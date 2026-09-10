@@ -482,12 +482,14 @@ def refresh_route_overview_metadata_for_context(
 ) -> list[dict[str, str]]:
     verified_commit = change.commit
     verified_date = change.commit_date
-    plan = validate_route_overview_refresh_plan_for_context(
+    # Closeout owns a mechanical metadata commit.  Body review and curator
+    # judgments remain explicit operations outside this Git transaction.
+    _ = accepted_no_impact
+    plan = route_overview_metadata_refresh_plan_for_context(
         context,
         change.changed_paths,
         memory_tree=memory_tree,
         memory_verified_commit=memory_verified_commit,
-        accepted_no_impact=accepted_no_impact,
     )
     refreshed: list[dict[str, str]] = []
     for item in plan["required"]:
@@ -862,6 +864,84 @@ def validate_onboarding_refresh_plan_for_context(
     return plan
 
 
+def validate_memory_refresh_attestations(
+    context,
+    changed_paths: list[str],
+    *,
+    working_paths: list[str] | None = None,
+    body_gate: OnboardingBodyGateEvidence | None = None,
+    route_body_gate: OnboardingBodyGateEvidence | None = None,
+) -> dict[str, list[str]]:
+    """Run the shared sidecar and route-body gates for one exact candidate.
+
+    Curator preparation and closeout must apply the same current-memory checks.  Keep
+    this as composition of the existing validators so neither caller can accidentally
+    publish a green result from only one of the two refresh surfaces.
+    """
+    sidecar_evidence = body_gate or OnboardingBodyGateEvidence()
+    route_evidence = route_body_gate or sidecar_evidence
+    errors: list[str] = []
+    sidecar_plan: OnboardingRefreshPlan | None = None
+    sidecar_gate: SidecarBodyClassification = {
+        "stale": [],
+        "untraced": [],
+        "attested_no_impact": [],
+    }
+    try:
+        sidecar_plan = validate_onboarding_refresh_plan_for_context(
+            context,
+            changed_paths,
+            working_paths=working_paths,
+            body_gate=sidecar_evidence,
+        )
+        sidecar_gate = apply_sidecar_no_impact(
+            classify_sidecar_updates(
+                context,
+                sidecar_plan,
+                memory_tree=sidecar_evidence.memory_tree,
+                memory_verified_commit=sidecar_evidence.memory_verified_commit,
+            ),
+            sidecar_evidence.accepted_no_impact,
+        )
+    except RuntimeError as error:
+        errors.append(f"sidecar onboarding: {error}")
+
+    overview_gate: RouteOverviewBodyClassification = {
+        "stale": [],
+        "untraced": [],
+        "attested_no_impact": [],
+        "stamped_without_body_review": [],
+    }
+    try:
+        overview_plan = validate_route_overview_refresh_plan_for_context(
+            context,
+            changed_paths,
+            memory_tree=route_evidence.memory_tree,
+            memory_verified_commit=route_evidence.memory_verified_commit,
+            accepted_no_impact=route_evidence.accepted_no_impact,
+        )
+        overview_gate = apply_route_no_impact(
+            classify_route_overview_updates(
+                context,
+                overview_plan,
+                changed_paths,
+                memory_tree=route_evidence.memory_tree,
+                memory_verified_commit=route_evidence.memory_verified_commit,
+            ),
+            route_evidence.accepted_no_impact,
+        )
+    except RuntimeError as error:
+        errors.append(f"route overview: {error}")
+    if errors:
+        raise RuntimeError("external-memory refresh validation failed; " + "; ".join(errors))
+    return {
+        "attested_sidecars": sidecar_gate["attested_no_impact"],
+        "attested_overviews": overview_gate["attested_no_impact"],
+        "stamped_overviews": overview_gate["stamped_without_body_review"],
+        "unonboarded_paths": [] if sidecar_plan is None else sidecar_plan["unonboarded"],
+    }
+
+
 def validate_onboarding_refresh_plan(
     contract: WorktreeContract,
     changed_paths: list[str],
@@ -891,15 +971,12 @@ def refresh_onboarding_metadata_for_context(
 ) -> list[dict[str, str]]:
     verified_commit = change.commit
     verified_date = change.commit_date
-    plan = validate_onboarding_refresh_plan_for_context(
+    # Closeout stamps existing metadata; it does not certify onboarding content.
+    _ = memory_verified_commit, accepted_no_impact
+    plan = onboarding_refresh_plan_for_context(
         context,
         change.changed_paths,
         working_paths=change.working_paths,
-        body_gate=OnboardingBodyGateEvidence(
-            memory_tree=memory_tree,
-            memory_verified_commit=memory_verified_commit,
-            accepted_no_impact=accepted_no_impact,
-        ),
     )
     refreshed: list[dict[str, str]] = []
     for item in plan["required"]:

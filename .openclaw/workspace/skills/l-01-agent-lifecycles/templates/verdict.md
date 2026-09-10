@@ -1,10 +1,12 @@
 # Verdict Template (adversarial reviewer)
 
 The artifact an **adversarial reviewer** writes at a seam (`roles/reviewer.md`). It lands
-under the series `notes/reports/` directory. Leaf route review binds through the task document;
-seam verdicts attach to handover gates as **judge evidence**. Variants are **leaf route review**,
-**master-exit** (before manager → orchestrator), **super-exit** (before orchestrator → developer),
-and the loop-review adaptation below.
+under the series `notes/reports/` directory. Standalone/organizational leaf route review and
+atomic-master integration review bind through the task document; other seam verdicts attach to
+handover gates as **judge evidence**. Variants are **standalone/organizational leaf route review**,
+**atomic-master integration review**, **master-exit** (before manager → orchestrator),
+**super-exit** (before orchestrator → developer), and the loop-review adaptation below. Atomic
+child leaves do not receive a separate route-review verdict.
 
 ## Rules
 
@@ -14,14 +16,16 @@ and the loop-review adaptation below.
    manager/orchestrator can dispatch. A block that cannot be named as fix leaves is not yet a block.
 3. **Refute-or-confirm:** every finding must survive an attempt to refute it. Rank findings and cite
    the backing evidence file.
-4. Cover all three lenses (completion · code quality · onboarding-vs-code) explicitly, even to say a
-   lens is clean.
+4. Cover all three lenses (completion · scoped implementation evidence · onboarding-vs-code)
+   explicitly, even to say a lens is clean. Full quality/test/memory evidence appears only when
+   the developer explicitly requested that operation.
 5. Record the gate evidence reference exactly: `kind=reviewer-verdict`, `ref=<artifact path>`, and
    `verdict=<pass | pass-with-notes | block>`.
-6. **Report every bound catalog criterion** in the Criteria Catalog Results table (the catalogs the
-   binding table in `roles/reviewer.md` assigns this review type, `../criteria/`) — one row per
-   standing criterion even when it found nothing, candidate rows when run — and carry any proposed
-   catalog amendments (the promotion ratchet) in that section.
+6. **Report the phase-appropriate catalog result** in the Criteria Catalog Results table. A
+   `baseline` reports every bound standing criterion, candidate rows when run, and any proposed
+   catalog amendments. A `fix-verification` reports only the sealed-baseline criteria/evidence
+   used to verify its listed IDs and may not run exploratory criteria, add a lens, or propose a
+   catalog amendment.
 7. **The reviewer seat is distinct from the author seat, and every requirement verdict cites
    evidence of the requirement's class** (rendering → mounted-UI proof, scheduling →
    operation-level proof, data model → artifact-level proof). A self-review or a wrong-class
@@ -32,8 +36,8 @@ and the loop-review adaptation below.
 9. **Adjudicate every requirement attempt separately.** Use the mandatory block below once per
    exact stable ID + version, leaf manifestation, worker attempt, and exact candidate, and choose
    only `accepted` or `rejected`. Independently inspect the matching canonical packet and every cited artifact;
-   missing rationale, wrong-class evidence, invalid citations, or missing developer approval forces
-   rejection. PASS and PASS-WITH-NOTES are forbidden while any requirement is rejected. A worker
+   missing rationale, wrong-class evidence, or invalid citations forces rejection. PASS and
+   PASS-WITH-NOTES are forbidden while any requirement is rejected. A worker
    row correctly adjudicated as `blocked` still requires an overall BLOCK until it is delivered or
    becomes an authorized `approved-change`.
 10. **Do not merge the two evidence contracts.** Per-requirement acceptance and the
@@ -44,18 +48,21 @@ and the loop-review adaptation below.
     exact journal anchor instead of copying the record into a second authority. Never edit the
     worker record or any earlier journal bytes. A pre-adjudication candidate change for this
     manifestation requires a successor worker attempt and new reviewer record; acceptance does not
-    float to “latest,” but an unrelated later candidate also does not reopen accepted work.
+    float to “latest,” but an unrelated later candidate also does not reopen accepted work. Under
+    `reviewMode=fix-verification`, only the sealed outstanding IDs may be adjudicated; an outside-list
+    regression or changed route is returned to the developer and cannot reopen a resolved ID.
     A malformed pre-handoff row never enters review: preserve its append-only
     `non-attempt-correction`/void reference and consume no attempt ID. A malformed handed-off row is
     a formal attempt; reject it independently without editing it, and require a successor only at
     the worker's next exact-candidate handoff.
-12. Classify every rejection finding as exactly one of `implementation defect`, `evidence gap`,
+12. Classify every first-review rejection finding as exactly one of `implementation defect`, `evidence gap`,
     `requirement contradiction/overconstraint`, `test/tool defect`, or `external blocker`. A
     requirement problem is rejected for architect/developer-approved revision; a reviewer cannot
-    rewrite it. Previously accepted attempts stay closed unless this reviewer proves direct
-    regression and the owning manager (architect in a flat run) records bounded invalidation citing
-    the accepted attempt, reviewer record, regressing candidate, and affected set, or an approved
-    new requirement version affects that manifestation. This verdict cannot reopen work by itself.
+    rewrite it. Previously accepted work stays closed. An outside-list observation is a developer
+    decision packet and cannot reopen work or extend the review by itself.
+    A successor disposition is valid only when its remaining IDs are a subset of the preceding
+    remaining set and sealed baseline, every preceding ID has a fixed/unfixed disposition, and no
+    unknown, duplicate, rewritten, reintroduced, or newly discovered finding is present.
 
 ## Mandatory Requirement Adjudication Block (repeat once per stable ID + version in every variant)
 
@@ -103,7 +110,7 @@ contradiction/overconstraint`, `test/tool defect`, and `external blocker`. A req
 must point to a requested developer-approved revision; it cannot be rewritten in this record.
 ```
 
-## Leaf Route-Review Variant (every code-changing leaf)
+## Standalone/Organizational Leaf Route-Review Variant
 
 ```md
 # Independent Route-Review Verdict — <leaf id>
@@ -113,6 +120,9 @@ must point to a requested developer-approved revision; it cannot be rewritten in
 | scope           | <leaf code candidate; the plane binds its tree>    |
 | reviewer seat   | <leaf task_doc path> + reviewer (must differ from author seat) |
 | author seat     | <implementer seat that authored the change set>    |
+| review mode     | <baseline | fix-verification>                |
+| sealed baseline | <sealed first-review baseline/verdict ref>         |
+| preceding result / outstanding IDs | <result ref + exact IDs | N/A for baseline> |
 | recommendation  | PASS, PASS-WITH-NOTES, or BLOCK                   |
 | decider         | owning manager (architect in flat/solo mode)       |
 | artifact path   | notes/reports/<leaf-id>-route-review-verdict.md    |
@@ -140,15 +150,84 @@ must point to a requested developer-approved revision; it cannot be rewritten in
 | # | Severity | Route | Finding | Evidence file/ref | Refutation attempted | Survives? |
 | - | -------- | ----- | ------- | ----------------- | -------------------- | --------- |
 
+## Fix-Verification Dispositions (required only for `reviewMode=fix-verification`)
+| Sealed issue ID | Preceding status | Worker fix/evidence | Fixed or unfixed | Remaining-set membership |
+| --------------- | ---------------- | ------------------- | ---------------- | ----------------------- |
+| <ID>             | <open>           | <exact refs>        | <fixed | unfixed> | <present | removed> |
+
 ## Owner Recording Packet
+- begin: `task_doc(operation="begin_review")` before reviewer work
+- result: `task_doc(operation="record_review")` or the existing `task_doc(operation="record_route_review")`
 - verdict: `<pass | pass-with-notes | block>`
 - verdictRef: `notes/reports/<leaf-id>-route-review-verdict.md`
 - routes: `<one {route, verdict, evidenceRef} row per table row>`
 
-The owner passes only this packet to `task_doc.record_route_review`. Do not include a candidate hash:
-the control plane computes and stamps the current Git candidate tree after proving every referenced
-artifact exists. A repair changes the tree and therefore requires the same route reviewers to
-delta-verify and the owner to record a fresh packet.
+The owner calls `task_doc(operation="begin_review")` before dispatching hosted reviewers or
+beginning native reviewer work, then calls `task_doc(operation="record_review")` or the existing
+`task_doc(operation="record_route_review")` after every required report exists. The task document
+remains the authority; no admission/publication IDs, purpose fields, or proof-of-human-authorship
+mechanism are required.
+```
+
+## Atomic-Master Integration Route-Review Variant
+
+```md
+# Independent Route-Review Verdict — atomic master integration · <master id>
+
+| Field           | Value                                              |
+| --------------- | -------------------------------------------------- |
+| scope           | <exact accumulated atomic master candidate; the plane binds its tree> |
+| reviewer seat   | <canonical master task_doc path> + reviewer (must differ from author seat) |
+| author seat     | <manager/owner that assembled the accumulated candidate> |
+| membership      | <canonical ordered child refs and normative intent identities> |
+| review mode     | <baseline | fix-verification>                |
+| sealed baseline | <sealed first-review baseline/verdict ref>         |
+| preceding result / outstanding IDs | <result ref + exact IDs | N/A for baseline> |
+| recommendation  | PASS, PASS-WITH-NOTES, or BLOCK                   |
+| decider         | integration owner at the master-to-parent gate    |
+| artifact path   | notes/reports/<master-id>-integration-route-review-verdict.md |
+| written         | <YYYY-MM-DDTHH:MM>                                 |
+
+## Requirement Adjudication
+<Repeat the Mandatory Requirement Adjudication Block once for every exact master/child stable ID + version in scope.>
+
+## Major-Route Coverage (every material route accounted for)
+| Major route | Independent reviewer report | Verdict | Changed + surrounding scope reviewed |
+| ----------- | --------------------------- | ------- | ------------------------------------ |
+| <route>     | notes/reports/<route-report>.md | pass, pass-with-notes, or block | <paths/owners/tests> |
+
+## Candidate and Dependency Binding
+- candidate tree: <plane-stamped accumulated master tree; never caller-supplied>
+- master ref: <canonical task-root `task.json` ref>
+- child membership/intents: <exact ordered refs and digest identities>
+- evidence: <verdict and route evidence refs, all task-relative and digest-bound>
+- integration seam: <master-to-parent movement only>
+
+## Criteria Catalog Results
+| Criterion (id · catalog) | Ran | Finding | Evidence |
+| ------------------------ | --- | ------- | -------- |
+| <CS-1 · code-seam>       | yes | none    | <what was refute-tested> |
+
+## Findings (ranked; each refute-tested)
+| # | Severity | Route | Finding | Evidence file/ref | Refutation attempted | Survives? |
+| - | -------- | ----- | ------- | ----------------- | ------------------- | --------- |
+
+## Fix-Verification Dispositions (required only for `reviewMode=fix-verification`)
+| Sealed issue ID | Preceding status | Worker fix/evidence | Fixed or unfixed | Remaining-set membership |
+| --------------- | ---------------- | ------------------- | ---------------- | ----------------------- |
+| <ID>             | <open>           | <exact refs>        | <fixed | unfixed> | <present | removed> |
+
+## Owner Recording Packet
+- verdict: `<pass | pass-with-notes | block>`
+- verdictRef: `notes/reports/<master-id>-integration-route-review-verdict.md`
+- routes: `<one {route, verdict, evidenceRef} row per table row>`
+
+The master owner calls `task_doc(operation="begin_review")` before dispatching hosted reviewers or
+beginning native reviewer work, then calls `task_doc(operation="record_review")` or the existing
+`task_doc(operation="record_route_review")` on the canonical master document after every child is
+represented. Atomic child closeout and leaf-to-master accumulation do not call this operation.
+Master-to-parent integration revalidates candidate, child membership/intents, evidence, and verdict
+under the protected mutation authority.
 ```
 
 ## Master-Exit Variant
@@ -161,6 +240,9 @@ delta-verify and the owner to record a fresh packet.
 | seam            | master-exit                                        |
 | execution nature | <organizational or atomic>                        |
 | scope           | <exact proposed organizational super candidate including final leaf; atomic branch ref> |
+| review mode     | <baseline | fix-verification>                |
+| sealed baseline | <sealed first-review baseline/verdict ref>         |
+| preceding result / outstanding IDs | <result ref + exact IDs | N/A for baseline> |
 | reviewer seat   | <review task_doc path> + reviewer                  |
 | task docs       | <master task_doc + leaf task docs>                 |
 | recommendation  | PASS, PASS-WITH-NOTES, or BLOCK                       |
@@ -178,30 +260,36 @@ delta-verify and the owner to record a fresh packet.
 - backing evidence file: <impact-analysis report path>
 - durable-evidence promotion hold point: N/A | <artifact → stable executable contract or dated expiry/removal; validator evidence>
 
-## Lens 2 — Code Quality
+## Lens 2 — Scoped Implementation Evidence
 - targeted leaf acceptance: current | failing:<which>
-- one full master gate: reserved for <proposed final organizational super candidate or atomic landing>; reviewer did not duplicate it
+- full quality/test suite: not run unless explicitly requested — <request/result if any>
 - regressions vs the past (route indexes · CGC · GrepAI): none | <finding>
 - backing evidence file: <quality/impact report path>
 
 ## Lens 3 — Onboarding vs Code
 - changed files' sidecars refreshed same pass: yes | <gaps>
-- drift_check clean and memory_quality_check clean: yes | <finding>
+- affected c-05 onboarding/scoped checks: pass | failed | blocked | not-run — <finding>
+- full drift_check/memory_quality_check: not run unless explicitly requested — <request/result if any>
 - master-side route overviews current: yes | <finding>
 - backing evidence file: <onboarding-coherency report path>
 
-## Criteria Catalog Results (every bound criterion reported — see roles/reviewer.md binding table)
+## Criteria Catalog Results (baseline: every bound criterion; fix-verification: sealed-ID evidence only — see roles/reviewer.md)
 | Criterion (id · catalog) | Ran | Finding | Evidence |
 | ------------------------ | --- | ------------- | -------- |
 | <CS-1 · code-seam>       | yes | none | <what was walked/checked> |
-- Proposed catalog amendments (promotion ratchet): <surviving novel finding-class → catalog + evidence> | none
+- Proposed catalog amendments (baseline only): <surviving novel finding-class → catalog + evidence> | none
 
 ## Findings (ranked; each refute-tested)
 | # | Severity | Finding | Evidence file/ref | Refutation attempted | Survives? |
 | - | -------- | ------- | ----------------- | -------------------- | --------- |
 
+## Fix-Verification Dispositions (required only for `reviewMode=fix-verification`)
+| Sealed issue ID | Preceding status | Worker fix/evidence | Fixed or unfixed | Remaining-set membership |
+| --------------- | ---------------- | ------------------- | ---------------- | ----------------------- |
+| <ID>             | <open>           | <exact refs>        | <fixed | unfixed> | <present | removed> |
+
 ## If BLOCK — Manager Fix Leaves
-1. <fix leaf under this master: scope · target files/docs · evidence refs · done-when>
+1. <baseline: fix leaf under this master, including an owning/reopened/new scoped fix leaf · scope · target files/docs · evidence refs · done-when; fix-verification: the existing owner and sealed outstanding issue IDs only>
    (A BLOCK with no fix leaves here is invalid — resolve to PASS-WITH-NOTES or name the leaves.)
 
 ## Judge-Evidence Note
@@ -218,6 +306,9 @@ reviewer does not.
 | --------------- | -------------------------------------------------- |
 | seam            | super-exit                                         |
 | scope           | <super integration branch ref>                     |
+| review mode     | <baseline | fix-verification>                |
+| sealed baseline | <sealed first-review baseline/verdict ref>         |
+| preceding result / outstanding IDs | <result ref + exact IDs | N/A for baseline> |
 | reviewer seat   | <review task_doc path> + reviewer                  |
 | task docs       | <portfolio task docs + master task docs>           |
 | recommendation  | PASS, PASS-WITH-NOTES, or BLOCK                       |
@@ -236,30 +327,37 @@ reviewer does not.
 - backing evidence file: <impact-analysis report path>
 - durable-evidence promotion hold point: N/A | <artifact → stable executable contract or dated expiry/removal; validator evidence>
 
-## Lens 2 — Code Quality
-- resolved system/tools.md suite for the accumulated super branch: green | failing:<which>
+## Lens 2 — Scoped Implementation Evidence
+- targeted branch evidence: pass | failing:<which> | not-run:<reason>
+- full system/tools.md suite: not run unless explicitly requested — <request/result if any>
 - branch-wide regressions vs the past and across masters (route indexes · CGC · GrepAI): none | <finding>
 - backing evidence file: <quality/impact report path>
 
 ## Lens 3 — Onboarding vs Code
 - changed files' sidecars refreshed same pass: yes | <gaps>
-- drift_check clean and memory_quality_check clean: yes | <finding>
+- affected c-05 onboarding/scoped checks: pass | failed | blocked | not-run — <finding>
+- full drift_check/memory_quality_check: not run unless explicitly requested — <request/result if any>
 - route overviews describe the accumulated behavior: yes | <finding>
 - C-11 carry-over and ledger mapping coherent for the final super branch: yes | <finding>
 - backing evidence file: <onboarding-coherency report path>
 
-## Criteria Catalog Results (every bound criterion reported — see roles/reviewer.md binding table)
+## Criteria Catalog Results (baseline: every bound criterion; fix-verification: sealed-ID evidence only — see roles/reviewer.md)
 | Criterion (id · catalog) | Ran | Finding | Evidence |
 | ------------------------ | --- | ------------- | -------- |
 | <CS-1 · code-seam>       | yes | none | <what was walked/checked> |
-- Proposed catalog amendments (promotion ratchet): <surviving novel finding-class → catalog + evidence> | none
+- Proposed catalog amendments (baseline only): <surviving novel finding-class → catalog + evidence> | none
 
 ## Findings (ranked; each refute-tested)
 | # | Severity | Finding | Evidence file/ref | Refutation attempted | Survives? |
 | - | -------- | ------- | ----------------- | -------------------- | --------- |
 
+## Fix-Verification Dispositions (required only for `reviewMode=fix-verification`)
+| Sealed issue ID | Preceding status | Worker fix/evidence | Fixed or unfixed | Remaining-set membership |
+| --------------- | ---------------- | ------------------- | ---------------- | ----------------------- |
+| <ID>             | <open>           | <exact refs>        | <fixed | unfixed> | <present | removed> |
+
 ## If BLOCK — Orchestrator Fix Leaves
-1. <fix leaf routed by the orchestrator: owning or reopened leaf, or new scoped fix leaf · scope · target files/docs · evidence refs · done-when>
+1. <baseline: fix leaf routed by the orchestrator, including an owning/reopened/new scoped fix leaf · scope · target files/docs · evidence refs · done-when; fix-verification: the existing owner and sealed outstanding issue IDs only>
    (A BLOCK with no fix leaves here is invalid — resolve to PASS-WITH-NOTES or name the leaves.)
 
 ## Judge-Evidence Note
@@ -278,7 +376,9 @@ Catalog Results (the loop's bound catalogs, e.g. `plan-review` + `report-verific
 review), ranked refute-tested findings, and fix decomposition. The verdict remains **evidence to
 the loop owner, never a decision**. Keep the mandatory Requirement Adjudication section and one
 block per stable ID + version. A delta-verify appends a dated delta section to this same artifact, rechecks
-only rejected IDs, direct regressions, and newly developer-authorized changed deliveries, and
-retains earlier accepted adjudications rather than opening a new full review. An approved new
-requirement version cannot inherit the prior version's acceptance; append its own reviewer record
-to the authoritative journal and link that anchor here.
+only the sealed outstanding IDs and their worker fixes, records a fixed/unfixed disposition for
+every preceding ID, and retains earlier accepted adjudications rather than opening a new full
+review. Outside-list observations, changed deliveries, new routes, and newly discovered criteria
+return to the developer rather than becoming successor findings. A successor never adds, reopens,
+or resets an issue. At three rounds, ask the developer directly, wait for explicit authorization,
+and record the instruction before any extra review.

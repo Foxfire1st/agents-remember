@@ -41,7 +41,9 @@ from agents_remember.errors import (
     CertificationContractError,
     CertificationExecutorPrerequisiteError,
     CertificationProfileError,
+    FinalCertificationError,
 )
+from agents_remember.memory_quality.incremental_scope.errors import ScopeUnprovenError
 from agents_remember.worktrees.modules.quality.clean_executor import (
     published_generation_root,
     published_report_path_from_manifest,
@@ -405,7 +407,7 @@ def _catalog_rows(payload: dict[str, object]) -> list[dict[str, object]]:
 
     gates = payload.get("gates")
     if not isinstance(gates, list):
-        return []
+        return _prepared_certification_rows(payload)
     rows: list[dict[str, object]] = []
     for gate_value in gates:
         if not isinstance(gate_value, dict):
@@ -417,6 +419,47 @@ def _catalog_rows(payload: dict[str, object]) -> list[dict[str, object]]:
             canonical = _canonical_rail_row(row)
             if canonical is not None:
                 rows.append(canonical)
+    return rows[:_MAX_CATALOG_ROWS]
+
+
+def _prepared_certification_rows(payload: Mapping[str, object]) -> list[dict[str, object]]:
+    """Project the current prepared-memory certification catalog into rail rows.
+
+    The prepared-memory producer publishes its typed attestation below
+    ``certification.attestation.catalog`` rather than the ordinary executor's
+    top-level ``gates`` population.  This is the one current producer shape;
+    malformed or unrelated payloads remain row-empty and are not interpreted.
+    """
+
+    certification = payload.get("certification")
+    if not isinstance(certification, Mapping):
+        return []
+    attestation = certification.get("attestation")
+    if not isinstance(attestation, Mapping):
+        return []
+    catalog = attestation.get("catalog")
+    if not isinstance(catalog, list):
+        return []
+    rows: list[dict[str, object]] = []
+    for item in catalog:
+        if not isinstance(item, Mapping):
+            continue
+        identity = item.get("item")
+        if not isinstance(identity, Mapping):
+            continue
+        canonical = _canonical_rail_row(
+            {
+                "identity": {
+                    "railId": identity.get("itemId"),
+                    "version": identity.get("version"),
+                },
+                "status": item.get("status"),
+                "findingCount": item.get("findingCount"),
+                "resultDigest": item.get("subresultDigest"),
+            }
+        )
+        if canonical is not None:
+            rows.append(canonical)
     return rows[:_MAX_CATALOG_ROWS]
 
 
@@ -437,6 +480,13 @@ def _canonical_rail_row(row: object) -> dict[str, object] | None:
         "key": key,
         "status": status,
     }
+    finding_count = row.get("findingCount")
+    if (
+        isinstance(finding_count, int)
+        and not isinstance(finding_count, bool)
+        and 0 <= finding_count <= 1_000_000_000
+    ):
+        canonical["findingCount"] = finding_count
     canonical.update(_row_posture_gate(row))
     canonical.update(_canonical_code_owner(row))
     blockers = _canonical_blocked_by(row)
@@ -798,8 +848,9 @@ def _worker_error_census(error: BaseException) -> dict[str, object]:
     """One bounded census of the outer exception family.
 
     Profile, executor-prerequisite, report-publication, and every other typed
-    family keeps its stable status code and bounded findings; only an error with
-    no typed identity is reported under its exception type.
+    family keeps its stable status code and bounded findings. Incremental-scope
+    failures also retain their checker, node, reason, and bounded detail; only
+    an error with no typed identity is reported under its exception type.
     """
 
     detail = _bounded_failure_text(error)
@@ -835,12 +886,39 @@ def _worker_error_census(error: BaseException) -> dict[str, object]:
             "findings": _bounded_findings(error),
             "detail": detail,
         }
-    return {
-        "type": type(error).__name__,
-        "status": None,
-        "stage": "worker-execution",
-        "detail": detail,
-    }
+    if isinstance(error, FinalCertificationError):
+        result: dict[str, object] = {
+            "type": "FinalCertificationError",
+            "status": error.status,
+            "stage": "final-certification",
+            "detail": detail,
+            "nextAction": error.next_action,
+        }
+        if error.expected:
+            result["expected"] = dict(error.expected)
+        if error.observed:
+            result["observed"] = dict(error.observed)
+        return result
+    scope_failure = isinstance(error, ScopeUnprovenError)
+    if scope_failure:
+        assert isinstance(error, ScopeUnprovenError)
+        result = error.response_fields()
+        result.update(
+            {
+                "type": type(error).__name__,
+                "status": error.status,
+                "stage": "memory-scope",
+                "detail": _bounded_failure_text(error.failure.detail),
+            }
+        )
+    else:
+        result = {
+            "type": type(error).__name__,
+            "status": None,
+            "stage": "worker-execution",
+            "detail": detail,
+        }
+    return _drop_absent(result) if scope_failure else result
 
 
 def _bounded_findings(error: CertificationContractError) -> list[dict[str, object]]:
@@ -860,7 +938,7 @@ def _bounded_findings(error: CertificationContractError) -> list[dict[str, objec
     return findings[:_MAX_CATALOG_ROWS]
 
 
-def _bounded_failure_text(error: BaseException) -> str | None:
+def _bounded_failure_text(error: BaseException | str) -> str | None:
     """The exception message stripped of any embedded raw command/log tail."""
 
     text = str(error)

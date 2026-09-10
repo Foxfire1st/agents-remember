@@ -15,7 +15,11 @@ from agents_remember.models.lifecycles.door import (
     DoorProvenance,
 )
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
-from agents_remember.worktrees.modules.git import branch_commit, worktree_candidate_tree
+from agents_remember.worktrees.modules.git import (
+    branch_commit,
+    require_git,
+    worktree_candidate_tree,
+)
 from agents_remember.worktrees.queue.closeout_queue_errors import (
     CloseoutQueueError,
     bounded_queue_failure_detail,
@@ -25,9 +29,9 @@ from agents_remember.worktrees.route_review import (
     RouteReviewError,
     code_candidate_tree,
     code_change_present,
-    require_current_route_review,
     require_current_route_review_task_intent,
 )
+from agents_remember.worktrees.route_review_scope import require_current_route_review
 from agents_remember.worktrees.source_lineage import require_current_source_lineage
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -56,6 +60,16 @@ class DoorCandidateEvidence:
         }
 
 
+def _bounded_ledger_error_text(value: str, *, limit: int) -> str:
+    marker = "...[truncated]..."
+    if len(value) <= limit:
+        return value
+    available = limit - len(marker)
+    head = available // 2
+    tail = available - head
+    return value[:head] + marker + value[-tail:]
+
+
 def require_source_bases_current(contract: WorktreeContract) -> None:
     """Require transitive ancestry and the exact immediate source heads."""
 
@@ -81,13 +95,14 @@ def require_source_bases_current(contract: WorktreeContract) -> None:
         )
     if contract.memory_mode != "external":
         return
-    if contract.memory_repo_path is None or not contract.memory_base_commit:
+    memory_repo_path = contract.memory_repo_path
+    if memory_repo_path is None or not contract.memory_base_commit:
         raise CloseoutQueueError(
             "closeout-door-memory-source-missing",
             "external memory base is incomplete",
         )
     if (
-        branch_commit(contract.memory_repo_path, contract.memory_source_branch)
+        branch_commit(memory_repo_path, contract.memory_source_branch)
         != contract.memory_base_commit
     ):
         raise CloseoutQueueError(
@@ -106,13 +121,36 @@ def ledger_mapping(contract: WorktreeContract) -> str | None:
             "closeout-door-ledger-missing",
             "external-memory contract has no ledger path",
         )
+    memory_repo_path = contract.memory_repo_path
+    if memory_repo_path is None or not contract.memory_base_commit:
+        raise CloseoutQueueError(
+            "closeout-door-memory-source-missing",
+            "external memory base is incomplete",
+        )
     row = find_mapping(load_ledger(contract.ledger_path), contract.code_base_commit)
     if row is None:
         raise CloseoutQueueError(
             "closeout-door-ledger-incompatible",
             f"ledger does not map code base {contract.code_base_commit}",
         )
-    return row.memory_commit
+    try:
+        return require_git(
+            memory_repo_path,
+            [
+                "rev-parse",
+                "--verify",
+                "--end-of-options",
+                f"{row.memory_commit}^{{commit}}",
+            ],
+        )
+    except RuntimeError as exc:
+        identity = _bounded_ledger_error_text(repr(row.memory_commit), limit=128)
+        cause = _bounded_ledger_error_text(str(exc), limit=512)
+        raise CloseoutQueueError(
+            "closeout-door-ledger-incompatible",
+            f"ledger maps code base {contract.code_base_commit} to memory commit "
+            f"{identity}, but the exact Git commit cannot be resolved: {cause}",
+        ) from exc
 
 
 def memory_candidate_tree(contract: WorktreeContract) -> str | None:
@@ -216,6 +254,30 @@ def _review_provenance(
                 }
             ),
         )
+    try:
+        review_state = require_current_route_review(contract)
+    except RouteReviewError as exc:
+        raise CloseoutQueueError(exc.status, str(exc)) from exc
+    # The scope owner returns ``required=false`` for two different boundaries:
+    # atomic child accumulation (where a leaf review is deliberately deferred)
+    # and the old master-altitude exemption (where this candidate is still a
+    # standalone/organizational leaf).  Only the explicit atomic deferrals may
+    # skip the candidate-aware checks below.
+    if review_state.get("status") in {
+        "deferred-atomic-child",
+        "deferred-atomic-master-until-integration",
+    }:
+        return DoorProvenance(
+            state="not-applicable",
+            fingerprint=_fingerprint(
+                {
+                    "state": "not-applicable",
+                    "reason": review_state.get("status", "review-deferred"),
+                    "candidateTree": candidate_tree,
+                    "masterRef": review_state.get("masterRef"),
+                }
+            ),
+        )
     if candidate.document.routeReview is None:
         raise CloseoutQueueError(
             "closeout-door-route-review-required",
@@ -233,7 +295,6 @@ def _review_provenance(
             "the canonical route-review record does not match the current candidate tree",
         )
     try:
-        require_current_route_review(contract)
         require_current_route_review_task_intent(contract, candidate)
     except RouteReviewError as exc:
         raise CloseoutQueueError(exc.status, str(exc)) from exc

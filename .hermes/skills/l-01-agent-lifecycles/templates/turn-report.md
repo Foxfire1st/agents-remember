@@ -34,6 +34,11 @@ manager watching for it (uniform-mechanism ruling 2026-07-07).
 11. Internal implementation, test, and evidence reruns are experimental protocol events, not
     delivery attempts. Preserve them separately with candidate identity, command, result, failure
     cause, repair made, and expected proof for the next run.
+12. Record the review mode. A baseline report supports the complete agreed-scope baseline; a
+    fix-verification report carries the sealed baseline, immediately preceding result, and
+    exact outstanding IDs, then records a fixed/unfixed disposition for every preceding ID. A
+    successor may not add, rewrite, reintroduce, or omit an issue, add a route, or reopen a resolved
+    ID; an outside-list observation is an owner/developer decision item.
 
 ## Shape
 
@@ -48,6 +53,9 @@ manager watching for it (uniform-mechanism ruling 2026-07-07).
 | worktree     | <branch / worktree>                     |
 | status       | in-progress | leaf-complete | blocked    |
 | checks       | green | failing:<which> | not-yet-run    |
+| review mode | baseline | fix-verification |
+| sealed baseline / preceding result | <sealed baseline ref> / <prior result ref or N/A> |
+| outstanding IDs | <exact IDs and prior remaining-set digest | none for baseline> |
 | written      | <YYYY-MM-DDTHH:MM>                       |
 | attempt journal | <path + exact worker attempt anchors appended for this handoff> |
 
@@ -96,6 +104,10 @@ anchor in the table above. It must never remain as a duplicate `Worker Attempt R
 | Finding ID | Prior class | Resolution in this attempt | Evidence or still-open reason |
 | ---------- | ----------- | -------------------------- | ----------------------------- |
 | <id or none> | <one exact failure class> | <resolution state> | <exact anchor> |
+
+For `fix-verification`, this table is the required disposition for every preceding
+outstanding ID. Its remaining IDs must be a subset of the preceding set and the sealed baseline;
+an omitted or unknown ID is a protocol failure, not an implicit closure.
 
 Allowed classes are exactly `implementation defect`, `evidence gap`, `requirement
 contradiction/overconstraint`, `test/tool defect`, and `external blocker`. Resolution state is
@@ -149,6 +161,13 @@ next run. These rows never consume a worker-attempt ID and never appear as revie
 | Check | Exact command | Result | Durable evidence reference |
 | ----- | ------------- | ------ | -------------------------- |
 | <name or none> | `<verbatim command or N/A>` | <exit/result or not-run reason> | <path + section, artifact ref, or N/A> |
+
+For a code handoff, this table records the relevant targeted tests selected by the worker and all
+applicable repository-prescribed lint, formatting, typing, and structural checks, with their exact
+scope, commands, and results. Explicitly list any relevant test or check not run and why, and report
+failures accurately. After a failure and code repair, repeat the failed tests and every affected
+targeted check before another handoff, documenting final results; if one is not rerun, record why.
+These are diagnostic worker checks, separate from certification and review-round accounting.
 
 ## Durable-Evidence Promotion Hold Point (separate concern)
 

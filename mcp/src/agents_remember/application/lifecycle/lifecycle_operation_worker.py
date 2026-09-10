@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import threading
@@ -20,7 +19,6 @@ from agents_remember.application.worktree_services import (
     bind_worktree_services,
     build_default_worktree_services,
 )
-from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.checkout_coordination import (
     declare_lifecycle_operation_process,
 )
@@ -37,15 +35,10 @@ from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     IntegrateOperationInput,
     IntegrationPublicationIntent,
-    IntegrationQualityCertification,
     LifecycleOperationKind,
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
     OrganizationalCompletionRepairEvidence,
-)
-from agents_remember.worktrees.integration.certification import IntegrationCertificationOwner
-from agents_remember.worktrees.integration.closeout.certification.execution import (
-    execute_selected_closeout,
 )
 from agents_remember.worktrees.integration.closeout.ledger_recovery import (
     CloseoutLedgerRecoveryDecision,
@@ -70,7 +63,6 @@ from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import load_contract
 
 HEARTBEAT_SECONDS = 5.0
-QUALITY_PROGRESS_REPORT = "quality-progress.json"
 
 
 class OperationCancelled(RuntimeError):
@@ -154,12 +146,6 @@ class OperationRuntime:
             if recovery_value is not None
             else None
         )
-        quality_value = evidence.get("quality_certification")
-        quality_certification = (
-            IntegrationQualityCertification.model_validate(quality_value)
-            if quality_value is not None
-            else None
-        )
         publication_value = evidence.get("integration_publication")
         integration_publication = (
             IntegrationPublicationIntent.model_validate(publication_value)
@@ -228,7 +214,6 @@ class OperationRuntime:
                         if finalization_value is None
                         else finalization_value
                     ),
-                    "qualityCertification": (quality_certification or record.qualityCertification),
                     "integrationPublication": (
                         integration_publication or record.integrationPublication
                     ),
@@ -245,11 +230,9 @@ class OperationRuntime:
     def heartbeat(self) -> None:
         while not self.stop.wait(HEARTBEAT_SECONDS):
             try:
-                current_command = self._quality_command()
-
                 def beat(
                     record: LifecycleOperationRecord,
-                    command_evidence: str | None = current_command,
+                    command_evidence: str | None = None,
                 ) -> LifecycleOperationRecord:
                     if record.status != "running":
                         return record
@@ -264,20 +247,6 @@ class OperationRuntime:
             except Exception as error:  # pragma: no cover - reported by terminal worker log
                 print(f"heartbeat failed: {error}", flush=True)
                 return
-
-    def _quality_command(self) -> str | None:
-        """Read the wrapper's atomic report without making it operation authority."""
-        path = self.store.path.parent / QUALITY_PROGRESS_REPORT
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-        if not isinstance(payload, dict) or payload.get("status") != "running":
-            return None
-        step = payload.get("step")
-        if step not in {"dagger", "complete", "failed"}:
-            return None
-        return f"quality stage: {step}"
 
     def finish(self, result: dict[str, object], *, ok: bool) -> None:
         stamp = _stamp()
@@ -323,20 +292,14 @@ def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntim
     operation_input = record.input
     config = load_config(operation_input.configPath)
     current_contract = load_contract(Path(operation_input.contractPath))
-    certification_profile = require_repo(
-        config,
-        current_contract.repo_name,
-    ).certification_profile
     common = {
         "contract_path": Path(operation_input.contractPath),
-        "certification_profile": certification_profile,
         "approved": True,
         "operation_key": record.operationKey,
         "operation_generation": record.generation,
         "candidate_tree": record.candidateTree,
         "approval_claimed": record.approvalClaimed,
         "recovery_commits": record.recoveryCommits,
-        "quality_certification": record.qualityCertification,
         "integration_publication": record.integrationPublication,
         "operation_progress": runtime.progress,
     }
@@ -347,11 +310,7 @@ def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntim
             approval_note=operation_input.approvalNote,
             closeout_input=operation_input.effectiveInput,
         )
-        result = (
-            execute_selected_closeout(current_contract, record, runtime.store)
-            if current_contract.kind == "leaf"
-            else closeout_result(args, current_contract)
-        )
+        result = closeout_result(args, current_contract)
         payload = {
             **result.payload,
             "ok": result.returncode == 0,
@@ -363,7 +322,6 @@ def execute_operation(record: LifecycleOperationRecord, runtime: OperationRuntim
             gate_policy=_policy(operation_input),
             strategy=operation_input.strategy,
             ledger_commit_message=operation_input.ledgerCommitMessage,
-            integration_certification_owner=IntegrationCertificationOwner(record, runtime.store),
         )
         result = integrate_result(args, current_contract)
         payload = integration_completion_payload(config, operation_input, result)
@@ -396,8 +354,8 @@ def terminal_operation_record(
 
     Organizational repair is an already-published developer-decision contract. A later
     lower-level symptom cannot replace that contract with a payload that the durable schema
-    rejects. Keeping this transition pure also gives the quality preflight one exact owner
-    boundary to validate before its consumers execute.
+    rejects. Keeping this transition pure preserves one exact owner boundary for the transaction
+    result before its consumers execute.
     """
 
     if record.cancelRequested or record.status in {"cancelled", "termination-required"}:

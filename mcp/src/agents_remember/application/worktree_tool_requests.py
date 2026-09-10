@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agents_remember.models.certification.corrective import RedCatalogDisposition
 from agents_remember.models.closeout.source import CandidateAdmissionFacts, SchedulingGradeInput
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import LifecycleOperationKind
@@ -76,6 +77,7 @@ class OperationControlRequest:
     ledger_commit_message: str | None = None
     grade: SchedulingGradeInput | None = None
     admission: CandidateAdmissionFacts | None = None
+    corrective_dispositions: tuple[RedCatalogDisposition, ...] = ()
     caller: DeclaredCaller | None = None
 
     def __post_init__(self) -> None:
@@ -92,6 +94,17 @@ class OperationControlRequest:
                 self,
                 "admission",
                 CandidateAdmissionFacts.model_validate(self.admission),
+            )
+        if self.corrective_dispositions:
+            object.__setattr__(
+                self,
+                "corrective_dispositions",
+                tuple(
+                    item
+                    if isinstance(item, RedCatalogDisposition)
+                    else RedCatalogDisposition.model_validate(item)
+                    for item in self.corrective_dispositions
+                ),
             )
 
 

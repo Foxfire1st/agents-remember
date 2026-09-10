@@ -28,6 +28,7 @@ from agents_remember.certification.certificate_models import (
     CertificationAdmissionManifest,
     CreationProvenance,
     GateCertificate,
+    GateCertificateIdentity,
     GateCertificateIssuanceContext,
 )
 from agents_remember.certification.certificate_store import (
@@ -240,6 +241,7 @@ def record_published_generation(
     payload: Mapping[str, object],
     *,
     retained: Sequence[RetainedGateExecution] = (),
+    retained_certificates: Sequence[GateCertificateIdentity] = (),
 ) -> RecordedCertificationGeneration:
     """Persist complete actual terminal catalogs, including red and interrupted gates.
 
@@ -253,7 +255,7 @@ def record_published_generation(
     _require_publication_admission(prepared, manifest)
     catalog = catalog_gates(payload)
     gate_records: list[dict[str, object]] = []
-    run = GateRecordPublication(manifest, [], [])
+    run = GateRecordPublication(manifest, [], [], tuple(retained_certificates))
     selected = {item.certificate.semanticEnvelope.gate: item for item in retained}
     if len(selected) != len(retained):
         raise CertificationContractError(
@@ -264,7 +266,14 @@ def record_published_generation(
         assert isinstance(gate, int)
         if entry.get("disposition") == "reused":
             gate_records.append(
-                record_retained(prepared, gate, entry, selected.pop(gate, None), run)
+                record_retained(
+                    prepared,
+                    gate,
+                    entry,
+                    selected.pop(gate, None),
+                    run,
+                    retained_certificates=retained_certificates,
+                )
             )
             continue
         gate_records.append(_record_gate(prepared, gate, entry, run))
@@ -434,6 +443,7 @@ def _publish_gate_result(
         manifest,
         run.certificates,
         GateCertificateIssuanceContext(provenance=prepared.provenance),
+        retained_certificates=run.retained_certificates,
     )
     binding = publication_binding(prepared.directory, certificate, manifest, run.publication)
     existing_path = store.exact_path("certificate", certificate.certificateDigest)

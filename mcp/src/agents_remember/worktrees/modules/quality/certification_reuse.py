@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from agents_remember.certification.certificate_authority import validate_certificate_chain
+from agents_remember.certification.certificate_models import GateCertificateIdentity
 from agents_remember.errors import CertificationContractError
 from agents_remember.worktrees.modules.quality.certification_evidence import (
     verify_publication_authority,
@@ -25,12 +26,14 @@ if TYPE_CHECKING:
     from agents_remember.worktrees.modules.quality.execution.models import RetainedGateExecution
 
 
-def record_retained(
+def record_retained(  # noqa: PLR0913
     prepared: PreparedCertificationRun,
     gate: int,
     entry: Mapping[str, object],
     retained: RetainedGateExecution | None,
     run: GateRecordPublication,
+    *,
+    retained_certificates: Sequence[GateCertificateIdentity] = (),
 ) -> dict[str, object]:
     """Reuse only caller-selected original objects and their exact source publication."""
     if retained is None:
@@ -59,7 +62,11 @@ def record_retained(
     ):
         return refused_record(gate, "retained-gate-catalog-mismatch")
     try:
-        validate_certificate_chain(prepared.lane.admission, (*run.certificates, certificate))
+        validate_certificate_chain(
+            prepared.lane.admission,
+            (*run.certificates, certificate),
+            retained_certificates=retained_certificates,
+        )
         verify_publication_authority(certificate, result, publication)
         verify_result_evidence(prepared.directory.parent, publication, result.railResults)
         store = prepared.certificate_store()

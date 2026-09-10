@@ -72,9 +72,8 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         never recovery evidence. Policy-gated:
         directExecutionEnabled must be set in the MCP
         authority settings. The code commit is verified, never created. Pass
-        candidate_tree (the staged candidate the owner gated through the Dagger
-        --source/--repository-bundle contract) to keep the gate strictly pre-commit:
-        a moved branch after the gate is refused before any memory or ledger commit.
+        candidate_tree (the exact candidate tree admitted by the closeout journal) to keep
+        a moved branch from being committed after admission.
         Each of memory_commit_message and ledger_commit_message must be explicit and
         nonblank only when its contract-derived leg is enabled; typed not-applicable
         legs may omit the corresponding message. The verified-existing code commit has
@@ -103,12 +102,12 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         memory_commit_message: str | None = None,
         ledger_commit_message: str | None = None,
     ) -> dict[str, Any]:
-        """Non-mutating preview of a worktree-backed closeout: proposed commits and whether
-        the leaf change-set-scoped quality gate (--targeted: changed files, reverse-import
-        closure, derived test subset, mandatory CRAP enforcement over changed modules) runs
-        over the staged task worktree before the code commit. memory_quality_check stays a
-        per-leaf closeout gate. Every contract-enabled commit leg requires its explicit,
-        nonblank message; typed not-applicable legs may be omitted."""
+        """Non-mutating preview of the bounded closeout Git transaction.
+
+        The preview reports the admitted candidate, source refs, external-memory refreshes,
+        and exact code, memory, and ledger writes. Every enabled commit leg requires its
+        explicit, nonblank message; typed not-applicable legs may be omitted.
+        """
         return worktree_closeout_preview_payload(
             config,
             contract_path,
@@ -133,16 +132,11 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         """Start or observe an approved task-bound worktree closeout. A mutating call
         returns promptly with queued/running/current-phase state; the plane-owned worker
         survives this MCP request and server process, and worktree_status observes it by
-        task context without a job id. When code would commit and the checkout
-        carries the wrapper, resets the index, stages the whole task worktree, and runs the
-        leaf change-set-scoped contract (--targeted: changed files, reverse-import closure,
-        derived test subset, mandatory CRAP enforcement over changed modules) over exactly
-        that staged content, before any code, memory, ledger, contract, or applied-gate
-        commit; then commits in order. The full wrapper is NOT a leaf gate: it runs once per
-        master at the master integration gate through the exact settings-selected local or
-        Dagger executor. A refused gate leaves the task worktree staged and commits nothing;
-        retries reset and restage only the operation's immutable accepted candidate tree.
-        MUTATING and commit-gated: preview and approval precede apply. Requires intent_note.
+        task context without a job id. The worker validates the admitted candidate and
+        source refs, commits code, refreshes and commits external memory, prepends the
+        exact code-to-memory ledger mapping, and finalizes the contract. Git mutation
+        journals preserve recovery at each irreversible boundary. MUTATING and commit-gated:
+        preview and approval precede apply. Requires intent_note.
         Every contract-enabled commit leg requires its explicit, nonblank message; typed
         not-applicable legs may be omitted.
         Repeat the same task input to observe/recover it; conflicting input refuses. Queue
@@ -171,11 +165,10 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
     ) -> dict[str, Any]:
         """Start or observe task-bound landing onto its source branch (strategy 'ff-only'
         or 'replay'). A mutating call returns promptly; worktree_status projects the durable
-        phase and result without exposing operation identity. Leaf integration reuses the
-        acceptance bound to its closeout commit without rerunning it; master integration runs
-        the full wrapper once through the pinned Dagger executor inside this step.
-        An explicit orchestration.qualityGate.memoryCapBytes remains available. MUTATING:
-        moves branch refs; preview with dry_run=true. Repeat the same task input to
+        phase and result without exposing operation identity. Integration validates the
+        admitted source refs and atomically merges the prepared code and memory refs while
+        recording the resulting pair. MUTATING: moves branch refs; preview with dry_run=true.
+        Repeat the same task input to
         observe/recover it; conflicting input refuses. Protected-ref serialization applies only to
         the addressed landing and never blocks task-document authoring."""
         return worktree_integrate_payload(
@@ -199,10 +192,11 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         ledger_commit_message: str | None = None,
         grade: SchedulingGradeInput | None = None,
         admission: CandidateAdmissionFacts | None = None,
+        corrective_dispositions: list[RedCatalogDisposition] | None = None,
         dry_run: bool = False,
         caller: DeclaredCaller | None = None,
     ) -> dict[str, Any]:
-        """Retry, recover, cancel, revise, retire, or supersede one task generation.
+        """Retry, recover, resume, cancel, retire, or supersede one task generation.
 
         The handler is addressed by canonical contract, operation kind, and public generation;
         it never accepts an operation key or process id. Same-generation retry/recover preserves
@@ -222,6 +216,7 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
                 ledger_commit_message=ledger_commit_message,
                 grade=grade,
                 admission=admission,
+                corrective_dispositions=tuple(corrective_dispositions or ()),
                 dry_run=dry_run,
                 caller=caller,
             ),

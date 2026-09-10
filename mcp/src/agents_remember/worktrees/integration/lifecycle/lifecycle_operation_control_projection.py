@@ -45,6 +45,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence i
 from agents_remember.worktrees.integration.lifecycle.worker.termination import (
     worker_exit_unproven,
 )
+from agents_remember.worktrees.integration.mutation_evidence import closeout_requires_recovery
 from agents_remember.worktrees.modules.git import branch_commit, is_ancestor, require_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -228,6 +229,18 @@ def _nonterminal_controls(
             and integration_observation.refs.state == "conflict"
         ):
             return []
+    if record.operationKind == "closeout":
+        if closeout_requires_recovery(record):
+            return [_control("resume", base, "Reconcile and continue this exact generation.")]
+        controls = [_control("cancel", base, "Cancel after proving no publication output.")]
+        if record.status in {"failed", "input-required"} or (
+            record.status == "queued" and record.workerPid is None
+        ):
+            controls.insert(
+                0,
+                _resume_control(record, base),
+            )
+        return controls
     if generation_requires_recovery(record):
         return [_control("recover", base, "Reconcile and continue this exact generation.")]
     if record.operationKind == "direct-landing":
@@ -236,8 +249,6 @@ def _nonterminal_controls(
             _control("cancel", base, "Cancel after proving both Git legs unchanged."),
         ]
     controls = [_control("cancel", base, "Cancel after proving no output and worker exit.")]
-    if record.operationKind == "closeout":
-        controls.append(_revise_control(record, base))
     if record.status == "queued" and record.workerPid is None:
         controls.insert(
             0,
@@ -275,8 +286,6 @@ def _pending_door_control(
         return None
     if action in {"retire", "supersede"} and not allow_completed_disposition:
         return None
-    if action == "revise":
-        return _revise_control(record, base)
     if action == "supersede":
         return _supersede_control(contract, record, base)
     return _control(
@@ -295,7 +304,7 @@ def pending_door_action(
     if publication is None or publication.state != "intent":
         return None
     if publication.generation.disposition == "claimed":
-        return "recover"
+        return "resume" if record.operationKind == "closeout" else "recover"
     if publication.generation.disposition == "waiting":
         if record.generationDisposition == "superseded":
             return "supersede"
@@ -315,7 +324,7 @@ def _cancelled_controls(
     if publication is not None and publication.state == "intent":
         return [_control("cancel", base, "Finish the durable cancellation disposition.")]
     if record.operationKind == "closeout":
-        return [_revise_control(record, base)]
+        return [_resume_control(record, base)]
     if record.operationKind == "direct-landing":
         return [_direct_successor_control(contract, record)]
     assert integration_observation is not None
@@ -536,7 +545,7 @@ def _control(action: str, base: dict[str, object], summary: str) -> dict[str, An
         "retry": "same",
         "recover": "same",
         "cancel": "terminal-disposition",
-        "revise": "successor",
+        "resume": "successor",
         "retire": "terminal-disposition",
         "supersede": "terminal-disposition",
     }[action]
@@ -549,11 +558,11 @@ def _control(action: str, base: dict[str, object], summary: str) -> dict[str, An
     }
 
 
-def _revise_control(
+def _resume_control(
     record: LifecycleOperationRecord,
     base: dict[str, object],
 ) -> dict[str, Any]:
-    control = _control("revise", base, "Validate and publish one fresh successor.")
+    control = _control("resume", base, "Validate and publish one fresh successor.")
     operation_input = record.input
     effective = getattr(operation_input, "effectiveInput", None)
     arguments = control["arguments"]

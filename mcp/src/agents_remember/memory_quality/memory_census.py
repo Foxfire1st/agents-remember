@@ -187,13 +187,6 @@ class _Census:
                 identity=identity,
             )
             return
-        if not exists:
-            self.block(
-                "removal-disposition-required",
-                "Physical absence requires the canonical curator removed disposition.",
-                source=source,
-                identity=identity,
-            )
         old = self.rows.get(identity.sort_key)
         sources = set(old.sourcePaths if old else ())
         reasons = set(old.reasons if old else ())
@@ -262,19 +255,30 @@ class _Census:
         self, source: str, documents: tuple[dict[str, dict[str, str]], ...], *, required: bool
     ) -> None:
         expected = mirror_onboarding_path(Path(self.onboarding), source).as_posix()
-        mapped = {
+        historical, current = documents
+        current_mapped = {
             path
-            for document in documents
-            for path, metadata in document.items()
+            for path, metadata in current.items()
             if metadata.get("doc_type") == "file-level-onboarding"
             and metadata.get("path") == source
         }
-        if any(path != expected for path in mapped):
+        historical_mapped = {
+            path
+            for path, metadata in historical.items()
+            if metadata.get("doc_type") == "file-level-onboarding"
+            and metadata.get("path") == source
+        }
+        current_source_declarations = {
+            path for path, metadata in current.items() if metadata.get("path") == source
+        }
+        if any(path != expected for path in current_source_declarations):
             self.block(
                 "ambiguous-onboarding-mapping",
-                "Source has a noncanonical or multiple declared sidecar mapping.",
+                f"Current mapping for {source} must use {expected}; correct it and recompute.",
                 source=source,
             )
+        mapped = set(current_mapped)
+        mapped.update(path for path in historical_mapped if path not in self.after.members)
         if expected in self.after.members or expected in self.before.members:
             mapped.add(expected)
         if not mapped:
@@ -289,17 +293,24 @@ class _Census:
             else:
                 self.unonboarded.add(source)
         for path in sorted(mapped):
-            for document in documents:
-                metadata = document.get(path)
-                if metadata is not None and (
-                    metadata.get("doc_type") != "file-level-onboarding"
-                    or metadata.get("path") != source
-                ):
-                    self.block(
-                        "contradictory-onboarding-mapping",
-                        "Canonical sidecar declares a different source or artifact type.",
-                        source=source,
-                    )
+            current_metadata = current.get(path)
+            if current_metadata is not None and (
+                current_metadata.get("doc_type") != "file-level-onboarding"
+                or current_metadata.get("path") != source
+            ):
+                self.block(
+                    "contradictory-onboarding-mapping",
+                    f"Current sidecar {path} must declare doc_type=file-level-onboarding and "
+                    f"path={source}; correct it and recompute.",
+                    source=source,
+                )
+            elif current_metadata is None and path in self.after.members:
+                self.block(
+                    "contradictory-onboarding-mapping",
+                    f"Current sidecar {path} is missing doc_type/path metadata for {source}; "
+                    "correct it and recompute.",
+                    source=source,
+                )
             self.add(
                 GovernedArtifactIdentity(artifactType="file-sidecar", memoryRootRelativePath=path),
                 source=source,
@@ -382,42 +393,54 @@ class _Census:
                         )
 
     def edited_documents(self, documents: tuple[dict[str, dict[str, str]], ...]) -> None:
+        historical, current = documents
         for path in self.scope.memory_paths:
-            types = {document[path].get("doc_type") for document in documents if path in document}
-            if len(types) > 1:
-                self.block(
-                    "contradictory-artifact-type",
-                    f"Task-edited artifact changes governed type: {path}",
-                )
-            for document in documents:
-                metadata = document.get(path)
-                if metadata is None:
+            if path in current:
+                metadata = current[path]
+                if not metadata:
+                    self.block(
+                        "contradictory-artifact-type",
+                        f"Current candidate is missing governed metadata: {path}",
+                    )
                     continue
-                kind = metadata.get("doc_type")
-                if kind in ROUTE_OVERVIEW_DOC_TYPES:
-                    self.add(
-                        GovernedArtifactIdentity(
-                            artifactType="route-overview", memoryRootRelativePath=path
-                        ),
-                        reason="task-edited-overview",
-                    )
-                elif kind == "file-level-onboarding":
-                    source = metadata.get("path", "")
-                    require_git_relative_path(source)
-                    expected = mirror_onboarding_path(Path(self.onboarding), source).as_posix()
-                    if path != expected:
-                        self.block(
-                            "ambiguous-onboarding-mapping",
-                            "Task-edited sidecar is not its source's canonical mapping.",
-                            source=source,
-                        )
-                    self.add(
-                        GovernedArtifactIdentity(
-                            artifactType="file-sidecar", memoryRootRelativePath=path
-                        ),
+                active_document = current
+                current_present = True
+            elif path in historical:
+                active_document = historical
+                current_present = False
+            else:
+                active_document = None
+                current_present = False
+            if active_document is None:
+                continue
+            metadata = active_document.get(path)
+            if metadata is None:
+                continue
+            kind = metadata.get("doc_type")
+            if kind in ROUTE_OVERVIEW_DOC_TYPES:
+                self.add(
+                    GovernedArtifactIdentity(
+                        artifactType="route-overview", memoryRootRelativePath=path
+                    ),
+                    reason="task-edited-overview",
+                )
+            elif kind == "file-level-onboarding":
+                source = metadata.get("path", "")
+                require_git_relative_path(source)
+                expected = mirror_onboarding_path(Path(self.onboarding), source).as_posix()
+                if current_present and path != expected:
+                    self.block(
+                        "ambiguous-onboarding-mapping",
+                        f"Current sidecar {path} must map to {expected}; correct it and recompute.",
                         source=source,
-                        reason="task-edited-onboarding",
                     )
+                self.add(
+                    GovernedArtifactIdentity(
+                        artifactType="file-sidecar", memoryRootRelativePath=path
+                    ),
+                    source=source,
+                    reason="task-edited-onboarding",
+                )
 
     def entities(self, sources: set[str], documents: tuple[dict[str, dict[str, str]], ...]) -> None:
         catalogs = {

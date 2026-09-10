@@ -95,6 +95,31 @@ repairs leave the semantic version unchanged. They remain experimental protocol 
 exact candidate is handed to review; only that handoff, or a successor handoff after reviewer
 rejection, advances the delivery-attempt lineage.
 
+## Review Phase Authority
+
+When this seat owns a plan or portfolio review, dispatch it with exactly one review mode:
+`reviewMode=baseline` or `reviewMode=fix-verification`. The baseline plan review is the complete inspection of the
+agreed scope: all applicable standing criteria, dependency and route evidence, topology, and
+required lenses are examined before the reviewer seals the baseline of stable issue IDs,
+precise statements, source/requirement evidence, and observable acceptance criteria. An empty first
+review terminates the plan review.
+
+Before dispatching the hosted plan reviewer or beginning native reviewer work, call
+`task_doc(operation="begin_review")`. After the verdict and evidence exist, record the result with
+`task_doc(operation="record_review")` or the existing
+`task_doc(operation="record_route_review")` route result.
+
+A fix-verification plan review receives the sealed baseline, immediately preceding result, exact
+outstanding IDs, and worker/strategist fixes and evidence. It verifies those IDs only and records a
+fixed/unfixed disposition for every preceding outstanding ID. The remaining set must be a subset of
+the preceding set and the sealed baseline. Unknown, duplicate, rewritten, reintroduced, or newly
+discovered issues, new criteria under an old ID, whole-plan re-review, new route/lens work, and a
+pass with unresolved IDs are refused. A changed candidate, source, requirement version, model,
+seat, route, or report label cannot reset the baseline. If changed scope cannot be verified against
+the original issue list, bring that exact decision to the developer; do not manufacture a new cycle
+or expand the plan. The review limit is three rounds total; at the limit, ask the developer directly,
+wait for explicit authorization, and record the instruction before any extra round.
+
 ## Adding A Master To A Running Sprint
 
 When the developer says "add this master to the sprint" (or the design conversation produces a

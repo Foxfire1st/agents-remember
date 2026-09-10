@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
 from agents_remember.models.lifecycles.operation import (
     IntegrationPublicationIntent,
-    IntegrationQualityCertification,
     LifecycleOperationRecord,
 )
 from agents_remember.tasks.document_refs import TaskDocumentTopology
@@ -90,23 +89,17 @@ def prepare_integration_publication_intent(
     operation_key: str,
     generation: int,
     facts: IntegrationBoundaryFacts,
-    certification: IntegrationQualityCertification | None,
 ) -> IntegrationPublicationIntent:
     """Bind the source authority before protected refs or task truth move."""
 
     completion = facts.organizational_completion
-    if (completion is None) != (certification is None):
-        raise RuntimeError(
-            "organizational completion plan and quality certification must be one identity"
-        )
     prepared_at = datetime.now(UTC).replace(microsecond=0).isoformat()
     organizational = (
         prepare_organizational_master_completion(
             completion,
-            certification=certification,
             completed_at=prepared_at,
         )
-        if completion is not None and certification is not None
+        if completion is not None
         else None
     )
     door = facts.door
@@ -191,24 +184,6 @@ def transfer_integration_claim(
             "claimTransferredAt": datetime.now(UTC).replace(microsecond=0).isoformat(),
         }
     )
-
-
-def recorded_organizational_quality_certification(
-    contract: WorktreeContract,
-    *,
-    operation_key: str,
-) -> IntegrationQualityCertification:
-    record = located_lifecycle_operation_store(contract, "integrate").read()
-    if (
-        record is None
-        or record.operationKey != operation_key
-        or record.status != "running"
-        or record.qualityCertification is None
-    ):
-        raise RuntimeError(
-            "organizational full-gate success was not durably certified before integration"
-        )
-    return record.qualityCertification
 
 
 def source_operation_matches(

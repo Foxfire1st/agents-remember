@@ -186,12 +186,20 @@ nature/edge payloads cite; never author empty or ceremonial topology.
 
 The reviewer (plan-review catalog) passes judgment on the plan; the architect relays the
 verdict and drawing-board feedback back into this session. **Convergence over
-rounds is expected and normal** — large, messy portfolios are explicitly NOT expected to be fixed
-in one shot; the iteration is the feature. Each round must shrink the finding set (the convergence
-rule); the loop's hard cap is 3 full rounds, and **the drawing board through the architect IS this
-loop's escalation**. Quo-vadis items — high-blast-radius truths such as two masters heavily
-disagreeing on direction — go **straight to the architect** at the drawing board; flag them,
-unmistakably, at the top of the coherence findings.
+rounds is expected and normal** for the first plan review — large, messy portfolios are explicitly
+NOT expected to be fixed in one shot; the first review must nevertheless inspect the complete
+agreed plan scope, all required criteria, routes, and lenses before sealing its issue list. A
+successor plan review receives that sealed baseline and verifies only its exact outstanding IDs;
+it cannot perform another portfolio sweep, add a lens or route, invent a requirement, broaden an
+issue, or reopen a resolved ID. Each successor disposition must say fixed or unfixed for every
+preceding outstanding ID, and its remaining set must be a subset of the preceding set. A changed
+plan surface that cannot be verified against the baseline returns to the developer rather than
+opening a new review cycle. Three review rounds are the ordinary maximum; at that limit ask the
+developer directly, wait for explicit authorization, and record the instruction before any extra
+round. Quo-vadis items — high-blast-radius truths such as two
+masters heavily disagreeing on direction — go **straight to the architect** at the first drawing
+board; in a successor they are an outside-list observation for developer decision, not a new
+finding. Flag them unmistakably at the top of the coherence findings.
 
 ### 6 — Adopted-plan handover
 

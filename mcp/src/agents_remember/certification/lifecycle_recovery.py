@@ -18,6 +18,7 @@ from agents_remember.certification.certificate_models import (
     CreationProvenance,
     FinalizationCurrentInputs,
     GateCertificate,
+    GateCertificateIdentity,
     GateFiveSemanticInputs,
 )
 from agents_remember.certification.digests import content_digest
@@ -85,6 +86,7 @@ def compile_lifecycle_finalization(
     inputs: FinalizationBoundaryInputs,
     *,
     provenance: CreationProvenance,
+    retained_certificates: Sequence[GateCertificateIdentity] | None = None,
 ) -> LifecycleFinalizationManifest:
     """Revalidate the same candidate and bind the exact unfinished publication leg."""
 
@@ -94,6 +96,7 @@ def compile_lifecycle_finalization(
         inputs.certificates,
         inputs.currentInputs,
         provenance,
+        retained_certificates=retained_certificates,
     )
     envelope = LifecycleFinalizationSemanticEnvelope(
         lifecycleAdmissionDigest=inputs.admission.lifecycle.admissionDigest,
@@ -112,12 +115,15 @@ def compile_lifecycle_finalization(
 def validate_lifecycle_finalization_currentness(
     expected: LifecycleFinalizationManifest,
     inputs: FinalizationBoundaryInputs,
+    *,
+    retained_certificates: Sequence[GateCertificateIdentity] | None = None,
 ) -> LifecycleFinalizationManifest:
     """Refuse any movement and otherwise resume with zero certification starts."""
 
     observed = compile_lifecycle_finalization(
         inputs,
         provenance=expected.provenance,
+        retained_certificates=retained_certificates,
     )
     if observed != expected:
         _refuse(
@@ -137,12 +143,15 @@ def authorize_finalization_leg(
     expected: LifecycleFinalizationManifest,
     requested_leg: FinalizationLeg,
     inputs: FinalizationBoundaryInputs,
+    *,
+    retained_certificates: Sequence[GateCertificateIdentity] | None = None,
 ) -> LifecycleFinalizationManifest:
     """Authorize only the exact journaled leg after a currentness reread."""
 
     current = validate_lifecycle_finalization_currentness(
         expected,
         inputs,
+        retained_certificates=retained_certificates,
     )
     next_leg = current.semanticEnvelope.nextLeg
     if requested_leg != next_leg:
@@ -225,6 +234,8 @@ def revalidate_certificate_authority(
     admission: CompiledLifecycleAdmission,
     certificates: Sequence[GateCertificate],
     current_inputs: FinalizationCurrentInputs,
+    *,
+    retained_certificates: Sequence[GateCertificateIdentity] | None = None,
 ) -> None:
     """Expose the R21 reread without changing finalization or gate state."""
 
@@ -234,12 +245,14 @@ def revalidate_certificate_authority(
         certificates,
         current_inputs,
         expected.provenance,
+        retained_certificates=retained_certificates,
     )
     validate_finalization_currentness(
         authority,
         admission.certification,
         certificates,
         current_inputs,
+        retained_certificates=retained_certificates,
     )
     if authority.authorityDigest != authority_digest:
         _refuse(

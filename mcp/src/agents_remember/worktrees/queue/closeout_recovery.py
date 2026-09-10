@@ -35,7 +35,6 @@ from agents_remember.worktrees.modules.args import WorktreeArgs, report_operatio
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     commit_if_dirty,
-    commit_verified_staged,
     head_commit,
     is_ancestor,
     require_clean,
@@ -55,7 +54,6 @@ class MemoryCloseoutOutcome:
     refreshed_entities: list[dict[str, object]] = field(default_factory=list)
     refreshed_route_overviews: list[dict[str, str]] = field(default_factory=list)
     route_index_refresh: dict[str, object] = field(default_factory=dict)
-    memory_quality: dict[str, object] = field(default_factory=dict)
 
 
 def prove_closeout_recovery_commits(
@@ -171,10 +169,13 @@ def accepted_code_commit(
     contract,
     args: WorktreeArgs,
     effective_input: EffectiveCloseoutInput,
-    *,
-    strict_code_quality_required: bool,
 ) -> str:
-    """Commit or prove the accepted code tree, then journal its exact commit."""
+    """Commit or prove the accepted code tree, then journal its exact commit.
+
+    Closeout is a Git transaction.  The candidate/ref and mutation journal carry
+    the safety checks; code-quality execution is an explicit developer action
+    outside this transaction.
+    """
     commits = args.recovery_commits
     created_commit = False
     if contract.kind == "series":
@@ -197,10 +198,8 @@ def accepted_code_commit(
             expected_output_tree=None,
             use_current_candidate=True,
         )
-        code_commit = (
-            commit_verified_staged(contract.code_worktree, effective_input.message_for("code"))
-            if strict_code_quality_required
-            else commit_if_dirty(contract.code_worktree, effective_input.message_for("code"))
+        code_commit = commit_if_dirty(
+            contract.code_worktree, effective_input.message_for("code")
         )
         prove_git_commit(
             args,

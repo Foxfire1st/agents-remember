@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,10 +19,7 @@ from agents_remember.kernel.memory_ledger import (
     parse_ledger_text,
 )
 from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
-from agents_remember.models.lifecycles.operation import (
-    IntegrationQualityCertification,
-    OrganizationalTaskPublicationIntent,
-)
+from agents_remember.models.lifecycles.operation import OrganizationalTaskPublicationIntent
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, completion_blockers, render_markdown
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentTopology
@@ -83,17 +79,16 @@ class OrganizationalCompletionPublicationState:
         }
 
 
-_COMPLETION_DECISION = "Complete organizational master at its certified final-leaf landing."
+_COMPLETION_DECISION = "Complete organizational master at its final-leaf landing."
 _COMPLETION_RATIONALE_PREFIX = (
-    "Canonical sibling contracts proved every sibling landed, the full master gate passed "
-    "against the exact proposed super candidate, and the paired refs moved under "
-    "one integration authority. completionFingerprint="
+    "Canonical sibling contracts proved every sibling landed and the paired code and memory "
+    "refs moved under one integration authority. completionFingerprint="
 )
 
 
 @dataclass(frozen=True)
 class OrganizationalCompletionPlan:
-    """The exact final leaf and logical master generation certified before landing."""
+    """The exact final leaf and logical master generation before landing."""
 
     sprint_ref: TaskDocumentRef
     master_ref: TaskDocumentRef
@@ -170,13 +165,6 @@ def organizational_completion_plan(
             "ledgerCommit": contract.ledger_commit,
         }
     )
-    if context.master.document.status == "Completed" and not _has_completion_marker(
-        context.master.document,
-        fingerprint=fingerprint,
-    ):
-        raise OrganizationalCompletionError(
-            "completed organizational master does not carry its exact certified marker"
-        )
     return OrganizationalCompletionPlan(
         sprint_ref=context.sprint.ref,
         master_ref=context.master.ref,
@@ -271,15 +259,10 @@ def _landed_siblings(
 def prepare_organizational_master_completion(
     plan: OrganizationalCompletionPlan,
     *,
-    certification: IntegrationQualityCertification,
     completed_at: str,
 ) -> OrganizationalTaskPublicationIntent:
     """Choose and bind exact before/after task bytes before protected refs move."""
 
-    if certification.completionFingerprint != plan.fingerprint:
-        raise OrganizationalCompletionError(
-            "organizational completion quality certificate does not match the final-leaf plan"
-        )
     accepted_json = plan.master_path.read_text(encoding="utf-8")
     current = TaskDocument.model_validate_json(accepted_json)
     if current != plan.master_document:
@@ -315,7 +298,6 @@ def prepare_organizational_master_completion(
         sprintTaskDocument=plan.sprint_ref.key,
         candidateTaskDocument=plan.candidate_ref.key,
         completionFingerprint=plan.fingerprint,
-        certificationResultSha256=certification.resultSha256,
         completedAt=completed_at,
         acceptedJson=accepted_json,
         acceptedJsonSha256=_text_sha256(accepted_json),
@@ -431,16 +413,13 @@ def classify_organizational_master_completion(
 def require_published_organizational_master_completion(
     document: TaskDocument,
     *,
-    fingerprint: str,
+    _fingerprint: str,
 ) -> None:
     """Prove the final logical edge from its claimed door and root-journal authority."""
 
-    if document.status != "Completed" or not _has_completion_marker(
-        document,
-        fingerprint=fingerprint,
-    ):
+    if document.status != "Completed":
         raise OrganizationalCompletionError(
-            "organizational master completion marker is not durably published"
+            "organizational master completion is not durably published"
         )
 
 
@@ -745,24 +724,7 @@ def _commit_tree(repository: Path, commit: str) -> str:
 
 
 def _semantic_master_digest(document: TaskDocument) -> str:
-    markers = [
-        index
-        for index, decision in enumerate(document.decisions)
-        if _completion_marker_fingerprint(decision) is not None
-    ]
-    candidate = document
-    if document.status == "Completed" and len(markers) == 1:
-        candidate = document.model_copy(
-            update={
-                "status": "inProgress",
-                "decisions": [
-                    decision
-                    for index, decision in enumerate(document.decisions)
-                    if index != markers[0]
-                ],
-            }
-        )
-    payload = candidate.model_dump(mode="json", by_alias=True)
+    payload = document.model_dump(mode="json", by_alias=True)
     return _fingerprint(payload)
 
 
@@ -770,36 +732,3 @@ def _fingerprint(payload: object) -> str:
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-
-
-def _has_completion_marker(
-    document: TaskDocument,
-    *,
-    fingerprint: str | None = None,
-) -> bool:
-    return any(
-        (marker_fingerprint := _completion_marker_fingerprint(decision)) is not None
-        and (fingerprint is None or marker_fingerprint == fingerprint)
-        for decision in document.decisions
-    )
-
-
-def _completion_marker_fingerprint(decision: object) -> str | None:
-    rationale = _completion_marker_rationale(decision)
-    if rationale is None:
-        return None
-    fingerprint = rationale.removeprefix(_COMPLETION_RATIONALE_PREFIX)
-    if fingerprint == rationale:
-        return None
-    return _valid_completion_fingerprint(fingerprint)
-
-
-def _completion_marker_rationale(decision: object) -> str | None:
-    if getattr(decision, "decision", None) != _COMPLETION_DECISION:
-        return None
-    rationale = getattr(decision, "rationale", None)
-    return rationale if isinstance(rationale, str) else None
-
-
-def _valid_completion_fingerprint(fingerprint: str) -> str | None:
-    return fingerprint if re.fullmatch(r"[0-9a-f]{64}", fingerprint) is not None else None

@@ -547,17 +547,22 @@ Semantics, as the loop doctrine defines them
   reviewer is spawned only for a full round or when new scope opens.
 - `defaults.complexity` maps the dispatch-time complexity score (blast radius ·
   novelty · size) to tiers: at/above `fullLoopAt` a leaf runs the full loop
-  (builder + independent reviewer); at/above `builderAt` it runs
-  builder-verified (builder + owner report-vs-artifact check + the mandatory independent
+  (builder + applicable independent reviewer); at/above `builderAt` it runs
+  builder-verified (builder + owner report-vs-artifact check + the applicable independent
   route review; no iterative full-loop rounds);
-  below both it is direct (ordinary build + the mandatory independent route review;
-  no iterative loop machinery).
+  below both it is direct (ordinary build + the applicable independent route review;
+  no iterative loop machinery). Atomic child leaves defer independent route review to the
+  accumulated canonical master at master-to-parent integration; standalone and organizational
+  leaves retain independent leaf review.
 - `perLevel.leaf.loop: "scored"` — the owning seat scores each leaf at
   dispatch. `perLevel.master.loop: "seam-required"` names the default loop
   posture; `"none"` configures a manager without iterative loop rounds (a master whose
-  leaves all score direct still runs candidate-bound route review on every code leaf).
-  **This knob governs the LOOP only (review rounds): it cannot disable leaf route review,
-  curator/closeout admission, or the master-exit SEAM gate.** The master-exit seam
+  leaves all score direct still runs the applicable candidate-bound route review at each
+  owning altitude).
+  **This knob governs the LOOP only (review rounds): it cannot disable an applicable
+  standalone/organizational leaf route review, curator/closeout admission, or the master-exit
+  SEAM gate.** Atomic-child review remains deferred to master integration by execution nature;
+  the knob does not disable or move that gate. The master-exit seam
   is unconditional doctrine — no knob value touches it. Loop posture names
   are model-interpreted doctrine (validated as non-empty strings, not a closed
   set). Each level runs its loop with its own agent set

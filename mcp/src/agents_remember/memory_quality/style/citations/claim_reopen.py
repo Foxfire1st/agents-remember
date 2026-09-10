@@ -615,6 +615,7 @@ def check_onboarding_root(
     code_repository_root: Path | None = None,
     *,
     unstamped_code_commit: str | None = None,
+    retained_code_history_commits: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Compare every complete claim against its own historical provenance.
 
@@ -622,7 +623,10 @@ def check_onboarding_root(
     That breaks the new-card deadlock without inventing a verification stamp: the preflight
     still resolves every claim against the base and working tree, and the post-refresh pass
     supplies no fallback, so metadata refresh must write the real code commit before memory
-    can commit. Standalone checks remain strict about every missing stamp.
+    can commit. A selected prepared code proof may retain verified code commits from its
+    explicit predecessor chain as reachability anchors while this check still reads current
+    working-tree bytes. Standalone checks remain strict about every missing stamp and have no
+    retained anchor.
     """
     documents = model.documents_in(onboarding_root)
     if code_repository_root is None:
@@ -633,7 +637,11 @@ def check_onboarding_root(
         }
 
     memory_root = onboarding_root.parent
-    histories = provenance.Histories(code_repository_root, memory_root)
+    histories = provenance.Histories(
+        code_repository_root,
+        memory_root,
+        retained_code_history_commits=retained_code_history_commits,
+    )
     trees = Trees(code_root=code_repository_root, memory_root=memory_root)
     router = claim_change_router.ClaimChangeRouter(trees, histories)
     current_files = CurrentFiles()

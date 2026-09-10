@@ -28,11 +28,10 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 @dataclass(frozen=True)
 class IntegratePreview:
-    """The evaluated seam guard and the planned altitude-routed quality gate."""
+    """The evaluated seam guard for the planned ref transaction."""
 
     guard: GateGuard
     handover_warning: dict[str, object] | None
-    quality_gate: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -45,7 +44,6 @@ class IntegrationPublication:
     sources: IntegrationSources
     commits: IntegratedCommits
     intent: IntegrationPublicationIntent
-    quality_gate: dict[str, object]
     handover_warning: dict[str, object] | None
 
 

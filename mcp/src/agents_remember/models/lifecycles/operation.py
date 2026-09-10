@@ -51,7 +51,9 @@ from agents_remember.models.lifecycles.operation_projection import (
 from agents_remember.models.lifecycles.policy import GatePolicyRuleSnapshot
 from agents_remember.models.lifecycles.preparation_state import (
     OperationPreparationState,
+    PreparedCodeRetention,
     validate_preparation_owner,
+    validate_prepared_code_retention,
 )
 from agents_remember.models.lifecycles.termination import (
     LifecycleCancellationEvidence,
@@ -81,7 +83,6 @@ class OrganizationalTaskPublicationIntent(BaseModel):
     sprintTaskDocument: str = Field(min_length=1, max_length=4096)
     candidateTaskDocument: str = Field(min_length=1, max_length=4096)
     completionFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    certificationResultSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     completedAt: str = Field(min_length=1, max_length=128)
     acceptedJson: str
     acceptedJsonSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -397,6 +398,7 @@ class LifecycleOperationRecord(BaseModel):
     qualityCertification: IntegrationQualityCertification | None = None
     certification: OperationCertificationState | None = None
     preparation: OperationPreparationState | None = None
+    preparedCodeRetention: PreparedCodeRetention | None = None
     integrationCertification: IntegrationCertificationSelection | None = None
     integrationPublication: IntegrationPublicationIntent | None = None
     organizationalRepair: OrganizationalCompletionRepairEvidence | None = None
@@ -539,6 +541,7 @@ _MEANINGFUL_STATE_FIELDS: tuple[str, ...] = (
     "qualityCertification",
     "certification",
     "preparation",
+    "preparedCodeRetention",
     "integrationCertification",
     "integrationPublication",
     "organizationalRepair",
@@ -603,6 +606,16 @@ def _require_altitude_authority(record: LifecycleOperationRecord) -> None:
         record.operationKey,
         record.generation,
         has_certification=record.certification is not None,
+    )
+    validate_prepared_code_retention(
+        record.preparedCodeRetention,
+        record.preparation,
+        (
+            record.operationKind,
+            record.operationKey,
+            record.generation,
+            record.predecessorFingerprint,
+        ),
     )
     _require_integration_certification_authority(record)
     if record.operationKind != "direct-landing" and record.directLandingLedgerIntent is not None:
@@ -978,12 +991,6 @@ def _require_integration_publication(record: LifecycleOperationRecord) -> None:
     organizational = publication.organizationalCompletion
     if organizational is None:
         return
-    certification = record.qualityCertification
-    if certification is None or (
-        certification.completionFingerprint != organizational.completionFingerprint
-        or certification.resultSha256 != organizational.certificationResultSha256
-    ):
-        raise ValueError("organizational publication lacks its exact quality certification")
 
 
 def _require_canonical_cancellation_handoff(

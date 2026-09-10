@@ -135,8 +135,11 @@ DEFAULT_EXPECTATION_SLA_SECONDS: dict[str, float] = {
 # reference; argv is definable only through the explicit harnesses family (260703-L16).
 HARNESS_IDS = tuple(harness.id for harness in HARNESSES)
 
-# The L12 loop defaults (docs/reference/settings-json.md, Orchestration Loops).
-DEFAULT_LOOP_MAX_ROUNDS = 3
+# The review budget is an authority boundary, not a tunable orchestration preference.
+# Keep the default and the parser's hard ceiling together so settings cannot authorize a
+# fourth review by supplying a larger positive ``maxRounds`` value.
+MAX_REVIEW_ROUNDS = 3
+DEFAULT_LOOP_MAX_ROUNDS = MAX_REVIEW_ROUNDS
 DEFAULT_REVIEWER_REUSE = "delta-verify"
 DEFAULT_LOOP_PER_LEVEL: dict[str, str] = {
     "leaf": "scored",

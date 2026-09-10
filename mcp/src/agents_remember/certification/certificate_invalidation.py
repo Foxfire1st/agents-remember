@@ -27,6 +27,7 @@ InputChangeClass = Literal[
     "memory-onboarding",
     "coherence-evidence",
     "topology-intent",
+    "closeout-resume",
     "journal-review-approval-attempt",
     "unchanged-interruption",
     "unclassified",
@@ -53,11 +54,14 @@ class CertificateInputChange(FrozenContractModel):
         consumes_declared = self.changeClass in {
             "runtime-toolchain-executor-image",
             "topology-intent",
+            "closeout-resume",
         }
         if not consumes_declared and self.consumingGates:
             raise ValueError("this input-change class has a fixed invalidation scope")
         if self.changeClass == "runtime-toolchain-executor-image" and not self.consumingGates:
             raise ValueError("runtime input changes require every declared consuming gate")
+        if self.changeClass == "closeout-resume" and len(self.consumingGates) != 1:
+            raise ValueError("closeout resume requires exactly its first gate to rerun")
         if self.changeClass != "coherence-evidence" and self.affectedGateFiveSubrecords:
             raise ValueError("only coherence changes can name affected Gate-5 subrecords")
         if self.affectedGateFiveSubrecords != tuple(sorted(set(self.affectedGateFiveSubrecords))):
@@ -135,7 +139,15 @@ def plan_certificate_reuse(
         raise ValueError("candidate certificates must form one exact ordered prefix")
     decision = classify_certificate_invalidation(changes)
     invalidated = set(decision.invalidatedGates)
-    invalidated.update(_identity_drift_closure(admission, chain, gate_five_inputs))
+    retained_hint = _explicit_resume_prefix(chain, changes, invalidated)
+    invalidated.update(
+        _identity_drift_closure(
+            admission,
+            chain,
+            gate_five_inputs,
+            retained_certificates=tuple(item.identity for item in retained_hint),
+        )
+    )
     retained_count = 0
     for certificate in chain:
         if certificate.semanticEnvelope.gate in invalidated:
@@ -146,6 +158,7 @@ def plan_certificate_reuse(
         admission,
         retained,
         gate_five_inputs=gate_five_inputs,
+        retained_certificates=(tuple(item.identity for item in retained_hint) or None),
     )
     missing: set[GateId] = set(_ALL_GATES[len(chain) :])
     candidates = invalidated | missing
@@ -181,17 +194,36 @@ def _change_start_gates(change: CertificateInputChange) -> tuple[GateId, ...]:
     return change.consumingGates
 
 
+def _explicit_resume_prefix(
+    chain: tuple[GateCertificate, ...],
+    changes: Sequence[CertificateInputChange],
+    invalidated: set[GateId],
+) -> tuple[GateCertificate, ...]:
+    starts = tuple(
+        change.consumingGates[0] for change in changes if change.changeClass == "closeout-resume"
+    )
+    if not starts:
+        return ()
+    first_gate = min(starts)
+    if any(gate < first_gate for gate in invalidated):
+        return ()
+    return chain[: first_gate - 1]
+
+
 def _identity_drift_closure(
     admission: CertificationAdmissionManifest,
     chain: tuple[GateCertificate, ...],
     gate_five_inputs: GateFiveSemanticInputs | None,
+    retained_certificates: Sequence[GateCertificateIdentity] = (),
 ) -> set[GateId]:
     for index, certificate in enumerate(chain):
         try:
+            prefix_retained = retained_certificates[: index + 1]
             validate_certificate_chain(
                 admission,
                 chain[: index + 1],
                 gate_five_inputs=gate_five_inputs,
+                retained_certificates=prefix_retained,
             )
         except CertificationContractError:
             return set(_DOWNSTREAM_GATES[certificate.semanticEnvelope.gate])

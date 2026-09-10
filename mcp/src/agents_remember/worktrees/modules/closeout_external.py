@@ -13,9 +13,6 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
-from agents_remember.worktrees.integration.closeout.curator_coherence import (
-    CuratorCoherenceNoImpact,
-)
 from agents_remember.worktrees.integration.mutation_evidence import (
     begin_exact_file_git_mutation,
     begin_git_mutation,
@@ -38,24 +35,11 @@ from agents_remember.worktrees.modules.onboarding import (
     refresh_route_indexes_for_context,
     refresh_route_overview_metadata_for_context,
 )
-from agents_remember.worktrees.modules.quality.closeout_memory import (
-    combine_memory_quality,
-    run_memory_quality_phase,
-)
 from agents_remember.worktrees.queue.closeout_recovery import (
     MemoryCloseoutOutcome,
     resume_external_commits,
 )
 from agents_remember.worktrees.series_closeout import exact_series_memory_closeout
-from agents_remember.worktrees.services import worktree_services
-
-
-@dataclass(frozen=True)
-class ExternalCloseoutEvidence:
-    """Reversible memory and no-impact evidence accepted before code commit."""
-
-    memory_quality_before_refresh: dict[str, Any]
-    coherence_no_impact: CuratorCoherenceNoImpact
 
 
 def external_closeout_commits(
@@ -63,7 +47,6 @@ def external_closeout_commits(
     args: WorktreeArgs,
     effective_input: EffectiveCloseoutInput,
     change: VerifiedChange,
-    evidence: ExternalCloseoutEvidence,
 ) -> MemoryCloseoutOutcome:
     if contract.ledger_path is None:
         raise RuntimeError("external-memory closeout requires a ledger path")
@@ -76,12 +59,7 @@ def external_closeout_commits(
     recovered = _resumed_external_outcome(contract, args, effective_input, code_commit)
     if recovered is not None:
         return recovered
-    refresh = _refresh_external_memory(
-        contract,
-        args,
-        change,
-        evidence,
-    )
+    refresh = _refresh_external_memory(contract, args, change)
     ledger = load_ledger(contract.ledger_path)
     existing_mapping = find_mapping(ledger, code_commit)
     memory_commit, memory_created = _commit_memory_content(
@@ -108,7 +86,6 @@ def external_closeout_commits(
         refreshed_entities=refresh.entities,
         refreshed_route_overviews=refresh.route_overviews,
         route_index_refresh=refresh.route_index,
-        memory_quality=refresh.quality,
     )
 
 
@@ -118,7 +95,6 @@ class _ExternalMemoryRefresh:
     entities: list[dict[str, object]]
     route_overviews: list[dict[str, str]]
     route_index: dict[str, object]
-    quality: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -133,7 +109,6 @@ def _refresh_external_memory(
     contract,
     args: WorktreeArgs,
     change: VerifiedChange,
-    evidence: ExternalCloseoutEvidence,
 ) -> _ExternalMemoryRefresh:
     context = replace(contract_context(contract), code_repository_root=contract.code_worktree)
     report_operation_progress(
@@ -142,28 +117,20 @@ def _refresh_external_memory(
     refreshed_onboarding = refresh_onboarding_metadata(
         contract,
         change,
-        accepted_no_impact=evidence.coherence_no_impact.content_sources,
     )
     refreshed_route_overviews = refresh_route_overview_metadata_for_context(
         context,
         change,
         memory_tree=contract.memory_worktree,
         memory_verified_commit=contract_memory_verified_commit(contract),
-        accepted_no_impact=evidence.coherence_no_impact.source_routes,
     )
     refreshed_entities = refresh_entity_fingerprints_for_context(context, change.changed_paths)
     route_index_refresh = refresh_route_indexes_for_context(context)
-    _, after_checks = worktree_services().memory_quality.check_groups()
-    memory_quality_after_refresh = run_memory_quality_phase(context, after_checks)
-    memory_quality = combine_memory_quality(
-        evidence.memory_quality_before_refresh, memory_quality_after_refresh
-    )
     return _ExternalMemoryRefresh(
         refreshed_onboarding,
         refreshed_entities,
         refreshed_route_overviews,
         route_index_refresh,
-        memory_quality,
     )
 
 

@@ -189,11 +189,24 @@ def _advance_recovery(
         provenance=handoff.selected.run.provenance,
         gate_five_inputs=memory_inputs,
     )
-    if len(terminals) == 5 and recovery.semanticEnvelope.reusePlan.firstGateToRun is not None:
-        refuse(
-            "certification-memory-successor-required",
-            "explicit successor for changed selected Gate-5 inputs",
-            recovery.semanticEnvelope.reusePlan,
+    stale_gate_five = (
+        len(terminals) == 5 and recovery.semanticEnvelope.reusePlan.firstGateToRun == 5
+    )
+    if stale_gate_five:
+        changes = (
+            *changes,
+            CertificateInputChange(
+                changeClass="closeout-resume",
+                consumingGates=(5,),
+                reason="The selected green Gate 5 is stale; resume its exact successor gate.",
+            ),
+        )
+        recovery = compile_certification_recovery_record(
+            handoff.selected.admission,
+            chain,
+            changes,
+            provenance=handoff.selected.run.provenance,
+            gate_five_inputs=memory_inputs,
         )
     objects = certificate_store(handoff.contract.worktree_group)
     retained = retain_memory_inputs(memory_inputs) if memory_inputs is not None else None
@@ -208,6 +221,15 @@ def _advance_recovery(
     )
     state = handoff.selected.state
     selected_terminals = state.terminals
+    terminal_history = state.terminalHistory
+    if stale_gate_five:
+        previous = state.terminals[-1]
+        historical = previous.model_copy(
+            update={"reusedFrom": previous.reusedFrom or state.predecessor}
+        )
+        if not any(item.result == historical.result for item in terminal_history):
+            terminal_history = (*terminal_history, historical)
+        selected_terminals = state.terminals[:-1]
     if inherited_memory is not None and recovery.semanticEnvelope.reusePlan.firstGateToRun is None:
         original = state.inputTerminals[-1]
         inherited = original.model_copy(
@@ -218,6 +240,7 @@ def _advance_recovery(
         update={
             "recoveryDecisions": (*state.recoveryDecisions, decision),
             "terminals": selected_terminals,
+            "terminalHistory": terminal_history,
         }
     )
     record = select_certification_state(handoff.contract, handoff.store, handoff.record, updated)

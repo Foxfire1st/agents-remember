@@ -179,6 +179,8 @@ class TaskDocResponse(ToolResponse):
     masterResolved: bool | None = None
     # linkage_report + get on a sprint: the read-only drift facts.
     linkageFacts: list[dict[str, Any]] | None = None
+    # Bounded first-review/fix-verification state; absent persisted state is reported as zero.
+    reviewState: dict[str, Any] | None = None
     # author_execution_graph: what the batch applied and the derived scheduling view.
     bootstrapped: bool | None = None
     appliedMutations: list[dict[str, Any]] | None = None

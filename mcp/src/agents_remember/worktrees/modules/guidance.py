@@ -338,7 +338,10 @@ def _pre_integration_phase(contract: WorktreeContract) -> LifecycleGuidance:
         }
     return {
         "phase": "worktree-started",
-        "summary": "Worktrees are ready; continue the wrapped workflow and close out after review.",
+        "summary": (
+            "Worktrees are ready; continue the wrapped workflow and satisfy the applicable "
+            "closeout prerequisites before the next lifecycle transition."
+        ),
         **next_guidance(
             "continue_work",
             tool="worktree_status",

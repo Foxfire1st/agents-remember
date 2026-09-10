@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, NoReturn
@@ -28,9 +29,28 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, R
 from agents_remember.memory_quality.curator_checklist import report_path_for
 from agents_remember.memory_quality.style.citations import source_index_cache
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
+from agents_remember.models.lifecycles.prepared_memory import PreparedCodeExecutionView
 from agents_remember.worktrees.git_worktree_manager import contract_context
+from agents_remember.worktrees.integration.closeout.future_code_candidate import (
+    capture_future_code_candidate,
+)
 from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
     resolve_memory_candidate_pair,
+)
+from agents_remember.worktrees.integration.closeout.preparation.code_view import (
+    observe_selected_prepared_code_view,
+)
+from agents_remember.worktrees.integration.closeout.preparation_selection import (
+    selected_prepared_code_history_commits,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    located_lifecycle_operation_store,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location_errors import (
+    LifecycleOperationLocationError,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
+    LifecycleOperationReadError,
 )
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
@@ -62,6 +82,24 @@ class MemoryScope:
     curator_report_path: Path | None = None
     contract: WorktreeContract | None = None
     pair_identity: MemoryCandidatePairIdentity | None = None
+    prepared_code_view: PreparedCodeExecutionView | None = None
+    prepared_code_history_commits: tuple[str, ...] = ()
+
+    @property
+    def quality_code_root(self) -> Path:
+        """Return the proved code root for quality reads, preserving pair identity."""
+
+        if self.prepared_code_view is None:
+            return self.code_root
+        return Path(self.prepared_code_view.physicalCodeRoot)
+
+    @property
+    def quality_context(self) -> CoordinationContext:
+        """Use the selected physical source only for quality/coherence reads."""
+
+        if self.prepared_code_view is None:
+            return self.context
+        return replace(self.context, code_repository_root=self.quality_code_root)
 
 
 def resolve_memory_scope(
@@ -154,7 +192,16 @@ def resolve_memory_candidate_scope(
         requested_contract_path=contract_path,
         requested_repo_id=repo.repo_id,
     )
-    return _leaf_scope(repo, configured.contract, pair_identity=pair)
+    prepared_code_view, prepared_code_history_commits = _resolve_prepared_code_source(
+        configured.contract, pair
+    )
+    return _leaf_scope(
+        repo,
+        configured.contract,
+        pair_identity=pair,
+        prepared_code_view=prepared_code_view,
+        prepared_code_history_commits=prepared_code_history_commits,
+    )
 
 
 def revalidate_memory_candidate_scope(
@@ -190,6 +237,40 @@ def revalidate_memory_candidate_scope(
                 next_args={"contract_path": pair.contractPath, "dry_run": True},
             ),
         )
+    if (
+        current.prepared_code_view != scope.prepared_code_view
+        or current.prepared_code_history_commits != scope.prepared_code_history_commits
+    ):
+        raise MemoryCandidatePairError(
+            "memory-quality-prepared-source-changed",
+            "the selected prepared code source changed after quality admission",
+            failure=MemoryCandidatePairFailure(
+                field="preparedCodeView",
+                contract_path=pair.contractPath,
+                expected={
+                    "preparedCodeView": (
+                        None
+                        if scope.prepared_code_view is None
+                        else scope.prepared_code_view.model_dump(mode="json")
+                    ),
+                    "preparedCodeHistoryCommits": scope.prepared_code_history_commits,
+                },
+                observed={
+                    "preparedCodeView": (
+                        None
+                        if current.prepared_code_view is None
+                        else current.prepared_code_view.model_dump(mode="json")
+                    ),
+                    "preparedCodeHistoryCommits": current.prepared_code_history_commits,
+                },
+                next_action="recover",
+                next_args={
+                    "repo_id": scope.repo_id,
+                    "contract_path": pair.contractPath,
+                    "operation": "closeout",
+                },
+            ),
+        )
     return current
 
 
@@ -198,6 +279,8 @@ def _leaf_scope(
     contract: WorktreeContract,
     *,
     pair_identity: MemoryCandidatePairIdentity | None = None,
+    prepared_code_view: PreparedCodeExecutionView | None = None,
+    prepared_code_history_commits: tuple[str, ...] = (),
 ) -> MemoryScope:
     assert contract.memory_worktree is not None
     onboarding_root = contract.memory_worktree / "onboarding"
@@ -231,6 +314,105 @@ def _leaf_scope(
         curator_report_path=report_path_for(contract.worktree_group),
         contract=contract,
         pair_identity=pair_identity,
+        prepared_code_view=prepared_code_view,
+        prepared_code_history_commits=prepared_code_history_commits,
+    )
+
+
+def _resolve_prepared_code_source(
+    contract: WorktreeContract,
+    pair: MemoryCandidatePairIdentity,
+) -> tuple[PreparedCodeExecutionView | None, tuple[str, ...]]:
+    """Resolve the selected closeout output into the existing prepared-view contract.
+
+    The closeout journal and certificate object store are the only source of a prepared
+    root.  A leaf without a selected code output remains on the ordinary logical working
+    tree; once a code intent is selected, an incomplete or moved output is a typed refusal.
+    """
+
+    try:
+        try:
+            store = located_lifecycle_operation_store(contract, "closeout")
+            record = store.read()
+        except LifecycleOperationLocationError as error:
+            if error.status == "operation-location-adoption-required":
+                return None, ()
+            raise
+        if record is None or record.preparation is None:
+            return None, ()
+        if record.preparation.legs[0].leg != "code":
+            raise ValueError("selected preparation does not begin with its code leg")
+        if record.preparation.legs[0].output is None:
+            raise ValueError("selected code preparation has no retained output")
+        view = observe_selected_prepared_code_view(
+            contract,
+            record,
+            store,
+            pair,
+        )
+        history_commits = selected_prepared_code_history_commits(contract, record)
+        current = capture_future_code_candidate(contract)
+        if view.codeTree != current.codeCandidateTree:
+            return None, history_commits
+        return view, history_commits
+    except (LifecycleOperationLocationError, LifecycleOperationReadError) as error:
+        raise _prepared_code_view_error(contract, error) from error
+    except (OSError, ValueError) as error:
+        raise _prepared_code_view_error(contract, error) from error
+
+
+def _prepared_code_view_error(
+    contract: WorktreeContract,
+    error: BaseException,
+) -> MemoryCandidatePairError:
+    status = "prepared-code-view-invalid"
+    detail = "the selected prepared code source could not be proved for memory quality"
+    expected: dict[str, object] = {"state": "selected-prepared-code-output"}
+    observed: dict[str, object] = {
+        "errorType": type(error).__name__,
+        "reason": str(error),
+    }
+    if isinstance(error, LifecycleOperationLocationError):
+        status = error.status
+        detail = error.detail
+        expected = dict(error.expected)
+        observed = dict(error.observed)
+    elif isinstance(error, LifecycleOperationReadError):
+        status = "prepared-code-view-journal-unreadable"
+        expected = dict(error.expected)
+        observed = dict(error.observed)
+    else:
+        findings = getattr(error, "findings", ())
+        if findings:
+            finding = findings[0]
+            code = str(finding.get("code", "invalid"))
+            status = f"prepared-code-view-{code}"
+            detail = f"selected prepared code proof refused: {code}"
+            expected_value = finding.get("expected")
+            observed_value = finding.get("observed")
+            if isinstance(expected_value, Mapping):
+                expected = dict(expected_value)
+            elif expected_value is not None:
+                expected = {"value": expected_value}
+            if isinstance(observed_value, Mapping):
+                observed = dict(observed_value)
+            elif observed_value is not None:
+                observed = {"value": observed_value}
+    return MemoryCandidatePairError(
+        status,
+        detail,
+        failure=MemoryCandidatePairFailure(
+            field="preparedCodeView",
+            contract_path=contract.contract_path.as_posix(),
+            expected=expected,
+            observed=observed,
+            next_action="recover",
+            next_args={
+                "repo_id": contract.repo_name,
+                "contract_path": contract.contract_path.as_posix(),
+                "operation": "closeout",
+            },
+        ),
     )
 
 

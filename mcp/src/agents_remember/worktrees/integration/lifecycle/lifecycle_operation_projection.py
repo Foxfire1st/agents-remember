@@ -457,7 +457,7 @@ def _recommended_action(
             arguments={"contract_path": record.contractPath},
             summary="Observe this exact lifecycle generation for its next durable edge.",
         )
-    for action in ("recover", "retry"):
+    for action in ("resume", "recover", "retry"):
         recommended = _recommended_control(action, legal_controls)
         if recommended is not None:
             return recommended

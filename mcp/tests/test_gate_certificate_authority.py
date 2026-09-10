@@ -103,6 +103,7 @@ def _scenario(
     *,
     profile_kind: ProfileKind = "certifying",
     gate_four_image: str | None = None,
+    candidate: CandidateIdentity = _CANDIDATE,
 ) -> _Scenario:
     raw_profile = fixture_profile()
     if gate_four_image is not None:
@@ -126,7 +127,7 @@ def _scenario(
     repository_plan = compile_repository_profile_plan(
         profile,
         selection_id=_PROFILE_ID,
-        candidate_identity=_CANDIDATE,
+        candidate_identity=candidate,
     )
     repository_rails = tuple(rail for gate in repository_plan.gates for rail in gate.rails)
     memory_prerequisite = repository_plan.gates[-1].rails[-1].identity
@@ -150,7 +151,7 @@ def _scenario(
     plan = compile_certification_plan(
         registry,
         profile_id=_PROFILE_ID,
-        candidate_identity=_CANDIDATE,
+        candidate_identity=candidate,
     )
     admission = compile_certification_admission(
         registry,
@@ -268,7 +269,7 @@ def _manifest(
         results,
         GateResultAdmission(
             profileId=_PROFILE_ID,
-            candidateIdentity=_CANDIDATE,
+            candidateIdentity=scenario.plan.candidateIdentity,
             altitude=scenario.plan.profileKind,
         ),
     )
@@ -464,6 +465,139 @@ def test_reuse_is_dependency_aware_and_refuses_forged_or_stale_identity() -> Non
     with pytest.raises(CertificationContractError) as caught:
         validate_certificate_chain(scenario.admission, (forged,))
     assert _finding_codes(caught.value) == {"stale-gate-certificate"}
+
+
+def test_closeout_resume_retains_passing_prefix_across_candidate_repair() -> None:
+    original = _scenario()
+    repaired = _scenario(candidate=CandidateIdentity(kind="git-tree", value="d" * 40))
+    original_chain = _certify_through(original, 3)
+    changes = (
+        CertificateInputChange(
+            changeClass="closeout-resume",
+            consumingGates=(4,),
+            reason="resume the fixed candidate at the failed Gate 4",
+        ),
+    )
+
+    reuse = plan_certificate_reuse(repaired.admission, original_chain, changes)
+
+    assert reuse.reusedCertificates == tuple(item.identity for item in original_chain)
+    assert reuse.firstGateToRun == 4
+    assert (
+        validate_certificate_chain(
+            repaired.admission,
+            original_chain,
+            retained_certificates=reuse.reusedCertificates,
+        )
+        == original_chain
+    )
+    with pytest.raises(CertificationContractError) as caught:
+        validate_certificate_chain(repaired.admission, original_chain)
+    assert _finding_codes(caught.value) == {"stale-gate-certificate"}
+
+    foreign_envelope = original_chain[0].semanticEnvelope.model_copy(
+        update={"repositoryId": "foreign-repository"}
+    )
+    foreign = GateCertificate(
+        semanticEnvelope=foreign_envelope,
+        certificateDigest=content_digest(foreign_envelope),
+        provenance=original_chain[0].provenance,
+    )
+    with pytest.raises(CertificationContractError) as caught:
+        validate_certificate_chain(
+            repaired.admission,
+            (foreign,),
+            retained_certificates=(foreign.identity,),
+        )
+    assert _finding_codes(caught.value) == {"retained-certificate-repository-mismatch"}
+
+    gate_four = compile_gate_certificate(
+        repaired.admission,
+        _gate(repaired.plan, 4),
+        _manifest(repaired, 4),
+        original_chain,
+        GateCertificateIssuanceContext(provenance=_provenance()),
+        retained_certificates=reuse.reusedCertificates,
+    )
+    assert gate_four.semanticEnvelope.candidateCodeTree == repaired.plan.candidateIdentity
+    assert gate_four.semanticEnvelope.resultManifestDigest == _manifest(repaired, 4).manifestDigest
+
+
+def test_closeout_resume_at_gate_five_retains_only_the_earlier_prefix() -> None:
+    original = _scenario()
+    repaired = _scenario(candidate=CandidateIdentity(kind="git-tree", value="e" * 40))
+    memory_inputs = _memory_inputs()
+    original_chain = _certify_through(original, 5, memory_inputs=memory_inputs)
+    changes = (
+        CertificateInputChange(
+            changeClass="closeout-resume",
+            consumingGates=(5,),
+            reason="formerly-green Gate 5 inputs are stale",
+        ),
+    )
+
+    reuse = plan_certificate_reuse(
+        repaired.admission,
+        original_chain,
+        changes,
+        gate_five_inputs=_memory_inputs("b"),
+    )
+
+    assert reuse.reusedCertificates == tuple(item.identity for item in original_chain[:4])
+    assert reuse.firstGateToRun == 5
+
+
+def test_finalization_revalidates_a_mixed_retained_and_new_certificate_chain() -> None:
+    original = _scenario()
+    repaired = _scenario(candidate=CandidateIdentity(kind="git-tree", value="f" * 40))
+    original_memory = _memory_inputs()
+    repaired_memory = _memory_inputs("b")
+    original_chain = _certify_through(original, 5, memory_inputs=original_memory)
+    retained = tuple(item.identity for item in original_chain[:3])
+    repaired_four = compile_gate_certificate(
+        repaired.admission,
+        _gate(repaired.plan, 4),
+        _manifest(repaired, 4),
+        original_chain[:3],
+        GateCertificateIssuanceContext(provenance=_provenance()),
+        retained_certificates=retained,
+    )
+    repaired_five = compile_gate_certificate(
+        repaired.admission,
+        _gate(repaired.plan, 5),
+        _manifest(repaired, 5),
+        (*original_chain[:3], repaired_four),
+        GateCertificateIssuanceContext(
+            provenance=_provenance(),
+            gateFiveInputs=repaired_memory,
+        ),
+        retained_certificates=retained,
+    )
+    chain = (*original_chain[:3], repaired_four, repaired_five)
+    current_inputs = FinalizationCurrentInputs(
+        gateFiveInputs=repaired_memory,
+        taskIntentAuthorityDigest="b" * 64,
+        journalAuthorityDigest="d" * 64,
+    )
+
+    authority = compile_finalization_authority(
+        repaired.admission,
+        chain,
+        current_inputs,
+        _provenance(),
+        retained_certificates=retained,
+    )
+
+    assert (
+        validate_finalization_currentness(
+            authority,
+            repaired.admission,
+            chain,
+            current_inputs,
+            retained_certificates=retained,
+        )
+        == authority
+    )
 
 
 def test_profile_mismatch_and_unproven_runtime_change_fail_closed() -> None:

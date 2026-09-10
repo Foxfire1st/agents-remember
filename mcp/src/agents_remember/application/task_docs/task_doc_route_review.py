@@ -26,10 +26,19 @@ from agents_remember.tasks.leaf_doc import (
     TerminalLeafResolutionError,
     resolve_terminal_leaf_doc,
 )
+from agents_remember.worktrees.review_history import (
+    ReviewHistoryError,
+    begin_task_review,
+    record_task_review,
+)
 from agents_remember.worktrees.route_review import (
     RouteReviewError,
     build_route_review,
     document_ref,
+)
+from agents_remember.worktrees.route_review_scope import (
+    build_master_route_review,
+    reject_atomic_child_route_review,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -101,39 +110,15 @@ def _record_route_review(
     available; this positional form preserves the pre-wave-2 call shape and its
     error dialect.
     """
-    if doc.kind == "master":
-        raise TaskDocError("record_route_review is valid only for a leaf task document")
-    if contract is None:
-        raise TaskDocError("record_route_review requires the leaf worktree contract")
-    if payload is None:
-        raise TaskDocError("record_route_review requires a review object")
-    try:
-        resolved = resolve_terminal_leaf_doc(
-            task_root,
-            contract.leaf_id,
-            asserted_path=selected_path,
-        )
-    except TerminalLeafResolutionError as exc:
-        raise TaskDocError(str(exc)) from exc
-    if resolved is None or resolved[0].resolve() != selected_path.resolve():
-        raise TaskDocError(
-            "record_route_review target is not the exact task document bound to the leaf contract"
-        )
-    try:
-        review = build_route_review(
-            contract,
-            ResolvedTaskDocument(
-                ref=document_ref(contract, selected_path),
-                path=selected_path,
-                document=doc,
-            ),
-            payload,
-        )
-    except (RouteReviewError, ValidationError) as exc:
-        raise TaskDocError(str(exc)) from exc
-    data = doc.model_dump(by_alias=True)
-    data["routeReview"] = review.model_dump(mode="json")
-    return _validate(data)
+    return _record_route_review_bound(
+        doc,
+        payload,
+        _RouteReviewBinding(
+            contract=contract,
+            task_root=task_root,
+            selected_path=selected_path,
+        ),
+    )
 
 
 def _record_route_review_bound(
@@ -141,18 +126,32 @@ def _record_route_review_bound(
     payload: dict[str, Any] | None,
     binding: _RouteReviewBinding,
 ) -> TaskDocument:
-    if doc.kind == "master":
-        raise TaskDocError(
-            "record_route_review is valid only for a leaf task document; "
-            f"{binding.selected_path} is a master document -- bind the review to a "
-            "leaf (its worktree contract) or re-stamp the series contract and retry "
-            "with branch_addressed=true for direct execution"
-        )
     if payload is None:
         raise TaskDocError("record_route_review requires a review object")
+    if doc.kind == "master":
+        _require_master_route_review_binding(binding)
+        contract = binding.contract
+        assert contract is not None
+        try:
+            review = build_master_route_review(
+                contract,
+                ResolvedTaskDocument(
+                    ref=document_ref(contract, binding.selected_path),
+                    path=binding.selected_path,
+                    document=doc,
+                ),
+                _route_payload(payload),
+            )
+        except (RouteReviewError, ValidationError) as exc:
+            raise TaskDocError(str(exc)) from exc
+        return _with_route_review_state(doc, payload, review)
     _require_route_review_binding(binding)
     contract = binding.contract
     assert contract is not None  # _require_route_review_binding proves the binding
+    try:
+        reject_atomic_child_route_review(contract)
+    except RouteReviewError as exc:
+        raise TaskDocError(str(exc)) from exc
     try:
         review = build_route_review(
             contract,
@@ -161,12 +160,74 @@ def _record_route_review_bound(
                 path=binding.selected_path,
                 document=doc,
             ),
-            payload,
+            _route_payload(payload),
             branch_addressed=binding.branch_addressed,
         )
     except (RouteReviewError, ValidationError) as exc:
         raise TaskDocError(str(exc)) from exc
-    data = doc.model_dump(by_alias=True)
+    return _with_route_review_state(doc, payload, review)
+
+
+def _begin_task_review_bound(
+    doc: TaskDocument,
+    payload: dict[str, Any] | None,
+    binding: _RouteReviewBinding | None = None,
+) -> TaskDocument:
+    """Start or resume the one pending review round owned by the task document."""
+
+    del binding
+    try:
+        return begin_task_review(doc, payload)
+    except ReviewHistoryError as exc:
+        raise TaskDocError(f"{exc.status}: {exc}") from exc
+
+
+def _record_task_review_bound(
+    doc: TaskDocument,
+    payload: dict[str, Any] | None,
+    binding: _RouteReviewBinding | None = None,
+) -> TaskDocument:
+    """Record generic review state without authoring code-route evidence."""
+
+    del binding
+    if payload is None:
+        raise TaskDocError("record_review requires a review object")
+    try:
+        return record_task_review(doc, payload)
+    except ReviewHistoryError as exc:
+        raise TaskDocError(f"{exc.status}: {exc}") from exc
+
+
+def _state_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep route evidence out of the shared, generic state transition."""
+
+    return {
+        key: payload[key]
+        for key in ("verdict", "verdictRef", "findings", "remainingFindingIds")
+        if key in payload
+    }
+
+
+def _route_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep fixed-list state fields out of the existing route-review schema."""
+
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in {"findings", "remainingFindingIds"}
+    }
+
+
+def _with_route_review_state(
+    doc: TaskDocument,
+    payload: dict[str, Any],
+    review: Any,
+) -> TaskDocument:
+    try:
+        updated = record_task_review(doc, _state_payload(payload))
+    except ReviewHistoryError as exc:
+        raise TaskDocError(f"{exc.status}: {exc}") from exc
+    data = updated.model_dump(by_alias=True)
     data["routeReview"] = review.model_dump(mode="json")
     return _validate(data)
 
@@ -213,6 +274,22 @@ def _require_route_review_binding(binding: _RouteReviewBinding) -> None:
         )
 
 
+def _require_master_route_review_binding(binding: _RouteReviewBinding) -> None:
+    """Bind master review publication to the canonical series task root."""
+
+    contract = binding.contract
+    if contract is None or contract.kind != "series":
+        raise TaskDocError("atomic-master route review requires the canonical series contract")
+    expected_root = contract.task_root.resolve()
+    if binding.task_root.resolve() != expected_root:
+        raise TaskDocError(
+            "master route review task root does not match the canonical series contract"
+        )
+    expected_path = expected_root / "task.json"
+    if binding.selected_path.resolve() != expected_path:
+        raise TaskDocError("master route review must target the canonical task-root task.json")
+
+
 def _enforce_route_review_authority(
     operation: str,
     original: TaskDocument | None,
@@ -232,6 +309,30 @@ def _enforce_route_review_authority(
         raise TaskDocError(
             "replace cannot add, remove, or change route-review evidence; "
             "use task_doc.record_route_review"
+        )
+
+
+def _enforce_review_state_authority(
+    operation: str,
+    original: TaskDocument | None,
+    candidate: TaskDocument,
+) -> None:
+    """Keep the bounded review counter behind begin/record transitions."""
+
+    candidate_state = candidate.reviewState
+    original_state = original.reviewState if original is not None else None
+    if operation == "create":
+        if candidate_state is not None:
+            raise TaskDocError(
+                "create cannot author reviewState; use task_doc.begin_review before reviewer work"
+            )
+        return
+    if operation in {"begin_review", "record_review", "record_route_review"}:
+        return
+    if candidate_state != original_state:
+        raise TaskDocError(
+            f"{operation} cannot add, remove, or change reviewState; "
+            "use task_doc.begin_review or task_doc.record_review"
         )
 
 

@@ -222,7 +222,9 @@ class AffectedClosurePlan(_StrictModel):
         return {
             node.nodeId
             for node in self.scope.selectedNodes
-            if node.nodeId.startswith(prefix) and node.nodeId.endswith(".md")
+            if node.nodeId.startswith(prefix)
+            and node.nodeId.endswith(".md")
+            and "historical Git tree member" not in node.reasons
         }
 
     def _incremental_checkers(self) -> set[str]:

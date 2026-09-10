@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -36,16 +36,6 @@ from agents_remember.models.task_intent import (
     task_intent_is_missing,
 )
 from agents_remember.worktrees.closeout_input import require_effective_closeout_plan
-from agents_remember.worktrees.integration.closeout.certification.admission import (
-    FrozenCloseoutAdmission,
-    initial_certification_state,
-    prepare_closeout_certification,
-    validate_selected_currentness,
-)
-from agents_remember.worktrees.integration.closeout.certification.selection import (
-    require_selected_certification,
-    require_unchanged_retry_admissible,
-)
 from agents_remember.worktrees.integration.closeout.door import (
     DoorPublicationError,
     classify_door_publication,
@@ -107,7 +97,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_project
     parse_operation_stamp,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
-    InitialCertificationSelection,
     LifecycleOperationStore,
 )
 from agents_remember.worktrees.integration.lifecycle.worker import launch as lifecycle_worker_launch
@@ -140,7 +129,6 @@ OperationLauncher = Callable[[WorktreeContract, LifecycleOperationRecord], None]
 class _OperationExecution:
     timestamp: datetime
     launcher: OperationLauncher
-    certification: FrozenCloseoutAdmission | None = None
 
 
 @dataclass(frozen=True)
@@ -158,7 +146,6 @@ class _GenerationCreation:
     contract: WorktreeContract
     operation_input: LifecycleOperationInput
     candidate: LifecycleOperationCandidate
-    initial_certification: InitialCertificationSelection | None = None
 
 
 @dataclass(frozen=True)
@@ -169,7 +156,6 @@ class _GenerationReplacement:
     contract: WorktreeContract
     operation_input: LifecycleOperationInput
     candidate: LifecycleOperationCandidate
-    initial_certification: InitialCertificationSelection | None = None
 
 
 class _CloseoutResumeNoLongerRequired(Exception):
@@ -271,24 +257,14 @@ def start_or_observe_closeout_operation(
         )
         if candidate.tree is None:
             raise RuntimeError("closeout admission has no exact code candidate")
-        current = store.read()
         if current_contract.kind == "series":
             _require_series_recording_only(current_contract, operation_input)
-            certification = None
-        elif current is not None and current.fingerprint == candidate.fingerprint:
-            selected = validate_selected_currentness(current_contract, operation_input, current)
-            require_unchanged_retry_admissible(selected)
-            certification = None
-        else:
-            certification = prepare_closeout_certification(
-                current_contract, operation_input, current, candidate_tree=candidate.tree
-            )
         return _start_or_observe_operation(
             current_contract,
             operation_input,
             candidate=candidate,
             integration_authority=None,
-            execution=_operation_execution(launcher, now, certification=certification),
+            execution=_operation_execution(launcher, now),
         )
 
 
@@ -296,7 +272,7 @@ def _require_series_recording_only(
     contract: WorktreeContract,
     operation_input: CloseoutOperationInput,
 ) -> None:
-    """Keep series recording outside leaf certification without admitting commit legs."""
+    """Keep series recording outside leaf mutation without admitting commit legs."""
     require_series_contract_authority(contract, operation="worktree_closeout")
     effective = operation_input.effectiveInput
     if effective.contractKind != "series" or any(
@@ -397,6 +373,23 @@ def _start_or_observe_operation(
     )
 
 
+def start_closeout_successor_under_lease(
+    contract: WorktreeContract,
+    operation_input: CloseoutOperationInput,
+    candidate: LifecycleOperationCandidate,
+) -> LifecycleOperationProjection:
+    """Start one validated closeout successor while the lifecycle lease is held."""
+    if contract.kind == "series":
+        _require_series_recording_only(contract, operation_input)
+    return _start_or_observe_operation(
+        contract,
+        operation_input,
+        candidate=candidate,
+        integration_authority=None,
+        execution=_operation_execution(None, None),
+    )
+
+
 def _claim_closeout_operation(
     admitted_contract: WorktreeContract,
     store: LifecycleOperationStore,
@@ -432,7 +425,7 @@ def _claim_closeout_operation(
                 next_action="developer-decision",
             )
         sprint_ref = door.sprintTaskDocumentRef
-        queued = _prepare_closeout_claim(
+        queued, _claimed_contract = _prepare_closeout_claim(
             _CloseoutClaimContext(
                 contract=contract,
                 store=store,
@@ -450,17 +443,8 @@ def _claim_closeout_operation(
                 contract,
                 operation_input,
                 candidate,
-                (
-                    lambda record: initial_certification_state(
-                        contract, record, execution.certification
-                    )
-                )
-                if contract.kind == "leaf"
-                else None,
             ),
         )
-        if contract.kind == "leaf":
-            require_selected_certification(contract, current)
         if not created:
             current, created = _resume_exact_duplicate_closeout(
                 store,
@@ -487,7 +471,7 @@ def _claim_closeout_operation(
 
 def _prepare_closeout_claim(
     context: _CloseoutClaimContext,
-) -> LifecycleOperationRecord:
+) -> tuple[LifecycleOperationRecord, WorktreeContract]:
     """Validate the door owner and add the waiting-to-claimed publication intent."""
 
     contract = context.contract
@@ -508,12 +492,13 @@ def _prepare_closeout_claim(
         claimed_record = context.queued.model_copy(
             update={"doorPublication": prepare_door_publication(contract, claimed)}
         )
-        return claimed_record.model_copy(
+        claimed_record = claimed_record.model_copy(
             update={"dependencies": lifecycle_operation_dependencies(claimed_record)}
         )
+        return claimed_record, replace(contract, closeout_door=claimed)
     if door.disposition == "claimed":
         _require_retained_closeout_owner(context.store, door, context.candidate)
-        return context.queued
+        return context.queued, contract
     raise LifecycleControlError(
         "closeout-door-not-waiting",
         "closeout claim requires a waiting door generation",
@@ -669,7 +654,7 @@ def _create_or_replace_generation(
 ) -> tuple[LifecycleOperationRecord, bool]:
     """Create one generation or replace only a terminal, advanced generation."""
 
-    current, created = store.create(queued, initial_certification=creation.initial_certification)
+    current, created = store.create(queued)
     if task_intent_is_missing(current.taskIntent) and current.operationKind in {
         "closeout",
         "direct-landing",
@@ -680,9 +665,7 @@ def _create_or_replace_generation(
                 "the active legacy operation predates canonical task intent and cannot be reused",
                 next_action="developer-decision",
             )
-        return store.replace_terminal(
-            queued, initial_certification=creation.initial_certification
-        ), True
+        return store.replace_terminal(queued), True
     if current.fingerprint == creation.candidate.fingerprint:
         return current, created
     _require_terminal_generation(current, creation.operation_input, creation.contract)
@@ -694,7 +677,6 @@ def _create_or_replace_generation(
             contract=creation.contract,
             operation_input=creation.operation_input,
             candidate=creation.candidate,
-            initial_certification=creation.initial_certification,
         )
     )
 
@@ -719,7 +701,7 @@ def _replace_terminal_generation(
     if replacement.current.status == "failed":
         raise RuntimeError(
             f"terminal {replacement.operation_input.kind} generation requires the explicit "
-            "task-addressed retry/recover/revise control"
+            "task-addressed retry/recover/resume control"
         )
     return _replace_completed_generation(replacement)
 
@@ -735,16 +717,10 @@ def _replace_cancelled_generation(
             replacement.candidate,
         )
     if replacement.operation_input.kind == "closeout":
-        return _replace_cancelled_closeout(
-            replacement.store,
-            replacement.queued,
-            replacement.current,
-            replacement.contract,
-            replacement.initial_certification,
-        )
+        return _replace_cancelled_closeout(replacement)
     raise RuntimeError(
         f"terminal {replacement.operation_input.kind} generation requires the explicit "
-        "task-addressed retry/recover/revise control"
+        "task-addressed retry/recover/resume control"
     )
 
 
@@ -763,12 +739,12 @@ def _replace_cancelled_integrate(
 
 
 def _replace_cancelled_closeout(
-    store: LifecycleOperationStore,
-    queued: LifecycleOperationRecord,
-    current: LifecycleOperationRecord,
-    contract: WorktreeContract,
-    initial_certification: InitialCertificationSelection | None,
+    replacement: _GenerationReplacement,
 ) -> tuple[LifecycleOperationRecord, bool]:
+    store = replacement.store
+    queued = replacement.queued
+    current = replacement.current
+    contract = replacement.contract
     successor = contract.closeout_door
     observed = (
         getattr(successor, "disposition", None),
@@ -780,7 +756,7 @@ def _replace_cancelled_closeout(
             "cancelled closeout can advance only through the current waiting door "
             "after proven worker exit"
         )
-    return store.replace_terminal(queued, initial_certification=initial_certification), True
+    return store.replace_terminal(queued), True
 
 
 def _replace_completed_generation(
@@ -797,9 +773,7 @@ def _replace_completed_generation(
         replacement.operation_input,
         replacement.candidate,
     )
-    return replacement.store.replace_terminal(
-        replacement.queued, initial_certification=replacement.initial_certification
-    ), True
+    return replacement.store.replace_terminal(replacement.queued), True
 
 
 def _require_released_closeout_output(
@@ -934,13 +908,10 @@ def _recover_launch_and_project(
 def _operation_execution(
     launcher: OperationLauncher | None,
     now: datetime | None,
-    *,
-    certification: FrozenCloseoutAdmission | None = None,
 ) -> _OperationExecution:
     return _OperationExecution(
         timestamp=(now or datetime.now(UTC)).replace(microsecond=0),
         launcher=launcher or launch_detached_worker,
-        certification=certification,
     )
 
 

@@ -228,22 +228,48 @@ section; they do not restate it.
 | Master | the manager | the leaf workers | the master-exit seam reviewer (verdict rides `master-handover-approval`) |
 | Portfolio plan | the architect | strategist when approved; orchestrator on a sanctioned strategist skip | reviewer with the plan-review catalog |
 
-**Independent route review is mandatory after every code-change session.** Once implementation
-and its focused acceptance are stable, the owning seat partitions the changed surface by
-material major route (architecture/control-plane ownership boundary, informed by governing route
-overviews and the import/call graph). The reviewer chair fans out one independent reviewer per
-affected major route. Each route reviewer reads the diff and its surroundings, tests likely side
-effects, and reports source-backed findings; the chair records a route-coverage table and one
-verdict. One reviewer may not silently collapse several routes into a generic diff skim. No code
-change proceeds to curator, closeout, integration, or handover without this verdict. A fix returns
-to the same builder and the same route reviewer delta-verifies it; touching a new major route adds
-that route to the review partition. This mandatory post-code gate also applies to direct/solo work:
-independence requires another agent, never builder self-review. The reviewer seat is also never
-the author/implementer seat itself (no self-review of one's own leaf), and every requirement
-verdict must cite evidence of the requirement's class: rendering/visibility requirements need
-mounted-UI proof, scheduling/ordering requirements need operation-level proof, and data-model
-requirements need artifact-level proof — evidence of the wrong class is verdict laundering, not
-a pass.
+**Independent route review is opt-in and explicit.** Run it only when the developer or the
+approved task/role brief requests review; closeout and integration never require or launch it.
+When requested, every review is dispatched with an explicit mode: `reviewMode=baseline` or
+`reviewMode=fix-verification`. A baseline review of a standalone or organizational code-changing
+leaf partitions the entire agreed surface by material major route (architecture/control-plane
+ownership boundary, informed by governing route overviews and the import/call graph). The reviewer
+chair fans out one independent reviewer per affected major route. Each route reviewer reads the
+diff and its surroundings, tests likely side effects, and reports source-backed findings; the chair
+records a complete route-coverage table and one verdict. One reviewer may not silently collapse
+several routes into a generic diff skim. An atomic child leaf does not receive an independent
+route-review record: its accumulated child changes become the review scope of one independent
+atomic-master review, published on the canonical master and enforced only when that review was
+requested. Direct/solo work follows the same requested altitude. Independence requires another
+agent, never builder self-review. The reviewer seat is also never the author/implementer seat
+itself, and every requirement verdict must cite evidence of the requirement's class: rendering/
+visibility requirements need mounted-UI proof, scheduling/ordering requirements need operation-
+level proof, and data-model requirements need artifact-level proof — evidence of the wrong class
+is verdict laundering, not a pass.
+
+**R27/R28 simple review rule.** If no review state is present, the used-round count is zero and the
+next review is a baseline; do not create a pristine marker or refuse because legacy review history
+is absent. Before reviewer work, the owner calls `task_doc(operation="begin_review")`; after the
+result, the owner records it with `task_doc(operation="record_review")` or the existing
+`task_doc(operation="record_route_review")` route result. Review 1 is thorough: inspect the entire
+agreed scope, applicable criteria, required routes, and lenses, then record the fixed original issue
+list with precise statements, evidence, and fix-acceptance criteria. Reviews 2 and 3 carry that
+list, the immediately preceding result, and worker fixes/evidence; they verify only listed issues,
+write fixed/unfixed dispositions for every preceding item, and leave a remaining set that is a
+subset of the preceding set. Unknown, duplicate, rewritten, reintroduced, newly discovered, or
+outside-list issues, new criteria, new routes/lenses, whole-review requests, and passing with
+unresolved items are refused. A changed candidate, source, requirement version, model, seat,
+route, or report label does not reset the list. A pending round may resume; a new review begins the
+next round.
+
+After three rounds, stop and ask the developer directly for authorization. Wait for explicit
+authorization, record the developer's instruction, and only then run the specifically authorized
+extra round. No agent may self-authorize an extra round, and no code path needs to prove human
+authorship or build a separate authentication mechanism.
+
+Mechanical tests and worker diagnosis are evidence and may not publish reviewer findings or reset
+review authority. This rule applies equally to native, hosted, plan, integration, route, lens,
+replacement, resumed, bootstrap, diagnostic, delta, and final review labels.
 
 **Requirement compilation precedes task topology.** After intent and scope are established, the
 architect compiles every independently falsifiable obligation into a canonical requirement index
@@ -284,7 +310,7 @@ an acceptance envelope.
 The independent reviewer inspects the owned primary packet revision and cited artifacts itself and
 adjudicates that exact manifestation as `accepted` or `rejected`, with its own rationale. Missing
 rationale, an unapproved packet revision, missing or wrong-class
-evidence, invalid citations, or missing developer approval forces rejection of that requirement;
+evidence, or invalid citations forces rejection of that requirement;
 the overall verdict cannot pass while any requirement is rejected. An accurately reported
 `blocked` row may be accepted as a truthful handoff, but it still requires a BLOCK recommendation
 until the requirement is delivered or becomes an approved change. The durable-evidence
@@ -325,14 +351,12 @@ architect for developer-approved revision; builders and reviewers may propose a 
 rewrite or approve one. The reviewer does not modify the worker record, and acceptance never floats
 to a later candidate.
 
-Rejection closes that attempt and a repair appends a successor citing the predecessor and findings.
-Accepted attempts remain closed unless an independent reviewer proves a direct regression against
-that exact accepted delivery and the owning manager (architect in a flat run) records a bounded
-invalidation citing the accepted attempt, reviewer record, regressing candidate, and affected set;
-the other trigger is a developer-approved new semantic requirement version and its bounded affected
-set. A worker, reviewer, changed candidate, or summary cannot reopen acceptance unilaterally. Same-reviewer
-delta verification, shrinking findings, and the three-round delegation cap stay in force; an
-architect takeover continues the same attempt lineage.
+Rejection closes that attempt and a repair appends a successor citing the predecessor and listed
+findings. Accepted attempts stay closed. During successor verification, an outside-list regression,
+changed route, or changed requirement goes directly to the developer; it does not add a finding,
+reopen a resolved item, or reset the review. A worker, reviewer, changed candidate, or summary
+cannot reopen acceptance unilaterally. Same-reviewer verification and shrinking findings stay in
+force; an architect takeover continues the same attempt lineage.
 
 The detailed per-leaf worker and reviewer records are authority. A master maintains a rebuildable
 summary linking those records and showing attempts, rejection history, current state, and dominant
@@ -340,41 +364,39 @@ open failure class per requirement manifestation. The summary is a disposable ob
 it is never a requirement contract, lifecycle/closeout gate, queue authority, or task-authoring
 lock. Missing or stale summary state is rebuilt from leaf journals and cannot block work.
 
-The chair persists the passing or blocking result through
-`task_doc(operation="record_route_review", review={verdict, verdictRef, routes:[...]})` after the
-durable verdict and every route evidence file exist. The control plane, not the chair or manager,
-stamps the exact current Git candidate tree and review time into the leaf document. Curator dispatch
-and closeout recompute that tree and refuse an absent, blocking, stale, or missing-artifact record.
-This is the executable post-code gate; prose, a chat claim, or an unbound evidence reference does
-not satisfy it.
+Before hosted reviewer dispatch or native reviewer work, when review was requested, the owner calls
+`task_doc(operation="begin_review")`. After the durable verdict and route evidence exist, the
+chair records the result with `task_doc(operation="record_review")` or the existing
+`task_doc(operation="record_route_review")` route result. The task document remains the review
+authority; prose, a chat claim, or an unbound evidence reference does not satisfy a requested
+review. Atomic child leaves defer a requested review to the canonical master integration review.
 
-**Complexity-scored tiers (per leaf, at dispatch).** The owning seat scores three axes — blast
+**Complexity-scored tiers (per leaf, at dispatch when review is requested).** The owning seat scores three axes — blast
 radius (doctrine/enforcement/public surface vs leaf-local) · novelty (new subsystem vs
 pattern-following) · size (files × steps) — into three tiers: **direct** (ordinary build channel
-plus the mandatory independent route review; no additional loop machinery),
+plus the requested independent route review; no additional loop machinery),
 **builder-verified** (builder implements; owner additionally verifies report-vs-artifact; the
-mandatory route review still runs), **full loop** (builder + independent reviewer rounds, with the
-mandatory route partition as the review scope floor). The
+requested route review still runs), **full loop** (builder + independent reviewer rounds, with the
+route partition as the review scope floor where the leaf owns that seam). The
 strategist's blast-radius register is the scoring input when an orchestration task exists. A
 leaf's loop mark (tier + scope: manager | orchestrator — the owning level runs the loop with ITS
 agent set) is recorded on the leaf doc with a decision-log entry. A master whose leaves all score
-`direct` avoids iterative full-loop machinery, but its code leaves still receive independent
-route review. The knobs tune review depth and round machinery; they never disable the post-code
-independence gate.
+`direct` avoids iterative full-loop machinery. Atomic leaves still defer a requested route review
+to the one master integration seam; standalone and organizational leaves retain their requested
+review scope. The knobs tune review depth and round machinery; they do not create a review when
+none was requested.
 
-**Rounds and the HARD cap.** A round = implement → review. **Hard cap: 3 rounds per loop — and
-ONLY full end-to-end rounds count against it.** Residuals of a passing round are landed and
-**delta-verified by the SAME reviewer via a follow-up message** (it retains everything it already
-verified, at a fraction of a fresh round's cost); **fix rounds resume the SAME builder**. A fresh
-reviewer is spawned only for a full round or when new scope opens. Delta-verifies close rounds;
-they do not open them.
+**Rounds and local convergence.** A governed review has at most three rounds: one thorough baseline
+and two fix-verification rounds. A pending round may resume; a new review counts the next round.
+Residuals of a passing round are verified by the same reviewer where the lifecycle uses follow-up
+verification; fix rounds resume the same builder. Reviews 2 and 3 verify only the original listed
+issues. Any outside-list matter goes to the developer and is not a successor finding.
 
-**The convergence rule (the real control; the cap is the backstop).** Every round must SHRINK the
-open finding set. A round that does not shrink it escalates immediately, regardless of the count;
-a monotonically converging loop may never hit the cap at all. At the cap, or on non-convergence,
-the owner does not spin another round — it **escalates one seat up the ladder (worker → manager →
-orchestrator → architect → developer) with the full round history attached**; the escalation packet IS the
-upper seat's visibility.
+**The convergence rule.** Every fix-verification round must shrink or honestly retain the listed
+open set with fixed/unfixed dispositions. At three rounds, or when a further round is needed, ask
+the developer directly and wait for explicit authorization; record that instruction before any
+authorized extra work. Do not spin an unapproved round, split the scope, or create a new finding
+list.
 
 **Quo-vadis (the written developer-escalation criterion).** A question is developer-worthy when it
 is a **high-blast-radius truth** — answered wrong it means big rewrites later (architecture
@@ -383,10 +405,12 @@ agent settings live). Quo-vadis questions escalate IMMEDIATELY to the architect 
 regardless of round count.
 Presentation-grade choices (2px vs 3px) never do — the owner rules and logs.
 
-**Criteria catalogs (the reviewer as test bench).** Criteria are never made up on the spot: every
-review runs its type's standing catalog from `criteria/` (code-seam · doctrine ·
-onboarding-memory · report-verification · plan-review) plus an exploratory mandate, under the
-promotion ratchet (each catalog carries it). `roles/reviewer.md` binds them.
+**Criteria catalogs (the reviewer as test bench).** The baseline review runs its type's standing
+catalog from `criteria/` (code-seam · doctrine · onboarding-memory · report-verification ·
+plan-review), the required routes, and the exploratory mandate, under the promotion ratchet.
+Fix-verification uses the sealed baseline and only the standing criteria/evidence needed to
+verify its listed IDs; it has no exploratory mandate, whole-catalog rediscovery, new-lens duty, or
+catalog-promotion authority. `roles/reviewer.md` binds the review mode and evidence packet.
 
 **Per-level agent sets.** Each level runs its loop with its own harness/model/effort set — the
 orchestrator-level set (the strongest models) and the manager-level set (cheaper, possibly
@@ -404,13 +428,13 @@ the portfolio queue, organizational leaf → super releases, atomic master → s
 the same closeout/finalize/cleanup mechanics when it wears a manager or worker hat in a flat/direct
 run. These edges do **not** stop for a new developer approval just
 because a commit, lifecycle finalization, cleanup, or integration command is next; the owner runs
-the preview/check, records the accepted-series authority in the intent note or decision log, and
+the transaction preview, records the accepted-series authority in the intent note or decision log, and
 continues.
 
 This does **not** weaken the escalation ladder. Developer approval is still required for the final
 completed super integration branch / PR-carryover gate, for any human-pinned gate that is actually
 raised (`integration-approval`, `push-approval`, `cleanup-approval`), for scope changes beyond the
-accepted plan, for red checks that cannot be fixed inside the task, and for quo-vadis decisions.
+accepted plan, for unresolved transaction conflicts or scope blockers, and for quo-vadis decisions.
 Owner-never-self-approves means verdicts and delegated gates need the configured distinct decider;
 it does not force a developer hand-off for mechanical closeout of in-scope work the owning seat
 performed directly under standing series authority.

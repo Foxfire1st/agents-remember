@@ -19,6 +19,10 @@ from agents_remember.certification.certificate_models import (
     CertificationAdmissionManifest,
     GateCertificate,
 )
+from agents_remember.certification.final_certification_models import (
+    FinalCertificationResult,
+    FinalItemStatus,
+)
 from agents_remember.errors import FinalCertificationError
 from agents_remember.memory_quality.incremental_scope.affected_models import (
     AffectedClosurePlan,
@@ -35,7 +39,6 @@ from .catalog import (
 )
 from .certificate import assemble_gate_five_inputs, coherence_subrecords
 from .gate_prefix import require_green_gate_prefix
-from .models import FinalCertificationResult, FinalItemStatus
 
 
 @dataclass(frozen=True)

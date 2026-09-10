@@ -70,10 +70,13 @@ from .task_doc_route_review import (
     DEFAULT_TASK_DOC_CALL,
     TaskDocCall,
     TaskDocError,
+    _begin_task_review_bound,
     _enforce_branch_addressed_policy,
+    _enforce_review_state_authority,
     _enforce_route_review_authority,
     _record_route_review,  # noqa: F401  # facade re-export (moved to task_doc_route_review.py)
     _record_route_review_bound,
+    _record_task_review_bound,
     _RouteReviewBinding,
     _validate,
 )
@@ -99,6 +102,8 @@ VALID_OPERATIONS = (
     "remove_subtask",
     "set_section",
     "append_decision",
+    "begin_review",
+    "record_review",
     "record_route_review",
     "author_execution_graph",
     "set_field",
@@ -278,6 +283,7 @@ def _validate_task_doc_candidate(context: _TaskDocCandidateContext) -> None:
     original = context.original
     doc = context.candidate
     _enforce_disposition_authority(operation, original, doc)
+    _enforce_review_state_authority(operation, original, doc)
     _enforce_route_review_authority(operation, original, doc)
     _enforce_replace_preserves_unresolved_units(operation, original, doc)
     _enforce_preserves_unresolved_master_rows(operation, original, doc)
@@ -372,6 +378,10 @@ def _prepare_task_doc_edit(
     original, selected_snapshot = read_task_doc_with_source(json_path)
     if request.operation == "replace":
         doc = _replace(request.payload_fields, request.contract, request.task_root, json_path)
+    elif request.operation == "begin_review":
+        doc = _begin_task_review_bound(original, request.edit.review)
+    elif request.operation == "record_review":
+        doc = _record_task_review_bound(original, request.edit.review)
     elif request.operation == "record_route_review":
         doc = _record_route_review_bound(
             original,

@@ -37,9 +37,21 @@ from agents_remember.memory_quality.curator_checklist import (
 from agents_remember.memory_quality.integrity.check_missing_onboarding import (
     missing_onboarding_for_source,
 )
+from agents_remember.memory_quality.prepared_certification import (
+    PreparedMemoryCertificationAdapter,
+    _realize_prepared_memory,
+)
 from agents_remember.models.declared_caller import DeclaredCaller
-from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceRequest
+from agents_remember.models.lifecycles.curator_coherence import (
+    CuratorCoherenceRequest,
+    CuratorSourceCandidate,
+)
 from agents_remember.models.lifecycles.door import CloseoutDoorRequest
+from agents_remember.models.lifecycles.preparation import PreparedCloseoutOutput
+from agents_remember.models.lifecycles.prepared_memory import (
+    PreparedCodeExecutionView,
+    PreparedMemoryCandidate,
+)
 from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.tasks import write_task_doc
 from agents_remember.worktrees.integration.closeout.certification.execution import (
@@ -47,6 +59,7 @@ from agents_remember.worktrees.integration.closeout.certification.execution impo
     current_certification_handoff,
     execute_selected_closeout,
 )
+from agents_remember.worktrees.integration.closeout.certification.selection import load_typed
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
     require_current_curator_coherence,
 )
@@ -63,12 +76,21 @@ from agents_remember.worktrees.integration.closeout.future_code_candidate import
 from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
     resolve_memory_candidate_pair,
 )
+from agents_remember.worktrees.integration.closeout.preparation.code_view import prepare_code_view
+from agents_remember.worktrees.integration.closeout.preparation.memory_execution import (
+    observe_prepared_memory_candidate,
+)
+from agents_remember.worktrees.integration.closeout.preparation.memory_port import (
+    PreparedMemoryCertificationRequest,
+)
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.modules.quality import clean_executor, gate
+from agents_remember.worktrees.modules.quality.certification_records import certificate_store
 from agents_remember.worktrees.services import bind_worktree_services, worktree_services
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+from curator_coherence_test_support import write_curator_evidence
 from repository_profile_test_support import (
     NODE_FIXTURE,
     install_fixture_profile,
@@ -177,7 +199,7 @@ def _write_source_cards(contract: WorktreeContract) -> None:
             f"| repository | {contract.repo_name} |\n{identity}\n"
             f"| doc_type | {doc_type} |\n"
             f"| lastVerifiedCommitHash | `{commit}` |\n"
-            f"| lastVerifiedCommitDate | {date} |\n\n"
+            f"| lastVerifiedCommitDate | {date}|\n\n"
             "## Purpose\n\n"
             "This temporary source belongs to the isolated memory certification fixture.\n\n"
             "## Update History\n\n"
@@ -193,7 +215,10 @@ def _write_source_cards(contract: WorktreeContract) -> None:
     git(context.memory_root, "add", "-A")
 
 
-def _publish_actual_coherence(contract: WorktreeContract, scan: _FullMemoryScan) -> None:
+def _publish_actual_coherence(
+    contract: WorktreeContract,
+    scan: _FullMemoryScan,
+) -> None:
     assert scan.ok, (scan.quality, scan.missing, scan.stale_indexes)
     pair = resolve_memory_candidate_pair(
         contract,
@@ -249,14 +274,78 @@ def _publish_actual_coherence(contract: WorktreeContract, scan: _FullMemoryScan)
     assert require_current_curator_coherence(contract).record.sourceCandidates == []
 
 
+def _prepare_created_source_fixture(
+    contract: WorktreeContract,
+) -> tuple[CuratorSourceCandidate, ...]:
+    source = contract.code_worktree / "feature.txt"
+    source.write_text(
+        source.read_text(encoding="utf-8") + "Prepared code fixture change.\n",
+        encoding="utf-8",
+    )
+    memory = contract.memory_worktree
+    assert memory is not None
+    date = git(contract.code_worktree, "show", "-s", "--format=%cI", "HEAD")
+    for relative, body in (
+        (
+            "onboarding/feature.txt.md",
+            "Prepared code fixture change is documented.",
+        ),
+        (
+            "onboarding/overview.md",
+            "The fixture route now documents the prepared code fixture change.",
+        ),
+    ):
+        document = memory / relative
+        text = document.read_text(encoding="utf-8")
+        text = text.replace(
+            "This temporary source belongs to the isolated memory certification fixture.",
+            "This temporary source belongs to the isolated memory certification fixture.\n\n"
+            + body,
+        )
+        text = text.replace(
+            f"- {date}: Describe the actual committed fixture source.\n",
+            f"- {date}: Describe the actual committed fixture source.\n"
+            "- 2026-09-09T03:00:00+02:00: Document prepared code fixture change.\n",
+        )
+        document.write_text(text, encoding="utf-8")
+    git(contract.code_worktree, "add", "-A")
+    git(memory, "add", "-A")
+    return (
+        CuratorSourceCandidate(
+            sourceFile="feature.txt",
+            onboardingFile="onboarding/feature.txt.md",
+            classification="sidecar",
+        ),
+        CuratorSourceCandidate(
+            sourceFile=".",
+            onboardingFile="onboarding/overview.md",
+            classification="route-overview",
+        ),
+    )
+
+
 @dataclass
 class _Fixture:
     handoff: CloseoutCertificationHandoff
 
 
+@dataclass(frozen=True)
+class _PreparedMemoryCase:
+    contract: WorktreeContract
+    handoff: CloseoutCertificationHandoff
+    view: PreparedCodeExecutionView
+    output: PreparedCloseoutOutput
+    candidate: PreparedMemoryCandidate
+    memory: Path
+    feature_doc: Path
+    overview_doc: Path
+
+
 def _fixture(
     root: Path,
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    prepared_source_change: bool = False,
 ) -> _Fixture:
     queue = QueueFixture(root, memory_mode="external")
     # Stop at the scheduler continuation boundary; the consumer runs real Gate 5.
@@ -291,10 +380,20 @@ def _fixture(
         "Prepare real source for isolated memory certification",
     )
     _write_source_cards(contract)
+    source_candidates = _prepare_created_source_fixture(contract) if prepared_source_change else ()
     slug = Path(queue.leaf_refs[MASTER_A].path).stem
     write_task_doc(contract.task_root, _leaf(contract, slug))
     queue.set_priority(queue.leaf_refs[MASTER_A], "normal")
-    _publish_actual_coherence(contract, _scan(contract))
+    if source_candidates:
+        write_curator_evidence(
+            contract,
+            caller_ref=SPRINT,
+            source_candidates=[
+                candidate.model_dump(mode="json") for candidate in source_candidates
+            ],
+        )
+    else:
+        _publish_actual_coherence(contract, _scan(contract))
     # Use the actual door API directly: QueueFixture.declare intentionally writes
     # synthetic upstream curator evidence, which this producer fixture must not use.
     closeout_door_tool(
@@ -349,3 +448,114 @@ def _fixture(
     handoff = current_certification_handoff(contract, owner, store)
     assert tuple(item.result.gate for item in handoff.selected.terminals) == (1, 2, 3, 4)
     return _Fixture(handoff)
+
+
+def _created_prepared_memory_realization_scenario(root: Path) -> None:
+    case = _created_prepared_memory_case(root)
+    _assert_created_memory_requires_refresh(case)
+    _refresh_created_memory_coherence(case)
+    _assert_refreshed_memory_is_noop(case)
+
+
+def _created_prepared_memory_case(root: Path) -> _PreparedMemoryCase:
+    with pytest.MonkeyPatch.context() as patch:
+        fixture = _fixture(root, patch, prepared_source_change=True)
+    contract = fixture.handoff.contract
+    memory = contract.memory_worktree
+    assert memory is not None
+    handoff, view = prepare_code_view(fixture.handoff)
+    assert view.disposition == "created"
+    output = load_typed(
+        certificate_store(contract.worktree_group), view.preparedOutput, PreparedCloseoutOutput
+    )
+    assert output.commit == view.codeCommit
+    assert output.tree == view.codeTree
+    assert output.committerDate == git(
+        Path(view.physicalCodeRoot), "show", "-s", "--format=%cI", "HEAD"
+    )
+    candidate = observe_prepared_memory_candidate(handoff, view)
+    feature_doc = memory / "onboarding" / "feature.txt.md"
+    overview_doc = memory / "onboarding" / "overview.md"
+    return _PreparedMemoryCase(
+        contract,
+        handoff,
+        view,
+        output,
+        candidate,
+        memory,
+        feature_doc,
+        overview_doc,
+    )
+
+
+def _assert_created_memory_requires_refresh(case: _PreparedMemoryCase) -> None:
+    before_bytes = (case.feature_doc.read_bytes(), case.overview_doc.read_bytes())
+    try:
+        PreparedMemoryCertificationAdapter().certify(
+            PreparedMemoryCertificationRequest(case.handoff, case.candidate)
+        )
+    except CertificationContractError as exc:
+        finding = exc.findings[0]
+        assert finding["code"] == "prepared-memory-curator-refresh-required"
+        detail = str(finding["detail"])
+        assert all(
+            value in detail
+            for value in (
+                case.contract.contract_path.as_posix(),
+                case.candidate.memoryTree,
+                case.output.commit,
+                case.output.committerDate,
+                "curator_coherence action=prepare then action=publish",
+            )
+        )
+    else:
+        raise AssertionError("created prepared memory must require curator refresh")
+    after_bytes = (case.feature_doc.read_bytes(), case.overview_doc.read_bytes())
+    assert after_bytes != before_bytes
+    assert case.output.commit.encode() in after_bytes[0]
+    assert case.output.committerDate.encode() in after_bytes[0]
+    refreshed_candidate = observe_prepared_memory_candidate(case.handoff, case.view)
+    assert refreshed_candidate.memoryTree != case.candidate.memoryTree
+
+
+def _refresh_created_memory_coherence(case: _PreparedMemoryCase) -> None:
+    write_curator_evidence(
+        case.contract,
+        caller_ref=SPRINT,
+        source_candidates=[
+            {
+                "sourceFile": "feature.txt",
+                "onboardingFile": "onboarding/feature.txt.md",
+                "classification": "sidecar",
+            },
+            {
+                "sourceFile": ".",
+                "onboardingFile": "onboarding/overview.md",
+                "classification": "route-overview",
+            },
+        ],
+    )
+    assert (
+        require_current_curator_coherence(case.contract).record.codeCandidateTree
+        == case.view.codeTree
+    )
+
+
+def _assert_refreshed_memory_is_noop(case: _PreparedMemoryCase) -> None:
+    current = observe_prepared_memory_candidate(case.handoff, case.view)
+    status_before_stale = git(case.memory, "status", "--porcelain")
+    realized = _realize_prepared_memory(PreparedMemoryCertificationRequest(case.handoff, current))
+    assert realized == current
+    assert git(case.memory, "status", "--porcelain") == status_before_stale
+    feature_after_refresh = case.feature_doc.read_bytes()
+    overview_after_refresh = case.overview_doc.read_bytes()
+    memory_ledger = case.memory / "memory.md"
+    memory_ledger.write_bytes(memory_ledger.read_bytes() + b"\nstale prefix fixture mutation\n")
+    try:
+        _realize_prepared_memory(PreparedMemoryCertificationRequest(case.handoff, current))
+    except CertificationContractError as exc:
+        assert exc.findings[0]["code"] == "prepared-memory-candidate-moved"
+    else:
+        raise AssertionError("stale prepared memory candidate must refuse before writers")
+    assert case.feature_doc.read_bytes() == feature_after_refresh
+    assert case.overview_doc.read_bytes() == overview_after_refresh

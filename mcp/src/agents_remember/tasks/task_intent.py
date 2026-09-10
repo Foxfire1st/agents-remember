@@ -193,6 +193,35 @@ def task_intent_identity(
     return TaskIntentIdentity(digest=hashlib.sha256(encoded.encode("utf-8")).hexdigest())
 
 
+def task_intent_master_projection(
+    task_root: Path,
+    candidate: ResolvedTaskDocument,
+    *,
+    schema_version: str = TASK_INTENT_SCHEMA,
+) -> dict[str, object]:
+    """Project one atomic master through the shared normative taxonomy.
+
+    The leaf-shaped ``TaskIntentV1`` remains the canonical child identity.  An
+    atomic-master review uses this same taxonomy for the master's own normative
+    slots and combines its digest with the exact child identities at the review
+    scope owner.
+    """
+
+    _require_schema_version(schema_version)
+    if candidate.document.kind != "master":
+        raise TaskIntentError(
+            "task-intent-master-required",
+            "master task intent projection requires a master document",
+        )
+    _validate_allowlisted_classifications()
+    projected = _normative_projection(candidate.document)
+    projected["requirements"] = [
+        value.model_dump(mode="json", by_alias=True)
+        for value in _requirements(task_root, candidate.document)
+    ]
+    return projected
+
+
 def require_current_task_intent(
     observed: TaskIntentState | None,
     current: TaskIntentIdentity,
@@ -356,5 +385,6 @@ __all__ = [
     "require_current_task_intent",
     "task_intent_fact",
     "task_intent_identity",
+    "task_intent_master_projection",
     "task_intent_projection",
 ]

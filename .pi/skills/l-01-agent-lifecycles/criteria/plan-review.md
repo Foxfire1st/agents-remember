@@ -7,8 +7,9 @@ builder = strategist when approved or orchestrator on a sanctioned strategist sk
 this catalog. The reviewer holds the same read-only
 analysis tools the strategist used (`cgc_*`, `grepai_*`, `read_ar_files`), so the plan's mechanical
 claims are re-derivable, not just readable. Criteria are never made up on the spot: the standing
-list below is the regression floor, run every time; the exploratory mandate and the promotion
-ratchet keep the catalog alive.
+list below is the regression floor for a baseline review; the exploratory mandate and promotion
+ratchet apply there. A fix-verification uses only the sealed baseline evidence needed for its
+outstanding plan-issue IDs and does not recensus the catalog or add a criterion.
 
 ## Standing Criteria (MUST RUN — the regression floor)
 
@@ -104,8 +105,8 @@ that ranks other masters, or an algorithm that silently invents priority, blocks
 
 ## Candidate Criteria (seeded exploratory — one catching engagement each; promote at ≥2)
 
-Run under the exploratory mandate; a candidate is proposed for promotion into the standing list
-when it catches in a second engagement (the ratchet below).
+Run under the exploratory mandate during a baseline review only; a candidate is proposed for
+promotion into the standing list when it catches in a second engagement (the ratchet below).
 
 ### PR-7 — Scaling & reclamation at design time *(candidate — 1 catch)*
 
@@ -119,18 +120,21 @@ when it catches in a second engagement (the ratchet below).
 
 ## Exploratory Mandate
 
-Beyond the standing list, the reviewer owes **novel lenses** (the brief sets N; default 2): ways
-THIS plan could be wrong that the catalog does not name yet. Every novel finding-class that
-survives refutation is proposed as a catalog amendment in the verdict.
+During a baseline review, beyond the standing list, the reviewer owes **novel lenses** (the brief sets
+N; default 2): ways THIS plan could be wrong that the catalog does not name yet. Every novel
+finding-class that survives refutation is proposed as a catalog amendment in the verdict. A
+Fix-verification has no novel-lens or new-catalog duty and cannot turn an observation outside
+the sealed issue list into a finding.
 
 ## Promotion Ratchet
 
-- A **candidate** criterion that catches a real defect in **≥2 separate engagements** is promoted
+- A **candidate** criterion that catches a real defect in **≥2 separate first-review engagements** is promoted
   into the standing list above, with its catching evidence cited — escaped bugs become permanent
   tests. Promotion is proposed in the verdict and lands on the loop owner's acceptance.
 - A **standing** criterion that fires nothing for **N consecutive engagements** (default 5)
   demotes to spot-check.
-- A criterion that can be **mechanized graduates out of the catalog into a gate** — the closeout
-  body gate (which catches history-only "refreshes" at commit time, where prose requests did not)
+- A criterion that can be **mechanized graduates out of the catalog into a scoped diagnostic** —
+  the curator handoff check (which catches history-only "refreshes" before the Git transaction,
+  where prose requests did not)
   is the working example; PR-4's local graph-shape portion has graduated into the task-document
   model, while evidence fidelity remains reviewer work.

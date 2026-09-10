@@ -133,7 +133,11 @@ def observe_certification_candidate(
         declarations=declarations,
     )
     envelope = CandidateAuthorityEnvelope(
-        mutation=mutation, source=source, worktree=rules, generated=generated
+        mutation=mutation,
+        source=source,
+        worktree=rules,
+        generated=generated,
+        admittedMemoryTree=door.memoryCandidateTree or None,
     )
     inputs = (
         lineage_input,

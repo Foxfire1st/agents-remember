@@ -37,7 +37,7 @@ The executable inventory lives in
 | Delivery coverage publication | `code_quality.check._pytest_step` | certifying only; metric values are diagnostic |
 | Quality | `worktrees.modules.quality.clean_executor.run_clean_quality` | certifying only |
 | Retry | `agents_remember_test_support.code_quality.retry_proof.prepare` | certifying only; explicit locked Dagger cache |
-| Route review | `worktrees.route_review.require_current_route_review` | independent candidate-bound verdict; no test substitution |
+| Route review | `worktrees.route_review_scope.require_current_route_review` | current review at its owning altitude; atomic children defer to the accumulated master integration review; no test substitution |
 | Lifecycle | `worktrees.modules.quality.gate.run_strict_code_quality_gate` | certifying only |
 | Closeout | `worktrees.queue.closeout_staged_quality.gate_staged_code` | certifying only |
 | Integration | `worktrees.integration.integration_quality.run_integration_quality_gate` | certifying only |

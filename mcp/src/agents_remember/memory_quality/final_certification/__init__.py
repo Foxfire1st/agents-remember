@@ -7,6 +7,13 @@ record and candidate-pair authority binding, and the R21 Gate-5 semantic-input
 assembly. The certification itself never mutates code or memory.
 """
 
+from agents_remember.certification.final_certification_models import (
+    FinalCatalogItemIdentity,
+    FinalCatalogItemResult,
+    FinalCertificationResult,
+    FinalFullCatalogAttestation,
+    FinalFullCatalogPlan,
+)
 from agents_remember.memory_quality.final_certification.catalog import (
     FINAL_FULL_CATALOG_VERSION,
     compile_final_catalog_plan,
@@ -24,13 +31,6 @@ from agents_remember.memory_quality.final_certification.certify import (
 from agents_remember.memory_quality.final_certification.gate_prefix import (
     GateFourPrefixProof,
     require_green_gate_prefix,
-)
-from agents_remember.memory_quality.final_certification.models import (
-    FinalCatalogItemIdentity,
-    FinalCatalogItemResult,
-    FinalCertificationResult,
-    FinalFullCatalogAttestation,
-    FinalFullCatalogPlan,
 )
 
 __all__ = [

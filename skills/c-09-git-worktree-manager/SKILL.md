@@ -31,7 +31,8 @@ closeout_door(request={action:"declare|status|defer|resume|withdraw|update-prove
 closeout_queue(request={action:"status|rebuild", sprint_task_document_ref:{repository:"<repo-id>", path:"<sprint task.json>"}})
 worktree_closeout_preview(contract_path="<enclosure series-contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
 worktree_closeout_apply(contract_path="<enclosure series-contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
-worktree_operation_control(contract_path="<enclosure series-contract.md>", operation_kind="closeout|integrate|direct-landing", action="retry|recover|cancel|revise|retire|supersede", expected_generation=<generation>, intent_note="<audit intent>")
+worktree_operation_control(contract_path="<enclosure series-contract.md>", operation_kind="closeout", action="cancel|resume", expected_generation=<generation>, intent_note="<audit intent>")
+worktree_operation_control(contract_path="<enclosure series-contract.md>", operation_kind="integrate|direct-landing", action="retry|recover|cancel|retire|supersede", expected_generation=<generation>, intent_note="<audit intent>")
 worktree_legacy_operation(contract_path="<enclosure series-contract.md>", operation_kind="closeout|integrate|direct-landing", action="inspect|migrate|archive", ...)
 worktree_integrate(contract_path="<enclosure series-contract.md>", strategy="ff-only")
 worktree_cleanup(contract_path="<enclosure series-contract.md>", teardown_providers=true)
@@ -290,14 +291,17 @@ remains reconciling until the exact current memory source is merged and validate
 
 ## Worktree Closeout
 
-Use the `c-12-closeout` skill for worktree closeout. The `c-12-closeout` skill owns the approval gate,
-missing-onboarding check, code commit, onboarding and entity refresh, memory
-quality gate, memory content commit, ledger update, and ledger commit.
+Use the `c-12-closeout` skill for worktree closeout. The `c-12-closeout` skill owns
+the explicit approval/series authority, code commit, prepared memory-content
+commit, ledger update, and ledger commit. Closeout is a Git transaction and does
+not run or require code-quality checks, test suites, memory-quality checks,
+curator certification, or independent review.
 
 Closeout scheduling and closeout execution have different owners:
 
 1. The `closeout_door` MCP tool publishes one exact contract-owned generation after current task,
-   review, memory, ledger, admission, source, and priority evidence is complete. Its disposition is
+   memory, ledger, admission, source, priority, and explicit authority evidence is complete. Review
+   or quality evidence may be attached when requested, but is not required. Its disposition is
    `waiting`, `deferred`, `withdrawn`, or `claimed`.
 2. The `closeout_queue` MCP tool is only the sprint's source-fingerprinted ordering projection of
    current `waiting` generations. It has `status` and `rebuild`; it has no declare, select, claim,
@@ -317,11 +321,16 @@ completion. Unrelated sprints and repositories retain their projection revisions
 
 For worktree-backed tasks, pass the configured leaf `series-contract.md` to
 `worktree_closeout_preview` / `worktree_closeout_apply`. Every enabled commit leg requires its own
-explicit nonblank message before authority is acquired. The accepted input is immutable per
-generation. A pre-output failure may retry the same input, cancel, or revise through a successor;
-ambiguous or proven output must reconcile/recover the same generation. Execute only an advertised
-task-addressed action through `worktree_operation_control`; never repeat Git directly or use queue
-state as recovery evidence.
+explicit nonblank message before authority is acquired. The accepted code/memory/ledger input is
+immutable per generation. Preview reports the concrete Git transaction and input conflicts without
+running quality, test, memory, certification, or review tools. Apply uses the existing transaction
+owner and publishes recoverable per-leg evidence. `cancel` preserves source changes and historical
+evidence; `resume` continues an unfinished commit leg without reconstructing certification history.
+Execute only the advertised task-addressed closeout action through `worktree_operation_control`;
+never repeat Git directly or use queue state as recovery evidence.
+
+Integration and direct-landing keep their own advertised retry/recover actions: a pre-output failure
+may retry the same input, while ambiguous or proven output must reconcile/recover the same generation.
 
 If the recorded code or external-memory source branch moves, admission refuses that landing edge
 with the exact `worktree_sync`/provenance-republication route. The moved source does not veto task
@@ -329,19 +338,18 @@ authoring and does not erase the journal or door generation.
 
 ## Integration
 
-Integration runs only after closeout completed and is authority-gated by context. It lands the
-closed task branches back onto the recorded source branches and records the landed commits
-separately from the closeout commits in the operation journal. A queue projection may be absent or
-invalid-empty throughout integration; `worktree_status` and `worktree_operation_control` remain
-task-addressed through the locator/manifest/journal chain. If a crash occurs before or after the
-protected ref moves, recovery reconciles the live ref and the recorded accepted base pair before
-advertising a next action. A later landing may not pass the same target until that exact owner is
-reconciled, but the landing exclusion never blocks task-document mutation. In an accepted
-orchestrated run, dependency-ordered
-leaf→master and master→super integrations ride the series' standing approval (the developer's
-portfolio-gate approval recorded in the planner master) — the developer hand-off concentrates at
-the super PR/carry-over gate per the `l-01-agent-lifecycles` loop/orchestrator doctrine. A raised
-durable `integration-approval` gate still awaits the developer.
+Integration runs only after closeout completed and is authority-gated by context. It performs the
+declared merge/fast-forward/replay strategy, moves the recorded code and memory refs together, and
+records the actual resulting code/memory pair in the operation journal. It does not run or require
+acceptance, code quality, test suites, memory quality, curator certification, or independent review.
+A queue projection may be absent or invalid-empty throughout integration; `worktree_status` and
+`worktree_operation_control` remain task-addressed through the locator/manifest/journal chain. If a
+crash occurs before or after protected ref moves, recovery reconciles the live ref and recorded
+accepted base pair before advertising a next action. A later landing may not pass the same target
+until that exact owner is reconciled, but the landing exclusion never blocks task-document mutation.
+In an accepted orchestrated run, dependency-ordered leaf→master and master→super integrations ride
+the series' standing approval (the developer's portfolio-gate approval recorded in the planner
+master). A raised durable `integration-approval` gate still awaits the developer.
 
 An ordinary master/series integration has no leaf closeout door of its own: its integration journal
 records source-door authority as `not-applicable`. That is an explicit series lifecycle state, not
@@ -352,7 +360,13 @@ present or stale door. Leaf integration continues to require its exact claimed c
 That last rule governs admission of a new leaf integration; an already-journaled no-door operation
 remains recoverable under its retained journal identity and is not reclassified as direct execution.
 
-On an orchestrated master's exit (master → super integration) the integrate step additionally enforces the delegated `master-handover-approval` seam: an undecided or policy-invalid handover gate addressed to the master (by `enclosure` = master task name) returns `handover-gate-blocked` instead of landing — decide the gate per the `l-01-agent-lifecycles` seam doctrine, then rerun. When no gate addresses the integrating master but open `master-handover-approval` gates exist elsewhere, integrate still proceeds and its result carries a `handover_gate_warning` naming them — treat it as a spelling check on the raised gate's `enclosure`.
+On an orchestrated master's exit (master → super integration), an explicitly
+raised `master-handover-approval` remains an authority check: an undecided or
+policy-invalid gate addressed to the master returns `handover-gate-blocked`
+instead of landing. This is a human/series authority control, not a review or
+quality certificate. When no gate addresses the integrating master but open
+handover gates exist elsewhere, integration proceeds and reports the spelling
+warning.
 
 Run `worktree_integrate(..., dry_run=true)` first. For subordinate accepted-series integrations,
 record the standing series authority and then run the real integration without a developer stop.

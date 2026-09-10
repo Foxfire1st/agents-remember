@@ -1,15 +1,16 @@
 # Master-Handover-Packet Template
 
-The artifact a **manager** hands to the **orchestrator** at master exit (`roles/manager.md`), after the
-master-exit adversarial seam. The artifact is durable and terminal/finalizer truth wakes the current
+The artifact a **manager** hands to the **orchestrator** at master exit (`roles/manager.md`), after
+the leaf handoffs and any explicitly requested master-exit review. The artifact is durable and terminal/finalizer truth wakes the current
 orchestrator. It tells the orchestrator which completion boundary is ready: the final accumulated
 organizational candidate containing prior landed contributions plus the proposed final leaf, or
 one isolated atomic branch ready to land.
 
 ## Rules
 
-1. Post it only **after** the independent master-exit verdict exists — its exact artifact reference
-   is a required slot and must identify the proposed candidate it reviewed.
+1. Post it after the prepared code/memory/ledger transaction inputs and scoped handoff reports
+   exist. Include an independent master-exit verdict only when review was explicitly requested;
+   when present, its exact artifact reference must identify the proposed candidate it reviewed.
 2. Name `executionNature` and the exact scope. An organizational master names the
    prior landed leaf commits plus the proposed final leaf
    and the exact proposed final super candidate; it has no
@@ -42,9 +43,11 @@ one isolated atomic branch ready to land.
 | candidate evidence | <canonical Git / operation evidence ref resolving that exact tree> |
 | handover evidence  | <delegated decision / accepted-series authority ref> |
 | super source       | <canonical sprint document / plane-owned current edge> |
-| full gate boundary | <before final organizational leaf moves super; atomic block landing> |
-| verdict            | <independent master-exit verdict artifact ref bound to proposed candidate> |
-| verdict outcome    | <pass or pass-with-notes>                    |
+| worker checks      | <targeted commands/results, including failed or not-run> |
+| curator checks     | <affected onboarding/scoped commands/results, or N/A> |
+| transaction legs   | <code commit · prepared memory commit · ledger commit/merge refs> |
+| verdict            | <independent master-exit verdict artifact ref, or none> |
+| verdict outcome    | <pass or pass-with-notes, or N/A>             |
 | written            | <YYYY-MM-DDTHH:MM>                            |
 
 ## Change-Set Summary

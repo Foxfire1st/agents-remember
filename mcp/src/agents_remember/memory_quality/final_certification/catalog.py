@@ -16,6 +16,13 @@ from typing import Any, NoReturn
 
 from agents_remember.certification.certificate_models import CoherenceSubrecordIdentity
 from agents_remember.certification.digests import content_digest
+from agents_remember.certification.final_certification_models import (
+    FinalCatalogItemIdentity,
+    FinalCatalogItemResult,
+    FinalFullCatalogAttestation,
+    FinalFullCatalogPlan,
+    FinalItemStatus,
+)
 from agents_remember.errors import FinalCertificationError
 from agents_remember.memory_quality.check import AVAILABLE_CHECKS, DRIFT_CHECK_NAME
 from agents_remember.memory_quality.incremental_scope.affected_models import (
@@ -32,14 +39,6 @@ from agents_remember.memory_quality.style.document_shape import (
     tables,
 )
 from agents_remember.memory_quality.style.update_history import history_order
-
-from .models import (
-    FinalCatalogItemIdentity,
-    FinalCatalogItemResult,
-    FinalFullCatalogAttestation,
-    FinalFullCatalogPlan,
-    FinalItemStatus,
-)
 
 FINAL_FULL_CATALOG_VERSION = "1.0.0"
 

@@ -46,8 +46,8 @@ LifecycleProjectionResultClass = Literal[
 LifecycleProjectionControlAction = Literal[
     "retry",
     "recover",
+    "resume",
     "cancel",
-    "revise",
     "retire",
     "supersede",
     "integrate",
@@ -121,19 +121,19 @@ STATE_MATRIX: dict[LifecycleOperationStatus, LifecycleProjectionStateRule] = {
         frozenset({"queued", "recovering-after-claim", "recovering-private-preparation"}),
         frozenset({"live", "exited"}),
         frozenset({"none", "progress", "recovery", "developer-decision"}),
-        frozenset({"recover", "cancel", "revise", "supersede"}),
+        frozenset({"recover", "resume", "cancel", "supersede"}),
     ),
     "running": LifecycleProjectionStateRule(
         _RUNNING_PHASES,
         frozenset({"live", "exited"}),
         frozenset({"none", "progress", "recovery", "developer-decision"}),
-        frozenset({"recover", "cancel", "revise", "supersede"}),
+        frozenset({"recover", "resume", "cancel", "supersede"}),
     ),
     "input-required": LifecycleProjectionStateRule(
         _INPUT_REQUIRED_PHASES,
         frozenset({"live", "exited"}),
         frozenset({"recovery", "developer-decision"}),
-        frozenset({"retry", "recover", "cancel", "revise", "supersede"}),
+        frozenset({"retry", "recover", "resume", "cancel", "supersede"}),
     ),
     "termination-required": LifecycleProjectionStateRule(
         frozenset({"termination-required"}),
@@ -151,13 +151,13 @@ STATE_MATRIX: dict[LifecycleOperationStatus, LifecycleProjectionStateRule] = {
         frozenset({"failed"}),
         frozenset({"live", "exited"}),
         frozenset({"none", "recovery", "developer-decision", "terminal"}),
-        frozenset({"retry", "recover", "cancel", "revise", "supersede"}),
+        frozenset({"retry", "recover", "resume", "cancel", "supersede"}),
     ),
     "cancelled": LifecycleProjectionStateRule(
         frozenset({"cancelled"}),
         frozenset({"exited"}),
         frozenset({"none", "recovery", "developer-decision", "terminal"}),
-        frozenset({"cancel", "revise", "integrate", "direct-landing"}),
+        frozenset({"cancel", "resume", "integrate", "direct-landing"}),
     ),
 }
 

@@ -31,18 +31,11 @@ from pydantic import (
     model_validator,
 )
 
-from agents_remember.models.lifecycles.evidence_dependencies import (
-    EvidenceDependencies,
-    canonical_sha256,
-    require_evidence_dependencies,
-)
 from agents_remember.models.task_document import DocStatus, MasterExecutionNature, StepStatus
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import (
     AcceptanceObligationQuestion,
     ApprovedRequirementPacketRef,
-    TaskIntentState,
-    missing_task_intent,
 )
 
 from .execution_graph_validation import (
@@ -53,12 +46,19 @@ from .execution_graph_validation import (
     find_execution_graph_cycle,
     validate_execution_graph,
 )
+from .route_review import (  # noqa: F401  # preserve existing task-document model exports
+    ReviewFinding,
+    ReviewState,
+    RouteReviewChildIntent,
+    RouteReviewRecord,
+    RouteReviewScope,
+    RouteReviewUnit,
+    RouteReviewVerdict,
+)
 
 TASK_DOCUMENT_SCHEMA = "ar-task-document/v1"
 
 DocKind = Literal["light", "subTask", "master"]
-RouteReviewVerdict = Literal["pass", "pass-with-notes", "block"]
-
 # The structural task altitude per role. Reviewer is deliberately polymorphic across the three
 # review seams; SprintSeat admits it in addition to the ordinary sprint roles. ``document_refs``
 # re-exports these constants for its altitude checks, so their canonical home is here.
@@ -129,73 +129,6 @@ class Decision(_Doc):
     at: str
     decision: str
     rationale: str
-
-
-class RouteReviewUnit(_Doc):
-    """One independently reviewed major route in the candidate code tree."""
-
-    route: str
-    verdict: RouteReviewVerdict
-    evidenceRef: str
-    evidenceSha256: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
-
-    @field_validator("route", "evidenceRef")
-    @classmethod
-    def _trim_nonblank_route_review_value(cls, value: str) -> str:
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("route-review route and evidenceRef must not be blank")
-        return trimmed
-
-
-class RouteReviewRecord(_Doc):
-    """Plane-stamped review evidence bound to one exact Git candidate tree."""
-
-    candidateTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
-    verdict: RouteReviewVerdict
-    verdictRef: str
-    reviewedAt: str
-    routes: list[RouteReviewUnit] = Field(min_length=1)
-    taskIntent: TaskIntentState = Field(default_factory=missing_task_intent)
-    verdictSha256: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
-    dependencies: EvidenceDependencies | None = None
-    recordDigest: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
-
-    @field_validator("verdictRef", "reviewedAt")
-    @classmethod
-    def _trim_nonblank_route_review_metadata(cls, value: str) -> str:
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("route-review verdictRef and reviewedAt must not be blank")
-        return trimmed
-
-    @model_validator(mode="after")
-    def _check_route_review_coherence(self) -> Self:
-        names = [route.route for route in self.routes]
-        if len(names) != len(set(names)):
-            raise ValueError("route-review routes must be unique")
-        blocked = any(route.verdict == "block" for route in self.routes)
-        if self.verdict == "block" and not blocked:
-            raise ValueError("a blocking route-review verdict requires at least one blocked route")
-        if self.verdict != "block" and blocked:
-            raise ValueError("a passing route-review verdict cannot contain a blocked route")
-        dependency_shape = (
-            bool(self.verdictSha256),
-            self.dependencies is not None,
-            bool(self.recordDigest),
-            all(route.evidenceSha256 for route in self.routes),
-        )
-        if any(dependency_shape) and not all(dependency_shape):
-            raise ValueError(
-                "route-review content addressing requires every evidence digest, "
-                "the dependency declaration, and the record digest"
-            )
-        if all(dependency_shape):
-            require_evidence_dependencies(self.dependencies, record_type="route-review/v1")
-            payload = self.model_dump(mode="json", by_alias=True, exclude={"recordDigest"})
-            if canonical_sha256(payload) != self.recordDigest:
-                raise ValueError("route-review record digest does not match its canonical bytes")
-        return self
 
 
 class CodeExample(_Doc):
@@ -747,6 +680,9 @@ class TaskDocument(_Doc):
     codeExamplesNote: str | None = None
     decisions: list[Decision] = Field(default_factory=list)
     routeReview: RouteReviewRecord | None = None
+    # Missing review state means zero rounds.  The state is written only by the dedicated
+    # begin/record review operations; generic task mutations cannot rewrite it.
+    reviewState: ReviewState | None = None
     openQuestions: list[str | AcceptanceObligationQuestion] = Field(default_factory=list)
     references: list[str] = Field(default_factory=list)
     # subTasks is the master series index (master-only). sections is the master's ordered
@@ -784,15 +720,16 @@ class TaskDocument(_Doc):
             or self.codeExamples
             or self.codeExamplesNote is not None
             or self.lifecycleId is not None
-            or self.routeReview is not None
             or self.executionRegistrations
         ):
             raise ValueError(
                 "a master document has no steps, codeExamples, codeExamplesNote, lifecycleId, "
-                "routeReview, or executionRegistrations"
+                "or executionRegistrations"
             )
 
     def _check_nonmaster_fields(self) -> None:
+        if self.routeReview is not None and self.routeReview.scope is not None:
+            raise ValueError("an atomic-master route-review scope is master-only")
         master_only = {
             "subTasks": self.subTasks,
             "discardedSubTasks": self.discardedSubTasks,

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Never
 
 from agents_remember.certification.certificate_admission import admitted_gate_identity
@@ -13,10 +15,12 @@ from agents_remember.certification.certificate_invalidation import (
 )
 from agents_remember.certification.certificate_models import GateCertificate, GateFiveSemanticInputs
 from agents_remember.certification.digests import content_digest
+from agents_remember.certification.final_certification_models import FinalCertificationResult
 from agents_remember.certification.frozen_run.models import FrozenCertificationRun
 from agents_remember.certification.lifecycle_admission import (
     LifecycleAdmissionAuthorities,
     PriorRedAdmissionContext,
+    PriorRedMemoryOwner,
     compile_lifecycle_admission,
 )
 from agents_remember.certification.lifecycle_models import ExactCandidateObservation
@@ -25,6 +29,11 @@ from agents_remember.certification.results import compile_gate_result_manifest
 from agents_remember.errors import CertificationContractError
 from agents_remember.models.certification.base import GateId
 from agents_remember.models.certification.corrective import RedCatalogDisposition
+from agents_remember.models.lifecycles.prepared_memory import PreparedMemoryCandidate
+from agents_remember.worktrees.modules.quality.certification_terminal import RecordedGateTerminal
+from agents_remember.worktrees.modules.quality.report_publication_paths import (
+    published_report_path_from_manifest,
+)
 
 _GATE_CLASSES: dict[GateId, InputChangeClass] = {
     1: "gate-1-input",
@@ -45,6 +54,70 @@ class RecoveryInputSnapshot:
     run: FrozenCertificationRun
     candidate: ExactCandidateObservation
     memory_inputs: GateFiveSemanticInputs | None = None
+    memory_candidate_tree: str | None = None
+    prior_memory_inputs: PriorRedMemoryOwner | None = None
+
+
+def prior_red_memory_owner_from_terminal(
+    reports_root: Path, terminal: RecordedGateTerminal
+) -> PriorRedMemoryOwner:
+    """Load the exact memory/coherence owner retained by a red published result.
+
+    A red Gate-5 terminal cannot publish a certificate, but its typed final
+    certification report still binds the prepared memory candidate and canonical
+    coherence plan. Read that one selected publication; never search report history.
+    """
+    if terminal.result.gate != 5 or terminal.result.disposition != "red":
+        raise CertificationContractError(
+            "prior-red Gate-5 owner evidence refused",
+            (
+                {
+                    "code": "prior-red-gate-five-terminal-invalid",
+                    "path": "priorRed.catalog",
+                    "detail": "the selected prior-red owner must be the red Gate-5 terminal",
+                },
+            ),
+        )
+    path = published_report_path_from_manifest(
+        reports_root,
+        terminal.publication,
+        terminal.publication.result_decoder.artifactPath,
+    )
+    try:
+        payload = json.loads(path.read_bytes())
+        result_payload = payload["certification"]
+        result = FinalCertificationResult.model_validate(result_payload)
+    except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as error:
+        raise CertificationContractError(
+            "prior-red Gate-5 owner evidence refused",
+            (
+                {
+                    "code": "prior-red-gate-five-inputs-unreadable",
+                    "path": "priorRed.publication.certification",
+                    "detail": f"the selected red Gate-5 certification is unreadable: {error}",
+                },
+            ),
+        ) from error
+    try:
+        candidate = PreparedMemoryCandidate.model_validate(payload["preparedCandidate"])
+        if (
+            candidate.codeView.codeTree != terminal.publication.candidate_tree
+            or result.plan.candidateCodeTree != candidate.codeView.codeTree
+            or result.plan.memoryTree != candidate.memoryTree
+        ):
+            raise ValueError("prepared candidate is not bound to the selected red report")
+        return PriorRedMemoryOwner(candidate)
+    except (KeyError, TypeError, ValueError) as error:
+        raise CertificationContractError(
+            "prior-red Gate-5 owner evidence refused",
+            (
+                {
+                    "code": "prior-red-gate-five-inputs-invalid",
+                    "path": "priorRed.publication.preparedCandidate",
+                    "detail": f"the selected red memory owner is invalid: {error}",
+                },
+            ),
+        ) from error
 
 
 def derive_certificate_input_changes(
@@ -107,7 +180,13 @@ def build_prior_red_context(
         _refuse("prior-red-certificate-prefix-incomplete", expected_gates, actual_gates)
     if len({item.rail.key for item in dispositions}) != len(dispositions):
         _refuse("prior-red-disposition-duplicate", "one disposition per rail", len(dispositions))
-    context = PriorRedAdmissionContext(prior.admission, catalog, dispositions)
+    context = PriorRedAdmissionContext(
+        prior.admission,
+        catalog,
+        dispositions,
+        priorMemoryInputs=current.prior_memory_inputs,
+        successorMemoryTree=current.memory_candidate_tree,
+    )
     try:
         validate_certificate_chain(prior.admission, certificates)
         _require_complete_red_catalog(prior, catalog)

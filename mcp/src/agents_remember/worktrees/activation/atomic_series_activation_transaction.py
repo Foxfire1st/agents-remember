@@ -7,7 +7,6 @@ from dataclasses import dataclass, replace
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.worktrees.activation.atomic_series_activation import (
     AtomicSeriesActivationError,
-    bounded_activation_detail,
     observe_atomic_series,
     publish_atomic_series_selection,
     require_atomic_series_cancellation_owner,
@@ -232,8 +231,6 @@ def _sync_selected_atomic_series_under_authority(
 def _admission_refusal(request: _AdmissionRefusalRequest) -> WorktreeCommandResult:
     contract = request.contract
     args = request.args
-    public_detail = bounded_activation_detail(request.detail)
-    assert public_detail is not None
     retry_args: dict[str, object] = {
         "contract_path": contract.contract_path.as_posix(),
         "dry_run": False,
@@ -252,7 +249,7 @@ def _admission_refusal(request: _AdmissionRefusalRequest) -> WorktreeCommandResu
         AtomicSeriesAdmissionRequest(
             operation=request.operation,
             status=request.status,
-            detail=public_detail,
+            detail=request.detail,
             contract=contract,
             observation=observation,
             expected=getattr(request.error, "expected", None),
@@ -275,20 +272,17 @@ def _admission_refusal(request: _AdmissionRefusalRequest) -> WorktreeCommandResu
         )
     else:
         summary = (
-            f"Atomic-series admission refused ({request.status}): {public_detail} "
+            f"Atomic-series admission refused ({request.status}): {request.detail} "
             "Apply the reported corrective action and inspect the supplied worktree_status "
             "address before retrying."
         )
-        bounded_summary = bounded_activation_detail(summary)
-        assert bounded_summary is not None
-        summary = bounded_summary
     return WorktreeCommandResult(
         2,
         {
             "state": request.status,
             "status": request.status,
             "summary": summary,
-            "detail": public_detail,
+            "detail": request.detail,
             "contract_path": contract.contract_path.as_posix(),
             "retryable": True,
             "nextTool": "worktree_sync",

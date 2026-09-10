@@ -51,7 +51,7 @@ def validate_lifecycle_control_request(
             observed={"field": "intent_note", "state": "blank"},
         )
     present = sorted(name for name, value in request.commit_messages.items() if value is not None)
-    if request.action != "revise" and present:
+    if request.action != "resume" and present:
         raise LifecycleControlRequestError(
             expected={"action": request.action, "commitMessageFields": "absent"},
             observed={"action": request.action, "presentFields": present},

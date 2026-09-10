@@ -127,7 +127,7 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         parsed back. Mutating (writes the doc's .json and .md) except operation='get'.
 
         operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'skip_step' | 'set_subtask' | 'remove_subtask' |
-        'set_section' | 'append_decision' | 'record_route_review' |
+        'set_section' | 'append_decision' | 'begin_review' | 'record_review' | 'record_route_review' |
         'author_execution_graph' | 'attach_master' | 'detach_master' | 'linkage_report' |
         'set_field' | 'get'. Locate the doc by task_name (also resolves the
         contract for the lifecycle key) or contract_path; pass slug for a series sub-task
@@ -155,8 +155,22 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         'record_route_review' takes review={verdict, verdictRef, routes:[{route, verdict,
         evidenceRef}]}; the control plane stamps the current Git candidate tree and time, and every
         evidence path must be a real task-relative file. It overwrites the prior candidate's review.
-        For sanctioned direct execution (no leaf worktree), pass branch_addressed=true to bind the
-        task-root series contract and stamp the candidate tree from the branch HEAD (policy-gated).
+        'begin_review' takes an empty review object, or the bounded developerApproval and
+        additionalRounds controls, and increments the task review round before reviewer work (a
+        repeated begin resumes the pending round). 'record_review' takes
+        {verdict, findings:[{findingId, description}] for the first result, or
+        remainingFindingIds:[...] for later results, verdictRef?}; successors may only shrink the
+        sealed finding set. 'record_route_review' uses the same bounded state transition while
+        preserving its existing candidate/evidence/currentness checks; call 'begin_review' before
+        either publication. The response includes the small reviewState counter, pending flag,
+        baseline findings, and remaining IDs.
+        Standalone and organizational leaves use their bound leaf contract. For an atomic master,
+        the operation targets the canonical task-root master document and binds the accumulated
+        master candidate, canonical child membership/intents, and evidence; an atomic child does
+        not publish an independent leaf review. Master review is required only at master-to-parent
+        integration. For sanctioned direct execution (no leaf worktree), pass branch_addressed=true
+        to bind the task-root series contract and stamp the candidate tree from the branch HEAD
+        (policy-gated); a canonical atomic child remains deferred to its master.
         'author_execution_graph' applies one validated atomic batch of structural mutations to a
         sprint's executionGraph: fields={mutations:[...]} where each mutation is one of
         {op:'add_node', ref:{repository,path}, kind?:'master'|'segment', leafIds?:[...]},

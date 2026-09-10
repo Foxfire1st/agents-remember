@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import patch
 
+from agents_remember.application.lifecycle import terminal_rail_failure
 from agents_remember.certification import (
     READINESS_SURFACES,
     build_rail_result,
@@ -65,6 +70,11 @@ from agents_remember.certification.repository_profiles.models import (
     RepositoryProfilePlan,
     repository_gate_plan_digest,
 )
+from agents_remember.errors import FinalCertificationError
+from agents_remember.memory_quality.incremental_scope.errors import (
+    GateFiveClosureRefusedError,
+    ScopeFailure,
+)
 from agents_remember.models.certification.base import GateId, RailIdentity
 from integration_certification_test_support import selected_code_fixture
 
@@ -91,6 +101,134 @@ class QualityGatePublicContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "dependencies do not match"):
                 forged.render()
 
+    def test_terminal_projection_preserves_prepared_memory_catalog_failure(self) -> None:
+        error = FinalCertificationError(
+            "prepared-memory-certification-red",
+            "at least one final catalog item failed",
+            next_action="memory_quality_check",
+        )
+        result = _terminal_result(
+            _prepared_catalog_payload(),
+            status="failed",
+            exit_code=1,
+            error=error,
+        )
+        terminal = cast(dict[str, object], result["terminalResult"])
+        counts = cast(dict[str, int], result["counts"])
+        rails = cast(dict[str, list[dict[str, object]]], result["rails"])
+        error_payload = cast(dict[str, object], result["error"])
+
+        self.assertEqual(
+            terminal,
+            {"disposition": "red", "status": "failed", "exitCode": 1},
+        )
+        self.assertEqual(
+            counts,
+            {"passed": 10, "failed": 2, "blocked": 0, "skipped": 0, "notApplicable": 0},
+        )
+        self.assertEqual(
+            {row["railId"]: row["findingCount"] for row in rails["failed"]},
+            {
+                "integrity.missing_onboarding": 10,
+                "integrity.onboarding_drift_check.summary": 135,
+            },
+        )
+        self.assertTrue(all("reference" not in row for row in rails["failed"]))
+        self.assertEqual(error_payload["type"], "FinalCertificationError")
+        self.assertEqual(error_payload["status"], "prepared-memory-certification-red")
+        self.assertEqual(error_payload["detail"], "at least one final catalog item failed")
+        self.assertEqual(error_payload["nextAction"], "memory_quality_check")
+        self.assertEqual(
+            result["evidence"],
+            [{"path": "clean-quality-results.json", "sha256": "r" * 64, "size": 22192}],
+        )
+
+    def test_terminal_projection_accepts_green_prepared_memory_catalog(self) -> None:
+        payload = _prepared_catalog_payload()
+        certification = cast(dict[str, object], payload["certification"])
+        attestation = cast(dict[str, object], certification["attestation"])
+        catalog = cast(list[dict[str, object]], attestation["catalog"])
+        for item in catalog:
+            item["status"] = "pass"
+            item["findingCount"] = 0
+            item["reference"] = None
+        payload["status"] = "passed"
+        payload["exitCode"] = 0
+        certification["state"] = "green"
+        certification["reason"] = None
+        attestation["statusCounts"] = {"blocked": 0, "fail": 0, "not-applicable": 0, "pass": 12}
+
+        result = _terminal_result(payload, status="passed", exit_code=0)
+        terminal = cast(dict[str, object], result["terminalResult"])
+        counts = cast(dict[str, int], result["counts"])
+        self.assertEqual(terminal["disposition"], "green")
+        self.assertEqual(terminal["status"], "passed")
+        self.assertEqual(counts["passed"], 12)
+        self.assertEqual(counts["failed"], 0)
+
+    def test_terminal_projection_keeps_ordinary_gate_catalog_shape(self) -> None:
+        payload = {
+            "status": "passed",
+            "exitCode": 0,
+            "gates": [
+                {
+                    "rails": [
+                        {
+                            "identity": {"railId": "ordinary-lint", "version": "1.0.0"},
+                            "status": "pass",
+                            "posture": "enforcing",
+                        }
+                    ]
+                }
+            ],
+        }
+        result = _terminal_result(payload, status="passed", exit_code=0)
+        terminal = cast(dict[str, object], result["terminalResult"])
+        counts = cast(dict[str, int], result["counts"])
+        self.assertEqual(terminal["disposition"], "green")
+        self.assertEqual(counts["passed"], 1)
+        self.assertEqual(counts["failed"], 0)
+
+    def test_terminal_projection_preserves_incremental_scope_failure_context(self) -> None:
+        error = GateFiveClosureRefusedError(
+            ScopeFailure(
+                code="checker-execution-failed",
+                detail=(
+                    "incremental checker failed before publishing a result: "
+                    "ValueError: selected document is unreadable"
+                ),
+                checker="citation-range",
+                node="memory:onboarding/example.md",
+            )
+        )
+        with patch.object(
+            terminal_rail_failure,
+            "_read_published_report",
+            return_value=terminal_rail_failure.PublishedReportRead(state="missing"),
+        ):
+            result = terminal_rail_failure.terminal_worker_failure_result(
+                operation_kind="closeout",
+                generation=1,
+                candidate_tree="c" * 40,
+                error=error,
+            )
+
+        self.assertEqual(
+            result["error"],
+            {
+                "type": "GateFiveClosureRefusedError",
+                "status": "gate-5-closure-refused",
+                "stage": "memory-scope",
+                "reason": "checker-execution-failed",
+                "detail": (
+                    "incremental checker failed before publishing a result: "
+                    "ValueError: selected document is unreadable"
+                ),
+                "checker": "citation-range",
+                "node": "memory:onboarding/example.md",
+            },
+        )
+
 
 _CANDIDATE = CandidateIdentity(kind="git-tree", value="c" * 40)
 _PROFILE = "portable-ci"
@@ -104,6 +242,164 @@ _CLASS_BY_GATE: dict[GateId, RailClass] = {
     4: "integration-test",
     5: "memory-quality",
 }
+
+_L38_PREPARED_CATALOG: tuple[dict[str, Any], ...] = (
+    {
+        "item": {"itemId": "affected.closure", "version": "1.0.0"},
+        "status": "pass",
+        "findingCount": 0,
+        "subresultDigest": "ee39b23bc9e8920c29785fe8e4dff262722fed4cef15135bb1fc67689510ff5f",
+        "reference": None,
+    },
+    {
+        "item": {"itemId": "candidate.code_memory_pair", "version": "1.0.0"},
+        "status": "pass",
+        "findingCount": 0,
+        "subresultDigest": "93dec059bdc627c2fbeb7886e09b7b2c3c285c120fd04a2d1e90750f3da8e244",
+        "reference": None,
+    },
+    {
+        "item": {"itemId": "coherence.record", "version": "1.0.0"},
+        "status": "pass",
+        "findingCount": 0,
+        "subresultDigest": "85a63f4d9689a85d77dc44a1d7d8b67a520ca27e5ce168539ec2ae65623d2622",
+        "reference": None,
+    },
+    {
+        "item": {"itemId": "integrity.missing_onboarding", "version": "1.0.0"},
+        "status": "fail",
+        "findingCount": 10,
+        "subresultDigest": "675e741eca30235d6c210f18709c901a7f6fe5b52c3708f4e3074834415b36f4",
+        "reference": None,
+    },
+    {
+        "item": {
+            "itemId": "integrity.onboarding_drift_check.summary",
+            "version": "1.0.0",
+        },
+        "status": "fail",
+        "findingCount": 135,
+        "subresultDigest": "a59991ed46ae0ad380e16ad69d2337a9db41dfa1a54ac412bf1610e809c132e6",
+        "reference": "/home/firefox/projects/ar-coordination/temp/drift-reports/code/code_HEAD_drift-report.md",
+    },
+    {
+        "item": {"itemId": "route_index.alignment", "version": "1.0.0"},
+        "status": "pass",
+        "findingCount": 0,
+        "subresultDigest": "4f67e1f2d39fc7f1f205320282c7dd754ecb01d4e0bdf54d8103f056cb7eefc6",
+        "reference": None,
+    },
+    {
+        "item": {"itemId": "style.citations.claim_reopen", "version": "1.0.0"},
+        "status": "pass",
+        "findingCount": 0,
+        "subresultDigest": "20ba8ba4d57d72a74bc8ab1157aa851c83f921aaf7f08be22fd9b2bfec1955f7",
+        "reference": None,
+    },
+    {
+        "item": {"itemId": "style.citations.range_resolution", "version": "1.0.0"},
+        "status": "pass",
+        "findingCount": 0,
+        "subresultDigest": "3e03909af65774855c7670b1a0f6e2529514e98f701dc9dfb1c6e863f5879f53",
+        "reference": None,
+    },
+    {
+        "item": {"itemId": "style.document_shape.diff_markers", "version": "1.0.0"},
+        "status": "pass",
+        "findingCount": 0,
+        "subresultDigest": "d7ce3428c91d25c2234e86f96815bc53b909e2b4b36b71aee3dce9f1e4e40d19",
+        "reference": None,
+    },
+    {
+        "item": {
+            "itemId": "style.document_shape.entity_catalog_alignment",
+            "version": "1.0.0",
+        },
+        "status": "pass",
+        "findingCount": 0,
+        "subresultDigest": "c45e4483c00cd75ad296de9a2a3afedf95f3a0b66c2e6602a0f276d93007f31b",
+        "reference": None,
+    },
+    {
+        "item": {"itemId": "style.document_shape.tables", "version": "1.0.0"},
+        "status": "pass",
+        "findingCount": 0,
+        "subresultDigest": "8bbe3c2b1d6a8bbf6eb8204844f76ae4a3e731dbe7404869d6e980d0f509e8ec",
+        "reference": None,
+    },
+    {
+        "item": {"itemId": "style.update_history.history_order", "version": "1.0.0"},
+        "status": "pass",
+        "findingCount": 0,
+        "subresultDigest": "7854789c723f3825d302186b46d55130a484ece7e1df47f0508b59028fbbb273",
+        "reference": None,
+    },
+)
+
+
+def _prepared_catalog_payload() -> dict[str, object]:
+    return {
+        "status": "failed",
+        "exitCode": 1,
+        "producer": "prepared-memory-certification",
+        "preparedCandidate": {},
+        "certification": {
+            "state": "red",
+            "reason": "at least one final catalog item failed",
+            "attestation": {
+                "statusCounts": {"blocked": 0, "fail": 2, "not-applicable": 0, "pass": 10},
+                "catalog": [deepcopy(item) for item in _L38_PREPARED_CATALOG],
+            },
+        },
+    }
+
+
+def _published_report(
+    payload: dict[str, object], *, status: str, exit_code: int
+) -> terminal_rail_failure.PublishedReportRead:
+    manifest = cast(
+        Any,
+        SimpleNamespace(
+            profile_digest="p" * 64,
+            profile_plan_digest="q" * 64,
+            profile_selection_id="atomic-leaf-closeout-targeted",
+            executor_adapter_id="certifying-dagger",
+            result_decoder=SimpleNamespace(
+                model_dump=lambda **_kwargs: {"decoderId": "quality-terminal-result"}
+            ),
+            runtime_authority_digest=None,
+            candidate_tree="c" * 40,
+            generation=98,
+            files={"clean-quality-results.json": SimpleNamespace(sha256="r" * 64, size=22192)},
+        ),
+    )
+    return terminal_rail_failure.PublishedReportRead(
+        state="published",
+        manifest=manifest,
+        payload=payload,
+        status=status,
+        exit_code=exit_code,
+    )
+
+
+def _terminal_result(
+    payload: dict[str, object],
+    *,
+    status: str,
+    exit_code: int,
+    error: BaseException | None = None,
+) -> dict[str, object]:
+    with patch.object(
+        terminal_rail_failure,
+        "_read_published_report",
+        return_value=_published_report(payload, status=status, exit_code=exit_code),
+    ):
+        return terminal_rail_failure.terminal_worker_failure_result(
+            operation_kind="closeout",
+            generation=1,
+            candidate_tree="c" * 40,
+            error=error,
+        )
 
 
 @dataclass(frozen=True)

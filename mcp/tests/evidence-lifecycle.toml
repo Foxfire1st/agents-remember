@@ -276,6 +276,7 @@ permanence_rationale = "The helper owns the shared closeout repository topology 
 replacement_contract = "node:mcp/tests/test_closeout_certification_recovery.py::test_selection_recompiles_untrusted_proposals_before_selecting_original_references"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_closeout_certification_recovery.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_integration_ref_transaction.py",
@@ -299,6 +300,8 @@ replacement_contract = "node:mcp/tests/test_prepared_publication_recovery.py::te
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_activation_admission_registered.py",
+  "mcp/tests/test_atomic_master_review_public.py",
+  "mcp/tests/test_atomic_master_review_scope.py",
   "mcp/tests/test_atomic_series_activation.py",
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_author_execution_graph.py",
@@ -349,6 +352,8 @@ replacement_contract = "node:mcp/tests/test_prepared_publication_recovery.py::te
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_activation_admission_registered.py",
+  "mcp/tests/test_atomic_master_review_public.py",
+  "mcp/tests/test_atomic_master_review_scope.py",
   "mcp/tests/test_atomic_series_activation.py",
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_author_execution_graph.py",
@@ -413,6 +418,7 @@ permanence_rationale = "The helper owns one real-Git authority setup shared by i
 replacement_contract = "node:mcp/tests/test_integration_branch_authority.py::IntegrationBranchAuthorityTests::test_external_pair_cas_retains_torn_pair_without_clobbering_memory_race"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_integration_ref_transaction.py",
 ]
@@ -525,6 +531,7 @@ replacement_contract = "node:mcp/tests/test_repository_certification_profiles.py
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agents_remember_quality.py",
+  "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_clean_quality_executor.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
@@ -563,6 +570,7 @@ replacement_contract = "node:mcp/tests/test_repository_certification_profiles.py
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agents_remember_quality.py",
+  "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_clean_quality_executor.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
@@ -601,6 +609,7 @@ replacement_contract = "node:mcp/tests/test_repository_certification_profiles.py
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agents_remember_quality.py",
+  "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_clean_quality_executor.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
@@ -918,6 +927,7 @@ permanence_rationale = "One fixture builds isolated Git candidates and real reta
 replacement_contract = "node:mcp/tests/test_closeout_certification_recovery.py::test_unchanged_interruption_reuses_the_original_exact_certificates"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
   "mcp/tests/test_closeout_memory_certification_reuse.py",
@@ -966,6 +976,7 @@ replacement_contract = "node:mcp/tests/test_repository_certification_profiles.py
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_agents_remember_quality.py",
+  "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_certification_lane_bridge.py",
   "mcp/tests/test_clean_quality_executor.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
@@ -1004,6 +1015,7 @@ permanence_rationale = "Lifecycle journal tests require real selected admission 
 replacement_contract = "node:mcp/tests/test_lifecycle_operations.py::test_contract_lifecycle_lease_excludes_cross_kind_and_terminal_mutation"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_integration_ref_transaction.py",
   "mcp/tests/test_lifecycle_operations.py",

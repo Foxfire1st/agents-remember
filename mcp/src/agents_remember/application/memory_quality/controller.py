@@ -31,6 +31,7 @@ from agents_remember.errors import (
     MemoryCandidatePairError,
     MemoryCandidatePairFailure,
 )
+from agents_remember.kernel import filesystem
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.route_index import build_route_indexes
@@ -58,10 +59,16 @@ from agents_remember.models.memory import (
     MemoryQualitySyncRequest,
 )
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
+    curator_coherence_no_impact,
     curator_coherence_paths,
     require_current_curator_coherence,
 )
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
+from agents_remember.worktrees.modules.onboarding import (
+    contract_memory_verified_commit,
+    validate_memory_refresh_attestations,
+)
+from agents_remember.worktrees.modules.onboarding_acceptance import OnboardingBodyGateEvidence
 
 _CAPACITY_GUIDANCE = (
     "Poll an existing run or wait for active memory-quality work to finish, then submit "
@@ -323,6 +330,8 @@ def _resolve_execution(
 
 def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, object]:
     scope = revalidate_memory_candidate_scope(execution.config, execution.scope)
+    quality_code_root = scope.quality_code_root
+    quality_context = scope.quality_context
     candidate_inputs = (
         _curator_candidate_inputs(scope) if execution.publish_curator_report else None
     )
@@ -331,10 +340,13 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
         scope.onboarding_root,
         checks=execution.checks,
         drift_context=DriftCheckContext(
-            code_repository_root=scope.code_root,
-            context=scope.context,
+            code_repository_root=quality_code_root,
+            context=quality_context,
             detail_limit=execution.detail_limit,
-            unstamped_code_commit=scope.unstamped_code_commit,
+            unstamped_code_commit=(
+                None if scope.prepared_code_view is not None else scope.unstamped_code_commit
+            ),
+            retained_code_history_commits=scope.prepared_code_history_commits,
             report_path=(scope.curator_report_path if execution.publish_curator_report else None),
             include_rows=execution.publish_curator_report,
             write_report=not execution.publish_curator_report,
@@ -427,16 +439,16 @@ def _attach_curator_checklist(
         scope.onboarding_root,
     )
     missing_onboarding = check_missing_onboarding(
-        code_repository_root=scope.code_root,
+        code_repository_root=scope.quality_code_root,
         onboarding_root=scope.onboarding_root,
-        settings=scope.context.storage,
-        code_repository_name=scope.context.code_repository_name,
+        settings=scope.quality_context.storage,
+        code_repository_name=scope.quality_context.code_repository_name,
     )
     route_indexes = build_route_indexes(
-        code_root=scope.code_root,
+        code_root=scope.quality_code_root,
         onboarding_root=scope.onboarding_root,
-        repository=scope.context.code_repository_name,
-        storage=scope.context.storage,
+        repository=scope.quality_context.code_repository_name,
+        storage=scope.quality_context.storage,
         dry_run=True,
     )
     scope = revalidate_memory_candidate_scope(config, scope)
@@ -454,6 +466,48 @@ def _attach_curator_checklist(
     if census is None:
         raise RuntimeError("curator publication requires its complete plane-derived census")
     source_candidates = census_curator_candidates(census)
+    if (
+        scope.contract is not None
+        and scope.contract.memory_mode == "external"
+        and scope.contract.kind == "leaf"
+    ):
+        changed_paths = sorted({*census.scope.working_paths, *census.scope.committed_paths})
+        current_working_paths = _current_working_code_paths(scope, census.scope.working_paths)
+        accepted_no_impact = frozenset()
+        accepted_route_no_impact = frozenset()
+        try:
+            coherence = require_current_curator_coherence(scope.contract)
+        except CuratorCoherenceError:
+            pass
+        else:
+            no_impact = curator_coherence_no_impact(coherence)
+            accepted_no_impact = no_impact.content_sources
+            accepted_route_no_impact = no_impact.source_routes
+        try:
+            validate_memory_refresh_attestations(
+                scope.quality_context,
+                changed_paths,
+                working_paths=current_working_paths,
+                body_gate=OnboardingBodyGateEvidence(
+                    memory_tree=scope.onboarding_root.parent,
+                    memory_verified_commit=contract_memory_verified_commit(scope.contract),
+                    accepted_no_impact=accepted_no_impact,
+                ),
+                route_body_gate=OnboardingBodyGateEvidence(
+                    memory_tree=scope.onboarding_root.parent,
+                    memory_verified_commit=contract_memory_verified_commit(scope.contract),
+                    accepted_no_impact=accepted_route_no_impact,
+                ),
+            )
+        except RuntimeError as error:
+            repair_findings.append(
+                {
+                    "check": "memory-refresh-attestations",
+                    "code": "memory-refresh-attestation-failed",
+                    "path": "",
+                    "message": str(error),
+                }
+            )
     repair_findings.extend(
         {
             "check": "memory-census",
@@ -469,7 +523,7 @@ def _attach_curator_checklist(
         CuratorChecklist(
             report_path=scope.curator_report_path,
             repo_id=scope.repo_id,
-            code_root=scope.code_root,
+            code_root=scope.quality_code_root,
             onboarding_root=scope.onboarding_root,
             pair_identity=scope.pair_identity,
             code_candidate_tree=candidate_inputs.code_tree,
@@ -562,6 +616,12 @@ def _curator_candidate_inputs(scope: MemoryScope) -> _CuratorCandidateInputs:
                 Path(memory_temporary) / "index",
             ),
         )
+
+
+def _current_working_code_paths(scope: MemoryScope, paths: tuple[str, ...]) -> list[str]:
+    """Keep current source targets while retaining deleted paths in the census history."""
+
+    return [path for path in paths if filesystem.is_file(scope.quality_code_root / path)]
 
 
 def _require_same_curator_candidate(

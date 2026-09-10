@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
@@ -20,7 +21,7 @@ from agents_remember.models.lifecycles.evidence_dependencies import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import TaskIntentIdentity
-from agents_remember.tasks import RouteReviewRecord
+from agents_remember.tasks import RouteReviewRecord, TaskDocument
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
 from agents_remember.tasks.task_intent import (
@@ -32,7 +33,7 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 class RouteReviewError(ValueError):
-    """The leaf lacks a passing review for its exact current candidate tree."""
+    """A candidate lacks a passing review for its exact current route."""
 
     def __init__(self, status: str, detail: str) -> None:
         self.status = status
@@ -50,6 +51,135 @@ _ROUTE_REVIEW_RECORD_STATUSES = frozenset(
         "route-review-task-intent-stale",
     }
 )
+_MASTER_REVIEW_RECORD_STATUSES = frozenset(
+    {
+        "route-review-master-required",
+        "route-review-master-scope-stale",
+        "route-review-master-stale",
+        "route-review-master-dependencies-stale",
+        "route-review-master-task-intent-stale",
+        "route-review-evidence-stale",
+        "route-review-task-intent-missing",
+        "route-review-task-intent-unavailable",
+        "route-review-task-intent-stale",
+    }
+)
+_MASTER_REVIEW_OWNER_STATUSES = frozenset(
+    {
+        "route-review-atomic-owner-invalid",
+        "route-review-atomic-owner-missing",
+        "route-review-atomic-child-invalid",
+        "route-review-master-membership-invalid",
+        "route-review-master-binding-invalid",
+    }
+)
+_MASTER_REVIEW_CANDIDATE_STATUSES = frozenset({"route-review-master-candidate-unreadable"})
+_MASTER_REVIEW_BLOCKED_STATUSES = frozenset({"route-review-master-blocked"})
+
+
+@dataclass(frozen=True)
+class _RouteReviewProjectionPlan:
+    expected: dict[str, object]
+    observed: dict[str, object]
+    next_action: str
+    summary: str
+    next_operation: str
+    required_args: list[str] | None
+    inspection_tool: Literal["task_doc", "worktree_status"] = "task_doc"
+
+
+def _route_review_projection_plan(
+    status: str,
+    *,
+    boundary: Literal["closeout", "integration"],
+) -> _RouteReviewProjectionPlan:
+    integration = boundary == "integration"
+    retry_target = "integration" if integration else "closeout"
+    if integration and status in _MASTER_REVIEW_CANDIDATE_STATUSES:
+        plan = _RouteReviewProjectionPlan(
+            {"candidate": "readable journaled Git candidate commit"},
+            {"candidateStatus": "unreadable"},
+            "inspect_task_document",
+            "Inspect the exact worktree_status address and restore a readable journaled "
+            f"candidate before retrying {retry_target}.",
+            "inspect_task_document",
+            None,
+            "worktree_status",
+        )
+    elif integration and status in _MASTER_REVIEW_OWNER_STATUSES:
+        plan = _RouteReviewProjectionPlan(
+            {"atomicMaster": "canonical series owner and child membership"},
+            {"routeReviewStatus": status},
+            "inspect_task_document",
+            f"Inspect or correct the canonical atomic-master owner before retrying {retry_target}.",
+            "inspect_task_document",
+            None,
+        )
+    elif integration and status in _MASTER_REVIEW_BLOCKED_STATUSES:
+        plan = _RouteReviewProjectionPlan(
+            {"routeReview": "current passing review of the accumulated master candidate"},
+            {"routeReview": "blocked"},
+            "developer-decision",
+            "The independent master route review blocks this integration; resolve that review "
+            f"decision before retrying {retry_target}.",
+            "developer-decision",
+            None,
+        )
+    elif integration and status in _MASTER_REVIEW_RECORD_STATUSES:
+        observed: dict[str, object] = (
+            {"routeReview": "missing"}
+            if status == "route-review-master-required"
+            else {"routeReviewStatus": status}
+        )
+        plan = _RouteReviewProjectionPlan(
+            {"routeReview": "current passing review of the accumulated master candidate"},
+            observed,
+            "record_route_review",
+            "Record or refresh the independent master route review for the exact accumulated "
+            f"candidate, then retry {retry_target}.",
+            "record_route_review",
+            ["review"],
+        )
+    elif status == "route-review-task-document-missing":
+        plan = _RouteReviewProjectionPlan(
+            {"taskDocument": "canonical leaf task document with route-review authority"},
+            {"taskDocument": "missing"},
+            "inspect_task_document",
+            "Restore or inspect the canonical leaf task document, then record a current "
+            f"route review before retrying {retry_target}.",
+            "inspect_task_document",
+            None,
+        )
+    elif status == "route-review-blocked":
+        plan = _RouteReviewProjectionPlan(
+            {"routeReview": "current passing independent review"},
+            {"routeReview": "blocked"},
+            "developer-decision",
+            "The independent route review blocks this candidate; resolve that review decision "
+            f"before retrying {retry_target}.",
+            "developer-decision",
+            None,
+        )
+    elif status in _ROUTE_REVIEW_RECORD_STATUSES:
+        plan = _RouteReviewProjectionPlan(
+            {"routeReview": "current passing review bound to this candidate"},
+            {"routeReviewStatus": status},
+            "record_route_review",
+            "Record or refresh the route review for the exact current candidate, then retry "
+            f"{retry_target}.",
+            "record_route_review",
+            ["review"],
+        )
+    else:
+        plan = _RouteReviewProjectionPlan(
+            {"routeReview": "valid current review authority"},
+            {"routeReviewStatus": status},
+            "developer-decision",
+            f"Resolve the route-review admission failure ({status}) before retrying {retry_target}.",
+            "developer-decision",
+            None,
+        )
+    return plan
 
 
 def route_review_refusal_projection(
@@ -57,6 +187,7 @@ def route_review_refusal_projection(
     detail: str,
     *,
     contract: WorktreeContract | None = None,
+    boundary: Literal["closeout", "integration"] = "closeout",
 ) -> dict[str, object]:
     """Project one route-review refusal into truthful, task-bound recovery guidance.
 
@@ -66,69 +197,43 @@ def route_review_refusal_projection(
     finding without that identity cannot accidentally invent a review payload or destination.
     """
 
-    if status == "route-review-task-document-missing":
-        expected = {"taskDocument": "canonical leaf task document with route-review authority"}
-        observed = {"taskDocument": "missing"}
-        next_action = "inspect_task_document"
-        summary = (
-            "Restore or inspect the canonical leaf task document, then record a current "
-            "route review before retrying closeout."
-        )
-        next_operation = "inspect_task_document"
-        required_args: list[str] | None = None
-    elif status == "route-review-blocked":
-        expected = {"routeReview": "current passing independent review"}
-        observed = {"routeReview": "blocked"}
-        next_action = "developer-decision"
-        summary = (
-            "The independent route review blocks this candidate; resolve that review decision "
-            "before retrying closeout."
-        )
-        next_operation = "developer-decision"
-        required_args = None
-    elif status in _ROUTE_REVIEW_RECORD_STATUSES:
-        expected = {"routeReview": "current passing review bound to this candidate"}
-        observed = {"routeReviewStatus": status}
-        next_action = "record_route_review"
-        summary = (
-            "Record or refresh the route review for the exact current candidate, then retry "
-            "closeout."
-        )
-        next_operation = "record_route_review"
-        required_args = ["review"]
-    else:
-        expected = {"routeReview": "valid current review authority"}
-        observed = {"routeReviewStatus": status}
-        next_action = "developer-decision"
-        summary = f"Resolve the route-review admission failure ({status}) before retrying closeout."
-        next_operation = "developer-decision"
-        required_args = None
+    integration = boundary == "integration"
+    plan = _route_review_projection_plan(status, boundary=boundary)
 
     result: dict[str, object] = {
         "status": status,
         "detail": detail,
-        "expected": expected,
-        "observed": observed,
-        "nextAction": next_action,
+        "expected": plan.expected,
+        "observed": plan.observed,
+        "nextAction": plan.next_action,
     }
     next_step: dict[str, object] = {
-        "summary": summary,
-        "nextOperation": next_operation,
+        "summary": plan.summary,
+        "nextOperation": plan.next_operation,
     }
     if contract is not None:
         contract_path = contract.contract_path.as_posix()
         result["contractPath"] = contract_path
-        if status == "route-review-task-document-missing":
+        if integration:
+            result["statusAction"] = {
+                "tool": "worktree_status",
+                "args": {
+                    "repo_id": contract.repo_name,
+                    "contract_path": contract_path,
+                },
+            }
+        if plan.next_action == "inspect_task_document":
             next_args = {
                 "repo_id": contract.repo_name,
-                "operation": "get",
                 "contract_path": contract_path,
             }
-            result["nextTool"] = "task_doc"
+            if plan.inspection_tool == "task_doc":
+                next_args["operation"] = "get"
+            result["nextTool"] = plan.inspection_tool
             result["nextArgs"] = next_args
-            next_step["nextTool"] = "task_doc"
+            next_step["nextTool"] = plan.inspection_tool
             next_step["nextArgs"] = next_args
-        elif status in _ROUTE_REVIEW_RECORD_STATUSES:
+        elif plan.next_action == "record_route_review":
             next_args = {
                 "repo_id": contract.repo_name,
                 "operation": "record_route_review",
@@ -138,9 +243,11 @@ def route_review_refusal_projection(
             result["nextArgs"] = next_args
             next_step["nextTool"] = "task_doc"
             next_step["nextArgs"] = next_args
-        if required_args:
-            result["nextRequiredArgs"] = required_args
-            next_step["nextRequiredArgs"] = required_args
+        if plan.required_args:
+            result["nextRequiredArgs"] = plan.required_args
+            next_step["nextRequiredArgs"] = plan.required_args
+    if integration:
+        result["developerDecisionRequired"] = plan.next_action == "developer-decision"
     result["nextStep"] = next_step
     return result
 
@@ -149,10 +256,16 @@ def route_review_refusal_fields(
     error: RouteReviewError,
     *,
     contract: WorktreeContract,
+    boundary: Literal["closeout", "integration"] = "closeout",
 ) -> dict[str, object]:
     """Project a typed route-review error with the exact contract identity."""
 
-    return route_review_refusal_projection(error.status, str(error), contract=contract)
+    return route_review_refusal_projection(
+        error.status,
+        str(error),
+        contract=contract,
+        boundary=boundary,
+    )
 
 
 def code_candidate_tree(contract: WorktreeContract) -> str:
@@ -260,6 +373,7 @@ def require_current_route_review(contract: WorktreeContract) -> dict[str, object
             "route-review-required",
             "the current code change has no independent route-review record",
         )
+    _require_review_state_resolved(document)
     if review.verdict == "block":
         raise RouteReviewError(
             "route-review-blocked",
@@ -283,6 +397,25 @@ def require_current_route_review(contract: WorktreeContract) -> dict[str, object
         "verdictRef": review.verdictRef,
         "routeCount": len(review.routes),
     }
+
+
+def _require_review_state_resolved(document: TaskDocument) -> None:
+    """Keep an unresolved fixed-list review from being accepted by an older route record."""
+
+    state = getattr(document, "reviewState", None)
+    if state is None:
+        return
+    if state.pending:
+        raise RouteReviewError(
+            "review-admission-pending",
+            f"review round {state.round} is pending publication; route acceptance cannot proceed",
+        )
+    if state.remainingFindingIds:
+        raise RouteReviewError(
+            "review-findings-unresolved",
+            "the sealed review still has unresolved findings: "
+            + ", ".join(state.remainingFindingIds),
+        )
 
 
 def require_current_route_review_task_intent(

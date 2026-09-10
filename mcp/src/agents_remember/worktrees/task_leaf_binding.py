@@ -5,6 +5,7 @@ from __future__ import annotations
 import stat
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SubTaskRef, TaskDocument, read_task_doc
@@ -14,15 +15,30 @@ from agents_remember.tasks.leaf_binding import (
     require_canonical_leaf_binding,
     require_leaf_parent_row,
 )
+from agents_remember.tasks.leaf_doc import (
+    LeafEnclosureRegistrationPlan,
+    plan_leaf_doc_enclosure_registration,
+)
+from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
+
+if TYPE_CHECKING:
+    from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 class TaskLeafBindingError(ValueError):
     """The parent row and exact child source do not form one canonical leaf identity."""
 
-    def __init__(self, detail: str, *, status: str = "task-leaf-binding-invalid") -> None:
+    def __init__(
+        self,
+        detail: str,
+        *,
+        status: str = "task-leaf-binding-invalid",
+        facts: dict[str, object] | None = None,
+    ) -> None:
         self.status = status
         self.detail = detail
+        self.facts = facts or {}
         super().__init__(detail)
 
 
@@ -150,13 +166,142 @@ def require_current_start_task_binding(
     task_name: str | None = None,
 ) -> None:
     """Re-prove the task identity immediately before the start locator reservation."""
+    _resolve_exact_leaf_document(
+        coordination_root,
+        repo_id,
+        task_root,
+        leaf_id,
+        task_name=task_name,
+    )
+
+
+def plan_current_leaf_enclosure_registration(  # noqa: PLR0913
+    coordination_root: Path,
+    repo_id: str,
+    task_root: Path,
+    leaf_id: str,
+    enclosure_path: Path,
+    *,
+    lifecycle_id: str | None = None,
+    task_name: str | None = None,
+) -> LeafEnclosureRegistrationPlan:
+    """Prepare one exact leaf document candidate from canonical task topology."""
+
+    document_path, _document = _resolve_exact_leaf_document(
+        coordination_root,
+        repo_id,
+        task_root,
+        leaf_id,
+        task_name=task_name,
+    )
+    return plan_leaf_doc_enclosure_registration(
+        document_path,
+        leaf_id,
+        enclosure_path,
+        lifecycle_id=lifecycle_id,
+    )
+
+
+def require_current_leaf_enclosure_binding(  # noqa: PLR0913
+    coordination_root: Path,
+    repo_id: str,
+    task_root: Path,
+    leaf_id: str,
+    enclosure_path: Path,
+    *,
+    task_name: str | None = None,
+) -> LeafEnclosureRegistrationPlan:
+    """Require the exact persisted leaf/enclosure binding before closeout work."""
+
+    plan = plan_current_leaf_enclosure_registration(
+        coordination_root,
+        repo_id,
+        task_root,
+        leaf_id,
+        enclosure_path,
+        task_name=task_name,
+    )
+    if plan.candidate is not None:
+        task_facts = _enclosure_binding_facts(plan, task_name=task_name)
+        recovery = (
+            "run task_doc.replace against this exact leaf contract, then re-run "
+            "worktree_start/worktree_attach before closeout"
+        )
+        status = (
+            "task-enclosure-binding-missing"
+            if plan.state == "missing"
+            else "task-enclosure-binding-mismatched"
+        )
+        raise TaskLeafBindingError(
+            "addressed leaf enclosure binding is "
+            f"{plan.state}: leaf {plan.leaf_id!r}, task document {plan.doc_path}, "
+            f"contract {plan.enclosure_path}; recovery: {recovery}",
+            status=status,
+            facts={**task_facts, "recoveryOperation": recovery},
+        )
+    return plan
+
+
+def leaf_enclosure_binding_refusal(
+    contract: WorktreeContract,
+) -> WorktreeCommandResult | None:
+    """Return the actionable refusal before closeout preparation, if binding is stale."""
+
+    try:
+        require_current_leaf_enclosure_binding(
+            contract.coordination_root,
+            contract.repo_name,
+            contract.task_root,
+            contract.leaf_id,
+            contract.contract_path,
+            task_name=contract.task_name,
+        )
+    except TaskLeafBindingError as error:
+        recovery = error.facts.get(
+            "recoveryOperation",
+            "publish the exact leaf/enclosure binding through task_doc.replace, then retry closeout",
+        )
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": error.status,
+                "status": error.status,
+                "summary": (f"closeout refused for leaf {contract.leaf_id!r}: {error.detail}"),
+                "detail": error.detail,
+                "leafId": contract.leaf_id,
+                "taskName": contract.task_name,
+                "taskDocument": error.facts.get("taskDocument", ""),
+                "contractPath": contract.contract_path.as_posix(),
+                "recoveryOperation": recovery,
+                "nextAction": "repair-task-enclosure-binding",
+                "nextTool": "task_doc",
+                "nextArgs": {
+                    "operation": "get",
+                    "contract_path": contract.contract_path.as_posix(),
+                },
+            },
+        )
+    return None
+
+
+def _resolve_exact_leaf_document(
+    coordination_root: Path,
+    repo_id: str,
+    task_root: Path,
+    leaf_id: str,
+    *,
+    task_name: str | None = None,
+) -> tuple[Path, TaskDocument]:
+    """Resolve one JSON-primary leaf through the parent row, never by sibling scan."""
 
     root_path = task_root.resolve(strict=False) / "task.json"
     try:
         root = read_task_doc(root_path)
     except (OSError, ValueError) as exc:
         raise TaskLeafBindingError(
-            f"worktree_start task authority is missing or unreadable: {root_path}: {exc}"
+            f"canonical task authority is missing or unreadable: {root_path}: {exc}",
+            status="task-leaf-binding-document-unreadable",
+            facts={"leafId": leaf_id, "taskDocument": root_path.as_posix()},
         ) from exc
     if root.kind == "master":
         binding = resolve_leaf_task_binding(
@@ -168,13 +313,41 @@ def require_current_start_task_binding(
         )
         if binding.leaf is None:
             raise TaskLeafBindingError(
-                "worktree_start requires the exact JSON-primary leaf task source"
+                "canonical leaf task document is missing: "
+                f"leaf {leaf_id!r}, task document {binding.leaf_json_path}",
+                status="task-leaf-binding-document-missing",
+                facts={
+                    "leafId": leaf_id,
+                    "taskDocument": binding.leaf_json_path.as_posix(),
+                },
             )
-        return
-    if root.id != leaf_id:
+        return binding.leaf_json_path, binding.leaf
+    if root.kind != "subTask" or root.id != leaf_id:
         raise TaskLeafBindingError(
-            f"worktree_start task identity changed: expected {leaf_id!r}, observed {root.id!r}"
+            f"canonical task identity changed: expected leaf {leaf_id!r}, observed "
+            f"{root.id!r} ({root.kind}) in {root_path}",
+            status="task-leaf-binding-identity-mismatch",
+            facts={
+                "leafId": leaf_id,
+                "taskDocument": root_path.as_posix(),
+                "observedTaskId": root.id,
+            },
         )
+    return root_path, root
+
+
+def _enclosure_binding_facts(
+    plan: LeafEnclosureRegistrationPlan,
+    *,
+    task_name: str | None,
+) -> dict[str, object]:
+    return {
+        "leafId": plan.leaf_id,
+        "taskName": task_name or "",
+        "taskDocument": plan.doc_path.as_posix(),
+        "contractPath": plan.enclosure_path,
+        "bindingState": plan.state,
+    }
 
 
 def _source_mode(path: Path) -> int | None:

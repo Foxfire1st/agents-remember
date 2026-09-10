@@ -4,8 +4,10 @@ The standing criteria an **adversarial reviewer** (`../roles/reviewer.md`) — a
 verifying a builder round — MUST run over every report, claim, and summary in the change set:
 builder reports, owner claims, handover packets. **Standing from day one** in every review type:
 report-vs-artifact caught real defects in three separate engagements before this catalog existed.
-Criteria are never made up on the spot: the standing list below is the regression floor, run every
-time; the exploratory mandate and the promotion ratchet keep the catalog alive.
+Criteria are never made up on the spot. A baseline review runs the standing list below as its
+regression floor and may use the exploratory mandate and promotion ratchet. A
+fix-verification uses only the sealed baseline evidence needed for its outstanding IDs; it
+does not recensus this catalog or add a criterion.
 
 ## Standing Criteria (MUST RUN — the regression floor)
 
@@ -44,7 +46,7 @@ of the load-bearing ones.
   not a second verifier or permission to dump arbitrary untracked bytes into a report.
 
 - Catching evidence, three separate engagements (260703-L8): review 3 caught a **hand-aligned
-  test** behind a wiring claim; cycle 6's closeout gate caught **"refreshed" overviews that were
+  test** behind a wiring claim; cycle 6's scoped handoff caught **"refreshed" overviews that were
   history-only**; review 4 caught the **OWNER's own canvas overclaim** (L8 decision log, cycle-7
   entry) — builder reports and owner claims fail the same way. Fourth engagement
   (260815-DAG-L12): 10 files carried mode-only changes (100755→100644, incl.
@@ -97,8 +99,8 @@ A green result or measurement without matching target provenance is not evidence
 
 ## Candidate Criteria (seeded exploratory — one catching engagement each; promote at ≥2)
 
-Run under the exploratory mandate; a candidate is proposed for promotion into the standing list
-when it catches in a second engagement (the ratchet below).
+Run under the exploratory mandate during a baseline review only; a candidate is proposed for
+promotion into the standing list when it catches in a second engagement (the ratchet below).
 
 ### RV-3 — Partial-fix-creates-falsehoods *(candidate — 1 catch)*
 
@@ -113,18 +115,21 @@ after the change.
 
 ## Exploratory Mandate
 
-Beyond the standing list, the reviewer owes **novel lenses** (the brief sets N; default 2): ways
-THIS report could mislead that the catalog does not name yet. Every novel finding-class that
-survives refutation is proposed as a catalog amendment in the verdict.
+During a baseline review, beyond the standing list, the reviewer owes **novel lenses** (the brief sets
+N; default 2): ways THIS report could mislead that the catalog does not name yet. Every novel
+finding-class that survives refutation is proposed as a catalog amendment in the verdict. A
+Fix-verification has no novel-lens or new-catalog duty and cannot turn an observation outside
+the sealed issue list into a finding.
 
 ## Promotion Ratchet
 
-- A **candidate** criterion that catches a real defect in **≥2 separate engagements** is promoted
+- A **candidate** criterion that catches a real defect in **≥2 separate first-review engagements** is promoted
   into the standing list above, with its catching evidence cited — escaped bugs become permanent
   tests (RV-1 is itself the precedent: promoted on three catches). Promotion is proposed in the
   verdict and lands on the loop owner's acceptance.
 - A **standing** criterion that fires nothing for **N consecutive engagements** (default 5)
   demotes to spot-check.
-- A criterion that can be **mechanized graduates out of the catalog into a gate** — the closeout
-  body gate (which catches history-only "refreshes" at commit time, where prose requests did not)
+- A criterion that can be **mechanized graduates out of the catalog into a scoped diagnostic** —
+  the curator handoff check (which catches history-only "refreshes" before the Git transaction, where
+  prose requests did not)
   is the working example.

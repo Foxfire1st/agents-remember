@@ -47,6 +47,7 @@ class StyleCheckInputs:
     onboarding_root: Path
     code_repository_root: Path | None = None
     unstamped_code_commit: str | None = None
+    retained_code_history_commits: tuple[str, ...] = ()
 
 
 CheckRunner = Callable[[StyleCheckInputs], dict[str, Any]]
@@ -62,6 +63,7 @@ STYLE_CHECKS: dict[str, CheckRunner] = {
         inputs.onboarding_root,
         inputs.code_repository_root,
         unstamped_code_commit=inputs.unstamped_code_commit,
+        retained_code_history_commits=inputs.retained_code_history_commits,
     ),
     diff_markers.CHECK_NAME: onboarding_only(diff_markers.check_onboarding_root),
     entity_catalog_alignment.CHECK_NAME: onboarding_only(
@@ -99,6 +101,7 @@ class DriftCheckContext:
     context: Any
     detail_limit: int = 50
     unstamped_code_commit: str | None = None
+    retained_code_history_commits: tuple[str, ...] = ()
     report_path: Path | None = None
     include_rows: bool = False
     write_report: bool = True
@@ -152,6 +155,9 @@ def run_check(
                 ),
                 unstamped_code_commit=(
                     None if drift_context is None else drift_context.unstamped_code_commit
+                ),
+                retained_code_history_commits=(
+                    () if drift_context is None else drift_context.retained_code_history_commits
                 ),
             )
         )

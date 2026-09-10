@@ -169,13 +169,18 @@ def observe_git_nodes(repository: Path, delta: GitTreeDelta) -> tuple[ScopeNode,
         blob = candidate.get(path) or base.get(path)
         if blob is None:
             _refuse("git-node-missing", "Git diff root has no blob in either exact tree", node=path)
+        reasons = ("exact Git tree member",)
+        if path not in candidate:
+            # Keep a deleted/renamed endpoint in the immutable attention population, but do
+            # not present it as a current document to an executor that reads the candidate tree.
+            reasons = ("exact Git tree member", "historical Git tree member")
         nodes.append(
             ScopeNode(
                 nodeId=f"{delta.namespace}:{path}",
                 contentDigest=canonical_digest({"gitBlob": blob}),
                 authorityNamespace=authority,
                 validatorVersion=delta.ownerVersion,
-                reasons=("exact Git tree member",),
+                reasons=reasons,
             )
         )
     return tuple(nodes)

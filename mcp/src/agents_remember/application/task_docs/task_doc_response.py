@@ -19,6 +19,20 @@ from agents_remember.tasks import (
 from agents_remember.tasks.master_sync import MasterSyncPlan
 
 
+def _review_state_payload(doc: TaskDocument) -> dict[str, Any]:
+    """Expose the bounded review counter, treating an absent field as zero."""
+
+    state = doc.reviewState
+    if state is None:
+        return {
+            "round": 0,
+            "pending": False,
+            "baselineFindings": [],
+            "remainingFindingIds": [],
+        }
+    return state.model_dump(mode="json", by_alias=True)
+
+
 def task_doc_result(
     operation: str,
     doc: TaskDocument,
@@ -39,6 +53,7 @@ def task_doc_result(
         "renderedPath": markdown_path.as_posix(),
         "stepsDone": step_done(doc),
         "stepsTotal": step_total(doc),
+        "reviewState": _review_state_payload(doc),
     }
     sync_payload = _master_sync_payload(master_sync, preview=False)
     if sync_payload is not None:

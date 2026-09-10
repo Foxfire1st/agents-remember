@@ -78,7 +78,7 @@ from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.quality.certification_records import certificate_store
 from agents_remember.worktrees.queue.closeout_recovery import prove_closeout_recovery_commits
 from agents_remember.worktrees.queue.closeout_staged_quality import PreparedStagedCode
-from agents_remember.worktrees.route_review import require_current_route_review
+from agents_remember.worktrees.route_review_scope import require_current_route_review
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     load_contract,

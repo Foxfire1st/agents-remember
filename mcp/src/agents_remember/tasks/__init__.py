@@ -26,7 +26,9 @@ from .document import (
     HeaderNote,
     LeafPlacement,
     MasterExecutionNature,
+    RouteReviewChildIntent,
     RouteReviewRecord,
+    RouteReviewScope,
     RouteReviewUnit,
     RouteReviewVerdict,
     Section,
@@ -61,6 +63,10 @@ from .execution_graph_titles import (
 )
 from .readiness import CompletionBlocker, completion_blockers
 from .render import render_markdown
+from .route_review import (
+    ReviewFinding,
+    ReviewState,
+)
 from .store import (
     TaskDocSourceReadError,
     TaskDocSourceSnapshot,
@@ -93,7 +99,11 @@ __all__ = [
     "HeaderNote",
     "LeafPlacement",
     "MasterExecutionNature",
+    "ReviewFinding",
+    "ReviewState",
+    "RouteReviewChildIntent",
     "RouteReviewRecord",
+    "RouteReviewScope",
     "RouteReviewUnit",
     "RouteReviewVerdict",
     "Section",

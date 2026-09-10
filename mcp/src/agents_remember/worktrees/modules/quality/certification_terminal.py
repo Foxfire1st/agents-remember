@@ -7,7 +7,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.certification.certificate_models import GateCertificate
+from agents_remember.certification.certificate_models import (
+    GateCertificate,
+    GateCertificateIdentity,
+)
 from agents_remember.certification.models import (
     CompiledRail,
     GatePlan,
@@ -64,6 +67,7 @@ class GateRecordPublication:
     publication: PublishedQualityManifest
     certificates: list[GateCertificate]
     terminals: list[RecordedGateTerminal]
+    retained_certificates: tuple[GateCertificateIdentity, ...] = ()
 
 
 class TerminalEvidenceMissing(RuntimeError):

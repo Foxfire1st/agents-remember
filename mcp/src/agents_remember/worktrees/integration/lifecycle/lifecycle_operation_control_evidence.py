@@ -89,7 +89,7 @@ def _reconciled_closeout_record(
     if record.legacyMigration is not None:
         raise LifecycleControlError(
             "legacy-output-recovery-required",
-            "migrated legacy code output is proven and cannot be cancelled or revised",
+            "migrated legacy code output is proven and cannot be cancelled or resumed",
             expected={"codeCommit": record.legacyMigration.codeCommit},
             observed={"legacyDigest": record.legacyMigration.originalSha256},
             next_action="recover",

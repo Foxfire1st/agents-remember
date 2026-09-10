@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,6 +15,7 @@ from agents_remember.memory_quality.check import (
     run_memory_quality_check,
 )
 from agents_remember.memory_quality.style.citations import (
+    claim_reopen,
     range_resolution,
 )
 
@@ -205,8 +207,30 @@ class DeletedClassTests(TreeCase):
         self.assertEqual(self.codes(self.tree.run()), ["citation_source_malformed"])
 
 
-class StyleSurfaceTests(unittest.TestCase):
+class StyleSurfaceTests(TreeCase):
     """How the check reaches the gate, and what it says when it cannot resolve."""
+
+    def test_full_and_selected_walks_share_canonical_document_validation(self) -> None:
+        outside = self.tree.memory / "outside.md"
+        outside.write_text("outside\n", encoding="utf-8")
+        (self.tree.onboarding / "escape.md").symlink_to(outside)
+
+        for selected in (None, "escape.md"):
+            with (
+                self.subTest(selected=selected),
+                self.assertRaisesRegex(ValueError, "must name one regular canonical document"),
+            ):
+                if selected is None:
+                    range_resolution.check_onboarding_root(
+                        self.tree.onboarding, self.tree.code, only=None
+                    )
+                else:
+                    range_resolution.check_onboarding_root(
+                        self.tree.onboarding,
+                        self.tree.code,
+                        only=selected,
+                        expected_snapshot="a" * 64,
+                    )
 
     def test_without_a_code_root_the_result_says_so_instead_of_passing_quietly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -216,6 +240,111 @@ class StyleSurfaceTests(unittest.TestCase):
             block = result["checks"][range_resolution.CHECK_NAME]
             self.assertEqual(block["status"], "no-code-repository-root")
             self.assertEqual(block["filesChecked"], 0)
+
+
+class RetainedPreparedProvenanceTests(TreeCase):
+    """A stale prepared tree may anchor history while claims resolve current bytes."""
+
+    def git(self, root: Path, *args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise AssertionError(result.stderr or result.stdout)
+        return result.stdout.strip()
+
+    def setUp(self) -> None:
+        super().setUp()
+        for root in (self.tree.code, self.tree.memory):
+            self.git(root, "init", "--quiet")
+            self.git(root, "config", "user.email", "fixture@example.invalid")
+            self.git(root, "config", "user.name", "Fixture")
+        (self.tree.memory / "memory.md").write_text("# Memory\n", encoding="utf-8")
+        self.git(self.tree.memory, "add", "memory.md")
+        self.git(self.tree.memory, "commit", "--quiet", "-m", "init")
+
+    def card(self, stamp: str) -> None:
+        self.tree.memory_file(
+            "onboarding/current.md",
+            "\n".join(
+                (
+                    "# Current",
+                    "",
+                    "| Field | Value |",
+                    "| --- | --- |",
+                    f"| lastVerifiedCommitHash | `{stamp}` |",
+                    "| lastVerifiedCommitDate | 2026-09-10 |",
+                    "",
+                    "## Repo-Internal References",
+                    "",
+                    "| Finding | Anchor | Source |",
+                    "| --- | --- | --- |",
+                    "| Current value | `VALUE` | src.py:1-1 |",
+                    "",
+                )
+            ),
+        )
+
+    def commits(self) -> tuple[str, str, str]:
+        self.tree.source("src.py", "VALUE = 1\n")
+        self.git(self.tree.code, "add", "src.py")
+        self.git(self.tree.code, "commit", "--quiet", "-m", "old")
+        old = self.git(self.tree.code, "rev-parse", "HEAD")
+        self.git(self.tree.code, "checkout", "--quiet", "--orphan", "current")
+        self.git(self.tree.code, "rm", "--quiet", "-rf", ".")
+        self.tree.source("src.py", "VALUE = 2\n")
+        self.git(self.tree.code, "add", "src.py")
+        self.git(self.tree.code, "commit", "--quiet", "-m", "current")
+        current = self.git(self.tree.code, "rev-parse", "HEAD")
+        self.git(self.tree.code, "checkout", "--quiet", "--orphan", "unrelated")
+        self.git(self.tree.code, "rm", "--quiet", "-rf", ".")
+        self.tree.source("src.py", "VALUE = 3\n")
+        self.git(self.tree.code, "add", "src.py")
+        self.git(self.tree.code, "commit", "--quiet", "-m", "unrelated")
+        unrelated = self.git(self.tree.code, "rev-parse", "HEAD")
+        self.git(self.tree.code, "checkout", "--quiet", "current")
+        return old, current, unrelated
+
+    def check(
+        self,
+        stamp: str,
+        anchor: str | None = None,
+        anchors: tuple[str, ...] | None = None,
+    ) -> dict:
+        self.card(stamp)
+        retained = anchors if anchors is not None else (() if anchor is None else (anchor,))
+        return claim_reopen.check_onboarding_root(
+            self.tree.onboarding,
+            self.tree.code,
+            retained_code_history_commits=retained,
+        )
+
+    def test_retained_prepared_commit_accepts_current_tree_and_rejects_other_history(self) -> None:
+        old, current, unrelated = self.commits()
+
+        retained = self.check(old, anchors=(old, current))
+        self.assertTrue(retained["ok"], retained["findings"])
+        self.assertEqual(len(retained["surfacedFindings"]), 1)
+        self.assertEqual(retained["surfacedFindings"][0]["code"], "citation_claim_reopened")
+
+        refused = self.check(unrelated, old)
+        self.assertFalse(refused["ok"])
+        self.assertEqual(refused["findings"][0]["code"], "citation_provenance_invalid")
+
+        current_only = self.check(old, anchors=(current,))
+        self.assertFalse(current_only["ok"])
+        self.assertEqual(current_only["findings"][0]["code"], "citation_provenance_invalid")
+
+        without_anchor = self.check(old)
+        self.assertFalse(without_anchor["ok"])
+        self.assertEqual(without_anchor["findings"][0]["code"], "citation_provenance_invalid")
+
+        ordinary = self.check(current)
+        self.assertTrue(ordinary["ok"], ordinary["findings"])
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from agents_remember.certification.certificate_models import (
     GateCertificateIssuanceContext,
     GateFiveSemanticInputs,
 )
+from agents_remember.certification.final_certification_models import FinalCertificationResult
 from agents_remember.certification.models import (
     GateResultAdmission,
     GateResultManifest,
@@ -29,7 +30,7 @@ from agents_remember.certification.repository_profiles.execution import (
     admit_repository_profile_execution,
 )
 from agents_remember.certification.results import build_rail_result, compile_gate_result_manifest
-from agents_remember.errors import FinalCertificationError
+from agents_remember.errors import CertificationContractError, FinalCertificationError
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import load_config
 from agents_remember.kernel.route_index import build_route_indexes
@@ -43,7 +44,6 @@ from agents_remember.memory_quality.final_certification.certify import (
     FinalCertificationEvidence,
     certify_final_full_memory_coherence,
 )
-from agents_remember.memory_quality.final_certification.models import FinalCertificationResult
 from agents_remember.memory_quality.incremental_scope.affected_execution import (
     AffectedClosureExecution,
     RangeResolutionAffectedExecutor,
@@ -73,6 +73,11 @@ from agents_remember.memory_quality.integrity.check_missing_onboarding import (
 from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.memory_quality.style.citations.source_index import open_repository_index
 from agents_remember.models.lifecycles.operation import CloseoutOperationInput
+from agents_remember.models.lifecycles.preparation import (
+    PreparedCloseoutOutput,
+    require_prepared_output_matches_intent,
+)
+from agents_remember.models.lifecycles.prepared_memory import PreparedMemoryCandidate
 from agents_remember.models.task_document import CanonicalTaskObservation
 from agents_remember.worktrees.integration.closeout.certification.execution import (
     CloseoutCertificationHandoff,
@@ -80,9 +85,12 @@ from agents_remember.worktrees.integration.closeout.certification.execution impo
 )
 from agents_remember.worktrees.integration.closeout.certification.observation import refuse
 from agents_remember.worktrees.integration.closeout.certification.selection import (
+    load_typed,
     select_recorded_terminals,
 )
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
+    ValidatedCuratorCoherence,
+    curator_coherence_no_impact,
     require_current_curator_coherence,
 )
 from agents_remember.worktrees.integration.closeout.preparation.memory_execution import (
@@ -92,7 +100,23 @@ from agents_remember.worktrees.integration.closeout.preparation.memory_port impo
     PreparedMemoryCertificationRequest,
     PreparedMemoryCertificationResult,
 )
+from agents_remember.worktrees.integration.closeout.preparation_selection import (
+    selected_preparation_intents,
+)
 from agents_remember.worktrees.modules.context import contract_context
+from agents_remember.worktrees.modules.models import VerifiedChange
+from agents_remember.worktrees.modules.onboarding import (
+    contract_memory_verified_commit,
+    entity_fingerprint_refresh_plan_for_context,
+    parse_entity_fingerprint_rows,
+    refresh_entity_fingerprints_for_context,
+    refresh_onboarding_metadata_for_context,
+    refresh_route_indexes_for_context,
+    refresh_route_overview_metadata_for_context,
+    validate_onboarding_refresh_plan_for_context,
+    validate_route_overview_refresh_plan_for_context,
+)
+from agents_remember.worktrees.modules.onboarding_acceptance import OnboardingBodyGateEvidence
 from agents_remember.worktrees.modules.quality.certification_evidence import verify_result_evidence
 from agents_remember.worktrees.modules.quality.certification_records import certificate_store
 from agents_remember.worktrees.modules.quality.certification_terminal import (
@@ -110,6 +134,7 @@ from agents_remember.worktrees.modules.quality.published_manifest import (
 from agents_remember.worktrees.modules.quality.report_publication_paths import (
     published_report_path_from_manifest,
 )
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 def _current(request: PreparedMemoryCertificationRequest) -> CloseoutCertificationHandoff:
@@ -165,6 +190,222 @@ class _PreparedScopeAuthority:
             ),
             task=TaskObservationPair(base=baseline, candidate=task),
         )
+
+
+def _prepared_change(
+    request: PreparedMemoryCertificationRequest,
+    current: CloseoutCertificationHandoff,
+    candidate: ScopeCandidateIdentity,
+) -> VerifiedChange:
+    """Bind existing memory writers to the selected prepared Git object and scope."""
+    intents = selected_preparation_intents(current.contract, current.record)
+    if len(intents) != 1 or intents[0].leg != "code":
+        refuse("prepared-memory-code-intent-missing", "one selected code preparation", intents)
+    output = load_typed(
+        certificate_store(current.contract.worktree_group),
+        request.candidate.codeView.preparedOutput,
+        PreparedCloseoutOutput,
+    )
+    require_prepared_output_matches_intent(output, intents[0])
+    changed_paths = sorted(
+        {
+            path
+            for change in candidate.code.changes
+            for path in (change.newPath, change.oldPath)
+            if path is not None
+            and (Path(request.candidate.codeView.physicalCodeRoot) / path).is_file()
+        }
+    )
+    return VerifiedChange(
+        commit=output.commit,
+        commit_date=output.committerDate,
+        changed_paths=changed_paths,
+        working_paths=changed_paths,
+    )
+
+
+def _require_supported_entity_refresh(context, changed_paths: list[str]) -> None:
+    unsupported = entity_fingerprint_refresh_plan_for_context(context, changed_paths)["unsupported"]
+    if not unsupported:
+        return
+    details = ", ".join(f"{item['entity']} ({item['algorithm']})" for item in unsupported)
+    raise RuntimeError(
+        "external-memory closeout requires supported entity fingerprint rows before memory "
+        f"certification; unsupported rows: {details}. Run the c-05-create-or-update-onboarding-files "
+        "skill, then rerun closeout."
+    )
+
+
+_ENTITY_REFRESH_DISPOSITIONS = frozenset(
+    {
+        "reconciled",
+        "preserved",
+        "extended",
+        "superseded",
+        "no-content-impact",
+        "no-route-impact",
+    }
+)
+
+
+def _curated_entity_evidence_paths(
+    context,
+    coherence: ValidatedCuratorCoherence,
+) -> list[str]:
+    """Project accepted candidate-owned entity judgments into writer scope.
+
+    Entity fingerprints are derived from source evidence, but inherited source changes
+    do not appear in this leaf's code delta.  The current coherence record is the
+    existing candidate-bound curator authority for those rows; unresolved dispositions
+    remain outside the refresh set and therefore cannot be hidden by a stamp.
+    """
+    names = {
+        judgment.sourceFile.removeprefix("entity:")
+        for judgment in coherence.record.judgments
+        if (
+            judgment.onboardingFile == "entities.md"
+            and judgment.classification == "entity-row"
+            and judgment.sourceFile.startswith("entity:")
+            and judgment.disposition in _ENTITY_REFRESH_DISPOSITIONS
+        )
+    }
+    if not names:
+        return []
+    rows = {
+        str(row["entity"]): row
+        for row in parse_entity_fingerprint_rows(context.onboarding_root / "entities.md")
+    }
+    missing = sorted(names - rows.keys())
+    if missing:
+        refuse(
+            "prepared-memory-entity-judgment-unmapped",
+            "catalog rows for every accepted entity-row judgment",
+            missing,
+        )
+    return sorted({path for name in names for path in rows[name]["evidence_paths"]})
+
+
+@dataclass(frozen=True)
+class _CuratorRefreshFailure:
+    contract: WorktreeContract
+    request: PreparedMemoryCertificationRequest
+    coherence: ValidatedCuratorCoherence
+    before: PreparedMemoryCandidate
+    after: PreparedMemoryCandidate
+    change: VerifiedChange
+
+
+def _raise_curator_refresh_required(failure: _CuratorRefreshFailure) -> None:
+    """Keep the old authority untouched and name the existing curator retry seam."""
+    contract_path = failure.contract.contract_path.as_posix()
+    detail = (
+        "curator refresh required: "
+        f"contract={contract_path}; beforeMemoryTree={failure.before.memoryTree}; "
+        f"afterMemoryTree={failure.after.memoryTree}; codeTree={failure.after.codeView.codeTree}; "
+        f"preparedCommit={failure.change.commit}; preparedCommitDate={failure.change.commit_date}; "
+        f"oldCoherence={failure.coherence.record_digest}; "
+        "run curator_coherence action=prepare then action=publish for this contract, "
+        "then retry closeout"
+    )
+    raise CertificationContractError(
+        "closeout certification admission refused",
+        (
+            {
+                "code": "prepared-memory-curator-refresh-required",
+                "path": "prepared-memory.curator-coherence",
+                "detail": detail,
+                "expected": {
+                    "contractPath": contract_path,
+                    "memoryTree": failure.before.memoryTree,
+                    "codeTree": failure.request.candidate.codeView.codeTree,
+                    "preparedCommit": failure.change.commit,
+                    "preparedCommitDate": failure.change.commit_date,
+                    "coherenceRecordDigest": failure.coherence.record_digest,
+                },
+                "observed": {
+                    "contractPath": contract_path,
+                    "memoryTree": failure.after.memoryTree,
+                    "codeTree": failure.after.codeView.codeTree,
+                    "candidateDigest": failure.after.candidateDigest,
+                },
+            },
+        ),
+    )
+
+
+def _realize_prepared_memory(
+    request: PreparedMemoryCertificationRequest,
+) -> PreparedMemoryCandidate:
+    """Apply existing metadata writers once, then require curator revalidation if they move memory."""
+    current = _current(request)
+    coherence = require_current_curator_coherence(current.contract)
+    pair = request.candidate.codeView.logicalPair
+    physical_code = Path(request.candidate.codeView.physicalCodeRoot)
+    memory, onboarding = Path(pair.memoryRoot), Path(pair.onboardingRoot)
+    context = replace(
+        contract_context(current.contract),
+        code_repository_root=physical_code,
+        memory_root=memory,
+        onboarding_root=onboarding,
+    )
+    authority = _PreparedScopeAuthority(request)
+    candidate = authority.observe()
+    change = _prepared_change(request, current, candidate)
+    curated_entity_paths = _curated_entity_evidence_paths(context, coherence)
+    entity_changed_paths = sorted(set(change.changed_paths).union(curated_entity_paths))
+    memory_verified_commit = contract_memory_verified_commit(current.contract)
+    no_impact = curator_coherence_no_impact(coherence)
+    body_gate = OnboardingBodyGateEvidence(
+        memory_tree=memory,
+        memory_verified_commit=memory_verified_commit,
+        accepted_no_impact=no_impact.content_sources,
+    )
+    validate_onboarding_refresh_plan_for_context(
+        context,
+        change.changed_paths,
+        working_paths=change.working_paths,
+        body_gate=body_gate,
+    )
+    route_no_impact = no_impact.source_routes
+    validate_route_overview_refresh_plan_for_context(
+        context,
+        change.changed_paths,
+        memory_tree=memory,
+        memory_verified_commit=memory_verified_commit,
+        accepted_no_impact=route_no_impact,
+    )
+    _require_supported_entity_refresh(context, entity_changed_paths)
+    build_route_indexes(
+        code_root=physical_code,
+        onboarding_root=onboarding,
+        repository=current.contract.repo_name,
+        storage=context.storage,
+        dry_run=True,
+    )
+    refresh_onboarding_metadata_for_context(
+        context,
+        change,
+        memory_tree=memory,
+        memory_verified_commit=memory_verified_commit,
+        accepted_no_impact=body_gate.accepted_no_impact,
+    )
+    refresh_route_overview_metadata_for_context(
+        context,
+        change,
+        memory_tree=memory,
+        memory_verified_commit=memory_verified_commit,
+        accepted_no_impact=route_no_impact,
+    )
+    refresh_entity_fingerprints_for_context(context, entity_changed_paths)
+    refresh_route_indexes_for_context(context)
+    after = observe_prepared_memory_candidate(current, request.candidate.codeView)
+    if after.memoryTree != request.candidate.memoryTree:
+        _raise_curator_refresh_required(
+            _CuratorRefreshFailure(
+                current.contract, request, coherence, request.candidate, after, change
+            )
+        )
+    return after
 
 
 def _run(request: PreparedMemoryCertificationRequest) -> FinalCertificationResult:
@@ -446,6 +687,7 @@ def _select(
                 provenance=frozen.provenance,
                 gateFiveInputs=result.gateFiveInputs,
             ),
+            retained_certificates=current.selected.recovery.semanticEnvelope.reusePlan.reusedCertificates,
         )
     objects = certificate_store(current.contract.worktree_group)
     objects.publish(manifest)
@@ -494,6 +736,7 @@ class PreparedMemoryCertificationAdapter:
                 "exact code prefix only",
                 current.selected.state,
             )
+        _realize_prepared_memory(request)
         result = _run(request)
         execution = _profile(request)
         with TemporaryDirectory(

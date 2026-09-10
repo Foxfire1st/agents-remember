@@ -105,6 +105,14 @@ class CandidateAuthorityEnvelope(FrozenContractModel):
     source: SourceAuthorityRecord
     worktree: WorktreeRuleRecord
     generated: GeneratedInputRecord
+    # Older authority objects predate the admitted memory-tree binding. Omit the
+    # absent value from their canonical projection so their retained digest and
+    # bytes remain valid; new observations bind the actual closeout door tree.
+    admittedMemoryTree: str | None = Field(
+        default=None,
+        pattern=_GIT_OBJECT,
+        exclude_if=lambda value: value is None,
+    )
 
 
 class CandidateAuthorityRecords(FrozenContractModel):

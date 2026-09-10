@@ -87,7 +87,7 @@ class LifecycleControlError(RuntimeError):
         }
         if caller is not None:
             arguments["caller"] = caller.model_dump(mode="json")
-        if self.next_action == "revise":
+        if self.next_action == "resume":
             arguments.update(
                 {
                     "code_commit_message": "<fresh message when enabled>",

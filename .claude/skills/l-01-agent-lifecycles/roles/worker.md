@@ -14,11 +14,11 @@ killed, compacted, or respawned without losing anything a successor cannot recon
 
 The worker builds; it does not manage lifecycle machinery. **Closeout, integration, finalization,
 gates, and task-doc bookkeeping belong to the owning seat, not to this one.** A leaf-complete
-terminal state requires *checks green + one complete acceptance block for the owned primary
-requirement + turn report written*. A blocked terminal state instead requires *status `blocked` +
-the checks result + an exact escalation + respawn/recovery state*; failing checks or a blocked row
-can never be reported as leaf-complete. Nothing after either truthful handoff is this seat's
-concern.
+terminal state requires *relevant targeted checks run and truthfully reported + one complete
+acceptance block for the owned primary requirement + turn report written*. A blocked terminal state
+instead requires *status `blocked` + the checks result + an exact escalation + respawn/recovery
+state*. A failed or not-run check must be reported and escalated as needed; it can never be used to
+claim full green. Nothing after either truthful handoff is this seat's concern.
 
 ## Role-Seat Immutability
 
@@ -31,7 +31,7 @@ work, and it never absorbs curator/onboarding-writer work.
 ## The Worker Loop
 
 ```
-brief -> orient -> build code -> checks green -> leaf-complete report -> curator pass
+brief -> orient -> build code -> targeted checks + report -> leaf-complete report -> curator pass
                         |
                         +-- blocked -> checks result + escalation + respawn state -> blocked report
 ```
@@ -43,12 +43,17 @@ checklist so the dashboard chat is attached to this leaf. Then read the brief fu
 spec / `task_doc` it names. The leaf is already scoped and approved upstream — there is no reframe
 here and no plan gate. The brief names your two writable areas: the leaf's **code worktree** and
 your report path. The memory worktree is context for the curator pass unless the brief explicitly
-says otherwise. It also enumerates the exact applicable requirement revisions by stable ID +
-version and links their canonical packets. If a requirement lacks either field, two IDs collide,
-the packet version disagrees with the brief, or the packet/rationale reference is missing, refuse
-the dispatch as incomplete rather than inventing or repairing an identity. The brief also names
-the leaf manifestation, attempt-journal path, next leaf-local attempt ID, predecessor/findings when
-this is a retry, and exact candidate identity class. You edit nothing outside your named surfaces.
+  says otherwise. It also enumerates the exact applicable requirement revisions by stable ID +
+  version and links their canonical packets. If a requirement lacks either field, two IDs collide,
+  the packet version disagrees with the brief, or the packet/rationale reference is missing, refuse
+  the dispatch as incomplete rather than inventing or repairing an identity. The brief also names
+  the leaf manifestation, attempt-journal path, next leaf-local attempt ID, predecessor/findings when
+  this is a retry, and exact candidate identity class. You edit nothing outside your named surfaces.
+  It also names `reviewMode=baseline` or `reviewMode=fix-verification`. A fix-verification brief must carry
+  the sealed first-review baseline, the immediately preceding result, and the exact outstanding
+  finding IDs. In that phase you may implement and evidence fixes for those IDs only; an outside-
+  list observation is reported to the owner for developer decision and never becomes a new finding,
+  route, requirement, or scope.
 
 ### 2 — Orient (paired reads before edits)
 
@@ -56,7 +61,7 @@ this is a retry, and exact candidate identity class. You edit nothing outside yo
   (note: it serves the official baseline, not your worktree) and native reads inside the worktree
   for current state. Native read is your edit precondition.
 - Read the memory layer's `system/coding-guidelines.md` (the brief names the path) **before your
-  first edit** — the closeout chain judges your diff against it: file/function budgets,
+  first edit** — the owning workflow may use it to judge your diff against: file/function budgets,
   responsibility and anti-pattern rules, source-comment scope, typed-boundary (DTO) rules, and the
   D1/D2/D3 stability doctrine. The acceptance implementation does not read for any of this, so green evidence
   prove nothing here. A conflict between the guidelines and the leaf plan is an escalation to the
@@ -72,7 +77,7 @@ this is a retry, and exact candidate identity class. You edit nothing outside yo
 - Produce the builder input the downstream curator needs: changed paths, code-diff summary, tests,
   and any route/onboarding observations that would help the coherence pass. Mark observations as
   evidence or candidates rather than declaring them current truth. The curator, not the
-  worker, writes onboarding in the official manager -> builder -> reviewer -> curator closeout
+  worker, writes onboarding in the official manager -> builder -> optional reviewer -> curator handoff
   chain.
 - **Never `git commit`.** Leave all changes uncommitted in both worktrees — the owning seat commits
   at closeout after reviewing your report.
@@ -136,11 +141,11 @@ requirement problem is a blocked attempt routed to the architect for developer-a
 you may diagnose and propose, but never rewrite the requirement. An internal candidate change or
 correction before handoff remains in the experimental log and does not consume an attempt ID. If a
 reviewer rejects a handed-off attempt, preserve it and append a successor for the next candidate
-handoff; that is the only repair path that may append a successor attempt. An unrelated later
-candidate does not reopen an accepted attempt;
-reopening still requires the bounded regression or approved-revision authority below. Failure to
-append makes this handoff incomplete, but never locks unrelated task authoring, lifecycle work, or
-queues.
+handoff; that is the only repair path that may append a successor attempt. An accepted attempt stays
+closed. Under `reviewMode=fix-verification`, implement only the sealed outstanding IDs; do not add
+new findings or reopen resolved IDs. Report any changed scope to the developer for decision; it does
+not grant another review. Failure to append makes this handoff incomplete, but never locks unrelated
+task authoring, lifecycle work, or queues.
 
 Validate the complete record before append. Append plus exact-candidate review handoff is one
 logical formal-attempt boundary. If a malformed pre-handoff row was appended accidentally,
@@ -149,7 +154,17 @@ for the corrected record at handoff; no formal attempt was consumed. If the malf
 row was already presented to review, do not self-reject it: the independent reviewer rejects that formal attempt,
 and a successor is appended only with the next candidate handoff.
 
-### 5 — Checks (green before you report)
+### 5 — Targeted Checks (before you report)
+
+Before handing a code implementation or fix to the supervising owner, select and run the relevant
+targeted tests and applicable repository-prescribed lint, formatting, typing, and structural checks
+using the resolved repository tools and environment. Record the exact commands, selected scope, and
+results in the turn report; explicitly list any relevant test or check not run and why, and report
+failures accurately. After a failure and code fix, rerun the failed tests and every affected
+targeted check, then document the final results before handoff; if one is not rerun, record why.
+These worker checks are separate from closeout/integration and do not consume a review round;
+applicable non-code checks follow repository policy. Do not run or claim a full suite/full quality
+result unless the developer or task brief explicitly requests that operation.
 
 Before task-local test proof becomes a durable fixture, recording, generator, shared support file,
 or migration proof, stop at the promotion hold point. Record in the task and turn report either:
@@ -161,21 +176,19 @@ or migration proof, stop at the promotion hold point. Record in the task and tur
 For example, a retained provider frame may graduate to
 `contract:codex-agent-wire-version-matrix`; a migration comparison expiring on `2026-09-30` must
 name an exact `node:...::test_replacement` and removal event. "Useful later" is neither option.
-Run the repository's public evidence-lifecycle quality check; a missing/contradictory catalog row
-is implementation work, never a review note or tool blocker.
+Run the relevant repository evidence-lifecycle check when the brief requires it; a missing or
+contradictory catalog row is implementation work, never a review note or tool blocker.
 
 Run what the brief prescribes and record the exact commands + outcomes for the report. The
 repository's resolved memory — especially `system/git-workflow.md`, `system/coding-guidelines.md`,
 and `system/tools.md` — owns the concrete test implementation, permitted environment, arguments,
 and evidence contract. Do not substitute a familiar runner or invent a fallback.
 
-Under the quality altitude ladder, leaf acceptance is change-set-scoped and runs exactly once at
-leaf closeout. Leaf integration lands that certified commit without rerunning acceptance. The
-full-repository check is not a leaf check: it runs exactly once per master at its completion
-boundary (against the proposed final organizational super candidate before it lands, or during
-atomic landing). `memory_quality_check`
-stays a per-leaf closeout gate. A red check you cannot fix inside the
-leaf's scope is an escalation, not a workaround.
+Closeout and integration are Git code/memory/ledger transactions. They do not launch automatic
+code-quality, full-suite, memory-quality, curator-certification, or independent-review operations.
+Full quality, full tests, and full memory quality are separate operations that require an explicit
+developer request. A red targeted check you cannot fix inside the leaf's scope is an escalation,
+not a workaround; a failed or not-run check is reported without claiming full green.
 
 ### 6 — The Turn Report (mandatory, your last act)
 
@@ -220,8 +233,8 @@ sub-agent touches AR tools; a harness without fan-out simply does these reads se
 
 The owning seat scores each leaf into a tier at dispatch (loop doctrine: `../SKILL.md`, The
 Three-Party Loop). On a **builder-verified** or **full-loop** leaf, this seat is the **BUILDER**:
-your turn report is the builder input, and the owner verifies it report-vs-artifact before the
-reviewer and curator inputs complete the closeout packet. Two consequences for you:
+your turn report is the builder input, and the owner verifies it report-vs-artifact before any
+requested reviewer result and curator handoff are consumed. Two consequences for you:
 
 - **Fix rounds resume THIS session** — the same builder, with its context intact. Your round-2+
   report **appends** to your report file rather than rewriting it, so the loop history stays

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
+from agents_remember.certification.certificate_invalidation import CertificateInputChange
 from agents_remember.certification.certificate_models import GateCertificate
 from agents_remember.certification.certificate_store import ContentAddressedCertificateStore
 from agents_remember.certification.frozen_run.authorities import CandidateAuthorityRecords
@@ -19,6 +21,7 @@ from agents_remember.certification.repository_profiles.authority import load_rep
 from agents_remember.errors import CertificationContractError
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.models.certification.base import GateId
 from agents_remember.models.lifecycles.certification import (
     CertificationPredecessor,
     OperationCertificationState,
@@ -44,7 +47,8 @@ from agents_remember.worktrees.queue.closeout_staged_quality import (
     PreparedStagedCode,
     prepare_staged_code,
 )
-from agents_remember.worktrees.route_review import RouteReviewError, require_current_route_review
+from agents_remember.worktrees.route_review import RouteReviewError
+from agents_remember.worktrees.route_review_scope import require_current_route_review
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 from .observation import (
@@ -57,6 +61,7 @@ from .recovery import (
     RecoveryInputSnapshot,
     build_prior_red_context,
     derive_certificate_input_changes,
+    prior_red_memory_owner_from_terminal,
 )
 from .retained_output import require_retained_output_currentness
 from .selection import (
@@ -81,6 +86,7 @@ def prepare_closeout_certification(
     current: LifecycleOperationRecord | None,
     *,
     candidate_tree: str,
+    resume: bool = False,
 ) -> FrozenCloseoutAdmission | None:
     """An existing generation is observed; only a new admission runs strict preparation."""
     if current is not None and current.status in {"queued", "running"}:
@@ -134,7 +140,7 @@ def prepare_closeout_certification(
             prepared.provenance,
         )
     )
-    prior_red = _prior_red_context(predecessor, prepared, observed, operation_input)
+    prior_red = _prior_red_context(contract, predecessor, prepared, observed, operation_input)
     admission = compile_lifecycle_admission(
         _authorities(prepared, observed), provenance=prepared.provenance, prior_red=prior_red
     )
@@ -148,10 +154,31 @@ def prepare_closeout_certification(
         if predecessor is not None
         else ()
     )
+    if resume and predecessor is not None:
+        changes = (
+            *(change for change in changes if change.changeClass != "code"),
+            CertificateInputChange(
+                changeClass="closeout-resume",
+                consumingGates=(_resume_gate(predecessor),),
+                reason="Resume the selected prefix at its first failed or stale gate.",
+            ),
+        )
     recovery = compile_certification_recovery_record(
         admission, _certificates(predecessor), changes, provenance=prepared.provenance
     )
     return FrozenCloseoutAdmission(prepared, observed, admission, recovery, predecessor)
+
+
+def _resume_gate(predecessor: LoadedCertificationSelection) -> GateId:
+    red = tuple(
+        item.result.gate for item in predecessor.terminals if item.result.disposition == "red"
+    )
+    if red:
+        return cast(GateId, red[-1])
+    first = predecessor.recovery.semanticEnvelope.reusePlan.firstGateToRun
+    if first is not None:
+        return cast(GateId, first)
+    return cast(GateId, 5)
 
 
 def _authorities(
@@ -174,16 +201,18 @@ def _certificates(prior: LoadedCertificationSelection | None) -> tuple[GateCerti
 
 
 def _prior_red_context(
+    contract: WorktreeContract,
     prior: LoadedCertificationSelection | None,
     prepared: PreparedCertificationRun,
     observed: ObservedCertificationCandidate,
     operation_input: CloseoutOperationInput,
 ) -> PriorRedAdmissionContext | None:
-    red = (
-        tuple(item.result for item in prior.terminals if item.result.disposition == "red")
+    red_terminal = (
+        next((item for item in prior.terminals if item.result.disposition == "red"), None)
         if prior
-        else ()
+        else None
     )
+    red = (red_terminal.result,) if red_terminal is not None else ()
     dispositions = operation_input.correctiveDispositions
     if not red:
         if dispositions:
@@ -191,9 +220,23 @@ def _prior_red_context(
         return None
     # The loaded predecessor's exact prefix permits only its last terminal to be red.
     assert prior is not None
+    assert red_terminal is not None
+    prior_memory_inputs = (
+        prior_red_memory_owner_from_terminal(contract.worktree_group / "reports", red_terminal)
+        if red_terminal.result.gate == 5
+        else None
+    )
+    successor_memory_tree = (
+        contract.closeout_door.memoryCandidateTree if contract.closeout_door is not None else None
+    )
     return build_prior_red_context(
         prior.run,
-        RecoveryInputSnapshot(prepared.frozen_run, observed.candidate),
+        RecoveryInputSnapshot(
+            prepared.frozen_run,
+            observed.candidate,
+            memory_candidate_tree=successor_memory_tree,
+            prior_memory_inputs=prior_memory_inputs,
+        ),
         red[0],
         dispositions,
         _certificates(prior),

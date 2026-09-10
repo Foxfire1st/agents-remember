@@ -40,15 +40,6 @@ from agents_remember.worktrees.integration.integration_publication_fence import 
     classify_integration_door_authority,
     integration_door_decision_payload,
 )
-from agents_remember.worktrees.integration.integration_quality import (
-    INTEGRATION_QUALITY_DECISION_SURFACE,
-    IntegrationQualityFailure,
-    organizational_quality_failure_payload,
-    run_integration_quality_gate,
-)
-from agents_remember.worktrees.integration.integration_quality import (
-    quality_gate_preview as _quality_gate_preview,
-)
 from agents_remember.worktrees.integration.integration_ref_state import (
     IntegrationRefDecisionError,
     IntegrationRefPublicationInterrupted,
@@ -69,14 +60,12 @@ from agents_remember.worktrees.integration.integration_ref_transaction import (
 from agents_remember.worktrees.integration.integration_resolution_handoff import (
     integration_resolution_required,
 )
+from agents_remember.worktrees.integration.master_review_gate import (
+    blocked_integration_payload,
+)
 from agents_remember.worktrees.integration.organizational_completion_integration import (
-    IntegrationBoundaryFacts,
     prepare_integration_publication_intent,
     preview_integration_boundary,
-    recorded_organizational_quality_certification,
-)
-from agents_remember.worktrees.integration.organizational_completion_repair import (
-    record_organizational_completion_repair,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
@@ -202,32 +191,6 @@ def unmatched_handover_gate_warning(
     }
 
 
-def blocked_integration_payload(
-    contract: WorktreeContract,
-    state: str,
-    reason: str,
-    persist: bool = True,
-    developer_decision_required: bool = True,
-    **extra: object,
-) -> dict[str, object]:
-    blocked = amend_contract(contract, ContractCells(integration_status="blocked"))
-    if persist:
-        write_contract(blocked.contract_path, blocked)
-    next_step: dict[str, object] = {"summary": reason}
-    for key in ("nextOperation", "nextTool", "nextArgs"):
-        if key in extra:
-            next_step[key] = extra[key]
-    return {
-        "state": state,
-        **status_payload(blocked),
-        "reason": reason,
-        "summary": reason,
-        "developerDecisionRequired": developer_decision_required,
-        "nextStep": next_step,
-        **extra,
-    }
-
-
 def validate_integrate_contract(contract: WorktreeContract) -> None:
     if contract.closeout_status != "completed":
         raise RuntimeError("integration requires closeout.status completed")
@@ -317,9 +280,9 @@ def _integration_sources_moved_block(
         2,
         blocked_integration_payload(
             contract,
-            "source-moved-during-quality",
-            "integration source branches moved while the quality gate ran; retry from "
-            "preflight so the combined candidate is certified against the new tips",
+            "source-moved-during-preflight",
+            "integration source branches moved during transaction admission; retry from "
+            "preflight so the combined candidate is bound to the new tips",
             developer_decision_required=False,
             nextOperation="request_integration_decision",
             nextTool="worktree_integrate",
@@ -417,7 +380,6 @@ def _dry_run_result(
             "gateId": preview.guard.gate_id,
             "reason": preview.guard.reason,
         },
-        "quality_gate": preview.quality_gate,
         "cleanup_question": "After successful integration, ask whether to remove the code and memory worktrees plus merged local task branches.",
     }
     if preview.handover_warning is not None:
@@ -459,7 +421,6 @@ def _integrated_result(
     commits: IntegratedCommits,
     *,
     handover_warning: dict[str, object] | None,
-    quality_gate: dict[str, object],
 ) -> WorktreeCommandResult:
     updated = amend_contract(
         replace(
@@ -480,7 +441,6 @@ def _integrated_result(
         "integrated_code_commit": commits.code,
         "integrated_memory_content_commit": commits.memory_content,
         "integrated_ledger_commit": commits.ledger,
-        "quality_gate": quality_gate,
         "cleanup_question": "Integration completed. Remove the code and memory worktrees plus merged local task branches now?",
     }
     if handover_warning is not None:
@@ -676,11 +636,6 @@ def _recover_integration_finalization(
         args,
         proven,
         handover_warning=None,
-        quality_gate={
-            "status": "recovered-contract-finalization",
-            "passed": True,
-            "reason": "the exact accepted commit set was proven from Git and the ledger",
-        },
     )
     result.payload["recovered"] = True
     return result
@@ -742,7 +697,7 @@ def integrate_result(
 ) -> WorktreeCommandResult:
     report_operation_progress(args, "preflight", current_command="validate integration eligibility")
     if not args.approved and not args.dry_run:
-        raise RuntimeError("integration requires --approved after human review")
+        raise RuntimeError("integration requires explicit developer approval")
     assert args.contract_path is not None
     contract = current_contract
     if args.contract_path.resolve() != contract.contract_path.resolve():
@@ -811,6 +766,24 @@ def _completed_integration_result(
     return completed
 
 
+def _recover_integration_publication_edge(
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    authority: IntegrationOperationAuthority,
+    intent: IntegrationPublicationIntent,
+) -> WorktreeCommandResult | None:
+    current = load_contract(contract.contract_path)
+    if current != contract and contract.integration_status != "completed":
+        raise RuntimeError("integration contract changed before recovery finalization")
+    decision = protected_integration_decision(current, args)
+    if decision is not None:
+        return decision
+    if current.integration_status != "completed":
+        require_atomic_landing_authority(current)
+    result = _recover_integration_finalization(current, args, authority)
+    return publish_journaled_organizational_completion(result, intent)
+
+
 def _recover_integration_under_authority(
     contract: WorktreeContract,
     args: WorktreeArgs,
@@ -834,26 +807,19 @@ def _recover_integration_under_authority(
     except IntegrationDoorAuthorityConflict as error:
         return WorktreeCommandResult(2, integration_door_decision_payload(error.evidence))
 
-    def publication() -> WorktreeCommandResult | None:
-        current = load_contract(contract.contract_path)
-        if current != contract and contract.integration_status != "completed":
-            raise RuntimeError("integration contract changed before recovery finalization")
-        decision = protected_integration_decision(current, args)
-        if decision is not None:
-            return decision
-        if current.integration_status != "completed":
-            require_atomic_landing_authority(current)
-        result = _recover_integration_finalization(current, args, authority)
-        return publish_journaled_organizational_completion(result, intent)
-
     try:
         if contract.kind == "series":
             if contract.integration_status != "completed":
-                return publish_series_integration_under_authority(contract, publication)
+                return publish_series_integration_under_authority(
+                    contract,
+                    lambda: _recover_integration_publication_edge(
+                        contract, args, authority, intent
+                    ),
+                )
             with integration_authority_lock(contract.coordination_root, contract.repo_name):
-                return publication()
+                return _recover_integration_publication_edge(contract, args, authority, intent)
         with integration_authority_lock(contract.coordination_root, contract.repo_name):
-            return publication()
+            return _recover_integration_publication_edge(contract, args, authority, intent)
     except AtomicLandingBlocked as error:
         return atomic_landing_blocked_result(contract, error)
 
@@ -932,10 +898,6 @@ def _handover_or_apply_integration(
             preview=IntegratePreview(
                 guard=guard,
                 handover_warning=handover_warning,
-                quality_gate=_quality_gate_preview(
-                    contract,
-                    profile_reference=args.certification_profile,
-                ),
             ),
         )
 
@@ -958,13 +920,12 @@ def _apply_integration(
     prepared = _prepare_integration_commits(contract, args, sources)
     if isinstance(prepared, WorktreeCommandResult):
         return prepared
-    commits, quality_gate, quality_certification, boundary_facts = prepared
+    commits, boundary_facts = prepared
     intent = args.integration_publication or prepare_integration_publication_intent(
         contract,
         operation_key=args.operation_key,
         generation=args.operation_generation,
         facts=boundary_facts,
-        certification=quality_certification,
     )
     commit_tuple = (commits.code, commits.memory_content, commits.ledger)
     try:
@@ -975,7 +936,6 @@ def _apply_integration(
         return WorktreeCommandResult(2, integration_door_decision_payload(error.evidence))
     locked_args = replace(
         args,
-        quality_certification=quality_certification or args.quality_certification,
         integration_publication=intent,
     )
     publication = IntegrationPublication(
@@ -985,7 +945,6 @@ def _apply_integration(
         sources=sources,
         commits=commits,
         intent=intent,
-        quality_gate=quality_gate,
         handover_warning=handover_warning,
     )
 
@@ -1026,7 +985,6 @@ def _publish_integration_edge(
     blocked = _integration_source_state_block(current, publication.sources)
     if blocked is not None:
         return blocked
-    quality_gate = publication.quality_gate
     snapshot = prepare_integration_ref_move(
         current,
         publication.commits,
@@ -1070,7 +1028,6 @@ def _publish_integration_edge(
         publication.locked_args,
         publication.commits,
         handover_warning=publication.handover_warning,
-        quality_gate=quality_gate,
     )
 
 
@@ -1085,26 +1042,12 @@ def _prepare_integration_commits(
 
 def _prepare_fresh_integration_commits(
     contract: WorktreeContract,
-    args: WorktreeArgs,
+    _args: WorktreeArgs,
     sources: IntegrationSources,
 ):
     integrated_code_commit, blocked = _integrated_code_commit(contract, sources.current_code_source)
     if blocked is not None:
         return WorktreeCommandResult(2, blocked)
-    report_operation_progress(
-        args, "integration-quality", current_command="run altitude-routed quality contract"
-    )
-    quality_certification = args.quality_certification
-    boundary_facts = IntegrationBoundaryFacts(None, None, None)
-    if contract.kind == "series":
-        quality_gate, blocked = _run_integration_quality_gate(contract, args=args)
-        if blocked is not None:
-            return WorktreeCommandResult(2, blocked)
-    else:
-        quality_gate = _quality_gate_preview(
-            contract,
-            profile_reference=args.certification_profile,
-        )
     blocked = _integration_source_state_block(contract, sources)
     if blocked is not None:
         return blocked
@@ -1118,22 +1061,7 @@ def _prepare_fresh_integration_commits(
         memory_content=integrated_memory_content_commit,
         ledger=integrated_ledger_commit,
     )
-    boundary_facts = preview_integration_boundary(contract)
-    if contract.kind == "leaf":
-        completion = boundary_facts.organizational_completion
-        if completion is not None:
-            quality_gate, blocked = _run_integration_quality_gate(
-                contract,
-                completion=completion,
-                args=args,
-            )
-            if blocked is not None:
-                return WorktreeCommandResult(2, blocked)
-            quality_certification = recorded_organizational_quality_certification(
-                contract,
-                operation_key=args.operation_key,
-            )
-    return commits, quality_gate, quality_certification, boundary_facts
+    return commits, preview_integration_boundary(contract)
 
 
 def _integration_door_block(
@@ -1144,43 +1072,3 @@ def _integration_door_block(
     if authority.valid:
         return None
     return WorktreeCommandResult(2, integration_door_decision_payload(authority))
-
-
-def _run_integration_quality_gate(
-    contract: WorktreeContract,
-    *,
-    completion=None,
-    args: WorktreeArgs,
-) -> tuple[dict[str, object], dict[str, object] | None]:
-    """Run the altitude-owned gate and translate failure into lifecycle guidance."""
-
-    try:
-        outcome = run_integration_quality_gate(
-            contract,
-            completion=completion,
-            owner=args.integration_certification_owner,
-            profile_reference=args.certification_profile,
-        )
-    except IntegrationQualityFailure as error:
-        if error.organizational_completion:
-            failure = organizational_quality_failure_payload(
-                contract,
-                error,
-                expected_generation=args.operation_generation,
-            )
-            if args.operation_progress is not None:
-                record_organizational_completion_repair(
-                    contract,
-                    operation_key=args.operation_key,
-                    failure=failure,
-                    progress=args.operation_progress,
-                )
-            return {}, failure
-        return {}, blocked_integration_payload(
-            contract,
-            "blocked-quality-gate",
-            "integration refused by the required quality gate",
-            failureEvidence=error.evidence,
-            decisionSurface=INTEGRATION_QUALITY_DECISION_SURFACE,
-        )
-    return outcome.result, None

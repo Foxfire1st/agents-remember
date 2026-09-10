@@ -30,10 +30,11 @@ def coherence_subrecords(
     """Derive the canonical coherence subrecord set from the current authority record.
 
     One subrecord for the immutable record itself and one content-addressed subrecord per
-    judgment evidence byte range the record binds. affected_subrecords name raw
-    judgment evidence references (or coherence-record); each must be covered by the
-    current record so that coherence-evidence invalidation can never be hidden behind a
-    stale repair plan.
+    distinct judgment evidence reference the record binds. Multiple judgments may share
+    one evidence file, but they must agree on its captured digest. affected_subrecords
+    name raw judgment evidence references (or coherence-record); each must be covered by
+    the current record so that coherence-evidence invalidation can never be hidden behind
+    a stale repair plan.
     """
 
     covered_refs = {judgment.evidenceRef for judgment in record.judgments}
@@ -50,6 +51,21 @@ def coherence_subrecords(
             observed={"uncoveredSubrecords": missing_affected},
             next_action="curator_coherence",
         )
+    evidence_digests: dict[str, set[str]] = {}
+    for judgment in record.judgments:
+        evidence_digests.setdefault(judgment.evidenceRef, set()).add(judgment.evidenceSha256)
+    conflicting_digests = {
+        reference: sorted(digests)
+        for reference, digests in evidence_digests.items()
+        if len(digests) > 1
+    }
+    if conflicting_digests:
+        raise FinalCertificationError(
+            "gate-five-coherence-subrecord-conflict",
+            "coherence judgments bind conflicting evidence digests for one evidence reference",
+            observed={"evidenceDigestsByReference": conflicting_digests},
+            next_action="curator_coherence",
+        )
     subrecords = [
         CoherenceSubrecordIdentity(
             subrecordId="coherence-record",
@@ -58,10 +74,10 @@ def coherence_subrecords(
     ]
     subrecords.extend(
         CoherenceSubrecordIdentity(
-            subrecordId=_judgment_subrecord_id(judgment.evidenceRef),
-            contentDigest=judgment.evidenceSha256,
+            subrecordId=_judgment_subrecord_id(evidence_ref),
+            contentDigest=sorted(digests)[0],
         )
-        for judgment in record.judgments
+        for evidence_ref, digests in evidence_digests.items()
     )
     return tuple(sorted(subrecords, key=lambda item: (item.subrecordId, item.contentDigest)))
 

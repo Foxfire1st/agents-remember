@@ -95,7 +95,8 @@ from agents_remember.worktrees.modules.startup.start_contract import (
     MasterSeriesContractSpec,
     ensure_master_series_contract,
 )
-from agents_remember.worktrees.route_review import RouteReviewError, require_current_route_review
+from agents_remember.worktrees.route_review import RouteReviewError
+from agents_remember.worktrees.route_review_scope import require_current_route_review
 from agents_remember.worktrees.scheduling_mode import effective_execution_nature
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 

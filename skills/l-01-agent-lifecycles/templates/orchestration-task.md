@@ -55,8 +55,20 @@ identity: the sprint's `orchestrates` and `integrationBranch`, every commanded m
    attachment first, then send one `task_doc.author_execution_graph` batch containing the exact
    full `add_node` set and its evidence-backed edges. Graph authoring bootstraps or edits the graph
    — it is never a runtime fallback and is not called to create ceremonial empty topology.
-7. **Review before adoption.** Run `../criteria/plan-review.md`; revisions append round sections
-   rather than erasing history. The artifact remains standing scope after adoption.
+7. **Review before adoption.** The first plan review runs `../criteria/plan-review.md` across the
+   complete agreed scope, required routes, and lenses, then seals the issue list with
+   stable IDs, precise statements, evidence, and observable fix-acceptance criteria. Revisions after
+   that first review use `fix-verification`: they carry the sealed baseline and immediately
+   preceding result, verify only the exact outstanding IDs, write fixed/unfixed dispositions for
+   every preceding ID, and leave a remaining set that is a subset of the preceding set. They may
+   not run another full plan review, add a lens/route/criterion, broaden or reopen an ID, accept
+   unknown/duplicate/rewritten/reintroduced issues, or pass with unresolved IDs. Revisions append
+   result sections rather than erasing history. A changed plan surface that cannot be verified
+   against the baseline returns to the developer; it does not create a new review cycle. The
+  owning task document calls `task_doc(operation="begin_review")` before hosted/native reviewer
+  work and calls `task_doc(operation="record_review")` or the existing
+  `task_doc(operation="record_route_review")` after the result. The artifact remains standing
+  scope after adoption.
 
 ## Shape
 
@@ -70,7 +82,10 @@ identity: the sprint's `orchestrates` and `integrationBranch`, every commanded m
 | masters in scope   | <exact commanded master document refs> |
 | integrationBranch  | <exact super branch persisted on the sprint document> |
 | status             | <draft, in-review, round-n, or adopted> |
-| round              | <n> (3-round cap; drawing board is escalation) |
+| review mode        | <baseline | fix-verification> |
+| sealed baseline    | <sealed baseline issue-list/verdict ref> |
+| preceding result / outstanding IDs | <result ref + exact IDs | N/A for baseline> |
+| round              | <n> (three rounds ordinary maximum; explicit developer authorization required for any extra) |
 | written            | <YYYY-MM-DDTHH:MM> |
 
 ## Sprint Scope

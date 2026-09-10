@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.certification.certificate_authority import validate_certificate_chain
-from agents_remember.certification.certificate_models import GateCertificate, GateFiveSemanticInputs
+from agents_remember.certification.certificate_models import (
+    GateCertificate,
+    GateCertificateIdentity,
+    GateFiveSemanticInputs,
+)
 from agents_remember.certification.certificate_store import ContentAddressedCertificateStore
 from agents_remember.certification.digests import content_digest
 from agents_remember.certification.frozen_run.authorities import CandidateAuthorityRecords
@@ -61,10 +65,18 @@ from agents_remember.worktrees.modules.quality.published_manifest import (
 from agents_remember.worktrees.modules.quality.report_publication_paths import (
     published_report_path_from_manifest,
 )
-from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember.worktrees.worktree_contract import (
+    ContractError,
+    WorktreeContract,
+    parse_contract_text,
+)
 
 from .observation import refuse
-from .recovery import RecoveryInputSnapshot, build_prior_red_context
+from .recovery import (
+    RecoveryInputSnapshot,
+    build_prior_red_context,
+    prior_red_memory_owner_from_terminal,
+)
 
 MAX_SELECTED_GENERATIONS = 256
 
@@ -89,6 +101,16 @@ class LoadedCertificationSelection:
     recovery: CertificationRecoveryRecord
     terminals: tuple[RecordedGateTerminal, ...]
     protected_generations: frozenset[str]
+
+
+@dataclass(frozen=True)
+class _AdmissionRecompileInput:
+    contract: WorktreeContract
+    run: FrozenCertificationRun
+    lifecycle: LifecycleAdmissionManifest
+    prior_red: PriorRedDispositionManifest | None
+    prior: LoadedCertificationSelection | None
+    authorities: CandidateAuthorityRecords
 
 
 def require_unchanged_retry_admissible(selected: LoadedCertificationSelection) -> None:
@@ -155,21 +177,38 @@ def _load_selection(
         or candidate.generatedInputsDigest != content_digest(authority.generated)
     ):
         refuse("certification-owner-projections-mismatch", authorities.authorityDigest, candidate)
-    admission = _recompile_admission(run, lifecycle, prior_red, prior)
-    _require_inherited_terminals(selected, prior)
     terminals = tuple(
         load_selected_terminal(contract.worktree_group / "reports", store, run, terminal)
         for terminal in selected.terminals
     )
+    admission = _recompile_admission(
+        _AdmissionRecompileInput(contract, run, lifecycle, prior_red, prior, authorities)
+    )
+    _require_inherited_terminals(selected, prior)
     protected = {terminal.publication.generation for terminal in terminals}
     if prior is not None:
         protected.update(prior.protected_generations)
+    historical_terminals: list[RecordedGateTerminal] = []
     for terminal in selected.terminalHistory:
         retained = load_selected_terminal(contract.worktree_group / "reports", store, run, terminal)
-        _require_interrupted_terminal(contract.worktree_group / "reports", retained)
+        if not _is_stale_gate_five_history(recoveries, terminal):
+            _require_interrupted_terminal(contract.worktree_group / "reports", retained)
+        historical_terminals.append(retained)
         protected.add(retained.publication.generation)
-    _require_terminal_chain(run, terminals)
-    _require_recovery_history(admission, recoveries, selected.recoveryDecisions, prior, terminals)
+    retained_certificates = tuple(
+        loaded.certificate.identity
+        for selected_terminal, loaded in zip(selected.terminals, terminals, strict=True)
+        if selected_terminal.reusedFrom is not None and loaded.certificate is not None
+    )
+    _require_terminal_chain(run, terminals, retained_certificates=retained_certificates)
+    _require_recovery_history(
+        admission,
+        recoveries,
+        selected.recoveryDecisions,
+        prior,
+        terminals,
+        history=tuple(historical_terminals),
+    )
     loaded = LoadedCertificationSelection(
         selected,
         run,
@@ -268,12 +307,56 @@ def _require_inherited_terminals(
             refuse("selected-reused-terminal-mismatch", expected, terminal)
 
 
-def _recompile_admission(
-    run: FrozenCertificationRun,
-    lifecycle: LifecycleAdmissionManifest,
-    prior_red: PriorRedDispositionManifest | None,
-    prior: LoadedCertificationSelection | None,
-) -> CompiledLifecycleAdmission:
+def _retained_contract_memory_tree(
+    contract: WorktreeContract,
+    authorities: CandidateAuthorityRecords,
+) -> str | None:
+    snapshots = tuple(
+        item
+        for item in authorities.inputSnapshots
+        if item.owner == "contract-owner" and item.address == contract.contract_path.as_posix()
+    )
+    if len(snapshots) != 1:
+        refuse(
+            "selected-contract-owner-snapshot-missing",
+            {"owner": "contract-owner", "address": contract.contract_path.as_posix()},
+            [item.model_dump(mode="json") for item in snapshots],
+        )
+    snapshot = snapshots[0]
+    try:
+        retained_text = json.loads(snapshot.canonicalBytes)
+        if not isinstance(retained_text, str):
+            raise ValueError("retained contract-owner bytes are not a serialized text contract")
+        retained = parse_contract_text(retained_text, path=contract.contract_path)
+    except (ContractError, OSError, UnicodeError, ValueError) as error:
+        refuse(
+            "selected-contract-owner-snapshot-invalid",
+            "the retained contract-owner bytes must parse as the selected contract",
+            str(error),
+        )
+    door = retained.closeout_door
+    if door is None:
+        refuse(
+            "selected-contract-door-missing",
+            "the retained contract must carry its canonical closeout door",
+            retained.contract_path.as_posix(),
+        )
+    if door.contractPath != contract.contract_path.as_posix():
+        refuse(
+            "selected-contract-door-owner-mismatch",
+            contract.contract_path.as_posix(),
+            door.contractPath,
+        )
+    return door.memoryCandidateTree or None
+
+
+def _recompile_admission(request: _AdmissionRecompileInput) -> CompiledLifecycleAdmission:
+    contract = request.contract
+    run = request.run
+    lifecycle = request.lifecycle
+    prior_red = request.prior_red
+    prior = request.prior
+    authorities = request.authorities
     context = None
     red = (
         tuple(item.result for item in prior.terminals if item.result.disposition == "red")
@@ -285,9 +368,25 @@ def _recompile_admission(
     if prior_red is not None:
         # A loaded predecessor has an exact prefix with at most one final red terminal.
         assert prior is not None and red
+        red_terminal = next(item for item in prior.terminals if item.result.disposition == "red")
+        prior_memory_inputs = (
+            prior_red_memory_owner_from_terminal(contract.worktree_group / "reports", red_terminal)
+            if red_terminal.result.gate == 5
+            else None
+        )
+        successor_memory_tree = (
+            _retained_contract_memory_tree(contract, authorities)
+            if red_terminal.result.gate == 5
+            else None
+        )
         context = build_prior_red_context(
             prior.run,
-            RecoveryInputSnapshot(run, lifecycle.semanticEnvelope.candidate),
+            RecoveryInputSnapshot(
+                run,
+                lifecycle.semanticEnvelope.candidate,
+                memory_candidate_tree=successor_memory_tree,
+                prior_memory_inputs=prior_memory_inputs,
+            ),
             red[0],
             prior_red.semanticEnvelope.dispositions,
             tuple(item.certificate for item in prior.terminals if item.certificate is not None),
@@ -309,7 +408,10 @@ def _recompile_admission(
 
 
 def _require_terminal_chain(
-    run: FrozenCertificationRun, terminals: tuple[RecordedGateTerminal, ...]
+    run: FrozenCertificationRun,
+    terminals: tuple[RecordedGateTerminal, ...],
+    *,
+    retained_certificates: tuple[GateCertificateIdentity, ...] = (),
 ) -> None:
     gates = tuple(item.result.gate for item in terminals)
     if gates != tuple(range(1, len(terminals) + 1)):
@@ -318,17 +420,24 @@ def _require_terminal_chain(
     if any(item.certificate is None for item in terminals[:-1]):
         refuse("selected-terminal-after-red", "zero later gate terminals", gates)
     memory = certificates[-1].semanticEnvelope.gateFiveInputs if certificates else None
-    validate_certificate_chain(run.admission, certificates, gate_five_inputs=memory)
+    validate_certificate_chain(
+        run.admission,
+        certificates,
+        gate_five_inputs=memory,
+        retained_certificates=retained_certificates,
+    )
 
 
-def _require_recovery_history(
+def _require_recovery_history(  # noqa: PLR0913
     admission: CompiledLifecycleAdmission,
     recoveries: tuple[CertificationRecoveryRecord, ...],
     decisions: tuple[SelectedRecoveryDecision, ...],
     prior: LoadedCertificationSelection | None,
     terminals: tuple[RecordedGateTerminal, ...],
+    *,
+    history: tuple[RecordedGateTerminal, ...] = (),
 ) -> None:
-    available = (*(() if prior is None else prior.terminals), *terminals)
+    available = (*(() if prior is None else prior.terminals), *terminals, *history)
     certificates = {
         item.certificate.identity: item.certificate
         for item in available
@@ -347,6 +456,19 @@ def _require_recovery_history(
         )
         if rebuilt != recovery:
             refuse("selected-recovery-mismatch", rebuilt, recovery)
+
+
+def _is_stale_gate_five_history(
+    recoveries: tuple[CertificationRecoveryRecord, ...],
+    terminal: SelectedGateTerminal,
+) -> bool:
+    if terminal.gate != 5 or not recoveries:
+        return False
+    recovery = recoveries[-1]
+    return any(
+        change.changeClass == "closeout-resume" and change.consumingGates == (5,)
+        for change in recovery.semanticEnvelope.inputChanges
+    )
 
 
 def load_selected_terminal(

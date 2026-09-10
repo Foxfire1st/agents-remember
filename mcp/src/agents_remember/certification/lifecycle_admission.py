@@ -38,6 +38,7 @@ from agents_remember.models.certification.corrective import (
     CorrectiveInputChange,
     RedCatalogDisposition,
 )
+from agents_remember.models.lifecycles.prepared_memory import PreparedMemoryCandidate
 
 
 @dataclass(frozen=True)
@@ -61,10 +62,19 @@ class LifecycleAdmissionAuthorities:
 
 
 @dataclass(frozen=True)
+class PriorRedMemoryOwner:
+    """Exact prepared memory owner retained by a red Gate-5 report."""
+
+    candidate: PreparedMemoryCandidate
+
+
+@dataclass(frozen=True)
 class PriorRedAdmissionContext:
     priorAdmission: CertificationAdmissionManifest
     priorCatalog: GateResultManifest
     dispositions: tuple[RedCatalogDisposition, ...]
+    priorMemoryInputs: PriorRedMemoryOwner | None = None
+    successorMemoryTree: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +84,8 @@ class _DispositionContext:
     prior: CertificationAdmissionManifest
     successor: CertificationAdmissionManifest
     gate: int
+    priorMemoryInputs: PriorRedMemoryOwner | None
+    successorMemoryTree: str | None
 
 
 @dataclass(frozen=True)
@@ -255,6 +267,8 @@ def _compile_prior_red_disposition(
         prior_admission,
         successor,
         prior_catalog.gate,
+        prior_red.priorMemoryInputs,
+        prior_red.successorMemoryTree,
     )
     for key, result in required.items():
         _require_result_disposition(result, supplied_by_rail[key], context)
@@ -361,23 +375,24 @@ def _require_result_disposition(
     for change in disposition.changedInputs:
         _require_relevant_change(
             change,
-            context.prior,
-            context.successor,
-            context.gate,
             disposition.rail.key,
+            context,
         )
 
 
 def _require_relevant_change(
     change: CorrectiveInputChange,
-    prior: CertificationAdmissionManifest,
-    successor: CertificationAdmissionManifest,
-    gate: int,
     rail_key: str,
+    context: _DispositionContext,
 ) -> None:
+    prior = context.prior
+    successor = context.successor
+    gate = context.gate
     if change.key == ("candidate-code-tree", "candidate"):
         expected = prior.semanticEnvelope.candidateCodeTree.value
         observed = successor.semanticEnvelope.candidateCodeTree.value
+    elif change.inputKind == "memory-tree" and change.inputId == "candidate":
+        expected, observed = _memory_tree_change_digests(context)
     else:
         prior_inputs = {
             item.key: item.contentDigest
@@ -405,6 +420,25 @@ def _require_relevant_change(
                 change.model_dump(mode="json"),
             ),
         )
+
+
+def _memory_tree_change_digests(
+    context: _DispositionContext,
+) -> tuple[str | None, str | None]:
+    """Resolve the exact memory-tree owner without adding an admission input row."""
+    if context.priorMemoryInputs is None:
+        _refuse(
+            "prior-red successor admission refused",
+            "prior-red-memory-input-owner-missing",
+            "priorRed.dispositions.changedInputs",
+            _RefusalEvidence(
+                "the selected red Gate-5 report does not retain its exact memory-tree owner",
+                {"priorMemoryTree": "selected red Gate-5 owner"},
+                {"priorMemoryTree": None},
+            ),
+        )
+    expected = context.priorMemoryInputs.candidate.memoryTree
+    return expected, context.successorMemoryTree
 
 
 def _json_identity(values: tuple[object, ...]) -> list[object]:

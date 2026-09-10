@@ -9,31 +9,38 @@ from typing import Literal
 from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.models.certification.corrective import RedCatalogDisposition
 from agents_remember.models.closeout.input import (
     CloseoutCorrectedCall,
     CloseoutMessageInput,
 )
 from agents_remember.models.closeout.source import CandidateAdmissionFacts, SchedulingGradeInput
 from agents_remember.models.declared_caller import DeclaredCaller
+from agents_remember.models.lifecycles.door import CloseoutDoorRequest
 from agents_remember.models.lifecycles.operation import (
+    CloseoutOperationInput,
     GatePolicyRuleSnapshot,
     LifecycleOperationKind,
     LifecycleOperationProjection,
     LifecycleOperationRecord,
 )
 from agents_remember.models.lifecycles.operation_kinds import LifecycleControlAction
-from agents_remember.models.lifecycles.operation_projection import LifecycleRecommendedAction
 from agents_remember.worktrees.closeout_input import (
     CloseoutInputError,
     corrected_closeout_arguments,
 )
 from agents_remember.worktrees.integration.closeout.door import (
     DoorPublicationClassification,
+    DoorPublicationError,
     classify_door_publication,
     prepare_door_publication,
+    publish_door_intent,
 )
 from agents_remember.worktrees.integration.closeout.door_source import (
+    authorize_door_actor,
+    door_task_context,
     superseding_door_generation,
+    updated_door_generation,
 )
 from agents_remember.worktrees.integration.closeout.ledger_recovery import (
     classify_closeout_ledger_recovery,
@@ -100,10 +107,15 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     launch_detached_worker,
+    start_closeout_successor_under_lease,
 )
 from agents_remember.worktrees.integration.lifecycle.worker.state import (
     project_worker_exit,
     reconcile_worker_exit,
+)
+from agents_remember.worktrees.integration.mutation_evidence import closeout_requires_recovery
+from agents_remember.worktrees.queue.closeout_projection_publication import (
+    refresh_closeout_projection,
 )
 from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
@@ -119,8 +131,9 @@ class LifecycleControlCommand:
     expected_generation: int
     intent_note: str
     dry_run: bool = False
-    revision_messages: CloseoutMessageInput | None = None
-    revision_gate_policy: list[GatePolicyRuleSnapshot] | None = None
+    resume_messages: CloseoutMessageInput | None = None
+    resume_gate_policy: list[GatePolicyRuleSnapshot] | None = None
+    corrective_dispositions: tuple[RedCatalogDisposition, ...] = ()
     supersede_grade: SchedulingGradeInput | None = None
     supersede_admission: CandidateAdmissionFacts | None = None
     allow_completed_disposition: bool = False
@@ -158,7 +171,7 @@ def control_operation(
     command: LifecycleControlCommand,
 ) -> LifecycleOperationProjection:
     """Execute one same-generation or terminal-disposition control."""
-    if not command.intent_note.strip():
+    if not command.intent_note.strip() and command.action != "resume":
         raise LifecycleControlError(
             "lifecycle-control-intent-required",
             "lifecycle control requires a nonblank developer intent note",
@@ -243,7 +256,7 @@ def _observe_control_under_lease(
         store,
         record,
         dry_run=command.dry_run,
-        preserve_recovery_intent=command.action == "recover",
+        preserve_recovery_intent=command.action in {"recover", "resume"},
     )
     integration = None
     if command.kind == "integrate":
@@ -280,7 +293,7 @@ def _observe_control_under_lease(
     return _ControlObservation(contract, store, record, integration, door)
 
 
-def _execute_legal_control(
+def _execute_legal_control(  # noqa: PLR0911
     contract: WorktreeContract,
     store: LifecycleOperationStore,
     record: LifecycleOperationRecord,
@@ -305,6 +318,21 @@ def _execute_legal_control(
             action="recover",
             dry_run=command.dry_run,
         )
+    if action == "resume":
+        if record.operationKind == "closeout" and not closeout_requires_recovery(record):
+            return _resume_closeout_successor(
+                contract,
+                store,
+                record,
+                command=command,
+            )
+        return _resume(
+            contract,
+            store,
+            record,
+            action="resume",
+            dry_run=command.dry_run,
+        )
     if action == "retire":
         return _dispose_completed(
             contract,
@@ -319,12 +347,7 @@ def _execute_legal_control(
             record,
             command=command,
         )
-    return _revise_closeout(
-        contract,
-        store,
-        record,
-        command=command,
-    )
+    raise AssertionError(f"unhandled lifecycle control action: {action}")
 
 
 def _resume(
@@ -332,7 +355,7 @@ def _resume(
     store: LifecycleOperationStore,
     record: LifecycleOperationRecord,
     *,
-    action: Literal["retry", "recover"],
+    action: Literal["retry", "recover", "resume"],
     dry_run: bool,
 ) -> LifecycleOperationProjection:
     if action == "recover" and record.operationKind == "closeout":
@@ -371,7 +394,7 @@ def _resume(
             "a newer lifecycle generation replaced the advertised action",
             expected={"generation": record.generation},
             observed={"generation": requeued.generation},
-            next_action="recover",
+            next_action=action,
         )
     launch_detached_worker(contract, requeued)
     current = store.read() or requeued
@@ -447,13 +470,13 @@ def _require_proven_closeout_door_for_launch(
 
 def _require_resumable(
     record: LifecycleOperationRecord,
-    action: Literal["retry", "recover"],
+    action: Literal["retry", "recover", "resume"],
 ) -> None:
     if record.status in {"completed", "cancelled"}:
         raise LifecycleControlError(
             "lifecycle-generation-terminal",
             "same-generation retry/recover cannot replace this terminal disposition",
-            next_action="revise" if record.status == "cancelled" else "retire",
+            next_action="resume" if record.status == "cancelled" else "retire",
         )
     if record.workerPid is not None:
         raise LifecycleControlError(
@@ -770,92 +793,184 @@ def _require_supersede_declaration_match(
         )
 
 
-def _revise_closeout(
+def _resume_closeout_successor(
     contract: WorktreeContract,
     store: LifecycleOperationStore,
     record: LifecycleOperationRecord,
     *,
     command: LifecycleControlCommand,
 ) -> LifecycleOperationProjection:
-    if record.operationKind != "closeout" or command.revision_messages is None:
+    if record.operationKind != "closeout" or command.resume_messages is None:
         raise LifecycleControlError(
-            "lifecycle-revision-input-required",
-            "closeout revise requires fresh explicit commit-message fields",
-            next_action="revise",
+            "lifecycle-resume-input-required",
+            "closeout resume requires fresh explicit commit-message fields",
+            next_action="resume",
         )
+    if command.dry_run:
+        validated = _validated_resume(contract, record, command)
+        return bind_projection_result(
+            operation_projection(record, contract=contract),
+            {
+                "state": "would-resume",
+                "summary": "Resume would cancel this attempt and start the repaired candidate.",
+                "nextAction": "resume",
+                "nextTool": "worktree_operation_control",
+                "nextArgs": _resume_arguments(validated, record),
+            },
+        )
+
     if record.status == "cancelled":
-        record = complete_pending_door(contract, store, record, dry_run=command.dry_run)
-        cancellation_projection = operation_projection(record, contract=contract)
+        complete_pending_door(contract, store, record, dry_run=False)
     else:
-        cancellation_projection = cancel_operation(
-            contract,
-            store,
-            record,
-            dry_run=command.dry_run,
+        cancel_operation(contract, store, record, dry_run=False)
+    record = store.read() or record
+    current_contract = _refresh_resume_door(contract, command)
+    record = store.read() or record
+    validated = _validated_resume(current_contract, record, command)
+    candidate_tree = validated.candidate.tree
+    if candidate_tree is None:
+        raise LifecycleControlError(
+            "lifecycle-resume-candidate-missing",
+            "closeout resume requires one exact repaired code candidate",
+            next_action="resume",
         )
-        record = store.read() or record
-    current_contract = load_contract(contract.contract_path)
-    validated = _validated_revision(current_contract, record, command)
-    state = "would-revise" if command.dry_run else "revision-ready"
-    result = {
-        "state": state,
-        "summary": (
-            "Cancellation would publish a distinct waiting door successor; apply the "
-            "validated closeout input through worktree_closeout_apply."
-            if command.dry_run
-            else "A distinct waiting door successor is published; apply the validated "
-            "closeout input through worktree_closeout_apply."
-        ),
-        "nextAction": "apply-closeout-successor",
-        "nextTool": "worktree_closeout_apply",
-        "nextArgs": _revision_apply_args(validated),
-    }
-    summary = str(result["summary"])
-    return bind_projection_result(
-        cancellation_projection,
-        result,
-        guidance=summary,
-        recommendation=LifecycleRecommendedAction(
-            action="apply-closeout-successor",
-            tool="worktree_closeout_apply",
-            arguments=_revision_apply_args(validated),
-            summary=summary,
-            mutating=True,
-        ),
+    return start_closeout_successor_under_lease(
+        current_contract,
+        validated.operation_input,
+        validated.candidate,
     )
 
 
-def _validated_revision(
+def _refresh_resume_door(
+    contract: WorktreeContract,
+    command: LifecycleControlCommand,
+) -> WorktreeContract:
+    """Bind resume to the current source candidate before claiming its successor."""
+
+    current_door = contract.closeout_door
+    if current_door is None:
+        raise LifecycleControlError(
+            "closeout-resume-door-missing",
+            "closeout resume requires the cancelled generation's waiting door",
+            next_action="developer-decision",
+        )
+    actor = command.caller or DeclaredCaller(
+        role="orchestrator",
+        task_document_ref=current_door.sprintTaskDocumentRef,
+    )
+    request = CloseoutDoorRequest(
+        action="update-provenance",
+        contract_path=contract.contract_path.as_posix(),
+        candidate_task_document_ref=(
+            current_door.taskDocumentRef if contract.kind == "series" else None
+        ),
+        expected_generation_id=current_door.generationId,
+        grade=SchedulingGradeInput(
+            priority=current_door.schedulingProvenance.priority,
+            judgmentId=current_door.schedulingProvenance.judgmentId,
+        ),
+        admission=CandidateAdmissionFacts(
+            resourceReady=current_door.admissionProvenance.resourceReady,
+            resourceReason=current_door.admissionProvenance.resourceReason,
+            admissionReady=current_door.admissionProvenance.admissionReady,
+            admissionReason=current_door.admissionProvenance.admissionReason,
+        ),
+        caller=actor,
+    )
+    runtime = load_config(command.configured_authority)
+    with task_publication_lock(contract.coordination_root, contract.repo_name):
+        current, _location = reread_configured_contract(
+            contract,
+            command.configured_authority,
+        )
+        try:
+            context = door_task_context(runtime, current, request)
+            authorize_door_actor(actor, context, "update-provenance")
+            generation = updated_door_generation(context, request, actor)
+            proof = publish_door_intent(
+                current.contract_path,
+                prepare_door_publication(current, generation),
+            )
+        except DoorPublicationError as exc:
+            classification = exc.classification
+            raise LifecycleControlError(
+                exc.status,
+                exc.detail,
+                expected=classification.expected,
+                observed=classification.observed,
+                next_action="resume"
+                if classification.state == "accepted-before"
+                else "developer-decision",
+            ) from exc
+        except CloseoutQueueError as exc:
+            raise LifecycleControlError(
+                exc.status,
+                str(exc),
+                next_action="resume",
+            ) from exc
+        if proof.state != "proven":
+            raise LifecycleControlError(
+                "closeout-resume-door-unproven",
+                "resume could not prove its source-door successor",
+                next_action="resume",
+            )
+    updated = load_contract(contract.contract_path)
+    door = updated.closeout_door
+    if door is None:
+        raise LifecycleControlError(
+            "closeout-resume-door-missing",
+            "resume could not reload its waiting successor door",
+            next_action="developer-decision",
+        )
+    try:
+        effect = refresh_closeout_projection(
+            updated.coordination_root,
+            door.sprintTaskDocumentRef,
+        )
+    except Exception as exc:
+        raise LifecycleControlError(
+            "closeout-resume-projection-failed",
+            "resume could not rebuild the exact current closeout projection",
+            next_action="resume",
+        ) from exc
+    if effect.rebuild.outcome not in {"published", "already-current"}:
+        raise LifecycleControlError(
+            "closeout-resume-projection-invalid",
+            "resume requires an exact current closeout projection before claiming",
+            observed={"rebuild": effect.rebuild.outcome},
+            next_action="resume",
+        )
+    return load_contract(updated.contract_path)
+
+
+def _validated_resume(
     contract: WorktreeContract,
     record: LifecycleOperationRecord,
     command: LifecycleControlCommand,
 ) -> ValidatedCloseoutAdmission:
-    admission = _closeout_revision_admission(record, command)
+    admission = _closeout_resume_admission(record, command)
     try:
         validated = prevalidate_closeout_operation_admission(contract, admission)
     except CloseoutInputError as exc:
         raise LifecycleControlError(
             exc.status,
-            "closeout revision input is invalid; use the corrected fields",
+            "closeout resume input is invalid; use the corrected fields",
             expected=exc.response_fields(),
-            next_action="revise",
+            next_action="resume",
         ) from exc
-    if (
-        validated.operation_input == record.input
-        or validated.candidate.fingerprint == record.fingerprint
-    ):
-        raise LifecycleControlError(
-            "lifecycle-revision-unchanged",
-            "revise requires genuinely fresh approved intent",
-            next_action="revise",
-        )
     return validated
 
 
-def _revision_apply_args(validated: ValidatedCloseoutAdmission) -> dict[str, object]:
+def _resume_arguments(
+    validated: ValidatedCloseoutAdmission,
+    record: LifecycleOperationRecord,
+) -> dict[str, object]:
     operation_input = validated.operation_input
+    assert isinstance(operation_input, CloseoutOperationInput)
     args: dict[str, object] = {
         "contract_path": operation_input.contractPath,
+        "operation_kind": "closeout",
+        "action": "resume",
         "intent_note": operation_input.approvalNote,
         "dry_run": False,
     }
@@ -867,35 +982,49 @@ def _revision_apply_args(validated: ValidatedCloseoutAdmission) -> dict[str, obj
         accepted = getattr(operation_input.effectiveInput, leg)
         if accepted.state == "enabled":
             args[field] = accepted.message
+    if operation_input.correctiveDispositions:
+        args["corrective_dispositions"] = [
+            item.model_dump(mode="json") for item in operation_input.correctiveDispositions
+        ]
+    args["expected_generation"] = record.generation
     return args
 
 
-def _closeout_revision_admission(
+def _closeout_resume_admission(
     record: LifecycleOperationRecord,
     command: LifecycleControlCommand,
 ) -> CloseoutOperationAdmission:
     operation_input = record.input
+    assert isinstance(operation_input, CloseoutOperationInput)
     config_path = operation_input.configPath
-    gate_policy = command.revision_gate_policy
-    if gate_policy is None:
-        raise LifecycleControlError(
-            "lifecycle-revision-policy-required",
-            "closeout revise requires the current configured gate policy snapshot",
-            next_action="revise",
-        )
+    gate_policy = command.resume_gate_policy or operation_input.gatePolicy
+    messages = command.resume_messages or CloseoutMessageInput()
+    accepted = operation_input.effectiveInput
+    messages = CloseoutMessageInput(
+        code=messages.code or (accepted.message_for("code") if accepted.enabled("code") else None),
+        memory=(
+            messages.memory
+            or (accepted.message_for("memory") if accepted.enabled("memory") else None)
+        ),
+        ledger=(
+            messages.ledger
+            or (accepted.message_for("ledger") if accepted.enabled("ledger") else None)
+        ),
+    )
     return CloseoutOperationAdmission(
         config_path=config_path,
         contract_path=Path(record.contractPath),
-        messages=command.revision_messages or CloseoutMessageInput(),
-        approval_note=command.intent_note.strip(),
+        messages=messages,
+        approval_note=command.intent_note.strip() or operation_input.approvalNote,
         gate_policy=gate_policy,
+        corrective_dispositions=command.corrective_dispositions,
         corrected_call=CloseoutCorrectedCall(
             tool="worktree_operation_control",
             arguments={
                 **corrected_closeout_arguments(
                     record.contractPath,
                     operation_kind="closeout",
-                    action="revise",
+                    action="resume",
                     expected_generation=record.generation,
                     intent_note="<fresh developer intent>",
                 )

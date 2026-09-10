@@ -277,15 +277,16 @@ Before final closure:
 1. verify any referenced workflow or skill paths still resolve
 2. check whether newly introduced terms belong in the glossary or naming references listed in the `c-08-ar-coordination-context-resolver` resolved `sources_path`
 3. update any repo-level descriptions that would now be misleading
-4. independently review the owned primary stable-ID + version acceptance block as `accepted |
-   rejected`, opening the
-   cited artifacts and giving a reviewer rationale; missing rationale, wrong-class evidence,
-   invalid citations, or missing developer approval forces rejection, and closure cannot pass
-   while any ID is rejected. Bind the adjudication to the exact worker attempt, leaf manifestation,
-   and candidate; append a separate immutable reviewer record without changing the worker record.
-   Every rejection uses one closed failure class. Accepted attempts remain closed unless an
-   independent reviewer proves direct regression and the owning manager (architect in a flat run)
-   records bounded invalidation, or an approved requirement revision affects that manifestation.
+4. When the developer or approved task brief requests review, independently review the owned
+   primary stable-ID + version acceptance block as `accepted | rejected`, opening the cited artifacts
+   and giving a reviewer rationale; missing rationale, wrong-class evidence, or invalid citations
+   forces rejection, and the requested review cannot pass while any ID is rejected. Bind the
+   adjudication to the exact worker attempt, leaf manifestation, and candidate; append a separate
+   immutable reviewer record without changing the worker record. Every rejection uses one closed
+   failure class. Accepted attempts remain closed unless the requested reviewer proves direct
+   regression and the owning manager (architect in a flat run) records bounded invalidation, or an
+   approved requirement revision affects that manifestation. Review is not an automatic closeout or
+   integration requirement.
 
 ## Three-touch iteration cycle
 

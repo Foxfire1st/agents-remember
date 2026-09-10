@@ -4,13 +4,15 @@
 #     _gate.sh fast      pre-commit: check staged/index content, cheaply.
 #     _gate.sh targeted  pre-push:   report the pushed refs and repeat the
 #                                    deterministic non-test checks.
-#     _gate.sh full      manual:     refuse and point at the Dagger-only gate.
+#     _gate.sh full      manual:     explicit full workflow; hooks do not launch it.
 #
 # Enable once per clone:  ./setup-hooks.sh
 # Prerequisite:           create mcp/.venv and install "mcp[dev]" into it
 #
-# The hook tiers run deterministic non-test checks only. Acceptance is owned by the
-# pinned Dagger graph exactly once at leaf closeout and once at master integration.
+# The hook tiers run deterministic non-test checks only. Closeout and integration
+# publish authorized Git code/memory/ledger transactions and do not launch automatic
+# full quality, test, memory-quality, curator-certification, or review operations.
+# Explicit developer-requested workflows may use the repository's configured executor.
 # Push, pull-request, tag, publish, and leaf-integration paths do not rerun it. Pull
 # requests still own GitHub's deterministic non-test checks. In linked worktrees,
 # use the primary worktree's MCP development environment when necessary and put the
@@ -150,8 +152,8 @@ report_untracked_scope() {
 }
 
 # The host frontend rail is intentionally non-test: codegen, lint, and typecheck.
-# Playwright refuses outside the pinned Dagger graph. Direct targeted Vitest is a
-# diagnostic-only developer loop, not part of this hook or acceptance evidence. A fresh
+# Playwright remains outside this hook's deterministic non-test scope. Direct targeted Vitest is a
+# diagnostic-only developer loop, not part of this hook or closeout/integration evidence. A fresh
 # checkout without node_modules fails with the install instruction instead of skipping the gate.
 dashboard_checks() {
   if [ ! -f "dashboard/package.json" ]; then

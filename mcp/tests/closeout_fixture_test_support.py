@@ -116,9 +116,7 @@ def _component_code_and_memory(contract, args: WorktreeArgs) -> tuple[str, str]:
     """Real writer-component fixture only; this does not claim lifecycle/Gate-5 acceptance."""
     assert args.closeout_input is not None
     git(contract.code_worktree, "add", "-A")
-    code = closeout_recovery.accepted_code_commit(
-        contract, args, args.closeout_input, strict_code_quality_required=True
-    )
+    code = closeout_recovery.accepted_code_commit(contract, args, args.closeout_input)
     memory, created = closeout_external._commit_memory_content(
         contract, args, args.closeout_input, existing_mapping=None, resuming=False
     )

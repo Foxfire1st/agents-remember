@@ -18,6 +18,7 @@ from agents_remember.memory_quality.memory_census import build_memory_census
 from agents_remember.models.lifecycles.curator_coherence import CuratorSourceCandidate
 from agents_remember.models.lifecycles.memory_census import MemoryCensusResult, MemoryCensusRow
 from agents_remember.worktrees.integration.closeout.memory_census_scope import (
+    MemoryCensusCodeInput,
     MemoryCensusScope,
     capture_memory_census_scope,
 )
@@ -35,7 +36,10 @@ def prepare_memory_census(scope: MemoryScope) -> PreparedMemoryCensus | None:
     if scope.pair_identity is None:
         return None
     contract = load_contract(Path(scope.pair_identity.contractPath))
-    candidate = capture_memory_census_scope(contract)
+    candidate = capture_memory_census_scope(
+        contract,
+        code_input=_prepared_code_input(scope),
+    )
     return PreparedMemoryCensus(
         candidate,
         build_memory_census(candidate, settings=scope.context.storage),
@@ -130,3 +134,20 @@ def _curator_source(prepared: PreparedMemoryCensus, row: MemoryCensusRow) -> str
     if not source:
         raise ValueError("governed artifact lacks its canonical source identity")
     return source
+
+
+def _prepared_code_input(scope: MemoryScope) -> MemoryCensusCodeInput | None:
+    """Use the selected commit for census provenance while retaining the logical pair."""
+
+    view = scope.prepared_code_view
+    pair = scope.pair_identity
+    if view is None or pair is None:
+        return None
+    return MemoryCensusCodeInput(
+        mode="existing-code-recovery",
+        pairIdentity=pair,
+        observedCodeHead=view.codeCommit,
+        codeBaseCommit=pair.codeBaseCommit,
+        targetCodeTree=view.codeTree,
+        targetCodeCommit=view.codeCommit,
+    )

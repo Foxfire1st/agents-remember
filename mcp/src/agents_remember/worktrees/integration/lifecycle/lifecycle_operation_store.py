@@ -757,6 +757,10 @@ class LifecycleOperationStore:
         candidate: LifecycleOperationRecord,
         *,
         initial_certification: InitialCertificationSelection | None = None,
+        retain_preparation: Callable[
+            [LifecycleOperationRecord, LifecycleOperationRecord], LifecycleOperationRecord
+        ]
+        | None = None,
     ) -> LifecycleOperationRecord:
         """Archive one exact terminal predecessor, then atomically publish N+1."""
         with exclusive_access(self.path, _OWNERSHIP):
@@ -769,20 +773,11 @@ class LifecycleOperationStore:
                 return current
             if current is None or current.status not in _TERMINAL:
                 raise RuntimeError("an active lifecycle operation cannot be replaced")
-            if current.preparation is not None or candidate.preparation is not None:
-                raise RuntimeError(
-                    "private preparation requires an explicit proved retention disposition"
-                )
-            if current.workerPid is not None or (
-                current.workerTermination is not None
-                and current.workerTermination.state != "exited"
-            ):
-                raise RuntimeError(
-                    "terminal lifecycle generation retains unproven worker authority"
-                )
-            for field in ("taskId", "taskName", "contractPath", "operationKind"):
-                if getattr(candidate, field) != getattr(current, field):
-                    raise RuntimeError(f"a sequential lifecycle operation cannot change {field}")
+            self._require_terminal_replacement(
+                current,
+                candidate,
+                retain_preparation=retain_preparation,
+            )
             successor_revision = current.recordRevision + (
                 1
                 if current.operationKind in {"closeout", "direct-landing"}
@@ -804,6 +799,18 @@ class LifecycleOperationStore:
                 current.taskIntent
             ):
                 validated = self._with_initial_certification(validated, initial_certification)
+                if retain_preparation is not None:
+                    validated = LifecycleOperationRecord.model_validate(
+                        retain_preparation(current, validated).model_dump(mode="json")
+                    )
+                if current.preparation is not None and validated.preparedCodeRetention is None:
+                    raise RuntimeError(
+                        "private preparation retention did not publish a proved successor binding"
+                    )
+                if current.preparation is None and validated.preparedCodeRetention is not None:
+                    raise RuntimeError(
+                        "prepared code retention requires a selected predecessor preparation"
+                    )
                 return self._retire_missing_intent_generation(current, validated)
             predecessor = LifecycleOperationRecord.model_validate(
                 current.model_copy(
@@ -816,8 +823,52 @@ class LifecycleOperationStore:
             )
             self._archive_generation(predecessor)
             validated = self._with_initial_certification(validated, initial_certification)
+            if retain_preparation is not None:
+                validated = LifecycleOperationRecord.model_validate(
+                    retain_preparation(current, validated).model_dump(mode="json")
+                )
+            if (
+                current.preparation is not None
+                and validated.preparedCodeRetention is None
+                and current.candidateTree == validated.candidateTree
+            ):
+                raise RuntimeError(
+                    "private preparation retention did not publish a proved successor binding"
+                )
+            if current.preparation is None and validated.preparedCodeRetention is not None:
+                raise RuntimeError(
+                    "prepared code retention requires a selected predecessor preparation"
+                )
             self._write(validated)
             return validated
+
+    @staticmethod
+    def _require_terminal_replacement(
+        current: LifecycleOperationRecord,
+        candidate: LifecycleOperationRecord,
+        *,
+        retain_preparation: Callable[
+            [LifecycleOperationRecord, LifecycleOperationRecord], LifecycleOperationRecord
+        ]
+        | None,
+    ) -> None:
+        if (
+            current.preparation is not None
+            and retain_preparation is None
+            and current.candidateTree == candidate.candidateTree
+        ):
+            raise RuntimeError(
+                "private preparation requires an explicit proved retention disposition"
+            )
+        if candidate.preparation is not None:
+            raise RuntimeError("private preparation must be selected by the successor owner")
+        if current.workerPid is not None or (
+            current.workerTermination is not None and current.workerTermination.state != "exited"
+        ):
+            raise RuntimeError("terminal lifecycle generation retains unproven worker authority")
+        for field in ("taskId", "taskName", "contractPath", "operationKind"):
+            if getattr(candidate, field) != getattr(current, field):
+                raise RuntimeError(f"a sequential lifecycle operation cannot change {field}")
 
     def _retire_missing_intent_generation(
         self,

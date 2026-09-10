@@ -188,7 +188,10 @@ the design: run the bulwark check against the portfolio and the past before disp
 - **Route-coherence scan** across the set (route indexes · onboarding · grepai · cgc); the scan
   runs in this seat's own loop or a dispatched system-specialist's, writing durable reports
   (`../templates/impact-analysis.md`).
-- **Integrity bulwark** — planned-vs-planned AND planned-vs-past, every time.
+- **Integrity bulwark** — the baseline plan review performs the complete planned-vs-planned and
+  planned-vs-past sweep. A `reviewMode=fix-verification` successor reuses the sealed evidence and
+  inspects only the outstanding IDs and their fixes; it does not repeat the portfolio sweep or
+  turn an outside-list observation into a finding.
 - **Reshape** — foundation-master extraction; leaf **moves** for planning-status leaves (real
   moves, never tombstones), each with decision-log entries on both masters. **The sub-task list is
   an ORDERED LIST with word-processor semantics:** numbers ARE positions; moving an item renumbers
@@ -224,8 +227,20 @@ the design: run the bulwark check against the portfolio and the past before disp
 - **Re-evaluation rules:** ordinary readiness changes, candidate arrivals, landed leaves, and
   bounded reprioritization are this seat's job; recompute without a strategist. A new dependency,
   changed atomic boundary, invalidated priority model, or multi-master reshape is substantial:
-  propose a fresh strategist pass through the architect (same approval rule). An out-of-sprint
-  master waits for the next sprint unless the architect explicitly changes scope.
+  propose a fresh strategist pass through the architect (same approval rule) only for a developer-
+  approved planning-scope change. During `reviewMode=fix-verification`, a changed surface that
+  cannot be checked against the sealed baseline returns to the developer and does not open a new
+  review cycle. An out-of-sprint master waits for the next sprint unless the architect explicitly
+  changes scope.
+- **Plan-review mode:** the architect's plan-review packet carries exactly `reviewMode=baseline` or
+  `reviewMode=fix-verification`. Baseline planning establishes the complete agreed scope, standing
+  criteria, routes, lenses, and sealed issue IDs. A successor carries the sealed baseline,
+  immediately preceding result, and exact outstanding IDs; it records fixed/unfixed dispositions
+  for every preceding ID and may leave only a subset of those IDs. It cannot add or rewrite an
+  issue, reopen a resolved ID, add a route/lens/criterion, or run another whole-plan review. A
+  changed plan surface that cannot be checked against the baseline returns to the developer. Three
+  review rounds are the ordinary maximum; at that limit ask the developer directly, wait for explicit
+  authorization, and record the instruction before any extra round.
 - **Output: the planner master task + the adopted orchestration task** — the run's durable home:
   subTasks = the sprint's **master index** — one typed row per commanded master carrying
   `masterRef` (attached through `task_doc.attach_master`, never hand-written); the sprint's seats
@@ -253,9 +268,11 @@ the design: run the bulwark check against the portfolio and the past before disp
   commanded master first, then use one complete `task_doc.author_execution_graph` batch containing
   every node and evidence-backed edge; edit the graph incrementally only after that bootstrap
   (edges are always graph-authoring work).
-- **Gate:** the portfolio plan gate — one wholesale architect/developer review of the reshaped
-  portfolio + the orchestration task (sprint scope + DAG + dispatch order). **No git surface** —
-  not even the super branch exists yet.
+- **Gate:** the portfolio plan gate — a baseline gets one complete architect/developer review of
+  the reshaped portfolio + orchestration task (sprint scope + DAG + dispatch order). A
+  `fix-verification` successor carries the sealed baseline and verifies only its outstanding IDs;
+  it does not repeat the wholesale review. **No git surface** — not even the super branch exists
+  yet.
 
 ## Job O — Orchestrate (execute the plan)
 
@@ -318,9 +335,11 @@ no seat-local polling/monitoring, own duty inverts to processing what lands, not
 Then apply the **spirit test** — a model-judgment duty, not a watching one — to escalated
 deltas. A manager escalation may carry a **loop's full round history** (3-round cap hit, or a
 round that failed to shrink the finding set — the convergence rule, `../SKILL.md` The Three-Party
-Loop): this seat either re-runs the loop at ITS level (the orchestrator-level agent set — the
-strongest models) or, when the blocker is a quo-vadis truth, emits a decision item to the
-architect. This spawned backend seat does not run flat hat-collapse (see The Hat-Collapse Rule).
+Loop): preserve that history and escalate it to the architect or developer; this seat does not
+silently re-run a governed review, reset its baseline, or create a new finding list. A quo-vadis
+  truth still becomes a decision item to the architect. A pending review may resume; a genuinely new
+  review counts the next round. This spawned backend seat does not run flat hat-collapse (see
+the Hat-Collapse Rule).
 
 Source-pair activation serializes new atomic implementation exposure; the landing lane separately
 serializes conflicting protected-ref movement. Neither authority can
@@ -334,21 +353,22 @@ projection/admission or conflicting landing boundary, not for planning elsewhere
 subordinate execution without repeated developer formality. Managers may close out and integrate
 their leaves; this seat may decide manager handovers, close out direct work when it wears the
 manager/worker hat, finalize/cleanup subordinate edges, release organizational leaf candidates,
-and land completed atomic masters under the accepted-series authority. Run the preview/checks (a code commit's acceptance
-evidence comes from the implementation resolved through `system/tools.md`, which closeout runs at
-the gate — relay its
-result with the edge) and record the authority
-source in the intent note or decision log; do not stop merely because the next operation creates a
+and land completed atomic masters under the accepted-series authority. Preview the exact
+code/memory/ledger legs and record the authority source in the intent note or decision log;
+worker targeted and curator scoped check results travel with the edge, while closeout does not
+launch automatic quality or test suites. Do not stop merely because the next operation creates a
 commit, advances a lifecycle, cleans up a spent worktree, or fast-forwards a subordinate branch.
 Stop for the developer only when the work reaches the final completed super branch / PR-carryover
 gate, a human-pinned gate is actually raised, the plan meaning changes, checks remain red outside
 scope, or a quo-vadis truth is in play.
 
-**Failed-deliverable rule (reopen-and-reshape):** a leaf whose deliverable came out wrong is
-**REOPENED under its own id** (`task_reopen`) and its doc reshaped to the intended form — the
-decision log preserves the journey. New leaves are only for genuinely **new** changes discovered
-(a fix leaf ≠ a redo leaf). Spawning a sibling per failed attempt hides what went down, breaks
-task order, and splits the change-set.
+**Failed-deliverable rule (reopen-and-reshape):** during baseline execution, a leaf whose
+deliverable came out wrong is **REOPENED under its own id** (`task_reopen`) and its doc reshaped to
+the intended form — the decision log preserves the journey. New leaves are only for genuinely
+**new** changes discovered (a fix leaf ≠ a redo leaf). During `reviewMode=fix-verification`, only
+the existing owner and sealed outstanding IDs may drive that repair; an outside-list change goes
+to the developer and cannot create a new leaf or reopen a resolved issue. Spawning a sibling per
+failed attempt hides what went down, breaks task order, and splits the change-set.
 
 **Review independence and evidence type (added 260815-DAG-L15):** never review your own leaf
 or plan implementation as the "independent" route reviewer (260815-DAG: L7/L8/L9 self-reviews),
@@ -358,37 +378,36 @@ requirements need artifact-level proof. Route reviews come from a distinct revie
 seat reviews only at super-exit, through a spawned reviewer.
 
 **Master exit:** read the manager's handover packet
-(`../templates/master-handover-packet.md`); check the master-exit verdict (evidence, never a
-decision); then decide the one open manager handover gate structurally:
+(`../templates/master-handover-packet.md`); if a master-exit review was requested, check its
+verdict (evidence, never a decision); then decide the one open manager handover gate structurally:
 `gate_decide(task_document_ref=<canonical master document>,
 kind="master-handover-approval", decision="approve")`. The plane resolves the private gate from
 the document, kind, and caller's ambient orchestrator seat; zero or multiple matches fail closed.
 The ambient seat becomes the attributed decider (owner-never-self-approves holds because the
-raiser was the manager), and policy may require the attached reviewer verdict
-(`requireReviewerVerdictAtSeams`). Integration
-enforces it: `worktree_integrate` refuses while a `master-handover-approval` gate addressed to
-this master (its `enclosure`) is undecided or policy-invalid. A blocking verdict decomposes into
-fix leaves dispatched before integration; a
+raiser was the manager), and policy may require the attached authority evidence. Integration
+enforces only the durable `master-handover-approval` gate addressed to this master (its
+`enclosure`) while it is undecided or policy-invalid. If a requested review blocks, its listed
+fixes are handled under the three-round rule before integration; a
 handover you cannot honestly decide escalates to the architect as a decision item.
 
 **Landing duty — one super line, two execution natures.** Per ready candidate:
 
 1. Consume the manager's readiness or handover packet: execution nature, canonical refs,
-   waiting door generation, change-set summary, targeted acceptance, verdict, route/seam facts,
-   lineage, ledger state, blockers, risks, and dependent nodes.
+   waiting door generation, change-set summary, worker targeted-check report, curator scoped
+   onboarding/check report, optional requested verdict, lineage, ledger state, blockers, risks, and
+   dependent nodes.
 2. Recompute the graph frontier and current valid-built closeout projection, then release only its
    exact first-ready generation. A manager publishes door facts; it never selects against another
    master. Claim is a short task/door CAS inside `worktree_closeout_apply`; after claim, all
    attempt/worker/commit/recovery evidence belongs to the operation journal even if the projection
    is later invalidated or absent.
-3. **Organizational:** release one reviewed leaf closeout against the current super source. Ordinary
-   leaves land their targeted-certified commits directly. For the final leaf, build the exact
-   proposed super candidate, run the repository's full acceptance once **before** moving super,
-   then atomically land that leaf and complete the organizational master only on pass. No master
-   branch is merged because none exists.
+3. **Organizational:** release one prepared leaf transaction against the current super source and
+   land its code/memory/ledger legs directly. No full acceptance is launched at the final leaf. No
+   master branch is merged because none exists.
 4. **Atomic:** require the master to be the active source-pair selection while its manager exposes
-   implementation, integrate every certified leaf into the isolated atomic branch, then acquire
-   the narrow landing authority, run the full acceptance, and land that one branch on super.
+   implementation, integrate every prepared leaf into the isolated atomic branch, then acquire the
+   narrow landing authority and land that one code/memory/ledger block on super. Full quality or
+   memory suites run only when the developer explicitly requests them.
    Expose no intermediate atomic leaf to super; a paused master retains its branch and journals.
 5. Map the external-memory edge with the code edge. Prefer ancestry-preserving fast-forward/replay;
    carry-over is an explicit recovery for unavoidable divergence, not a routine consequence of
@@ -411,18 +430,13 @@ handover you cannot honestly decide escalates to the architect as a decision ite
    Setting `retirement.autoCloseCompletedSeats=false` restores landed/archive behavior for the
    three automatic leaf-altitude roles; it never makes manager/orchestrator automatic targets.
 
-**Quality altitude ladder.** Leaf closeout runs the repository-prescribed change-set-scoped
-acceptance exactly once. Leaf integration lands that certified commit without a rerun. The
-repository-prescribed full check runs exactly once per master at its completion gate: against the
-proposed final organizational super candidate before it lands, or against the atomic block during
-its landing. Series/master closeout does
-not spend it. `memory_quality_check` stays a per-leaf closeout gate.
-Do not run a separate full check per leaf or add integration-time reruns.
-
-The concrete executor, permitted environment, command arguments, retry semantics, resource policy,
-and evidence contract belong to the repository's resolved `system/git-workflow.md`,
-`system/coding-guidelines.md`, and `system/tools.md`. Missing or failed required acceptance refuses;
-never replace it with a familiar local runner or compatibility fallback.
+**Transaction boundary.** Closeout and integration publish only the explicitly authorized Git code,
+prepared memory, and ledger commits/merges, with source/destination refs, conflict checks, and
+recovery evidence. They do not automatically run code-quality checks, full test suites,
+memory-quality suites, curator certification, or independent review. Full code quality, full tests,
+and full memory quality run only after an explicit developer request. Worker targeted checks and
+curator scoped onboarding checks remain truthful handoff evidence; failed or not-run checks are
+reported and never relabeled as full green.
 
 **The topology (single home — this section owns it):**
 
@@ -431,10 +445,10 @@ main
   └── super-integration (orchestrator-owned, branch off main — created at Job O entry)
         ├── organizational master A (logical owner only)
         │     ├── leaf A1 (off current super) ──→ super
-        │     └── leaf A2 (off refreshed super) ── full A gate ─→ super once
+        │     └── leaf A2 (off refreshed super) ── prepared transaction ─→ super
         ├── atomic master B branch (off current super; source-pair-selected; one landing)
         │     ├── leaf B1 ─→ B
-        │     └── leaf B2 ─→ B ── full B gate ─→ super once
+        │     └── leaf B2 ─→ B ── prepared transaction ─→ super
         └── … final: super → main PR (remote merge) + memory carry-over to main + push
 ```
 
@@ -448,10 +462,12 @@ approval**.
 
 **Conflict resolution — integration branches are not workbenches.** *Up-front (preferred):* an
 overlap found during planning becomes a cited predecessor edge or an atomic foundation master
-implemented first. *Late:* return the repair to the leaf that owns the change, or create a scoped
-fix leaf when it is genuinely new work; refresh it from current super, review it, and re-enter the
-door/projection path with new proven provenance. Direct feature/fix commits on main, super, or an
-atomic integration branch are forbidden;
+implemented first. *Late during baseline execution:* return the repair to the leaf that owns the
+change, or create a scoped fix leaf when it is genuinely new work; refresh it from current super,
+review it, and re-enter the door/projection path with new proven provenance. During
+`reviewMode=fix-verification`, return only sealed outstanding-ID repairs to their existing owner;
+an outside-list conflict is a developer decision item and cannot create a new fix leaf or review.
+Direct feature/fix commits on main, super, or an atomic integration branch are forbidden;
 only plane-owned ref movement and narrowly scoped conflict-resolution commits belong there.
 
 **Mechanization boundary:** the typed graph and execution-nature schema own task ordering; door
@@ -461,24 +477,22 @@ movement and atomic exclusion only. If any owner is unreadable, fail closed only
 boundary and report the task-addressed repair. Never approximate a missing primitive with direct
 Git, task freezes, queue lifecycle rows, scanned journals, or compatibility readers.
 
-**Super exit & landing tail — the architect-mediated SINGLE review point (ruled 2026-07-06, resolves
+**Super exit & landing tail — the architect-mediated handoff (ruled 2026-07-06, resolves
 L8-Q9):** all organizational leaf→super and atomic master→super landings are
 **orchestrator-delegated** — on the
 happy path they proceed under the series' standing approval (the developer's portfolio-gate
 approval, recorded in the planner master's decision log); a durable `integration-approval` gate,
-when one is raised, still awaits the developer — the kind stays human-pinned as-built. The
-architect presents the developer review ONCE, at the **fully integrated super branch on the
-PR/carry-over gate**. When
-the DAG drains, dispatch the super-exit adversarial reviewer (`roles/reviewer.md`) with
-`dispatch_agent` on this sprint document, role `reviewer`, and a complete whole-super brief; attach
-its verdict as judge
-evidence (`evidenceRefs=[{"kind":"reviewer-verdict","ref":"notes/reports/…","verdict":"…"}]`).
+when one is raised, still awaits the developer — the kind stays human-pinned as-built. When the
+developer or approved plan requests a super-exit review, dispatch the reviewer on this sprint
+document with the complete whole-super brief and attach its verdict as judge evidence
+(`evidenceRefs=[{"kind":"reviewer-verdict","ref":"notes/reports/…","verdict":"…"}]`).
 The handover to the architect **MUST offer a REVIEWABLE ENVIRONMENT** — for agents-remember: the
 dashboard running on the super branch — because the developer review is **visible-behavior-first** (a
 broken visual pass fails the handover fast, before anyone reads a diff), code review second. The
 handover carries **demo notes — "what changed visibly"**: per master, the user-visible behavior
 to walk (panels, flows, outputs, how to reach them), so the developer can drive the environment
-without archaeology. Rejections decompose into fix leaves. On approval: PR + memory carry-over +
+without archaeology. Requested review rejections decompose into listed fix leaves under the
+three-round rule. On approval: PR + memory carry-over +
 push (architect-mediated developer gate), then finalization
 (`lifecycle_finalize_task` per edge — statuses via the tool, steps checked by hand), then the **self-improvement close**:
 proposals for future runs grounded in the run's own ledger ("did x/y/z; hit a/b/c; a and b solved
@@ -528,8 +542,10 @@ seats that produce code or memory artifacts, never for seats that operate orches
 ## The Spirit Test — This Seat Only
 
 **Within the spirit** of what the architect/developer accepted → act alone + a decision-log entry (leaf
-moves and renumbers on planning-status masters, inserted fix leaves, reopened-and-reshaped leaves,
-mid-series convergence — durable task decisions and routed fix leaves are the safety net).
+moves and renumbers on planning-status masters, baseline fix leaves, reopened-and-reshaped leaves,
+mid-series convergence — durable task decisions and routed fix leaves are the safety net). During
+`reviewMode=fix-verification`, the spirit test cannot insert a fix leaf, reopen a resolved issue, or
+broaden the sealed list; route an outside-list observation to the developer.
 **Against the spirit** →
 raise it for a joint decision. Only this seat holds the global view to judge a collision; the
 test is not ported down the ladder — managers and workers keep the default behavior (fulfill the
@@ -571,9 +587,12 @@ task, fill small blanks, escalate real deltas).
   agent settings live) goes to the architect IMMEDIATELY as a decision item, regardless of any
   loop's round count; presentation-grade choices (2px vs 3px) never go up — rule and log.
   A loop that hits its 3-round cap or stops converging arrives here with its full round history;
-  re-run it at this level's agent set or take the quo-vadis part to the architect. Architect or
-  developer rejections arrive here and decompose into fix leaves (or reopens — see the
-  failed-deliverable rule).
+  preserve the sealed baseline and preceding results, then ask the developer directly, wait for
+  explicit authorization, and record the instruction before any extra review rather than resetting
+  the issue list. Architect or
+  developer rejections arrive here and decompose into baseline fix leaves (or reopens — see the
+  failed-deliverable rule); a fix-verification successor may route only its sealed outstanding IDs
+  to their existing owners.
 
 ## Knobs
 

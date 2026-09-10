@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -17,7 +18,7 @@ from agents_remember.certification.certificate_models import (
     GateCertificateIdentity,
 )
 from agents_remember.memory_quality.check import AVAILABLE_CHECKS, DRIFT_CHECK_NAME
-from agents_remember.memory_quality.incremental_scope import affected_planning
+from agents_remember.memory_quality.incremental_scope import affected_planning, owners
 from agents_remember.memory_quality.incremental_scope.affected_execution import (
     AffectedClosureExecution,
     execute_affected_closure,
@@ -589,6 +590,74 @@ def test_r07_execution_publishes_every_member_and_never_promotes_incremental_suc
     }
     assert set(executor.calls or ()) == {item.document for item in plan.units}
     assert result.pendingFinalFull == plan.pendingFinalFull
+
+
+def test_r07_historical_document_stays_in_attention_without_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = _r07_candidate()
+    scope = _r07_scope(candidate)
+    historical = _r07_node("memory:onboarding/old.py.md").model_copy(
+        update={"reasons": ("exact Git tree member", "historical Git tree member")}
+    )
+    scope = _r07_redigest_scope(
+        scope.model_copy(
+            update={
+                "selectedNodes": tuple(
+                    sorted((*scope.selectedNodes, historical), key=lambda item: item.nodeId)
+                )
+            }
+        )
+    )
+    plan = compile_affected_closure_plan(_r07_admission(monkeypatch, candidate), scope)
+
+    assert "old.py.md" not in {item.document for item in plan.units}
+    old_member = next(item for item in plan.members if item.node.nodeId.endswith("old.py.md"))
+    assert old_member.disposition == "dependency-input"
+    assert old_member.unitDigests == ()
+
+    executor = R07RecordingExecutor()
+    result = execute_affected_closure(
+        AffectedClosureExecution(R07StableAuthority(candidate), executor),
+        plan,
+    )
+    assert result.incrementalMemoryReady is True
+    assert "old.py.md" not in (executor.calls or ())
+    old_result = next(item for item in result.memberResults if item.nodeId.endswith("old.py.md"))
+    assert old_result.disposition == "dependency-input"
+    assert old_result.status is None
+
+
+def test_git_rename_marks_only_the_old_node_as_historical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    delta = GitTreeDelta(
+        namespace="memory",
+        root="/work/memory",
+        baseTree="7" * 40,
+        candidateTree="8" * 40,
+        changes=(
+            GitPathChange(
+                status="renamed",
+                oldPath="onboarding/old.py.md",
+                newPath="onboarding/new.py.md",
+                oldBlob="1" * 40,
+                newBlob="2" * 40,
+            ),
+        ),
+    )
+    entries = iter(
+        (
+            {"onboarding/new.py.md": "2" * 40},
+            {"onboarding/old.py.md": "1" * 40},
+        )
+    )
+    monkeypatch.setattr(owners, "_tree_entries", lambda _root, _tree: next(entries))
+
+    nodes = owners.observe_git_nodes(Path("/work/memory"), delta)
+    by_path = {node.nodeId: node for node in nodes}
+    assert "historical Git tree member" not in by_path["memory:onboarding/new.py.md"].reasons
+    assert "historical Git tree member" in by_path["memory:onboarding/old.py.md"].reasons
 
 
 def test_r07_blocked_unit_preserves_code_and_blocks_aggregate(

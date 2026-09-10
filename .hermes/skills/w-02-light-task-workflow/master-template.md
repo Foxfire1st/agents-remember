@@ -152,9 +152,11 @@ is scoped to one slice and points back at the master:
 2. Keep sub-task files flat and numbered; do not nest phase folders.
 3. Run the series through the master integration branch; create one leaf enclosure/worktree per active slice.
 4. Only the master records the version bump and release; sub-tasks never bump.
-5. Each slice runs the repository-prescribed, change-set-scoped acceptance checks plus its listed
-   requirement checks green before its commit. The full-repository gate runs once at the master
-   integration boundary, not at every leaf.
+5. Each slice runs its relevant targeted checks plus its listed requirement checks before handoff,
+   and records failures or not-run checks without claiming full green from a subset. Closeout and
+   integration publish only the authorized code/memory/ledger Git transactions; full code quality,
+   full tests, full memory quality, curator certification, and independent review run only on an
+   explicit developer request.
 6. Decision logs are append-only in both the master and the sub-task files.
 7. Any slice that introduces or retains durable test evidence records a registered stable executable
    contract or an exact expiry/retirement event in that slice; the master may not hide this decision

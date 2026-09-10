@@ -11,7 +11,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from agents_remember.certification.certificate_authority import validate_certificate_chain
 from agents_remember.certification.certificate_invalidation import (
     CertificateInputChange,
     plan_certificate_reuse,
@@ -43,11 +42,11 @@ def require_green_gate_prefix(
     """Admit one exact current green Gate 1-4 prefix or refuse with a typed refusal.
 
     The caller holds the exact prefix chain. plan_certificate_reuse is the single R21
-    authority deciding what may be reused; the adapter only allows the memory-only Gate-5
-    start (reuse exactly Gates 1-4, first gate to run is 5) for the exact admitted code
-    candidate. Any earlier invalidation -- including a code change, which invalidates
-    Gate 5 and restarts at Gate 1 -- refuses before any memory scan or coherence
-    publication.
+    authority deciding what may be reused; this adapter only admits the memory-only
+    Gate-5 start (reuse exactly Gates 1-4, first gate to run is 5). It must receive
+    explicit closeout-resume input when an earlier candidate changed so the planner can
+    validate the exact retained prefix before any memory scan or publication. Fresh
+    admissions with a code change still restart at Gate 1.
     """
 
     ordered = tuple(certificates)
@@ -69,16 +68,6 @@ def require_green_gate_prefix(
             observed={"candidateCodeTree": code_tree},
             next_action="worktree_closeout",
         )
-    try:
-        validate_certificate_chain(admission, ordered, gate_five_inputs=None)
-    except CertificationContractError as error:
-        raise FinalCertificationError(
-            "gate-five-prefix-stale",
-            "the exact green Gate 1-4 certificate prefix is stale against the current admission",
-            expected={"state": "current-green-1-4"},
-            observed={"refusal": _refusal_summary(error)},
-            next_action="worktree_closeout",
-        ) from error
     try:
         reuse = plan_certificate_reuse(admission, ordered, changes)
     except (CertificationContractError, ValueError) as error:

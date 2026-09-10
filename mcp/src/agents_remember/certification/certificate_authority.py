@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Never
+from typing import Never, TypedDict, Unpack
 
 from agents_remember.certification.certificate_admission import (
     admitted_gate_identity,
@@ -23,6 +23,7 @@ from agents_remember.certification.certificate_models import (
     FinalizationCurrentInputs,
     FinalizationSemanticEnvelope,
     GateCertificate,
+    GateCertificateIdentity,
     GateCertificateIssuanceContext,
     GateCertificateSemanticEnvelope,
     GateFiveSemanticInputs,
@@ -36,18 +37,33 @@ from agents_remember.certification.models import (
 from agents_remember.errors import CertificationContractError
 
 
+class _GateCertificateOptions(TypedDict, total=False):
+    retained_certificates: Sequence[GateCertificateIdentity] | None
+
+
 def compile_gate_certificate(
     admission: CertificationAdmissionManifest,
     gate_plan: GatePlan,
     result_manifest: GateResultManifest,
     predecessors: Sequence[GateCertificate],
     issuance: GateCertificateIssuanceContext,
+    **options: Unpack[_GateCertificateOptions],
 ) -> GateCertificate:
     """Issue one green certificate from exact current plans and predecessors."""
 
+    unknown = set(options) - {"retained_certificates"}
+    if unknown:
+        raise TypeError(f"unexpected certificate issuance option: {sorted(unknown)[0]}")
+    retained_certificates = options.get("retained_certificates")
     gate_identity = admitted_gate_identity(admission, gate_plan.gate)
     _require_gate_result_authority(admission, gate_identity, gate_plan, result_manifest)
-    _require_current_predecessors(admission, gate_plan.gate, predecessors)
+    retained = _require_retained_prefix(predecessors, retained_certificates)
+    _require_current_predecessors(
+        admission,
+        gate_plan.gate,
+        predecessors,
+        retained_certificates=retained,
+    )
     if result_manifest.disposition != "green":
         _raise(
             "gate certificate publication refused",
@@ -115,6 +131,7 @@ def validate_certificate_chain(
     certificates: Sequence[GateCertificate],
     *,
     gate_five_inputs: GateFiveSemanticInputs | None = None,
+    retained_certificates: Sequence[GateCertificateIdentity] | None = None,
 ) -> tuple[GateCertificate, ...]:
     """Validate one exact prefix against current gate-local semantic inputs."""
 
@@ -126,12 +143,14 @@ def validate_certificate_chain(
             "certificates",
             "certificate chain must be one exact ordered prefix beginning at Gate 1",
         )
+    retained = _require_retained_prefix(ordered, retained_certificates)
     for index, certificate in enumerate(ordered):
         _require_current_certificate(
             admission,
             certificate,
             predecessors=ordered[:index],
             gate_five_inputs=gate_five_inputs,
+            retained_certificates=retained,
         )
     return ordered
 
@@ -141,6 +160,8 @@ def compile_finalization_authority(
     certificates: Sequence[GateCertificate],
     current_inputs: FinalizationCurrentInputs,
     provenance: CreationProvenance,
+    *,
+    retained_certificates: Sequence[GateCertificateIdentity] | None = None,
 ) -> FinalizationCertificateAuthority:
     """Bind current certificates to transactional authority without rerunning a gate."""
 
@@ -148,6 +169,7 @@ def compile_finalization_authority(
         admission,
         certificates,
         gate_five_inputs=current_inputs.gateFiveInputs,
+        retained_certificates=retained_certificates,
     )
     if len(chain) != 5:
         _raise(
@@ -178,6 +200,8 @@ def validate_finalization_currentness(
     admission: CertificationAdmissionManifest,
     certificates: Sequence[GateCertificate],
     current_inputs: FinalizationCurrentInputs,
+    *,
+    retained_certificates: Sequence[GateCertificateIdentity] | None = None,
 ) -> FinalizationCertificateAuthority:
     """Rebuild finalization authority exactly; unchanged recovery starts zero gates."""
 
@@ -186,6 +210,7 @@ def validate_finalization_currentness(
         certificates,
         current_inputs,
         authority.provenance,
+        retained_certificates=retained_certificates,
     )
     if authority != expected:
         _raise(
@@ -234,6 +259,8 @@ def _require_current_predecessors(
     admission: CertificationAdmissionManifest,
     gate: int,
     predecessors: Sequence[GateCertificate],
+    *,
+    retained_certificates: Sequence[GateCertificateIdentity] = (),
 ) -> None:
     expected_gates = tuple(range(1, gate))
     if tuple(item.semanticEnvelope.gate for item in predecessors) != expected_gates:
@@ -249,6 +276,7 @@ def _require_current_predecessors(
             certificate,
             predecessors=predecessors[:index],
             gate_five_inputs=None,
+            retained_certificates=retained_certificates,
         )
 
 
@@ -258,8 +286,26 @@ def _require_current_certificate(
     *,
     predecessors: Sequence[GateCertificate],
     gate_five_inputs: GateFiveSemanticInputs | None,
+    retained_certificates: Sequence[GateCertificateIdentity] = (),
 ) -> None:
     envelope = certificate.semanticEnvelope
+    if certificate.identity in retained_certificates:
+        if envelope.repositoryId != admission.semanticEnvelope.repositoryId:
+            _raise(
+                "gate certificate chain refused",
+                "retained-certificate-repository-mismatch",
+                f"certificates.{envelope.gate}.repositoryId",
+                "retained certificate must remain bound to the admitted repository",
+            )
+        expected_predecessors = tuple(item.identity for item in predecessors)
+        if envelope.directPredecessors != expected_predecessors:
+            _raise(
+                "gate certificate chain refused",
+                "retained-certificate-predecessor-mismatch",
+                f"certificates.{envelope.gate}.directPredecessors",
+                "retained certificate must preserve its exact predecessor lineage",
+            )
+        return
     admitted = admitted_gate_identity(admission, envelope.gate)
     expected_inputs = list(admitted.semanticInputs)
     if envelope.gate == 5:
@@ -296,6 +342,22 @@ def _require_current_certificate(
             f"certificates.{envelope.gate}",
             "certificate does not match the current gate-local inputs and exact predecessors",
         )
+
+
+def _require_retained_prefix(
+    certificates: Sequence[GateCertificate],
+    retained_certificates: Sequence[GateCertificateIdentity] | None,
+) -> tuple[GateCertificateIdentity, ...]:
+    retained = tuple(retained_certificates or ())
+    expected = tuple(item.identity for item in tuple(certificates)[: len(retained)])
+    if retained != expected:
+        _raise(
+            "gate certificate chain refused",
+            "retained-certificate-prefix-invalid",
+            "retainedCertificates",
+            "retained certificates must be the exact current chain prefix",
+        )
+    return retained
 
 
 def _bind_consumed_artifacts(

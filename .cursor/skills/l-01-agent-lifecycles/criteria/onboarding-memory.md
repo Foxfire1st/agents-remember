@@ -4,8 +4,9 @@ The standing criteria an **adversarial reviewer** (`../roles/reviewer.md`) MUST 
 memory side of a change set: sidecars, route overviews, route indexes, update histories. Binds at
 the master-exit and super-exit seams (the onboarding-vs-code lens) and in loop reviews whose change
 set carries onboarding (see the binding table in `../roles/reviewer.md`). Criteria are never made
-up on the spot: the standing list below is the regression floor, run every time; the exploratory
-mandate and the promotion ratchet keep the catalog alive.
+up on the spot. A baseline review runs the standing list below as its regression floor and may use the
+exploratory mandate and promotion ratchet. A fix-verification uses only the sealed baseline
+evidence needed for its outstanding IDs; it does not recensus this catalog or add a criterion.
 
 ## Standing Criteria (MUST RUN — the regression floor)
 
@@ -29,13 +30,13 @@ Update History line has NOT been refreshed — the body still asserts the old tr
 every claimed refresh touched body sentences, not just the history list.
 
 - Catching evidence: 260703-L8 cycle 6 — the builder reported route overviews as refreshed when
-  they were **history-only**; the closeout body gate caught it (L8 decision log, cycle-6 entry:
+  they were **history-only**; the scoped curator handoff caught it (L8 decision log, cycle-6 entry:
   "report-vs-artifact verification belongs in the reviewer criteria catalog").
 
 ## Candidate Criteria (seeded exploratory — one catching engagement; promote at ≥2)
 
-Run under the exploratory mandate; a candidate is proposed for promotion into the standing list
-when it catches in a second engagement (the ratchet below).
+Run under the exploratory mandate during a baseline review only; a candidate is proposed for
+promotion into the standing list when it catches in a second engagement (the ratchet below).
 
 ### OM-3 — Newest-first with the checker's own semantics *(candidate — 1 catch)*
 
@@ -51,17 +52,19 @@ in the wrong order). Verify ordering with the checker's semantics.
 
 ## Exploratory Mandate
 
-Beyond the standing list, the reviewer owes **novel lenses** (the brief sets N; default 2): attack
-surfaces of THIS memory delta the catalog does not name yet. Every novel finding-class that
-survives refutation is proposed as a catalog amendment in the verdict.
+During a baseline review, beyond the standing list, the reviewer owes **novel lenses** (the brief sets
+N; default 2): attack surfaces of THIS memory delta the catalog does not name yet. Every novel
+finding-class that survives refutation is proposed as a catalog amendment in the verdict. A
+Fix-verification has no novel-lens or new-catalog duty and cannot turn an observation outside
+the sealed issue list into a finding.
 
 ## Promotion Ratchet
 
-- A **candidate** criterion that catches a real defect in **≥2 separate engagements** is promoted
+- A **candidate** criterion that catches a real defect in **≥2 separate first-review engagements** is promoted
   into the standing list above, with its catching evidence cited — escaped bugs become permanent
   tests. Promotion is proposed in the verdict and lands on the loop owner's acceptance.
 - A **standing** criterion that fires nothing for **N consecutive engagements** (default 5)
   demotes to spot-check.
-- A criterion that can be **mechanized graduates out of the catalog into a gate** — the closeout
-  body gate is the working example, and it is THIS catalog's own OM-2 mechanized: the gate catches
+- A criterion that can be **mechanized graduates out of the catalog into a scoped diagnostic** — the
+  curator handoff is the working example, and it is THIS catalog's own OM-2 mechanized: the check catches
   history-only "refreshes" at commit time, where prose requests did not.

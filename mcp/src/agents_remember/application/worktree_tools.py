@@ -6,17 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.completion_cleanup import auto_complete_seats
-from agents_remember.application.lifecycle.certification_refusal import (
-    certification_admission_refusal,
-)
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_status import project_contract_status
-from agents_remember.errors import (
-    CertificationContractError,
-    CuratorCoherenceError,
-    MemoryCandidatePairError,
-    TaskIntentError,
-)
+from agents_remember.errors import TaskIntentError
 from agents_remember.kernel.authority import require_repo, require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import (
     DEFAULT_PROVIDER_SETUP_SECONDS,
@@ -50,10 +42,6 @@ from agents_remember.worktrees.closeout_input import (
     raw_closeout_messages,
     resolve_closeout_plan,
 )
-from agents_remember.worktrees.integration.closeout.memory_candidate_pairing import (
-    memory_candidate_pair_payload,
-    resolve_closeout_memory_pair,
-)
 from agents_remember.worktrees.integration.closeout.operation_admission import (
     CloseoutOperationAdmission,
     prevalidate_closeout_operation_admission,
@@ -80,11 +68,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_closeout_operation,
     start_or_observe_operation,
-)
-from agents_remember.worktrees.route_review import (
-    RouteReviewError,
-    route_review_refusal_fields,
-    route_review_refusal_projection,
 )
 from agents_remember.worktrees.sync_transaction_state import observe_sync_operation
 from agents_remember.worktrees.worktree_contract import (
@@ -445,10 +428,6 @@ def _start_closeout_operation(
     except (CloseoutInputError, TaskIntentError) as error:
         return _start_operation_refusal(config, confined, address, error)
     try:
-        pair_identity = resolve_closeout_memory_pair(configured.contract)
-    except MemoryCandidatePairError as error:
-        return _memory_candidate_pair_refusal(address.operation, error)
-    try:
         execution = execute_configured_contract_operation(
             configured,
             lambda: start_or_observe_closeout_operation(
@@ -457,11 +436,9 @@ def _start_closeout_operation(
             ),
         )
     except (
-        CertificationContractError,
         CloseoutInputError,
         LifecycleControlError,
         LifecycleOperationReadError,
-        RouteReviewError,
         TaskIntentError,
     ) as error:
         return _start_operation_refusal(
@@ -469,7 +446,6 @@ def _start_closeout_operation(
             confined,
             address,
             error,
-            contract=configured.contract,
         )
     if isinstance(execution, ConfiguredContractRefused):
         return project_configured_contract_refusal(
@@ -479,7 +455,6 @@ def _start_closeout_operation(
         )
     return {
         **_operation_acknowledgement("worktree_closeout_apply", execution),
-        **memory_candidate_pair_payload(pair_identity),
     }
 
 
@@ -542,10 +517,6 @@ def worktree_integrate_tool(
         return _operation_acknowledgement("worktree_integrate", execution)
     args = git_worktree_manager.WorktreeArgs(
         contract_path=confined_contract,
-        certification_profile=require_repo(
-            config,
-            configured.contract.repo_name,
-        ).certification_profile,
         strategy=strategy,
         approved=not dry_run,
         ledger_commit_message=ledger_commit_message,
@@ -687,13 +658,13 @@ def _execute_operation_control(
     disposition_authorized: bool,
 ) -> dict[str, Any]:
     confined = configured.contract_path
-    revision_messages = (
+    resume_messages = (
         raw_closeout_messages(
             code=request.code_commit_message,
             memory=request.memory_commit_message,
             ledger=request.ledger_commit_message,
         )
-        if request.action == "revise"
+        if request.action == "resume"
         else None
     )
     contract = configured.contract
@@ -710,10 +681,11 @@ def _execute_operation_control(
                     expected_generation=request.expected_generation,
                     intent_note=request.intent_note,
                     dry_run=request.dry_run,
-                    revision_messages=revision_messages,
-                    revision_gate_policy=(
-                        _gate_policy_snapshot(config) if request.action == "revise" else None
+                    resume_messages=resume_messages,
+                    resume_gate_policy=(
+                        _gate_policy_snapshot(config) if request.action == "resume" else None
                     ),
+                    corrective_dispositions=request.corrective_dispositions,
                     supersede_grade=request.grade,
                     supersede_admission=request.admission,
                     allow_completed_disposition=disposition_authorized,
@@ -776,25 +748,9 @@ def _start_operation_refusal(
     contract_path: Path,
     address: LifecycleOperationPublicAddress,
     error: Exception,
-    *,
-    contract: WorktreeContract | None = None,
 ) -> dict[str, Any]:
     """Translate one start/admission failure without duplicating route classifiers."""
 
-    if isinstance(error, (RouteReviewError, CertificationContractError)):
-        fields = (
-            route_review_refusal_fields(error, contract=contract)
-            if isinstance(error, RouteReviewError) and contract is not None
-            else route_review_refusal_projection(error.status, str(error))
-            if isinstance(error, RouteReviewError)
-            else certification_admission_refusal(address.operation, error, contract=contract)
-        )
-        return {
-            "ok": False,
-            "operation": address.operation,
-            "state": "refused",
-            **fields,
-        }
     if isinstance(error, CloseoutInputError):
         return _closeout_input_refusal(address.operation, error)
     if isinstance(error, TaskIntentError):
@@ -1003,47 +959,14 @@ def _worktree_closeout(
         return _closeout_input_refusal(operation, exc)
     args = git_worktree_manager.WorktreeArgs(
         contract_path=confined_contract,
-        certification_profile=require_repo(
-            config,
-            configured.contract.repo_name,
-        ).certification_profile,
         closeout_input=effective_input,
         approval_note=approval.intent_note,
         approved=not approval.dry_run,
         dry_run=approval.dry_run,
         gate_policy=config.orchestration.gate_policy,
     )
-    try:
-        result = git_worktree_manager.closeout_result(args, configured.contract)
-    except RouteReviewError as error:
-        return {
-            "ok": False,
-            "operation": operation,
-            "state": "refused",
-            **route_review_refusal_fields(error, contract=configured.contract),
-        }
-    except CuratorCoherenceError as error:
-        return {
-            "ok": False,
-            "operation": operation,
-            "state": "refused",
-            "contractPath": confined_contract.as_posix(),
-            **error.response_fields(),
-        }
+    result = git_worktree_manager.closeout_result(args, configured.contract)
     return _worktree_result(operation, result)
-
-
-def _memory_candidate_pair_refusal(
-    operation: str,
-    error: MemoryCandidatePairError,
-) -> dict[str, Any]:
-    return {
-        "ok": False,
-        "operation": operation,
-        "state": "refused",
-        "status": error.status,
-        **error.response_fields(),
-    }
 
 
 def _normalize_worktree_closeout(

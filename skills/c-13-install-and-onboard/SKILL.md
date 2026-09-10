@@ -54,8 +54,8 @@ Run this sequence in order:
 1. Runtime scaffold: run or verify `runtime_install()`.
 2. Agentic settings: walk the developer through the orchestration defaults in
    the seeded global settings file.
-3. Repository certification: author, validate, and explicitly register one repository-owned
-   Gate 1-4 profile for every configured repository that will commit code.
+3. Optional repository certification: only on an explicit developer request, author, validate, and
+   register one repository-owned Gate 1-4 profile for the requested repository.
 4. Memory repo: ask scaffold-new vs use-existing, unless memory already exists.
 5. Bootstrap: when a new memory repo was scaffolded, hand off to
    `c-03-repo-bootstrap`.
@@ -98,10 +98,10 @@ Check, in order:
    root, memory setup must remain consistent with that topology. Do not let
    memory initialization silently choose internal memory when settings clearly
    describe an external-memory layout.
-7. **Certification authority.** For every configured repository expected to commit code, report
-   its exact `repositories.<repo-id>.certificationProfile` value and whether that candidate file
-   exists inside the repository. Absence is work for Stage 3, not permission to discover a
-   wrapper, borrow another repository's profile, or leave code closeout silently uncertified.
+7. **Certification authority, when explicitly requested.** For a developer-requested certification
+   operation, report the exact `repositories.<repo-id>.certificationProfile` value and whether that
+   candidate file exists inside the repository. Routine code closeout/integration is a Git
+   transaction and does not require discovering or running a certification profile.
 
 Do not check for legacy hook prerequisites such as `jq`. Hook and instruction
 files are part of the copied, rendered harness package; this skill no longer
@@ -203,10 +203,11 @@ with the same `orchestration.*` shape; repo-local leaf values override the
 global file (arrays replace). Offer this only when the developer asks for
 repo-specific behavior; do not create the file unprompted.
 
-## Stage 3 - Repository Certification Profile
+## Stage 3 - Repository Certification Profile (explicit operation only)
 
-Complete this stage for every allowed repository that will use code closeout or master
-integration. The normative field and authoring procedure are documented in
+Run this stage only when the developer explicitly requests a repository certification or full
+quality operation. Routine closeout and master integration do not enter this stage. The normative
+field and authoring procedure are documented in
 `docs/reference/repository-certification-profile.md`.
 
 1. Read the repository's documented build, lint/type/format/structural checks, ordinary suite,
@@ -228,16 +229,16 @@ integration. The normative field and authoring procedure are documented in
    implement the exact profile execution and terminal-artifact contract. Do not launch the full
    suite or clean-room scenarios merely as install diagnostics.
 6. If the authority settings changed, tell the developer that the MCP/harness must restart before
-   the new boot-time repository authority is live. Remaining memory/bootstrap work may continue,
-   but report the project as not ready for code closeout until that restart is verified.
+   the new boot-time repository authority is live. This affects the requested certification
+   operation only; it is not a routine closeout/integration prerequisite.
 
 Make progress autonomously from durable repository contracts. Ask the developer only when the
 repository's intended rail, posture, or clean-room boundary is genuinely ambiguous. Never copy the
 Agents Remember reference profile into another repository, create a default profile, install a
 host executor, or add a compatibility/fallback route.
 
-An older configured repository with no profile remains valid for reading, task recovery, and
-onboarding. It has no code-certification authority: an operation that would certify code must fail
+An older configured repository with no profile remains valid for reading, task recovery, onboarding,
+and routine code/memory/ledger closeout. A developer-requested certification operation must fail
 closed until this stage is completed.
 
 ## Stage 4 - Memory Repo: Ask Scaffold Vs Existing
@@ -304,8 +305,9 @@ Summarize:
    resolved coordination root;
 3. agentic settings: interviewed and written, or left at the seeded defaults,
    with the global file path;
-4. repository certification: exact profile path and digest for each code repository, validation
-   result, and whether an authority-settings restart remains;
+4. repository certification: exact profile path and digest for each explicitly requested code
+   repository, validation result, and whether an authority-settings restart remains; routine
+   closeout/integration needs no profile;
 5. memory repo: scaffolded, existing-adopted, or already present, with the
    resolved memory root;
 6. bootstrap: run via `c-03-repo-bootstrap` or skipped;
@@ -329,5 +331,6 @@ longer installs hooks.
    `c-03-repo-bootstrap`, baseline adoption to
    `c-10-adopt-memory-baseline`, and context resolution to
    `c-08-ar-coordination-context-resolver`.
-6. It must not invent a certification profile, discover one by convention, copy another
-   repository's commands, or treat a missing/invalid profile as optional when code would commit.
+6. It must not invent a certification profile, discover one by convention, or copy another
+   repository's commands. A missing/invalid profile blocks only the explicitly requested
+   certification operation; routine code/memory/ledger closeout remains a Git transaction.

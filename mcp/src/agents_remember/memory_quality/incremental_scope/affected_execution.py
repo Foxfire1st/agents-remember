@@ -212,7 +212,8 @@ def execute_affected_closure(
         except Exception as error:
             _refuse(
                 "checker-execution-failed",
-                f"incremental checker failed before publishing a result: {type(error).__name__}",
+                "incremental checker failed before publishing a result for "
+                f"{unit.document!r}: {type(error).__name__}: {error}",
                 checker=unit.checker,
                 node=unit.node.nodeId,
             )

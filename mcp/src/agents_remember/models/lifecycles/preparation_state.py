@@ -12,6 +12,7 @@ from agents_remember.models.certification.references import CertificateObjectRef
 from agents_remember.models.lifecycles.preparation import PreparationLeg
 
 _Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+_GitObject = Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]
 PreparationCommandKind = Literal["create", "materialize", "commit"]
 PreparationWorker = tuple[int | None, str | None, str | None]
 _COMMAND_ORDER: tuple[PreparationCommandKind, ...] = ("create", "materialize", "commit")
@@ -129,6 +130,44 @@ class OperationPreparationState(FrozenContractModel):
         return self
 
 
+class PreparedCodeRetention(FrozenContractModel):
+    """One proved handoff of a private code output to a corrective generation.
+
+    The old preparation intent/output remain immutable certificate objects.  This
+    record binds the successor's re-bound objects to that exact predecessor and
+    records the Git identity that the owner re-observed before replacement.  It
+    is deliberately specific to the code leg; memory and ledger outputs still
+    have to be prepared by their normal successor owner.
+    """
+
+    schemaVersion: Literal["closeout-prepared-code-retention/v1"] = (
+        "closeout-prepared-code-retention/v1"
+    )
+    predecessorOperationKey: _Digest
+    predecessorGeneration: int = Field(strict=True, ge=1)
+    predecessorFingerprint: _Digest
+    sourceIntent: CertificateObjectReference
+    sourceOutput: CertificateObjectReference
+    successorIntent: CertificateObjectReference
+    successorOutput: CertificateObjectReference
+    commit: _GitObject
+    tree: _GitObject
+    committerDate: str = Field(min_length=1, max_length=64)
+    rawCommitSha256: _Digest
+
+    @model_validator(mode="after")
+    def _require_exact_references(self) -> Self:
+        for reference, kind in (
+            (self.sourceIntent, "preparation-intent"),
+            (self.sourceOutput, "prepared-output"),
+            (self.successorIntent, "preparation-intent"),
+            (self.successorOutput, "prepared-output"),
+        ):
+            if reference.kind != kind:
+                raise ValueError(f"prepared code retention requires an exact {kind} reference")
+        return self
+
+
 def validate_preparation_owner(
     selected: OperationPreparationState | None,
     operation_kind: str,
@@ -144,6 +183,34 @@ def validate_preparation_owner(
         raise ValueError("private preparation must belong to this exact closeout generation")
     if selected is not None and not has_certification:
         raise ValueError("private preparation requires the original selected certification")
+
+
+def validate_prepared_code_retention(
+    retained: PreparedCodeRetention | None,
+    selected: OperationPreparationState | None,
+    owner: tuple[str, str, int, str],
+) -> None:
+    """Validate the journal-side shape of a successor's proved code handoff."""
+
+    if retained is None:
+        return
+    operation_kind, operation_key, generation, predecessor_fingerprint = owner
+    if operation_kind != "closeout":
+        raise ValueError("prepared code retention belongs only to closeout successors")
+    if retained.predecessorGeneration != generation - 1:
+        raise ValueError("prepared code retention must name the immediately prior generation")
+    if not predecessor_fingerprint or retained.predecessorFingerprint != predecessor_fingerprint:
+        raise ValueError("prepared code retention must bind the archived predecessor")
+    if selected is None or (selected.operationKey, selected.generation) != (
+        operation_key,
+        generation,
+    ):
+        raise ValueError("prepared code retention requires the successor's selected preparation")
+    if not selected.legs or selected.legs[0].leg != "code":
+        raise ValueError("prepared code retention requires a code-first successor prefix")
+    leg = selected.legs[0]
+    if leg.intent != retained.successorIntent or leg.output != retained.successorOutput:
+        raise ValueError("prepared code retention does not bind the selected successor output")
 
 
 def validate_preparation_transition(

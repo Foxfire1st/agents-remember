@@ -13,7 +13,12 @@ from unittest import mock
 
 import pytest
 from agents_remember.worktrees.worktree_contract import load_contract
-from test_closeout_memory_certification_reuse import _fixture
+from test_closeout_memory_certification_reuse import (
+    _assert_created_memory_requires_refresh,
+    _created_prepared_memory_case,
+    _fixture,
+    _refresh_created_memory_coherence,
+)
 from test_worktree_support import git
 
 pytestmark = pytest.mark.integration
@@ -111,6 +116,245 @@ def _prepare_memory_output_scenario(root: Path) -> None:
     _publish_and_recover_memory_outputs(
         prepared, view.codeCommit, memory_commit, ledger_commit, ledger_before
     )
+    _prepare_memory_only_successor_scenario(root / "memory-only-successor")
+
+
+def _prepare_memory_only_successor_scenario(  # noqa: PLR0915
+    root: Path, *, complete_successor: bool = True
+) -> None:
+    """Exercise the public red Gate-5, corrective successor, and retained code output."""
+    from datetime import UTC, datetime  # noqa: PLC0415
+    from uuid import uuid4  # noqa: PLC0415
+
+    from agents_remember.application import worktree_tools  # noqa: PLC0415
+    from agents_remember.application.lifecycle.lifecycle_operation_worker import (  # noqa: PLC0415
+        OperationRuntime,
+    )
+    from agents_remember.errors import FinalCertificationError  # noqa: PLC0415
+    from agents_remember.kernel.primitives.runtime_config import load_config  # noqa: PLC0415
+    from agents_remember.memory_quality import prepared_certification  # noqa: PLC0415
+    from agents_remember.models.certification.corrective import (  # noqa: PLC0415
+        CorrectiveInputChange,
+        RedCatalogDisposition,
+    )
+    from agents_remember.models.lifecycles.operation import CloseoutOperationInput  # noqa: PLC0415
+    from agents_remember.models.lifecycles.preparation import (  # noqa: PLC0415
+        PreparedCloseoutOutput,
+    )
+    from agents_remember.worktrees.integration.closeout.certification.execution import (  # noqa: PLC0415
+        current_certification_handoff,
+        execute_selected_closeout,
+    )
+    from agents_remember.worktrees.integration.closeout.certification.selection import (  # noqa: PLC0415
+        load_typed,
+    )
+    from agents_remember.worktrees.integration.closeout.preparation.continuation import (  # noqa: PLC0415
+        PreparedCloseoutContinuation,
+    )
+    from agents_remember.worktrees.integration.closeout.preparation.memory_execution import (  # noqa: PLC0415
+        observe_prepared_memory_candidate,
+    )
+    from agents_remember.worktrees.integration.lifecycle import (  # noqa: PLC0415
+        lifecycle_operations,
+    )
+    from agents_remember.worktrees.integration.lifecycle.control import (  # noqa: PLC0415
+        cancellation,
+    )
+    from agents_remember.worktrees.integration.lifecycle.worker.termination import (  # noqa: PLC0415
+        worker_process_fingerprint,
+    )
+    from agents_remember.worktrees.modules.quality.certification_records import (  # noqa: PLC0415
+        certificate_store,
+    )
+    from agents_remember.worktrees.services import (  # noqa: PLC0415
+        bind_worktree_services,
+        worktree_services,
+    )
+    from test_closeout_memory_certification_reuse import _store  # noqa: PLC0415
+
+    with pytest.MonkeyPatch.context() as patch:
+        case = _created_prepared_memory_case(root)
+        # Reuse the real stamping assertions before entering the lifecycle successor path.
+        _assert_created_memory_requires_refresh(case)
+        _refresh_created_memory_coherence(case)
+
+        bind_worktree_services(
+            replace(
+                worktree_services(),
+                certification_continuation=PreparedCloseoutContinuation(),
+            )
+        )
+        quality = prepared_certification.run_memory_quality_check
+
+        def red_quality(*args, **kwargs):
+            observed = quality(*args, **kwargs)
+            checks = dict(observed["checks"])
+            check_name = next(iter(checks))
+            check = dict(checks[check_name])
+            check.update(ok=False, findingCount=max(1, int(check.get("findingCount", 0) or 0)))
+            checks[check_name] = check
+            return {**observed, "checks": checks}
+
+        patch.setattr(prepared_certification, "run_memory_quality_check", red_quality)
+        with pytest.raises(FinalCertificationError) as red:
+            execute_selected_closeout(case.contract, case.handoff.record, case.handoff.store)
+        assert red.value.status == "prepared-memory-certification-red"
+
+    red_record = case.handoff.store.read()
+    assert red_record is not None
+    red_handoff = current_certification_handoff(case.contract, red_record, case.handoff.store)
+    assert tuple(item.result.gate for item in red_handoff.selected.terminals) == (1, 2, 3, 4, 5)
+    assert all(item.result.disposition == "green" for item in red_handoff.selected.terminals[:4])
+    red_terminal = red_handoff.selected.terminals[-1]
+    assert red_terminal.result.disposition == "red"
+    assert case.handoff.record.preparation is not None
+    original_code_leg = case.handoff.record.preparation.legs[0]
+    assert original_code_leg.output is not None
+    original_code_output = load_typed(
+        certificate_store(case.contract.worktree_group),
+        original_code_leg.output,
+        PreparedCloseoutOutput,
+    )
+
+    memory_before = observe_prepared_memory_candidate(red_handoff, case.view).memoryTree
+    with case.feature_doc.open("a", encoding="utf-8") as stream:
+        stream.write("\nMemory-only corrective reconciliation.\n")
+    git(case.memory, "add", case.feature_doc.relative_to(case.memory).as_posix())
+    _refresh_created_memory_coherence(case)
+    memory_after = observe_prepared_memory_candidate(red_handoff, case.view).memoryTree
+
+    failed = [item for item in red_terminal.result.railResults if item.status == "fail"]
+    blocked = [item for item in red_terminal.result.railResults if item.status == "blocked"]
+    assert failed and not blocked, red_terminal.result.railResults
+
+    original_input = red_record.input
+    assert original_input is not None
+    assert isinstance(original_input, CloseoutOperationInput)
+    original_effective_input = original_input.effectiveInput
+    original_code_message = original_effective_input.message_for("code")
+    original_memory_message = original_effective_input.message_for("memory")
+    original_ledger_message = original_effective_input.message_for("ledger")
+    cancellation_request = worktree_tools.OperationControlRequest(
+        contract_path=case.contract.contract_path.as_posix(),
+        operation_kind="closeout",
+        action="cancel",
+        expected_generation=red_record.generation,
+        intent_note="Cancel the red Gate-5 generation before its memory-only successor.",
+    )
+
+    def prove_fixture_exit(request):
+        return request.model_copy(
+            update={
+                "state": "exited",
+                "observedAt": datetime.now(UTC).isoformat(),
+                "detail": "fixture proved the red Gate-5 worker exit",
+            }
+        )
+
+    config_path = case.contract.coordination_root.parent / "settings.json"
+    with mock.patch.object(
+        cancellation,
+        "signal_worker_and_prove_exit",
+        side_effect=prove_fixture_exit,
+    ):
+        cancelled = worktree_tools.worktree_operation_control_tool(
+            load_config(config_path),
+            cancellation_request,
+        )
+    assert cancelled["ok"] is True and cancelled["state"] == "cancelled", cancelled
+
+    cancelled_record = red_handoff.store.read()
+    assert cancelled_record is not None and cancelled_record.status == "cancelled"
+    change = CorrectiveInputChange(
+        inputKind="memory-tree",
+        inputId="candidate",
+        beforeDigest=memory_before,
+        afterDigest=memory_after,
+    )
+    dispositions = tuple(
+        RedCatalogDisposition(
+            rail=item.rail,
+            priorStatus="fail",
+            priorResultDigest=item.resultDigest,
+            correctiveOwner=item.correctiveOwner,
+            disposition="direct-repair",
+            changedInputs=(change,),
+            rationale="The curator published the exact corrected memory candidate tree.",
+        )
+        for item in failed
+    )
+    with mock.patch.object(lifecycle_operations, "launch_detached_worker") as launch:
+        resumed = worktree_tools.worktree_operation_control_tool(
+            load_config(config_path),
+            worktree_tools.OperationControlRequest(
+                contract_path=case.contract.contract_path.as_posix(),
+                operation_kind="closeout",
+                action="resume",
+                expected_generation=cancelled_record.generation,
+                intent_note="Resume the repaired memory-only closeout candidate.",
+                code_commit_message=original_code_message,
+                memory_commit_message=original_memory_message,
+                ledger_commit_message=original_ledger_message,
+                corrective_dispositions=dispositions,
+            ),
+        )
+    assert resumed["ok"] is True and resumed["state"] == "queued", resumed
+    launch.assert_called_once()
+
+    successor_contract = load_contract(case.contract.contract_path)
+    successor_store = _store(successor_contract)
+    successor = successor_store.read()
+    assert successor is not None and successor.generation == red_record.generation + 1
+    assert successor.preparedCodeRetention is not None
+    assert successor.preparation is not None and successor.preparation.legs[0].output is not None
+    successor_output = load_typed(
+        certificate_store(successor_contract.worktree_group),
+        successor.preparation.legs[0].output,
+        PreparedCloseoutOutput,
+    )
+    assert (
+        successor_output.commit,
+        successor_output.tree,
+        successor_output.committerDate,
+    ) == (
+        original_code_output.commit,
+        original_code_output.tree,
+        original_code_output.committerDate,
+    )
+
+    fingerprint = worker_process_fingerprint(os.getpid())
+    assert fingerprint is not None
+    lease = uuid4().hex * 2
+    successor_store.update(
+        lambda record: record.model_copy(
+            update={
+                "workerPid": os.getpid(),
+                "workerLease": lease,
+                "workerProcessFingerprint": fingerprint,
+            }
+        )
+    )
+    owner = OperationRuntime(successor_store, worker_lease=lease).start()
+    successor_handoff = current_certification_handoff(successor_contract, owner, successor_store)
+    assert any(
+        change.changeClass == "closeout-resume" and change.consumingGates == (5,)
+        for change in successor_handoff.selected.recovery.semanticEnvelope.inputChanges
+    )
+    reuse = successor_handoff.selected.recovery.semanticEnvelope.reusePlan
+    assert reuse.firstGateToRun == 5
+    assert tuple(item.gate for item in reuse.reusedCertificates) == (1, 2, 3, 4)
+    if not complete_successor:
+        return
+    completed = execute_selected_closeout(successor_contract, owner, successor_store)
+    assert completed.returncode == 0
+    final_contract = load_contract(case.contract.contract_path)
+    assert final_contract.closeout_status == "completed"
+    assert successor_store.read() is not None
+    final_record = successor_store.read()
+    assert final_record is not None
+    final_handoff = current_certification_handoff(final_contract, final_record, successor_store)
+    assert tuple(item.result.gate for item in final_handoff.selected.terminals) == (1, 2, 3, 4, 5)
+    assert all(item.result.disposition == "green" for item in final_handoff.selected.terminals)
 
 
 def _interrupt_and_resume_memory_publication(

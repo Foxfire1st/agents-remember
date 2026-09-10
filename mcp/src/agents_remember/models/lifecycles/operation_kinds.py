@@ -41,8 +41,8 @@ LifecycleOperationPhase = Literal[
 LifecycleControlAction = Literal[
     "retry",
     "recover",
+    "resume",
     "cancel",
-    "revise",
     "retire",
     "supersede",
 ]

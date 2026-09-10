@@ -10,6 +10,8 @@ unit-regression = [
   "mcp/tests/test_agentic_settings.py",
   "mcp/tests/test_agents_remember_quality.py",
   "mcp/tests/test_application_guards.py",
+  "mcp/tests/test_atomic_master_review_identity.py",
+  "mcp/tests/test_atomic_master_review_scope.py",
   "mcp/tests/test_benchmark_analysis.py",
   "mcp/tests/test_catalog_selection.py",
   "mcp/tests/test_causal_failure_localization.py",
@@ -105,8 +107,9 @@ public-contract = [
   "mcp/tests/test_quality_gate_public_contract.py",
 ]
 integration = [
-  "mcp/tests/test_atomic_series_activation.py",
   "mcp/tests/test_activation_admission_registered.py",
+  "mcp/tests/test_atomic_master_review_public.py",
+  "mcp/tests/test_atomic_series_activation.py",
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_citation_document_transaction.py",

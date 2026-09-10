@@ -54,7 +54,7 @@ class MergePrecedenceTests(unittest.TestCase):
             {
                 "orchestration": {
                     "spawn": {"harness": "codex"},
-                    "loops": {"defaults": {"maxRounds": 5, "reviewerReuse": "delta-verify"}},
+                    "loops": {"defaults": {"maxRounds": 3, "reviewerReuse": "delta-verify"}},
                     "concurrency": {"maxParallelLeaves": 3},
                 }
             },
@@ -155,6 +155,25 @@ class FailLoudTests(unittest.TestCase):
         ) as caught:
             load_agentic_settings(self.coordination_root, self.repo_root)
         self.assertIn(str(path), str(caught.exception))
+
+    def test_review_round_cap_rejects_higher_global_or_local_setting(self) -> None:
+        """R28: settings cannot turn the three-review authority boundary into a preference."""
+        global_path = write_settings(
+            self.coordination_root,
+            {"orchestration": {"loops": {"defaults": {"maxRounds": 4}}}},
+        )
+        with self.assertRaisesRegex(AgenticSettingsError, "hard review limit 3") as global_error:
+            load_agentic_settings(self.coordination_root)
+        self.assertIn(str(global_path), str(global_error.exception))
+
+        global_path.unlink()
+        local_path = write_settings(
+            self.repo_root,
+            {"orchestration": {"loops": {"defaults": {"maxRounds": 99}}}},
+        )
+        with self.assertRaisesRegex(AgenticSettingsError, "hard review limit 3") as local_error:
+            load_agentic_settings(self.coordination_root, self.repo_root)
+        self.assertIn(str(local_path), str(local_error.exception))
 
 
 class TypedModelTests(unittest.TestCase):

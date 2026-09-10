@@ -45,6 +45,24 @@ class LeafLifecycleRestampPlan:
     blockers: tuple[CompletionBlocker, ...] = ()
 
 
+@dataclass(frozen=True)
+class LeafEnclosureRegistrationPlan:
+    """Plan the canonical leaf task-document enclosure registration.
+
+    The worktree contract is the address authority.  A start or reattachment may
+    repair a missing/stale document reference, but it must prepare the candidate
+    through the same JSON-primary task writer used by ordinary task-document edits.
+    """
+
+    doc_path: Path
+    leaf_id: str
+    enclosure_path: str
+    lifecycle_id: str | None
+    candidate: TaskDocument | None
+    state: str
+    blockers: tuple[CompletionBlocker, ...] = ()
+
+
 def _matches_leaf_identity(json_path: Path, doc: TaskDocument, leaf_id: str) -> bool:
     want = leaf_id.strip().lower()
     return (
@@ -206,3 +224,69 @@ def restamp_leaf_doc_lifecycle(
         "lifecycleId": lifecycle_id,
         "changed": plan.changed,
     }
+
+
+def plan_leaf_doc_enclosure_registration(
+    doc_path: Path,
+    leaf_id: str,
+    enclosure_path: Path,
+    *,
+    lifecycle_id: str | None = None,
+) -> LeafEnclosureRegistrationPlan:
+    """Plan an exact leaf/enclosure binding and optional lifecycle restamp.
+
+    ``doc_path`` is resolved by the canonical parent-row resolver.  This function
+    therefore never searches for a plausible sibling document and never mutates
+    the task source.  An already exact binding with the requested lifecycle is a
+    no-op; every other state produces one full-document candidate for the normal
+    task publication writer.
+    """
+
+    path = doc_path.resolve(strict=False)
+    document = read_task_doc(path)
+    expected_path = enclosure_path.resolve(strict=False).as_posix()
+    address_exact = (
+        len(document.enclosures) == 1
+        and document.enclosures[0].leafId == leaf_id
+        and _same_path(document.enclosures[0].enclosurePath, expected_path)
+    )
+    exact = address_exact and (lifecycle_id is None or document.lifecycleId == lifecycle_id)
+    if exact:
+        return LeafEnclosureRegistrationPlan(
+            path,
+            leaf_id,
+            expected_path,
+            lifecycle_id,
+            None,
+            "present",
+        )
+
+    data = document.model_dump(by_alias=True)
+    existing_binding = any(ref.leafId == leaf_id for ref in document.enclosures)
+    data["enclosures"] = [{"leafId": leaf_id, "enclosurePath": expected_path}]
+    if lifecycle_id is not None:
+        data["lifecycleId"] = lifecycle_id
+    candidate = TaskDocument.model_validate(data)
+    blockers = tuple(completion_blockers(candidate)) if candidate.status == "Completed" else ()
+    if address_exact and lifecycle_id is not None and document.lifecycleId != lifecycle_id:
+        state = "lifecycle-mismatch"
+    else:
+        state = "mismatched" if existing_binding or document.enclosures else "missing"
+    return LeafEnclosureRegistrationPlan(
+        path,
+        leaf_id,
+        expected_path,
+        lifecycle_id,
+        candidate,
+        state,
+        blockers,
+    )
+
+
+def _same_path(value: str, expected: str) -> bool:
+    """Compare persisted and contract paths without accepting relative aliases."""
+
+    try:
+        return Path(value).resolve(strict=False).as_posix() == expected
+    except (OSError, RuntimeError, ValueError):
+        return False

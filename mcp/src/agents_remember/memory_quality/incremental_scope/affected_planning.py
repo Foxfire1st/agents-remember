@@ -248,6 +248,7 @@ def _compile_units(
         item.nodeId: item
         for item in scope.selectedNodes
         if _document_relative(item.nodeId, onboarding) is not None
+        and "historical Git tree member" not in item.reasons
     }
     inputs = _UnitInputs(
         scope=scope,

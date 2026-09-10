@@ -18,6 +18,7 @@ from agents_remember.worktrees.integration.closeout.certification.execution impo
 )
 from agents_remember.worktrees.integration.closeout.certification.observation import refuse
 from agents_remember.worktrees.integration.closeout.preparation_selection import (
+    require_retained_prepared_code_current,
     select_preparation_intent,
     selected_preparation_intents,
 )
@@ -45,9 +46,25 @@ def current_code_preparation(selected: SelectedCloseoutPreparation) -> SelectedC
         or (intents[0] != selected.intent or state.legs[0].intent != selected.reference)
     ):
         refuse("prepared-code-selection-moved", selected.reference, state)
+    assert state is not None
     actual = _new_code_intent(handoff)
     if actual != selected.intent:
-        refuse("prepared-code-intent-moved", selected.intent.intentDigest, actual.intentDigest)
+        expected = selected.intent.model_dump(mode="json")
+        observed = actual.model_dump(mode="json")
+        for payload in (expected, observed):
+            payload.pop("privateRoot", None)
+            payload.pop("intentDigest", None)
+        if expected != observed or state.legs[0].output is None:
+            refuse("prepared-code-intent-moved", selected.intent.intentDigest, actual.intentDigest)
+        objects = certificate_store(handoff.contract.worktree_group)
+        output = objects.load_reference(state.legs[0].output)
+        if not isinstance(output, PreparedCloseoutOutput):
+            refuse("prepared-code-output-kind", "PreparedCloseoutOutput", type(output).__name__)
+        require_retained_prepared_code_current(
+            handoff.record,
+            selected.intent,
+            output,
+        )
     return replace(selected, handoff=handoff)
 
 
@@ -80,7 +97,18 @@ def _code_prefix(handoff: CloseoutCertificationHandoff) -> tuple[CertificateObje
         refuse(
             "prepared-code-prefix-incomplete", "four original green code gates", len(certificates)
         )
-    validate_certificate_chain(handoff.selected.run.admission, certificates)
+    retained = tuple(
+        terminal.certificate.identity
+        for selected, terminal in zip(
+            handoff.selected.state.terminals[:4], handoff.selected.terminals[:4], strict=True
+        )
+        if selected.reusedFrom is not None and terminal.certificate is not None
+    )
+    validate_certificate_chain(
+        handoff.selected.run.admission,
+        certificates,
+        retained_certificates=retained,
+    )
     return references
 
 

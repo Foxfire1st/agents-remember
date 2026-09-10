@@ -67,7 +67,13 @@ def record_terminal_generation(
             "repository certification terminal decoder must be an object",
             ({"code": "terminal-catalog-invalid", "path": str(artifact)},),
         )
-    return record_published_generation(prepared, manifest, payload, retained=retained)
+    return record_published_generation(
+        prepared,
+        manifest,
+        payload,
+        retained=retained,
+        retained_certificates=tuple(item.certificate.identity for item in retained),
+    )
 
 
 def require_recorded_generation(recorded: RecordedCertificationGeneration) -> None:

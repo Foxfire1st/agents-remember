@@ -14,6 +14,9 @@ from pathlib import Path
 
 import pytest
 from agents_remember.certification.certificate_models import CoherenceSubrecordIdentity
+from agents_remember.certification.final_certification_models import (
+    FinalFullCatalogPlan,
+)
 from agents_remember.errors import FinalCertificationError
 from agents_remember.memory_quality.final_certification import (
     coherence_subrecords,
@@ -21,10 +24,11 @@ from agents_remember.memory_quality.final_certification import (
     final_catalog_attestation,
 )
 from agents_remember.memory_quality.final_certification.catalog import ExecutedFinalCatalog
-from agents_remember.memory_quality.final_certification.models import (
-    FinalFullCatalogPlan,
-)
 from agents_remember.memory_quality.style.document_shape import tables
+from agents_remember.models.lifecycles.curator_coherence import (
+    CuratorCoherenceRecordedJudgment,
+    CuratorSourceCandidate,
+)
 from test_final_full_memory_coherence_certification import (
     _CODE_TREE,
     _MEMORY_TREE,
@@ -161,6 +165,60 @@ def test_coherence_subrecords_require_affected_coverage() -> None:
         )
     assert caught.value.status == "gate-five-affected-coherence-subrecords-uncovered"
     assert caught.value.observed["uncoveredSubrecords"] == ["memory:missing.md"]
+
+
+def _coherence_with_shared_evidence(*, conflicting: bool = False):
+    pair = _pair()
+    base = _coherence(pair).record
+    candidates = [
+        CuratorSourceCandidate(
+            sourceFile=f"entity:{name}",
+            onboardingFile="entities.md",
+            classification="entity-row",
+        )
+        for name in ("Closeout Effective Input", "Seat Landing Archive", "Source Lineage")
+    ]
+    judgments = [
+        CuratorCoherenceRecordedJudgment(
+            **candidate.model_dump(mode="json"),
+            disposition="preserved",
+            rationale="The entity row remains current in the fixture.",
+            evidenceRef=(
+                "memory:onboarding/entities.md"
+                if index < 2
+                else "memory:onboarding/source-lineage.md"
+            ),
+            evidenceSha256=(
+                (("b" if conflicting else "a") if index == 1 else ("a" if index == 0 else "c")) * 64
+            ),
+        )
+        for index, candidate in enumerate(candidates)
+    ]
+    return base.model_copy(update={"sourceCandidates": candidates, "judgments": judgments})
+
+
+def test_coherence_subrecords_deduplicate_shared_evidence_reference() -> None:
+    record = _coherence_with_shared_evidence()
+
+    subrecords = coherence_subrecords(record_digest="c" * 64, record=record)
+
+    assert len(subrecords) == 3
+    assert len({item.subrecordId for item in subrecords}) == 3
+    assert {
+        item.contentDigest for item in subrecords if item.subrecordId != "coherence-record"
+    } == {"a" * 64, "c" * 64}
+
+
+def test_coherence_subrecords_refuse_conflicting_shared_evidence_digests() -> None:
+    record = _coherence_with_shared_evidence(conflicting=True)
+
+    with pytest.raises(FinalCertificationError) as caught:
+        coherence_subrecords(record_digest="c" * 64, record=record)
+
+    assert caught.value.status == "gate-five-coherence-subrecord-conflict"
+    assert caught.value.observed == {
+        "evidenceDigestsByReference": {"memory:onboarding/entities.md": ["a" * 64, "b" * 64]}
+    }
 
 
 # ---------------------------------------------------------------------------
