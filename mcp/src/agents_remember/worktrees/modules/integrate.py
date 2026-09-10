@@ -333,7 +333,9 @@ def _blocked_non_ff_result(
         blocked_integration_payload(
             contract,
             "blocked-non-ff",
-            "source branch moved; rerun with --strategy replay after reviewing parallel changes",
+            "source branch moved; run worktree_sync for this contract, settle any retained "
+            "code or memory conflict -- re-running the targeted test utility after code "
+            "resolutions -- then re-run the closeout before retrying the integration",
             persist=not args.dry_run,
             code_replay_required=sources.code_replay_required,
             memory_replay_required=sources.memory_replay_required,

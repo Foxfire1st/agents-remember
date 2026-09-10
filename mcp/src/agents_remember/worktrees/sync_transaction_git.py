@@ -109,6 +109,124 @@ def git_status(worktree: Path) -> str:
     return result.stdout.strip()
 
 
+def worktree_dirty_paths(worktree: Path) -> tuple[str, ...]:
+    """Every dirty path the worktree holds, untracked included.
+
+    NUL separation is the only porcelain form that never quotes a path, so the reported
+    paths are exactly the paths git reported.
+    """
+
+    result = run_git(worktree, ["status", "--porcelain", "-z", "-uall"])
+    if result.returncode != 0:
+        raise SyncGitProofError(result.stderr.strip() or "could not read sync worktree status")
+    entries = result.stdout.split("\0")
+    paths: list[str] = []
+    index = 0
+    while index < len(entries):
+        entry = entries[index]
+        index += 1
+        if not entry:
+            continue
+        status = entry[:2]
+        paths.append(entry[3:])
+        if "R" in status or "C" in status:
+            index += 1
+    return tuple(paths)
+
+
+def park_worktree_wip(worktree: Path, *, message: str) -> str:
+    """Stash the exact worktree candidate with its untracked files; return its identity."""
+
+    result = run_git(worktree, ["stash", "push", "--include-untracked", "--message", message])
+    if result.returncode != 0:
+        raise SyncGitProofError(
+            result.stderr.strip() or result.stdout.strip() or "git stash push failed"
+        )
+    if git_status(worktree):
+        raise SyncGitProofError("git stash push left the sync worktree dirty")
+    parked = run_git(worktree, ["rev-parse", "--verify", "refs/stash^{commit}"])
+    if parked.returncode != 0:
+        raise SyncGitProofError("git stash push created no stash entry")
+    return parked.stdout.strip()
+
+
+def apply_parked_wip(side: SyncSideRecord) -> tuple[str, tuple[str, ...]]:
+    """Reapply one side's parked WIP onto its carried result, retaining a real conflict."""
+
+    worktree = Path(side.worktree)
+    require_side_checkout(side)
+    result = run_git(worktree, ["stash", "apply", "--quiet", side.wipStash])
+    conflicts = unmerged_paths(worktree)
+    if result.returncode == 0 and not conflicts:
+        return "applied", ()
+    if conflicts:
+        return "conflict", conflicts
+    raise SyncGitProofError(
+        result.stderr.strip() or result.stdout.strip() or "the parked worktree WIP did not reapply"
+    )
+
+
+def prove_parked_wip_restored(side: SyncSideRecord, carried_head: str) -> bool:
+    """Prove the parked candidate is back in the worktree, not silently lost.
+
+    A parked path is restored when the worktree reports it dirty again, or when the
+    carried result already holds exactly the parked content (a clean reapply that the
+    moved source made identical). Anything else fails the proof.
+    """
+
+    dirty = set(worktree_dirty_paths(Path(side.worktree)))
+    for path in side.wipPaths:
+        if path in dirty:
+            continue
+        parked = _revision_blob(side, (f"{side.wipStash}^3:{path}", f"{side.wipStash}:{path}"))
+        if parked is not None and parked == _revision_blob(side, (f"{carried_head}:{path}",)):
+            continue
+        return False
+    return True
+
+
+def discard_conflicted_wip_reapply(side: SyncSideRecord) -> None:
+    """Drop a conflicted parked-candidate reapply; the candidate itself stays in its stash."""
+
+    worktree = Path(side.worktree)
+    require_side_checkout(side)
+    if merge_head(worktree) is not None:
+        raise SyncGitProofError(f"{side.side} sync has an active merge outside cancel authority")
+    reset = run_git(worktree, ["reset", "--hard"])
+    if reset.returncode != 0:
+        raise SyncGitProofError(
+            reset.stderr.strip() or f"could not clear the {side.side} candidate reapply"
+        )
+
+
+def drop_parked_wip(side: SyncSideRecord) -> bool:
+    """Drop exactly the recorded stash entry, and never another one."""
+
+    repository = Path(side.repository)
+    listed = run_git(repository, ["stash", "list", "--format=%gd %H"])
+    if listed.returncode != 0:
+        raise SyncGitProofError(listed.stderr.strip() or "could not list the stash stack")
+    for line in listed.stdout.splitlines():
+        cells = line.split()
+        if len(cells) == 2 and cells[1] == side.wipStash:
+            dropped = run_git(repository, ["stash", "drop", cells[0]])
+            if dropped.returncode != 0:
+                raise SyncGitProofError(
+                    dropped.stderr.strip() or "could not drop the parked worktree WIP"
+                )
+            return True
+    return False
+
+
+def _revision_blob(side: SyncSideRecord, specs: tuple[str, ...]) -> str | None:
+    repository = Path(side.repository)
+    for spec in specs:
+        resolved = run_git(repository, ["rev-parse", "--verify", "--quiet", spec])
+        if resolved.returncode == 0:
+            return resolved.stdout.strip()
+    return None
+
+
 def merge_head(worktree: Path) -> str | None:
     result = run_git(worktree, ["rev-parse", "--verify", "MERGE_HEAD"])
     return result.stdout.strip() if result.returncode == 0 else None

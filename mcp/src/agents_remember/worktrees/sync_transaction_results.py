@@ -74,19 +74,28 @@ def resolution_required(
 ) -> WorktreeCommandResult:
     side = record.code if record.phase == "code-resolution-required" else record.memory
     assert side is not None
+    parked = side.wipState == "restore-conflict"
+    resolution: dict[str, object] = {
+        "side": side.side,
+        "owner": "agent",
+        "worktree": side.worktree,
+        "files": list(side.conflictFiles),
+    }
+    if parked:
+        resolution["wipRestore"] = True
     return WorktreeCommandResult(
         2,
         {
             "state": "sync-resolution-required",
             "status": "agent-action-required",
             "resolutionOwner": "agent",
-            "summary": f"Resolve and stage the retained {side.side} merge, then continue.",
-            "resolution": {
-                "side": side.side,
-                "owner": "agent",
-                "worktree": side.worktree,
-                "files": list(side.conflictFiles),
-            },
+            "summary": (
+                f"Resolve the parked {side.side} candidate reapply in its worktree, then "
+                "continue; the parked WIP stays in the stash until it is settled."
+                if parked
+                else f"Resolve and stage the retained {side.side} merge, then continue."
+            ),
+            "resolution": resolution,
             "nextOperation": "continue_sync_resolution",
             "nextTool": "worktree_sync",
             "nextArgs": {
@@ -98,6 +107,36 @@ def resolution_required(
                 "contract_path": record.contractPath,
                 "resolution_action": "cancel",
                 "dry_run": False,
+            },
+            "fetch": fetch,
+        },
+    )
+
+
+def parked_wip_validation_preview(
+    side: SyncSideRecord,
+    fetch: dict[str, object],
+) -> WorktreeCommandResult:
+    """Read-only preview of settling a parked-candidate reapply the agent resolved."""
+
+    conflicts = unmerged_paths(Path(side.worktree))
+    ready = not conflicts
+    return WorktreeCommandResult(
+        0 if ready else 2,
+        {
+            "state": "would-settle-parked-wip" if ready else "sync-resolution-incomplete",
+            "summary": (
+                "The parked candidate reapply is resolved; continuing retires its stash entry "
+                "and leaves the candidate uncommitted for closeout."
+                if ready
+                else f"The parked {side.side} candidate reapply still has unmerged paths."
+            ),
+            "resolution": {
+                "side": side.side,
+                "owner": "agent",
+                "worktree": side.worktree,
+                "files": list(conflicts),
+                "wipRestore": True,
             },
             "fetch": fetch,
         },

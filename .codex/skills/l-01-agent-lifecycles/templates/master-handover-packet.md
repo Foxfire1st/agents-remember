@@ -61,7 +61,7 @@ one isolated atomic branch ready to land.
 - Candidate-tree evidence ref: <canonical ref resolving the proposed candidate above>
 - Code-ancestry evidence ref: <canonical contract/evidence ref + stable row/id/JSON pointer>
 - Memory-ancestry evidence ref: <canonical contract/evidence ref + stable row/id/JSON pointer>
-- Ancestry-compatible fast-forward/replay: yes | no:<exact divergence>
+- Ancestry-compatible fast-forward: yes | no:<exact divergence>
 - Memory rows carried as explicit recovery: <summary> | none
 - Ledger maps every leaf commit: yes | <gap>
 - Single-siding notes after unavoidable overlap: <which memory to defer / dedup> | none

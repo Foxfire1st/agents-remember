@@ -593,7 +593,9 @@ main
   └── super-integration (orchestrator-owned, off main)
         ├── organizational master A (logical owner; leaves land directly on super)
         ├── atomic master B (isolated branch; all leaves land there, then B lands once)
-        ├── later leaves refresh from moved super before closeout
+        ├── later leaves refresh from moved super before closeout; closeout performs that
+        │     refresh itself when it is a plain fast-forward, and refresh, closeout and
+        │     landing stay adjacent per leaf so the line cannot move between them
         └── … final: super → main PR + memory carry-over + push
 ```
 

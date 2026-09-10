@@ -16,10 +16,15 @@ from agents_remember.worktrees.modules.git import branch_commit, head_commit, is
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.sync_transaction_git import (
     SyncGitProofError,
+    apply_parked_wip,
     create_pinned_ref,
     delete_pinned_ref,
+    drop_parked_wip,
+    prove_parked_wip_restored,
     read_ref,
     remove_temporary_worktree,
+    side_branch_head,
+    unmerged_paths,
 )
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationRecord,
@@ -330,7 +335,119 @@ def side_payload(side: SyncSideRecord | None) -> dict[str, object]:
         "worktree": side.worktree,
         "temporary": side.temporary,
         **({"files": list(side.conflictFiles)} if side.conflictFiles else {}),
+        **(
+            {
+                "wip": {
+                    "state": side.wipState,
+                    "paths": list(side.wipPaths),
+                    "pathCount": side.wipPathCount,
+                }
+            }
+            if side.wipState
+            else {}
+        ),
     }
+
+
+def resolution_phase(side_name: SyncSide) -> SyncPhase:
+    return "code-resolution-required" if side_name == "code" else "memory-resolution-required"
+
+
+def restore_parked_wip(
+    store: SyncOperationStore,
+    record: SyncOperationRecord,
+    side_name: SyncSide,
+    side: SyncSideRecord,
+) -> tuple[SyncOperationRecord, SyncSideRecord, bool]:
+    """Return one side's parked candidate to its worktree and journal the outcome.
+
+    A clean reapply is proven restored before the stash entry is dropped; a conflicted one
+    becomes the retained ``*-resolution-required`` state with the stash kept. The third
+    value reports that retained conflict, and the caller must not advance that side.
+    """
+
+    if side.wipState not in {"parked", "restore-conflict"} or not side.wipStash:
+        return record, side, False
+    state, conflicts = apply_parked_wip(side)
+    if state == "conflict":
+        updated = side.model_copy(
+            update={
+                "state": "resolution-required",
+                "wipState": "restore-conflict",
+                "conflictFiles": conflicts,
+            }
+        )
+        record = update_record(
+            store,
+            record,
+            phase=resolution_phase(side_name),
+            side=updated,
+            side_name=side_name,
+        )
+        return record, updated, True
+    if not prove_parked_wip_restored(side, side_branch_head(side)):
+        raise SyncGitProofError(
+            f"{side.side} parked worktree WIP could not be proven restored; its stash is kept"
+        )
+    drop_parked_wip(side)
+    updated = side.model_copy(update={"wipState": "restored", "conflictFiles": ()})
+    record = update_record(store, record, phase=record.phase, side=updated, side_name=side_name)
+    return record, updated, False
+
+
+def restore_cancelled_wip(
+    store: SyncOperationStore, record: SyncOperationRecord
+) -> SyncOperationRecord:
+    """Return every parked candidate after a rollback restored the pinned pre-sync heads."""
+
+    for side in (record.memory, record.code):
+        if side is None or not side.wipStash:
+            continue
+        if side.wipState not in {"parked", "restore-conflict"}:
+            continue
+        state, conflicts = apply_parked_wip(side)
+        if state != "applied" or conflicts:
+            raise SyncGitProofError(
+                f"{side.side} parked worktree WIP could not be restored after cancellation: "
+                f"{', '.join(conflicts[:30]) or 'the reapply did not apply'}"
+            )
+        drop_parked_wip(side)
+        updated = side.model_copy(update={"wipState": "restored", "conflictFiles": ()})
+        record = update_record(store, record, phase=record.phase, side=updated, side_name=side.side)
+    return record
+
+
+def settle_resolved_parked_wip(
+    store: SyncOperationStore,
+    record: SyncOperationRecord,
+    side_name: SyncSide,
+    side: SyncSideRecord,
+) -> SyncOperationRecord:
+    """Close a parked-candidate conflict the agent resolved in the worktree.
+
+    The merge itself already committed, so the resolved candidate stays uncommitted for the
+    owner of that worktree; only the stash entry is retired once no unmerged path remains.
+    """
+
+    conflicts = unmerged_paths(Path(side.worktree))
+    if conflicts:
+        raise SyncGitProofError(
+            f"{side.side} parked candidate reapply still has unmerged paths: "
+            f"{', '.join(conflicts[:30])}"
+        )
+    drop_parked_wip(side)
+    updated = side.model_copy(update={"wipState": "restored", "conflictFiles": ()})
+    return update_record(store, record, phase=record.phase, side=updated, side_name=side_name)
+
+
+def require_parked_wip_settled(record: SyncOperationRecord) -> None:
+    """Refuse finalization while any side still parks the candidate it carries."""
+
+    for side in participating_sides(record):
+        if side.wipState in {"parked", "restore-conflict"}:
+            raise SyncGitProofError(
+                f"{side.side} sync still parks its worktree WIP; restore it before finalizing"
+            )
 
 
 def command_result(

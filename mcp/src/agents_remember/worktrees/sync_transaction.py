@@ -14,6 +14,9 @@ from agents_remember.worktrees.sync_transaction_authority import (
     preflight_official_pair,
     require_pinned_authority,
     require_record_contract,
+    resolution_phase,
+    restore_parked_wip,
+    settle_resolved_parked_wip,
     side_record,
     source_pair,
     sync_contract_kind,
@@ -21,15 +24,18 @@ from agents_remember.worktrees.sync_transaction_authority import (
 )
 from agents_remember.worktrees.sync_transaction_git import (
     SyncGitProofError,
+    apply_parked_wip,
     continue_side_merge,
+    drop_parked_wip,
     ensure_temporary_worktree,
-    git_status,
+    park_worktree_wip,
     require_side_checkout,
     side_branch_head,
     side_merge_completed,
     start_side_merge,
     unmerged_paths,
     validate_current_memory_side,
+    worktree_dirty_paths,
 )
 from agents_remember.worktrees.sync_transaction_recovery import (
     cancel_sync,
@@ -43,6 +49,7 @@ from agents_remember.worktrees.sync_transaction_results import (
     active_preview,
     cancel_preview,
     memory_choice_required,
+    parked_wip_validation_preview,
     quarantine_replay,
     resolution_required,
     resolution_validation_preview,
@@ -67,6 +74,10 @@ _ACTIVE_PHASES = {
     "finalizing",
     "cancelling",
 }
+
+# The parked candidate's path sample kept in the journal. It is the proof set the restore
+# re-checks per path; the exact count is journaled alongside it.
+WIP_PATH_SAMPLE_LIMIT = 128
 
 
 def sync_contract_under_authority(
@@ -214,12 +225,10 @@ def _admit_and_run(
         return memory_choice_required(contract, code, memory, fetch)
     if memory is not None and args.memory_sync_choice == "skip-memory":
         memory = memory.model_copy(update={"plan": "skip"})
-    preflight = _preflight_participating_sides(code, memory, fetch)
-    if preflight is not None:
-        return preflight
-    if args.dry_run:
-        return sync_preview(code, memory, fetch)
-
+    prepared = _admit_participating_sides(contract, code, memory, args, fetch)
+    if isinstance(prepared, WorktreeCommandResult):
+        return prepared
+    code, memory = prepared
     record = _new_sync_record(contract, args, predecessor, code, memory)
     pin_authority(record)
     store.write(record)
@@ -227,6 +236,102 @@ def _admit_and_run(
         if side is not None and side.temporary and side.plan not in {"already-current", "skip"}:
             ensure_temporary_worktree(side)
     return _run_automatic(contract, store, record, fetch)
+
+
+def _admit_participating_sides(
+    contract: WorktreeContract,
+    code: SyncSideRecord,
+    memory: SyncSideRecord | None,
+    args: WorktreeArgs,
+    fetch: dict[str, object],
+) -> tuple[SyncSideRecord, SyncSideRecord | None] | WorktreeCommandResult:
+    """Refuse, preview, or park: everything that precedes the journaled admission."""
+
+    preflight = _preflight_participating_sides(code, memory, fetch)
+    if preflight is not None:
+        return preflight
+    if args.dry_run:
+        return sync_preview(code, memory, fetch)
+    return _park_participating_wip(contract, code, memory, fetch)
+
+
+def _side_parks_wip(side: SyncSideRecord | None) -> bool:
+    """Only a live worktree this transaction will actually move parks its candidate."""
+
+    return side is not None and not side.temporary and side.plan not in {"already-current", "skip"}
+
+
+def _park_participating_wip(
+    contract: WorktreeContract,
+    code: SyncSideRecord,
+    memory: SyncSideRecord | None,
+    fetch: dict[str, object],
+) -> tuple[SyncSideRecord, SyncSideRecord | None] | WorktreeCommandResult:
+    """Stash each dirty moving side's candidate into the transaction that will return it.
+
+    The parked identity is journaled with the admission record, so the candidate a closeout
+    leaves in its worktree is never lost to the carry. A stash that genuinely cannot be
+    taken restores whatever was already parked and refuses with the typed sync refusal.
+    """
+
+    parked: dict[SyncSide, SyncSideRecord] = {}
+    for side in (code, memory):
+        if not _side_parks_wip(side):
+            continue
+        assert side is not None
+        paths = worktree_dirty_paths(Path(side.worktree))
+        if not paths:
+            continue
+        try:
+            stash = park_worktree_wip(
+                Path(side.worktree),
+                message=_wip_stash_message(contract, side),
+            )
+        except SyncGitProofError as error:
+            detail = _restore_already_parked(parked, error)
+            return command_result(2, "sync-side-preflight-failed", detail, fetch)
+        parked[side.side] = side.model_copy(
+            update={
+                "wipState": "parked",
+                "wipStash": stash,
+                "wipPaths": paths[:WIP_PATH_SAMPLE_LIMIT],
+                "wipPathCount": len(paths),
+            }
+        )
+    return parked.get("code", code), parked.get("memory", memory)
+
+
+def _wip_stash_message(contract: WorktreeContract, side: SyncSideRecord) -> str:
+    """A stash message a human can find: the operation, the side, and the exact contract."""
+
+    return (
+        f"agents-remember worktree_sync parked {side.side} WIP for {contract.task_id} "
+        f"({contract.contract_path.as_posix()})"
+    )
+
+
+def _restore_already_parked(
+    parked: dict[SyncSide, SyncSideRecord], error: SyncGitProofError
+) -> str:
+    """Undo a partial park before refusing, so no candidate is left without a journal."""
+
+    stranded: list[str] = []
+    for side in parked.values():
+        try:
+            state, conflicts = apply_parked_wip(side)
+            if state != "applied" or conflicts:
+                stranded.append(f"{side.side} ({side.wipStash})")
+                continue
+            drop_parked_wip(side)
+        except SyncGitProofError:
+            stranded.append(f"{side.side} ({side.wipStash})")
+    detail = str(error)
+    if stranded:
+        detail = (
+            f"{detail} The parked candidate remains in refs/stash for "
+            f"{', '.join(stranded)}; recover it with git stash apply."
+        )
+    return detail
 
 
 def _already_current_result(
@@ -286,22 +391,28 @@ def _preflight_participating_sides(
     memory: SyncSideRecord | None,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult | None:
+    """Refuse only the moving sides whose candidate genuinely cannot be parked."""
+
     for side in (code, memory):
         if side is None or side.temporary or side.plan in {"already-current", "skip"}:
             continue
         try:
             require_side_checkout(side)
-            dirty = git_status(Path(side.worktree))
+            _require_parkable_worktree(side)
         except SyncGitProofError as error:
             return command_result(2, "sync-side-preflight-failed", str(error), fetch)
-        if dirty:
-            return command_result(
-                2,
-                "sync-side-preflight-failed",
-                f"{side.side} sync requires a clean worktree before transaction admission.",
-                fetch,
-            )
     return None
+
+
+def _require_parkable_worktree(side: SyncSideRecord) -> None:
+    """A dirty moving side is parked; only an unsettleable index or worktree is refused."""
+
+    conflicts = unmerged_paths(Path(side.worktree))
+    if conflicts:
+        raise SyncGitProofError(
+            f"{side.side} sync cannot park a worktree with unmerged paths: "
+            f"{', '.join(conflicts[:30])}"
+        )
 
 
 def _resume_active(
@@ -339,6 +450,8 @@ def _active_preview(
     if record.phase in {"code-resolution-required", "memory-resolution-required"}:
         side = record.code if record.phase == "code-resolution-required" else record.memory
         assert side is not None
+        if side.wipState == "restore-conflict":
+            return parked_wip_validation_preview(side, fetch)
         return resolution_validation_preview(side, fetch)
     return manual_repair_result(
         "sync-resolution-not-required",
@@ -413,11 +526,13 @@ def _run_side(
         updated_side = side.model_copy(
             update={"state": "resolution-required", "conflictFiles": conflicts}
         )
-        phase = "code-resolution-required" if side_name == "code" else "memory-resolution-required"
-        return update_record(store, record, phase=phase, side=updated_side)
+        return update_record(store, record, phase=resolution_phase(side_name), side=updated_side)
     updated_side = side.model_copy(
         update={"state": "completed", "resultHead": side_branch_head(side)}
     )
+    record, updated_side, conflicted = restore_parked_wip(store, record, side_name, updated_side)
+    if conflicted:
+        return record
     return _advance_after_side(store, record, side_name, updated_side)
 
 
@@ -437,6 +552,8 @@ def _continue_resolution(
     side_name: SyncSide = "code" if record.phase == "code-resolution-required" else "memory"
     side = record.code if side_name == "code" else record.memory
     assert side is not None
+    if side.wipState == "restore-conflict":
+        return _continue_parked_wip_restore(contract, store, record, fetch)
     try:
         result_head = continue_side_merge(side)
     except SyncGitProofError as error:
@@ -446,6 +563,33 @@ def _continue_resolution(
     completed = side.model_copy(
         update={"state": "completed", "resultHead": result_head, "conflictFiles": ()}
     )
+    record, completed, conflicted = restore_parked_wip(store, record, side_name, completed)
+    if conflicted:
+        return resolution_required(record, fetch)
+    record = _advance_after_side(store, record, side_name, completed)
+    return _run_automatic(contract, store, record, fetch)
+
+
+def _continue_parked_wip_restore(
+    contract: WorktreeContract,
+    store: SyncOperationStore,
+    record: SyncOperationRecord,
+    fetch: dict[str, object],
+) -> WorktreeCommandResult:
+    """Finish a parked-candidate reapply the agent resolved; the source merge already landed."""
+
+    side_name: SyncSide = "code" if record.phase == "code-resolution-required" else "memory"
+    side = record.code if side_name == "code" else record.memory
+    assert side is not None
+    try:
+        record = settle_resolved_parked_wip(store, record, side_name, side)
+    except SyncGitProofError as error:
+        refreshed = side.model_copy(update={"conflictFiles": unmerged_paths(Path(side.worktree))})
+        record = update_record(store, record, phase=record.phase, side=refreshed)
+        return manual_repair_result("sync-resolution-incomplete", str(error), record, fetch)
+    completed = side.model_copy(
+        update={"state": "completed", "wipState": "restored", "conflictFiles": ()}
+    )
     record = _advance_after_side(store, record, side_name, completed)
     return _run_automatic(contract, store, record, fetch)
 
@@ -453,11 +597,15 @@ def _continue_resolution(
 def _reconcile_completed_sides(
     store: SyncOperationStore, record: SyncOperationRecord
 ) -> SyncOperationRecord:
+    """Adopt a side whose merge is already committed, returning any candidate it parks."""
+
     if record.phase == "running-code" and _side_live_complete(record.code):
         side = record.code.model_copy(
             update={"state": "completed", "resultHead": side_branch_head(record.code)}
         )
-        record = _advance_after_side(store, record, "code", side)
+        record, side, conflicted = restore_parked_wip(store, record, "code", side)
+        if not conflicted:
+            record = _advance_after_side(store, record, "code", side)
     if (
         record.phase == "running-memory"
         and record.memory is not None
@@ -475,7 +623,9 @@ def _reconcile_completed_sides(
                 ),
             }
         )
-        record = _advance_after_side(store, record, "memory", side)
+        record, side, conflicted = restore_parked_wip(store, record, "memory", side)
+        if not conflicted:
+            record = _advance_after_side(store, record, "memory", side)
     return record
 
 

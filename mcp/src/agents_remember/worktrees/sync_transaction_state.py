@@ -32,6 +32,10 @@ SyncSideState = Literal[
     "completed",
     "rolled-back",
 ]
+# The parked-worktree candidate: a closeout-time leaf is dirty by definition, so the sync
+# parks its WIP before the carry and must return it. ``restore-conflict`` means the parked
+# candidate could not be reapplied onto the carried result and still needs its resolver.
+SyncWipState = Literal["", "parked", "restore-conflict", "restored"]
 
 
 class SyncSideRecord(BaseModel):
@@ -55,6 +59,12 @@ class SyncSideRecord(BaseModel):
     temporary: bool = False
     resultHead: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     conflictFiles: tuple[str, ...] = ()
+    # The exact parked candidate: its stash identity is journaled with the transaction, so
+    # a crash mid-carry can always return the WIP it parked.
+    wipState: SyncWipState = ""
+    wipStash: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
+    wipPaths: tuple[str, ...] = ()
+    wipPathCount: int = Field(default=0, ge=0)
 
 
 class SyncOperationRecord(BaseModel):
@@ -384,7 +394,11 @@ def _active_sync_projection(
         )
     elif side is not None:
         state = "resolution-required"
-        summary = f"Resolve and stage the retained {side} merge, then continue worktree_sync."
+        summary = (
+            f"Resolve the parked {side} candidate reapply, then continue worktree_sync."
+            if side_record is not None and side_record.wipState == "restore-conflict"
+            else f"Resolve and stage the retained {side} merge, then continue worktree_sync."
+        )
     elif record.phase == "cancelling":
         state = "cancelling"
         summary = "The exact sync rollback is incomplete; rerun cancellation."

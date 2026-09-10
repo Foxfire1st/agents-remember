@@ -35,6 +35,9 @@ from agents_remember.worktrees.modules.args import WorktreeArgs, report_operatio
 from agents_remember.worktrees.modules.closeout_external import (
     external_closeout_commits,
 )
+from agents_remember.worktrees.modules.closeout_lineage import (
+    heal_current_source_lineage,
+)
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -79,7 +82,6 @@ from agents_remember.worktrees.series_closeout import (
     publish_closeout_under_authority,
     refuse_series_workbench_commit,
 )
-from agents_remember.worktrees.source_lineage import require_current_source_lineage
 from agents_remember.worktrees.task_leaf_binding import leaf_enclosure_binding_refusal
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
@@ -303,10 +305,17 @@ def _validate_closeout_source_heads(contract) -> None:
             )
 
 
-def _validate_closeout_source_state(contract) -> None:
-    """Prove immediate source heads and the full super -> master -> leaf chain."""
-    _validate_closeout_source_heads(contract)
-    require_current_source_lineage(contract, operation="closeout")
+def _validate_closeout_source_state(contract, *, dry_run: bool) -> WorktreeContract:
+    """Prove the full super -> master -> leaf chain, self-healing a plain fast-forward.
+
+    Ordered deliberately: the lineage guard runs first, so a source branch that moved
+    while only its ancestry is stale is settled by the sync rather than refused as a
+    moved source. The exact immediate source heads are then re-proved on the contract
+    identity the sync left on disk.
+    """
+    healed = heal_current_source_lineage(contract, operation="closeout", dry_run=dry_run)
+    _validate_closeout_source_heads(healed.contract)
+    return healed.contract
 
 
 def _closeout_approval_note(args: WorktreeArgs) -> str:
@@ -571,13 +580,16 @@ def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, An
     }
 
 
-def _revalidate_candidate(contract, accepted_candidate_tree: str) -> None:
+def _revalidate_candidate(
+    contract, accepted_candidate_tree: str, *, dry_run: bool
+) -> WorktreeContract:
     """Re-prove source lineage and candidate identity before Git mutation."""
-    _validate_closeout_source_state(contract)
+    contract = _validate_closeout_source_state(contract, dry_run=dry_run)
     if code_candidate_tree(contract) != accepted_candidate_tree:
         raise RuntimeError(
             "closeout candidate changed after admission; restart from the current candidate"
         )
+    return contract
 
 
 @dataclass(frozen=True)
@@ -697,7 +709,7 @@ def closeout_result(
     worklist = closeout_changed_paths(contract)
     accepted_candidate_tree = cast(str, args.candidate_tree)
     refuse_series_workbench_commit(contract)
-    _revalidate_candidate(contract, accepted_candidate_tree)
+    contract = _revalidate_candidate(contract, accepted_candidate_tree, dry_run=args.dry_run)
 
     return _publish_closeout_candidate(
         contract,
@@ -740,7 +752,7 @@ def _publish_closeout_candidate(
         else:
             require_ordinary_worktree(current, operation="worktree_closeout")
         refuse_series_workbench_commit(current)
-        _revalidate_candidate(current, accepted_candidate_tree)
+        current = _revalidate_candidate(current, accepted_candidate_tree, dry_run=args.dry_run)
         committed = _closeout_commit_phase(
             current,
             args,
@@ -800,7 +812,7 @@ def _closeout_entry(
     recovered = _recover_closeout_finalization(contract, args)
     if recovered is not None:
         return contract, effective_input, recovered
-    _validate_closeout_source_state(contract)
+    contract = _validate_closeout_source_state(contract, dry_run=args.dry_run)
     refuse_series_workbench_commit(contract)
     if args.dry_run:
         return (
