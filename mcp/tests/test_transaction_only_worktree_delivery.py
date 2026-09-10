@@ -321,15 +321,25 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
             dry_run=True,
         )
         assert preview["ok"] is True, preview
-        applied = worktree_tools.worktree_integrate_tool(
-            config,
-            contract_path=closed.contract_path.as_posix(),
-            strategy="ff-only",
-            dry_run=False,
+        # Seat retirement must still fire on the SYNCHRONOUS path: its other call
+        # site was the detached worker, so a deletion that removed this trigger
+        # would stop retiring seats silently and a green suite would not catch it.
+        # This fixture disables auto-landing, so enable retirement for the pin.
+        retiring = replace(
+            config, retirement=replace(config.retirement, auto_land_on_integration=True)
         )
+        with mock.patch.object(worktree_tools, "auto_complete_seats", return_value={}) as retire:
+            applied = worktree_tools.worktree_integrate_tool(
+                retiring,
+                contract_path=closed.contract_path.as_posix(),
+                strategy="ff-only",
+                dry_run=False,
+            )
 
     # Integration runs in this process: the refs themselves are the record.
     assert applied["ok"] is True, applied
+    assert retire.call_args is not None, "auto_complete_seats is no longer reachable"
+    assert retire.call_args.kwargs["edge"] == "leaf-integration"
     integrated = load_contract(closed.contract_path)
     assert integrated.integration_status == "completed"
     assert integrated.integrated_code_commit == integrated.code_commit
