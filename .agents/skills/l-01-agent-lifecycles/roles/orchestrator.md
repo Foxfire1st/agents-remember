@@ -409,9 +409,11 @@ handover you cannot honestly decide escalates to the architect as a decision ite
    narrow landing authority and land that one code/memory/ledger block on super. Full quality or
    memory suites run only when the developer explicitly requests them.
    Expose no intermediate atomic leaf to super; a paused master retains its branch and journals.
-5. Map the external-memory edge with the code edge. Prefer ancestry-preserving fast-forward/replay;
-   carry-over is an explicit recovery for unavoidable divergence, not a routine consequence of
-   parallel organizational work.
+5. Map the external-memory edge with the code edge. Prefer an ancestry-preserving fast-forward, and
+   reserve `replay` for the case where carryover is genuinely the only choice; carry-over is an
+   explicit recovery for unavoidable divergence, not a routine consequence of parallel
+   organizational work. A candidate that no longer sits on the current source produces a new
+   targeted closeout after the moved source is propagated downstream into its worktrees.
 6. Record the new super tips in their owning Git/ledger/operation evidence, publish any resulting
    task or door disposition change, rebuild affected projections, release or retain the exact
    landing blocker, and recompute. Do not retain a terminal or certified queue row for audit.

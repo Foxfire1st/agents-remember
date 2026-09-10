@@ -290,7 +290,7 @@ stops belong to the orchestrator via the system-specialist protocol.
 - **Integrate according to execution nature.** After the orchestrator releases the candidate,
   close out and land through the task-bound worktree tools. An `organizational` leaf lands directly
   into the current super line; an `atomic` leaf lands only into its atomic master branch. Prefer
-  current-lineage fast-forward/replay mechanics; `c-11-memory-carryover-from-branch` is a recovery
+  current-lineage fast-forward mechanics; `c-11-memory-carryover-from-branch` is a recovery
   for unavoidable divergence, not the normal scheduling strategy. Know the human-pinned gate kinds by name:
   `integration-approval`, `push-approval`, `cleanup-approval` — none is ever delegable. When a
   durable `integration-approval` gate is raised on this step it awaits the **developer** (via the

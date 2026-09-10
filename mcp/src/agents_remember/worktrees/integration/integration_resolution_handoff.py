@@ -48,12 +48,13 @@ def integration_resolution_required(
     )
     summary = (
         "The selected source moved after this leaf closed. Integration will not create an "
-        "untested replay commit. Cancel this pre-boundary operation, resolve the exact "
-        "source delta in the recorded leaf worktree, and produce a new targeted closeout."
+        "untested replay commit. Cancel this pre-boundary operation, run worktree_sync for "
+        "this contract, settle any retained code or memory conflict -- re-running the "
+        "targeted test utility after code resolutions -- and produce a new targeted closeout."
     )
     cancel_note = (
-        "Cancel the stale pre-boundary integration so the owning leaf can absorb the "
-        "recorded source delta and produce a new targeted closeout."
+        "Cancel the stale pre-boundary integration so the owning leaf can sync its source, "
+        "settle any retained conflict, and produce a new targeted closeout."
     )
     preview_args = {
         "contract_path": contract.contract_path.as_posix(),

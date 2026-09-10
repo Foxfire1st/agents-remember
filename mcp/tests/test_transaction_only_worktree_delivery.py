@@ -64,9 +64,7 @@ def _public_config(root: Path, contract) -> object:
     if not code_link.exists():
         code_link.symlink_to(contract.code_repo_path, target_is_directory=True)
     if contract.memory_repo_path is not None:
-        memory_link = (
-            contract.coordination_root / "memory-repos" / f"ar-{contract.repo_name}"
-        )
+        memory_link = contract.coordination_root / "memory-repos" / f"ar-{contract.repo_name}"
         memory_link.parent.mkdir(parents=True, exist_ok=True)
         if not memory_link.exists():
             memory_link.symlink_to(contract.memory_repo_path, target_is_directory=True)
@@ -163,24 +161,29 @@ def _publish_synthetic_closeout_source(contract, config_path: Path):
 def _forbid_acceptance_tools():
     """Patch historical acceptance entry points so an accidental call fails loudly."""
 
-    return mock.patch.multiple(
-        quality_gate,
-        run_strict_code_quality_gate=mock.Mock(
-            side_effect=AssertionError("transaction called strict code quality")
+    return (
+        mock.patch.multiple(
+            quality_gate,
+            run_strict_code_quality_gate=mock.Mock(
+                side_effect=AssertionError("transaction called strict code quality")
+            ),
+            create=True,
         ),
-        create=True,
-    ), mock.patch.object(
-        memory_quality,
-        "run_memory_quality_phase",
-        side_effect=AssertionError("transaction called memory quality"),
-    ), mock.patch.object(
-        selected,
-        "execute_selected_closeout",
-        side_effect=AssertionError("transaction called selected certification"),
-    ), mock.patch.object(
-        coherence,
-        "require_current_curator_coherence",
-        side_effect=AssertionError("transaction called curator certification"),
+        mock.patch.object(
+            memory_quality,
+            "run_memory_quality_phase",
+            side_effect=AssertionError("transaction called memory quality"),
+        ),
+        mock.patch.object(
+            selected,
+            "execute_selected_closeout",
+            side_effect=AssertionError("transaction called selected certification"),
+        ),
+        mock.patch.object(
+            coherence,
+            "require_current_curator_coherence",
+            side_effect=AssertionError("transaction called curator certification"),
+        ),
     )
 
 
@@ -206,9 +209,7 @@ def _install_failing_pre_commit_hooks(contract, root: Path) -> tuple[Path, Path]
         assert hook.is_file() and hook.stat().st_mode & 0o111
         probe = run_git(repository, ["hook", "run", "pre-commit"])
         assert probe.returncode == 97, probe
-        assert log.read_text(encoding="utf-8").splitlines() == [
-            "transaction-hook-invoked"
-        ]
+        assert log.read_text(encoding="utf-8").splitlines() == ["transaction-hook-invoked"]
         log.unlink()
     return logs
 
@@ -296,9 +297,7 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
     """Integration merges the prepared code and memory refs without rerunning acceptance."""
 
     fixture = _authority_fixture(tmp_path, external_memory=True)
-    closed = _closed_external_leaf_worktrees(
-        fixture, tmp_path, publish_closeout_evidence=False
-    )
+    closed = _closed_external_leaf_worktrees(fixture, tmp_path, publish_closeout_evidence=False)
     config = _public_config(tmp_path, closed)
     closed = _publish_synthetic_closeout_source(closed, config.config_path)
     _assert_no_profile_or_review(config, closed)
@@ -339,9 +338,7 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
     """A source-tip race remains a concrete refusal and cannot publish a torn pair."""
 
     fixture = _authority_fixture(tmp_path, external_memory=True)
-    closed = _closed_external_leaf_worktrees(
-        fixture, tmp_path, publish_closeout_evidence=False
-    )
+    closed = _closed_external_leaf_worktrees(fixture, tmp_path, publish_closeout_evidence=False)
     config = _public_config(tmp_path, closed)
     closed = _publish_synthetic_closeout_source(closed, config.config_path)
     _assert_no_profile_or_review(config, closed)

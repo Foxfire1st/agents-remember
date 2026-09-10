@@ -20,11 +20,19 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.worktrees.activation.atomic_series_activation import observe_atomic_series
+from agents_remember.worktrees.integration import (
+    integration_resolution_handoff,
+    master_review_gate,
+)
+from agents_remember.worktrees.integration.integration_ref_transaction import IntegrationSources
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
 )
+from agents_remember.worktrees.modules import integrate
 from agents_remember.worktrees.modules import start as start_module
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.closeout import _validate_closeout_source_state
+from agents_remember.worktrees.modules.closeout_lineage import SourceLineageRefusal
 from agents_remember.worktrees.modules.start import _preflighted_contract, attach_result
 from agents_remember.worktrees.source_lineage import (
     lineage_refusal,
@@ -39,6 +47,7 @@ from agents_remember.worktrees.worktree_contract import (
     contract_publication_text,
     default_contract,
     default_series_contract,
+    load_contract,
     write_contract,
 )
 from repository_profile_test_support import install_fixture_profile
@@ -164,6 +173,206 @@ class SourceLineageTests(unittest.TestCase):
                 "closeout requires current transitive source lineage.*worktree_sync",
             ):
                 require_current_source_lineage(fixture.leaf_contract, operation="closeout")
+
+
+class CloseoutSourceLineageHealTests(unittest.TestCase):
+    """The closeout boundary settles a plain fast-forwardable break by itself.
+
+    Every case here protects a distinct outcome of that one guard: the healed proceed,
+    the observe-only preview, the escalated divergence, the retained sync conflict, and
+    the sync that could not be admitted at all.
+    """
+
+    def test_closeout_boundary_heals_a_plain_fast_forward_break(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp))
+            _live_leaf_worktree(fixture)
+            _commit_on(fixture.code_repo, "ar/master", "moved-on-source.txt")
+            moved = _git(fixture.code_repo, "rev-parse", "ar/master")
+
+            healed = _validate_closeout_source_state(fixture.leaf_contract, dry_run=False)
+
+            self.assertEqual(healed.code_base_commit, moved)
+            self.assertEqual(_git(fixture.code_repo, "rev-parse", "leaf"), moved)
+            self.assertEqual(
+                load_contract(fixture.leaf_contract.contract_path).code_base_commit, moved
+            )
+            projection = source_lineage_for_contract(healed)
+            assert projection is not None
+            self.assertIsNone(lineage_refusal(projection))
+
+    def test_closeout_preview_refuses_without_moving_the_break(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp))
+            _live_leaf_worktree(fixture)
+            behind = _git(fixture.code_repo, "rev-parse", "leaf")
+            _commit_on(fixture.code_repo, "ar/master", "moved-on-source.txt")
+
+            with self.assertRaisesRegex(
+                RuntimeError, "closeout requires current transitive source lineage.*worktree_sync"
+            ):
+                _validate_closeout_source_state(fixture.leaf_contract, dry_run=True)
+
+            self.assertEqual(_git(fixture.code_repo, "rev-parse", "leaf"), behind)
+            self.assertNotEqual(
+                load_contract(fixture.leaf_contract.contract_path).code_base_commit,
+                _git(fixture.code_repo, "rev-parse", "ar/master"),
+            )
+
+    def test_closeout_boundary_carries_a_leaf_that_owns_its_own_commit(self) -> None:
+        """A leaf owning its own commit is normal: the carried merge settles the break."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp))
+            worktree = _live_leaf_worktree(fixture)
+            _commit_in(worktree, "leaf-work.txt")
+            leaf_head = _git(fixture.code_repo, "rev-parse", "leaf")
+            _commit_on(fixture.code_repo, "ar/master", "moved-on-source.txt")
+            moved = _git(fixture.code_repo, "rev-parse", "ar/master")
+
+            healed = _validate_closeout_source_state(fixture.leaf_contract, dry_run=False)
+
+            self.assertEqual(healed.code_base_commit, moved)
+            self.assertEqual(
+                _git(fixture.code_repo, "rev-list", "--parents", "-n", "1", "leaf").split()[1:],
+                [leaf_head, moved],
+            )
+            stored = load_contract(fixture.leaf_contract.contract_path)
+            self.assertEqual(stored.code_base_commit, moved)
+            projection = source_lineage_for_contract(healed)
+            assert projection is not None
+            self.assertIsNone(lineage_refusal(projection))
+
+    def test_unprovable_lineage_escalates_to_the_human_developer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp))
+            _live_leaf_worktree(fixture)
+            leaf_head = _git(fixture.code_repo, "rev-parse", "leaf")
+            before = load_contract(fixture.leaf_contract.contract_path).code_base_commit
+            fixture.master_contract.contract_path.unlink()
+
+            with self.assertRaises(SourceLineageRefusal) as raised:
+                _validate_closeout_source_state(fixture.leaf_contract, dry_run=False)
+
+            refusal = raised.exception
+            self.assertEqual(refusal.status, "source-lineage-unavailable")
+            self.assertIn("beyond simple fast-forwarding", str(refusal))
+            self.assertIn("human developer", str(refusal))
+            self.assertEqual(_git(fixture.code_repo, "rev-parse", "leaf"), leaf_head)
+            self.assertEqual(
+                load_contract(fixture.leaf_contract.contract_path).code_base_commit, before
+            )
+
+    def test_retained_sync_conflict_hands_back_both_worktrees_and_their_duties(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp))
+            worktree = _live_leaf_worktree(fixture)
+            (worktree / "base.txt").write_text("leaf version\n", encoding="utf-8")
+            _git(worktree, "add", "base.txt")
+            _git(worktree, "commit", "-m", "leaf edits base")
+            leaf_head = _git(fixture.code_repo, "rev-parse", "leaf")
+            base = fixture.leaf_contract.code_base_commit
+            _commit_base_on_source(fixture.code_repo, "ar/master")
+            moved = _git(fixture.code_repo, "rev-parse", "ar/master")
+
+            with self.assertRaises(SourceLineageRefusal) as raised:
+                _validate_closeout_source_state(fixture.leaf_contract, dry_run=False)
+
+            refusal = raised.exception
+            self.assertEqual(refusal.status, "source-lineage-sync-conflict")
+            resolution = refusal.payload["resolution"]
+            self.assertEqual(resolution["side"], "code")
+            self.assertIn("base.txt", resolution["files"])
+            self.assertEqual(refusal.payload["nextTool"], "worktree_sync")
+            message = str(refusal)
+            self.assertIn("both worktrees -- code and memory", message)
+            self.assertIn("neither code nor memory", message)
+            self.assertIn("re-run the targeted test utility", message)
+            self.assertIn("memory tooling", message)
+            self.assertIn("curator agent", message)
+            # The closeout did not complete: the merge is retained in the leaf worktree.
+            self.assertEqual(_git(fixture.code_repo, "rev-parse", "leaf"), leaf_head)
+            self.assertEqual(_git(worktree, "rev-parse", "MERGE_HEAD"), moved)
+            self.assertEqual(
+                load_contract(fixture.leaf_contract.contract_path).code_base_commit, base
+            )
+
+    def test_closeout_boundary_carries_an_uncommitted_candidate(self) -> None:
+        """The closeout-time leaf is dirty by definition; one call carries and returns it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp))
+            worktree = _live_leaf_worktree(fixture)
+            (worktree / "candidate.txt").write_text("uncommitted candidate\n", encoding="utf-8")
+            _commit_on(fixture.code_repo, "ar/master", "moved-on-source.txt")
+            moved = _git(fixture.code_repo, "rev-parse", "ar/master")
+
+            healed = _validate_closeout_source_state(fixture.leaf_contract, dry_run=False)
+
+            self.assertEqual(healed.code_base_commit, moved)
+            self.assertEqual(_git(fixture.code_repo, "rev-parse", "leaf"), moved)
+            self.assertEqual(
+                (worktree / "candidate.txt").read_text(encoding="utf-8"),
+                "uncommitted candidate\n",
+            )
+            self.assertEqual(_git(worktree, "stash", "list"), "")
+            projection = source_lineage_for_contract(healed)
+            assert projection is not None
+            self.assertIsNone(lineage_refusal(projection))
+
+    def test_closeout_boundary_retains_a_parked_candidate_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp))
+            worktree = _live_leaf_worktree(fixture)
+            (worktree / "base.txt").write_text("candidate version\n", encoding="utf-8")
+            base = fixture.leaf_contract.code_base_commit
+            _commit_base_on_source(fixture.code_repo, "ar/master")
+
+            with self.assertRaises(SourceLineageRefusal) as raised:
+                _validate_closeout_source_state(fixture.leaf_contract, dry_run=False)
+
+            refusal = raised.exception
+            self.assertEqual(refusal.status, "source-lineage-sync-conflict")
+            self.assertIn("base.txt", refusal.payload["resolution"]["files"])
+            message = str(refusal)
+            self.assertIn("both worktrees -- code and memory", message)
+            self.assertIn("neither code nor memory", message)
+            self.assertIn("re-run the targeted test utility", message)
+            self.assertIn("memory tooling", message)
+            self.assertIn("curator agent", message)
+            # The candidate is recoverable from its stash and the closeout did not complete.
+            self.assertNotEqual(_git(worktree, "stash", "list"), "")
+            self.assertIn("candidate version", (worktree / "base.txt").read_text(encoding="utf-8"))
+            self.assertEqual(
+                load_contract(fixture.leaf_contract.contract_path).code_base_commit, base
+            )
+
+    def test_source_moved_integration_guidance_routes_through_the_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp))
+            sources = IntegrationSources(
+                current_code_source="c0",
+                current_memory_source="",
+                code_replay_required=True,
+                memory_replay_required=False,
+            )
+
+            with mock.patch.object(master_review_gate, "status_payload", return_value={}):
+                blocked = integrate._blocked_non_ff_result(
+                    fixture.leaf_contract, WorktreeArgs(), sources
+                )
+            handoff = integration_resolution_handoff.integration_resolution_required(
+                fixture.leaf_contract,
+                WorktreeArgs(),
+                sources,
+                SimpleNamespace(generation=1, operationKey="", integrationAuthority=None),
+            )
+
+            reason = cast(str, blocked.payload["reason"])
+            summary = cast(str, handoff.payload["summary"])
+            self.assertIn("worktree_sync", reason)
+            self.assertNotIn("--strategy replay", reason)
+            self.assertIn("worktree_sync", summary)
+            self.assertIn("untested replay commit", summary)
+            self.assertNotIn("--strategy replay", summary)
 
 
 class _Fixture:
@@ -370,6 +579,35 @@ def _commit_on(repo: Path, branch: str, name: str) -> None:
     (repo / name).write_text(name + "\n", encoding="utf-8")
     _git(repo, "add", name)
     _git(repo, "commit", "-m", name)
+
+
+def _commit_base_on_source(repo: Path, branch: str) -> None:
+    """Change the shared base file on the source branch so a carried merge conflicts."""
+    _git(repo, "switch", branch)
+    (repo / "base.txt").write_text("source version\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-m", "source edits base")
+
+
+def _live_leaf_worktree(fixture: _Fixture) -> Path:
+    """Check the leaf work branch out where a real sync transaction can merge into it."""
+    worktree = fixture.leaf_contract.code_worktree
+    worktree.parent.mkdir(parents=True, exist_ok=True)
+    _git(
+        fixture.code_repo,
+        "worktree",
+        "add",
+        str(worktree),
+        fixture.leaf_contract.code_work_branch,
+    )
+    return worktree
+
+
+def _commit_in(worktree: Path, name: str) -> None:
+    """Commit inside the leaf worktree, whose branch is checked out there."""
+    (worktree / name).write_text(name + "\n", encoding="utf-8")
+    _git(worktree, "add", name)
+    _git(worktree, "commit", "-m", name)
 
 
 def _git(repo: Path, *args: str) -> str:

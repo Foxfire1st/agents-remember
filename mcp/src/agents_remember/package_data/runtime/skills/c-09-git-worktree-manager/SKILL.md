@@ -272,6 +272,14 @@ when competing changes encode a semantic truth the agent cannot derive from curr
 code, tests, and durable decisions. A routine textual, import, fixture, or ledger conflict is not by
 itself a developer decision.
 
+Closeout invokes this sync automatically when its ancestor check finds a carry it can settle — a
+fast-forward, or a merge where the leaf owns its own commit — so a moved line is not an operator
+step: the sync parks any pending uncommitted candidate, carries the moved source into the leaf's code
+and memory worktrees, reapplies the candidate, and closeout continues in the same call. The parked
+work is part of the sync journal, so `cancel` and resume give it back rather than absorbing it; never
+hand-stash around this. Only a retained merge conflict, or a break no carry can settle, reaches an
+agent or the developer.
+
 `resolution_action=cancel` is the explicit escape hatch when the operation should be abandoned. It
 restores each participating branch to its pinned pre-sync head, removes retained temporary sync
 worktrees, terminalizes the journal, and releases an exact reconciling atomic-series selection to
@@ -332,9 +340,23 @@ never repeat Git directly or use queue state as recovery evidence.
 Integration and direct-landing keep their own advertised retry/recover actions: a pre-output failure
 may retry the same input, while ambiguous or proven output must reconcile/recover the same generation.
 
-If the recorded code or external-memory source branch moves, admission refuses that landing edge
-with the exact `worktree_sync`/provenance-republication route. The moved source does not veto task
-authoring and does not erase the journal or door generation.
+Admission proves the whole ancestor chain (leaf ← master ← super), not just the immediate parent. If
+a recorded code or external-memory source branch has moved, closeout **does not simply refuse**: it
+runs the upstream check and, when every stale edge is a carry it can settle — a fast-forward where
+the descendant owns no commits, a merge where it does, which is the normal shape for a closed-out
+leaf — performs the `worktree_sync` itself and continues. No operator turn is spent on the happy path. A break higher in
+the chain (a sibling or a parent sprint advancing the line above this leaf's master) is satisfied the
+same way, because the sync walks the recorded edges down to this leaf and the sibling leaves pick up
+the propagated changes when their own turn comes.
+
+A `worktree_sync` that retains merge conflicts ends the automatic phase: closeout completes for
+neither code nor memory. The response directs the agent to check **both** worktrees, re-run the
+targeted test utility after code fixes, and for memory to run the memory tooling first and then make
+the memory adjustments. Small conflicts may be handled ad hoc by the orchestrating/managing agent;
+larger ones return to the responsible worker and/or curator agent. A break no downstream carry can
+settle — an unprovable edge, or a sync that reports it cannot settle the delta — is escalated to the
+human developer rather than auto-resolved.
+The moved source does not veto task authoring and does not erase the journal or door generation.
 
 ## Integration
 
@@ -385,15 +407,22 @@ be reflected in the branch choice made before `worktree_start`.
 Strategies:
 
 1. `ff-only`: require current code and memory source branches to be ancestors of the closeout commits, then fast-forward both source branches.
-2. `replay`: when source branches moved because parallel work landed first, replay the code task commit onto current code source, replay only the memory content commit onto current memory source, regenerate `memory.md` for the final landed code and memory content commits, then fast-forward both source branches.
+2. `replay`: the carryover mechanics — replay the code task commit onto current code source, replay only the memory content commit onto current memory source, regenerate `memory.md` for the final landed code and memory content commits, then fast-forward both source branches — used where carryover is genuinely the only choice. It is not the recovery for a leaf whose source merely advanced while its own candidate sat unlanded: that leaf refreshes downstream with `worktree_sync` and produces a new targeted closeout.
 
-Conflict rule: if code replay or memory-content replay conflicts, stop before moving source
-branches and resolve the retained conflict through the operation's advertised continuation path.
-The agent owns technically derivable merge resolution and its validation. Escalate through the
-architect only when current requirements and evidence leave a genuine semantic ambiguity; do not
-label ordinary technical reconciliation `developerDecisionRequired`. Do not replay an old ledger
-commit over current memory main; always regenerate the ledger row after memory content has been
-mediated.
+Conflict rule: a retained code or memory conflict stops the operation before any source branch
+moves; resolve it through the advertised continuation path. The agent owns technically derivable
+merge resolution and its validation. After code conflicts are resolved, re-run the targeted test
+utility before retrying. For memory, run the memory tooling first and then make the memory
+adjustments. Small conflicts may be resolved ad hoc by the orchestrating/managing agent; larger ones
+go back to the responsible worker and/or curator agent. Escalate through the architect only when
+current requirements and evidence leave a genuine semantic ambiguity; do not label ordinary
+technical reconciliation `developerDecisionRequired`. A stale edge is carried downstream — a
+fast-forward where the descendant owns no commits, a merge where it does, which is the normal shape
+because a closed-out leaf always owns its own commit. Only a break no carry can settle — an
+unprovable edge (missing contract, branch, or comparable history), or a sync that reports it cannot
+settle the delta — escalates to the human developer, never an automatic resolution. Do not
+replay an old ledger commit over current memory main; always regenerate the ledger row after memory
+content has been mediated.
 
 After successful integration, complete any repo-specific landing tail first: push/PR/merge for PR-gated code, pull the protected target back locally, and carry memory forward until the official memory branch maps the landed code commit. Then use `lifecycle_finalize_task` for the terminal edge.
 

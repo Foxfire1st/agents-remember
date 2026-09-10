@@ -20,6 +20,8 @@ from agents_remember.worktrees.sync_transaction_authority import (
     remove_temporary_worktrees,
     require_contract_bases_unchanged,
     require_finalizable_contract,
+    require_parked_wip_settled,
+    restore_cancelled_wip,
     side_locations,
     side_payload,
     sync_contract_kind,
@@ -29,6 +31,7 @@ from agents_remember.worktrees.sync_transaction_authority import (
 from agents_remember.worktrees.sync_transaction_git import (
     SyncGitProofError,
     delete_pinned_ref,
+    discard_conflicted_wip_reapply,
     ensure_temporary_worktree,
     exact_created_head,
     merge_head,
@@ -60,6 +63,7 @@ def finalize_sync(
     current = reload_contract(contract)
     require_finalizable_contract(current, record)
     _require_completed_branches(record)
+    require_parked_wip_settled(record)
     memory_to = target_memory_base(record)
     if (
         current.code_base_commit != record.code.sourceCommit
@@ -162,6 +166,8 @@ def cancel_sync(
     record = update_record(store, record, phase="cancelling")
     for side in (record.memory, record.code):
         if side is not None:
+            if side.wipState == "restore-conflict":
+                discard_conflicted_wip_reapply(side)
             if side.plan in {"already-current", "skip"}:
                 if side_branch_head(side) != side.preSyncHead:
                     raise SyncGitProofError(
@@ -169,6 +175,10 @@ def cancel_sync(
                     )
             else:
                 rollback_side(side)
+    try:
+        record = restore_cancelled_wip(store, record)
+    except SyncGitProofError as error:
+        return manual_repair_result("sync-cancel-wip-restore-failed", str(error), record, fetch)
     require_contract_bases_unchanged(reload_contract(contract), record)
     remove_temporary_worktrees(record)
     record = update_record(store, record, phase="cancelled")

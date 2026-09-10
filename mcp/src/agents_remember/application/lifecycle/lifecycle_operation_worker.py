@@ -230,6 +230,7 @@ class OperationRuntime:
     def heartbeat(self) -> None:
         while not self.stop.wait(HEARTBEAT_SECONDS):
             try:
+
                 def beat(
                     record: LifecycleOperationRecord,
                     command_evidence: str | None = None,
