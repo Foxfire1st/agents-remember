@@ -48,7 +48,6 @@ PUBLIC_TOOLS = (
     "worktree_closeout_apply",
     "worktree_integrate",
     "worktree_operation_control",
-    "worktree_legacy_operation",
     "worktree_cleanup",
     "worktree_abandon",
     "task_reopen",

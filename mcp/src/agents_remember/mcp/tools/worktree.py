@@ -4,10 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.application.lifecycle.legacy_operation_tool import (
-    LegacyOperationRequest,
-    worktree_legacy_operation_tool,
-)
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tools import (
     DEFAULT_START_EXECUTION,
@@ -159,16 +155,6 @@ def worktree_operation_control_payload(
         worktree_operation_control_tool(config, request),
     )
 
-
-def worktree_legacy_operation_payload(
-    config: McpRuntimeConfig,
-    contract_path: str,
-    request: LegacyOperationRequest,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "worktree_legacy_operation",
-        worktree_legacy_operation_tool(config, contract_path, request),
-    )
 
 
 def worktree_cleanup_payload(
