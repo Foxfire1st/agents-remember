@@ -84,8 +84,25 @@ def test_baseline_seals_findings_and_successors_only_shrink_remaining() -> None:
     assert final.reviewState is not None
     assert final.reviewState.round == 3
     assert final.reviewState.remainingFindingIds == []
-    with pytest.raises(ReviewHistoryError, match="no remaining findings"):
+
+    # A sealed clean review is not permanent: a later candidate may open a new round
+    # (bounded by the ordinary three-round budget), and the sealed definitions survive.
+    with pytest.raises(ReviewHistoryError, match="count=3, limit=3") as budget:
         begin_task_review(final)
+    assert budget.value.status == "review-budget-exhausted"
+
+    reopened = begin_task_review(
+        final,
+        {
+            "developerApproval": "Developer authorizes one more verification round.",
+            "additionalRounds": 1,
+        },
+    )
+    assert reopened.reviewState is not None
+    assert reopened.reviewState.round == 4
+    assert reopened.reviewState.pending is True
+    assert reopened.reviewState.baselineFindings == final.reviewState.baselineFindings
+    assert reopened.reviewState.remainingFindingIds == []
 
 
 def test_successor_rejects_new_duplicate_reintroduced_and_unresolved_passing_ids() -> None:
@@ -112,9 +129,11 @@ def test_successor_rejects_new_duplicate_reintroduced_and_unresolved_passing_ids
         record_task_review(successor, {"verdict": "pass", "remainingFindingIds": ["A"]})
 
 
-def test_record_requires_begin_and_verdict() -> None:
-    with pytest.raises(ReviewHistoryError, match="begin_review"):
-        record_task_review(_document(), {"findings": []})
+def test_record_without_begin_starts_the_baseline_and_still_requires_a_verdict() -> None:
+    recorded = record_task_review(_document(), {"verdict": "block", "findings": []})
+    assert recorded.reviewState is not None
+    assert recorded.reviewState.round == 1
+    assert recorded.reviewState.pending is False
     pending = begin_task_review(_document())
     with pytest.raises(ReviewHistoryError, match="requires verdict"):
         record_task_review(pending, {"findings": []})

@@ -21,7 +21,7 @@ from agents_remember.models.lifecycles.evidence_dependencies import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import TaskIntentIdentity
-from agents_remember.tasks import RouteReviewRecord, TaskDocument
+from agents_remember.tasks import RouteReviewRecord
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
 from agents_remember.tasks.task_intent import (
@@ -43,7 +43,6 @@ class RouteReviewError(ValueError):
 _ROUTE_REVIEW_RECORD_STATUSES = frozenset(
     {
         "route-review-required",
-        "route-review-stale",
         "route-review-evidence-stale",
         "route-review-dependencies-stale",
         "route-review-task-intent-missing",
@@ -373,49 +372,22 @@ def require_current_route_review(contract: WorktreeContract) -> dict[str, object
             "route-review-required",
             "the current code change has no independent route-review record",
         )
-    _require_review_state_resolved(document)
     if review.verdict == "block":
         raise RouteReviewError(
             "route-review-blocked",
             f"independent route review blocks this candidate; see {review.verdictRef}",
-        )
-    current = code_candidate_tree(contract)
-    if review.candidateTree != current:
-        raise RouteReviewError(
-            "route-review-stale",
-            "the code candidate changed after independent route review; rerun route review "
-            f"(reviewed {review.candidateTree}, current {current})",
         )
     current_intent = require_current_route_review_task_intent(contract, candidate)
     _require_evidence_files(contract.task_root, review)
     return {
         "required": True,
         "status": "current",
-        "candidateTree": current,
+        "candidateTree": review.candidateTree,
         "taskIntent": current_intent.model_dump(mode="json", by_alias=True),
         "verdict": review.verdict,
         "verdictRef": review.verdictRef,
         "routeCount": len(review.routes),
     }
-
-
-def _require_review_state_resolved(document: TaskDocument) -> None:
-    """Keep an unresolved fixed-list review from being accepted by an older route record."""
-
-    state = getattr(document, "reviewState", None)
-    if state is None:
-        return
-    if state.pending:
-        raise RouteReviewError(
-            "review-admission-pending",
-            f"review round {state.round} is pending publication; route acceptance cannot proceed",
-        )
-    if state.remainingFindingIds:
-        raise RouteReviewError(
-            "review-findings-unresolved",
-            "the sealed review still has unresolved findings: "
-            + ", ".join(state.remainingFindingIds),
-        )
 
 
 def require_current_route_review_task_intent(

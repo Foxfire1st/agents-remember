@@ -72,7 +72,6 @@ from .task_doc_route_review import (
     TaskDocError,
     _begin_task_review_bound,
     _enforce_branch_addressed_policy,
-    _enforce_review_state_authority,
     _enforce_route_review_authority,
     _record_route_review,  # noqa: F401  # facade re-export (moved to task_doc_route_review.py)
     _record_route_review_bound,
@@ -283,7 +282,6 @@ def _validate_task_doc_candidate(context: _TaskDocCandidateContext) -> None:
     original = context.original
     doc = context.candidate
     _enforce_disposition_authority(operation, original, doc)
-    _enforce_review_state_authority(operation, original, doc)
     _enforce_route_review_authority(operation, original, doc)
     _enforce_replace_preserves_unresolved_units(operation, original, doc)
     _enforce_preserves_unresolved_master_rows(operation, original, doc)

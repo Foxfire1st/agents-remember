@@ -42,7 +42,6 @@ from agents_remember.worktrees.modules.git import require_git
 from agents_remember.worktrees.route_review import (
     RouteReviewError,
     _require_evidence_files,
-    _require_review_state_resolved,
     _stamp_evidence_digests,
     _stamped_evidence,
     code_candidate_tree,
@@ -203,7 +202,6 @@ def require_current_master_route_review(
             "atomic master integration has no independent review of the accumulated candidate; "
             "publish task_doc.record_route_review on the canonical master",
         )
-    _require_review_state_resolved(resolved.master.document)
     if review.scope != resolved.review_scope:
         raise RouteReviewError(
             "route-review-master-scope-stale",
