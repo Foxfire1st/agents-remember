@@ -36,7 +36,6 @@ from agents_remember.worktrees.integration.integration_operation_authority impor
 )
 from agents_remember.worktrees.integration.integration_publication_fence import (
     IntegrationDoorAuthorityConflict,
-    classify_integration_door_authority,
     integration_door_decision_payload,
 )
 from agents_remember.worktrees.integration.integration_ref_state import (
@@ -714,12 +713,6 @@ def integrate_result(
     completed = _completed_integration_result(contract, args, operation)
     if completed is not None:
         return completed
-    door_block = _integration_door_block(
-        contract,
-        operation.integrationPublication if operation is not None else None,
-    )
-    if door_block is not None:
-        return door_block
     validate_integrate_contract(contract)
     sources = _integration_replay_requirements(contract)
     operation = None
@@ -967,9 +960,6 @@ def _publish_integration_edge(
     publication: IntegrationPublication,
 ) -> WorktreeCommandResult:
     current = load_contract(publication.contract.contract_path)
-    door_block = _integration_door_block(current, publication.intent)
-    if door_block is not None:
-        return door_block
     if current != publication.contract:
         raise RuntimeError("integration contract changed before protected-ref movement")
     require_atomic_landing_authority(current)
@@ -1060,13 +1050,3 @@ def _prepare_fresh_integration_commits(
         ledger=integrated_ledger_commit,
     )
     return commits, preview_integration_boundary(contract)
-
-
-def _integration_door_block(
-    contract: WorktreeContract,
-    publication: IntegrationPublicationIntent | None,
-) -> WorktreeCommandResult | None:
-    authority = classify_integration_door_authority(contract, publication)
-    if authority.valid:
-        return None
-    return WorktreeCommandResult(2, integration_door_decision_payload(authority))
