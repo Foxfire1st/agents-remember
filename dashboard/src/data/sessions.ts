@@ -193,6 +193,38 @@ export function sessionSeatRole(
   return session.seatRole ?? session.spawnRole ?? sessionRole(session);
 }
 
+/**
+ * PLANNED RETIREMENT — the one `terminated` row that owns no window.
+ *
+ * `terminated` is ALREADY the right terminal state; it is not the retirable/non-retirable signal by
+ * itself. It splits on the retirement provenance `retire_entry` layers on top of it (see the
+ * backend `TerminalCatalogEntry.with_retirement`, mirrored in `types/terminalCatalog.ts` under
+ * "Retirement provenance (a terminal mark layered on `terminated`)"): the PLANNED path
+ * (`auto_complete_seats` → `_retire_reported_leaf_seats` → `retire_entry` → `mark_retired`) writes
+ * `retired_at`/`retired_by_session`/`retired_reason`/`retired_edge` together with the status, while
+ * an UNPLANNED shutdown (the `/terminate` route → `mark_terminated` → `with_status("terminated")`)
+ * writes `terminatedAt` only.
+ *
+ * `retiredAt` is the authoritative marker (the backend always stamps it on a retirement); the other
+ * three are corroborating provenance. A cleanly retired worker has no reason to keep a dead
+ * terminal around, so its window closes; a bare `terminated` row is an unplanned shutdown — crash
+ * evidence worth surfacing — and deliberately keeps its window.
+ */
+export function isPlannedRetirement(
+  session: Pick<
+    OpenSession,
+    "status" | "retiredAt" | "retiredBySession" | "retiredReason" | "retiredEdge"
+  >,
+): boolean {
+  if (session.status !== "terminated") return false;
+  return Boolean(
+    session.retiredAt ??
+      session.retiredBySession ??
+      session.retiredReason ??
+      session.retiredEdge,
+  );
+}
+
 /** Preselect only a declared/typed attach role; a legacy generic chat must be chosen explicitly. */
 export function attachSeatRole(
   session: Pick<OpenSession, "kind" | "seatRole" | "spawnRole">,
