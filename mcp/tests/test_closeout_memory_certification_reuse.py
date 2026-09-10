@@ -37,10 +37,6 @@ from agents_remember.memory_quality.curator_checklist import (
 from agents_remember.memory_quality.integrity.check_missing_onboarding import (
     missing_onboarding_for_source,
 )
-from agents_remember.memory_quality.prepared_certification import (
-    PreparedMemoryCertificationAdapter,
-    _realize_prepared_memory,
-)
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceRequest,
@@ -82,6 +78,10 @@ from agents_remember.worktrees.integration.closeout.preparation.memory_execution
 )
 from agents_remember.worktrees.integration.closeout.preparation.memory_port import (
     PreparedMemoryCertificationRequest,
+)
+from agents_remember.worktrees.integration.closeout.prepared_certification import (
+    PreparedMemoryCertificationAdapter,
+    _realize_prepared_memory,
 )
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
 from agents_remember.worktrees.modules.context import contract_context

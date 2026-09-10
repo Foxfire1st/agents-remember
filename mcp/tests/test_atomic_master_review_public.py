@@ -13,7 +13,6 @@ from typing import Any
 import pytest
 from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.kernel.memory_ledger import load_ledger
-from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
 from agents_remember.tasks import read_task_doc, write_task_doc
 from agents_remember.worktrees.activation.atomic_series_activation import (
@@ -771,7 +770,6 @@ def test_atomic_leaf_public_closeout_defers_review_and_organizational_leaf_keeps
     }
 
     _assert_external_ledger_identity_cases(tmp_path / "external")
-
 
 
 def test_atomic_master_public_integration_refuses_without_review_before_ref_move(

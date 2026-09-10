@@ -61,9 +61,6 @@ def _prepare_memory_output_scenario(root: Path) -> None:
         find_mapping,
         parse_ledger_text,
     )
-    from agents_remember.memory_quality.prepared_certification import (  # noqa: PLC0415
-        PreparedMemoryCertificationAdapter,
-    )
     from agents_remember.worktrees.integration.closeout.preparation.code_view import (  # noqa: PLC0415
         prepare_code_view,
     )
@@ -75,6 +72,9 @@ def _prepare_memory_output_scenario(root: Path) -> None:
     )
     from agents_remember.worktrees.integration.closeout.preparation.memory_port import (  # noqa: PLC0415
         PreparedMemoryCertificationRequest,
+    )
+    from agents_remember.worktrees.integration.closeout.prepared_certification import (  # noqa: PLC0415
+        PreparedMemoryCertificationAdapter,
     )
 
     with pytest.MonkeyPatch.context() as patch:
@@ -132,7 +132,6 @@ def _prepare_memory_only_successor_scenario(  # noqa: PLR0915
     )
     from agents_remember.errors import FinalCertificationError  # noqa: PLC0415
     from agents_remember.kernel.primitives.runtime_config import load_config  # noqa: PLC0415
-    from agents_remember.memory_quality import prepared_certification  # noqa: PLC0415
     from agents_remember.models.certification.corrective import (  # noqa: PLC0415
         CorrectiveInputChange,
         RedCatalogDisposition,
@@ -140,6 +139,9 @@ def _prepare_memory_only_successor_scenario(  # noqa: PLR0915
     from agents_remember.models.lifecycles.operation import CloseoutOperationInput  # noqa: PLC0415
     from agents_remember.models.lifecycles.preparation import (  # noqa: PLC0415
         PreparedCloseoutOutput,
+    )
+    from agents_remember.worktrees.integration.closeout import (  # noqa: PLC0415
+        prepared_certification,
     )
     from agents_remember.worktrees.integration.closeout.certification.execution import (  # noqa: PLC0415
         current_certification_handoff,
