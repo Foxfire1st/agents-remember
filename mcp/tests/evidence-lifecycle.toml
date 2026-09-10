@@ -276,11 +276,7 @@ permanence_rationale = "The helper owns the shared closeout repository topology 
 replacement_contract = "node:mcp/tests/test_closeout_certification_recovery.py::test_selection_recompiles_untrusted_proposals_before_selecting_original_references"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_closeout_certification_recovery.py",
-  "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_integration_ref_transaction.py",
-  "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_operation_certification_selection.py",
 ]
 
@@ -307,6 +303,7 @@ consumers = [
   "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
+  "mcp/tests/test_closeout_kept_rules_pins.py",
   "mcp/tests/test_closeout_memory_certification_reuse.py",
   "mcp/tests/test_closeout_queue.py",
   "mcp/tests/test_compact_content.py",
@@ -314,7 +311,6 @@ consumers = [
   "mcp/tests/test_context_packet.py",
   "mcp/tests/test_direct_landing.py",
   "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_integration_ref_transaction.py",
   "mcp/tests/test_lifecycle_finalize.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_mcp_stdio_transport.py",
@@ -328,9 +324,9 @@ consumers = [
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_task_sprint_linkage.py",
   "mcp/tests/test_tools.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_closeout_route_review_transport.py",
-  "mcp/tests/test_worktree_integrate_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
@@ -359,6 +355,7 @@ consumers = [
   "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
+  "mcp/tests/test_closeout_kept_rules_pins.py",
   "mcp/tests/test_closeout_memory_certification_reuse.py",
   "mcp/tests/test_closeout_queue.py",
   "mcp/tests/test_compact_content.py",
@@ -366,7 +363,6 @@ consumers = [
   "mcp/tests/test_context_packet.py",
   "mcp/tests/test_direct_landing.py",
   "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_integration_ref_transaction.py",
   "mcp/tests/test_lifecycle_finalize.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_mcp_stdio_transport.py",
@@ -380,9 +376,9 @@ consumers = [
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_task_sprint_linkage.py",
   "mcp/tests/test_tools.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_closeout_route_review_transport.py",
-  "mcp/tests/test_worktree_integrate_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
@@ -420,7 +416,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_integration_ref_transaction.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
 ]
 
 [[artifact]]
@@ -541,7 +537,6 @@ consumers = [
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
   "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_integration_ref_transaction.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_prepared_publication_recovery.py",
@@ -549,8 +544,8 @@ consumers = [
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
-  "mcp/tests/test_worktree_integrate_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
 ]
 
@@ -580,7 +575,6 @@ consumers = [
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
   "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_integration_ref_transaction.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_prepared_publication_recovery.py",
@@ -588,8 +582,8 @@ consumers = [
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
-  "mcp/tests/test_worktree_integrate_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
 ]
 
@@ -619,7 +613,6 @@ consumers = [
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
   "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_integration_ref_transaction.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_prepared_publication_recovery.py",
@@ -627,8 +620,8 @@ consumers = [
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
-  "mcp/tests/test_worktree_integrate_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
 ]
 
@@ -934,11 +927,11 @@ consumers = [
   "mcp/tests/test_code_certification_execution.py",
   "mcp/tests/test_gate_certification_evidence.py",
   "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_integration_ref_transaction.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_prepared_publication_recovery.py",
   "mcp/tests/test_quality_gate_public_contract.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
 ]
 
@@ -987,7 +980,6 @@ consumers = [
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
   "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_integration_ref_transaction.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_prepared_publication_recovery.py",
@@ -995,8 +987,8 @@ consumers = [
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
-  "mcp/tests/test_worktree_integrate_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
 ]
 
@@ -1012,11 +1004,11 @@ source_version_or_generator = "real task, profile, door, frozen admission and at
 introduced_by = "260831-CCR-L33"
 lifetime = "permanent"
 permanence_rationale = "Lifecycle journal tests require real selected admission and successor references; completion helpers exercise bookkeeping without asserting certification acceptance."
-replacement_contract = "node:mcp/tests/test_lifecycle_operations.py::test_contract_lifecycle_lease_excludes_cross_kind_and_terminal_mutation"
+replacement_contract = "node:mcp/tests/test_lifecycle_operations.py::test_start_returns_immediately_and_duplicate_observes_one_launch"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_integration_ref_transaction.py",
   "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
 ]
