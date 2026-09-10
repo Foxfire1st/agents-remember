@@ -93,8 +93,6 @@ def worktree_status_payload(
     )
 
 
-
-
 def worktree_closeout_preview_payload(
     config: McpRuntimeConfig,
     contract_path: str,
@@ -154,7 +152,6 @@ def worktree_operation_control_payload(
         "worktree_operation_control",
         worktree_operation_control_tool(config, request),
     )
-
 
 
 def worktree_cleanup_payload(

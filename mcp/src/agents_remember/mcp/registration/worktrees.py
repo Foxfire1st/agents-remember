@@ -105,7 +105,6 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
 def _register_worktree_address_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     """Adopt or re-attach one existing worktree enclosure."""
 
-
     @server.tool()
     def worktree_attach(
         repo_id: str,
@@ -165,7 +164,6 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
             ),
             caller=caller,
         )
-
 
     @server.tool()
     def worktree_sync(
