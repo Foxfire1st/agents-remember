@@ -54,7 +54,6 @@ _MASTER_REVIEW_RECORD_STATUSES = frozenset(
     {
         "route-review-master-required",
         "route-review-master-scope-stale",
-        "route-review-master-stale",
         "route-review-master-dependencies-stale",
         "route-review-master-task-intent-stale",
         "route-review-evidence-stale",

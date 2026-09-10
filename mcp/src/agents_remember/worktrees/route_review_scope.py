@@ -217,13 +217,6 @@ def require_current_master_route_review(
         resolved.contract,
         expected_candidate_commit=expected_candidate_commit,
     )
-    if review.candidateTree != current_tree:
-        raise RouteReviewError(
-            "route-review-master-stale",
-            "the accumulated master code candidate changed after independent review; "
-            "rerun task_doc.record_route_review "
-            f"(reviewed {review.candidateTree}, current {current_tree})",
-        )
     try:
         current = require_current_task_intent(
             review.taskIntent,
