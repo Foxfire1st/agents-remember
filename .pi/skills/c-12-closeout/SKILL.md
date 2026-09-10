@@ -208,10 +208,14 @@ your final prose, and **STOP**; push only after the developer approves and
 your next turn auto-resumes. A separately raised human-pinned `push-approval` gate, when present,
 must be decided by the developer; it is not a closeout recovery route.
 
-Closeout does not mark the task `Completed`. After closeout, integration, any
-PR-gated merge/pull, and memory carryover are done, use
-`lifecycle_finalize_task` from the `c-09-git-worktree-manager` skill to prove the
-landed parent-child branch edge, run or verify cleanup, and update the current
+Closeout does not mark the task `Completed`. Continue with
+`c-09-git-worktree-manager`: after integration, any PR-gated merge/pull, and
+memory carryover are done, run `worktree_cleanup(contract_path=..., dry_run=true)`
+and then apply `worktree_cleanup(contract_path=...)` under the existing authority.
+Clean up every finished worktree enclosure before handing back the task, including
+after an authorized manual Git landing. If cleanup refuses, report its concrete
+reason and the enclosure still pending cleanup. Then use `lifecycle_finalize_task`
+to prove the landed parent-child branch edge, verify cleanup, and update the current
 task plus immediate parent row.
 
 ## Sanctioned Branch-Direct Landing
