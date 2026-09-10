@@ -86,15 +86,10 @@ is prevented mechanically: every graph authoring/migration write
 preflight and refuses with upgrade guidance when the serving runtime predates the
 topology schema (`task-execution-topology-serving-build-unsupported`).
 
-The preflight checks two legs:
-
-1. **Model self-probe**: the process running the tool (the MCP server serving the
-   tree) must declare `executionNature`/`executionGraph` on `TaskDocument`.
-2. **Installed distribution**: when the resolved `agents-remember-mcp` distribution
-   is a non-editable wheel older than the documented floor (`3.0.0rc8`), refuse even
-   if the checkout code on `sys.path` is current. An editable install, or a
-   source-tree `*.egg-info` (the checkout dev layout), proves the checkout code
-   serves and passes.
+The preflight is a **model self-probe**: the process running the tool (the MCP server
+serving the tree) must declare `executionNature`/`executionGraph` on `TaskDocument`.
+It never consults the installed distribution version, so a task authoring edit does
+not depend on which wheel happens to be resolved.
 
 Operator contract: run authoring through the **deployed serving server** (in-process
 invocation), never from a checkout CLI whose server is a different build — the
