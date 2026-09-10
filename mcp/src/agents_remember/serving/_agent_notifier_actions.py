@@ -64,7 +64,7 @@ from agents_remember.serving.state_signals import (
     non_reaction_response,
     state_signal_response,
 )
-from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 
 # The one event-rename seam for the compatibility window (260713-TES-L1): every agent-notifier
 # event is emitted under BOTH the current and the legacy name so observer-river consumers and
@@ -476,10 +476,16 @@ def _emit_state_signal(  # pragma: no cover
     entry, current_finding = current
     if current_finding.task_document_ref is None:
         return AgentNotifierActionResult("state-signal", finding, "skipped", "no task document")
-    owner = derive_manager_owner(
-        ctx.catalog, topology, task_document_ref=current_finding.task_document_ref
+    owner = derive_signal_owner(
+        ctx.catalog,
+        topology,
+        sender_agent_id=current_finding.session_id,
+        message_kind="state-signal",
+        task_document_ref=current_finding.task_document_ref,
     )
-    if owner.agent_id is None and owner.lifecycle_id is None and owner.role is None:
+    # A role/document-only owner is a structural address without a current occupant. Leave the
+    # source eligible so a later sweep can retry after the manager seat recovers.
+    if owner.agent_id is None:
         return AgentNotifierActionResult("state-signal", finding, "skipped", "no routable owner")
     delivery_state = _post_owner_signal(
         ctx,
@@ -704,7 +710,7 @@ def act_on_finding(
         return AgentNotifierActionResult("none", finding, "skipped", "unhandled finding kind")
     try:
         return action(ctx, finding, now=now, sweep=sweep)
-    except (SeatOccupancyError, StructuralRoutingError) as exc:
+    except (SeatOccupancyError, StructuralRoutingError, TaskDocumentRefError) as exc:
         # A corrupt canonical seat fences only the finding addressed to it. Other retries and the
         # sweep heartbeat still advance, and this row remains pending for a later unambiguous pass.
         return AgentNotifierActionResult("none", finding, "skipped", str(exc))
@@ -734,7 +740,7 @@ def act_on_findings(
     for index, finding in enumerate(findings):
         try:
             item = _prepare_expiry(ctx, finding, topology=topology, sweep=sweep)
-        except (SeatOccupancyError, StructuralRoutingError) as exc:
+        except (SeatOccupancyError, StructuralRoutingError, TaskDocumentRefError) as exc:
             # Expiry preparation resolves structural owners before the ordinary action boundary.
             # Fence only that finding when its route is ambiguous or malformed.
             results[index] = AgentNotifierActionResult("none", finding, "skipped", str(exc))

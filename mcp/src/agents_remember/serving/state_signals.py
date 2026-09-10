@@ -22,6 +22,7 @@ from agents_remember.models.terminal_catalog import TerminalCatalogEntry, seat_a
 from agents_remember.serving.agent_notifier_models import AgentNotifierFinding
 from agents_remember.serving.inbox_delivery import target_session_for_entry
 from agents_remember.serving.ports import TerminalCatalogPort
+from agents_remember.tasks.document_refs import TaskDocumentRefError
 
 NON_REACTION_WINDOW_SECONDS = 300.0
 COMPOUND_IDLE_SWEEP_LATENCY_SECONDS = 10.0
@@ -213,7 +214,7 @@ def _safe_state_signal_finding(
 ) -> AgentNotifierFinding | None:
     try:
         return _state_signal_finding(catalog, hierarchy, entry)
-    except (SeatOccupancyError, StructuralRoutingError):
+    except (SeatOccupancyError, StructuralRoutingError, TaskDocumentRefError):
         return None
 
 

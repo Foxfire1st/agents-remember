@@ -13,9 +13,10 @@ import unittest
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 from unittest import mock
 
+from agents_remember.controlplane import signal_routing as signal_routing_module
 from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import (
@@ -28,22 +29,25 @@ from agents_remember.controlplane.operator_inbox_records import (
     state_signal_landed,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.controlplane.signal_routing import RoutedOwner
 from agents_remember.models.conversations.control_wire import SubmissionReceipt
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.store import EventStore
+from agents_remember.serving import _agent_notifier_actions as notifier_actions
 from agents_remember.serving._agent_notifier_actions import act_on_finding
 from agents_remember.serving.agent_notifier import AgentNotifierContext, run_agent_notifier_sweep
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
 from agents_remember.serving.state_signals import (
     NonReactionRuntime,
     evaluate_non_reaction_findings,
+    evaluate_state_signal_findings,
 )
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCatalogEntry
 from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
 from agents_remember.serving.terminal_tmux import TmuxProbeResult
 from agents_remember.tasks import TaskDocument, write_task_doc
-from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 
 NOW = datetime(2026, 7, 13, 15, 41, 0, tzinfo=UTC)
 MASTER = TaskDocumentRef(repository="repo-a", path="260707_master/task.json")
@@ -429,6 +433,125 @@ class StateSignalRelayTests(unittest.TestCase):
         signals = self._state_signals()
         self.assertEqual(len(signals), 1)
         self.assertEqual(signals[0].agentId, "manager-2")
+
+    def test_master_exit_reviewer_signal_reaches_current_manager(self) -> None:
+        self.catalog.upsert(replace(_manager("manager-old"), status="exited"))
+        self.catalog.upsert(replace(_manager("manager-current"), turn_state="working"))
+        reviewer = _entry(
+            "reviewer-master-exit",
+            task_document_ref=MASTER,
+            spawn_role="reviewer",
+            seat_role="reviewer",
+            structural_parent_task_document_ref=MASTER,
+            structural_parent_role="manager",
+            turn_state="turn-ended",
+            turn_state_changed_at=NOW.isoformat(),
+            terminal_outcome="completed",
+            terminal_outcome_at=NOW.isoformat(),
+            terminal_evidence_id="review-turn-1",
+        )
+        self.catalog.upsert(reviewer)
+
+        run_agent_notifier_sweep(self._ctx(), now=NOW)
+
+        signals = self._state_signals()
+        self.assertEqual(len(signals), 1)
+        signal = signals[0]
+        self.assertEqual(signal.agentId, "manager-current")
+        self.assertEqual(signal.taskDocumentRef, MASTER)
+        self.assertEqual(signal.recipientRole, "manager")
+        self.assertEqual(signal.subjectTaskDocumentRef, MASTER)
+        self.assertEqual(signal.subjectAgentId, "reviewer-master-exit")
+        self.assertEqual(signal.seatRole, "reviewer")
+
+    def test_topology_refusal_fences_one_subject_and_keeps_unrelated_finding(self) -> None:
+        self.catalog.upsert(_manager())
+        self.catalog.upsert(_done_worker("worker-malformed"))
+        self.catalog.upsert(
+            _done_worker(
+                "worker-valid",
+                task_document_ref=TaskDocumentRef(
+                    repository="repo-a", path="260707_master/leaf-rebound.json"
+                ),
+            )
+        )
+
+        class _RefusalTopology:
+            def __init__(self, status: str) -> None:
+                self.status = status
+
+            def parent(self, ref: TaskDocumentRef) -> TaskDocumentRef | None:
+                if ref == LEAF:
+                    raise TaskDocumentRefError(self.status, "test topology refusal")
+                return self._topology.parent(ref)
+
+            def altitude(self, ref: TaskDocumentRef) -> str:
+                return self._topology.altitude(ref)
+
+            _topology = self.topology
+
+        for status in ("task-document-parent-missing", "task-document-parent-ambiguous"):
+            with self.subTest(status=status):
+                findings = evaluate_state_signal_findings(self.catalog, _RefusalTopology(status))
+                self.assertEqual([finding.session_id for finding in findings], ["worker-valid"])
+
+    def test_owner_disappearance_after_revalidation_keeps_source_eligible(self) -> None:
+        manager = _manager("manager-race", turn_state="working")
+        self.catalog.upsert(manager)
+        self.catalog.upsert(_done_worker("worker-race"))
+        finding = evaluate_state_signal_findings(self.catalog, self.topology)[0]
+
+        real_derive_signal_owner = signal_routing_module.derive_signal_owner
+
+        def remove_current_manager(
+            catalog: TerminalCatalog,
+            hierarchy: TaskDocumentTopology,
+            *,
+            sender_agent_id: str | None,
+            message_kind: Literal["state-signal"],
+            task_document_ref: TaskDocumentRef | None = None,
+        ) -> RoutedOwner:
+            self.catalog.upsert(replace(manager, status="exited"))
+            return real_derive_signal_owner(
+                catalog,
+                hierarchy,
+                sender_agent_id=sender_agent_id,
+                message_kind=message_kind,
+                task_document_ref=task_document_ref,
+            )
+
+        with mock.patch.object(
+            notifier_actions,
+            "derive_signal_owner",
+            side_effect=remove_current_manager,
+        ):
+            result = act_on_finding(self._ctx(), finding, now=NOW)
+
+        self.assertEqual(result.outcome, "skipped")
+        self.assertIn("no routable owner", result.detail or "")
+        self.assertEqual(self._state_signals(), [])
+        current = self.catalog.get("worker-race")
+        assert current is not None
+        self.assertIsNone(current.state_signal_emitted_for)
+
+    def test_action_topology_refusal_fences_subject_without_marker(self) -> None:
+        self.catalog.upsert(_manager("manager-refused", turn_state="working"))
+        self.catalog.upsert(_done_worker("worker-refused"))
+        finding = evaluate_state_signal_findings(self.catalog, self.topology)[0]
+
+        with mock.patch.object(
+            notifier_actions,
+            "derive_signal_owner",
+            side_effect=TaskDocumentRefError("task-document-parent-ambiguous", "test action"),
+        ):
+            result = act_on_finding(self._ctx(), finding, now=NOW)
+
+        self.assertEqual(result.outcome, "skipped")
+        self.assertIn("test action", result.detail or "")
+        self.assertEqual(self._state_signals(), [])
+        current = self.catalog.get("worker-refused")
+        assert current is not None
+        self.assertIsNone(current.state_signal_emitted_for)
 
     def test_no_done_signal_for_killed_or_hung_seats(self) -> None:
         self.catalog.upsert(_manager())
