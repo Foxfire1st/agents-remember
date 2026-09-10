@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
-from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
+from agents_remember.memory_quality.memory_candidate_pair import (
     resolve_memory_candidate_pair,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract

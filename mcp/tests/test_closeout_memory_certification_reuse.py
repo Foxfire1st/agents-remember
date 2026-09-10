@@ -66,10 +66,10 @@ from agents_remember.worktrees.integration.closeout.door_control import (
     DoorActor,
     closeout_door_tool,
 )
-from agents_remember.worktrees.integration.closeout.future_code_candidate import (
+from agents_remember.memory_quality.future_code_candidate import (
     capture_future_code_candidate,
 )
-from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
+from agents_remember.memory_quality.memory_candidate_pair import (
     resolve_memory_candidate_pair,
 )
 from agents_remember.worktrees.integration.closeout.preparation.code_view import prepare_code_view

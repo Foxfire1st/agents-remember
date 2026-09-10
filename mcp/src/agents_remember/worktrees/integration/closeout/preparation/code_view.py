@@ -27,7 +27,7 @@ from agents_remember.worktrees.integration.closeout.certification.execution impo
 )
 from agents_remember.worktrees.integration.closeout.certification.observation import refuse
 from agents_remember.worktrees.integration.closeout.certification.selection import load_typed
-from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
+from agents_remember.memory_quality.memory_candidate_pair import (
     resolve_memory_candidate_pair,
 )
 from agents_remember.worktrees.integration.closeout.preparation_selection import (

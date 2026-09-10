@@ -44,10 +44,10 @@ from agents_remember.tasks.task_intent import (
     require_current_task_intent,
     task_intent_identity,
 )
-from agents_remember.worktrees.integration.closeout.future_code_candidate import (
+from agents_remember.memory_quality.future_code_candidate import (
     capture_future_code_candidate,
 )
-from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
+from agents_remember.memory_quality.memory_candidate_pair import (
     resolve_memory_candidate_pair,
 )
 from agents_remember.worktrees.modules.git import worktree_candidate_tree

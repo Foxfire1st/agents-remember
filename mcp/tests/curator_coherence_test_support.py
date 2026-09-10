@@ -25,10 +25,10 @@ from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.integration.closeout.curator_coherence_publication import (
     curator_coherence_action,
 )
-from agents_remember.worktrees.integration.closeout.future_code_candidate import (
+from agents_remember.memory_quality.future_code_candidate import (
     capture_future_code_candidate,
 )
-from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
+from agents_remember.memory_quality.memory_candidate_pair import (
     resolve_memory_candidate_pair,
 )
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
