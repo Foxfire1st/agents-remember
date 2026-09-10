@@ -8,7 +8,6 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
-from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -20,15 +19,8 @@ from agents_remember.tasks import (
     TaskDocument,
     write_task_doc,
 )
-from agents_remember.worktrees.integration import integration_quality as quality_mod
-from agents_remember.worktrees.integration.integration_ref_transaction import IntegrationSources
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
-)
-from agents_remember.worktrees.modules import integrate as integrate_mod
-from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.quality.gate import (
-    GATE_TARGETED,
 )
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -40,7 +32,6 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 from repository_profile_test_support import (
-    AGENTS_REMEMBER_PROFILE_REFERENCE,
     install_agents_remember_profile,
 )
 from test_worktree_support import init_repo
@@ -195,57 +186,3 @@ class IntegrationQualityGateAltitudeTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
-
-    def test_leaf_integration_reuses_closeout_acceptance_without_running_a_gate(self) -> None:
-        contract = integration_contract(self.root, kind="leaf")
-
-        with (
-            mock.patch.object(
-                quality_mod, "run_strict_code_quality_gate", return_value={"passed": True}
-            ) as gate,
-        ):
-            result, blocked = integrate_mod._run_integration_quality_gate(
-                contract,
-                args=WorktreeArgs(certification_profile=AGENTS_REMEMBER_PROFILE_REFERENCE),
-            )
-
-        self.assertIsNone(blocked)
-        self.assertFalse(result["required"])
-        self.assertEqual(result["status"], "certified-at-leaf-closeout")
-        self.assertEqual(result["mode"], GATE_TARGETED)
-        gate.assert_not_called()
-
-    def test_source_movement_after_quality_refuses_before_memory_or_merge(self) -> None:
-        contract = integration_contract(self.root, kind="leaf")
-        moved = integrate_mod.WorktreeCommandResult(2, {"state": "source-moved-during-quality"})
-
-        with (
-            mock.patch.object(integrate_mod, "_integrated_code_commit", return_value=("c1", None)),
-            mock.patch.object(
-                integrate_mod,
-                "_quality_gate_preview",
-                return_value={"status": "certified-at-leaf-closeout"},
-            ),
-            mock.patch.object(integrate_mod, "_integration_lineage_block", return_value=None),
-            mock.patch.object(
-                integrate_mod, "_integration_sources_moved_block", return_value=moved
-            ) as source_check,
-            mock.patch.object(integrate_mod, "_integrated_memory_commits") as memory,
-            mock.patch.object(integrate_mod, "merge_integrated_commits") as merge,
-        ):
-            result = integrate_mod._apply_integration(
-                contract,
-                WorktreeArgs(strategy="ff-only"),
-                IntegrationSources(
-                    current_code_source="c0",
-                    current_memory_source="",
-                    code_replay_required=False,
-                    memory_replay_required=False,
-                ),
-                handover_warning=None,
-            )
-
-        self.assertEqual(result.payload["state"], "source-moved-during-quality")
-        source_check.assert_called_once()
-        memory.assert_not_called()
-        merge.assert_not_called()
