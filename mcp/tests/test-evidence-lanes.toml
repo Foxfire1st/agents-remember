@@ -83,6 +83,7 @@ unit-regression = [
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_retry_selection.py",
+  "mcp/tests/test_review_state.py",
   "mcp/tests/test_semantic_topology_refusals.py",
   "mcp/tests/test_signal_routing.py",
   "mcp/tests/test_sprint_role_seats.py",
@@ -91,6 +92,7 @@ unit-regression = [
   "mcp/tests/test_suite_budget.py",
   "mcp/tests/test_sync_runtime.py",
   "mcp/tests/test_task_doc_graph_publication.py",
+  "mcp/tests/test_task_doc_review_public.py",
   "mcp/tests/test_task_document.py",
   "mcp/tests/test_task_document_application_1.py",
   "mcp/tests/test_task_documents_graph_projection.py",
@@ -98,8 +100,10 @@ unit-regression = [
   "mcp/tests/test_task_intent_identity.py",
   "mcp/tests/test_telemetry_store.py",
   "mcp/tests/test_terminal_catalog.py",
+  "mcp/tests/test_terminal_liveness_deferred_work.py",
   "mcp/tests/test_terminal_paste.py",
   "mcp/tests/test_tool_response_budgets.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
 ]
 public-contract = [
