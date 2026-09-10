@@ -127,7 +127,15 @@ def test_r2_supplied_messages_are_shape_normalized_and_carried_on_every_leg() ->
         corrected_call=CORRECTED_CALL,
         resolved_plan=_enabled_plan(),
     )
-    assert (effective.code.message, effective.memory.message, effective.ledger.message) == (
+    # Read the message through the canonical accessor: it narrows the
+    # enabled/not-applicable leg union and raises if a leg is not applicable, which
+    # is exactly the invariant this test pins. Reading `.message` off the union
+    # directly is what Pyright flagged, because NotApplicableCloseoutLeg has none.
+    assert (
+        effective.message_for("code"),
+        effective.message_for("memory"),
+        effective.message_for("ledger"),
+    ) == (
         "commit code",
         "commit memory",
         "commit ledger",

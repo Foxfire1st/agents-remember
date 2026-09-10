@@ -45,9 +45,13 @@ from agents_remember.tasks import (
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.store import json_path_for
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
+from agents_remember.worktrees import route_review_scope
 from agents_remember.worktrees.closeout_input import (
     normalize_closeout_input,
     raw_closeout_messages,
+)
+from agents_remember.worktrees.integration.closeout import (
+    memory_candidate_pairing,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
@@ -854,9 +858,9 @@ def closeout_publication_facts(
             arguments={"contract_path": contract.contract_path.as_posix()},
         ),
     )
-    pair = closeout_module.accepted_closeout_memory_pair(contract)
+    pair = memory_candidate_pairing.accepted_closeout_memory_pair(contract)
     worklist = closeout_module.closeout_changed_paths(contract)
-    route_review = closeout_module.require_current_route_review(contract)
+    route_review = route_review_scope.require_current_route_review(contract)
     attestations = closeout_module._closeout_attestations(contract, worklist, pair.no_impact)
     memory_quality = closeout_module._memory_quality_before_refresh(contract)
     git(contract.code_worktree, "add", "-A")

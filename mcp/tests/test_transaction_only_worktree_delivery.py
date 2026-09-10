@@ -20,7 +20,7 @@ from agents_remember.kernel.memory_ledger import (
     load_ledger,
     write_ledger,
 )
-from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskEnclosureRef, read_task_doc, write_task_doc
 from agents_remember.worktrees.integration.closeout import curator_coherence as coherence
@@ -54,7 +54,7 @@ MESSAGES = CloseoutCommitMessages(
 )
 
 
-def _public_config(root: Path, contract) -> object:
+def _public_config(root: Path, contract) -> McpRuntimeConfig:
     """Bind an existing temp Git fixture to MCP authority without a profile."""
 
     code_link = root / contract.repo_name
@@ -273,6 +273,9 @@ def test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools
     assert applied["ok"] is True, applied
     assert applied["state"] == "closed", applied
     closed = load_contract(contract.contract_path)
+    # The reload above rebinds `contract`, so the optional memory worktree and ledger
+    # path must be narrowed again before they are read.
+    assert contract.memory_worktree is not None and contract.ledger_path is not None
     assert closed.closeout_status == "completed"
     assert closed.code_commit and closed.memory_content_commit and closed.ledger_commit
     assert _git(contract.code_worktree, "rev-parse", "HEAD") == closed.code_commit
@@ -297,7 +300,12 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
     """Integration merges the prepared code and memory refs without rerunning acceptance."""
 
     fixture = _authority_fixture(tmp_path, external_memory=True)
+    # Narrow the fixture's optional repositories once, where the test establishes them.
+    code_repo = fixture.code_repo
+    assert isinstance(code_repo, Path)
     closed = _closed_external_leaf_worktrees(fixture, tmp_path, publish_closeout_evidence=False)
+    memory_repo = closed.memory_repo_path
+    assert isinstance(memory_repo, Path)
     config = _public_config(tmp_path, closed)
     closed = _publish_synthetic_closeout_source(closed, config.config_path)
     _assert_no_profile_or_review(config, closed)
@@ -337,8 +345,8 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
     assert integrated.integrated_code_commit == integrated.code_commit
     assert integrated.integrated_memory_content_commit == integrated.memory_content_commit
     assert integrated.integrated_ledger_commit == integrated.ledger_commit
-    assert _git(fixture.code_repo, "rev-parse", "ar/master") == integrated.code_commit
-    assert _git(closed.memory_repo_path, "rev-parse", "ar/master") == integrated.ledger_commit
+    assert _git(code_repo, "rev-parse", "ar/master") == integrated.code_commit
+    assert _git(memory_repo, "rev-parse", "ar/master") == integrated.ledger_commit
     assert not code_hook_log.exists()
     assert not memory_hook_log.exists()
 
@@ -347,12 +355,17 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
     """A source-tip race remains a concrete refusal and cannot publish a torn pair."""
 
     fixture = _authority_fixture(tmp_path, external_memory=True)
+    # Narrow the fixture's optional repositories once, where the test establishes them.
+    code_repo = fixture.code_repo
+    assert isinstance(code_repo, Path)
     closed = _closed_external_leaf_worktrees(fixture, tmp_path, publish_closeout_evidence=False)
+    memory_repo = closed.memory_repo_path
+    assert isinstance(memory_repo, Path)
     config = _public_config(tmp_path, closed)
     closed = _publish_synthetic_closeout_source(closed, config.config_path)
     _assert_no_profile_or_review(config, closed)
-    source_before = _git(fixture.code_repo, "rev-parse", "ar/master")
-    memory_before = _git(closed.memory_repo_path, "rev-parse", "ar/master")
+    source_before = _git(code_repo, "rev-parse", "ar/master")
+    memory_before = _git(memory_repo, "rev-parse", "ar/master")
 
     with ExitStack() as stack:
         for patcher in _forbid_acceptance_tools():
@@ -365,13 +378,13 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
         )
         assert preview["ok"] is True, preview
 
-        _git(fixture.code_repo, "branch", "race", source_before)
-        _git(fixture.code_repo, "switch", "race")
+        _git(code_repo, "branch", "race", source_before)
+        _git(code_repo, "switch", "race")
         (fixture.code_repo / "parallel.txt").write_text("parallel\n", encoding="utf-8")
-        _git(fixture.code_repo, "add", "parallel.txt")
-        _git(fixture.code_repo, "commit", "-m", "Parallel source change")
-        raced = _git(fixture.code_repo, "rev-parse", "HEAD")
-        _git(fixture.code_repo, "update-ref", "refs/heads/ar/master", raced, source_before)
+        _git(code_repo, "add", "parallel.txt")
+        _git(code_repo, "commit", "-m", "Parallel source change")
+        raced = _git(code_repo, "rev-parse", "HEAD")
+        _git(code_repo, "update-ref", "refs/heads/ar/master", raced, source_before)
         code_hook_log, memory_hook_log = _install_failing_pre_commit_hooks(closed, tmp_path)
 
         # The parent moved past the candidate, so the git replay requirement is
@@ -387,8 +400,8 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
     assert refused["ok"] is False, refused
     assert refused["state"] == "blocked-non-ff", refused
     assert "source branch moved" in repr(refused)
-    assert _git(fixture.code_repo, "rev-parse", "ar/master") == raced
-    assert _git(closed.memory_repo_path, "rev-parse", "ar/master") == memory_before
+    assert _git(code_repo, "rev-parse", "ar/master") == raced
+    assert _git(memory_repo, "rev-parse", "ar/master") == memory_before
     assert not code_hook_log.exists()
     assert not memory_hook_log.exists()
     current = load_contract(closed.contract_path)

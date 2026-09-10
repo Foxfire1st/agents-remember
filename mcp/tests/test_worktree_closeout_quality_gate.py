@@ -10,7 +10,6 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.worktrees.modules import closeout as closeout_module
 from agents_remember.worktrees.modules.quality import gate as code_quality_gate
 from agents_remember.worktrees.queue import closeout_staged_quality
 from repository_profile_test_support import (
@@ -88,7 +87,7 @@ class CertifiedIndexCommitTests(unittest.TestCase):
                 mock.patch.object(closeout_staged_quality, "run_strict_code_quality_gate") as gate,
                 self.assertRaisesRegex(RuntimeError, "candidate changed"),
             ):
-                closeout_module._gate_staged_code(
+                closeout_staged_quality.gate_staged_code(
                     _quality_target(worktree, worktree.parent),
                     diff_base="HEAD",
                     candidate_tree=candidate,
@@ -119,7 +118,7 @@ class CertifiedIndexCommitTests(unittest.TestCase):
                 ),
                 self.assertRaisesRegex(RuntimeError, "while materializing the accepted tree"),
             ):
-                closeout_module._gate_staged_code(
+                closeout_staged_quality.gate_staged_code(
                     _quality_target(worktree, worktree.parent),
                     diff_base="HEAD",
                     candidate_tree=candidate,
@@ -148,7 +147,7 @@ class CertifiedIndexCommitTests(unittest.TestCase):
                     RuntimeError, "pre-commit hook changed the independently reviewed candidate"
                 ),
             ):
-                closeout_module._gate_staged_code(
+                closeout_staged_quality.gate_staged_code(
                     _quality_target(worktree, worktree.parent),
                     diff_base="HEAD",
                     candidate_tree=candidate,
