@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.kernel.memory_ledger import load_ledger
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
 from agents_remember.tasks import read_task_doc, write_task_doc
@@ -35,8 +34,10 @@ from agents_remember.worktrees.worktree_contract import (
 )
 from closeout_input_test_support import (
     closeout_operation_input,
+    finish_operation_record,
     publish_closeout_finalization,
     start_closeout_operation,
+    start_operation_record,
 )
 from curator_coherence_test_support import write_curator_evidence
 from integration_branch_authority_test_support import (
@@ -552,7 +553,8 @@ def _run_exact_candidate(
     )
     start_or_observe_operation(operation_input, series, launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(series.worktree_group, "integrate"))
-    running = OperationRuntime(store).start()
+    running = store.read()
+    assert running is not None
     args = WorktreeArgs(
         contract_path=series.contract_path,
         certification_profile=Path("mcp/certification-profile-v1.json"),
@@ -606,7 +608,8 @@ def _integrate_exact_leaf(
     )
     start_or_observe_operation(operation_input, leaf, launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(leaf.worktree_group, "integrate"))
-    running = OperationRuntime(store).start()
+    running = store.read()
+    assert running is not None
     args = WorktreeArgs(
         contract_path=leaf.contract_path,
         certification_profile=Path("mcp/certification-profile-v1.json"),
@@ -648,8 +651,7 @@ def _prepare_atomic_leaf_landing(
         launcher=lambda *_: None,
     )
     store = LifecycleOperationStore(operation_record_path(contract.worktree_group, "closeout"))
-    runtime = OperationRuntime(store)
-    assert runtime.start().status == "running"
+    assert start_operation_record(store).status == "running"
     finalized = replace(
         load_contract(contract.contract_path),
         human_review_status="approved",
@@ -658,8 +660,8 @@ def _prepare_atomic_leaf_landing(
         code_commit=candidate_commit,
     )
     write_contract(finalized.contract_path, finalized)
-    publish_closeout_finalization(runtime, finalized)
-    runtime.finish({"state": "closed"}, ok=True)
+    publish_closeout_finalization(store, finalized)
+    finish_operation_record(store, {"state": "closed"}, ok=True)
     return load_contract(finalized.contract_path), candidate_commit
 
 

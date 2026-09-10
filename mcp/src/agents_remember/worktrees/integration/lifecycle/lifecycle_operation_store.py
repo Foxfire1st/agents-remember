@@ -962,3 +962,95 @@ class LifecycleOperationStore:
             raise RuntimeError(
                 "an irreversible lifecycle operation needs exact unchanged cancellation evidence"
             )
+
+
+def _organizational_repair_failure(
+    record: LifecycleOperationRecord | None,
+) -> dict[str, object] | None:
+    if (
+        record is None
+        or record.organizationalRepair is None
+        or not isinstance(record.result, dict)
+        or record.result.get("state") != "organizational-completion-gate-failed"
+    ):
+        return None
+    return dict(record.result)
+
+
+def terminal_operation_record(
+    record: LifecycleOperationRecord,
+    result: dict[str, object],
+    *,
+    ok: bool,
+    stamp: str,
+) -> LifecycleOperationRecord:
+    """Apply the terminal transition while preserving an accepted repair generation.
+
+    Organizational repair is an already-published developer-decision contract. A later
+    lower-level symptom cannot replace that contract with a payload that the durable schema
+    rejects. Keeping this transition pure preserves one exact owner boundary for the transaction
+    result before its consumers execute.
+
+    Moved here from the deleted ``application.lifecycle.lifecycle_operation_worker``: the
+    terminal transition belongs with the store that persists it, and the registered
+    causal preflight ``schema:lifecycle-operation-terminalization:v1`` owns this symbol.
+    """
+
+    if record.cancelRequested or record.status in {"cancelled", "termination-required"}:
+        return record
+    if ok:
+        return record.model_copy(
+            update={
+                "status": "completed",
+                "phase": "completed",
+                "heartbeatAt": stamp,
+                "finishedAt": stamp,
+                "currentCommand": "operation completed",
+                "result": result,
+                "guidance": "Observe the task contract for the next lifecycle edge.",
+                # The process is still executing this final stack frame. Status/control
+                # reconciliation clears its binding only after observing actual exit.
+            }
+        )
+    durable_result = _organizational_repair_failure(record) or result
+    recovery_phase = closeout_recovery_phase(record, waiting=True)
+    needs_recovery = (
+        recovery_phase is not None
+        if record.operationKind == "closeout"
+        else record.irreversibleBoundaryEntered and not bool(durable_result.get("safeToReplace"))
+    )
+    developer_decision = bool(durable_result.get("developerDecisionRequired"))
+    needs_input = needs_recovery or developer_decision
+    return record.model_copy(
+        update={
+            "status": "input-required" if needs_input else "failed",
+            "phase": recovery_phase or ("contract-finalization" if needs_recovery else "failed"),
+            "heartbeatAt": stamp,
+            "finishedAt": None if needs_input else stamp,
+            "currentCommand": "reconcile the same operation"
+            if needs_recovery
+            else "operation failed",
+            "result": durable_result,
+            "failure": str(
+                durable_result.get("reason") or durable_result.get("summary") or durable_result
+            ),
+            "guidance": (
+                "Resolve the exact developer-decision evidence without replacing this "
+                "generation; status will advertise recovery only after the accepted or "
+                "intended state is restored."
+                if developer_decision
+                else (
+                    "Inspect the exact named private output and continue this generation; "
+                    "private preparation has not consumed its approval."
+                    if recovery_phase == "recovering-private-preparation"
+                    else "Restart this exact task operation; its consumed approval remains bound "
+                    "to the same internal fingerprint and recovery will not replay a different "
+                    "mutation."
+                    if needs_recovery
+                    else "Fix the reported preflight failure, then restart this task operation."
+                )
+            ),
+            # Exit proof and Git proof are independent. Retain this process binding
+            # until a task-addressed observer proves the process instance exited.
+        }
+    )

@@ -14,15 +14,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from agents_remember.application.lifecycle.lifecycle_operation_worker import (
-    terminal_operation_record,
-)
 from agents_remember.kernel.git_command import run_git
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
     IntegrationOperationAuthority,
     LifecycleOperationRecord,
     OrganizationalCompletionRepairEvidence,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
+    terminal_operation_record,
 )
 
 from agents_remember_test_support.testing.causal_dependency import (
@@ -237,12 +237,14 @@ def _canonical_repair_result(contract_path: str, generation: int) -> dict[str, o
 PREFLIGHTS = (
     PreflightSpec(
         cause_id="schema:lifecycle-operation-terminalization:v1",
-        owner=Path("mcp/src/agents_remember/application/lifecycle/lifecycle_operation_worker.py"),
-        owner_module="agents_remember.application.lifecycle.lifecycle_operation_worker",
+        owner=Path(
+            "mcp/src/agents_remember/worktrees/integration/lifecycle/lifecycle_operation_store.py"
+        ),
+        owner_module=("agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store"),
         owner_symbol="terminal_operation_record",
         evidence_altitude="integration-lifecycle-schema",
         corrective_owner=Path(
-            "mcp/src/agents_remember/application/lifecycle/lifecycle_operation_worker.py"
+            "mcp/src/agents_remember/worktrees/integration/lifecycle/lifecycle_operation_store.py"
         ),
         validator=_validate_lifecycle_terminalization,
     ),

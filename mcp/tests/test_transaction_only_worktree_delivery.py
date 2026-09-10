@@ -10,10 +10,6 @@ from pathlib import Path
 from unittest import mock
 
 from agents_remember.application import worktree_tools
-from agents_remember.application.lifecycle.lifecycle_operation_worker import (
-    OperationRuntime,
-    execute_operation,
-)
 from agents_remember.application.worktree_tool_requests import (
     CloseoutApproval,
     CloseoutCommitMessages,
@@ -40,8 +36,10 @@ from agents_remember.worktrees.worktree_contract import load_contract, write_con
 from closeout_input_test_support import (
     closeout_operation_input,
     ensure_fixture_waiting_door,
+    finish_operation_record,
     publish_closeout_finalization,
     start_closeout_operation,
+    start_operation_record,
 )
 from integration_branch_authority_test_support import (
     _authority_fixture,
@@ -83,13 +81,6 @@ def _public_config(root: Path, contract) -> object:
     return load_config(config_path)
 
 
-def _run_queued_operation(contract, operation: str):
-    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, operation))
-    running = OperationRuntime(store).start()
-    execute_operation(running, OperationRuntime(store))
-    return load_contract(contract.contract_path), store.read()
-
-
 def _bind_task_without_review(contract) -> None:
     """Add only the canonical enclosure binding; leave review evidence absent."""
 
@@ -119,7 +110,12 @@ def _assert_no_profile_or_review(config, contract) -> None:
 
 
 def _publish_synthetic_closeout_source(contract, config_path: Path):
-    """Create only the durable source journal that integration's CAS owner consumes."""
+    """Publish the leaf's claimed closeout source for the integration proof.
+
+    Integration is synchronous: it reads the contract's recorded closeout commits
+    (code/memory/ledger) and its claimed source door. The claim still comes from the
+    real admission owner; only the detached queue run is gone.
+    """
 
     # Reuse the real fixture's sprint -> master -> leaf topology.  The lifecycle helper's
     # fallback sprint is intentionally disposable and cannot support integration completion.
@@ -138,23 +134,20 @@ def _publish_synthetic_closeout_source(contract, config_path: Path):
         ),
     )
     write_contract(current.contract_path, current)
-    contract = current
-    operation_input = closeout_operation_input(
-        contract,
-        config_path=config_path,
-        approval_note="fixture records the already prepared transaction",
-    )
     start_closeout_operation(
-        operation_input,
+        closeout_operation_input(
+            current,
+            config_path=config_path,
+            approval_note="fixture records the already prepared transaction",
+        ),
         launcher=lambda *_: None,
     )
-    current = load_contract(contract.contract_path)
+    current = load_contract(current.contract_path)
     store = LifecycleOperationStore(operation_record_path(current.worktree_group, "closeout"))
-    runtime = OperationRuntime(store)
-    runtime.start()
-    publish_closeout_finalization(runtime, current)
-    runtime.finish({"state": "closed"}, ok=True)
-    return load_contract(contract.contract_path)
+    start_operation_record(store)
+    publish_closeout_finalization(store, current)
+    finish_operation_record(store, {"state": "closed"}, ok=True)
+    return load_contract(current.contract_path)
 
 
 def _forbid_acceptance_tools():
@@ -313,7 +306,6 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
     with ExitStack() as stack:
         for patcher in _forbid_acceptance_tools():
             stack.enter_context(patcher)
-        stack.enter_context(mock.patch.object(lifecycle_operations, "launch_detached_worker"))
         preview = worktree_tools.worktree_integrate_tool(
             config,
             contract_path=closed.contract_path.as_posix(),
@@ -365,7 +357,6 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
     with ExitStack() as stack:
         for patcher in _forbid_acceptance_tools():
             stack.enter_context(patcher)
-        stack.enter_context(mock.patch.object(lifecycle_operations, "launch_detached_worker"))
         preview = worktree_tools.worktree_integrate_tool(
             config,
             contract_path=closed.contract_path.as_posix(),

@@ -15,7 +15,6 @@ from uuid import uuid4
 
 import pytest
 from agents_remember.application import worktree_tools
-from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.certification.repository_profiles.canonical import repository_profile_digest
 from agents_remember.certification.repository_profiles.models import RepositoryCertificationProfile
 from agents_remember.errors import CertificationContractError
@@ -90,6 +89,7 @@ from agents_remember.worktrees.modules.quality import clean_executor, gate
 from agents_remember.worktrees.modules.quality.certification_records import certificate_store
 from agents_remember.worktrees.services import bind_worktree_services, worktree_services
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+from closeout_input_test_support import start_operation_record
 from curator_coherence_test_support import write_curator_evidence
 from repository_profile_test_support import (
     NODE_FIXTURE,
@@ -439,7 +439,7 @@ def _fixture(
             }
         )
     )
-    owner = OperationRuntime(store, worker_lease=lease).start()
+    owner = start_operation_record(store)
     calls: list[clean_executor.CleanQualityRequest] = []
     monkeypatch.setattr(gate, "run_clean_quality", _executor(NODE_FIXTURE, calls))
     with pytest.raises(CertificationContractError) as unbound:

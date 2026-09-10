@@ -6,6 +6,7 @@ import hashlib
 import json
 from contextlib import nullcontext
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
@@ -23,7 +24,11 @@ from agents_remember.models.lifecycles.mutation_evidence import (
     GitMutationEvidence,
     GitMutationSnapshot,
 )
-from agents_remember.models.lifecycles.operation import CloseoutOperationInput
+from agents_remember.models.lifecycles.operation import (
+    CloseoutOperationInput,
+    LifecycleOperationRecord,
+    LifecycleOperationRecoveryCommits,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import SubTaskRef, TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
@@ -46,6 +51,9 @@ from agents_remember.worktrees.integration.lifecycle import (
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
+    terminal_operation_record,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
     start_or_observe_closeout_operation,
@@ -318,21 +326,68 @@ def _confined_fixture_task_ref(contract, path: Path) -> TaskDocumentRef:
     )
 
 
-def publish_closeout_finalization(runtime, contract) -> None:
+def start_operation_record(store) -> LifecycleOperationRecord:
+    """Advance one queued fixture record to running through its own store.
+
+    The detached ``OperationRuntime`` is deleted with the worker. Closeout and
+    integration run in-process now, so only the journal-plane fixtures that still
+    need a running record do this explicitly here.
+    """
+    stamp = _stamp()
+
+    def advance(record):
+        return record.model_copy(
+            update={
+                "status": "running",
+                "phase": "preflight",
+                "startedAt": record.startedAt or stamp,
+                "heartbeatAt": stamp,
+                "currentCommand": "validate lifecycle operation",
+            }
+        )
+
+    return store.update(advance)
+
+
+def finish_operation_record(store, result: dict[str, object], *, ok: bool) -> None:
+    """Apply the terminal transition that the deleted worker used to own."""
+    stamp = _stamp()
+    store.update(lambda record: terminal_operation_record(record, result, ok=ok, stamp=stamp))
+
+
+def publish_closeout_finalization(store, contract) -> None:
     """Publish the exact proof production records before queue certification."""
 
-    runtime.progress(
-        "contract-finalization",
-        {
-            "approval_claimed": True,
-            "recovery_commits": {
-                "codeCommit": contract.code_commit,
-                "memoryContentCommit": contract.memory_content_commit,
-                "ledgerCommit": contract.ledger_commit,
-            },
-            "closeout_finalized_contract_sha256": closeout_contract_sha256(contract),
-        },
+    stamp = _stamp()
+    recovery = LifecycleOperationRecoveryCommits(
+        codeCommit=contract.code_commit,
+        memoryContentCommit=contract.memory_content_commit,
+        ledgerCommit=contract.ledger_commit,
     )
+
+    def advance(record):
+        mutations = dict(record.mutationEvidence)
+        return record.model_copy(
+            update={
+                "status": "running",
+                "phase": "contract-finalization",
+                "heartbeatAt": stamp,
+                "currentCommand": "lifecycle stage: contract-finalization",
+                "approvalClaimed": True,
+                "recoveryCommits": derive_closeout_recovery_commits(
+                    record,
+                    mutations=mutations,
+                    reported=recovery,
+                ),
+                "closeoutFinalizedContractSha256": closeout_contract_sha256(contract),
+            }
+        )
+
+    store.update(advance)
+
+
+def _stamp() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def _enabled_message(effective: EffectiveCloseoutInput, leg: CloseoutMutationLeg) -> str | None:

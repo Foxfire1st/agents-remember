@@ -12,7 +12,6 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.application.lifecycle.lifecycle_operation_worker import OperationRuntime
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
 )
@@ -90,7 +89,8 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             store = LifecycleOperationStore(
                 operation_record_path(closed.worktree_group, "integrate")
             )
-            running = OperationRuntime(store).start()
+            running = store.read()
+            assert running is not None
             authority = running.integrationAuthority
             assert authority is not None
             _git(memory_repo, "branch", "memory-race", "ar/master")

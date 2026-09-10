@@ -131,7 +131,6 @@ integration = [
   "mcp/tests/test_git_command.py",
   "mcp/tests/test_harness_control_ipc.py",
   "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_integration_ref_transaction.py",
   "mcp/tests/test_lifecycle_finalize.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_mcp_stdio_transport.py",

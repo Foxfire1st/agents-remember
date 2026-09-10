@@ -127,9 +127,6 @@ def _prepare_memory_only_successor_scenario(  # noqa: PLR0915
     from uuid import uuid4  # noqa: PLC0415
 
     from agents_remember.application import worktree_tools  # noqa: PLC0415
-    from agents_remember.application.lifecycle.lifecycle_operation_worker import (  # noqa: PLC0415
-        OperationRuntime,
-    )
     from agents_remember.errors import FinalCertificationError  # noqa: PLC0415
     from agents_remember.kernel.primitives.runtime_config import load_config  # noqa: PLC0415
     from agents_remember.models.certification.corrective import (  # noqa: PLC0415
@@ -172,6 +169,7 @@ def _prepare_memory_only_successor_scenario(  # noqa: PLR0915
         bind_worktree_services,
         worktree_services,
     )
+    from closeout_input_test_support import start_operation_record  # noqa: PLC0415
     from test_closeout_memory_certification_reuse import _store  # noqa: PLC0415
 
     with pytest.MonkeyPatch.context() as patch:
@@ -336,7 +334,7 @@ def _prepare_memory_only_successor_scenario(  # noqa: PLR0915
             }
         )
     )
-    owner = OperationRuntime(successor_store, worker_lease=lease).start()
+    owner = start_operation_record(successor_store)
     successor_handoff = current_certification_handoff(successor_contract, owner, successor_store)
     assert any(
         change.changeClass == "closeout-resume" and change.consumingGates == (5,)
