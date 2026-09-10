@@ -12,9 +12,6 @@ from agents_remember.worktrees.closeout_input import (
     normalize_closeout_input,
     raw_closeout_messages,
 )
-from agents_remember.worktrees.integration.mutation_evidence import (
-    JOURNALED_CLOSEOUT_REQUIRED,
-)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
 from agents_remember.worktrees.modules.closeout import closeout_result
@@ -57,8 +54,6 @@ def command_start(args: argparse.Namespace) -> int:
 
 def command_closeout(args: argparse.Namespace) -> int:
     worktree_args = WorktreeArgs.from_namespace(args)
-    if not worktree_args.dry_run:
-        raise RuntimeError(JOURNALED_CLOSEOUT_REQUIRED)
     if worktree_args.contract_path is None:
         raise RuntimeError("closeout requires a contract path")
     contract = load_contract(worktree_args.contract_path)

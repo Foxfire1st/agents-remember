@@ -31,10 +31,6 @@ from agents_remember.worktrees.modules.git import (
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
-JOURNALED_CLOSEOUT_REQUIRED = (
-    "worktree closeout mutation requires the journaled "
-    "worktree_closeout_apply operation; synchronous apply is not authorized"
-)
 CLEAN_STATUS_FINGERPRINT = hashlib.sha256(b"").hexdigest()
 
 
@@ -59,12 +55,6 @@ def snapshot_is_clean_at_head(
         snapshot.headTree,
         CLEAN_STATUS_FINGERPRINT,
     )
-
-
-def require_closeout_mutation_authority(args: WorktreeArgs) -> None:
-    """Refuse applying closeout when mutation evidence cannot be durable."""
-    if args.operation_progress is None:
-        raise RuntimeError(JOURNALED_CLOSEOUT_REQUIRED)
 
 
 def initial_closeout_mutation_evidence(
@@ -99,7 +89,6 @@ def begin_git_mutation(
     use_current_candidate: bool = False,
 ) -> GitMutationEvidence:
     """Persist exact pre-command facts before a commit command can launch."""
-    require_closeout_mutation_authority(args)
     _require_mutation_leg_authority(args, leg, repository)
     before = git_mutation_snapshot(repository, _evidence_index_path(args, leg))
     return _publish_mutation_intent(
@@ -123,7 +112,6 @@ def begin_exact_file_git_mutation(
 ) -> GitMutationEvidence:
     """Persist an exact file-output tree before touching the real worktree/index."""
 
-    require_closeout_mutation_authority(args)
     _require_mutation_leg_authority(args, leg, repository)
     before = git_mutation_snapshot(repository, _evidence_index_path(args, leg))
     expected_output_tree = _isolated_file_candidate_tree(
@@ -257,7 +245,6 @@ def bind_expected_output_tree(
     repository: Path,
 ) -> GitMutationEvidence:
     """Bind a prepared output tree after intent, but still before commit launch."""
-    require_closeout_mutation_authority(args)
     _require_mutation_leg_authority(args, evidence.leg, repository)
     _require_evidence_repository(evidence, repository)
     if evidence.state != "mutation-intent" or evidence.expectedOutputTree is not None:
@@ -281,7 +268,6 @@ def prove_git_commit(
     commit: str,
 ) -> None:
     """Publish a commit hash only after Git output matches the bound tree."""
-    require_closeout_mutation_authority(args)
     _require_mutation_leg_authority(args, evidence.leg, repository)
     _require_evidence_repository(evidence, repository)
     if evidence.before is None:

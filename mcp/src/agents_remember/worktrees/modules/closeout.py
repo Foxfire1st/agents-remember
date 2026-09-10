@@ -28,9 +28,6 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
 )
-from agents_remember.worktrees.integration.mutation_evidence import (
-    require_closeout_mutation_authority,
-)
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.closeout_external import (
     external_closeout_commits,
@@ -799,8 +796,6 @@ def _closeout_entry(
     args: WorktreeArgs,
     current_contract: WorktreeContract,
 ) -> tuple[WorktreeContract, EffectiveCloseoutInput, WorktreeCommandResult | None]:
-    if not args.dry_run:
-        require_closeout_mutation_authority(args)
     _contract_path, contract = _closeout_contract(args, current_contract)
     effective_input = _effective_closeout_input(args)
     if contract.kind == "leaf":

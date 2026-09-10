@@ -36,7 +36,6 @@ def _register_closeout_queue_tools(server: FastMCP, config: McpRuntimeConfig) ->
         return closeout_queue_payload(config, request)
 
 
-
 def _register_curator_coherence_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     @server.tool()
     def curator_coherence(request: CuratorCoherenceRequest) -> dict[str, Any]:
