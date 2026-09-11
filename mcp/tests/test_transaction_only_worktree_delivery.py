@@ -16,8 +16,11 @@ from agents_remember.application.worktree_tool_requests import (
 )
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
+    LedgerRow,
     create_initial_ledger,
+    ledger_to_text,
     load_ledger,
+    parse_ledger_text,
     write_ledger,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
@@ -30,7 +33,11 @@ from agents_remember.worktrees.integration.closeout import curator_coherence as 
 from agents_remember.worktrees.integration.closeout.certification import execution as selected
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.closeout_external import _commit_memory_content
+from agents_remember.worktrees.modules.closeout_external import (
+    _commit_ledger_mapping,
+    _commit_memory_content,
+    _LedgerCommitFacts,
+)
 from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.quality import closeout_memory as memory_quality
 from agents_remember.worktrees.modules.quality import gate as quality_gate
@@ -408,3 +415,172 @@ def test_recloseout_after_a_sync_records_the_memory_head_as_content_commit(tmp_p
     assert memory_commit == memory_head
     assert memory_commit != recorded
     assert is_ancestor(memory_repo, moved_source, memory_commit)
+
+
+# --------------------------------------------------------------------------------------
+# The ledger is derived state: closeout recomputes it, and a re-run repairs it.
+# --------------------------------------------------------------------------------------
+
+
+class _ClosedLedgerLeaf:
+    """One closed external leaf, its canonical mapping rows, and the ledger file they live in."""
+
+    def __init__(self, root: Path) -> None:
+        fixture = _authority_fixture(root, external_memory=True)
+        closed = _closed_external_leaf_worktrees(fixture, root, publish_closeout_evidence=False)
+        memory_repo = closed.memory_repo_path
+        memory_worktree = closed.memory_worktree
+        ledger_path = closed.ledger_path
+        assert memory_repo is not None and memory_worktree is not None
+        assert ledger_path is not None
+        self.contract = closed
+        self.memory_repo = memory_repo
+        self.memory_worktree = memory_worktree
+        self.ledger_path = ledger_path
+        source_commit = _git(memory_repo, "rev-parse", closed.memory_source_branch)
+        self.source_rows = parse_ledger_text(
+            _git(memory_repo, "show", f"{source_commit}:memory.md")
+        ).rows
+        self.own_row = LedgerRow(closed.code_commit, closed.memory_content_commit)
+        self.canonical_rows = [self.own_row, *self.source_rows]
+        self.content_path = memory_worktree / "candidate.md"
+        self.content_bytes = self.content_path.read_bytes()
+
+    def render(self, rows: list[LedgerRow], *, header: tuple[str, str] | None = None) -> str:
+        """A ledger whose rows are ``rows`` and whose header may deliberately disagree."""
+
+        consistent = replace(
+            load_ledger(self.ledger_path),
+            rows=list(rows),
+            last_verified_code_commit=rows[0].code_commit,
+            last_memory_content_commit=rows[0].memory_commit,
+        )
+        text = ledger_to_text(consistent)
+        if header is None or header == (rows[0].code_commit, rows[0].memory_commit):
+            return text
+        # The metadata block precedes the table, so the first occurrence of row 1's two values
+        # is the header; the table cells are left exactly as rendered.
+        return text.replace(f'"{rows[0].code_commit}"', f'"{header[0]}"', 1).replace(
+            f'"{rows[0].memory_commit}"', f'"{header[1]}"', 1
+        )
+
+    def commit_ledger_text(self, text: str, message: str) -> str:
+        self.ledger_path.write_text(text, encoding="utf-8")
+        _git(self.memory_worktree, "add", "memory.md")
+        _git(self.memory_worktree, "commit", "-m", message)
+        return _git(self.memory_worktree, "rev-parse", "HEAD")
+
+    def rerun_closeout(self):
+        """The closeout ledger step, re-run over whatever the file now says."""
+
+        return _commit_ledger_mapping(
+            self.contract,
+            WorktreeArgs(
+                contract_path=self.contract.contract_path,
+                closeout_input=_effective_closeout_input(),
+            ),
+            _effective_closeout_input(),
+            _LedgerCommitFacts(
+                self.contract.code_commit,
+                self.contract.memory_content_commit,
+            ),
+        )
+
+    def unreachable_memory_commit(self) -> str:
+        """Real memory content on a sibling branch, never reachable from this work head."""
+
+        source = _git(self.memory_repo, "rev-parse", self.contract.memory_source_branch)
+        _git(self.memory_repo, "branch", "superseded-content", source)
+        _commit_on(self.memory_repo, "superseded-content", "superseded-content.md")
+        orphan = _git(self.memory_repo, "rev-parse", "superseded-content")
+        _git(self.memory_repo, "switch", self.contract.memory_source_branch)
+        return orphan
+
+
+def test_closeout_rerun_leaves_an_already_correct_ledger_byte_identical(tmp_path):
+    """Re-running closeout over a correct ledger writes nothing and says exactly that."""
+
+    leaf = _ClosedLedgerLeaf(tmp_path)
+    before_bytes = leaf.ledger_path.read_bytes()
+    head_before = _git(leaf.memory_worktree, "rev-parse", "HEAD")
+
+    ledger_commit, created, payload = leaf.rerun_closeout()
+
+    assert created is False
+    assert ledger_commit == head_before
+    assert leaf.ledger_path.read_bytes() == before_bytes
+    assert load_ledger(leaf.ledger_path).rows == leaf.canonical_rows
+    assert _git(leaf.memory_worktree, "status", "--porcelain") == ""
+    assert payload["state"] == "already-correct"
+    assert payload["rowsAdded"] == []
+    assert payload["rowsRemoved"] == []
+    assert payload["rowsReordered"] == []
+    assert payload["headerChanged"] is False
+    assert str(payload["summary"]).startswith(
+        "the memory ledger already equals the projection for source "
+    )
+
+
+def test_closeout_rerun_repairs_every_malformed_ledger_shape_and_reports_it(tmp_path):
+    """The three real closeout-merge errors are repaired by re-running closeout.
+
+    Each shape was landed as real damage once: a superseded row kept, a table whose source
+    rows are not its tail, and a header that disagreed with its own first row. Re-running
+    closeout recomputes the ledger from the source plus the branch's own true mappings, and
+    the payload names what it changed rather than rewriting the record silently.
+    """
+
+    leaf = _ClosedLedgerLeaf(tmp_path)
+    own_row = leaf.own_row
+    orphan = leaf.unreachable_memory_commit()
+    source_row = leaf.source_rows[0]
+    malformations = (
+        (
+            "superseded row kept",
+            [own_row, LedgerRow(own_row.code_commit, orphan), *leaf.source_rows],
+            None,
+            "removed",
+        ),
+        (
+            "source row ahead of the branch's own mapping",
+            [source_row, own_row],
+            None,
+            "reordered",
+        ),
+        (
+            "header disagreeing with its own first row",
+            [own_row, *leaf.source_rows],
+            (source_row.code_commit, source_row.memory_commit),
+            "header",
+        ),
+    )
+
+    for name, rows, header, expectation in malformations:
+        leaf.commit_ledger_text(leaf.render(rows, header=header), f"Malform: {name}")
+        ledger_commit, created, payload = leaf.rerun_closeout()
+
+        assert created is True, name
+        assert load_ledger(leaf.ledger_path).rows == leaf.canonical_rows, name
+        # Content is never touched: the repair commit carries the mapping table and nothing else.
+        assert _git(
+            leaf.memory_worktree,
+            "show",
+            "--name-only",
+            "--format=",
+            ledger_commit,
+        ).split() == ["memory.md"], name
+        assert leaf.content_path.read_bytes() == leaf.content_bytes, name
+        assert payload["state"] == "repaired", name
+        assert str(payload["summary"]).startswith("repaired the memory ledger for source "), name
+        if expectation == "removed":
+            assert payload["rowsRemoved"], name
+            assert payload["removedReasons"], name
+        elif expectation == "reordered":
+            assert payload["rowsReordered"], name
+        else:
+            # A wrong header is repaired without moving a single row, so the payload has to
+            # report the header change rather than claim a table change that never happened.
+            assert payload["headerChanged"] is True, name
+            assert payload["rowsAdded"] == [], name
+            assert payload["rowsRemoved"] == [], name
+            assert payload["rowsReordered"] == [], name

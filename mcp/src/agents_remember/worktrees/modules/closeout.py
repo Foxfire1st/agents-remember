@@ -28,6 +28,7 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
 )
+from agents_remember.worktrees.ledger_projection import inspect_ledger_projection
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.closeout_external import (
     external_closeout_commits,
@@ -500,14 +501,15 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
             raise RuntimeError(
                 "completed closeout contract does not match its recorded recovery commits"
             )
-        return WorktreeCommandResult(
-            0,
-            {
-                "state": "already-closed",
-                "recovered": True,
-                **status_payload(contract),
-            },
-        )
+        payload = {
+            "state": "already-closed",
+            "recovered": True,
+            **status_payload(contract),
+        }
+        repair = _memory_ledger_repair(contract, MemoryCloseoutOutcome())
+        if repair is not None:
+            payload["memory_ledger_repair"] = repair
+        return WorktreeCommandResult(0, payload)
     approval_note = _closeout_approval_note(args)
 
     def publication():
@@ -559,7 +561,7 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
 def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, Any]:
     """Build the completed-closeout response after all durable writes finish."""
     memory = facts.memory
-    return {
+    payload = {
         "state": "closed",
         **status_payload(updated),
         "summary": "Closeout completed; integrate the task branches back into their source branches.",
@@ -575,6 +577,24 @@ def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, An
         "integration_reopen": facts.integration_reopen,
         "closeout_gate": _closeout_gate_payload(facts.gate_guard),
     }
+    repair = _memory_ledger_repair(updated, memory)
+    if repair is not None:
+        payload["memory_ledger_repair"] = repair
+    return payload
+
+
+def _memory_ledger_repair(updated, memory: MemoryCloseoutOutcome) -> dict[str, object] | None:
+    """What recomputing the ledger changed, or an explicit statement that it was not touched.
+
+    External-memory closeout always speaks about its ledger; internal-memory closeout has no
+    ledger to speak about, so the key is absent rather than falsely present.
+    """
+
+    if memory.ledger_repair:
+        return memory.ledger_repair
+    if updated.memory_mode != "external":
+        return None
+    return inspect_ledger_projection(updated)
 
 
 def _revalidate_candidate(

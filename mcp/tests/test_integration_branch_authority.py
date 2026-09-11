@@ -15,6 +15,7 @@ sys.path.insert(0, str(MCP_SRC))
 from agents_remember.kernel.memory_ledger import (
     LedgerRow,
     MemoryLedger,
+    ledger_to_text,
     load_ledger,
     parse_ledger_text,
     prepend_mapping,
@@ -67,6 +68,27 @@ def _commit_ledger(
     memory_worktree: Path, ledger_path: Path, ledger: MemoryLedger, message: str
 ) -> str:
     write_ledger(ledger_path, ledger)
+    _git(memory_worktree, "add", "memory.md")
+    _git(memory_worktree, "commit", "-m", message)
+    return _git(memory_worktree, "rev-parse", "HEAD")
+
+
+def _ledger_text_with_header(ledger: MemoryLedger, header: tuple[str, str]) -> str:
+    """The canonical rendering with a header that deliberately disagrees with its own first row.
+
+    The metadata block precedes the table, so the first occurrence of row 1's two values is the
+    header, and patching exactly those two leaves every table cell as rendered. This reproduces
+    the third real closeout-merge error on demand.
+    """
+
+    text = ledger_to_text(ledger)
+    return text.replace(f'"{ledger.rows[0].code_commit}"', f'"{header[0]}"', 1).replace(
+        f'"{ledger.rows[0].memory_commit}"', f'"{header[1]}"', 1
+    )
+
+
+def _commit_ledger_text(memory_worktree: Path, ledger_path: Path, text: str, message: str) -> str:
+    ledger_path.write_text(text, encoding="utf-8")
     _git(memory_worktree, "add", "memory.md")
     _git(memory_worktree, "commit", "-m", message)
     return _git(memory_worktree, "rev-parse", "HEAD")
@@ -311,6 +333,17 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                     "does not exist in the code repository",
                     (source,),
                 ),
+                (
+                    "duplicated source row",
+                    _ledger_with_rows(
+                        accumulated,
+                        [*accumulated.rows, accumulated.rows[-1]],
+                    ),
+                    closed.code_commit,
+                    second_memory,
+                    "does not preserve the complete source ledger history",
+                    (source_rows[-1].code_commit,),
+                ),
             )
             for name, ledger, code_commit, memory_content, refusal, evidence in cases:
                 with self.subTest(case=name):
@@ -336,6 +369,33 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                         self.assertIn(fragment, message)
                     self.assertIn("Remedy:", message)
                     self.assertIn("worktree_closeout_apply", message)
+            # A hand edit that leaves every row alone and moves only the header is still a
+            # malformed ledger, and it is the shape this check newly carries a remedy for: the
+            # integrated reader rejected it as an opaque "invalid" before the projection check.
+            with self.subTest(case="header disagreeing with its own first row"):
+                headered = _commit_ledger_text(
+                    memory_worktree,
+                    closed.ledger_path,
+                    _ledger_text_with_header(
+                        accumulated,
+                        (source_rows[0].code_commit, source_rows[0].memory_commit),
+                    ),
+                    "Ledger variant: header disagrees",
+                )
+                with self.assertRaises(RuntimeError) as raised:
+                    require_integrated_ledger_mapping(
+                        closed,
+                        IntegratedCommits(
+                            code=closed.code_commit,
+                            memory_content=second_memory,
+                            ledger=headered,
+                        ),
+                        memory_source_commit=source,
+                    )
+                message = str(raised.exception)
+                self.assertIn("the ledger header disagrees with its own first row", message)
+                self.assertIn("Remedy:", message)
+                self.assertIn("worktree_closeout_apply", message)
             self.assertEqual(
                 parse_ledger_text(_git(memory_repo, "show", f"{ledger_commit}:memory.md")).rows,
                 [
