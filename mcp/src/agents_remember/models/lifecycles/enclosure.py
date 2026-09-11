@@ -185,6 +185,30 @@ class TerminalEnclosureArchiveEntry(StrictResponseModel):
         return self
 
 
+class TerminalEnclosureRemovedWorkingState(StrictResponseModel):
+    """One canonical-root working-state artifact removed with the enclosure root.
+
+    Working state (a sync transaction journal written before the journal moved to the
+    group's ``reports/`` directory) is not landing evidence, so its bytes are deliberately
+    not copied into the archive. Its exact identity is, because the archive is what
+    survives the deletion and terminal cleanup must be able to name every file it removes.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    relativePath: str = Field(min_length=1, max_length=1024)
+    sha256: Sha256 = Field(pattern=r"^[0-9a-f]{64}$")
+    sizeBytes: int = Field(ge=0, le=16 * 1024 * 1024)
+    disposition: Literal["removed-with-enclosure"] = "removed-with-enclosure"
+
+    @model_validator(mode="after")
+    def _path_is_confined(self) -> TerminalEnclosureRemovedWorkingState:
+        path = PurePosixPath(self.relativePath)
+        if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+            raise ValueError("removed working-state entry must use one confined relative path")
+        return self
+
+
 class TerminalWorktreeCleanupArguments(StrictResponseModel):
     """Exact accepted public arguments for terminal cleanup."""
 
@@ -239,6 +263,13 @@ class TerminalEnclosureArchive(StrictResponseModel):
         min_length=1,
         max_length=1024,
     )
+    # Canonical-root working state is deleted with the enclosure but never archived: its
+    # bytes are not landing evidence. Its identity is recorded so the deletion is
+    # explained rather than silent. Absent on archives published before it existed.
+    removedWorkingState: list[TerminalEnclosureRemovedWorkingState] = Field(
+        default_factory=list,
+        max_length=16,
+    )
 
     @model_validator(mode="after")
     def _archive_identity_and_bytes_are_exact(self) -> TerminalEnclosureArchive:
@@ -249,6 +280,7 @@ class TerminalEnclosureArchive(StrictResponseModel):
         _require_contract_digest(self.contractText, self.contractSha256)
         _require_cleanup_request_identity(self)
         _require_unique_archive_paths(self.canonicalEntries)
+        _require_unique_removed_working_state(self.removedWorkingState)
         manifest_entry = _required_manifest_entry(self.canonicalEntries)
         expected_manifest = _expected_manifest_text(self.manifest)
         if manifest_entry.content != expected_manifest:
@@ -296,6 +328,14 @@ def _require_unique_archive_paths(entries: list[TerminalEnclosureArchiveEntry]) 
     paths = [entry.relativePath for entry in entries]
     if len(paths) != len(set(paths)):
         raise ValueError("terminal archive canonical entry paths must be unique")
+
+
+def _require_unique_removed_working_state(
+    entries: list[TerminalEnclosureRemovedWorkingState],
+) -> None:
+    paths = [entry.relativePath for entry in entries]
+    if len(paths) != len(set(paths)):
+        raise ValueError("terminal archive removed working-state paths must be unique")
 
 
 def _manifest_entries(

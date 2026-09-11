@@ -130,8 +130,25 @@ class MalformedSyncJournalEvidence(BaseModel):
     archivedAt: str = Field(min_length=1, max_length=128)
 
 
+# One sync transaction covers both repository sides, so its journal is addressed by the
+# shared worktree group and never by a single worktree. It is *not* leaf terminal evidence:
+# the next sync generation re-publishes it, and its pinned refs are retired when the
+# transaction reaches a terminal phase. It is therefore filed beside the declared-door
+# journal in the group's ``reports/`` working directory -- the same place
+# ``door_journal_path`` chose for the same reason -- and never in ``.lifecycle/``, whose
+# every other byte is terminal enclosure evidence the cleanup scanner archives.
+SYNC_OPERATION_RECORD_NAME = "sync-operation.json"
+_LEGACY_SYNC_LIFECYCLE_DIRECTORY = ".lifecycle"
+
+
 def sync_operation_path(worktree_group: Path) -> Path:
-    return worktree_group / ".lifecycle" / "sync-operation.json"
+    return worktree_group / "reports" / SYNC_OPERATION_RECORD_NAME
+
+
+def legacy_sync_operation_path(worktree_group: Path) -> Path:
+    """The pre-move journal location: read tolerance for enclosures created before it."""
+
+    return worktree_group / _LEGACY_SYNC_LIFECYCLE_DIRECTORY / SYNC_OPERATION_RECORD_NAME
 
 
 def sync_ref_prefix(contract_path: Path) -> str:
@@ -157,25 +174,46 @@ class SyncOperationStore:
 
     def __init__(self, worktree_group: Path) -> None:
         self.path = sync_operation_path(worktree_group)
+        self.legacy_path = legacy_sync_operation_path(worktree_group)
+        self._observed_path: Path | None = None
+
+    @property
+    def observed_path(self) -> Path:
+        """The exact file the last read came from, never a guessed live fallback."""
+
+        return self._observed_path if self._observed_path is not None else self.path
 
     def read(self) -> SyncJournalRecord | None:
+        record = self._read_at(self.path)
+        if record is not None:
+            self._observed_path = self.path
+            return record
+        # An enclosure created before the journal moved still owns its transaction here.
+        # Reading it is what keeps the move from turning live recovery authority into a
+        # missing journal; the next write retires the legacy copy.
+        record = self._read_at(self.legacy_path)
+        if record is not None:
+            self._observed_path = self.legacy_path
+        return record
+
+    def _read_at(self, path: Path) -> SyncJournalRecord | None:
         try:
-            mode = self.path.lstat().st_mode
+            mode = path.lstat().st_mode
         except FileNotFoundError:
             return None
         except OSError as error:
-            raise SyncJournalReadError(self.path, b"", type(error).__name__) from error
+            raise SyncJournalReadError(path, b"", type(error).__name__) from error
         if not stat.S_ISREG(mode):
-            raise SyncJournalReadError(self.path, b"", "journal-nonregular")
+            raise SyncJournalReadError(path, b"", "journal-nonregular")
         try:
             descriptor = os.open(
-                self.path,
+                path,
                 os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
             )
             with os.fdopen(descriptor, "rb") as handle:
                 raw = handle.read()
         except OSError as error:
-            raise SyncJournalReadError(self.path, b"", type(error).__name__) from error
+            raise SyncJournalReadError(path, b"", type(error).__name__) from error
         try:
             payload = json.loads(raw.decode("utf-8"))
             try:
@@ -183,37 +221,59 @@ class SyncOperationStore:
             except ValidationError:
                 return SyncQuarantineRecord.model_validate(payload)
         except (UnicodeError, json.JSONDecodeError, ValidationError, ValueError) as error:
-            raise SyncJournalReadError(self.path, raw, type(error).__name__) from error
+            raise SyncJournalReadError(path, raw, type(error).__name__) from error
 
     def write(self, record: SyncOperationRecord) -> None:
         checked = SyncOperationRecord.model_validate(record.model_dump(mode="json"))
         atomic_write_text(self.path, checked.model_dump_json(indent=2) + "\n")
+        self._retire_legacy_copy()
 
     def write_quarantine(self, record: SyncQuarantineRecord) -> None:
         checked = SyncQuarantineRecord.model_validate(record.model_dump(mode="json"))
         atomic_write_text(self.path, checked.model_dump_json(indent=2) + "\n")
+        self._retire_legacy_copy()
+
+    def _retire_legacy_copy(self) -> None:
+        """Drop a pre-move copy once the canonical journal carries the same transaction.
+
+        This is the reclamation half of the move: without it every synced-before-the-move
+        enclosure keeps a second, stale journal inside its terminal-evidence directory.
+        A copy that resists deletion is not an error -- reads already prefer the canonical
+        path, and terminal cleanup reports and removes any survivor it finds -- so this
+        stays best-effort rather than failing a sync whose journal is already durable.
+        """
+
+        self._observed_path = self.path
+        try:
+            self.legacy_path.unlink(missing_ok=True)
+        except OSError:
+            return
 
     def semantic_read_error(self, reason: str) -> SyncJournalReadError:
         """Capture the exact valid JSON bytes whose authority identity was rejected."""
 
+        path = self.observed_path
         try:
-            mode = self.path.lstat().st_mode
+            mode = path.lstat().st_mode
             if not stat.S_ISREG(mode):
-                return SyncJournalReadError(self.path, b"", "journal-nonregular")
+                return SyncJournalReadError(path, b"", "journal-nonregular")
             descriptor = os.open(
-                self.path,
+                path,
                 os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
             )
             with os.fdopen(descriptor, "rb") as handle:
                 raw = handle.read()
         except OSError as error:
-            return SyncJournalReadError(self.path, b"", type(error).__name__)
-        return SyncJournalReadError(self.path, raw, reason)
+            return SyncJournalReadError(path, b"", type(error).__name__)
+        return SyncJournalReadError(path, raw, reason)
 
     def archive_malformed(self, error: SyncJournalReadError) -> Path | None:
         if not error.raw:
             return self._archive_opaque_entry(error)
         digest = hashlib.sha256(error.raw).hexdigest()
+        # Malformed-journal evidence always lands in the canonical journal's own archive
+        # directory, so a legacy-era source is preserved in the working tree, not in the
+        # terminal-evidence directory it is being moved out of.
         archive_root = self.path.parent / "archive"
         raw_archive = archive_root / f"sync-operation-malformed-{digest}.raw"
         metadata_path = archive_root / f"sync-operation-malformed-{digest}.json"
@@ -249,11 +309,12 @@ class SyncOperationStore:
         """Preserve an unreadable/nonregular directory entry without following it."""
 
         archive_root = self.path.parent / "archive"
+        source = error.path
         try:
-            observed = self.path.lstat()
+            observed = source.lstat()
         except FileNotFoundError:
             descriptor = {
-                "sourcePath": self.path.as_posix(),
+                "sourcePath": source.as_posix(),
                 "reason": error.reason,
                 "fileType": "absent",
             }
@@ -271,12 +332,12 @@ class SyncOperationStore:
                 else "other"
             )
             descriptor = {
-                "sourcePath": self.path.as_posix(),
+                "sourcePath": source.as_posix(),
                 "reason": error.reason,
                 "fileType": file_type,
                 "mode": stat.S_IMODE(observed.st_mode),
                 "size": observed.st_size,
-                "symlinkTarget": os.readlink(self.path) if file_type == "symlink" else None,
+                "symlinkTarget": os.readlink(source) if file_type == "symlink" else None,
             }
             archive_kind = "opaque-entry"
             size = observed.st_size
@@ -287,7 +348,7 @@ class SyncOperationStore:
             if archive_path.exists():
                 return None
             archive_root.mkdir(parents=True, exist_ok=True)
-            atomic_replace(self.path, archive_path)
+            atomic_replace(source, archive_path)
         digest = hashlib.sha256(
             json.dumps(descriptor, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
