@@ -17,6 +17,7 @@ from agents_remember.models.lifecycles.enclosure import (
     TerminalEnclosureArchive,
     TerminalEnclosureArchiveEntry,
     TerminalEnclosureReceipt,
+    TerminalEnclosureRemovedWorkingState,
 )
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.worktrees.integration.lifecycle.lifecycle_enclosure_adoption import (
@@ -40,6 +41,10 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_locatio
 )
 from agents_remember.worktrees.integration.lifecycle.worker.state import project_worker_exit
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.sync_transaction_state import (
+    SYNC_OPERATION_RECORD_NAME,
+    observe_sync_operation,
+)
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 _OPERATION_RECORD = re.compile(
@@ -52,6 +57,11 @@ _LEGACY_MISSING_INTENT_RECORD = re.compile(
 )
 _MAX_CANONICAL_FILES = 1024
 _MAX_CANONICAL_BYTES = 64 * 1024 * 1024
+# The sync journal moved out of `.lifecycle/` into the group's `reports/` working
+# directory; only the pre-move location is still seen here, and only until that enclosure
+# is cleaned. These are the transaction states in which a journal holds no recovery
+# authority; every other state must refuse rather than delete live authority.
+_TERMINAL_SYNC_STATES = frozenset({"completed", "cancelled", "quarantined"})
 
 
 @dataclass(frozen=True)
@@ -340,6 +350,20 @@ def _location_error_refusal(
             next_tool="worktree_status",
             next_args=_status_args(contract),
         )
+    if error.status == "terminal-archive-sync-transaction-active":
+        return _ArchiveRefusal(
+            error.status,
+            error.detail,
+            error.expected,
+            error.observed,
+            next_action="worktree_sync",
+            next_tool="worktree_sync",
+            next_args={
+                "contract_path": contract.contract_path.resolve(strict=False).as_posix(),
+                "resolution_action": "cancel",
+                "dry_run": False,
+            },
+        )
     return _ArchiveRefusal(
         error.status,
         error.detail,
@@ -435,7 +459,11 @@ def _build_terminal_archive(
     contract_bytes = _read_regular_file(contract.contract_path, owner="worktree contract")
     contract_text = contract_bytes.decode("utf-8")
     contract_sha256 = _sha256(contract_bytes)
-    entries = _canonical_entries(location, operation=operation)
+    evidence = _canonical_entries(
+        location,
+        contract.contract_path,
+        operation=operation,
+    )
     request_id = _cleanup_request_id(
         location.locator.publicationRequestId,
         operation,
@@ -451,57 +479,154 @@ def _build_terminal_archive(
         contractPath=contract.contract_path.resolve(strict=False).as_posix(),
         contractSha256=contract_sha256,
         contractText=contract_text,
-        canonicalEntries=entries,
+        canonicalEntries=evidence.entries,
+        removedWorkingState=evidence.removed_working_state,
     )
+
+
+@dataclass(frozen=True)
+class _CanonicalRootEvidence:
+    """Everything one canonical lifecycle root contributes to the terminal archive."""
+
+    entries: list[TerminalEnclosureArchiveEntry]
+    removed_working_state: list[TerminalEnclosureRemovedWorkingState]
 
 
 def _canonical_entries(
     location: LifecycleOperationLocation,
+    contract_path: Path,
     *,
     operation: TerminalCleanupOperation,
-) -> list[TerminalEnclosureArchiveEntry]:
+) -> _CanonicalRootEvidence:
     lifecycle = location.lifecycle_directory
     try:
         paths = sorted(lifecycle.iterdir(), key=lambda path: path.name)
     except OSError as error:
         raise RuntimeError("canonical lifecycle directory is unreadable") from error
     entries: list[TerminalEnclosureArchiveEntry] = []
+    removed: list[TerminalEnclosureRemovedWorkingState] = []
     total_bytes = 0
     for path in paths:
-        if path.name.endswith(".lock") or path.name.endswith(".log"):
+        if path.name.endswith((".lock", ".log")):
             continue
-        operation_record = _OPERATION_RECORD.fullmatch(path.name) is not None
-        missing_intent_record = _LEGACY_MISSING_INTENT_RECORD.fullmatch(path.name) is not None
-        if path.name not in {"enclosure-manifest.json", ADOPTION_RECEIPT} and not (
-            operation_record or missing_intent_record
-        ):
-            raise RuntimeError(f"unowned artifact exists in canonical lifecycle root: {path.name}")
-        payload = _read_regular_file(path, owner=f"canonical lifecycle artifact {path.name}")
-        total_bytes += len(payload)
+        if path.name == SYNC_OPERATION_RECORD_NAME:
+            removed.append(
+                _legacy_sync_working_state(
+                    location,
+                    path,
+                    contract_path=contract_path,
+                )
+            )
+            continue
+        if not _is_canonical_artifact(path.name):
+            raise _unowned_canonical_artifact(lifecycle, path.name)
+        entry = _canonical_evidence_entry(path, operation=operation)
+        total_bytes += entry.sizeBytes
         if len(entries) >= _MAX_CANONICAL_FILES or total_bytes > _MAX_CANONICAL_BYTES:
             raise RuntimeError("canonical terminal archive exceeds its fixed file or byte bound")
-        text = payload.decode("utf-8")
-        if operation_record or missing_intent_record:
-            record = LifecycleOperationRecord.model_validate_json(text)
-            _require_archivable_operation(
-                record,
-                operation=operation,
-                current=operation_record and ".generation-" not in path.name,
-                name=path.name,
-            )
-        elif path.name == ADOPTION_RECEIPT:
-            LifecycleEnclosureAdoptionReceipt.model_validate_json(text)
-        entries.append(
-            TerminalEnclosureArchiveEntry(
-                relativePath=path.name,
-                sha256=_sha256(payload),
-                sizeBytes=len(payload),
-                content=text,
-            )
-        )
+        entries.append(entry)
     if not entries:
         raise RuntimeError("canonical terminal archive has no enclosure evidence")
-    return entries
+    return _CanonicalRootEvidence(entries=entries, removed_working_state=removed)
+
+
+def _is_canonical_artifact(name: str) -> bool:
+    return (
+        name in {"enclosure-manifest.json", ADOPTION_RECEIPT}
+        or _OPERATION_RECORD.fullmatch(name) is not None
+        or _LEGACY_MISSING_INTENT_RECORD.fullmatch(name) is not None
+    )
+
+
+def _canonical_evidence_entry(
+    path: Path,
+    *,
+    operation: TerminalCleanupOperation,
+) -> TerminalEnclosureArchiveEntry:
+    operation_record = _OPERATION_RECORD.fullmatch(path.name) is not None
+    missing_intent_record = _LEGACY_MISSING_INTENT_RECORD.fullmatch(path.name) is not None
+    payload = _read_regular_file(path, owner=f"canonical lifecycle artifact {path.name}")
+    text = payload.decode("utf-8")
+    if operation_record or missing_intent_record:
+        record = LifecycleOperationRecord.model_validate_json(text)
+        _require_archivable_operation(
+            record,
+            operation=operation,
+            current=operation_record and ".generation-" not in path.name,
+            name=path.name,
+        )
+    elif path.name == ADOPTION_RECEIPT:
+        LifecycleEnclosureAdoptionReceipt.model_validate_json(text)
+    return TerminalEnclosureArchiveEntry(
+        relativePath=path.name,
+        sha256=_sha256(payload),
+        sizeBytes=len(payload),
+        content=text,
+    )
+
+
+def _legacy_sync_working_state(
+    location: LifecycleOperationLocation,
+    path: Path,
+    *,
+    contract_path: Path,
+) -> TerminalEnclosureRemovedWorkingState:
+    """Account for a pre-move sync journal without archiving its bytes.
+
+    The journal records one sync transaction's working state -- the refs it pins are
+    retired when the transaction terminates -- so it is not terminal evidence of the
+    leaf's landing. It is deleted with the enclosure root, and its identity is recorded
+    so that deletion is explained rather than silent. A journal that is not terminal
+    still holds recovery authority and refuses instead.
+    """
+
+    payload = _read_regular_file(path, owner=f"canonical lifecycle artifact {path.name}")
+    projection = observe_sync_operation(location.worktree_group, contract_path=contract_path)
+    state = projection.state if projection is not None else "absent"
+    if state not in _TERMINAL_SYNC_STATES:
+        raise LifecycleOperationLocationError(
+            "terminal-archive-sync-transaction-active",
+            f"{path.name} is not terminal sync working state (observed {state!r}), so "
+            "cleanup cannot delete the enclosure while that transaction still holds "
+            "recovery authority. Run worktree_sync with resolution_action='cancel' to roll "
+            "it back, then clean up.",
+            expected={"syncJournalState": sorted(_TERMINAL_SYNC_STATES)},
+            observed={"syncJournal": path.name, "syncJournalState": state},
+        )
+    return TerminalEnclosureRemovedWorkingState(
+        relativePath=path.name,
+        sha256=_sha256(payload),
+        sizeBytes=len(payload),
+    )
+
+
+def _unowned_canonical_artifact(lifecycle: Path, name: str) -> LifecycleOperationLocationError:
+    """Refuse to delete a canonical-root file this scanner cannot classify.
+
+    The guard's whole intent is that nothing unowned is discarded to make cleanup
+    succeed, so an unrecognised file stays a refusal and never a deletion.
+    """
+
+    return LifecycleOperationLocationError(
+        "terminal-archive-unowned-artifact",
+        (
+            f"{name} is not terminal enclosure evidence, so cleanup will not delete it. "
+            "The scanner archives only enclosure-manifest.json, ADOPTION_RECEIPT, and "
+            "(closeout|integrate|direct-landing)-operation records, and it removes a "
+            "legacy sync-operation.json as sync working state. No automated remedy "
+            "exists: inspect the named file and remove or relocate it, or extend this "
+            "scanner when it is genuine enclosure evidence."
+        ),
+        expected={
+            "canonicalArtifacts": [
+                "enclosure-manifest.json",
+                ADOPTION_RECEIPT,
+                "(closeout|integrate|direct-landing)-operation*.json",
+            ],
+            "removedWorkingState": [SYNC_OPERATION_RECORD_NAME],
+        },
+        observed={"unownedArtifact": name, "lifecycleDirectory": lifecycle.as_posix()},
+    )
 
 
 def _require_archivable_operation(
@@ -776,6 +901,17 @@ def _archive_result(
                     "sizeBytes": item.sizeBytes,
                 }
                 for item in archive.canonicalEntries
+            ],
+            # Working state is deleted with the enclosure, never archived; this is the
+            # report that keeps that deletion from being silent.
+            "removedWorkingState": [
+                {
+                    "relativePath": item.relativePath,
+                    "sha256": item.sha256,
+                    "sizeBytes": item.sizeBytes,
+                    "disposition": item.disposition,
+                }
+                for item in archive.removedWorkingState
             ],
             "nextAction": operation if dry_run else None,
         },
