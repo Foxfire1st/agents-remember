@@ -29,10 +29,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_enclosure_termina
     terminal_enclosure_archive_paths,
     validate_terminal_proof,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
-    LifecycleOperationCompatibilityError,
-    require_lifecycle_operation_compatible,
-)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleLocatorObservation,
     LifecycleOperationLocation,
@@ -105,32 +101,12 @@ def terminal_archive_required_result(
         )
         if existing is not None:
             return existing
-        require_lifecycle_operation_compatible(
-            contract,
-            operation_kind=None,
-            publish_worker_exits=not dry_run,
-        )
         location = require_matching_lifecycle_operation_location(contract)
         return _publish_terminal_archive(
             contract,
             location,
             operation=operation,
             arguments=arguments,
-            dry_run=dry_run,
-        )
-    except LifecycleOperationCompatibilityError as error:
-        return _archive_refusal(
-            contract,
-            operation,
-            _ArchiveRefusal(
-                status="terminal-archive-operation-active",
-                detail=str(error),
-                expected={"activeOperations": []},
-                observed={"activeOperations": list(error.blockers)},
-                next_action="worktree_status",
-                next_tool="worktree_status",
-                next_args=_status_args(contract),
-            ),
             dry_run=dry_run,
         )
     except LifecycleOperationLocationError as error:

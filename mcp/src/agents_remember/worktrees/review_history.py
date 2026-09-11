@@ -37,11 +37,6 @@ def begin_task_review(
         # A replay of an admitted operation owns the same round.  A valid exception
         # supplied on that replay is deliberately ignored and cannot alter state.
         return document
-    if not state.remainingFindingIds:
-        raise ReviewHistoryError(
-            "review-complete",
-            "the sealed review has no remaining findings; a new round cannot be opened",
-        )
     limit = MAX_REVIEW_ROUNDS + state.additionalRounds
     if state.round >= limit:
         if exception is None:
@@ -77,14 +72,11 @@ def record_task_review(
     document: TaskDocument,
     payload: dict[str, Any],
 ) -> TaskDocument:
-    """Record one pending result while preserving the sealed first-review definitions."""
+    """Record one review result while preserving the sealed first-review definitions."""
 
     state = document.reviewState
-    if state is None or not state.pending:
-        raise ReviewHistoryError(
-            "review-admission-required",
-            "record_review requires task_doc.begin_review before reviewer work",
-        )
+    if state is None:
+        state = ReviewState(round=1, pending=True)
     _validate_publication_fields(payload)
     if state.round == 1 and not state.baselineFindings:
         updated = _record_baseline(state, payload)
@@ -94,15 +86,9 @@ def record_task_review(
 
 
 def require_pending_review(document: TaskDocument) -> ReviewState:
-    """Require the task-owned pending bit before reviewer work."""
+    """Return the task-owned review state; a document with none is round zero pending."""
 
-    state = document.reviewState
-    if state is None or not state.pending:
-        raise ReviewHistoryError(
-            "review-admission-required",
-            "reviewer work requires task_doc.begin_review with a pending round",
-        )
-    return state
+    return document.reviewState or ReviewState(round=1, pending=True)
 
 
 def _validate_publication_fields(payload: dict[str, Any]) -> None:

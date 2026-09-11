@@ -32,7 +32,6 @@ from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.task_fact_publication import (
     preview_contract_task_facts,
     publish_contract_task_facts,
-    validate_task_fact_mutation,
 )
 from agents_remember.worktrees.task_resolver import archive_completed_root_task
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
@@ -476,11 +475,7 @@ def _reconcile_task_documents(
         updates["parent"]["subtaskNumber"] = targets.parent_row.number
     projection_effects: list[dict[str, object]] = []
     if dry_run and documents:
-        validate_task_fact_mutation(
-            contract.coordination_root,
-            contract.repo_name,
-            lambda: _require_finalize_sources_current(targets),
-        )
+        _require_finalize_sources_current(targets)
         projection_effects = [
             effect.model_dump(by_alias=True)
             for effect in preview_contract_task_facts(contract, tuple(documents))

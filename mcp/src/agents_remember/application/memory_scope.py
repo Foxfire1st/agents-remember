@@ -27,16 +27,16 @@ from agents_remember.kernel.coordination_context_resolver import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.memory_quality.curator_checklist import report_path_for
+from agents_remember.memory_quality.future_code_candidate import (
+    capture_future_code_candidate,
+)
+from agents_remember.memory_quality.memory_candidate_pair import (
+    resolve_memory_candidate_pair,
+)
 from agents_remember.memory_quality.style.citations import source_index_cache
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.lifecycles.prepared_memory import PreparedCodeExecutionView
 from agents_remember.worktrees.git_worktree_manager import contract_context
-from agents_remember.worktrees.integration.closeout.future_code_candidate import (
-    capture_future_code_candidate,
-)
-from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
-    resolve_memory_candidate_pair,
-)
 from agents_remember.worktrees.integration.closeout.preparation.code_view import (
     observe_selected_prepared_code_view,
 )

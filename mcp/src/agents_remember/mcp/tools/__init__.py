@@ -10,7 +10,6 @@ from __future__ import annotations
 from .base import PUBLIC_TOOLS, RESERVED_TOOLS, TRANSPORT
 from .base import _tool_payload as _tool_payload  # re-exported for tool-response tests
 from .benchmark import codex_benchmark_prepare_payload, codex_benchmark_run_payload
-from .closeout_door import closeout_door_payload
 from .closeout_queue import closeout_queue_payload
 from .core import (
     context_packet_payload,
@@ -99,13 +98,10 @@ from .worktree import (
     worktree_cleanup_payload,
     worktree_closeout_apply_payload,
     worktree_closeout_preview_payload,
-    worktree_enclosure_adopt_payload,
     worktree_integrate_payload,
-    worktree_legacy_operation_payload,
     worktree_operation_control_payload,
     worktree_start_payload,
     worktree_status_payload,
-    worktree_status_wait_payload,
     worktree_sync_payload,
 )
 
@@ -125,7 +121,6 @@ __all__ = [
     "cgc_symbol_search_payload",
     "cgc_visualize_payload",
     "citation_fix_payload",
-    "closeout_door_payload",
     "closeout_queue_payload",
     "codex_benchmark_prepare_payload",
     "codex_benchmark_run_payload",
@@ -192,12 +187,9 @@ __all__ = [
     "worktree_cleanup_payload",
     "worktree_closeout_apply_payload",
     "worktree_closeout_preview_payload",
-    "worktree_enclosure_adopt_payload",
     "worktree_integrate_payload",
-    "worktree_legacy_operation_payload",
     "worktree_operation_control_payload",
     "worktree_start_payload",
     "worktree_status_payload",
-    "worktree_status_wait_payload",
     "worktree_sync_payload",
 ]

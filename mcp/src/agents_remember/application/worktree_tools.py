@@ -21,7 +21,6 @@ from agents_remember.models.closeout.input import CloseoutCorrectedCall, Effecti
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
     GatePolicyRuleSnapshot,
-    IntegrateOperationInput,
     IntegrateStrategy,
     LifecycleOperationKind,
     LifecycleOperationProjection,
@@ -42,10 +41,6 @@ from agents_remember.worktrees.closeout_input import (
     raw_closeout_messages,
     resolve_closeout_plan,
 )
-from agents_remember.worktrees.integration.closeout.operation_admission import (
-    CloseoutOperationAdmission,
-    prevalidate_closeout_operation_admission,
-)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
     LifecycleControlCommand,
     LifecycleControlError,
@@ -64,10 +59,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_request
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationReadError,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (
-    start_or_observe_closeout_operation,
-    start_or_observe_operation,
 )
 from agents_remember.worktrees.sync_transaction_state import observe_sync_operation
 from agents_remember.worktrees.worktree_contract import (
@@ -366,96 +357,14 @@ def worktree_closeout_apply_tool(
     *,
     corrective_dispositions: tuple[RedCatalogDisposition, ...] = (),
 ) -> dict[str, Any]:
-    if approval.dry_run:
-        return _worktree_closeout(
-            config,
-            operation="worktree_closeout_apply",
-            contract_path=contract_path,
-            messages=messages,
-            approval=approval,
-        )
-    return _start_closeout_operation(
-        config, contract_path, messages, approval, corrective_dispositions=corrective_dispositions
-    )
-
-
-def _start_closeout_operation(
-    config: McpRuntimeConfig,
-    contract_path: str,
-    messages: CloseoutCommitMessages,
-    approval: CloseoutApproval,
-    *,
-    corrective_dispositions: tuple[RedCatalogDisposition, ...] = (),
-) -> dict[str, Any]:
-    configured = admit_configured_contract(
+    del corrective_dispositions
+    return _worktree_closeout(
         config,
-        contract_path,
-        require_candidate_identity=False,
+        operation="worktree_closeout_apply",
+        contract_path=contract_path,
+        messages=messages,
+        approval=approval,
     )
-    address = LifecycleOperationPublicAddress("worktree_closeout_apply", "closeout")
-    if isinstance(configured, ConfiguredContractRefused):
-        return project_configured_contract_refusal(
-            configured,
-            operation=address.operation,
-            address=address,
-        )
-    confined = configured.contract_path
-    corrected_arguments = corrected_closeout_arguments(
-        confined.as_posix(), intent_note="<developer intent>"
-    )
-    admission = CloseoutOperationAdmission(
-        config_path=config.config_path.as_posix(),
-        contract_path=confined,
-        messages=raw_closeout_messages(
-            code=messages.code,
-            memory=messages.memory,
-            ledger=messages.ledger,
-        ),
-        approval_note=approval.intent_note,
-        corrective_dispositions=corrective_dispositions,
-        gate_policy=_gate_policy_snapshot(config),
-        corrected_call=CloseoutCorrectedCall(
-            tool="worktree_closeout_apply",
-            arguments=corrected_arguments,
-        ),
-    )
-    try:
-        # Input intent is the outermost public boundary.  Reuse the canonical
-        # admission normalizer here so blank enabled-leg messages refuse before
-        # candidate authority or another lifecycle can influence the result.
-        # The lease-owned start repeats this check against current state.
-        prevalidate_closeout_operation_admission(configured.contract, admission)
-    except (CloseoutInputError, TaskIntentError) as error:
-        return _start_operation_refusal(config, confined, address, error)
-    try:
-        execution = execute_configured_contract_operation(
-            configured,
-            lambda: start_or_observe_closeout_operation(
-                admission,
-                configured.contract,
-            ),
-        )
-    except (
-        CloseoutInputError,
-        LifecycleControlError,
-        LifecycleOperationReadError,
-        TaskIntentError,
-    ) as error:
-        return _start_operation_refusal(
-            config,
-            confined,
-            address,
-            error,
-        )
-    if isinstance(execution, ConfiguredContractRefused):
-        return project_configured_contract_refusal(
-            execution,
-            operation=address.operation,
-            address=address,
-        )
-    return {
-        **_operation_acknowledgement("worktree_closeout_apply", execution),
-    }
 
 
 def worktree_integrate_tool(
@@ -466,55 +375,27 @@ def worktree_integrate_tool(
     ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Start or observe the exact contract-addressed integration operation.
+    """Land the task branches onto their source branches in this process.
 
-    This task-addressed boundary does not make scheduling decisions or claim a
-    closeout door. The operation worker revalidates its exact journal, contract,
-    and protected-ref authority immediately before moving source history.
+    The one integration rule is the moved-parent refusal inside
+    ``git_worktree_manager.integrate_result``: an is_ancestor comparison of the
+    leaf's source ref against the candidate it was verified at. No door
+    authority, publication intent, claim, journal or operation record
+    participates.
+
+    THE REFUSAL IS A RETURN VALUE, NOT AN EXCEPTION: a moved parent produces
+    ``state == "blocked-non-ff"`` carrying "source branch moved" and routing to
+    the documented ``worktree_sync`` remedy, where it previously raised
+    ``RuntimeError("code integration source moved")``.
     """
 
     configured = admit_configured_contract(config, contract_path)
-    address = LifecycleOperationPublicAddress("worktree_integrate", "integrate")
     if isinstance(configured, ConfiguredContractRefused):
         return project_configured_contract_refusal(
             configured,
-            operation=address.operation,
-            address=address,
+            operation="worktree_integrate",
         )
     confined_contract = configured.contract_path
-    if not dry_run:
-        try:
-            execution = execute_configured_contract_operation(
-                configured,
-                lambda: start_or_observe_operation(
-                    IntegrateOperationInput(
-                        configPath=config.config_path.as_posix(),
-                        contractPath=confined_contract.as_posix(),
-                        strategy=strategy,
-                        ledgerCommitMessage=ledger_commit_message,
-                        gatePolicy=_gate_policy_snapshot(config),
-                        autoCompleteSeats=config.retirement.auto_land_on_integration,
-                    ),
-                    configured.contract,
-                ),
-            )
-        except (
-            LifecycleControlError,
-            LifecycleOperationReadError,
-        ) as error:
-            return _start_operation_refusal(
-                config,
-                confined_contract,
-                address,
-                error,
-            )
-        if isinstance(execution, ConfiguredContractRefused):
-            return project_configured_contract_refusal(
-                execution,
-                operation=address.operation,
-                address=address,
-            )
-        return _operation_acknowledgement("worktree_integrate", execution)
     args = git_worktree_manager.WorktreeArgs(
         contract_path=confined_contract,
         strategy=strategy,

@@ -10,7 +10,6 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import git_environment
 from agents_remember.kernel.platform_subprocess import (
@@ -83,10 +82,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_control
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
     closeout_contract_sha256,
     operation_state_fingerprint,
-)
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_lease import (
-    contract_lifecycle_lease,
-    require_lifecycle_operation_compatible,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     located_lifecycle_operation_store,
@@ -182,50 +177,45 @@ def start_or_observe_operation(
             "closeout operations require lease-bound raw-input admission through "
             "start_or_observe_closeout_operation"
         )
-    with contract_lifecycle_lease(admitted_contract):
-        contract, _location = reread_configured_contract(
-            admitted_contract,
-            operation_input.configPath,
+    contract, _location = reread_configured_contract(
+        admitted_contract,
+        operation_input.configPath,
+    )
+    _validate_input_identity(contract, operation_input)
+    door_authority = classify_integration_door_authority(contract, None)
+    if not door_authority.valid:
+        raise LifecycleControlError(
+            door_authority.status,
+            door_authority.detail,
+            expected=door_authority.expected,
+            observed=door_authority.observed,
+            next_action="developer-decision",
         )
-        _validate_input_identity(contract, operation_input)
-        door_authority = classify_integration_door_authority(contract, None)
-        if not door_authority.valid:
-            raise LifecycleControlError(
-                door_authority.status,
-                door_authority.detail,
-                expected=door_authority.expected,
-                observed=door_authority.observed,
-                next_action="developer-decision",
+    store = _store(contract, "integrate")
+    retained = _retained_integration_recovery_record(store.read(), operation_input)
+    if retained is None:
+        integration_authority = snapshot_integration_authority(contract, operation_input)
+        candidate = lifecycle_operation_candidate(
+            LifecycleOperationCandidateBinding(
+                operation_input=operation_input,
+                candidate_state=operation_state_fingerprint(contract),
+                integration_authority=integration_authority,
             )
-        require_lifecycle_operation_compatible(
-            contract,
-            operation_kind=operation_input.kind,
         )
-        store = _store(contract, "integrate")
-        retained = _retained_integration_recovery_record(store.read(), operation_input)
-        if retained is None:
-            integration_authority = snapshot_integration_authority(contract, operation_input)
-            candidate = lifecycle_operation_candidate(
-                LifecycleOperationCandidateBinding(
-                    operation_input=operation_input,
-                    candidate_state=operation_state_fingerprint(contract),
-                    integration_authority=integration_authority,
-                )
-            )
-        else:
-            integration_authority = retained.integrationAuthority
-            candidate = LifecycleOperationCandidate(
-                retained.candidateState,
-                retained.candidateTree,
-                retained.fingerprint,
-            )
-        return _start_or_observe_operation(
-            contract,
-            operation_input,
-            candidate=candidate,
-            integration_authority=integration_authority,
-            execution=_operation_execution(launcher, now),
+    else:
+        integration_authority = retained.integrationAuthority
+        candidate = LifecycleOperationCandidate(
+            retained.candidateState,
+            retained.candidateTree,
+            retained.fingerprint,
         )
+    return _start_or_observe_operation(
+        contract,
+        operation_input,
+        candidate=candidate,
+        integration_authority=integration_authority,
+        execution=_operation_execution(launcher, now),
+    )
 
 
 def start_or_observe_closeout_operation(
@@ -236,36 +226,31 @@ def start_or_observe_closeout_operation(
     now: datetime | None = None,
 ) -> LifecycleOperationProjection:
     """Normalize and admit one closeout generation under its lifecycle lease."""
-    with contract_lifecycle_lease(admitted_contract):
-        current_contract, _location = reread_configured_contract(
-            admitted_contract,
-            admission.config_path,
-        )
-        validated = prevalidate_closeout_operation_admission(current_contract, admission)
-        _validate_input_identity(current_contract, validated.operation_input)
-        store = _store(current_contract, "closeout")
-        _require_pending_initial_door_convergent(current_contract, store.read())
-        operation_input, candidate = resolve_closeout_operation_admission(
-            current_contract,
-            store.read(),
-            admission,
-            validated,
-        )
-        require_lifecycle_operation_compatible(
-            current_contract,
-            operation_kind="closeout",
-        )
-        if candidate.tree is None:
-            raise RuntimeError("closeout admission has no exact code candidate")
-        if current_contract.kind == "series":
-            _require_series_recording_only(current_contract, operation_input)
-        return _start_or_observe_operation(
-            current_contract,
-            operation_input,
-            candidate=candidate,
-            integration_authority=None,
-            execution=_operation_execution(launcher, now),
-        )
+    current_contract, _location = reread_configured_contract(
+        admitted_contract,
+        admission.config_path,
+    )
+    validated = prevalidate_closeout_operation_admission(current_contract, admission)
+    _validate_input_identity(current_contract, validated.operation_input)
+    store = _store(current_contract, "closeout")
+    _require_pending_initial_door_convergent(current_contract, store.read())
+    operation_input, candidate = resolve_closeout_operation_admission(
+        current_contract,
+        store.read(),
+        admission,
+        validated,
+    )
+    if candidate.tree is None:
+        raise RuntimeError("closeout admission has no exact code candidate")
+    if current_contract.kind == "series":
+        _require_series_recording_only(current_contract, operation_input)
+    return _start_or_observe_operation(
+        current_contract,
+        operation_input,
+        candidate=candidate,
+        integration_authority=None,
+        execution=_operation_execution(launcher, now),
+    )
 
 
 def _require_series_recording_only(
@@ -400,73 +385,72 @@ def _claim_closeout_operation(
 ) -> tuple[LifecycleOperationRecord, WorktreeContract, bool, TaskDocumentRef, bool]:
     """Transfer one first-ready waiting generation into root-journal authority."""
 
-    with task_publication_lock(admitted_contract.coordination_root, admitted_contract.repo_name):
-        contract, _location = reread_configured_contract(
-            admitted_contract,
-            operation_input.configPath,
+    contract, _location = reread_configured_contract(
+        admitted_contract,
+        operation_input.configPath,
+    )
+    _validate_input_identity(contract, operation_input)
+    if contract.kind == "series":
+        _require_series_recording_only(contract, operation_input)
+    queued = queued_operation_record(
+        contract,
+        operation_input,
+        candidate,
+        None,
+        execution.timestamp,
+    )
+    door = contract.closeout_door
+    if door is None:
+        raise LifecycleControlError(
+            "closeout-door-missing",
+            "closeout claim requires one current waiting door generation",
+            expected={"disposition": "waiting"},
+            observed={"disposition": "absent"},
+            next_action="developer-decision",
         )
-        _validate_input_identity(contract, operation_input)
-        if contract.kind == "series":
-            _require_series_recording_only(contract, operation_input)
-        queued = queued_operation_record(
+    sprint_ref = door.sprintTaskDocumentRef
+    queued, _claimed_contract = _prepare_closeout_claim(
+        _CloseoutClaimContext(
+            contract=contract,
+            store=store,
+            operation_input=operation_input,
+            candidate=candidate,
+            queued=queued,
+            door=door,
+        )
+    )
+
+    current, created = _create_or_replace_generation(
+        store,
+        queued,
+        creation=_GenerationCreation(
             contract,
             operation_input,
             candidate,
-            None,
-            execution.timestamp,
-        )
-        door = contract.closeout_door
-        if door is None:
-            raise LifecycleControlError(
-                "closeout-door-missing",
-                "closeout claim requires one current waiting door generation",
-                expected={"disposition": "waiting"},
-                observed={"disposition": "absent"},
-                next_action="developer-decision",
-            )
-        sprint_ref = door.sprintTaskDocumentRef
-        queued, _claimed_contract = _prepare_closeout_claim(
-            _CloseoutClaimContext(
-                contract=contract,
-                store=store,
-                operation_input=operation_input,
-                candidate=candidate,
-                queued=queued,
-                door=door,
-            )
-        )
-
-        current, created = _create_or_replace_generation(
+        ),
+    )
+    if not created:
+        current, created = _resume_exact_duplicate_closeout(
             store,
-            queued,
-            creation=_GenerationCreation(
-                contract,
-                operation_input,
-                candidate,
-            ),
+            current,
+            operation_input=operation_input,
+            candidate=candidate,
         )
-        if not created:
-            current, created = _resume_exact_duplicate_closeout(
-                store,
-                current,
-                operation_input=operation_input,
-                candidate=candidate,
-            )
-        if current.status not in {"queued", "running"}:
-            return current, contract, created, sprint_ref, False
-        publication = current.doorPublication
-        refresh_required = publication is not None and publication.state == "intent"
-        recovered_initial_claim = (
-            not created
-            and refresh_required
-            and current.status == "queued"
-            and not current.cancelRequested
-            and current.workerPid is None
-            and current.workerLease is None
-            and current.workerProcessFingerprint is None
-        )
-        current, contract = _publish_initial_closeout_door(contract, store, current)
-        return current, contract, created or recovered_initial_claim, sprint_ref, refresh_required
+    if current.status not in {"queued", "running"}:
+        return current, contract, created, sprint_ref, False
+    publication = current.doorPublication
+    refresh_required = publication is not None and publication.state == "intent"
+    recovered_initial_claim = (
+        not created
+        and refresh_required
+        and current.status == "queued"
+        and not current.cancelRequested
+        and current.workerPid is None
+        and current.workerLease is None
+        and current.workerProcessFingerprint is None
+    )
+    current, contract = _publish_initial_closeout_door(contract, store, current)
+    return current, contract, created or recovered_initial_claim, sprint_ref, refresh_required
 
 
 def _prepare_closeout_claim(

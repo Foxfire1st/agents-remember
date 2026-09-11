@@ -9,15 +9,15 @@ from typing import Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agents_remember.kernel.git_command import run_git
-from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
-from agents_remember.worktrees.integration.closeout.future_code_candidate import (
+from agents_remember.memory_quality.future_code_candidate import (
     FutureCodeCandidateIdentity,
     capture_future_code_candidate,
     require_current_future_code_candidate,
 )
-from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
+from agents_remember.memory_quality.memory_candidate_pair import (
     resolve_memory_candidate_pair,
 )
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.worktrees.modules.git import head_commit, is_ancestor, worktree_candidate_tree
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 

@@ -111,8 +111,11 @@ class IntegrationPublicationIntent(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    operationKey: str = Field(pattern=r"^[0-9a-f]{64}$")
-    generation: int = Field(ge=1)
+    # Journal identity. Absent when the intent carries no door/claim: an
+    # integration that runs in this process has no generation and no operation
+    # key, and nothing that consumes the intent reads either of them.
+    operationKey: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    generation: int = Field(default=0, ge=0)
     preparedAt: str = Field(min_length=1, max_length=128)
     claimState: Literal["not-applicable", "intent", "proven"]
     claimTransferredAt: str | None = Field(default=None, min_length=1, max_length=128)

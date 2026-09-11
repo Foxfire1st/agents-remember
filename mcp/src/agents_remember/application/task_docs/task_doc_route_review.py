@@ -312,30 +312,6 @@ def _enforce_route_review_authority(
         )
 
 
-def _enforce_review_state_authority(
-    operation: str,
-    original: TaskDocument | None,
-    candidate: TaskDocument,
-) -> None:
-    """Keep the bounded review counter behind begin/record transitions."""
-
-    candidate_state = candidate.reviewState
-    original_state = original.reviewState if original is not None else None
-    if operation == "create":
-        if candidate_state is not None:
-            raise TaskDocError(
-                "create cannot author reviewState; use task_doc.begin_review before reviewer work"
-            )
-        return
-    if operation in {"begin_review", "record_review", "record_route_review"}:
-        return
-    if candidate_state != original_state:
-        raise TaskDocError(
-            f"{operation} cannot add, remove, or change reviewState; "
-            "use task_doc.begin_review or task_doc.record_review"
-        )
-
-
 def _validate(data: dict[str, Any]) -> TaskDocument:
     try:
         return TaskDocument.model_validate(data)

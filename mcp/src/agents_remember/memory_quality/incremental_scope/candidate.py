@@ -8,18 +8,18 @@ from tempfile import TemporaryDirectory
 from typing import NoReturn
 
 from agents_remember.errors import FutureCodeCandidateError, MemoryCandidatePairError
+from agents_remember.memory_quality.future_code_candidate import (
+    capture_future_code_candidate,
+)
+from agents_remember.memory_quality.memory_candidate_pair import (
+    resolve_memory_candidate_pair,
+)
 from agents_remember.models.task_document import CanonicalTaskObservation
 from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
 from agents_remember.tasks.store import TaskDocSourceSnapshot, current_task_doc_source
 from agents_remember.tasks.task_intent import task_intent_identity
-from agents_remember.worktrees.integration.closeout.future_code_candidate import (
-    capture_future_code_candidate,
-)
-from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
-    resolve_memory_candidate_pair,
-)
 from agents_remember.worktrees.modules.git import require_git, worktree_candidate_tree
 from agents_remember.worktrees.queue.closeout_projection_members import (
     candidate_task_topology_fingerprint,
@@ -65,11 +65,7 @@ def observe_scope_candidate(
         )
         code_candidate = capture_future_code_candidate(contract).codeCandidateTree
         memory_candidate = _candidate_tree(contract.memory_worktree, contract.worktree_group)
-        task_pair = observe_contract_task_pair(
-            contract,
-            code_candidate=code_candidate,
-            memory_candidate=memory_candidate,
-        )
+        task_pair = observe_contract_task_pair(contract)
     except ScopeUnprovenError:
         raise
     except (FutureCodeCandidateError, MemoryCandidatePairError, OSError, RuntimeError) as exc:
@@ -101,52 +97,18 @@ def observe_scope_candidate(
 
 def observe_contract_task_pair(
     contract: WorktreeContract,
-    *,
-    code_candidate: str,
-    memory_candidate: str,
 ) -> TaskObservationPair:
-    """Read the closeout-door baseline and live R01/R02 candidate from their owners."""
+    """Read the accepted task baseline and its live candidate from the task source.
 
-    door = contract.closeout_door
-    if door is None:
-        _refuse(
-            "task-base-unavailable",
-            "external-memory scope requires one canonical closeout-door task baseline",
-        )
-    if not isinstance(door.taskIntent, TaskIntentIdentity):
-        _refuse("task-base-intent-unavailable", "closeout-door task intent is unavailable")
-    if (
-        door.contractPath != contract.contract_path.as_posix()
-        or door.taskId != contract.task_id
-        or door.taskName != contract.task_name
-        or door.codeBaseCommit != contract.code_base_commit
-        or door.memoryBaseCommit != contract.memory_base_commit
-    ):
-        _refuse(
-            "task-base-identity-mismatch",
-            "closeout-door baseline differs from the exact contract authority",
-        )
-    if door.candidateTree != code_candidate or door.memoryCandidateTree != memory_candidate:
-        _refuse(
-            "task-base-candidate-mismatch",
-            "closeout-door baseline belongs to a different code or memory candidate",
-        )
-    current = observe_contract_task(contract)
-    if current.taskDocumentRef != door.taskDocumentRef:
-        _refuse(
-            "task-document-identity-mismatch",
-            "closeout-door and current task owners resolve different leaf documents",
-        )
-    baseline = CanonicalTaskObservation(
-        taskRoot=contract.task_root.resolve().as_posix(),
-        taskDocumentRef=door.taskDocumentRef,
-        sourceDigest=door.generationId,
-        sourceAuthorityNamespace="agents-remember.closeout-door-generation",
-        sourceValidatorVersion=door.schemaVersion,
-        semanticTopologyDigest=door.taskTopologyFingerprint,
-        taskIntent=door.taskIntent,
-    )
-    return TaskObservationPair(base=baseline, candidate=current)
+    Both sides are the canonical task-document observation. That observation *is*
+    the acceptance record: it is built from the accepted task-document source
+    snapshots, and :func:`observe_contract_task` refuses when the source moved
+    while it was read. Task identity therefore has exactly one owner -- the task
+    document -- instead of a second copy stored in the worktree contract.
+    """
+
+    observed = observe_contract_task(contract)
+    return TaskObservationPair(base=observed, candidate=observed)
 
 
 def observe_contract_task(contract: WorktreeContract) -> CanonicalTaskObservation:

@@ -5,7 +5,6 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
 from agents_remember.tasks.store import write_task_docs
 from agents_remember.worktrees.activation.atomic_series_activation import (
@@ -743,23 +742,19 @@ def _materialize_start_enclosure(
         # The short task CAS is the sole start-versus-discard serialization seam. It proves the
         # parent row still exists and reserves the exact address before code, memory, provider, or
         # task-lifecycle writes. The repository landing lock is intentionally absent here.
-        with task_publication_lock(
+        require_current_start_task_binding(
             planned_contract.coordination_root,
             planned_contract.repo_name,
-        ):
-            require_current_start_task_binding(
-                planned_contract.coordination_root,
-                planned_contract.repo_name,
-                planned_contract.task_root,
-                planned_contract.leaf_id,
-                task_name=args.task_name,
-            )
-            predecessor_contract = _restartable_start_predecessor(planned_contract)
-            reserve_new_lifecycle_operation_location(
-                planned_contract,
-                contract_text=publication_text,
-                predecessor_contract=predecessor_contract,
-            )
+            planned_contract.task_root,
+            planned_contract.leaf_id,
+            task_name=args.task_name,
+        )
+        predecessor_contract = _restartable_start_predecessor(planned_contract)
+        reserve_new_lifecycle_operation_location(
+            planned_contract,
+            contract_text=publication_text,
+            predecessor_contract=predecessor_contract,
+        )
     except TaskLeafBindingError as error:
         return _task_start_authority_refusal(error)
     except LifecycleOperationLocationError as error:
@@ -917,7 +912,6 @@ def _publish_leaf_task_enclosure_binding(
     if getattr(plan, "candidate", None) is not None:
         published = publish_task_fact_mutation(
             contract.coordination_root,
-            contract.repo_name,
             validate=validate,
             projection_scopes=projection_scopes,
             publication=publication,

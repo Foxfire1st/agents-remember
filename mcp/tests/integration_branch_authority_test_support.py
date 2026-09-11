@@ -9,7 +9,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
-from agents_remember.application.lifecycle import lifecycle_operation_worker
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
     load_ledger,
@@ -55,44 +54,14 @@ from agents_remember.worktrees.worktree_contract import (
 )
 from closeout_input_test_support import (
     closeout_operation_input,
+    finish_operation_record,
     publish_closeout_finalization,
     start_closeout_operation,
+    start_operation_record,
 )
 from repository_profile_test_support import AGENTS_REMEMBER_PROFILE_REFERENCE
 from selected_lifecycle_test_support import selected_closeout_operation_input
 from test_source_lineage import _commit_on, _fixture, _git
-
-
-def _closed_leaf_worktree(
-    fixture,
-    _root: Path,
-    *,
-    candidate_commit: bool,
-    publish_closeout_evidence: bool = True,
-):
-    worktree = fixture.leaf_contract.code_worktree
-    worktree.parent.mkdir(parents=True, exist_ok=True)
-    _git(fixture.code_repo, "worktree", "add", worktree.as_posix(), "leaf")
-    if candidate_commit:
-        (worktree / "candidate.txt").write_text("candidate\n", encoding="utf-8")
-        _git(worktree, "add", "candidate.txt")
-        _git(worktree, "commit", "-m", "closed leaf candidate")
-    _git(fixture.code_repo, "switch", "ar/master")
-    closed = replace(
-        fixture.leaf_contract,
-        code_worktree=worktree,
-        code_source_branch="ar/master",
-        code_work_branch="leaf",
-        closeout_status="completed",
-        approved_for_commit=True,
-        human_review_status="approved",
-        code_commit=_git(worktree, "rev-parse", "HEAD"),
-    )
-    write_contract(closed.contract_path, closed)
-    if publish_closeout_evidence:
-        return _publish_completed_closeout_fixture(fixture, closed)
-    fixture.leaf_contract = closed
-    return closed
 
 
 def _closed_external_leaf_worktrees(
@@ -164,8 +133,7 @@ def _publish_completed_closeout_fixture(
     )
     start_closeout_operation(operation_input, launcher=lambda *_: None)
     store = LifecycleOperationStore(operation_record_path(closed.worktree_group, "closeout"))
-    runtime = lifecycle_operation_worker.OperationRuntime(store)
-    runtime.start()
+    start_operation_record(store)
     finalized = replace(
         load_contract(closed.contract_path),
         code_source_branch=final_source_branch or closed.code_source_branch,
@@ -177,8 +145,8 @@ def _publish_completed_closeout_fixture(
         ledger_commit=closed.ledger_commit,
     )
     write_contract(finalized.contract_path, finalized)
-    publish_closeout_finalization(runtime, finalized)
-    runtime.finish({"state": "closed"}, ok=True)
+    publish_closeout_finalization(store, finalized)
+    finish_operation_record(store, {"state": "closed"}, ok=True)
     if finalized.kind == "series":
         fixture.master_contract = finalized
     else:

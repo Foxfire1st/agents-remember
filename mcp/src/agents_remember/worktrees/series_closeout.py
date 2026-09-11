@@ -6,7 +6,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.kernel.memory_ledger import LedgerRow, find_mapping, parse_ledger_text
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import completion_blockers
@@ -69,13 +68,12 @@ def publish_series_integration_under_authority[T](
     topology = TaskDocumentTopology(contract.coordination_root)
     master_ref = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
     _require_atomic_master_complete(topology, master_ref)
-    with integration_authority_lock(contract.coordination_root, contract.repo_name):
-        current = load_contract(contract.contract_path)
-        if current != contract:
-            raise RuntimeError("atomic series contract changed before protected landing")
-        _require_atomic_master_complete(topology, master_ref)
-        _require_every_atomic_leaf_landed(current)
-        return publication()
+    current = load_contract(contract.contract_path)
+    if current != contract:
+        raise RuntimeError("atomic series contract changed before protected landing")
+    _require_atomic_master_complete(topology, master_ref)
+    _require_every_atomic_leaf_landed(current)
+    return publication()
 
 
 def _require_every_atomic_leaf_landed(series: WorktreeContract) -> None:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.worktrees.activation.atomic_series_activation import (
     AtomicSeriesActivationError,
     observe_atomic_series,
@@ -72,23 +71,22 @@ def activate_atomic_series_contract(
     # exact local source tips after that lock is held.
     try:
         fetch = fetch_source_upstreams(contract)
-        with integration_authority_lock(contract.coordination_root, contract.repo_name):
-            current = load_contract(contract.contract_path)
-            if current != contract:
-                return _admission_refusal(
-                    _AdmissionRefusalRequest(
-                        contract=contract,
-                        args=activation_args,
-                        operation=operation,
-                        status="atomic-series-contract-changed",
-                        detail="atomic-series contract changed while source evidence was refreshed",
-                    )
+        current = load_contract(contract.contract_path)
+        if current != contract:
+            return _admission_refusal(
+                _AdmissionRefusalRequest(
+                    contract=contract,
+                    args=activation_args,
+                    operation=operation,
+                    status="atomic-series-contract-changed",
+                    detail="atomic-series contract changed while source evidence was refreshed",
                 )
-            return reconcile_selected_series_under_authority(
-                current,
-                activation_args=activation_args,
-                fetch=fetch,
             )
+        return reconcile_selected_series_under_authority(
+            current,
+            activation_args=activation_args,
+            fetch=fetch,
+        )
     except _EXPECTED_ADMISSION_FAILURES as error:
         return _admission_refusal(
             _AdmissionRefusalRequest(

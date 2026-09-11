@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.models.lifecycles.operation import (
     LifecycleOperationProjection,
     LifecycleOperationRecord,
@@ -67,12 +66,11 @@ def complete_pending_door(
     operation_input = record.input
     if record.operationKind not in {"closeout", "direct-landing"}:
         raise RuntimeError("door publication intent belongs only to schedulable commit operations")
-    with task_publication_lock(contract.coordination_root, contract.repo_name):
-        current_contract, _location = reread_configured_contract(
-            contract,
-            operation_input.configPath,
-        )
-        return complete_pending_door_locked(current_contract, store, record)
+    current_contract, _location = reread_configured_contract(
+        contract,
+        operation_input.configPath,
+    )
+    return complete_pending_door_locked(current_contract, store, record)
 
 
 def complete_pending_door_locked(

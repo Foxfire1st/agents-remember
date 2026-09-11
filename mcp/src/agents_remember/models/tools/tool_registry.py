@@ -30,7 +30,6 @@ from agents_remember.models.context_packet import ContextPacketV2
 from agents_remember.models.core import PingResponse, ServerInfoResponse
 from agents_remember.models.direct_landing import DirectLandingResponse
 from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceResponse
-from agents_remember.models.lifecycles.door_response import CloseoutDoorResponse
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.lifecycles.responses import (
     LifecycleBlockResponse,
@@ -109,13 +108,10 @@ from agents_remember.models.worktree import (
     WorktreeCleanupResponse,
     WorktreeCloseoutApplyResponse,
     WorktreeCloseoutPreviewResponse,
-    WorktreeEnclosureAdoptResponse,
     WorktreeIntegrateResponse,
-    WorktreeLegacyOperationResponse,
     WorktreeOperationControlResponse,
     WorktreeStartResponse,
     WorktreeStatusResponse,
-    WorktreeStatusWaitResponse,
     WorktreeSyncResponse,
 )
 
@@ -184,14 +180,11 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "worktree_start": WorktreeStartResponse,
     "worktree_attach": WorktreeAttachResponse,
     "worktree_status": WorktreeStatusResponse,
-    "worktree_status_wait": WorktreeStatusWaitResponse,
-    "worktree_enclosure_adopt": WorktreeEnclosureAdoptResponse,
     "worktree_sync": WorktreeSyncResponse,
     "worktree_closeout_preview": WorktreeCloseoutPreviewResponse,
     "worktree_closeout_apply": WorktreeCloseoutApplyResponse,
     "worktree_integrate": WorktreeIntegrateResponse,
     "worktree_operation_control": WorktreeOperationControlResponse,
-    "worktree_legacy_operation": WorktreeLegacyOperationResponse,
     "worktree_cleanup": WorktreeCleanupResponse,
     "worktree_abandon": WorktreeAbandonResponse,
     "task_reopen": TaskReopenResponse,
@@ -211,7 +204,6 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "lifecycle_finalize_task": LifecycleFinalizeTaskResponse,
     "task_doc": TaskDocResponse,
     "curator_coherence": CuratorCoherenceResponse,
-    "closeout_door": CloseoutDoorResponse,
     "closeout_queue": CloseoutQueueResponse,
     "direct_landing": DirectLandingResponse,
     "lifecycle_gate": LifecycleGateResponse,

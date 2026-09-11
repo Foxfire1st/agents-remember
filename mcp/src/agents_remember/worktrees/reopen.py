@@ -480,7 +480,6 @@ def _publish_reopen_transition(
     publication = _ReopenPublication(contract, updated)
     published = publish_task_fact_mutation(
         contract.coordination_root,
-        contract.repo_name,
         validate=publication.validate,
         projection_scopes=publication.projection_scopes,
         publication=publication.publish,

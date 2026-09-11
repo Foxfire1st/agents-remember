@@ -1,4 +1,3 @@
-import io
 import json
 import shutil
 import subprocess
@@ -8,7 +7,6 @@ import unittest
 from argparse import Namespace
 from contextlib import (
     contextmanager,
-    redirect_stdout,
 )
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -33,7 +31,6 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.memory import baseline as adopt_baseline
-from agents_remember.models.closeout.input import CloseoutCorrectedCall
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import (
     SprintExecutionGraph,
@@ -44,15 +41,9 @@ from agents_remember.tasks import (
 )
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.store import json_path_for
-from agents_remember.worktrees import git_worktree_manager as worktree_manager
-from agents_remember.worktrees.closeout_input import (
-    normalize_closeout_input,
-    raw_closeout_messages,
-)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
 )
-from agents_remember.worktrees.modules import closeout as closeout_module
 from agents_remember.worktrees.route_review import (
     build_route_review,
     document_ref,
@@ -65,7 +56,6 @@ from agents_remember.worktrees.worktree_contract import (
     contract_publication_text,
     default_contract,
     default_series_contract,
-    load_contract,
     write_contract,
 )
 from closeout_input_test_support import MutationEvidenceRecorder
@@ -828,74 +818,6 @@ def closeout_args(contract, *, dry_run: bool = False) -> Namespace:
     )
 
 
-def closeout_publication_facts(
-    contract: WorktreeContract,
-    args: Namespace,
-) -> closeout_module._CloseoutPublicationFacts:
-    """Build current inputs for the isolated writer component, without certifying gates.
-
-    The real pair, attestation and memory-check owners supply their own facts. The
-    fixture stages its exact candidate for the existing staged-index writer; this
-    fixture does not establish selected-operation or code-gate acceptance.
-    """
-    worktree_args = worktree_manager.WorktreeArgs.from_namespace(args)
-    if worktree_args.operation_progress is None:
-        raise AssertionError("applying closeout mechanics require an evidence recorder")
-    effective = normalize_closeout_input(
-        contract,
-        raw_closeout_messages(
-            code=getattr(args, "code_commit_message", None),
-            memory=getattr(args, "memory_commit_message", None),
-            ledger=getattr(args, "ledger_commit_message", None),
-        ),
-        route="worktree",
-        corrected_call=CloseoutCorrectedCall(
-            tool="worktree_closeout_apply",
-            arguments={"contract_path": contract.contract_path.as_posix()},
-        ),
-    )
-    pair = closeout_module.accepted_closeout_memory_pair(contract)
-    worklist = closeout_module.closeout_changed_paths(contract)
-    route_review = closeout_module.require_current_route_review(contract)
-    attestations = closeout_module._closeout_attestations(contract, worklist, pair.no_impact)
-    memory_quality = closeout_module._memory_quality_before_refresh(contract)
-    git(contract.code_worktree, "add", "-A")
-    return closeout_module._CloseoutPublicationFacts(
-        args=replace(
-            worktree_args,
-            closeout_input=effective,
-            ledger_commit_message="",
-            candidate_tree=git(contract.code_worktree, "write-tree"),
-        ),
-        effective_input=effective,
-        worklist=worklist,
-        quality=closeout_module._CloseoutQualityFacts(
-            attestations=attestations,
-            code_quality_gate={"status": "component-fixture", "acceptanceClaim": False},
-            memory_quality_before_refresh=memory_quality,
-            strict_code_quality_required=True,
-            coherence_no_impact=pair.no_impact,
-            pair_identity=pair.pair_identity,
-        ),
-        route_review=route_review,
-        approval_note=closeout_module._closeout_approval_note(worktree_args),
-    )
-
-
-def run_authorized_closeout_mechanics(args: Namespace) -> int:
-    """Exercise the real writer component; apply results make no gate-acceptance claim."""
-    worktree_args = worktree_manager.WorktreeArgs.from_namespace(args)
-    if worktree_args.dry_run:
-        return worktree_manager.command_closeout(args)
-    assert worktree_args.contract_path is not None
-    contract = load_contract(worktree_args.contract_path)
-    result = closeout_module._publish_closeout_candidate(
-        contract, closeout_publication_facts(contract, args)
-    )
-    print(json.dumps(result.payload, indent=2))
-    return result.returncode
-
-
 def integrate_args(contract, *, dry_run: bool = False) -> Namespace:
     return Namespace(
         contract_path=contract.contract_path,
@@ -904,45 +826,6 @@ def integrate_args(contract, *, dry_run: bool = False) -> Namespace:
         ledger_commit_message="",
         dry_run=dry_run,
     )
-
-
-def integrated_external_contract_fixture(root: Path, *, lifecycle_id: str = ""):
-    contract = dirty_open_external_contract_fixture(root, lifecycle_id=lifecycle_id)
-    with redirect_stdout(io.StringIO()):
-        assert (
-            run_authorized_closeout_mechanics(
-                closeout_args(contract),
-            )
-            == 0
-        )
-    closed = load_contract(contract.contract_path)
-    assert closed.memory_repo_path is not None
-    git(
-        closed.code_repo_path,
-        "update-ref",
-        f"refs/heads/{closed.code_source_branch}",
-        closed.code_commit,
-    )
-    git(
-        closed.memory_repo_path,
-        "update-ref",
-        f"refs/heads/{closed.memory_source_branch}",
-        closed.ledger_commit,
-    )
-    integrated = replace(
-        closed,
-        integration_status="completed",
-        integration_strategy="ff-only",
-        integrated_code_commit=closed.code_commit,
-        integrated_memory_content_commit=closed.memory_content_commit,
-        integrated_ledger_commit=closed.ledger_commit,
-    )
-    write_contract(integrated.contract_path, integrated)
-    # This helper returns a candidate intended for a fresh direct-mechanics invocation. The
-    # preceding closeout changed the memory candidate, so publish the exact-current coherence
-    # authority that the shared preflight now requires before returning it.
-    write_passing_route_review(integrated)
-    return integrated
 
 
 class WorktreeSupportTests(unittest.TestCase):

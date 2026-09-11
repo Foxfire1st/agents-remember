@@ -16,12 +16,19 @@ from agents_remember.errors import (
     MemoryCandidatePairError,
     TaskIntentError,
 )
+from agents_remember.memory_quality.future_code_candidate import (
+    capture_future_code_candidate,
+)
+from agents_remember.memory_quality.memory_candidate_pair import (
+    resolve_memory_candidate_pair,
+)
 from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceAuthority,
     CuratorCoherenceRecord,
     CuratorQualityAttestation,
     CuratorSourceCandidate,
+    ValidatedCuratorCoherence,
     require_memory_quality_attestation_dependencies,
 )
 from agents_remember.models.lifecycles.evidence_dependencies import (
@@ -43,12 +50,6 @@ from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
 from agents_remember.tasks.task_intent import (
     require_current_task_intent,
     task_intent_identity,
-)
-from agents_remember.worktrees.integration.closeout.future_code_candidate import (
-    capture_future_code_candidate,
-)
-from agents_remember.worktrees.integration.closeout.memory_candidate_pair import (
-    resolve_memory_candidate_pair,
 )
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.queue.closeout_projection_members import (
@@ -101,16 +102,6 @@ class _QualityAttestationSource:
     pair_identity: MemoryCandidatePairIdentity
     code_candidate_tree: str
     memory_candidate_tree: str
-
-
-@dataclass(frozen=True)
-class ValidatedCuratorCoherence:
-    authority: CuratorCoherenceAuthority
-    record: CuratorCoherenceRecord
-    record_path: Path
-    report_path: Path
-    record_digest: str
-    evidence: list[EvidenceFact]
 
 
 @dataclass(frozen=True)

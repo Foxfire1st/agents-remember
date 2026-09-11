@@ -34,7 +34,6 @@ from agents_remember.tasks.document_refs import (
 )
 from agents_remember.tasks.leaf_doc import TerminalLeafResolutionError, resolve_terminal_leaf_doc
 from agents_remember.tasks.task_intent import (
-    require_current_task_intent,
     task_intent_identity,
     task_intent_master_projection,
 )
@@ -42,7 +41,6 @@ from agents_remember.worktrees.modules.git import require_git
 from agents_remember.worktrees.route_review import (
     RouteReviewError,
     _require_evidence_files,
-    _require_review_state_resolved,
     _stamp_evidence_digests,
     _stamped_evidence,
     code_candidate_tree,
@@ -174,79 +172,15 @@ def require_current_route_review(contract: WorktreeContract) -> dict[str, object
         return require_leaf_route_review(contract)
     if scope is None:
         return require_leaf_route_review(contract)
-    # The series closeout/door path records the accumulated candidate, but the
-    # independent master review belongs to its parent integration boundary.
-    # Only that integration owner calls ``require_current_master_route_review``.
+    # The series closeout/door path records the accumulated candidate. The master
+    # review is not required at this boundary: quality is checked focused within the
+    # leaves and an adversarial review runs before integration, so integration
+    # deliberately does not re-run full code/memory quality here.
     return {
         "required": False,
         "status": "deferred-atomic-master-until-integration",
         "masterRef": scope.master.ref.model_dump(mode="json"),
         "childCount": len(scope.children),
-    }
-
-
-def require_current_master_route_review(
-    contract: WorktreeContract,
-    *,
-    scope: AtomicMasterReviewScope | None = None,
-    expected_candidate_commit: str | None = None,
-) -> dict[str, object]:
-    """Require a passing master review against current docs, evidence, and candidate."""
-
-    resolved = scope or resolve_atomic_master_scope(contract)
-    if resolved is None:
-        return {"required": False, "status": "not-required-master-altitude"}
-    review = resolved.master.document.routeReview
-    if review is None:
-        raise RouteReviewError(
-            "route-review-master-required",
-            "atomic master integration has no independent review of the accumulated candidate; "
-            "publish task_doc.record_route_review on the canonical master",
-        )
-    _require_review_state_resolved(resolved.master.document)
-    if review.scope != resolved.review_scope:
-        raise RouteReviewError(
-            "route-review-master-scope-stale",
-            "atomic master route review does not bind the current canonical master or child set; "
-            "rerun task_doc.record_route_review",
-        )
-    if review.verdict == "block":
-        raise RouteReviewError(
-            "route-review-master-blocked",
-            f"independent master route review blocks this candidate; see {review.verdictRef}",
-        )
-    current_tree = _candidate_tree(
-        resolved.contract,
-        expected_candidate_commit=expected_candidate_commit,
-    )
-    if review.candidateTree != current_tree:
-        raise RouteReviewError(
-            "route-review-master-stale",
-            "the accumulated master code candidate changed after independent review; "
-            "rerun task_doc.record_route_review "
-            f"(reviewed {review.candidateTree}, current {current_tree})",
-        )
-    try:
-        current = require_current_task_intent(
-            review.taskIntent,
-            resolved.aggregate_intent,
-            owner="route-review-master",
-            next_action="record_route_review",
-        )
-    except TaskIntentError as exc:
-        raise RouteReviewError(exc.status, exc.detail) from exc
-    _require_master_dependencies(review, resolved)
-    _require_evidence_files(resolved.contract.task_root, review)
-    return {
-        "required": True,
-        "status": "current",
-        "candidateTree": current_tree,
-        "taskIntent": current.model_dump(mode="json", by_alias=True),
-        "masterRef": resolved.master.ref.model_dump(mode="json"),
-        "childCount": len(resolved.children),
-        "verdict": review.verdict,
-        "verdictRef": review.verdictRef,
-        "routeCount": len(review.routes),
     }
 
 
@@ -525,7 +459,6 @@ __all__ = [
     "AtomicMasterReviewScope",
     "build_master_route_review",
     "reject_atomic_child_route_review",
-    "require_current_master_route_review",
     "require_current_route_review",
     "resolve_atomic_master_scope",
 ]

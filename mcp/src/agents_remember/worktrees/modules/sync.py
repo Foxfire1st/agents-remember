@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.worktrees.activation.atomic_series_activation_transaction import (
     sync_selected_atomic_series_under_authority,
 )
@@ -73,28 +72,27 @@ def _sync_live(
     args: WorktreeArgs,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult:
-    with integration_authority_lock(contract.coordination_root, contract.repo_name):
-        current = load_contract_from_args(args)
-        if current != contract:
-            return WorktreeCommandResult(
-                2,
-                {
-                    "state": "sync-contract-changed-retry",
-                    "summary": "The contract changed while source evidence was refreshed; "
-                    "retry the same contract-addressed sync.",
-                    "nextTool": "worktree_sync",
-                    "nextArgs": {
-                        "contract_path": current.contract_path.as_posix(),
-                        "dry_run": False,
-                    },
-                    "fetch": fetch,
+    current = load_contract_from_args(args)
+    if current != contract:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "sync-contract-changed-retry",
+                "summary": "The contract changed while source evidence was refreshed; "
+                "retry the same contract-addressed sync.",
+                "nextTool": "worktree_sync",
+                "nextArgs": {
+                    "contract_path": current.contract_path.as_posix(),
+                    "dry_run": False,
                 },
-            )
-        require_sync_worktree(current)
-        if current.kind == "series":
-            return sync_selected_atomic_series_under_authority(
-                current,
-                activation_args=args,
-                fetch=fetch,
-            )
-        return sync_contract_under_authority(current, args, fetch=fetch)
+                "fetch": fetch,
+            },
+        )
+    require_sync_worktree(current)
+    if current.kind == "series":
+        return sync_selected_atomic_series_under_authority(
+            current,
+            activation_args=args,
+            fetch=fetch,
+        )
+    return sync_contract_under_authority(current, args, fetch=fetch)

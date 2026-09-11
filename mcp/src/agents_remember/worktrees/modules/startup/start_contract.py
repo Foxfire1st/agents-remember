@@ -10,7 +10,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
-from agents_remember.controlplane.integration_authority_lock import integration_authority_lock
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.tasks import TaskDocument, read_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
@@ -275,40 +274,37 @@ def ensure_master_series_contract(
     # same host-local/process-local lock across the second existence check, both branch creations,
     # and contract publication.  A concurrent loser therefore adopts the winner's completed edge;
     # it can never enter rollback and delete the winner's contract.
-    with (
-        integration_authority_lock(spec.coordination_root, spec.repo_name),
+    _require_commanded_atomic_master(spec)
+    # Store locks never nest: finish the per-master bootstrap journal transaction
+    # before reading or writing the source-pair activation store.
+    with exclusive_access(
+        _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
     ):
-        _require_commanded_atomic_master(spec)
-        # Store locks never nest: finish the per-master bootstrap journal transaction
-        # before reading or writing the source-pair activation store.
-        with exclusive_access(
-            _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
-        ):
-            recovering = _recover_master_series_bootstrap(spec)
-            if recovering is not None:
-                contract = recovering
+        recovering = _recover_master_series_bootstrap(spec)
+        if recovering is not None:
+            contract = recovering
+        else:
+            try:
+                existing = _existing_master_series_contract(spec)
+            except MasterSeriesContractAdmissionError as error:
+                return _master_series_admission_refusal(
+                    spec,
+                    error,
+                    operation=leaf_admission_operation or "worktree_start",
+                )
+            if existing is not None:
+                contract = existing
             else:
-                try:
-                    existing = _existing_master_series_contract(spec)
-                except MasterSeriesContractAdmissionError as error:
-                    return _master_series_admission_refusal(
-                        spec,
-                        error,
-                        operation=leaf_admission_operation or "worktree_start",
-                    )
-                if existing is not None:
-                    contract = existing
-                else:
-                    contract = _new_master_series_contract(spec)
-                    integration_surfaces(contract)
-                    _publish_master_series_contract(spec, contract)
-        if leaf_admission_operation is not None:
-            require_series_accepting_leaves(contract, operation=leaf_admission_operation)
-        return reconcile_selected_series_under_authority(
-            contract,
-            activation_args=activation_args,
-            fetch=fetch,
-        )
+                contract = _new_master_series_contract(spec)
+                integration_surfaces(contract)
+                _publish_master_series_contract(spec, contract)
+    if leaf_admission_operation is not None:
+        require_series_accepting_leaves(contract, operation=leaf_admission_operation)
+    return reconcile_selected_series_under_authority(
+        contract,
+        activation_args=activation_args,
+        fetch=fetch,
+    )
 
 
 def _bootstrap_preflight_contract(spec: MasterSeriesContractSpec) -> WorktreeContract:

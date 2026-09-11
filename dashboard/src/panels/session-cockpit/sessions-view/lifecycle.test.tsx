@@ -421,3 +421,88 @@ describe("authoritative landed cleanup through rail and palette callers (F5-S5-2
     );
   });
 });
+
+describe("planned retirement closes its own window (unplanned termination keeps it)", () => {
+  // `terminated` alone is not the marker: the retire path layers retirement provenance on the
+  // terminal mark (backend `with_retirement` → `retiredAt`/`retiredBySession`/`retiredReason`/
+  // `retiredEdge`), while an unplanned shutdown (the /terminate route → `mark_terminated`) writes
+  // `terminatedAt` only. A cleanly retired worker has no reason to keep a dead terminal around, so
+  // its window closes itself; a bare `terminated` row is crash evidence worth surfacing and keeps
+  // its window; `landed` is a still-live, still-inspectable session and keeps its window too.
+  it("closes the rail window for a planned retirement and keeps it for a bare termination", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          ({ ok: false, status: 503, json: async () => ({}) }) as Response,
+      ),
+    );
+    const seat = (id: string, extra: Partial<Parameters<typeof catalogRow>[0]> = {}) =>
+      fromTerminalSessionInfo(
+        catalogRow({
+          id,
+          label: id,
+          spawnRole: "worker",
+          seatRole: "worker",
+          status: "running",
+          ...extra,
+        }),
+      );
+    sessionStore.getState().hydrate([
+      seat("seat-retired"),
+      seat("seat-crashed"),
+      seat("seat-stay"),
+      seat("seat-landed", { status: "landed", landedReason: "leaf integrated" }),
+    ]);
+    sessionCockpitStore.setState({ focusedSessionId: null });
+    const { getByTestId, queryByTestId } = render(<SessionsView active />);
+
+    // Every window is open while its row is not a planned retirement.
+    expect(getByTestId("rail-row-seat-retired")).not.toBeNull();
+    expect(getByTestId("rail-row-seat-crashed")).not.toBeNull();
+    expect(getByTestId("rail-row-seat-landed")).not.toBeNull();
+
+    // The retire path (auto_complete_seats → retire_entry): status + retirement provenance.
+    act(() => {
+      sessionStore.getState().patch("seat-retired", {
+        status: "terminated",
+        retiredAt: "2026-07-17T09:05:00Z",
+        retiredBySession: "manager-1",
+        retiredReason: "seat superseded",
+        retiredEdge: "leaf-integration",
+      });
+    });
+    await waitFor(() =>
+      expect(queryByTestId("rail-row-seat-retired")).toBeNull(),
+    );
+
+    // An unplanned shutdown (the /terminate route): `terminated` with NO retirement provenance —
+    // the crash stays visible instead of tombstoning into a hand-closed row.
+    act(() => {
+      sessionStore.getState().patch("seat-crashed", {
+        status: "terminated",
+      });
+    });
+    await waitFor(() =>
+      expect(getByTestId("rail-row-seat-crashed")).not.toBeNull(),
+    );
+
+    // Deliberate tombstone semantics survive: the durable rows remain the ended-chat record the
+    // stage/inspector/residual sweep read — only the retired WINDOW closed.
+    expect(
+      sessionStore
+        .getState()
+        .sessions.map((row) => `${row.id}:${row.status}`)
+        .sort(),
+    ).toEqual([
+      "seat-crashed:terminated",
+      "seat-landed:landed",
+      "seat-retired:terminated",
+      "seat-stay:running",
+    ]);
+
+    // `landed` (a still-live session) and the untouched running seat keep their windows.
+    expect(getByTestId("rail-row-seat-landed")).not.toBeNull();
+    expect(getByTestId("rail-row-seat-stay")).not.toBeNull();
+  });
+});

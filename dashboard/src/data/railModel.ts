@@ -4,7 +4,12 @@ import type {
   LifecycleProjection,
   TaskDocNode,
 } from '../types/projection';
-import { sessionHasPendingInteraction, sessionSeatRole, type OpenSession } from './sessions';
+import {
+  isPlannedRetirement,
+  sessionHasPendingInteraction,
+  sessionSeatRole,
+  type OpenSession,
+} from './sessions';
 import { seatVisualState } from './stateGrammar';
 import { reviewerParentMatches } from './reviewerContext';
 import { isOrchestrationDoc, masterCommandNames, pathDir } from './taskHierarchy';
@@ -203,8 +208,14 @@ function materializeMaster(acc: MasterAccumulator): RailMasterSection {
   };
 }
 
+/**
+ * The rail's open-window population. A PLANNED retirement (`terminated` + retirement provenance)
+ * has no reason to keep a dead terminal around, so its row closes itself; a bare `terminated` is an
+ * unplanned shutdown and stays visible as the crash evidence it is; `landed` is a still-live,
+ * still-inspectable session (its tmux pane was never killed) and is placed in a completed folder.
+ */
 function currentSessions(sessions: readonly OpenSession[]): OpenSession[] {
-  return sessions.filter((session) => session.status !== 'terminated');
+  return sessions.filter((session) => !isPlannedRetirement(session));
 }
 
 interface RailAccumulators {
@@ -449,7 +460,7 @@ export interface SpawnTreeRow {
 }
 
 export function buildSpawnTree(sessions: OpenSession[]): SpawnTreeRow[] {
-  const visible = sessions.filter((session) => session.status !== 'terminated');
+  const visible = sessions.filter((session) => !isPlannedRetirement(session));
   const byParent = new Map<string, OpenSession[]>();
   const ids = new Set(visible.map((session) => session.id));
   const roots: OpenSession[] = [];

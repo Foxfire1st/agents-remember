@@ -102,30 +102,34 @@ def test_public_review_operations_seal_then_shrink_findings(tmp_path: Path) -> N
     assert final["reviewState"]["remainingFindingIds"] == []
 
 
-def test_public_review_api_requires_begin_and_rejects_generic_state_reset(
+def test_public_review_api_records_without_begin_and_replace_can_set_state(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
     _create(config)
 
-    with pytest.raises(TaskDocError, match="review-admission-required"):
-        _call(config, "record_review", review={"verdict": "pass", "findings": []})
+    # record_review no longer requires a prior begin_review; the first result is the
+    # baseline and state is derived from the review records, not gated by them.
+    direct = _call(config, "record_review", review={"verdict": "pass", "findings": []})
+    assert direct["reviewState"]["round"] == 1
+    assert direct["reviewState"]["pending"] is False
 
     _call(config, "begin_review", review={})
-    with pytest.raises(TaskDocError, match="cannot add, remove, or change reviewState"):
-        _call(
-            config,
-            "replace",
-            fields={
-                "id": "review-api",
-                "slug": "review_api",
-                "title": "Review API changed",
-                "kind": "subTask",
-                "repo": "agents-remember",
-                "type": "Code",
-                "createdAt": "2026-01-01T00:00",
-            },
-        )
+    replaced = _call(
+        config,
+        "replace",
+        fields={
+            "id": "review-api",
+            "slug": "review_api",
+            "title": "Review API changed",
+            "kind": "subTask",
+            "repo": "agents-remember",
+            "type": "Code",
+            "createdAt": "2026-01-01T00:00",
+        },
+    )
+    assert replaced["reviewState"]["round"] == 0
+    assert replaced["reviewState"]["pending"] is False
 
 
 def test_successor_cannot_add_a_new_finding(tmp_path: Path) -> None:

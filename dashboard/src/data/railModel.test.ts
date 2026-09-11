@@ -148,12 +148,39 @@ describe('buildRailModel (sprint-local command groups and leaf-subordinate clust
     expect(buildFleetModel().completedUnattached.map((seat) => seat.id)).toEqual(['pi-probe']);
   });
 
-  it('keeps unclaimed non-command seats in unattached; terminated tombstones never render', () => {
-    const model2 = buildRailModel(
-      [...fleet, fromTerminalSessionInfo(catalogRow({ id: 'tomb', status: 'terminated' }))],
-      FLEET_DOCS,
+  it('closes only a PLANNED retirement; an unplanned terminated row keeps its window', () => {
+    // `retire_entry` (auto_complete_seats) layers retirement provenance on the terminal mark.
+    const retired = fromTerminalSessionInfo(
+      catalogRow({
+        id: 'tomb-retired',
+        status: 'terminated',
+        terminatedAt: '2026-07-17T09:05:00Z',
+        retiredAt: '2026-07-17T09:05:00Z',
+        retiredBySession: 'manager-l6',
+        retiredReason: 'seat superseded',
+        retiredEdge: 'leaf-integration',
+      }),
     );
-    expect(model2.unattached.map((seat) => seat.id)).toEqual(['scout']);
+    // The /terminate route (mark_terminated) writes the status only: an unplanned shutdown.
+    const crashed = fromTerminalSessionInfo(
+      catalogRow({ id: 'tomb-crashed', status: 'terminated' }),
+    );
+    const model2 = buildRailModel([...fleet, retired, crashed], FLEET_DOCS);
+    expect(model2.unattached.map((seat) => seat.id)).toEqual(['scout', 'tomb-crashed']);
+    // The provenance-bearing mark alone is not the marker: a `landed` row keeps its window.
+    const landed = fromTerminalSessionInfo(
+      catalogRow({ id: 'tomb-landed', status: 'landed', landedReason: 'leaf integrated' }),
+    );
+    expect(
+      buildRailModel([...fleet, landed], FLEET_DOCS).completedUnattached.map((seat) => seat.id),
+    ).toEqual(['pi-probe', 'tomb-landed']);
+    // The spawn-tree provenance view applies the same rule.
+    expect(buildSpawnTree([...fleet, retired, crashed]).map((row) => row.session.id)).not.toContain(
+      'tomb-retired',
+    );
+    expect(buildSpawnTree([...fleet, crashed]).map((row) => row.session.id)).toContain(
+      'tomb-crashed',
+    );
   });
 
   it('surfaces altitude-invalid role bindings as unattached instead of guessing', () => {

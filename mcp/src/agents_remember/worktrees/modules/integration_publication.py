@@ -6,12 +6,6 @@ from dataclasses import dataclass
 
 from agents_remember.controlplane.enforcement import GateGuard
 from agents_remember.models.lifecycles.operation import IntegrationPublicationIntent
-from agents_remember.worktrees.integration.integration_operation_authority import (
-    require_plane_integration_operation,
-)
-from agents_remember.worktrees.integration.integration_operation_decision import (
-    classify_integration_operation,
-)
 from agents_remember.worktrees.integration.integration_ref_transaction import (
     IntegratedCommits,
     IntegrationSources,
@@ -45,17 +39,6 @@ class IntegrationPublication:
     commits: IntegratedCommits
     intent: IntegrationPublicationIntent
     handover_warning: dict[str, object] | None
-
-
-def protected_integration_decision(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-) -> WorktreeCommandResult | None:
-    """Reclassify all live evidence before any protected publication."""
-
-    record = require_plane_integration_operation(contract, args)
-    decision = classify_integration_operation(contract, record).decision
-    return WorktreeCommandResult(2, decision) if decision is not None else None
 
 
 def publish_journaled_organizational_completion(

@@ -23,6 +23,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.entities im
 from agents_remember.memory_quality.integrity.onboarding_drift_check.inline import (
     extract_inline_onboarding_block,
 )
+from agents_remember.memory_quality.memory_census_scope import MemoryCensusScope
 from agents_remember.models.lifecycles.memory_census import (
     GovernedArtifactIdentity,
     MemoryCensusBlocker,
@@ -30,7 +31,6 @@ from agents_remember.models.lifecycles.memory_census import (
     MemoryCensusRow,
     require_git_relative_path,
 )
-from agents_remember.worktrees.integration.closeout.memory_census_scope import MemoryCensusScope
 
 
 def _git(root: Path, arguments: list[str]) -> str:

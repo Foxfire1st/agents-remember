@@ -5,10 +5,6 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from agents_remember.application.lifecycle.direct_landing import DirectLandingRequest
-from agents_remember.application.lifecycle.legacy_operation_tool import (
-    LegacyOperationAction,
-    LegacyOperationRequest,
-)
 from agents_remember.application.worktree_tools import (
     CloseoutApproval,
     CloseoutCommitMessages,
@@ -31,7 +27,6 @@ from ..tools import (
     worktree_closeout_apply_payload,
     worktree_closeout_preview_payload,
     worktree_integrate_payload,
-    worktree_legacy_operation_payload,
     worktree_operation_control_payload,
 )
 
@@ -219,40 +214,6 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
                 corrective_dispositions=tuple(corrective_dispositions or ()),
                 dry_run=dry_run,
                 caller=caller,
-            ),
-        )
-
-    @server.tool()
-    def worktree_legacy_operation(
-        *,
-        contract_path: str,
-        operation_kind: LifecycleOperationKind,
-        action: LegacyOperationAction,
-        expected_digest: str = "",
-        memory_commit_message: str | None = None,
-        ledger_commit_message: str | None = None,
-        audit_reason: str = "",
-        dry_run: bool = False,
-    ) -> dict[str, Any]:
-        """Inspect, migrate, or archive one exact task-addressed schema-1 record.
-
-        Inspect never mutates. Migrate supports only the proven closeout incident with
-        blank unfinished memory/ledger message cells and publishes one current canonical
-        generation carrying the original bytes and live code-output proof. Archive requires
-        kind-specific terminal/no-live-authority Git and contract evidence. Apply binds the
-        exact digest returned by inspect. Normal lifecycle readers remain schema-3-only.
-        """
-        return worktree_legacy_operation_payload(
-            config,
-            contract_path,
-            LegacyOperationRequest(
-                operation_kind=operation_kind,
-                action=action,
-                expected_digest=expected_digest,
-                memory_commit_message=memory_commit_message,
-                ledger_commit_message=ledger_commit_message,
-                audit_reason=audit_reason,
-                dry_run=dry_run,
             ),
         )
 

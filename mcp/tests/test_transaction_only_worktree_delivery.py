@@ -9,12 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-import pytest
 from agents_remember.application import worktree_tools
-from agents_remember.application.lifecycle.lifecycle_operation_worker import (
-    OperationRuntime,
-    execute_operation,
-)
 from agents_remember.application.worktree_tool_requests import (
     CloseoutApproval,
     CloseoutCommitMessages,
@@ -25,7 +20,7 @@ from agents_remember.kernel.memory_ledger import (
     load_ledger,
     write_ledger,
 )
-from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskEnclosureRef, read_task_doc, write_task_doc
 from agents_remember.worktrees.integration.closeout import curator_coherence as coherence
@@ -41,8 +36,10 @@ from agents_remember.worktrees.worktree_contract import load_contract, write_con
 from closeout_input_test_support import (
     closeout_operation_input,
     ensure_fixture_waiting_door,
+    finish_operation_record,
     publish_closeout_finalization,
     start_closeout_operation,
+    start_operation_record,
 )
 from integration_branch_authority_test_support import (
     _authority_fixture,
@@ -57,7 +54,7 @@ MESSAGES = CloseoutCommitMessages(
 )
 
 
-def _public_config(root: Path, contract) -> object:
+def _public_config(root: Path, contract) -> McpRuntimeConfig:
     """Bind an existing temp Git fixture to MCP authority without a profile."""
 
     code_link = root / contract.repo_name
@@ -82,13 +79,6 @@ def _public_config(root: Path, contract) -> object:
         encoding="utf-8",
     )
     return load_config(config_path)
-
-
-def _run_queued_operation(contract, operation: str):
-    store = LifecycleOperationStore(operation_record_path(contract.worktree_group, operation))
-    running = OperationRuntime(store).start()
-    execute_operation(running, OperationRuntime(store))
-    return load_contract(contract.contract_path), store.read()
 
 
 def _bind_task_without_review(contract) -> None:
@@ -120,7 +110,12 @@ def _assert_no_profile_or_review(config, contract) -> None:
 
 
 def _publish_synthetic_closeout_source(contract, config_path: Path):
-    """Create only the durable source journal that integration's CAS owner consumes."""
+    """Publish the leaf's claimed closeout source for the integration proof.
+
+    Integration is synchronous: it reads the contract's recorded closeout commits
+    (code/memory/ledger) and its claimed source door. The claim still comes from the
+    real admission owner; only the detached queue run is gone.
+    """
 
     # Reuse the real fixture's sprint -> master -> leaf topology.  The lifecycle helper's
     # fallback sprint is intentionally disposable and cannot support integration completion.
@@ -139,23 +134,20 @@ def _publish_synthetic_closeout_source(contract, config_path: Path):
         ),
     )
     write_contract(current.contract_path, current)
-    contract = current
-    operation_input = closeout_operation_input(
-        contract,
-        config_path=config_path,
-        approval_note="fixture records the already prepared transaction",
-    )
     start_closeout_operation(
-        operation_input,
+        closeout_operation_input(
+            current,
+            config_path=config_path,
+            approval_note="fixture records the already prepared transaction",
+        ),
         launcher=lambda *_: None,
     )
-    current = load_contract(contract.contract_path)
+    current = load_contract(current.contract_path)
     store = LifecycleOperationStore(operation_record_path(current.worktree_group, "closeout"))
-    runtime = OperationRuntime(store)
-    runtime.start()
-    publish_closeout_finalization(runtime, current)
-    runtime.finish({"state": "closed"}, ok=True)
-    return load_contract(contract.contract_path)
+    start_operation_record(store)
+    publish_closeout_finalization(store, current)
+    finish_operation_record(store, {"state": "closed"}, ok=True)
+    return load_contract(current.contract_path)
 
 
 def _forbid_acceptance_tools():
@@ -260,26 +252,30 @@ def test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools
             stack.enter_context(patcher)
         # The existing helper publishes a deliberately non-applicable waiting door.  Its
         # disposable sprint has no queue projection, so bypass only that fixture fence while
-        # retaining the public apply admission and worker transaction.
+        # retaining the public apply admission.
         stack.enter_context(
             mock.patch.object(lifecycle_operations, "require_first_ready_generation")
         )
-        stack.enter_context(mock.patch.object(lifecycle_operations, "launch_detached_worker"))
         preview = worktree_tools.worktree_closeout_preview_tool(
             config, contract.contract_path.as_posix(), MESSAGES
         )
         assert preview["ok"] is True, preview
         assert preview["state"] == "would-closeout"
-        queued = worktree_tools.worktree_closeout_apply_tool(
+        applied = worktree_tools.worktree_closeout_apply_tool(
             config,
             contract.contract_path.as_posix(),
             MESSAGES,
             CloseoutApproval(intent_note="developer approved transaction"),
         )
-        assert queued["ok"] is True and queued["state"] == "queued", queued
-        closed, operation = _run_queued_operation(contract, "closeout")
 
-    assert operation is not None and operation.status == "completed", operation
+    # Closeout runs in this process: no detached worker, no operation record. The
+    # three commits and their ancestry are the whole record of what it did.
+    assert applied["ok"] is True, applied
+    assert applied["state"] == "closed", applied
+    closed = load_contract(contract.contract_path)
+    # The reload above rebinds `contract`, so the optional memory worktree and ledger
+    # path must be narrowed again before they are read.
+    assert contract.memory_worktree is not None and contract.ledger_path is not None
     assert closed.closeout_status == "completed"
     assert closed.code_commit and closed.memory_content_commit and closed.ledger_commit
     assert _git(contract.code_worktree, "rev-parse", "HEAD") == closed.code_commit
@@ -287,6 +283,13 @@ def test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools
     mapping = load_ledger(contract.ledger_path).rows[0]
     assert mapping.code_commit == closed.code_commit
     assert mapping.memory_commit == closed.memory_content_commit
+    # The validated messages are the ones that actually landed in the commit objects.
+    assert _git(contract.code_worktree, "log", "-1", "--format=%s") == MESSAGES.code
+    assert _git(contract.memory_worktree, "log", "-1", "--format=%s") == MESSAGES.ledger
+    assert (
+        _git(contract.memory_worktree, "log", "-1", "--format=%s", closed.memory_content_commit)
+        == MESSAGES.memory
+    )
     assert not code_hook_log.exists()
     assert not memory_hook_log.exists()
 
@@ -297,7 +300,12 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
     """Integration merges the prepared code and memory refs without rerunning acceptance."""
 
     fixture = _authority_fixture(tmp_path, external_memory=True)
+    # Narrow the fixture's optional repositories once, where the test establishes them.
+    code_repo = fixture.code_repo
+    assert isinstance(code_repo, Path)
     closed = _closed_external_leaf_worktrees(fixture, tmp_path, publish_closeout_evidence=False)
+    memory_repo = closed.memory_repo_path
+    assert isinstance(memory_repo, Path)
     config = _public_config(tmp_path, closed)
     closed = _publish_synthetic_closeout_source(closed, config.config_path)
     _assert_no_profile_or_review(config, closed)
@@ -306,7 +314,6 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
     with ExitStack() as stack:
         for patcher in _forbid_acceptance_tools():
             stack.enter_context(patcher)
-        stack.enter_context(mock.patch.object(lifecycle_operations, "launch_detached_worker"))
         preview = worktree_tools.worktree_integrate_tool(
             config,
             contract_path=closed.contract_path.as_posix(),
@@ -314,22 +321,32 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
             dry_run=True,
         )
         assert preview["ok"] is True, preview
-        queued = worktree_tools.worktree_integrate_tool(
-            config,
-            contract_path=closed.contract_path.as_posix(),
-            strategy="ff-only",
-            dry_run=False,
+        # Seat retirement must still fire on the SYNCHRONOUS path: its other call
+        # site was the detached worker, so a deletion that removed this trigger
+        # would stop retiring seats silently and a green suite would not catch it.
+        # This fixture disables auto-landing, so enable retirement for the pin.
+        retiring = replace(
+            config, retirement=replace(config.retirement, auto_land_on_integration=True)
         )
-        assert queued["ok"] is True and queued["state"] == "queued", queued
-        integrated, operation = _run_queued_operation(closed, "integrate")
+        with mock.patch.object(worktree_tools, "auto_complete_seats", return_value={}) as retire:
+            applied = worktree_tools.worktree_integrate_tool(
+                retiring,
+                contract_path=closed.contract_path.as_posix(),
+                strategy="ff-only",
+                dry_run=False,
+            )
 
-    assert operation is not None and operation.status == "completed", operation
+    # Integration runs in this process: the refs themselves are the record.
+    assert applied["ok"] is True, applied
+    assert retire.call_args is not None, "auto_complete_seats is no longer reachable"
+    assert retire.call_args.kwargs["edge"] == "leaf-integration"
+    integrated = load_contract(closed.contract_path)
     assert integrated.integration_status == "completed"
     assert integrated.integrated_code_commit == integrated.code_commit
     assert integrated.integrated_memory_content_commit == integrated.memory_content_commit
     assert integrated.integrated_ledger_commit == integrated.ledger_commit
-    assert _git(fixture.code_repo, "rev-parse", "ar/master") == integrated.code_commit
-    assert _git(closed.memory_repo_path, "rev-parse", "ar/master") == integrated.ledger_commit
+    assert _git(code_repo, "rev-parse", "ar/master") == integrated.code_commit
+    assert _git(memory_repo, "rev-parse", "ar/master") == integrated.ledger_commit
     assert not code_hook_log.exists()
     assert not memory_hook_log.exists()
 
@@ -338,47 +355,53 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
     """A source-tip race remains a concrete refusal and cannot publish a torn pair."""
 
     fixture = _authority_fixture(tmp_path, external_memory=True)
+    # Narrow the fixture's optional repositories once, where the test establishes them.
+    code_repo = fixture.code_repo
+    assert isinstance(code_repo, Path)
     closed = _closed_external_leaf_worktrees(fixture, tmp_path, publish_closeout_evidence=False)
+    memory_repo = closed.memory_repo_path
+    assert isinstance(memory_repo, Path)
     config = _public_config(tmp_path, closed)
     closed = _publish_synthetic_closeout_source(closed, config.config_path)
     _assert_no_profile_or_review(config, closed)
-    source_before = _git(fixture.code_repo, "rev-parse", "ar/master")
-    memory_before = _git(closed.memory_repo_path, "rev-parse", "ar/master")
+    source_before = _git(code_repo, "rev-parse", "ar/master")
+    memory_before = _git(memory_repo, "rev-parse", "ar/master")
 
     with ExitStack() as stack:
         for patcher in _forbid_acceptance_tools():
             stack.enter_context(patcher)
-        stack.enter_context(mock.patch.object(lifecycle_operations, "launch_detached_worker"))
-        queued = worktree_tools.worktree_integrate_tool(
+        preview = worktree_tools.worktree_integrate_tool(
+            config,
+            contract_path=closed.contract_path.as_posix(),
+            strategy="ff-only",
+            dry_run=True,
+        )
+        assert preview["ok"] is True, preview
+
+        _git(code_repo, "branch", "race", source_before)
+        _git(code_repo, "switch", "race")
+        (fixture.code_repo / "parallel.txt").write_text("parallel\n", encoding="utf-8")
+        _git(code_repo, "add", "parallel.txt")
+        _git(code_repo, "commit", "-m", "Parallel source change")
+        raced = _git(code_repo, "rev-parse", "HEAD")
+        _git(code_repo, "update-ref", "refs/heads/ar/master", raced, source_before)
+        code_hook_log, memory_hook_log = _install_failing_pre_commit_hooks(closed, tmp_path)
+
+        # The parent moved past the candidate, so the git replay requirement is
+        # true and the integration refuses before any ref moves. The refusal is
+        # a return value, not an exception.
+        refused = worktree_tools.worktree_integrate_tool(
             config,
             contract_path=closed.contract_path.as_posix(),
             strategy="ff-only",
             dry_run=False,
         )
-        assert queued["ok"] is True and queued["state"] == "queued", queued
 
-        _git(fixture.code_repo, "branch", "race", source_before)
-        _git(fixture.code_repo, "switch", "race")
-        (fixture.code_repo / "parallel.txt").write_text("parallel\n", encoding="utf-8")
-        _git(fixture.code_repo, "add", "parallel.txt")
-        _git(fixture.code_repo, "commit", "-m", "Parallel source change")
-        raced = _git(fixture.code_repo, "rev-parse", "HEAD")
-        _git(fixture.code_repo, "update-ref", "refs/heads/ar/master", raced, source_before)
-        code_hook_log, memory_hook_log = _install_failing_pre_commit_hooks(closed, tmp_path)
-
-        store = LifecycleOperationStore(operation_record_path(closed.worktree_group, "integrate"))
-        running = OperationRuntime(store).start()
-        runtime = OperationRuntime(store)
-        with pytest.raises(RuntimeError, match="code integration source moved") as raised:
-            execute_operation(running, runtime)
-        runtime.fail(raised.value)
-        operation = store.read()
-
-    assert operation is not None and operation.status == "failed", operation
-    assert operation.result is not None, operation
-    assert "code integration source moved" in repr(operation.result)
-    assert _git(fixture.code_repo, "rev-parse", "ar/master") == raced
-    assert _git(closed.memory_repo_path, "rev-parse", "ar/master") == memory_before
+    assert refused["ok"] is False, refused
+    assert refused["state"] == "blocked-non-ff", refused
+    assert "source branch moved" in repr(refused)
+    assert _git(code_repo, "rev-parse", "ar/master") == raced
+    assert _git(memory_repo, "rev-parse", "ar/master") == memory_before
     assert not code_hook_log.exists()
     assert not memory_hook_log.exists()
     current = load_contract(closed.contract_path)

@@ -4,18 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.application.lifecycle.legacy_operation_tool import (
-    LegacyOperationRequest,
-    worktree_legacy_operation_tool,
-)
-from agents_remember.application.lifecycle.lifecycle_enclosure_tools import (
-    EnclosureAdoptionRequest,
-    worktree_enclosure_adopt_tool,
-)
-from agents_remember.application.lifecycle.lifecycle_status_wait import (
-    LifecycleStatusWaitRequest,
-    worktree_status_wait_tool,
-)
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tools import (
     DEFAULT_START_EXECUTION,
@@ -105,26 +93,6 @@ def worktree_status_payload(
     )
 
 
-def worktree_status_wait_payload(
-    config: McpRuntimeConfig,
-    request: LifecycleStatusWaitRequest,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "worktree_status_wait",
-        worktree_status_wait_tool(config, request),
-    )
-
-
-def worktree_enclosure_adopt_payload(
-    config: McpRuntimeConfig,
-    request: EnclosureAdoptionRequest,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "worktree_enclosure_adopt",
-        worktree_enclosure_adopt_tool(config, request),
-    )
-
-
 def worktree_closeout_preview_payload(
     config: McpRuntimeConfig,
     contract_path: str,
@@ -183,17 +151,6 @@ def worktree_operation_control_payload(
     return _tool_payload(
         "worktree_operation_control",
         worktree_operation_control_tool(config, request),
-    )
-
-
-def worktree_legacy_operation_payload(
-    config: McpRuntimeConfig,
-    contract_path: str,
-    request: LegacyOperationRequest,
-) -> dict[str, Any]:
-    return _tool_payload(
-        "worktree_legacy_operation",
-        worktree_legacy_operation_tool(config, contract_path, request),
     )
 
 

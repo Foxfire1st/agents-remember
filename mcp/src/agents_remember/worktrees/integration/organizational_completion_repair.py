@@ -8,7 +8,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from agents_remember.controlplane.task_publication_lock import task_publication_lock
 from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
 from agents_remember.models.lifecycles.operation import (
     IntegrationOperationAuthority,
@@ -352,16 +351,15 @@ def _publish_reset(
     evidence: OrganizationalCompletionRepairEvidence,
     record: LifecycleOperationRecord,
 ) -> None:
-    with task_publication_lock(contract.coordination_root, contract.repo_name):
-        current = load_contract(contract.contract_path)
-        require_unchanged_integration_refs(record)
-        classification = _classify_organizational_repair_evidence(current, evidence)
-        if _reset_already_published(classification, evidence=evidence, observed=current):
-            return
-        _require_sources_unmoved(current)
-        _write_reset_contract(contract, reset, evidence)
-        observed = load_contract(contract.contract_path)
-        _require_published_reset(observed, evidence)
+    current = load_contract(contract.contract_path)
+    require_unchanged_integration_refs(record)
+    classification = _classify_organizational_repair_evidence(current, evidence)
+    if _reset_already_published(classification, evidence=evidence, observed=current):
+        return
+    _require_sources_unmoved(current)
+    _write_reset_contract(contract, reset, evidence)
+    observed = load_contract(contract.contract_path)
+    _require_published_reset(observed, evidence)
 
 
 def _reset_already_published(
