@@ -13,6 +13,7 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.errors import HarnessControlError
 from agents_remember.models.conversations.control_wire import (
     AcceptanceState,
     ActivityState,
@@ -197,6 +198,22 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         self.assertEqual({entry.status for entry in entries}, {"running"})
         self.assertEqual({entry.liveness_failures for entry in entries}, {3})
 
+        self.clock.advance(2)
+        sweeper.refresh()
+        entries = self.catalog.list()
+        self.assertEqual({entry.status for entry in entries}, {"exited"})
+        self.assertEqual({entry.liveness_failures for entry in entries}, {4})
+        self.assertEqual({entry.exit_evidence for entry in entries}, {"tmux-command-failed"})
+
+        self.catalog.upsert(_entry("pane-gone"))
+        host.result = TmuxProbeResult(exists=False, evidence="pane-gone")
+        sweeper.refresh()
+        pane_gone = self.catalog.get("pane-gone")
+        assert pane_gone is not None
+        self.assertEqual(pane_gone.status, "exited")
+        self.assertEqual(pane_gone.liveness_failures, 1)
+        self.assertEqual(pane_gone.exit_evidence, "pane-gone")
+
     def test_full_sweep_rate_limit_is_preserved(self) -> None:
         self.catalog.upsert(_entry("full-sweep"))
         host = _FakeHost(TmuxProbeResult(exists=True, evidence="tmux-live"))
@@ -257,6 +274,153 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         sweeper.refresh()
         self.assertEqual(host.calls, 5)
         self.assertEqual(self.catalog.get(starting[4].id).control_state, "ready")
+
+
+    def test_host_failure_series_survives_restart_and_success_resets(self) -> None:
+        self.catalog.upsert(_entry("host-restart"))
+        host = _FakeHost(TmuxProbeResult(exists=False, evidence="tmux-command-failed"))
+        probe = LivenessProbe(
+            hysteresis=TerminalCatalogLivenessConfig(sweep_interval_seconds=0.0),
+            pane_capturer=lambda _tmux_name: "",
+        )
+        sweeper = TerminalCatalogLivenessSweeper(
+            self.catalog,
+            host,
+            now=self.clock,
+            probe=probe,
+        )
+
+        for _ in range(2):
+            sweeper.refresh()
+            self.clock.advance(1)
+
+        restarted = TerminalCatalog(self.catalog.path)
+        persisted = restarted.get("host-restart")
+        assert persisted is not None
+        assert persisted.liveness_first_failed_at is not None
+        self.assertEqual(persisted.liveness_failures, 2)
+        self.assertEqual(persisted.liveness_first_failed_at, "2026-07-07T00:00:00+00:00")
+
+        host.result = TmuxProbeResult(exists=True, evidence="alive")
+        TerminalCatalogLivenessSweeper(
+            restarted,
+            host,
+            now=self.clock,
+            probe=probe,
+        ).refresh()
+        recovered = restarted.get("host-restart")
+        assert recovered is not None
+        self.assertEqual(recovered.status, "running")
+        self.assertEqual(recovered.liveness_failures, 0)
+        self.assertIsNone(recovered.liveness_first_failed_at)
+        self.assertIsNone(recovered.liveness_last_failed_at)
+        self.assertIsNone(recovered.liveness_evidence)
+        self.assertIsNone(recovered.exit_evidence)
+
+    def test_connected_control_reads_require_three_strikes_across_restart_and_reset(self) -> None:
+        connected = replace(
+            _entry("connected"),
+            control_state="ready",
+            control_endpoint=Path("/tmp/connected.sock"),
+            control_activity="idle",
+            control_acceptance="immediate",
+        )
+        self.catalog.upsert(connected)
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+
+        def failed_snapshot(_entry: TerminalCatalogEntry) -> AdapterSnapshot:
+            raise HarnessControlError("bridge unavailable")
+
+        config = TerminalCatalogLivenessConfig(sweep_interval_seconds=0.0)
+        failing_probe = LivenessProbe(
+            hysteresis=config,
+            pane_capturer=lambda _tmux_name: "",
+            snapshot_reader=failed_snapshot,
+        )
+        sweeper = TerminalCatalogLivenessSweeper(
+            self.catalog,
+            host,
+            now=self.clock,
+            probe=failing_probe,
+        )
+        for expected_failures in (1, 2):
+            sweeper.refresh()
+            row = self.catalog.get("connected")
+            assert row is not None
+            assert row.control_raw is not None
+            self.assertEqual(row.control_state, "ready")
+            self.assertEqual(row.control_raw.get("controlReadFailures"), expected_failures)
+            self.clock.advance(1)
+
+        restarted = TerminalCatalog(self.catalog.path)
+        persisted = restarted.get("connected")
+        assert persisted is not None
+        assert persisted.control_raw is not None
+        self.assertEqual(persisted.control_raw.get("controlReadFailures"), 2)
+
+        TerminalCatalogLivenessSweeper(
+            restarted,
+            host,
+            now=self.clock,
+            probe=failing_probe,
+        ).refresh()
+        disconnected = restarted.get("connected")
+        assert disconnected is not None
+        self.assertEqual(disconnected.control_state, "disconnected")
+        self.assertEqual(disconnected.turn_state, "stale")
+        assert disconnected.control_raw is not None
+        self.assertEqual(disconnected.control_raw.get("controlReadFailures"), 3)
+
+        ready_probe = LivenessProbe(
+            hysteresis=config,
+            pane_capturer=lambda _tmux_name: "",
+            snapshot_reader=_ready_snapshot,
+        )
+        TerminalCatalogLivenessSweeper(
+            restarted,
+            host,
+            now=self.clock,
+            probe=ready_probe,
+        ).refresh()
+        recovered = restarted.get("connected")
+        assert recovered is not None
+        self.assertEqual(recovered.control_state, "ready")
+        assert recovered.control_raw is not None
+        self.assertNotIn("controlReadFailures", recovered.control_raw)
+
+    def test_alive_starting_row_survives_delayed_bridge_reads(self) -> None:
+        starting = replace(
+            _entry("starting"),
+            control_state="starting",
+            control_endpoint=Path("/tmp/starting.sock"),
+        )
+        self.catalog.upsert(starting)
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+        bridge_ready = False
+
+        def delayed_snapshot(entry: TerminalCatalogEntry) -> AdapterSnapshot:
+            if not bridge_ready:
+                raise HarnessControlError("bridge still booting")
+            return _ready_snapshot(entry)
+
+        sweeper = self._starting_sweeper(host, snapshot_reader=delayed_snapshot)
+        for expected_failures in range(1, 5):
+            sweeper.refresh()
+            row = self.catalog.get("starting")
+            assert row is not None
+            assert row.control_raw is not None
+            self.assertEqual(row.control_state, "starting")
+            self.assertEqual(row.control_raw.get("controlReadFailures"), expected_failures)
+            self.clock.advance(1)
+
+        bridge_ready = True
+        sweeper.refresh()
+        recovered = self.catalog.get("starting")
+        assert recovered is not None
+        self.assertEqual(recovered.control_state, "ready")
+        assert recovered.control_raw is not None
+        self.assertNotIn("controlReadFailures", recovered.control_raw)
+        self.assertEqual(host.calls, 5)
 
 
 if __name__ == "__main__":
