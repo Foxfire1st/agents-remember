@@ -437,6 +437,25 @@ def _oldest_landed_episode(
     return oldest, accepted_at
 
 
+def _boundary_follows_last_attempt(entry: OperatorInboxEntry, boundary_at: datetime) -> bool:
+    """Whether this boundary is a new delivery opportunity for one pending row.
+
+    A row carrying no attempt clock has nothing to compare against. Only a state-signal row
+    reaches that state with its delivery still owned by this boundary path: rebinding it to a
+    replacement occupant deliberately restarts its attempt clock, so the replacement's current
+    boundary is that row's first admissible one. Every other no-attempt row keeps the ordinary
+    redelivery path and is not a drain candidate.
+    """
+
+    if entry.lastAttemptAt is None:
+        return entry.messageKind == "state-signal"
+    try:
+        attempted_at = datetime.fromisoformat(entry.lastAttemptAt)
+    except ValueError:
+        return False
+    return boundary_at > attempted_at
+
+
 def evaluate_boundary_drain_findings(
     catalog: TerminalCatalogPort,
     current: dict[str, OperatorInboxEntry],
@@ -448,8 +467,6 @@ def evaluate_boundary_drain_findings(
         if entry.state != "pending" or state_signal_landed(entry):
             continue
         if entry.agentId is not None and is_seat_dead(catalog, entry.agentId):
-            continue
-        if entry.lastAttemptAt is None:
             continue
         try:
             target = target_session_for_entry(catalog, entry)
@@ -464,10 +481,9 @@ def evaluate_boundary_drain_findings(
             continue
         try:
             boundary_at = datetime.fromisoformat(target.turn_state_changed_at)
-            attempted_at = datetime.fromisoformat(entry.lastAttemptAt)
         except ValueError:
             continue
-        if boundary_at <= attempted_at:
+        if not _boundary_follows_last_attempt(entry, boundary_at):
             continue
         findings.append(
             AgentNotifierFinding(
