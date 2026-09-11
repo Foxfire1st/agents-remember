@@ -231,6 +231,16 @@ def require_closeout_door_dependencies(
     return observed
 
 
+# The contract-byte digests this model carried while the door lived in the worktree
+# contract. They have no meaning now (the door is journal-owned), so they are not fields
+# and nothing can write them again. Operation records already on disk still carry them.
+_RETIRED_DOOR_CONTRACT_DIGEST_FIELDS = (
+    "expectedBeforeContractSha256",
+    "expectedPublishedContractSha256",
+    "observedPublishedContractSha256",
+)
+
+
 class DoorPublicationEvidence(_StrictModel):
     """Write-once intent/proof for one exact door generation.
 
@@ -241,6 +251,27 @@ class DoorPublicationEvidence(_StrictModel):
 
     state: DoorPublicationState
     generation: CloseoutDoorGeneration
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_contract_digests(cls, value: Any) -> Any:
+        """Read a persisted door publication that predates the contract-byte cut.
+
+        The retired digests are dropped on the way in, exactly as the contract parser
+        ignores a retired ``closeout_door:`` block: the key is never read, and the next
+        rewrite heals it away. Only these three names are tolerated, so every other
+        unknown key stays a hard ``extra_forbidden`` refusal.
+        """
+
+        if not isinstance(value, dict):
+            return value
+        if not any(name in value for name in _RETIRED_DOOR_CONTRACT_DIGEST_FIELDS):
+            return value
+        return {
+            key: item
+            for key, item in value.items()
+            if key not in _RETIRED_DOOR_CONTRACT_DIGEST_FIELDS
+        }
 
 
 class CloseoutDoorRequest(_StrictModel):

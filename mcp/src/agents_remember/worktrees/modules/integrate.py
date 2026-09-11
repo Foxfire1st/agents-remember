@@ -36,6 +36,7 @@ from agents_remember.worktrees.integration.master_review_gate import (
     blocked_integration_payload,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
+from agents_remember.worktrees.modules.automatic_cleanup import run_automatic_cleanup
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     current_branch,
@@ -333,7 +334,7 @@ def _dry_run_result(
             "gateId": preview.guard.gate_id,
             "reason": preview.guard.reason,
         },
-        "cleanup_question": "After successful integration, ask whether to remove the code and memory worktrees plus merged local task branches.",
+        "cleanup_reminder": "On apply, the code and memory worktrees plus merged local task branches are cleaned up automatically.",
     }
     if preview.handover_warning is not None:
         payload["handover_gate_warning"] = preview.handover_warning
@@ -386,15 +387,20 @@ def _integrated_result(
         ContractCells(integration_status="completed", cleanup="pending"),
     )
     write_contract(contract.contract_path, updated)
+    # The developer ruling: a completed leaf is reclaimed by an automatic procedure, not by
+    # a prompt. Cleanup reuses the existing terminal procedure, including its refusal
+    # authority; its outcome is reported here and never fails the landing that preceded it.
+    cleanup = run_automatic_cleanup(updated)
+    observed = load_contract(contract.contract_path)
     payload: dict[str, object] = {
         "state": "integrated",
-        **status_payload(updated),
-        "summary": "Integration completed; ask the developer whether to clean up worktrees and merged local branches.",
+        **status_payload(observed),
+        "summary": f"Integration completed. {cleanup['summary']}",
         "strategy": args.strategy,
         "integrated_code_commit": commits.code,
         "integrated_memory_content_commit": commits.memory_content,
         "integrated_ledger_commit": commits.ledger,
-        "cleanup_question": "Integration completed. Remove the code and memory worktrees plus merged local task branches now?",
+        "cleanup": cleanup,
     }
     if handover_warning is not None:
         payload["handover_gate_warning"] = handover_warning

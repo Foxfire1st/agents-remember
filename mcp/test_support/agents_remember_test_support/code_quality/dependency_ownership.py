@@ -62,6 +62,7 @@ REPOSITORY_TEST_INPUT_CONSUMERS: dict[Path, frozenset[Path]] = {
     AMBIENT_ROLE_RUNNER_PATH: frozenset(
         {
             Path("mcp/tests/test_agents_remember_quality.py"),
+            Path("mcp/tests/test_automatic_post_integration_cleanup.py"),
             Path("mcp/tests/test_certification_lane_bridge.py"),
             Path("mcp/tests/test_clean_quality_executor.py"),
             Path("mcp/tests/test_closeout_certification_entrypoint.py"),
@@ -76,6 +77,7 @@ REPOSITORY_TEST_INPUT_CONSUMERS: dict[Path, frozenset[Path]] = {
             Path("mcp/tests/test_quality_gate_public_contract.py"),
             Path("mcp/tests/test_quality_report_publication_security.py"),
             Path("mcp/tests/test_repository_certification_profiles.py"),
+            Path("mcp/tests/test_retired_door_publication_fields.py"),
             Path("mcp/tests/test_source_lineage.py"),
             Path("mcp/tests/test_transaction_only_worktree_delivery.py"),
             Path("mcp/tests/test_worktree_closeout_quality_gate.py"),
