@@ -399,9 +399,12 @@ def derived_leaf_placement(
     graph: SprintExecutionGraph,
     master_ref: TaskDocumentRef,
     planned_leaf_ids: list[str],
-    completed_refs: set[TaskDocumentRef],
+    resolved_refs: set[TaskDocumentRef],
 ) -> LeafPlacement:
     """Map one master's planned leafs to its segments, deriving unplaced placements.
+
+    ``resolved_refs`` names the masters that reached a terminal decision -- ``Completed`` or
+    ``abandoned`` -- and therefore no longer block a segment.
 
     Pure: unplaced leafs (the master's leaf set grew after authoring) schedule as if
     appended to the master's latest unblocked segment -- latest by derived wave index,
@@ -424,7 +427,7 @@ def derived_leaf_placement(
     derived: dict[str, SprintExecutionNode] = {}
     all_blocked = False
     if unplaced:
-        target, all_blocked = _latest_unblocked_segment(graph, segments, completed_refs)
+        target, all_blocked = _latest_unblocked_segment(graph, segments, resolved_refs)
         derived = {leaf: target for leaf in unplaced}
     return LeafPlacement(placed, unknown, unplaced, derived, all_blocked)
 
@@ -432,7 +435,7 @@ def derived_leaf_placement(
 def _latest_unblocked_segment(
     graph: SprintExecutionGraph,
     segments: list[SprintExecutionNode],
-    completed_refs: set[TaskDocumentRef],
+    resolved_refs: set[TaskDocumentRef],
 ) -> tuple[SprintExecutionNode, bool]:
     analysis = graph._execution_graph_analysis()
     wave_of = {node: index for index, wave in enumerate(analysis.waves) for node in wave}
@@ -444,7 +447,7 @@ def _latest_unblocked_segment(
         predecessors[graph.nodes[successor_index]].append(graph.nodes[predecessor_index])
     ordered = sorted(segments, key=lambda node: (wave_of[node], declaration[node]))
     for candidate in reversed(ordered):
-        if all(predecessor.ref in completed_refs for predecessor in predecessors[candidate]):
+        if all(predecessor.ref in resolved_refs for predecessor in predecessors[candidate]):
             return candidate, False
     return ordered[-1], True
 

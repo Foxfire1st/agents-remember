@@ -409,6 +409,13 @@ class WorktreeIntegrateResponse(WorktreeCommandResponse):
     autoLandedSeats: list[str] = Field(default_factory=list)
 
 
+class WorktreeRecordLandingResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_record_landing"] = "worktree_record_landing"
+    integrationStrategy: str = ""
+    landedCodeCommit: str = ""
+    landingTargets: list[str] = Field(default_factory=list)
+
+
 class WorktreeOperationControlResponse(WorktreeCommandResponse):
     operation: Literal["worktree_operation_control"] = "worktree_operation_control"
     lifecycleOperation: LifecycleOperationProjection | None = None

@@ -148,6 +148,17 @@ class DerivedLeafPlacementTests(unittest.TestCase):
             ],
         )
 
+    def test_a_resolved_predecessor_unblocks_the_later_segment(self) -> None:
+        # The same graph with MASTER-B resolved. A master abandoned without ever producing its
+        # work is exactly this case -- terminal, but never landed -- so it must stop blocking the
+        # segment that waits on it. Otherwise abandonment would deadlock the sprint's queue.
+        placement = derived_leaf_placement(
+            self._graph(edge_to="L2"), MASTER_A, ["L1", "L2", "L3"], {MASTER_B}
+        )
+        self.assertEqual(placement.unplaced_leaf_ids, ("L3",))
+        self.assertEqual(placement.derived["L3"].leafIds, ["L2"])
+        self.assertFalse(placement.derived_all_blocked)
+
 
 class ExecutionTopologySegmentValidationTests(unittest.TestCase):
     """L11-R1/R2/R6: cross-document node-kind legality and partition facts."""

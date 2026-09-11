@@ -8,6 +8,7 @@ from agents_remember.application.lifecycle.direct_landing import DirectLandingRe
 from agents_remember.application.worktree_tools import (
     CloseoutApproval,
     CloseoutCommitMessages,
+    LandedCommits,
     OperationControlRequest,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -28,6 +29,7 @@ from ..tools import (
     worktree_closeout_preview_payload,
     worktree_integrate_payload,
     worktree_operation_control_payload,
+    worktree_record_landing_payload,
 )
 
 
@@ -171,6 +173,33 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
             contract_path,
             strategy=strategy,
             ledger_commit_message=ledger_commit_message,
+            dry_run=dry_run,
+        )
+
+    @server.tool()
+    def worktree_record_landing(
+        *,
+        contract_path: str,
+        landed_code_commit: str,
+        landed_memory_content_commit: str = "",
+        landed_ledger_commit: str = "",
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Record that this task's code landed through a pull request, so its contract stops
+        reading as never-integrated. Use this as the PR tail's recording step, after the merge and
+        after the protected branch is pulled locally: pass the commit the pull request landed.
+        It shares one contract write with worktree_integrate, so the terminal integration cell has
+        a single definition on both routes; nothing is inferred afterwards, because inferring would
+        mean querying GitHub and this cell gates branch retirement. It refuses a commit that is not
+        reachable from a landing target. MUTATING (contract only); preview with dry_run=true."""
+        return worktree_record_landing_payload(
+            config,
+            contract_path,
+            landed=LandedCommits(
+                code=landed_code_commit,
+                memory_content=landed_memory_content_commit,
+                ledger=landed_ledger_commit,
+            ),
             dry_run=dry_run,
         )
 

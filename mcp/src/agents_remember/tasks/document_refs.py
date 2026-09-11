@@ -23,6 +23,7 @@ from agents_remember.tasks.document import (
     TaskDocument,
     derived_leaf_placement,
 )
+from agents_remember.tasks.readiness import master_is_terminal
 from agents_remember.tasks.store import (
     TaskDocSourceSnapshot,
     read_task_doc_with_source,
@@ -427,7 +428,7 @@ class TaskDocumentTopology:
                 "task-execution-topology-migration-required",
                 f"orchestration sprint {sprint_ref.key} has no executionGraph",
             )
-        completed = {master.ref for master in masters if master.document.status == "Completed"}
+        resolved = {master.ref for master in masters if master_is_terminal(master.document)}
         return tuple(
             MasterLeafPlacement(
                 master=master,
@@ -435,7 +436,7 @@ class TaskDocumentTopology:
                     graph,
                     master.ref,
                     [row.number for row in master.document.subTasks],
-                    completed,
+                    resolved,
                 ),
             )
             for master in masters

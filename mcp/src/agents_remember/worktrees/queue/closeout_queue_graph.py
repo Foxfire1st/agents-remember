@@ -24,6 +24,7 @@ from agents_remember.tasks import (
     TaskDocument,
     derived_leaf_placement,
     leaf_placement_facts,
+    master_is_terminal,
 )
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
@@ -88,8 +89,8 @@ def graph_context(
         raise CloseoutQueueError(exc.status, exc.detail) from exc
     graph = topology_index.boundGraph
     sprint = _sprint_with_bound_graph(sprint, graph)
-    completed = {ref for ref, master in master_map.items() if master.document.status == "Completed"}
-    leaf_nodes, leaf_facts = _leaf_node_index(graph, master_map, completed)
+    resolved = {ref for ref, master in master_map.items() if master_is_terminal(master.document)}
+    leaf_nodes, leaf_facts = _leaf_node_index(graph, master_map, resolved)
     try:
         judgments, priorities = planning_authorities(sprint, strict=strict_registers)
     except CloseoutQueueError as exc:
@@ -112,7 +113,7 @@ def graph_context(
         nodes_by_master=_nodes_by_master(graph),
         leaf_nodes=leaf_nodes,
         leaf_facts=leaf_facts,
-        incomplete_predecessors=incomplete_predecessor_map(graph, completed=completed),
+        incomplete_predecessors=incomplete_predecessor_map(graph, resolved=resolved),
         grade_authority=GradeAuthority(sprint, judgments, priorities),
     )
 
@@ -235,7 +236,7 @@ def _nodes_by_master(
 def _leaf_node_index(
     graph: SprintExecutionGraph,
     masters: dict[TaskDocumentRef, ResolvedTaskDocument],
-    completed: set[TaskDocumentRef],
+    resolved: set[TaskDocumentRef],
 ) -> tuple[dict[TaskDocumentRef, SprintExecutionNode], tuple[dict[str, Any], ...]]:
     """Fold authored and derived (L11-R2) leaf placements into one leaf->node index."""
 
@@ -246,7 +247,7 @@ def _leaf_node_index(
             graph,
             master.ref,
             [row.number for row in master.document.subTasks],
-            completed,
+            resolved,
         )
         targets = {**placement.placed, **placement.derived}
         master_dir = Path(master.ref.path).parent
@@ -340,13 +341,15 @@ def master_incomplete_predecessors(
 def incomplete_predecessor_map(
     graph: SprintExecutionGraph,
     *,
-    completed: set[TaskDocumentRef],
+    resolved: set[TaskDocumentRef],
 ) -> dict[SprintExecutionNode, tuple[SprintExecutionNode, ...]]:
     """Build every node's predecessor set in one bounded O(V+E) pass.
 
-    Completion is master-granular: a node counts complete when its master document is
-    Completed. An edge into a segment therefore blocks exactly that segment's leafs
-    until the predecessor's master completes (L11-R3).
+    Resolution is master-granular: a node counts resolved when its master document reached a
+    terminal decision -- ``Completed``, or ``abandoned``. Both stop blocking dependents, which is
+    the point: an abandoned master is never going to produce its work, so leaving its dependents
+    blocked forever would make abandonment worse than doing nothing. An edge into a segment
+    therefore blocks exactly that segment's leafs until the predecessor's master resolves (L11-R3).
     """
 
     incomplete: dict[SprintExecutionNode, list[SprintExecutionNode]] = {
@@ -359,7 +362,7 @@ def incomplete_predecessor_map(
         predecessor = graph.resolve_endpoint(edge.predecessor)
         successors[predecessor].append(graph.resolve_endpoint(edge.successor))
     for predecessor in graph.nodes:
-        if predecessor.ref in completed:
+        if predecessor.ref in resolved:
             continue
         for successor in successors[predecessor]:
             incomplete[successor].append(predecessor)

@@ -104,6 +104,11 @@ def subtask_ref_from_leaf(
 
 def derived_master_status(leaf: TaskDocument) -> DocStatus:
     """Collapse leaf step state to the master's strict status vocabulary."""
+    if leaf.status == "abandoned":
+        # A leaf whose work was deliberately not taken projects that terminal row directly.
+        # Without this the partially-done check below would collapse it back to ``inProgress``,
+        # and a later master sync would silently reopen a row abandoned on purpose.
+        return "abandoned"
     statuses = [step.status for step in leaf.steps]
     statuses.extend(sub.status for step in leaf.steps for sub in step.substeps)
     if statuses and not completion_blockers(leaf):

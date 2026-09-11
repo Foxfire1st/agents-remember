@@ -19,12 +19,24 @@ from agents_remember.models.task_intent import TaskIntentState
 StepStatus = Literal["pending", "inProgress", "blocked", "done"]
 # Document status stays in the ``w-02-light-task-workflow`` template vocabulary so
 # the rendered ``**Status:**`` line is always a valid template value.
-DocStatus = Literal["planning", "inProgress", "Completed"]
+# ``abandoned`` is a second *terminal* value, and it records a decision rather than a failure.
+# On a master document it means nothing of that master integrated, so its work was deliberately
+# not taken; on a master row it means that leaf's work was not taken while the master still
+# completed. It carries no reason of its own: the reason belongs to the declaring operation's
+# audit trail (``skip_step``, ``remove_subtask`` with a disposition, or the decision log).
+DocStatus = Literal["planning", "inProgress", "Completed", "abandoned"]
 # A commanded master's closed execution contract. This is shared by persisted task documents and
 # the served projection so generated clients receive the same finite vocabulary.
 MasterExecutionNature = Literal["organizational", "atomic"]
 
 CompletionUnitStatus = StepStatus | DocStatus
+
+# A master row is resolved once it reaches a terminal state by either route: its work landed and
+# finished (``Completed``), or its work was deliberately not taken (``abandoned``). Both are
+# decisions, so neither is outstanding work and neither may hold its master open. It lives here
+# beside the vocabulary so the task, worktree, and observer planes share one definition instead of
+# each spelling the set out and drifting.
+RESOLVED_MASTER_ROW_STATUSES: frozenset[str] = frozenset({"Completed", "abandoned"})
 
 
 class CompletionBlocker(BaseModel):

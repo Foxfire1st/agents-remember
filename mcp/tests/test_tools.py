@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -7,7 +8,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
+
+from mcp.server.fastmcp import FastMCP
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -22,9 +26,11 @@ from agents_remember.application.provider_tools import (
 )
 from agents_remember.kernel import memory_init as memory_init_module
 from agents_remember.kernel.primitives.runtime_config import (
+    McpRuntimeConfig,
     load_config,
 )
 from agents_remember.mcp import SERVER_VERSION
+from agents_remember.mcp.registration import TOOL_REGISTRARS
 from agents_remember.mcp.tools import (
     PUBLIC_TOOLS,
     cgc_callees_payload,
@@ -35,6 +41,8 @@ from agents_remember.mcp.tools import (
     ping_payload,
     server_info_payload,
 )
+from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
+from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.serving.build_info import ServingBuild
 from test_config import settings_payload
 
@@ -207,6 +215,62 @@ def run_git(repo: Path, args: list[str]) -> None:
     result = subprocess.run(["git", *args], cwd=repo, text=True, capture_output=True, check=False)
     if result.returncode != 0:
         raise AssertionError(result.stderr or result.stdout)
+
+
+class PublicSurfaceInventoryTests(unittest.TestCase):
+    """The advertised inventory and the live registration must agree, in order.
+
+    The ``server_info`` payload reports ``PUBLIC_TOOLS`` itself, so its own assertion is
+    self-referential and cannot catch a tool that is registered but missing from the inventory.
+    That is exactly how ``worktree_record_landing`` shipped advertised-but-unusable: absent from
+    ``PUBLIC_TOOLS`` and absent from ``TOOL_RESPONSE_MODELS``, where ``finalize_tool_response``
+    indexes by tool name -- so the tool was listed and could not return a payload at all.
+    """
+
+    def test_live_registration_matches_the_public_inventory_in_order(self) -> None:
+        server = FastMCP("inventory-probe")
+        for register_tools in TOOL_REGISTRARS:
+            register_tools(server, _permissive_registration_config())
+
+        live = tuple(tool.name for tool in asyncio.run(server.list_tools()))
+
+        # FastMCP publishes in registration order, so this comparison is ordered on purpose:
+        # a tool registered into the wrong group is a reordering bug, not just a missing row.
+        self.assertEqual(live, PUBLIC_TOOLS)
+
+    def test_worktree_record_landing_has_a_response_model_that_validates(self) -> None:
+        self.assertEqual(set(PUBLIC_TOOL_RESPONSE_MODELS), set(PUBLIC_TOOLS))
+        # A name in the inventory but missing from the registry raises KeyError here, which the
+        # surface comparison above cannot see on its own.
+        envelope = finalize_tool_response(
+            "worktree_record_landing",
+            {
+                "ok": True,
+                "state": "recorded",
+                "taskId": "T",
+                "taskName": "task",
+                "contractPath": "/tmp/contract.md",
+                "integrationStrategy": "pr",
+                "landedCodeCommit": "a" * 40,
+                "landingTargets": ["main"],
+                "summary": "recorded",
+            },
+        )
+        self.assertEqual(envelope["operation"], "worktree_record_landing")
+
+
+def _permissive_registration_config() -> McpRuntimeConfig:
+    """A registration-time config stub.
+
+    Every registrar only closes over the config; none validates it while registering. A
+    permissive chain keeps this test about the inventory rather than about building a runtime.
+    """
+
+    class _Stub:
+        def __getattr__(self, name: str) -> object:
+            return _Stub()
+
+    return cast(McpRuntimeConfig, _Stub())
 
 
 if __name__ == "__main__":

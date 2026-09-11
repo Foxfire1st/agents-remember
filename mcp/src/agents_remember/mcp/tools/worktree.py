@@ -10,6 +10,7 @@ from agents_remember.application.worktree_tools import (
     DEFAULT_TASK_BASES,
     CloseoutApproval,
     CloseoutCommitMessages,
+    LandedCommits,
     OperationControlRequest,
     StartExecution,
     TaskBases,
@@ -22,6 +23,7 @@ from agents_remember.application.worktree_tools import (
     worktree_closeout_preview_tool,
     worktree_integrate_tool,
     worktree_operation_control_tool,
+    worktree_record_landing_tool,
     worktree_status_tool,
     worktree_sync_tool,
 )
@@ -139,6 +141,24 @@ def worktree_integrate_payload(
             contract_path=contract_path,
             strategy=strategy,
             ledger_commit_message=ledger_commit_message,
+            dry_run=dry_run,
+        ),
+    )
+
+
+def worktree_record_landing_payload(
+    config: McpRuntimeConfig,
+    contract_path: str,
+    *,
+    landed: LandedCommits,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "worktree_record_landing",
+        worktree_record_landing_tool(
+            config,
+            contract_path=contract_path,
+            landed=landed,
             dry_run=dry_run,
         ),
     )

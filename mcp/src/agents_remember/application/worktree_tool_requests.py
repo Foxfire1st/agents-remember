@@ -118,6 +118,20 @@ class CloseoutCommitMessages:
 
 
 @dataclass(frozen=True)
+class LandedCommits:
+    """The commits a pull request landed, supplied by the tail that completed the merge.
+
+    ``code`` is the commit the PR landed on the protected branch. The memory pair is optional
+    because C-11 carryover may not have run yet when the landing is recorded; the cleanup guard
+    checks carryover separately and refuses until it is done.
+    """
+
+    code: str
+    memory_content: str = ""
+    ledger: str = ""
+
+
+@dataclass(frozen=True)
 class CloseoutApproval:
     """Whether a closeout actually commits, and the note recording why it may."""
 

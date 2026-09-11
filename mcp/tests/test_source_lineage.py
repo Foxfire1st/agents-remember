@@ -25,6 +25,9 @@ from agents_remember.worktrees.integration import (
     integration_resolution_handoff,
     master_review_gate,
 )
+from agents_remember.worktrees.integration.integration_branch_authority import (
+    require_terminal_worktree,
+)
 from agents_remember.worktrees.integration.integration_ref_transaction import IntegrationSources
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
@@ -138,6 +141,51 @@ class SourceLineageTests(unittest.TestCase):
                 cast(str, result.payload["summary"]),
             )
             self.assertEqual(observe_atomic_series(fixture.master_contract).state, "active")
+
+    @pytest.mark.integration
+    def test_attach_resumes_a_live_series_instead_of_refusing_its_kind(self) -> None:
+        # ``kind == "series"`` is not a reason to refuse: it is the series' own altitude. The old
+        # message named that property and hid the real cause, which sent readers after contract
+        # staleness rather than the branch that had been merged and deleted.
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp))
+
+            result = attach_result(
+                WorktreeArgs(contract_path=fixture.master_contract.contract_path)
+            )
+
+            self.assertEqual((result.returncode, result.payload["state"]), (0, "attached"))
+            self.assertTrue(result.payload["attached"])
+            self.assertIn("atomicSeriesActivation", result.payload)
+
+    @pytest.mark.integration
+    def test_attach_names_the_deleted_branch_when_a_series_cannot_be_resumed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp))
+            branch = fixture.master_contract.code_work_branch
+            _git(fixture.code_repo, "branch", "-D", branch)
+
+            result = attach_result(
+                WorktreeArgs(contract_path=fixture.master_contract.contract_path)
+            )
+
+            self.assertEqual(
+                (result.returncode, result.payload["state"]), (2, "series-branch-missing")
+            )
+            self.assertIn(branch, cast(str, result.payload["summary"]))
+            self.assertIn("Re-cut it", cast(str, result.payload["summary"]))
+
+    def test_series_abandon_refuses_while_the_master_task_is_not_terminal(self) -> None:
+        # The LOCR regression. An in-progress master could have its integration branch retired
+        # because the task check ran only for ``worktree_cleanup``, and the sibling enclosure
+        # census cannot see a child that was never started -- such a child has no enclosure.
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = _fixture(Path(tmp))
+
+            with self.assertRaises(RuntimeError) as raised:
+                require_terminal_worktree(fixture.master_contract, operation="worktree_abandon")
+
+            self.assertIn("must be declared abandoned", str(raised.exception))
 
     def test_parent_and_leaf_paths_may_be_sibling_worktrees_of_one_repository(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

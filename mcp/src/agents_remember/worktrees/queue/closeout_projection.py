@@ -22,7 +22,7 @@ from agents_remember.models.closeout.projection import (
 )
 from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import SprintExecutionGraph, TaskDocument
+from agents_remember.tasks import SprintExecutionGraph, TaskDocument, master_is_terminal
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
     TaskDocumentRefError,
@@ -168,7 +168,7 @@ def capture_projection_source(
     if problems:
         return _unreadable_snapshot(tuple(_bounded_problems(problems, sprint_ref)), captured_at)
     classification: ProjectionSourceClassification = (
-        "terminal" if tasks.sprint.document.status == "Completed" else "active"
+        "terminal" if master_is_terminal(tasks.sprint.document) else "active"
     )
     if classification == "terminal":
         return ProjectionSourceSnapshot(

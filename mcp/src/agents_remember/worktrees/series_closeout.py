@@ -329,7 +329,16 @@ def _require_atomic_master_complete(
             "series closeout requires the canonical atomic master task",
         )
     blockers = completion_blockers(master.document)
+    # ``!= "Completed"`` is deliberate here and must stay: closeout proves a *completion* fact.
+    # An ``abandoned`` master is terminal but not complete, and its retirement route is
+    # ``worktree_abandon``, never this one -- so it is named rather than silently accepted.
     if master.document.status != "Completed" or blockers:
+        if master.document.status == "abandoned":
+            raise CloseoutQueueError(
+                "atomic-series-closeout-master-abandoned",
+                "this atomic master is abandoned, not completed; an abandoned master is reclaimed "
+                "with worktree_abandon and is never closed out",
+            )
         raise CloseoutQueueError(
             "atomic-series-closeout-master-incomplete",
             f"atomic master closeout requires exact completion facts: {blockers!r}",

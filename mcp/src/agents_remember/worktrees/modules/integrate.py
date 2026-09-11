@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
 
 from agents_remember.controlplane.enforcement import GateGuard, evaluate_gate
 from agents_remember.controlplane.records import GateRecord
@@ -56,6 +55,7 @@ from agents_remember.worktrees.modules.integration_publication import (
     IntegratePreview,
     IntegrationPublication,
 )
+from agents_remember.worktrees.modules.landing_record import record_landed_integration
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.series_closeout import (
     atomic_series_ledger_prefix,
@@ -67,11 +67,8 @@ from agents_remember.worktrees.source_lineage import (
     source_lineage_for_contract,
 )
 from agents_remember.worktrees.worktree_contract import (
-    ContractCells,
     WorktreeContract,
-    amend_contract,
     load_contract,
-    write_contract,
 )
 
 
@@ -376,17 +373,13 @@ def _integrated_result(
     *,
     handover_warning: dict[str, object] | None,
 ) -> WorktreeCommandResult:
-    updated = amend_contract(
-        replace(
-            contract,
-            integration_strategy=args.strategy,
-            integrated_code_commit=commits.code,
-            integrated_memory_content_commit=commits.memory_content,
-            integrated_ledger_commit=commits.ledger,
-        ),
-        ContractCells(integration_status="completed", cleanup="pending"),
+    updated = record_landed_integration(
+        contract,
+        strategy=args.strategy,
+        code_commit=commits.code,
+        memory_content_commit=commits.memory_content,
+        ledger_commit=commits.ledger,
     )
-    write_contract(contract.contract_path, updated)
     # The developer ruling: a completed leaf is reclaimed by an automatic procedure, not by
     # a prompt. Cleanup reuses the existing terminal procedure, including its refusal
     # authority; its outcome is reported here and never fails the landing that preceded it.

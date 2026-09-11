@@ -80,7 +80,13 @@ def _execution_registration_lines(
     ]
 
 
-_MARKER: dict[str, str] = {"Completed": "✅", "inProgress": "🔨", "planning": "⬜"}
+# A direct lookup, so every ``DocStatus`` value must appear here or rendering raises.
+_MARKER: dict[str, str] = {
+    "Completed": "✅",
+    "inProgress": "🔨",
+    "planning": "⬜",
+    "abandoned": "⛔",
+}
 
 
 def _render_master(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None = None) -> str:

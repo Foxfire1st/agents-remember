@@ -59,7 +59,9 @@ class TaskDocumentsGraphViewProjectionTests(unittest.TestCase):
             ),
         )
 
-    def test_segmented_master_scenario_projects_titles_and_predecessors(self) -> None:
+    def _segmented_scenario(self, *, atomic_status: str) -> None:
+        """Write the sprint and its two masters; only ``atomic-f``'s status varies."""
+
         write_task_doc(
             self.coord / "tasks" / REPO / "sprint",
             _doc(
@@ -118,10 +120,13 @@ class TaskDocumentsGraphViewProjectionTests(unittest.TestCase):
         )
         self._master(
             "atomic-f",
-            status="planning",
+            status=atomic_status,
             nature="atomic",
             rows=[{"number": "F-L1", "name": "F leaf", "status": "planning"}],
         )
+
+    def test_segmented_master_scenario_projects_titles_and_predecessors(self) -> None:
+        self._segmented_scenario(atomic_status="planning")
 
         nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
         sprint = next(node for node in nodes if node.id == "SPRINT")
@@ -142,6 +147,23 @@ class TaskDocumentsGraphViewProjectionTests(unittest.TestCase):
             [(p.predecessorTitle, p.reason) for p in late.predecessors],
             [("Title atomic-f", "the atomic block gates the late segment")],
         )
+
+    def test_abandoned_master_reads_abandoned_and_stops_gating_its_successor(self) -> None:
+        self._segmented_scenario(atomic_status="abandoned")
+
+        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        sprint = next(node for node in nodes if node.id == "SPRINT")
+        view = sprint.executionGraphView
+        self.assertIsNotNone(view)
+        assert view is not None
+        _early, atomic, late = view.nodes
+
+        # Named for what it is: the block was dropped, so it must not read as ready work even
+        # though its own gate never landed.
+        self.assertEqual(atomic.frontierState, "abandoned")
+        # And it stops gating the segment that waited on it. Without that, abandoning a master
+        # would leave its dependents waiting forever -- worse than not abandoning it.
+        self.assertEqual(late.frontierState, "ready")
 
     def test_duplicate_local_leaf_numbers_keep_master_qualified_titles(self) -> None:
         write_task_doc(

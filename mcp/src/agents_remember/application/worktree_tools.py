@@ -92,6 +92,7 @@ from .worktree_tool_requests import (
     CloseoutApproval,
     CloseoutCommitMessages,
     FinalizeTaskDocs,
+    LandedCommits,
     OperationControlRequest,
     StartExecution,
     TaskBases,
@@ -421,6 +422,43 @@ def worktree_integrate_tool(
             )
         )
     return result
+
+
+def worktree_record_landing_tool(
+    config: McpRuntimeConfig,
+    *,
+    contract_path: str,
+    landed: LandedCommits,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Record a landing the remote already performed (the pull-request route).
+
+    ``worktree_integrate`` moves refs locally; a pull request does not. This entry point shares
+    that operation's one contract write (``modules.landing_record``) so the terminal
+    ``integration`` cell has exactly one definition regardless of how the code landed. It refuses
+    a commit that is not reachable from a landing target, so the cell cannot be set from a commit
+    that landed nowhere.
+    """
+
+    configured = admit_configured_contract(config, contract_path)
+    if isinstance(configured, ConfiguredContractRefused):
+        return project_configured_contract_refusal(
+            configured,
+            operation="worktree_record_landing",
+        )
+    args = git_worktree_manager.WorktreeArgs(
+        contract_path=configured.contract_path,
+        approved=not dry_run,
+        dry_run=dry_run,
+        landed_code_commit=landed.code,
+        landed_memory_content_commit=landed.memory_content,
+        landed_ledger_commit=landed.ledger,
+        gate_policy=config.orchestration.gate_policy,
+    )
+    return _worktree_result(
+        "worktree_record_landing",
+        git_worktree_manager.record_landing_result(args),
+    )
 
 
 def worktree_operation_control_tool(

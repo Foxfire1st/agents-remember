@@ -31,6 +31,7 @@ from agents_remember.tasks import (
     json_path_for,
     leaf_placement_facts,
     markdown_path_for,
+    master_is_terminal,
     numbering_drift_hints,
     read_graph_titles,
     read_task_doc_with_source,
@@ -767,9 +768,7 @@ def require_commanded_masters_completed(
     except TaskDocumentRefError as exc:
         raise ExecutionTopologyError(f"{exc.status}: {exc}") from exc
     incomplete = sorted(
-        master.ref.key
-        for master in masters
-        if master.document.status != "Completed" or completion_blockers(master.document)
+        master.ref.key for master in masters if not master_is_terminal(master.document)
     )
     if incomplete:
         raise ExecutionTopologyError(

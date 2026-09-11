@@ -418,10 +418,16 @@ def require_published_organizational_master_completion(
 ) -> None:
     """Prove the final logical edge from its claimed door and root-journal authority."""
 
+    # An ``abandoned`` master is terminal but is not a published completion, so it must not pass
+    # here. The refusal says which, because "completion is not durably published" for a master
+    # that was deliberately dropped sends the reader looking for missing work.
     if document.status != "Completed":
-        raise OrganizationalCompletionError(
-            "organizational master completion is not durably published"
+        detail = (
+            "this organizational master is abandoned, not completed"
+            if document.status == "abandoned"
+            else "organizational master completion is not durably published"
         )
+        raise OrganizationalCompletionError(detail)
 
 
 def _text_sha256(value: str) -> str:

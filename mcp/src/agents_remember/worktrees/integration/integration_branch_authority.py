@@ -205,13 +205,7 @@ def require_terminal_worktree(contract: WorktreeContract, *, operation: str) -> 
     if contract.kind != "series":
         raise RuntimeError(f"{operation} refused: unsupported contract kind {contract.kind!r}")
     authority = require_series_contract_authority(contract, operation=operation)
-    if operation == "worktree_cleanup":
-        master = authority.topology.resolve(authority.master_ref)
-        if master.document.status != "Completed":
-            raise RuntimeError(
-                "worktree_cleanup refused: atomic master task must be Completed before its "
-                "integration branch can retire"
-            )
+    _require_series_task_terminal(authority, contract, operation=operation)
     expected = f"ar/{slugify(contract.task_root.name)}"
     for side in _repository_sides(contract):
         spelled = side.work_branch.strip().removeprefix("refs/heads/")
@@ -234,6 +228,50 @@ def require_terminal_worktree(contract: WorktreeContract, *, operation: str) -> 
         )
         if actual in (default, parent):
             raise RuntimeError(f"{operation} refused: protected parent ref cannot be retired")
+
+
+def _require_series_task_terminal(
+    authority: _MasterAuthority,
+    contract: WorktreeContract,
+    *,
+    operation: str,
+) -> None:
+    """Require the master's own task document to authorize retiring its integration branch.
+
+    This is the only guard that can see *unstarted* work. Its sibling
+    :func:`require_series_children_retired` is an enclosure census -- it walks
+    ``task_root/enclosures`` -- and a child that was never started has no enclosure to walk, so a
+    master whose remaining leaves are all still ``planning`` reads as fully retired there. That
+    is how ``ar/260831_lifecycle-owned-completion-relay`` could have had its branch retired while
+    19 of its 28 leaves had never been created.
+
+    ``worktree_abandon`` used to skip the task check the cleanup arm already had, so an
+    in-progress master was retirable through it.
+    """
+
+    master = authority.topology.resolve(authority.master_ref)
+    status = master.document.status
+    if operation == "worktree_cleanup":
+        if status != "Completed":
+            raise RuntimeError(
+                "worktree_cleanup refused: atomic master task must be Completed before its "
+                "integration branch can retire"
+            )
+        return
+    if status not in {"Completed", "abandoned"}:
+        raise RuntimeError(
+            "worktree_abandon refused: an atomic master must be declared abandoned (or "
+            f"Completed) before its integration branch can retire; it is {status!r}"
+        )
+    if status == "abandoned" and contract.integration_status == "completed":
+        # Abandoning a master asserts that none of its work was taken. Once part of it integrated
+        # that assertion is false, and the honest terminal route is completion: set the rows that
+        # never integrated to ``abandoned`` and complete the master.
+        raise RuntimeError(
+            "worktree_abandon refused: this master already integrated, so its work cannot be "
+            "abandoned as a whole; mark the rows that never integrated abandoned and complete "
+            "the master instead"
+        )
 
 
 def require_series_contract_authority(

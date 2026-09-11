@@ -122,8 +122,17 @@ no_assert = false
 minversion = "9.0"
 # Count parametrized items. Budget growth needs a documented protection/cost tradeoff,
 # not coverage-driven additions or silently raising these limits.
+#
+# 2026-09-11 -- integration 150 -> 200, developer-decided. The population was saturated at 150 by
+# the task-terminal/production-retirement change: two of its cases exercise real service-bound
+# boundaries (a series must resume through worktree_attach instead of refusing its own kind, and a
+# deleted integration branch must be named as the cause) and cannot run in the unit population,
+# which has no bound worktree services. That left zero headroom for the next genuine boundary
+# case, which is what the ceiling is for. Cost measured on this checkout the same day:
+# integration 150 cases + 31 subtests in 31.8s; unit 795 cases + 145 subtests in 56.0s; combined
+# 945 cases in 64.5s. The ceiling is headroom, not a target -- do not fill it.
 unit_case_budget = 1000
-integration_case_budget = 150
+integration_case_budget = 200
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this
 # key to build its pytest step, so the wrapper no longer carries a second copy that can
