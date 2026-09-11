@@ -291,13 +291,17 @@ def _post_integration_phase(contract: WorktreeContract) -> LifecycleGuidance | N
             }
         return {
             "phase": "cleanup-pending",
-            "summary": "Carryover completed; cleanup is still pending.",
+            "summary": (
+                "Carryover completed, but the automatic post-integration cleanup did not "
+                "complete. Read the integration result's cleanup report, clear the refusal, "
+                "then retry worktree_cleanup."
+            ),
             # surfaced onto EngineProcessNode.carryoverDoneAt for the dashboard (05m; 5k renders)
             "carryoverDoneAt": carryover_done_at,
             **next_guidance(
-                "request_cleanup_decision",
+                "retry_cleanup",
                 tool="worktree_cleanup",
-                args=contract_next_args(contract, dry_run=True),
+                args=contract_next_args(contract),
             ),
         }
     return None

@@ -48,7 +48,7 @@ NextOperation = Literal[
     "request_integration_decision",
     "developer_decision",
     "request_carryover_decision",
-    "request_cleanup_decision",
+    "retry_cleanup",
     "done",
 ]
 NextTool = Literal[
