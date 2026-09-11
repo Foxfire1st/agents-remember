@@ -6,7 +6,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -21,6 +21,7 @@ from agents_remember.models.conversations.control_wire import (
     ControlState,
 )
 from agents_remember.models.terminal_catalog import (
+    DEFAULT_LIVENESS_SWEEP_INTERVAL_SECONDS,
     TerminalCatalogEntry,
     TerminalSessionStatus,
 )
@@ -28,6 +29,7 @@ from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
 )
 from agents_remember.serving.terminal_liveness import (
+    DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS,
     LivenessProbe,
     SnapshotReader,
     TerminalCatalogLivenessConfig,
@@ -194,6 +196,67 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         entries = self.catalog.list()
         self.assertEqual({entry.status for entry in entries}, {"running"})
         self.assertEqual({entry.liveness_failures for entry in entries}, {3})
+
+    def test_full_sweep_rate_limit_is_preserved(self) -> None:
+        self.catalog.upsert(_entry("full-sweep"))
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="tmux-live"))
+        sweeper = self._sweeper(
+            host,
+            sweep_interval_seconds=DEFAULT_LIVENESS_SWEEP_INTERVAL_SECONDS,
+        )
+
+        sweeper.refresh()
+        self.assertEqual(host.calls, 1)
+
+        self.clock.advance(DEFAULT_LIVENESS_SWEEP_INTERVAL_SECONDS - 1)
+        sweeper.refresh()
+        self.assertEqual(host.calls, 1)
+
+        self.clock.advance(1)
+        sweeper.refresh()
+        self.assertEqual(host.calls, 2)
+
+    def test_starting_rows_use_one_second_fast_path_and_four_row_cap(self) -> None:
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="tmux-live"))
+        sweeper = self._starting_sweeper(host)
+        sweeper.refresh()
+        self.assertEqual(host.calls, 0)
+
+        starting = [
+            replace(
+                _entry(f"starting-{index}"),
+                control_state="starting",
+                control_endpoint=self.tmp / f"control-{index}.sock",
+                control_activity="unknown",
+                control_acceptance="unknown",
+            )
+            for index in range(5)
+        ]
+        for entry in starting:
+            self.catalog.upsert(entry)
+
+        self.clock.advance(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS)
+        sweeper.refresh()
+        entries = {entry.id: entry for entry in self.catalog.list()}
+        self.assertEqual(host.calls, 4)
+        self.assertEqual(
+            {entries[entry.id].control_state for entry in starting[:4]},
+            {"ready"},
+        )
+        self.assertEqual(entries[starting[4].id].control_state, "starting")
+
+        self.clock.advance(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS / 2)
+        sweeper.refresh()
+        self.assertEqual(host.calls, 4)
+        self.assertEqual(
+            self.catalog.get(starting[4].id).control_state,
+            "starting",
+        )
+
+        self.clock.advance(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS / 2)
+        sweeper.refresh()
+        self.assertEqual(host.calls, 5)
+        self.assertEqual(self.catalog.get(starting[4].id).control_state, "ready")
 
 
 if __name__ == "__main__":
