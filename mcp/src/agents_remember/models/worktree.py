@@ -136,10 +136,21 @@ class SyncOperationProjection(StrictResponseModel):
 
 
 class SyncResolutionProjection(StrictResponseModel):
+    """What the agent must settle, and whether a parked candidate is part of it.
+
+    ``wipRestore`` marks a resolution that is re-applying the work-in-progress the sync
+    parked rather than a plain merge conflict. ``sync_transaction_results`` has emitted it
+    since it introduced the parked-WIP path; this field is what makes that path able to
+    describe itself. Without it the model refused its own projection with
+    ``extra_forbidden``, so a resolution that needed agent action surfaced as a
+    serialization error instead of the guidance the agent needed.
+    """
+
     side: SyncSide
     owner: Literal["agent"] = "agent"
     worktree: str | None = None
     files: list[str] = Field(default_factory=list)
+    wipRestore: bool = False
 
 
 class AtomicSeriesActivationFact(StrictResponseModel):

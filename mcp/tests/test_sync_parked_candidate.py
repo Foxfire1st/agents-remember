@@ -17,6 +17,7 @@ from unittest import mock
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.models.worktree import SyncResolutionProjection
 from agents_remember.worktrees import sync_transaction
 from agents_remember.worktrees.sync_transaction_git import SyncGitProofError
 from agents_remember.worktrees.worktree_contract import load_contract
@@ -87,6 +88,16 @@ class ParkedCandidateTests(unittest.TestCase):
             self.assertEqual(retained.payload["state"], "sync-resolution-required")
             self.assertTrue(section(retained.payload, "resolution")["wipRestore"])
             self.assertIn("README.md", section(retained.payload, "resolution")["files"])
+            # The raw dict assertions above pass even when the public projection refuses the
+            # payload, which is exactly how a producer emitting `resolution.wipRestore` while
+            # `SyncResolutionProjection` did not declare it stayed invisible: the agent got
+            # `extra_forbidden` instead of the resolution it needed. Validate the projection
+            # model, not just the dict.
+            projected = SyncResolutionProjection.model_validate(
+                section(retained.payload, "resolution")
+            )
+            self.assertTrue(projected.wipRestore)
+            self.assertIn("README.md", projected.files)
             self.assertNotEqual(git(worktree, "stash", "list"), "")
 
             cancelled = fixture.sync(resolution_action="cancel")
