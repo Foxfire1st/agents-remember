@@ -42,13 +42,15 @@ jobs:
         run: |
           . scripts/python-runtime-contract.env
           python -m pip install --disable-pip-version-check "uv==$AR_UV_VERSION"
-          UV_PROJECT_ENVIRONMENT=mcp/.venv uv sync \
+          # Absolute: `--project mcp` resolves a relative UV_PROJECT_ENVIRONMENT against the
+          # project directory, which would create the environment at mcp/mcp/.venv.
+          UV_PROJECT_ENVIRONMENT="$PWD/mcp/.venv" uv sync \
             --project mcp \
             --python "$(command -v python)" \
             --no-managed-python \
             --frozen \
             --all-extras
-          uv pip check --python mcp/.venv/bin/python
+          uv pip check --python "$PWD/mcp/.venv/bin/python"
 
       - name: Install dashboard dependencies
         working-directory: dashboard
