@@ -7,8 +7,10 @@ import sys
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -160,6 +162,98 @@ class TerminalCatalogTests(unittest.TestCase):
                 checked_at=datetime.fromisoformat("2026-07-12T10:02:00+00:00"),
             )
         self.assertEqual(other.get("worker").status, "terminated")  # type: ignore[union-attr]
+
+    def test_clean_batch_does_not_replace_catalog(self) -> None:
+        self.catalog.upsert(_entry("clean"))
+        entry = self.catalog.get("clean")
+        assert entry is not None
+
+        with (
+            patch.object(self.catalog, "_write_disk", wraps=self.catalog._write_disk) as write_disk,
+            self.catalog.batch(),
+        ):
+            self.catalog.upsert(entry)
+            self.catalog.record_liveness_probe(
+                "clean",
+                alive=True,
+                checked_at=datetime.fromisoformat("2026-07-12T10:02:00+00:00"),
+            )
+
+        self.assertEqual(write_disk.call_count, 0)
+
+    def test_list_committed_bypasses_batch_buffer_without_changing_list_semantics(self) -> None:
+        self.catalog.upsert(_entry("snapshot"))
+        committed = self.catalog.get("snapshot")
+        assert committed is not None
+        updated = replace(committed, label="working buffer")
+
+        with self.catalog.batch():
+            self.catalog.upsert(updated)
+            self.assertEqual(self.catalog.get("snapshot").label, "working buffer")  # type: ignore[union-attr]
+            self.assertEqual(self.catalog.list_committed()[0], committed)
+
+        self.assertEqual(self.catalog.get("snapshot").label, "working buffer")  # type: ignore[union-attr]
+
+    def test_dirty_batch_replaces_catalog_once(self) -> None:
+        self.catalog.upsert(_entry("dirty-first"))
+        self.catalog.upsert(_entry("dirty-second"))
+
+        with (
+            patch.object(self.catalog, "_write_disk", wraps=self.catalog._write_disk) as write_disk,
+            self.catalog.batch(),
+        ):
+            self.catalog.record_liveness_probe(
+                "dirty-first",
+                alive=False,
+                checked_at=datetime.fromisoformat("2026-07-12T10:02:00+00:00"),
+                evidence="tmux-command-failed",
+            )
+            self.catalog.record_liveness_probe(
+                "dirty-second",
+                alive=False,
+                checked_at=datetime.fromisoformat("2026-07-12T10:02:00+00:00"),
+                evidence="tmux-command-failed",
+            )
+
+        self.assertEqual(write_disk.call_count, 1)
+        first = self.catalog.get("dirty-first")
+        second = self.catalog.get("dirty-second")
+        assert first is not None and second is not None
+        self.assertEqual(first.liveness_failures, 1)
+        self.assertEqual(second.liveness_failures, 1)
+
+    def test_dirty_partial_batch_flushes_once_and_releases_for_retry(self) -> None:
+        self.catalog.upsert(_entry("first"))
+        self.catalog.upsert(_entry("later"))
+
+        with (
+            patch.object(self.catalog, "_write_disk", wraps=self.catalog._write_disk) as write_disk,
+            self.assertRaisesRegex(RuntimeError, "stop after first row"),
+            self.catalog.batch(),
+        ):
+            self.catalog.record_liveness_probe(
+                "first",
+                alive=False,
+                checked_at=datetime.fromisoformat("2026-07-12T10:02:00+00:00"),
+                evidence="tmux-command-failed",
+            )
+            raise RuntimeError("stop after first row")
+
+        self.assertEqual(write_disk.call_count, 1)
+        self.assertEqual(self.catalog.get("first").liveness_failures, 1)  # type: ignore[union-attr]
+        self.assertEqual(self.catalog.get("later").liveness_failures, 0)  # type: ignore[union-attr]
+
+        with (
+            patch.object(self.catalog, "_write_disk", wraps=self.catalog._write_disk) as write_disk,
+            self.catalog.batch(),
+        ):
+            self.catalog.record_liveness_probe(
+                "later",
+                alive=False,
+                checked_at=datetime.fromisoformat("2026-07-12T10:02:00+00:00"),
+                evidence="tmux-command-failed",
+            )
+        self.assertEqual(write_disk.call_count, 1)
 
 
 if __name__ == "__main__":

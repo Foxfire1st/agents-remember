@@ -83,6 +83,14 @@ class TerminalCatalog:
             return entries
         return [entry for entry in entries if entry.status != "terminated"]
 
+    def list_committed(self, *, include_terminated: bool = False) -> list[TerminalCatalogEntry]:
+        """Read the last committed atomic snapshot without waiting for this instance's batch."""
+
+        entries = self._read_disk()
+        if include_terminated:
+            return entries
+        return [entry for entry in entries if entry.status != "terminated"]
+
     def get(self, session_id: str) -> TerminalCatalogEntry | None:
         return next((entry for entry in self._read_snapshot() if entry.id == session_id), None)
 
@@ -99,7 +107,11 @@ class TerminalCatalog:
 
     def upsert(self, entry: TerminalCatalogEntry) -> None:
         with self._catalog_access():
-            entries = [current for current in self._read() if current.id != entry.id]
+            entries = self._read()
+            matching = [current for current in entries if current.id == entry.id]
+            if len(matching) == 1 and matching[0] == entry:
+                return
+            entries = [current for current in entries if current.id != entry.id]
             entries.append(entry)
             self._write(entries)
 

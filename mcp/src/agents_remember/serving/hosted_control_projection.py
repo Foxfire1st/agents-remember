@@ -63,17 +63,24 @@ def mark_legacy_control_unsupported(
 ) -> TerminalCatalogEntry:
     """Label an existing raw-TUI row honestly; no protocol identity can be manufactured for it."""
 
+    projected = legacy_control_unsupported_entry(entry)
+    if projected != entry:
+        catalog.upsert(projected)
+    return projected
+
+
+def legacy_control_unsupported_entry(entry: TerminalCatalogEntry) -> TerminalCatalogEntry:
+    """Return the raw-TUI unsupported projection without persisting an intermediate row."""
+
     if entry.kind != "harness" or entry.control_state == "unsupported":
         return entry
-    projected = replace(
+    return replace(
         entry,
         control_state="unsupported",
         control_activity="unknown",
         control_acceptance="unsupported",
         control_raw={"detail": "legacy raw-TUI session has no protocol bridge"},
     )
-    catalog.upsert(projected)
-    return projected
 
 
 def snapshot_turn_state(

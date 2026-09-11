@@ -25,8 +25,8 @@ from agents_remember.models.terminal_catalog import (
 )
 from agents_remember.serving.harness_control_client import read_control_snapshot
 from agents_remember.serving.hosted_control_projection import (
-    mark_legacy_control_unsupported,
-    project_control_snapshot,
+    control_snapshot_entry,
+    legacy_control_unsupported_entry,
     snapshot_turn_state,
 )
 from agents_remember.serving.ports import TerminalCatalogPort
@@ -176,7 +176,7 @@ class TerminalCatalogLivenessSweeper:
         if self._rate_limited(moment):
             return self._refresh_starting_rows(moment)
         if not self._lock.acquire(blocking=False):
-            return self._catalog.list()
+            return self._catalog.list_committed()
         try:
             moment = self._now()
             if self._rate_limited(moment):
@@ -233,24 +233,22 @@ class TerminalCatalogLivenessSweeper:
         path runs the same observe_terminal_liveness, so with_liveness_failure's minimum window
         still gates exit marking.
         """
-        if self._starting_rate_limited(moment):
-            return self._catalog.list()
-        entries = self._catalog.list()
-        starting = [
-            entry
-            for entry in entries
-            if entry.kind == "harness"
-            and entry.status == "running"
-            and entry.control_state == "starting"
-        ][:4]  # cap the fast-path batch so a starting-row burst stays bounded
-        if not starting:
-            return entries
         if not self._lock.acquire(blocking=False):
-            return entries
+            return self._catalog.list_committed()
         try:
             moment = self._now()
             if self._starting_rate_limited(moment):
                 return self._catalog.list()
+            entries = self._catalog.list()
+            starting = [
+                entry
+                for entry in entries
+                if entry.kind == "harness"
+                and entry.status == "running"
+                and entry.control_state == "starting"
+            ][:4]  # cap the fast-path batch so a starting-row burst stays bounded
+            if not starting:
+                return entries
             self._last_starting_sweep_at = moment
             pending_syncs: list[_PendingInteractionSync] = []
             with self._catalog.batch():
@@ -383,7 +381,7 @@ def _observe_alive(
     pane_text = capture(entry.tmux_name)
     pane_diagnostic = classify_turn_state(pane_text, harness=entry.harness)
     if entry.control_endpoint is None:
-        projected = mark_legacy_control_unsupported(catalog, entry)
+        projected = legacy_control_unsupported_entry(entry)
         projected = replace(
             projected,
             control_raw={
@@ -407,7 +405,7 @@ def _observe_alive(
     # terminal cursors advance only on a successful read, so a failed read leaves the
     # row at the pre-window position and the next sweep re-reads the same evidence.
     terminal_read = _terminal_evidence(probe, entry)
-    projected = project_control_snapshot(catalog, entry, snapshot)
+    projected = control_snapshot_entry(entry, snapshot)
     projected = replace(
         projected,
         control_raw={**(projected.control_raw or {}), "paneDiagnostic": pane_diagnostic.state},

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -29,6 +30,7 @@ from agents_remember.models.terminal_catalog import (
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
 )
+from agents_remember.serving.terminal_evidence import TerminalEvidenceRead
 from agents_remember.serving.terminal_liveness import (
     DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS,
     LivenessProbe,
@@ -107,6 +109,20 @@ class _FakeHost:
         if self.release is not None:
             self.release.wait(timeout=5)
         return self.result
+
+
+class _RaisingHost(_FakeHost):
+    def __init__(self, result: TmuxProbeResult) -> None:
+        super().__init__(result)
+        self.raise_next = True
+
+    def probe_session(self, tmux_name: str) -> TmuxProbeResult:
+        if self.raise_next:
+            self.raise_next = False
+            self.calls += 1
+            raise RuntimeError("probe failed")
+        return super().probe_session(tmux_name)
+
 
 
 class TerminalCatalogLivenessTests(unittest.TestCase):
@@ -421,6 +437,139 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         assert recovered.control_raw is not None
         self.assertNotIn("controlReadFailures", recovered.control_raw)
         self.assertEqual(host.calls, 5)
+
+
+    def test_contended_full_sweep_returns_committed_snapshot_without_second_probe(self) -> None:
+        self.catalog.upsert(replace(_entry("full"), kind="terminal", harness=None))
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+        host.entered = threading.Event()
+        host.release = threading.Event()
+        sweeper = self._sweeper(host)
+        first_result: list[list[TerminalCatalogEntry]] = []
+        first_errors: list[BaseException] = []
+
+        def run_first() -> None:
+            try:
+                first_result.append(sweeper.refresh())
+            except BaseException as exc:  # pragma: no cover - assertion below reports it
+                first_errors.append(exc)
+
+        first = threading.Thread(target=run_first)
+        first.start()
+        assert host.entered is not None
+        self.assertTrue(host.entered.wait(timeout=1))
+
+        contender_result: list[list[TerminalCatalogEntry]] = []
+        contender = threading.Thread(target=lambda: contender_result.append(sweeper.refresh()))
+        contender.start()
+        contender.join(timeout=0.25)
+        try:
+            self.assertFalse(contender.is_alive())
+            self.assertEqual(host.calls, 1)
+            self.assertEqual([entry.id for entry in contender_result[0]], ["full"])
+        finally:
+            assert host.release is not None
+            host.release.set()
+            first.join(timeout=1)
+        self.assertFalse(first.is_alive())
+        self.assertEqual(first_errors, [])
+        self.assertEqual([entry.id for entry in first_result[0]], ["full"])
+
+        sweeper.refresh()
+        self.assertEqual(host.calls, 2)
+
+    def test_sweep_lock_releases_after_observation_exception_for_later_retry(self) -> None:
+        self.catalog.upsert(replace(_entry("retry"), kind="terminal", harness=None))
+        host = _RaisingHost(TmuxProbeResult(exists=True, evidence="alive"))
+        sweeper = self._sweeper(host)
+
+        with self.assertRaisesRegex(RuntimeError, "probe failed"):
+            sweeper.refresh()
+
+        self.assertEqual(host.calls, 1)
+        self.assertEqual([entry.id for entry in sweeper.refresh()], ["retry"])
+        self.assertEqual(host.calls, 2)
+
+    def test_contended_starting_sweep_reads_committed_snapshot_before_any_catalog_list(
+        self,
+    ) -> None:
+        self.catalog.upsert(replace(_entry("starting"), control_state="starting"))
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+        host.entered = threading.Event()
+        host.release = threading.Event()
+        sweeper = self._starting_sweeper(host)
+        sweeper._last_sweep_at = self.clock.moment
+        first_result: list[list[TerminalCatalogEntry]] = []
+        first_errors: list[BaseException] = []
+
+        def run_first() -> None:
+            try:
+                first_result.append(sweeper.refresh())
+            except BaseException as exc:  # pragma: no cover - assertion below reports it
+                first_errors.append(exc)
+
+        first = threading.Thread(target=run_first)
+        first.start()
+        assert host.entered is not None
+        self.assertTrue(host.entered.wait(timeout=1))
+
+        contender_result: list[list[TerminalCatalogEntry]] = []
+        contender = threading.Thread(target=lambda: contender_result.append(sweeper.refresh()))
+        contender.start()
+        contender.join(timeout=0.25)
+        try:
+            self.assertFalse(contender.is_alive())
+            self.assertEqual(host.calls, 1)
+            self.assertEqual([entry.id for entry in contender_result[0]], ["starting"])
+        finally:
+            assert host.release is not None
+            host.release.set()
+            first.join(timeout=1)
+        self.assertFalse(first.is_alive())
+        self.assertEqual(first_errors, [])
+        self.assertEqual([entry.id for entry in first_result[0]], ["starting"])
+
+        self.clock.advance(2)
+        sweeper.refresh()
+        self.assertEqual(host.calls, 1)
+
+    def test_repeated_clean_hosted_sweep_does_not_replace_catalog(self) -> None:
+        entry = replace(
+            _entry("hosted"),
+            control_state="ready",
+            control_endpoint=Path("/tmp/hosted.sock"),
+            control_activity="idle",
+            control_acceptance="immediate",
+            control_vendor_session_id="vendor-1",
+            control_raw={"paneDiagnostic": "stale"},
+        )
+        self.catalog.upsert(entry)
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
+        sweeper = TerminalCatalogLivenessSweeper(
+            self.catalog,
+            host,
+            now=self.clock,
+            probe=LivenessProbe(
+                hysteresis=TerminalCatalogLivenessConfig(
+                    failure_threshold=3,
+                    minimum_failure_window_seconds=5.0,
+                    pane_gone_failure_threshold=1,
+                    sweep_interval_seconds=0.0,
+                ),
+                pane_capturer=lambda _tmux_name: "",
+                snapshot_reader=_ready_snapshot,
+                terminal_reader=lambda _entry: TerminalEvidenceRead(projection=None),
+            ),
+        )
+
+        with patch.object(
+            self.catalog, "_write_disk", wraps=self.catalog._write_disk
+        ) as write_disk:
+            sweeper.refresh()
+            self.assertEqual(write_disk.call_count, 1)
+            write_disk.reset_mock()
+            sweeper.refresh()
+            self.assertEqual(write_disk.call_count, 0)
 
 
 if __name__ == "__main__":
