@@ -29,6 +29,7 @@ from agents_remember.worktrees.integration.closeout.certification.admission impo
 from agents_remember.worktrees.integration.closeout.certification.selection import (
     require_selected_certification,
 )
+from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.integration.lifecycle.generation.creation import (
     queued_operation_record,
 )
@@ -74,7 +75,7 @@ class _Fixture:
 def _queued(
     contract: WorktreeContract, operation_input: CloseoutOperationInput, tree: str
 ) -> LifecycleOperationRecord:
-    door = contract.closeout_door
+    door = live_closeout_door(contract)
     assert door is not None
     assert isinstance(door.taskIntent, TaskIntentIdentity)
     candidate = lifecycle_operation_candidate(

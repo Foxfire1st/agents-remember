@@ -7,11 +7,6 @@ from dataclasses import dataclass
 from typing import NoReturn
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
-from agents_remember.worktrees.integration.integration_publication_fence import (
-    IntegrationDoorAuthorityEvidence,
-    classify_integration_door_authority,
-    integration_door_decision_payload,
-)
 from agents_remember.worktrees.integration.integration_ref_state import (
     IntegrationRefState,
     classify_integration_refs,
@@ -34,7 +29,6 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 class IntegrationOperationObservation:
     """One captured evidence set shared by controls, status, and handlers."""
 
-    door: IntegrationDoorAuthorityEvidence | None
     refs: IntegrationRefState | None
     organizational: OrganizationalCompletionPublicationState | None
     repair: OrganizationalRepairState
@@ -56,8 +50,7 @@ def classify_integration_operation(
             if refs.state == "conflict"
             else (repair.decision_payload() if repair.state == "developer-decision" else None)
         )
-        return IntegrationOperationObservation(None, refs, None, repair, decision, decision)
-    door = classify_integration_door_authority(contract, record.integrationPublication)
+        return IntegrationOperationObservation(refs, None, repair, decision, decision)
     refs = classify_integration_refs(record)
     publication = record.integrationPublication
     organizational = (
@@ -66,9 +59,7 @@ def classify_integration_operation(
         else None
     )
     decision: dict[str, object] | None = None
-    if not door.valid:
-        decision = integration_door_decision_payload(door)
-    elif refs.state == "conflict":
+    if refs.state == "conflict":
         decision = refs.decision_payload()
     elif organizational is not None and not organizational.mechanically_convergent:
         decision = organizational.decision_payload()
@@ -82,7 +73,6 @@ def classify_integration_operation(
     ):
         projected_result = refs.public_payload()
     return IntegrationOperationObservation(
-        door,
         refs,
         organizational,
         repair,

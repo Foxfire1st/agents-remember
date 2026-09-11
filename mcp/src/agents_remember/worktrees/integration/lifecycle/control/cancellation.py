@@ -17,6 +17,7 @@ from agents_remember.models.lifecycles.termination import (
     WorkerTerminationEvidence,
 )
 from agents_remember.worktrees.integration.closeout.door import (
+    live_closeout_door,
     prepare_door_publication,
     successor_waiting_door,
 )
@@ -166,7 +167,7 @@ def _publish_cancelled_outcome(
             contract,
             operation_input.configPath,
         )
-        claimed = _require_cancelled_door_owner(contract, record)
+        claimed = _require_cancelled_door_owner(record)
         successor = successor_waiting_door(
             claimed.generation,
             declared_by="lifecycle-cancel",
@@ -188,7 +189,6 @@ def _publish_cancelled_outcome(
 
 
 def _require_cancelled_door_owner(
-    contract: WorktreeContract,
     record: LifecycleOperationRecord,
 ) -> DoorPublicationEvidence:
     claimed = record.doorPublication
@@ -199,7 +199,6 @@ def _require_cancelled_door_owner(
         and claimed.generation.operationKind == record.operationKind
         and claimed.generation.operationFingerprint == record.fingerprint
         and claimed.generation.claimedOperationKey == record.operationKey
-        and contract.closeout_door == claimed.generation
     ):
         return claimed
     raise LifecycleControlError(
@@ -210,7 +209,7 @@ def _require_cancelled_door_owner(
             "doorDisposition": "claimed",
         },
         observed={
-            "doorDisposition": contract.closeout_door.disposition if contract.closeout_door else "",
+            "doorDisposition": (claimed.generation.disposition if claimed is not None else ""),
             "publicationState": claimed.state if claimed is not None else "",
         },
         next_action="developer-decision",
@@ -284,9 +283,7 @@ def _raise_queue_repair_failure(
             "contractSha256": closeout_contract_sha256(observed),
             "closeoutStatus": observed.closeout_status,
             "integrationStatus": observed.integration_status,
-            "doorDisposition": (
-                observed.closeout_door.disposition if observed.closeout_door else ""
-            ),
+            "doorDisposition": _observed_door_disposition(observed),
         },
         next_action="developer-decision",
     ) from error
@@ -369,3 +366,8 @@ def _cancelled_guidance(kind: LifecycleOperationKind) -> str:
 
 def _stamp() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
+
+
+def _observed_door_disposition(contract: WorktreeContract) -> str:
+    door = live_closeout_door(contract)
+    return "" if door is None else door.disposition

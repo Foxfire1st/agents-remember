@@ -33,32 +33,18 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.errors import TaskIntentError
 from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.closeout.input import CloseoutCorrectedCall, EffectiveCloseoutInput
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
-from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
 from agents_remember.models.lifecycles.operation import (
     GatePolicyRuleSnapshot,
     LifecycleOperationRecord,
-    lifecycle_operation_dependencies,
 )
-from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.worktrees.closeout_input import (
     corrected_closeout_arguments,
     normalize_closeout_input,
     raw_closeout_messages,
-)
-from agents_remember.worktrees.integration.closeout.door import (
-    DoorPublicationError,
-    door_generation_for_operation,
-    prepare_door_publication,
-    publish_door_intent,
-)
-from agents_remember.worktrees.integration.closeout.task_intent_identity import (
-    current_door_task_intent,
 )
 from agents_remember.worktrees.integration.configured_contract_authority import (
     reread_configured_contract,
@@ -67,7 +53,6 @@ from agents_remember.worktrees.integration.direct_landing.direct_landing_errors 
     DirectLandingError,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_execution import (
-    direct_landing_input,
     execute_or_require_direct_landing_recovery,
 )
 from agents_remember.worktrees.integration.direct_landing.direct_landing_operation import (
@@ -98,12 +83,6 @@ from agents_remember.worktrees.modules.git import (
     current_branch,
     require_git,
 )
-from agents_remember.worktrees.queue.closeout_projection_publication import (
-    projection_refresh_failure_effect,
-    refresh_closeout_projection,
-)
-from agents_remember.worktrees.queue.closeout_queue import require_first_ready_generation
-from agents_remember.worktrees.queue.closeout_queue_errors import CloseoutQueueError
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 
@@ -319,30 +298,7 @@ def _direct_landing_preview(
     effective_input: EffectiveCloseoutInput,
     code_commit: str,
 ) -> dict[str, object]:
-    candidate_tree = _verify_code_commit(contract, code_commit, request.candidate_tree)
-    door = contract.closeout_door
-    if door is None or door.disposition != "waiting":
-        raise DirectLandingError(
-            "direct-landing-door-not-waiting",
-            "direct landing preview requires one current waiting series door generation",
-            expected={"disposition": "waiting"},
-            observed={"disposition": door.disposition if door is not None else "absent"},
-        )
-    if door.candidateTree != candidate_tree:
-        raise DirectLandingError(
-            "direct-landing-door-candidate-moved",
-            "the waiting series door does not bind the gated direct candidate tree",
-            expected={"candidateTree": door.candidateTree},
-            observed={"candidateTree": candidate_tree},
-        )
-    try:
-        require_first_ready_generation(
-            contract.coordination_root,
-            sprint_ref=door.sprintTaskDocumentRef,
-            generation_id=door.generationId,
-        )
-    except CloseoutQueueError as exc:
-        raise DirectLandingError(exc.status, str(exc)) from exc
+    _verify_code_commit(contract, code_commit, request.candidate_tree)
     memory = _memory_facts(contract)
     return {
         "ok": True,
@@ -355,7 +311,6 @@ def _direct_landing_preview(
         "memoryContentCommit": "",
         "ledgerCommit": "",
         "dryRun": True,
-        "doorGenerationId": door.generationId,
         "memory": memory,
         "effectiveInput": effective_input.model_dump(mode="json"),
     }
@@ -438,64 +393,25 @@ def _start_or_observe_direct_landing(
         code_commit,
         candidate_tree,
     )
-    prepared: tuple[DirectLandingOperationInput, LifecycleOperationCandidate] | None = None
-    door = contract.closeout_door
-    if door is None:
-        raise DirectLandingError(
-            "direct-landing-door-missing",
-            "direct landing requires one current series door generation",
-            expected={"disposition": "waiting-or-claimed"},
-            observed={"disposition": "absent"},
-        )
-    if door.disposition == "waiting":
-        current_contract, _location = reread_configured_contract(
-            contract,
-            config.config_path.as_posix(),
-        )
-        if current_contract != contract:
-            raise DirectLandingError(
-                "direct-landing-contract-changed",
-                "series contract changed before direct landing admission",
-            )
-        prepared = _prepare_direct_landing_candidate(identity, door.generationId)
-    record, claimed_contract, created, sprint_ref = _claim_direct_landing(
-        config,
+    current_contract, _location = reread_configured_contract(
         contract,
-        store,
-        identity,
-        prepared,
-    )
-    try:
-        projection_effect = refresh_closeout_projection(
-            claimed_contract.coordination_root,
-            sprint_ref,
-        )
-    except Exception as exc:
-        projection_effect = projection_refresh_failure_effect(
-            claimed_contract.coordination_root,
-            sprint_ref,
-            exc,
-        )
-    if record.status == "completed" and record.result is not None:
-        return _with_projection_effect(
-            _with_lifecycle_operation(dict(record.result), claimed_contract, record),
-            projection_effect,
-        )
-    if not created and record.status != "running":
-        return _with_projection_effect(
-            _direct_landing_observation(claimed_contract, record),
-            projection_effect,
-        )
-    live_contract, _location = reread_configured_contract(
-        claimed_contract,
         config.config_path.as_posix(),
     )
-    _require_direct_claim_owner(live_contract, record)
-    runtime = DirectLandingRuntime(live_contract, record)
-    result = execute_or_require_direct_landing_recovery(live_contract, runtime)
+    if current_contract != contract:
+        raise DirectLandingError(
+            "direct-landing-contract-changed",
+            "series contract changed before direct landing admission",
+        )
+    prepared = _prepare_direct_landing_candidate(identity)
+    record, created = _create_direct_landing(contract, store, prepared)
+    if record.status == "completed" and record.result is not None:
+        return _with_lifecycle_operation(dict(record.result), contract, record)
+    if not created and record.status != "running":
+        return _direct_landing_observation(contract, record)
+    runtime = DirectLandingRuntime(contract, record)
+    result = execute_or_require_direct_landing_recovery(contract, runtime)
     completed = runtime.store.read() or runtime.record
-    result = _with_lifecycle_operation(result, live_contract, completed)
-    return _with_projection_effect(result, projection_effect)
+    return _with_lifecycle_operation(result, contract, completed)
 
 
 def _with_lifecycle_operation(
@@ -516,7 +432,6 @@ def _with_lifecycle_operation(
 
 def _prepare_direct_landing_candidate(
     identity: _DirectRequestIdentity,
-    door_generation_id: str,
 ) -> tuple[DirectLandingOperationInput, LifecycleOperationCandidate]:
     config = identity.config
     contract = identity.contract
@@ -525,27 +440,6 @@ def _prepare_direct_landing_candidate(
     assert memory_repo is not None and contract.ledger_path is not None
     candidate_tree = identity.candidate_tree
     code_tree = _verify_code_commit(contract, identity.code_commit, candidate_tree)
-    door = contract.closeout_door
-    if (
-        door is None
-        or door.disposition != "waiting"
-        or door.generationId != door_generation_id
-        or door.candidateTree != code_tree
-    ):
-        raise DirectLandingError(
-            "direct-landing-door-candidate-moved",
-            "the waiting series door no longer binds the gated direct candidate",
-            expected={
-                "generationId": door_generation_id,
-                "candidateTree": code_tree,
-                "disposition": "waiting",
-            },
-            observed={
-                "generationId": door.generationId if door is not None else "",
-                "candidateTree": door.candidateTree if door is not None else "",
-                "disposition": door.disposition if door is not None else "absent",
-            },
-        )
     memory_before = _direct_memory_admission_snapshot(contract)
     _load_direct_ledger(contract.ledger_path)
     ledger_text = _read_direct_ledger_text(contract.ledger_path)
@@ -566,299 +460,51 @@ def _prepare_direct_landing_candidate(
         ledgerBeforeText=ledger_text,
         ledgerBeforeSha256=_text_sha256(ledger_text),
     )
-    try:
-        intent = current_door_task_intent(contract)
-    except TaskIntentError as exc:
-        raise DirectLandingError(
-            exc.status,
-            exc.detail,
-            next_action=exc.next_action,
-        ) from exc
     candidate = lifecycle_operation_candidate(
         LifecycleOperationCandidateBinding(
             operation_input=operation_input,
             candidate_state=operation_state_fingerprint(contract),
             candidate_tree=candidate_tree,
-            closeout_door_generation_id=door_generation_id,
-            task_intent=intent,
         )
     )
     return operation_input, candidate
 
 
-def _claim_direct_landing(
-    config: McpRuntimeConfig,
-    admitted_contract: WorktreeContract,
-    store: LifecycleOperationStore,
-    identity: _DirectRequestIdentity,
-    prepared: tuple[DirectLandingOperationInput, LifecycleOperationCandidate] | None,
-) -> tuple[LifecycleOperationRecord, WorktreeContract, bool, TaskDocumentRef]:
-    """Create/replay the journal intent and claim one exact waiting series door."""
-
-    contract, _location = reread_configured_contract(
-        admitted_contract,
-        config.config_path.as_posix(),
-    )
-    door = _require_direct_door(contract)
-    if door.disposition == "claimed":
-        return _resume_direct_claim(contract, store, identity, door)
-    return _claim_waiting_direct_landing(contract, store, prepared, door)
-
-
-def _require_direct_door(contract: WorktreeContract) -> CloseoutDoorGeneration:
-    door = contract.closeout_door
-    if door is None:
-        raise DirectLandingError(
-            "direct-landing-door-missing",
-            "direct landing claim has no current series door generation",
-        )
-    return door
-
-
-def _resume_direct_claim(
+def _create_direct_landing(
     contract: WorktreeContract,
     store: LifecycleOperationStore,
-    identity: _DirectRequestIdentity,
-    door: CloseoutDoorGeneration,
-) -> tuple[LifecycleOperationRecord, WorktreeContract, bool, TaskDocumentRef]:
-    current = store.read()
-    try:
-        current_intent = current_door_task_intent(contract)
-    except TaskIntentError as exc:
-        raise DirectLandingError(
-            exc.status,
-            exc.detail,
-            next_action=exc.next_action,
-        ) from exc
-    if current is not None and not isinstance(current.taskIntent, TaskIntentIdentity):
-        raise DirectLandingError(
-            "lifecycle-operation-task-intent-unavailable",
-            "the claimed legacy direct-landing journal cannot be reused",
-            next_action="retire-and-republish",
-        )
-    if current is not None and current.taskIntent != current_intent:
-        raise DirectLandingError(
-            "lifecycle-operation-task-intent-stale",
-            "the claimed direct-landing journal binds a different canonical task intent",
-            next_action="retire-and-republish",
-        )
-    if current is None or not _same_direct_request(current, identity):
-        raise DirectLandingError(
-            "direct-landing-claim-owner-conflict",
-            "the claimed series door belongs to another exact journal intent",
-            expected={
-                "operationKind": door.operationKind or "",
-                "operationFingerprint": door.operationFingerprint,
-                "operationKey": door.claimedOperationKey,
-            },
-            observed={
-                "operationKind": current.operationKind if current is not None else "",
-                "operationFingerprint": current.fingerprint if current is not None else "",
-                "operationKey": current.operationKey if current is not None else "",
-            },
-        )
-    _require_direct_claim_owner(contract, current)
-    current = _publish_direct_door_proof(contract, store, current)
-    return current, load_contract(contract.contract_path), False, door.sprintTaskDocumentRef
-
-
-def _claim_waiting_direct_landing(
-    contract: WorktreeContract,
-    store: LifecycleOperationStore,
-    prepared: tuple[DirectLandingOperationInput, LifecycleOperationCandidate] | None,
-    door: CloseoutDoorGeneration,
-) -> tuple[LifecycleOperationRecord, WorktreeContract, bool, TaskDocumentRef]:
-    if door.disposition != "waiting" or prepared is None:
-        raise DirectLandingError(
-            "direct-landing-door-not-waiting",
-            "direct landing claim requires the exact waiting source generation",
-            expected={"disposition": "waiting"},
-            observed={"disposition": door.disposition},
-        )
-    operation_input, candidate = prepared
-    _require_waiting_direct_candidate(contract, door, candidate)
-    try:
-        require_first_ready_generation(
-            contract.coordination_root,
-            sprint_ref=door.sprintTaskDocumentRef,
-            generation_id=door.generationId,
-        )
-    except CloseoutQueueError as exc:
-        raise DirectLandingError(exc.status, str(exc)) from exc
-    provisional = direct_landing_record(contract, operation_input, candidate, None)
-    claimed = door_generation_for_operation(contract, provisional, "claimed")
-    queued = provisional.model_copy(
-        update={"doorPublication": prepare_door_publication(contract, claimed)}
-    )
-    queued = queued.model_copy(update={"dependencies": lifecycle_operation_dependencies(queued)})
-    current, created = _create_direct_claim(store, queued, door)
-    current = _publish_direct_door_proof(contract, store, current)
-    return current, load_contract(contract.contract_path), created, door.sprintTaskDocumentRef
-
-
-def _require_waiting_direct_candidate(
-    contract: WorktreeContract,
-    door: CloseoutDoorGeneration,
-    candidate: LifecycleOperationCandidate,
-) -> None:
-    if candidate.state != operation_state_fingerprint(contract):
-        raise DirectLandingError(
-            "direct-landing-contract-changed",
-            "series contract changed after direct landing candidate admission",
-        )
-    if candidate.tree != door.candidateTree:
-        raise DirectLandingError(
-            "direct-landing-door-candidate-moved",
-            "the admitted direct candidate no longer equals the waiting door candidate",
-            expected={"candidateTree": door.candidateTree},
-            observed={"candidateTree": candidate.tree or ""},
-        )
-    if not isinstance(door.taskIntent, TaskIntentIdentity):
-        raise DirectLandingError(
-            "closeout-door-task-intent-unavailable",
-            "the waiting direct-landing door predates canonical task intent",
-            next_action="closeout_door.update-provenance",
-        )
-    if candidate.task_intent != door.taskIntent:
-        raise DirectLandingError(
-            "closeout-door-task-intent-stale",
-            "the admitted direct-landing task intent no longer equals the waiting door",
-            expected={"taskIntent": door.taskIntent.model_dump(mode="json", by_alias=True)},
-            observed={
-                "taskIntent": (
-                    candidate.task_intent.model_dump(mode="json", by_alias=True)
-                    if candidate.task_intent is not None
-                    else None
-                )
-            },
-            next_action="closeout_door.update-provenance",
-        )
-
-
-def _create_direct_claim(
-    store: LifecycleOperationStore,
-    queued: LifecycleOperationRecord,
-    door: CloseoutDoorGeneration,
+    prepared: tuple[DirectLandingOperationInput, LifecycleOperationCandidate],
 ) -> tuple[LifecycleOperationRecord, bool]:
+    """Create the exact journal generation, or replay/replace a terminal one.
+
+    A fresh direct landing is admitted by the request itself: the exact series
+    contract, the branch HEAD commit and its tree, the gated candidate tree and
+    the effective commit messages. It does not consult, claim or publish a
+    closeout door, so there is no waiting-door predecessor to satisfy.
+    """
+
+    operation_input, candidate = prepared
+    queued = direct_landing_record(contract, operation_input, candidate)
     current = store.read()
     if current is None:
         return store.create(queued)
     if current.fingerprint == queued.fingerprint:
-        if current.doorPublication != queued.doorPublication:
-            raise DirectLandingError(
-                "direct-landing-journal-intent-conflict",
-                "the retained direct journal does not match the exact claim intent",
-            )
         return current, False
-    if _direct_successor_is_authorized(current, door):
+    if current.status in {"completed", "cancelled"} and current.generationDisposition in {
+        "cancelled",
+        "superseded",
+    }:
         return store.replace_terminal(queued), True
     raise DirectLandingError(
         "direct-landing-input-conflict",
-        "a fresh direct landing requires an exact cancelled or superseded door successor",
+        "a fresh direct landing requires one terminal retained generation; "
+        "retry, recover, cancel or supersede the accepted one first",
         expected={
             "acceptedFingerprint": current.fingerprint,
             "acceptedDisposition": current.generationDisposition,
         },
-        observed={
-            "candidateFingerprint": queued.fingerprint,
-            "doorPredecessor": door.predecessorGenerationId,
-        },
+        observed={"candidateFingerprint": queued.fingerprint},
     )
-
-
-def _direct_successor_is_authorized(
-    record: LifecycleOperationRecord,
-    waiting_door,
-) -> bool:
-    publication = record.doorPublication
-    predecessor = record.doorPublicationHistory[-1] if record.doorPublicationHistory else None
-    return bool(
-        record.status in {"completed", "cancelled"}
-        and record.generationDisposition in {"cancelled", "superseded"}
-        and publication is not None
-        and publication.state == "proven"
-        and publication.generation == waiting_door
-        and predecessor is not None
-        and predecessor.state == "proven"
-        and predecessor.generation.disposition == "claimed"
-        and predecessor.generation.operationKind == "direct-landing"
-        and predecessor.generation.operationFingerprint == record.fingerprint
-        and predecessor.generation.claimedOperationKey == record.operationKey
-        and waiting_door.disposition == "waiting"
-        and waiting_door.predecessorGenerationId == predecessor.generation.generationId
-    )
-
-
-def _publish_direct_door_proof(
-    contract: WorktreeContract,
-    store: LifecycleOperationStore,
-    record: LifecycleOperationRecord,
-) -> LifecycleOperationRecord:
-    publication = record.doorPublication
-    if publication is None:
-        raise DirectLandingError(
-            "direct-landing-door-intent-missing",
-            "canonical direct landing journal is missing its create-time claimed-door intent",
-        )
-    if publication.state == "proven":
-        return record
-    try:
-        proof = publish_door_intent(contract.contract_path, publication)
-    except DoorPublicationError as exc:
-        raise DirectLandingError(
-            exc.status,
-            exc.detail,
-            expected=exc.classification.expected,
-            observed=exc.classification.observed,
-        ) from exc
-    return store.update(lambda current: current.model_copy(update={"doorPublication": proof}))
-
-
-def _require_direct_claim_owner(
-    contract: WorktreeContract,
-    record: LifecycleOperationRecord,
-) -> None:
-    door = contract.closeout_door
-    publication = record.doorPublication
-    if (
-        door is None
-        or door.disposition != "claimed"
-        or door.operationKind != "direct-landing"
-        or door.operationFingerprint != record.fingerprint
-        or door.claimedOperationKey != record.operationKey
-        or publication is None
-        or publication.generation != door
-    ):
-        raise DirectLandingError(
-            "direct-landing-claim-owner-conflict",
-            "direct execution requires its exact immutable journal and claimed-door owner",
-        )
-
-
-def _with_projection_effect(payload: dict[str, object], effect) -> dict[str, object]:
-    return {
-        **payload,
-        "projectionEffects": [effect.model_dump(mode="json")],
-    }
-
-
-def _same_direct_request(
-    record: LifecycleOperationRecord,
-    identity: _DirectRequestIdentity,
-) -> bool:
-    if record.operationKind != "direct-landing":
-        return False
-    accepted = direct_landing_input(record)
-    expected = {
-        "configPath": identity.config.config_path.as_posix(),
-        "contractPath": identity.contract.contract_path.as_posix(),
-        "effectiveInput": identity.effective_input,
-        "approvalNote": identity.request.intent_note.strip(),
-        "gatePolicy": _gate_policy_snapshot(identity.config),
-        "codeCommit": identity.code_commit,
-        "candidateTree": identity.candidate_tree,
-    }
-    return not any(getattr(accepted, field) != value for field, value in expected.items())
 
 
 def _direct_landing_observation(

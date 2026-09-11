@@ -256,7 +256,6 @@ def _contract_fact(
         facts.extend(
             (
                 _fact("enclosure", "absent", path),
-                _fact("door", "absent", path),
                 _fact("operation", "absent", path),
                 _fact("commit", "absent", path),
             )
@@ -283,13 +282,6 @@ def _contract_fact(
             "present",
             path,
             detail=f"cleanup={contract.cleanup}",
-        )
-    )
-    facts.append(
-        _fact(
-            "door",
-            "present" if contract.closeout_door is not None else "absent",
-            path,
         )
     )
     commit_present = any(

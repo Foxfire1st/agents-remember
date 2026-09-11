@@ -31,6 +31,9 @@ from agents_remember.models.lifecycles.operation import (
     CloseoutOperationInput,
     LifecycleOperationRecord,
 )
+from agents_remember.worktrees.integration.closeout.door import (
+    live_closeout_door,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
 )
@@ -226,9 +229,8 @@ def _prior_red_context(
         if red_terminal.result.gate == 5
         else None
     )
-    successor_memory_tree = (
-        contract.closeout_door.memoryCandidateTree if contract.closeout_door is not None else None
-    )
+    live_door = live_closeout_door(contract)
+    successor_memory_tree = None if live_door is None else live_door.memoryCandidateTree
     return build_prior_red_context(
         prior.run,
         RecoveryInputSnapshot(

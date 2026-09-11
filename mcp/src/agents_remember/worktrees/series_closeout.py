@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.memory_ledger import LedgerRow, find_mapping, parse_ledger_text
@@ -29,12 +28,6 @@ from agents_remember.worktrees.queue.closeout_recovery import MemoryCloseoutOutc
 from agents_remember.worktrees.scheduling_mode import effective_execution_nature
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
-
-
-@dataclass(frozen=True)
-class _AtomicLandingFacts:
-    leaf_ref: TaskDocumentRef
-    sprint_ref: TaskDocumentRef | None
 
 
 def publish_closeout_under_authority[T](
@@ -81,7 +74,7 @@ def _require_every_atomic_leaf_landed(series: WorktreeContract) -> None:
 
 
 def _exact_atomic_landing_chain(series: WorktreeContract) -> list[WorktreeContract]:
-    expected, sprint_ref = _atomic_leaf_documents(series)
+    expected, _sprint_ref = _atomic_leaf_documents(series)
     contracts: dict[str, WorktreeContract] = {}
     for path in sorted((series.task_root / "enclosures").glob("*/series-contract.md")):
         leaf = load_contract(path)
@@ -102,14 +95,12 @@ def _exact_atomic_landing_chain(series: WorktreeContract) -> list[WorktreeContra
             "atomic series closeout requires one exact enclosure for every canonical leaf: "
             f"expected={sorted(expected)!r}, found={sorted(contracts)!r}",
         )
-    return _require_exact_atomic_landing_chain(series, contracts, expected, sprint_ref)
+    return _require_exact_atomic_landing_chain(series, contracts)
 
 
 def _require_exact_atomic_landing_chain(
     series: WorktreeContract,
     contracts: dict[str, WorktreeContract],
-    expected: dict[str, TaskDocumentRef],
-    sprint_ref: TaskDocumentRef | None,
 ) -> list[WorktreeContract]:
     current_code = series.code_base_commit
     current_memory = series.memory_base_commit if series.memory_mode == "external" else ""
@@ -129,11 +120,7 @@ def _require_exact_atomic_landing_chain(
             )
         leaf_id = next_ids[0]
         leaf = remaining.pop(leaf_id)
-        _require_atomic_leaf_landed(
-            series,
-            leaf,
-            _AtomicLandingFacts(expected[leaf_id], sprint_ref),
-        )
+        _require_atomic_leaf_landed(series, leaf)
         ordered.append(leaf)
         current_code = leaf.integrated_code_commit
         if series.memory_mode == "external":
@@ -219,9 +206,8 @@ def _atomic_leaf_documents(
 def _require_atomic_leaf_landed(
     series: WorktreeContract,
     leaf: WorktreeContract,
-    facts: _AtomicLandingFacts,
 ) -> None:
-    if not _atomic_leaf_code_matches(series, leaf, facts):
+    if not _atomic_leaf_code_matches(series, leaf):
         raise CloseoutQueueError(
             "atomic-series-leaf-not-landed",
             f"atomic leaf {leaf.leaf_id!r} has not landed on the exact series code ref",
@@ -251,13 +237,9 @@ def _require_atomic_leaf_landed(
 def _atomic_leaf_code_matches(
     series: WorktreeContract,
     leaf: WorktreeContract,
-    facts: _AtomicLandingFacts,
 ) -> bool:
     code_commit = leaf.integrated_code_commit
     parent_path = leaf.parent_contract_path.resolve() if leaf.parent_contract_path else None
-    door = leaf.closeout_door
-    door_sprint = door.sprintTaskDocumentRef.key if door is not None else ""
-    door_candidate = door.taskDocumentRef.key if door is not None else ""
     found = (
         leaf.repo_name,
         leaf.coordination_root.resolve(),
@@ -265,8 +247,6 @@ def _atomic_leaf_code_matches(
         leaf.contract_path.resolve(),
         parent_path,
         leaf.memory_mode,
-        door_candidate,
-        door_sprint,
         leaf.integration_status,
         leaf.code_source_branch,
         code_commit,
@@ -278,8 +258,6 @@ def _atomic_leaf_code_matches(
         leaf_enclosure_path(series.task_root, leaf.leaf_id).resolve(),
         series.contract_path.resolve(),
         series.memory_mode,
-        facts.leaf_ref.key if facts.sprint_ref is not None else "",
-        facts.sprint_ref.key if facts.sprint_ref is not None else "",
         "completed",
         series.code_work_branch,
         leaf.code_commit,

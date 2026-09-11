@@ -15,6 +15,7 @@ from agents_remember.tasks.task_intent import (
     require_current_task_intent,
     task_intent_identity,
 )
+from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -69,7 +70,7 @@ def contract_task_intent(
 def current_door_task_intent(contract: WorktreeContract) -> TaskIntentIdentity:
     """Require the live door to bind the exact current canonical leaf intent."""
 
-    door = contract.closeout_door
+    door = live_closeout_door(contract)
     if door is None:
         raise TaskIntentError(
             "closeout-door-missing",

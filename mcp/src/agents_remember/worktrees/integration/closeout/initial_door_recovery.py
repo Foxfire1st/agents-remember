@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
+from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
     public_lifecycle_evidence_pair,
 )
@@ -58,6 +59,7 @@ def classify_initial_closeout_door_recovery(
         "doorPublication": "create-time-claimed-intent-or-proof",
         "normalRecovery": "forbidden",
     }
+    live_door = live_closeout_door(contract)
     return InitialCloseoutDoorRecoveryClassification(
         "developer-decision",
         expected=expected,
@@ -65,10 +67,6 @@ def classify_initial_closeout_door_recovery(
             "generation": record.generation,
             "status": record.status,
             "phase": record.phase,
-            "contractDoor": (
-                contract.closeout_door.model_dump(mode="json")
-                if contract.closeout_door is not None
-                else None
-            ),
+            "contractDoor": (None if live_door is None else live_door.model_dump(mode="json")),
         },
     )

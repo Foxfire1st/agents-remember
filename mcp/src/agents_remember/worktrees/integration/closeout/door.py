@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
-from dataclasses import dataclass, replace
+import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.models.lifecycles.door import (
     CloseoutDoorDisposition,
     CloseoutDoorGeneration,
@@ -20,15 +21,10 @@ from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candidate import (
     fingerprint_payload,
 )
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (
-    closeout_contract_sha256,
-)
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
     WorktreeContract,
-    contract_publication_text,
     load_contract,
-    write_contract,
 )
 
 
@@ -93,7 +89,7 @@ def door_generation_for_operation(
         raise RuntimeError(
             "cancel, retire, and supersede are journal outcomes, not door dispositions"
         )
-    waiting = contract.closeout_door
+    waiting = live_closeout_door(contract, record)
     if waiting is None or waiting.disposition != "waiting":
         raise RuntimeError("closeout operation requires one exact waiting door generation")
     if predecessor_generation_id and waiting.predecessorGenerationId != predecessor_generation_id:
@@ -179,164 +175,131 @@ def successor_waiting_door(
     )
 
 
-def prepare_door_publication(
-    contract: WorktreeContract,
-    generation: CloseoutDoorGeneration,
-) -> DoorPublicationEvidence:
-    """Return exact before/after contract-byte evidence before publication."""
+def door_journal_path(contract: WorktreeContract) -> Path:
+    """Where a declared closeout door generation is published for one contract."""
 
-    _require_door_transition(contract.closeout_door, generation)
-    updated = replace(contract, closeout_door=generation)
-    published_text = contract_publication_text(contract.contract_path, updated)
-    return DoorPublicationEvidence(
-        state="intent",
-        generation=generation,
-        expectedBeforeContractSha256=closeout_contract_sha256(contract),
-        expectedPublishedContractSha256=hashlib.sha256(published_text.encode("utf-8")).hexdigest(),
+    return contract.worktree_group / "reports" / "closeout-door.json"
+
+
+def read_published_door(contract: WorktreeContract) -> CloseoutDoorGeneration | None:
+    """Read the declared door generation, or ``None`` when none is published."""
+
+    try:
+        payload = json.loads(door_journal_path(contract).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    try:
+        return CloseoutDoorGeneration.model_validate(payload)
+    except ValueError:
+        return None
+
+
+def write_published_door(contract: WorktreeContract, generation: CloseoutDoorGeneration) -> None:
+    """Publish one door generation to its journal, atomically."""
+
+    atomic_write_text(
+        door_journal_path(contract),
+        json.dumps(generation.model_dump(mode="json"), sort_keys=True, separators=(",", ":")),
     )
+
+
+def live_closeout_door(
+    contract: WorktreeContract,
+    record: LifecycleOperationRecord | None = None,
+) -> CloseoutDoorGeneration | None:
+    """The live closeout door for one contract, read from its own journal.
+
+    The worktree contract no longer stores a door generation. A door is declared,
+    claimed and proven in the journal alone: first the operation record's own
+    publication, then the contract's declared-door journal. A contract with
+    neither has no live door -- that is an absence, not a conflict.
+    """
+
+    if record is not None and record.doorPublication is not None:
+        return record.doorPublication.generation
+    if contract.kind not in {"series", "leaf"}:
+        return None
+    if record is not None:
+        return read_published_door(contract)
+    try:
+        from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (  # noqa: PLC0415
+            located_lifecycle_operation_store,
+        )
+
+        store = located_lifecycle_operation_store(contract, "closeout")
+        retained = store.read()
+    except Exception:  # a contract outside the journal has no live door, never an error
+        return read_published_door(contract)
+    if retained is None or retained.doorPublication is None:
+        return read_published_door(contract)
+    return retained.doorPublication.generation
 
 
 def classify_door_publication(
     intent: DoorPublicationEvidence,
-    live: WorktreeContract | DoorContractReadFailure,
+    live: WorktreeContract,
 ) -> DoorPublicationClassification:
-    """Classify one canonical contract read without performing another read."""
+    """Classify one journal-owned door intent against the contract's live door.
+
+    The contract is no longer the door's store, so there are no contract bytes to
+    hash or compare. The journal owns the transition: a proven intent is published
+    once the live door IS the intent's generation; an intent that has not been
+    proven is still accepted-before.
+    """
 
     expected: dict[str, object] = {
-        "beforeContractSha256": intent.expectedBeforeContractSha256,
-        "publishedContractSha256": intent.expectedPublishedContractSha256,
         "generationId": intent.generation.generationId,
         "disposition": intent.generation.disposition,
     }
-    if isinstance(live, DoorContractReadFailure):
-        return DoorPublicationClassification(
-            "developer-decision",
-            expected,
-            {
-                "readStatus": "unreadable",
-                "side": "contract",
-                "name": Path(intent.generation.contractPath).name,
-                "errorType": live.errorType,
-            },
-        )
-    current_sha = closeout_contract_sha256(live)
-    current_door = live.closeout_door
+    current = live_closeout_door(live)
     observed: dict[str, object] = {
-        "readStatus": "readable",
-        "contractSha256": current_sha,
-        "generationId": current_door.generationId if current_door else "",
-        "disposition": current_door.disposition if current_door else "",
+        "generationId": current.generationId if current is not None else "",
+        "disposition": current.disposition if current is not None else "",
     }
-    if current_sha == intent.expectedPublishedContractSha256:
+    if intent.state == "proven":
         state: Literal["published", "developer-decision"] = (
-            "published" if current_door == intent.generation else "developer-decision"
+            "published" if current == intent.generation else "developer-decision"
         )
         return DoorPublicationClassification(state, expected, observed)
-    if current_sha == intent.expectedBeforeContractSha256:
-        try:
-            _require_door_transition(current_door, intent.generation)
-        except RuntimeError as exc:
-            return DoorPublicationClassification(
-                "developer-decision",
-                expected,
-                {
-                    **observed,
-                    "transitionFailure": {
-                        "stage": "door-transition-validation",
-                        "side": "contract",
-                        "name": Path(intent.generation.contractPath).name,
-                        "errorType": type(exc).__name__,
-                    },
-                },
-            )
-        return DoorPublicationClassification("accepted-before", expected, observed)
-    return DoorPublicationClassification("developer-decision", expected, observed)
+    return DoorPublicationClassification("accepted-before", expected, observed)
 
 
-def observe_door_publication(
-    contract_path: Path,
-    intent: DoorPublicationEvidence,
-) -> DoorPublicationClassification:
-    """Read through the canonical contract reader and classify its exact outcome."""
+def prepare_door_publication(
+    contract: WorktreeContract,
+    generation: CloseoutDoorGeneration,
+) -> DoorPublicationEvidence:
+    """Return the journal-owned intent for one door generation."""
 
-    try:
-        live: WorktreeContract | DoorContractReadFailure = load_contract(contract_path)
-    except (ContractError, OSError, UnicodeError, ValueError) as exc:
-        live = DoorContractReadFailure(type(exc).__name__, "")
-    return classify_door_publication(intent, live)
+    _require_door_transition(live_closeout_door(contract), generation)
+    return DoorPublicationEvidence(state="intent", generation=generation)
 
 
 def publish_door_intent(
     contract_path: Path,
     intent: DoorPublicationEvidence,
 ) -> DoorPublicationEvidence:
-    """Publish or prove exactly the intended contract generation idempotently."""
+    """Publish and prove exactly the intended door generation, idempotently.
 
-    classification = observe_door_publication(contract_path, intent)
-    if classification.state == "published":
-        return intent.model_copy(
-            update={
-                "state": "proven",
-                "observedPublishedContractSha256": intent.expectedPublishedContractSha256,
-            }
-        )
-    if classification.state == "developer-decision":
-        raise DoorPublicationError(
-            "closeout-door-publication-conflict",
-            "the contract is unreadable or outside the journaled door publication",
-            classification,
-        )
+    The generation is written to the contract's own door journal, never to the
+    worktree contract, so there are no contract bytes to re-read or compare.
+    """
+
     try:
-        current = load_contract(contract_path)
-        revalidated = classify_door_publication(intent, current)
-        if revalidated.state != "accepted-before":
-            raise DoorPublicationError(
-                "closeout-door-publication-conflict",
-                "the contract changed after door publication preflight",
-                revalidated,
-            )
-        write_contract(contract_path, replace(current, closeout_door=intent.generation))
-    except DoorPublicationError:
-        raise
-    except (ContractError, OSError, RuntimeError, UnicodeError, ValueError) as exc:
-        after = observe_door_publication(contract_path, intent)
-        if after.state == "published":
-            return intent.model_copy(
-                update={
-                    "state": "proven",
-                    "observedPublishedContractSha256": intent.expectedPublishedContractSha256,
-                }
-            )
-        if after.state == "accepted-before":
-            raise DoorPublicationError(
-                "closeout-door-publication-interrupted",
-                "the journaled closeout-door publication did not change contract bytes",
-                after,
-            ) from exc
+        contract = load_contract(contract_path)
+    except (ContractError, OSError, UnicodeError, ValueError) as exc:
         raise DoorPublicationError(
             "closeout-door-publication-conflict",
-            "the contract changed or became unreadable during door publication",
-            after,
+            "the contract is unreadable for its door publication",
+            DoorPublicationClassification(
+                "developer-decision",
+                {"generationId": intent.generation.generationId},
+                {"readStatus": "unreadable", "errorType": type(exc).__name__},
+            ),
         ) from exc
-    after = observe_door_publication(contract_path, intent)
-    if after.state == "accepted-before":
-        raise DoorPublicationError(
-            "closeout-door-publication-interrupted",
-            "the journaled closeout-door publication did not change contract bytes",
-            after,
-        )
-    if after.state == "developer-decision":
-        raise DoorPublicationError(
-            "closeout-door-publication-conflict",
-            "the door publication did not produce its exact intended contract",
-            after,
-        )
-    return intent.model_copy(
-        update={
-            "state": "proven",
-            "observedPublishedContractSha256": intent.expectedPublishedContractSha256,
-        }
-    )
+    write_published_door(contract, intent.generation)
+    if intent.state == "proven":
+        return intent
+    return intent.model_copy(update={"state": "proven"})
 
 
 def _require_door_transition(

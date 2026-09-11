@@ -23,14 +23,12 @@ from agents_remember.certification.certificate_models import (
 )
 from agents_remember.certification.certification_lane import compile_certification_lane
 from agents_remember.certification.digests import content_digest
-from agents_remember.certification.frozen_run.authorities import CandidateAuthorityRecords
 from agents_remember.certification.frozen_run.models import (
     freeze_certification_run,
 )
 from agents_remember.certification.lifecycle_admission import PriorRedMemoryOwner
 from agents_remember.certification.lifecycle_models import (
     ExactCandidateObservation,
-    LifecycleAdmissionManifest,
 )
 from agents_remember.certification.models import (
     CandidateIdentity,
@@ -54,21 +52,11 @@ from agents_remember.models.certification.corrective import (
     CorrectiveInputChange,
     RedCatalogDisposition,
 )
-from agents_remember.models.lifecycles.certification import (
-    OperationCertificationState,
-    SelectedRecoveryDecision,
-)
 from agents_remember.models.lifecycles.prepared_memory import PreparedMemoryCandidate
 from agents_remember.worktrees.integration.closeout.certification.recovery import (
     RecoveryInputSnapshot,
     build_prior_red_context,
     derive_certificate_input_changes,
-)
-from agents_remember.worktrees.integration.closeout.certification.selection import (
-    _retained_contract_memory_tree,
-    require_selected_certification,
-    select_certification_state,
-    select_recorded_terminals,
 )
 from agents_remember.worktrees.modules.quality import certification_records
 from agents_remember.worktrees.modules.quality.execution import retained_reports
@@ -85,8 +73,6 @@ from certification_registry_test_support import (
 )
 from repository_profile_test_support import fixture_profile
 from test_code_certification_execution import selected_execution
-from test_operation_certification_selection import _fixture as _operation_fixture
-from test_operation_certification_selection import _publish as _publish_operation
 
 
 def _snapshot(
@@ -351,108 +337,6 @@ def _reordered_catalog(catalog: GateResultManifest) -> GateResultManifest:
     return reordered
 
 
-@pytest.mark.integration
-@pytest.mark.parametrize(
-    "fault,code",
-    [
-        ("lifecycle-profile", "selected-admission-recompile-mismatch"),
-        ("foreign-recovery", "selected-recovery-mismatch"),
-        ("terminal-order", "selected-gate-result-mismatch"),
-    ],
-)
-def test_selection_recompiles_untrusted_proposals_before_selecting_original_references(
-    tmp_path: Path, fault: str, code: str
-) -> None:
-    fixture = _operation_fixture(tmp_path / "current")
-    extra_originals: dict[Path, bytes] = {}
-    if fault == "terminal-order":
-        recorded = _publish_operation(fixture, tmp_path / "export", outcome="red")
-        fixture = replace(
-            fixture,
-            record=select_recorded_terminals(
-                fixture.contract, fixture.store, fixture.record, recorded
-            ),
-        )
-        pointer = fixture.contract.worktree_group / "reports/quality-report-set.json"
-        extra_originals[pointer] = pointer.read_bytes()
-    original = fixture.record.certification
-    assert original is not None
-    selected = require_selected_certification(fixture.contract, fixture.record)
-    retained_memory_tree = _retained_contract_memory_tree(fixture.contract, selected.authorities)
-    door = fixture.contract.closeout_door
-    assert door is not None
-    changed_today = "e" * 40 if door.memoryCandidateTree != "e" * 40 else "f" * 40
-    changed_contract = replace(
-        fixture.contract,
-        closeout_door=door.model_copy(update={"memoryCandidateTree": changed_today}),
-    )
-    assert _retained_contract_memory_tree(changed_contract, selected.authorities) == (
-        retained_memory_tree
-    )
-    objects = fixture.frozen.prepared.certificate_store()
-    references = (
-        original.frozenRun,
-        original.candidateAuthorities,
-        original.lifecycleAdmission,
-        *(decision.reference for decision in original.recoveryDecisions),
-        *(terminal.result for terminal in original.terminals),
-    )
-    originals = {
-        objects.exact_path(ref.kind, ref.semanticDigest): objects.exact_path(
-            ref.kind, ref.semanticDigest
-        ).read_bytes()
-        for ref in references
-    }
-    before = fixture.store.path.read_bytes()
-    payload = original.model_dump(mode="json")
-    if fault == "lifecycle-profile":
-        lifecycle = fixture.frozen.admission.lifecycle
-        envelope = {**lifecycle.semanticEnvelope.model_dump(mode="json"), "profileId": "foreign"}
-        untrusted = LifecycleAdmissionManifest.model_validate(
-            {
-                **lifecycle.model_dump(mode="json"),
-                "semanticEnvelope": envelope,
-                "admissionDigest": content_digest(envelope),
-            }
-        )
-        # Publishing a parsed object does not authorize its selection as this run's admission.
-        objects.publish(untrusted)
-        payload["lifecycleAdmission"] = objects.reference(
-            "lifecycle-admission", untrusted.admissionDigest
-        ).model_dump(mode="json")
-    elif fault == "foreign-recovery":
-        other = _operation_fixture(tmp_path / "other")
-        extra_originals[other.store.path] = other.store.path.read_bytes()
-        recovery = other.frozen.recovery
-        assert recovery.semanticEnvelope.lifecycleAdmissionDigest != (
-            fixture.frozen.admission.lifecycle.admissionDigest
-        )
-        objects.publish(recovery)
-        payload["recoveryDecisions"] = [
-            SelectedRecoveryDecision(
-                reference=objects.reference("recovery", recovery.recoveryDigest)
-            ).model_dump(mode="json")
-        ]
-    else:
-        terminal = original.terminals[0]
-        assert terminal.certificate is None
-        result = objects.load(GateResultManifest, terminal.result.semanticDigest)
-        assert result.disposition == "red"
-        reordered = _reordered_catalog(result)
-        objects.publish(reordered)
-        payload["terminals"][0]["result"] = objects.reference(
-            "result-manifest", reordered.manifestDigest
-        ).model_dump(mode="json")
-    proposal = OperationCertificationState.model_validate(payload)
-    with pytest.raises(CertificationContractError) as caught:
-        select_certification_state(fixture.contract, fixture.store, fixture.record, proposal)
-    assert caught.value.findings[0]["code"] == code
-    assert fixture.store.path.read_bytes() == before
-    assert fixture.store.read() == fixture.record
-    assert all(path.read_bytes() == raw for path, raw in {**originals, **extra_originals}.items())
-    assert require_selected_certification(fixture.contract, fixture.record).state == original
-
-
 def test_prior_red_requires_every_independent_root_and_blocked_dependant() -> None:
     prior, current = _snapshot(_red_profile()), _snapshot(_red_profile(), tree="d" * 40)
     catalog = _catalog(prior, 1, red=True)
@@ -524,93 +408,6 @@ def test_prior_red_memory_change_binds_door_owned_successor_tree() -> None:
             _chain(prior, through=4),
         )
     assert caught.value.findings[0]["code"] == "prior-red-changed-input-unproven"
-
-
-def test_candidate_authority_binds_current_memory_tree_and_reads_legacy_bytes(
-    tmp_path: Path,
-    worktree_services: None,
-) -> None:
-    fixture = _operation_fixture(tmp_path / "current", memory_mode="external")
-    selected = require_selected_certification(fixture.contract, fixture.record)
-    door = fixture.contract.closeout_door
-    assert door is not None and door.memoryCandidateTree
-    authority = selected.authorities.semanticEnvelope
-    assert authority.admittedMemoryTree == door.memoryCandidateTree
-
-    successor_tree = "e" * 40 if door.memoryCandidateTree != "e" * 40 else "f" * 40
-    successor_authority = authority.model_copy(update={"admittedMemoryTree": successor_tree})
-    assert content_digest(successor_authority) != selected.authorities.authorityDigest
-
-    legacy_authority = authority.model_copy(update={"admittedMemoryTree": None})
-    legacy_payload = selected.authorities.model_dump(mode="json")
-    legacy_payload.update(
-        semanticEnvelope=legacy_authority.model_dump(mode="json"),
-        authorityDigest=content_digest(legacy_authority),
-    )
-    legacy = CandidateAuthorityRecords.model_validate(legacy_payload)
-    assert legacy.authorityDigest == content_digest(legacy_authority)
-    assert "admittedMemoryTree" not in legacy_authority.model_dump(mode="json")
-
-
-def test_closeout_claim_retention_binds_the_claimed_publication_contract(
-    tmp_path: Path,
-    worktree_services: None,
-) -> None:
-    from agents_remember.models.task_intent import TaskIntentIdentity  # noqa: PLC0415
-    from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_candidate import (  # noqa: PLC0415
-        LifecycleOperationCandidate,
-    )
-    from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_identity import (  # noqa: PLC0415
-        closeout_contract_sha256,
-    )
-    from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import (  # noqa: PLC0415
-        _CloseoutClaimContext,
-        _prepare_closeout_claim,
-    )
-
-    fixture = _operation_fixture(tmp_path / "current", memory_mode="external")
-    door = fixture.contract.closeout_door
-    assert door is not None and door.disposition == "waiting"
-    task_intent = fixture.record.taskIntent
-    assert isinstance(task_intent, TaskIntentIdentity)
-    candidate = LifecycleOperationCandidate(
-        state=closeout_contract_sha256(fixture.contract),
-        tree=fixture.record.candidateTree,
-        fingerprint=fixture.record.fingerprint,
-        task_intent=task_intent,
-    )
-    claimed, claimed_contract = _prepare_closeout_claim(
-        _CloseoutClaimContext(
-            contract=fixture.contract,
-            store=fixture.store,
-            operation_input=fixture.operation_input,
-            candidate=candidate,
-            queued=fixture.record,
-            door=door,
-        )
-    )
-    publication = claimed.doorPublication
-    assert publication is not None
-    claimed_door = claimed_contract.closeout_door
-    assert claimed_door is not None
-    assert publication.expectedPublishedContractSha256 == closeout_contract_sha256(claimed_contract)
-    assert publication.expectedPublishedContractSha256 != closeout_contract_sha256(fixture.contract)
-    changed = {
-        key
-        for key, value in claimed_door.model_dump(mode="json").items()
-        if value != door.model_dump(mode="json").get(key)
-    }
-    assert changed == {
-        "claimedOperationKey",
-        "disposition",
-        "operationFingerprint",
-        "operationKind",
-    }
-    unrelated = replace(
-        claimed_contract,
-        closeout_door=claimed_door.model_copy(update={"declaredAt": "2099-01-01T00:00:00+00:00"}),
-    )
-    assert closeout_contract_sha256(unrelated) != publication.expectedPublishedContractSha256
 
 
 def test_prior_red_gate_two_requires_the_exact_original_gate_one_certificate() -> None:

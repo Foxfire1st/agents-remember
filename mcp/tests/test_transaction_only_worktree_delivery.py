@@ -21,25 +21,15 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
-from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskEnclosureRef, read_task_doc, write_task_doc
 from agents_remember.worktrees.integration.closeout import curator_coherence as coherence
 from agents_remember.worktrees.integration.closeout.certification import execution as selected
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
-from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
-    LifecycleOperationStore,
-    operation_record_path,
-)
 from agents_remember.worktrees.modules.quality import closeout_memory as memory_quality
 from agents_remember.worktrees.modules.quality import gate as quality_gate
-from agents_remember.worktrees.worktree_contract import load_contract, write_contract
+from agents_remember.worktrees.worktree_contract import load_contract
 from closeout_input_test_support import (
-    closeout_operation_input,
     ensure_fixture_waiting_door,
-    finish_operation_record,
-    publish_closeout_finalization,
-    start_closeout_operation,
-    start_operation_record,
 )
 from integration_branch_authority_test_support import (
     _authority_fixture,
@@ -107,47 +97,6 @@ def _assert_no_profile_or_review(config, contract) -> None:
     assert config.repositories[contract.repo_name].certification_profile is None
     document = read_task_doc(contract.task_root / f"{contract.leaf_id.lower()}.json")
     assert document.routeReview is None
-
-
-def _publish_synthetic_closeout_source(contract, config_path: Path):
-    """Publish the leaf's claimed closeout source for the integration proof.
-
-    Integration is synchronous: it reads the contract's recorded closeout commits
-    (code/memory/ledger) and its claimed source door. The claim still comes from the
-    real admission owner; only the detached queue run is gone.
-    """
-
-    # Reuse the real fixture's sprint -> master -> leaf topology.  The lifecycle helper's
-    # fallback sprint is intentionally disposable and cannot support integration completion.
-    ensure_fixture_waiting_door(contract, force_synthetic=True)
-    current = load_contract(contract.contract_path)
-    assert current.closeout_door is not None
-    current = replace(
-        current,
-        closeout_door=current.closeout_door.model_copy(
-            update={
-                "sprintTaskDocumentRef": TaskDocumentRef(
-                    repository=current.repo_name,
-                    path="sprint/task.json",
-                )
-            }
-        ),
-    )
-    write_contract(current.contract_path, current)
-    start_closeout_operation(
-        closeout_operation_input(
-            current,
-            config_path=config_path,
-            approval_note="fixture records the already prepared transaction",
-        ),
-        launcher=lambda *_: None,
-    )
-    current = load_contract(current.contract_path)
-    store = LifecycleOperationStore(operation_record_path(current.worktree_group, "closeout"))
-    start_operation_record(store)
-    publish_closeout_finalization(store, current)
-    finish_operation_record(store, {"state": "closed"}, ok=True)
-    return load_contract(current.contract_path)
 
 
 def _forbid_acceptance_tools():
@@ -307,7 +256,6 @@ def test_public_integration_merges_prepared_pair_without_acceptance_tools(
     memory_repo = closed.memory_repo_path
     assert isinstance(memory_repo, Path)
     config = _public_config(tmp_path, closed)
-    closed = _publish_synthetic_closeout_source(closed, config.config_path)
     _assert_no_profile_or_review(config, closed)
     code_hook_log, memory_hook_log = _install_failing_pre_commit_hooks(closed, tmp_path)
 
@@ -362,7 +310,6 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
     memory_repo = closed.memory_repo_path
     assert isinstance(memory_repo, Path)
     config = _public_config(tmp_path, closed)
-    closed = _publish_synthetic_closeout_source(closed, config.config_path)
     _assert_no_profile_or_review(config, closed)
     source_before = _git(code_repo, "rev-parse", "ar/master")
     memory_before = _git(memory_repo, "rev-parse", "ar/master")

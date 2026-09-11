@@ -253,7 +253,6 @@ def _projection_components(
                 allow_completed_disposition=context.allow_completed_disposition,
                 caller=context.caller,
                 integration=integration_observation,
-                door=door_observation,
             ),
         )
     projected_result, projected_failure, projected_guidance = _projected_operation_result(

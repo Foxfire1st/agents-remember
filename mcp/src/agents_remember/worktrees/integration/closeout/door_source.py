@@ -25,6 +25,7 @@ from agents_remember.models.lifecycles.door import (
     closeout_door_dependencies,
     require_closeout_door_dependencies,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import TaskIntentIdentity, task_intent_is_missing
 from agents_remember.tasks import completion_blockers
 from agents_remember.tasks.document_refs import (
@@ -34,6 +35,7 @@ from agents_remember.tasks.document_refs import (
 )
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
 from agents_remember.tasks.task_intent import task_intent_identity
+from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.integration.closeout.door_evidence import (
     capture_door_candidate_evidence,
 )
@@ -134,9 +136,7 @@ def _series_door_candidate(
             "closeout-door-direct-policy-disabled",
             "series door publication requires sanctioned direct execution policy",
         )
-    asserted = request.candidate_task_document_ref or (
-        contract.closeout_door.taskDocumentRef if contract.closeout_door is not None else None
-    )
+    asserted = request.candidate_task_document_ref or _live_task_document_ref(contract)
     if asserted is None:
         if request.action != "status":
             raise TaskDocumentRefError(
@@ -215,7 +215,7 @@ def updated_door_generation(
         return _declared_generation(context, request, actor)
     if request.action == "update-provenance":
         return _provenance_successor(context, request, actor)
-    return _transitioned_generation(context.contract.closeout_door, request)
+    return _transitioned_generation(live_closeout_door(context.contract), request)
 
 
 def _declared_generation(
@@ -223,7 +223,7 @@ def _declared_generation(
     request: CloseoutDoorRequest,
     actor: DeclaredCaller,
 ) -> CloseoutDoorGeneration:
-    current = context.contract.closeout_door
+    current = live_closeout_door(context.contract)
     if current is None or current.disposition == "withdrawn":
         return _declare_generation(
             context,
@@ -267,7 +267,7 @@ def _provenance_successor(
 
 
 def _required_provenance_generation(context: DoorSourceContext) -> CloseoutDoorGeneration:
-    current = context.contract.closeout_door
+    current = live_closeout_door(context.contract)
     if current is None:
         raise CloseoutQueueError(
             "closeout-door-source-update-refused",
@@ -350,7 +350,7 @@ def superseding_door_generation(
 ) -> CloseoutDoorGeneration:
     """Build the fresh waiting source successor authorized by journal supersession."""
 
-    current = contract.closeout_door
+    current = live_closeout_door(contract)
     if current is None or current.disposition != "claimed":
         raise CloseoutQueueError(
             "closeout-door-supersede-owner-mismatch",
@@ -548,3 +548,8 @@ def _door_fact(fact: Any) -> DoorEvidenceFact:
 def _fingerprint(payload: object) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _live_task_document_ref(contract: WorktreeContract) -> TaskDocumentRef | None:
+    door = live_closeout_door(contract)
+    return None if door is None else door.taskDocumentRef
