@@ -21,10 +21,17 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
+from agents_remember.models.closeout.input import (
+    EffectiveCloseoutInput,
+    EnabledCloseoutLeg,
+)
 from agents_remember.tasks import TaskEnclosureRef, read_task_doc, write_task_doc
 from agents_remember.worktrees.integration.closeout import curator_coherence as coherence
 from agents_remember.worktrees.integration.closeout.certification import execution as selected
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
+from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.closeout_external import _commit_memory_content
+from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.quality import closeout_memory as memory_quality
 from agents_remember.worktrees.modules.quality import gate as quality_gate
 from agents_remember.worktrees.worktree_contract import load_contract
@@ -35,7 +42,7 @@ from integration_branch_authority_test_support import (
     _authority_fixture,
     _closed_external_leaf_worktrees,
 )
-from test_source_lineage import _fixture, _git
+from test_source_lineage import _commit_on, _fixture, _git
 
 MESSAGES = CloseoutCommitMessages(
     code="Add transaction feature",
@@ -353,3 +360,51 @@ def test_public_integration_ref_movement_refuses_before_pair_merge(tmp_path, wor
     assert not memory_hook_log.exists()
     current = load_contract(closed.contract_path)
     assert current.integration_status != "completed"
+
+
+def _effective_closeout_input() -> EffectiveCloseoutInput:
+    leg = EnabledCloseoutLeg(reason="test", message="Test closeout commit")
+    return EffectiveCloseoutInput(
+        route="worktree",
+        contractKind="leaf",
+        memoryMode="external",
+        code=leg,
+        memory=leg,
+        ledger=leg,
+    )
+
+
+def test_recloseout_after_a_sync_records_the_memory_head_as_content_commit(tmp_path):
+    """Closeout -> sync -> closeout records the live memory head, not the stale record.
+
+    The recorded ``memory_content_commit`` predates the sync merge, and integration refuses
+    exactly that with "integrated memory content commit is not based on the exact memory
+    source". Since sync -> re-closeout -> retry is the published remedy for a moved parent,
+    the re-closeout must re-derive the content commit from the worktree it is committing.
+    """
+
+    fixture = _authority_fixture(tmp_path, external_memory=True)
+    closed = _closed_external_leaf_worktrees(fixture, tmp_path, publish_closeout_evidence=False)
+    memory_repo = closed.memory_repo_path
+    memory_worktree = closed.memory_worktree
+    assert memory_repo is not None and memory_worktree is not None
+    recorded = closed.memory_content_commit
+    # The parent moved after that closeout, and the sync merged the move into the work branch.
+    _commit_on(memory_repo, closed.memory_source_branch, "parent-moved.md")
+    moved_source = _git(memory_repo, "rev-parse", closed.memory_source_branch)
+    _git(memory_worktree, "merge", "--no-edit", moved_source)
+    memory_head = _git(memory_worktree, "rev-parse", "HEAD")
+    # The integration predicate this fix removes: the recorded commit is behind the source.
+    assert not is_ancestor(memory_repo, moved_source, recorded)
+
+    memory_commit, created = _commit_memory_content(
+        closed,
+        WorktreeArgs(contract_path=closed.contract_path),
+        _effective_closeout_input(),
+        existing_mapping=None,
+    )
+
+    assert created is False
+    assert memory_commit == memory_head
+    assert memory_commit != recorded
+    assert is_ancestor(memory_repo, moved_source, memory_commit)

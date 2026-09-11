@@ -55,7 +55,6 @@ def external_closeout_commits(
         return exact_series_memory_closeout(contract, code_commit)
     if contract.memory_worktree is None:
         raise RuntimeError("external-memory leaf closeout requires a memory worktree")
-    resuming = args.approval_claimed or args.recovery_commits is not None
     recovered = _resumed_external_outcome(contract, args, effective_input, code_commit)
     if recovered is not None:
         return recovered
@@ -67,7 +66,6 @@ def external_closeout_commits(
         args,
         effective_input,
         existing_mapping=existing_mapping,
-        resuming=resuming,
     )
     if not memory_created:
         _report_memory_commit(args, code_commit, memory_commit)
@@ -140,7 +138,6 @@ def _commit_memory_content(
     effective_input: EffectiveCloseoutInput,
     *,
     existing_mapping,
-    resuming: bool,
 ) -> tuple[str, bool]:
     assert contract.memory_worktree is not None
     report_operation_progress(
@@ -177,10 +174,16 @@ def _commit_memory_content(
             )
         return committed, False
     memory_head = head_commit(contract.memory_worktree)
-    return (
-        memory_head if resuming else contract.memory_content_commit or memory_head,
-        False,
-    )
+    # Re-derive the content commit from the live memory worktree rather than reusing the
+    # contract's recorded ``memory_content_commit``. That recorded value can predate the
+    # branch: a leaf that closes out, syncs because its parent moved, and closes out again
+    # used to re-record a memory commit from before the sync merge, and integration then
+    # refused the whole landing with "integrated memory content commit is not based on the
+    # exact memory source" (integration_ref_transaction.py's is_ancestor check) on the very
+    # recovery flow whose published remedy is sync -> re-closeout -> retry. After a sync
+    # merge the memory head IS the correct content commit, and on a first closeout the
+    # recorded value is empty, so both paths record the head.
+    return memory_head, False
 
 
 def _report_memory_commit(args: WorktreeArgs, code_commit: str, memory_commit: str) -> None:
