@@ -12,6 +12,7 @@ from agents_remember.kernel.memory_ledger import (
     MemoryLedger,
     find_mapping,
     parse_ledger_text,
+    parse_ledger_text_unvalidated,
 )
 from agents_remember.worktrees.integration.integration_branch_authority import (
     branch_worktree_owners,
@@ -19,6 +20,11 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
 )
 from agents_remember.worktrees.integration.integration_operation_authority import (
     require_authorized_integration_commits,
+)
+from agents_remember.worktrees.ledger_projection import (
+    LedgerSource,
+    LedgerWorld,
+    project_ledger,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
@@ -248,12 +254,16 @@ def _integrated_ledger_pair(
     if source_blob.returncode != 0:
         raise RuntimeError("exact memory source commit has no readable memory.md")
     try:
+        # The integrated ledger is read structurally. A header that disagrees with its own first
+        # row is one of the shapes the projection check refuses *with its remedy*, and refusing
+        # it here as unparseable would replace that remedy with an opaque "invalid". The source
+        # ledger stays authoritative: a malformed official source is a different failure.
         return (
-            parse_ledger_text(blob.stdout),
+            parse_ledger_text_unvalidated(blob.stdout),
             parse_ledger_text(source_blob.stdout),
         )
     except LedgerError as error:
-        raise RuntimeError("integrated memory ledger is invalid") from error
+        raise RuntimeError(f"memory ledger is invalid: {error}") from error
 
 
 def require_integrated_ledger_mapping(
@@ -317,12 +327,21 @@ def _require_preserved_ledger_history(
     expected_series_prefix: tuple[LedgerRow, ...],
     landing: _LedgerLanding,
 ) -> None:
-    """The source rows survive intact, and every row the leaf added ahead of them is true.
+    """The landed ledger equals the projection of its source and its own true mappings.
 
-    The count of added rows was previously the safeguard, and it was wrong: one leaf that
-    closes out, syncs because its parent moved, and closes out again accumulates two -- both
-    closeouts really happened. Each added row is proven instead; see
-    ``test_ledger_keeps_every_true_mapping_a_reclosed_leaf_accumulated``.
+    This used to compare paperwork: the last ``len(source_rows)`` rows had to be the source
+    ledger, and everything ahead of that tail was taken on trust as "the leaf's own" and then
+    proven row by row. Closeout now *computes* the ledger from exactly that projection, so the
+    question worth asking has changed. A malformed ledger reaching here means someone
+    hand-edited ``memory.md`` after closeout, and the way to catch that is to recompute the
+    projection from the world -- the source ledger, the code repository, and this landing's
+    memory ancestry -- and require the landed ledger to be the fixed point. It refuses a
+    dropped or reordered source row, a superseded row kept, a duplicated row, and a header
+    that disagrees with its own first row, and it advertises the closeout re-run that repairs
+    all four.
+
+    The check is not redundant with closeout computing the ledger, so it is not deleted: it is
+    the only thing standing between a post-closeout hand edit and a protected-ref landing.
     """
 
     if contract.kind == "series":
@@ -335,112 +354,81 @@ def _require_preserved_ledger_history(
             "integrated atomic series ledger does not preserve the exact ordered leaf "
             "landing prefix and complete source ledger history"
         )
-    added = _added_leaf_mappings(ledger.rows, source_ledger.rows)
-    if added is None:
-        raise RuntimeError(
-            _unpreserved_source_history_refusal(
-                ledger.rows,
-                source_ledger.rows,
-                memory_source_commit=landing.memory_source_commit,
-            )
-        )
-    _require_true_added_mappings(contract, added, landing)
-
-
-def _added_leaf_mappings(
-    ledger_rows: list[LedgerRow],
-    source_rows: list[LedgerRow],
-) -> list[LedgerRow] | None:
-    """The mappings this leaf's own closeouts added ahead of its preserved source history.
-
-    The distinction is suffix alignment, not a count: the last ``len(source_rows)`` rows of
-    the integrated ledger must be the complete source ledger in order, so every row ahead of
-    that tail is a mapping this leaf added. ``None`` means the source rows are not preserved
-    that way, which is the refusal case -- the caller reports it instead of guessing an
-    alignment.
-    """
-
-    preserved = len(source_rows)
-    if len(ledger_rows) < preserved:
-        return None
-    if ledger_rows[len(ledger_rows) - preserved :] != source_rows:
-        return None
-    return ledger_rows[: len(ledger_rows) - preserved]
-
-
-def _require_true_added_mappings(
-    contract: WorktreeContract,
-    added: list[LedgerRow],
-    landing: _LedgerLanding,
-) -> None:
-    """Prove every mapping the leaf added ahead of the source rows is a real one.
-
-    The truth of each row is what replaces the row count as the safeguard: its code commit
-    must exist in the code repository, and its memory commit must be an ancestor of the
-    landed ledger commit. The refusal names the offending row and the exact remedy; it never
-    prints two equal-looking values and refuses anyway.
-    """
-
     assert contract.memory_repo_path is not None
-    for row in added:
-        if not _code_commit_exists(contract.code_repo_path, row.code_commit):
-            raise RuntimeError(
-                f"integrated memory ledger adds the mapping {_ledger_row_text(row)}, but code "
-                f"commit {row.code_commit} does not exist in the code repository "
-                f"{contract.code_repo_path.as_posix()}: an added row must name a commit that "
-                "repository really holds. "
-                f"{_added_row_remedy(landing.memory_source_commit)}"
-            )
-        if not is_ancestor(contract.memory_repo_path, row.memory_commit, landing.ledger_commit):
-            raise RuntimeError(
-                f"integrated memory ledger adds the mapping {_ledger_row_text(row)}, but its "
-                f"memory commit {row.memory_commit} is not an ancestor of the landed ledger "
-                f"commit {landing.ledger_commit} in "
-                f"{contract.memory_repo_path.as_posix()}: an added row must name memory "
-                "content the landed ledger commit carries. "
-                f"{_added_row_remedy(landing.memory_source_commit)}"
-            )
+    projection = project_ledger(
+        source=LedgerSource(landing.memory_source_commit, source_ledger),
+        observed=ledger,
+        world=LedgerWorld(
+            memory_repository=contract.memory_repo_path,
+            memory_reachable_from=landing.ledger_commit,
+            code_repository=contract.code_repo_path,
+        ),
+    )
+    if projection.is_fixed_point:
+        return
+    raise RuntimeError(_ledger_projection_refusal(projection, landing.memory_source_commit))
 
 
-def _added_row_remedy(memory_source_commit: str) -> str:
+def _ledger_projection_refusal(projection, memory_source_commit: str) -> str:
+    """Operator-legible evidence for a ledger that is not its own projection.
+
+    Each sentence names the offending row in the vocabulary the row's own rule uses, so the
+    operator can tell a superseded row from a dropped source row without reading the diff.
+    """
+
+    details = _projection_divergence_evidence(projection)
     return (
-        "Remedy: remove that row from memory.md and re-run worktree_closeout_apply for this "
-        "contract -- closeout writes only rows it can verify -- and if the file was "
-        f"hand-edited, restore it from memory source commit {memory_source_commit} first."
+        "integrated memory ledger is not the projection of its source and its own true "
+        f"mappings: {details}. Ledger rows newest-first: "
+        f"{_ledger_row_list(list(projection.observed_rows))}. Source rows newest-first: "
+        f"{_ledger_row_list(list(projection.source_rows))}. A leaf may prepend any number of its "
+        "own mappings ahead of the source rows; no source row may be dropped, reordered, or "
+        "replaced, no superseded row may be kept, and the header must name the first row. "
+        "Remedy: re-run worktree_closeout_apply for this contract -- closeout recomputes "
+        "memory.md from the source ledger plus the branch's own true mappings, so the repair "
+        "needs no hand edit -- and if the file was hand-edited, restore it from memory source "
+        f"commit {memory_source_commit} first."
     )
 
 
-def _unpreserved_source_history_refusal(
-    ledger_rows: list[LedgerRow],
-    source_rows: list[LedgerRow],
-    *,
-    memory_source_commit: str,
-) -> str:
-    """Operator-legible evidence for a ledger that did not keep its source history."""
+def _projection_divergence_evidence(projection) -> str:
+    """One bounded sentence per class of difference, empty classes omitted."""
 
-    return (
-        "integrated memory ledger does not preserve the complete source ledger history: its "
-        f"last {len(source_rows)} row(s) must be the source ledger, in order, and "
-        f"{_source_history_divergence(ledger_rows, source_rows)}. Ledger rows newest-first: "
-        f"{_ledger_row_list(ledger_rows)}. Source rows newest-first: "
-        f"{_ledger_row_list(source_rows)}. A leaf may prepend any number of its own mappings "
-        "ahead of the source rows; no source row may be dropped, reordered, or replaced. "
-        "Remedy: run worktree_sync for this contract and re-run worktree_closeout_apply for "
-        "it -- the closeout rebuilds the ledger from the exact source -- and if memory.md was "
-        f"hand-edited, restore it from memory source commit {memory_source_commit} first."
-    )
-
-
-def _source_history_divergence(
-    ledger_rows: list[LedgerRow],
-    source_rows: list[LedgerRow],
-) -> str:
-    """Name the source rows the integrated ledger failed to keep, in row terms."""
-
-    absent = [row for row in source_rows if row not in ledger_rows]
-    if absent:
-        return f"it is missing {len(absent)} source row(s): {_ledger_row_list(absent)}"
-    return "the source rows are present but not as its trailing rows in source order"
+    evidence = [removal.evidence() for removal in projection.removals]
+    if projection.missing_source_rows:
+        evidence.append(
+            "does not preserve the complete source ledger history: missing "
+            f"{len(projection.missing_source_rows)} source row(s): "
+            f"{_ledger_row_list(list(projection.missing_source_rows))}"
+        )
+    if projection.reordered_rows:
+        evidence.append(
+            "does not preserve the complete source ledger history: the rows "
+            f"{_ledger_row_list(list(projection.reordered_rows))} are present but not as its "
+            "trailing rows in source order"
+        )
+    unattributed = [
+        row
+        for row in projection.removed_rows
+        if row not in {removal.row for removal in projection.removals}
+    ]
+    if unattributed:
+        evidence.append(
+            "does not preserve the complete source ledger history: "
+            f"{_ledger_row_list(unattributed)} appear more than once and no source row may be "
+            "duplicated"
+        )
+    if projection.header_changed:
+        evidence.append(
+            "the ledger header disagrees with its own first row: lastVerifiedCodeCommit is "
+            f"{projection.header_before[0]!r} and the first row's code commit is "
+            f"{projection.header_after[0]!r}"
+        )
+    if not evidence:
+        evidence.append(
+            "its mapping table carries rows the projection does not, or misses rows it does"
+        )
+    return "; ".join(evidence)
 
 
 def _ledger_row_list(rows: list[LedgerRow]) -> str:
@@ -449,12 +437,6 @@ def _ledger_row_list(rows: list[LedgerRow]) -> str:
 
 def _ledger_row_text(row: LedgerRow) -> str:
     return f"{row.code_commit} -> {row.memory_commit}"
-
-
-def _code_commit_exists(repository: Path, commit: str) -> bool:
-    """Whether the code repository really holds ``commit`` as a commit object."""
-
-    return run_git(repository, ["cat-file", "-e", f"{commit}^{{commit}}"]).returncode == 0
 
 
 def _compare_and_swap_ref(

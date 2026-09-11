@@ -7,11 +7,10 @@ from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_ledger import (
+    LedgerRow,
     find_mapping,
-    ledger_to_text,
     load_ledger,
     parse_ledger_text,
-    prepend_mapping,
     write_ledger,
 )
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
@@ -30,6 +29,10 @@ from agents_remember.worktrees.integration.mutation_evidence import (
     begin_exact_file_git_mutation,
     begin_git_mutation,
     prove_git_commit,
+)
+from agents_remember.worktrees.ledger_projection import (
+    contract_ledger_projection,
+    inspect_ledger_projection,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
@@ -54,6 +57,10 @@ class MemoryCloseoutOutcome:
     refreshed_entities: list[dict[str, object]] = field(default_factory=list)
     refreshed_route_overviews: list[dict[str, str]] = field(default_factory=list)
     route_index_refresh: dict[str, object] = field(default_factory=dict)
+    # What recomputing the ledger changed, in row terms. Derived state is recomputed, never
+    # silently: the payload says which rows were added, removed, or reordered and whether the
+    # header moved, and says so even when the ledger was already correct.
+    ledger_repair: dict[str, object] = field(default_factory=dict)
 
 
 def prove_closeout_recovery_commits(
@@ -233,8 +240,13 @@ def resume_external_commits(
     *,
     code_commit: str,
     memory_commit: str,
-) -> tuple[str, str]:
-    """Finish the exact ledger edge after a journaled memory-content commit."""
+) -> tuple[str, str, dict[str, object]]:
+    """Finish the exact ledger edge after a journaled memory-content commit.
+
+    The continuation recomputes the ledger from its source exactly as the first attempt does,
+    so a resumed operation repairs a malformed table instead of appending onto it.
+    """
+
     assert contract.memory_worktree is not None and contract.ledger_path is not None
     pending = _pending_ledger_record(contract, args)
     if pending is not None:
@@ -245,26 +257,23 @@ def resume_external_commits(
             pending,
             commits=(code_commit, memory_commit),
         )
-        return memory_commit, ledger_commit
+        return memory_commit, ledger_commit, inspect_ledger_projection(contract)
     require_clean(contract.memory_worktree, "resuming external-memory closeout")
     memory_head = head_commit(contract.memory_worktree)
-    ledger = load_ledger(contract.ledger_path)
-    mapping = find_mapping(ledger, code_commit)
-    created_commit = mapping is None or mapping.memory_commit != memory_commit
-    if created_commit:
+    repair = contract_ledger_projection(contract, (LedgerRow(code_commit, memory_commit),))
+    if repair.needs_write:
         if memory_head != memory_commit:
             raise RuntimeError(
                 "closeout recovery cannot prove the recorded memory commit at memory HEAD"
             )
-        intended_ledger = prepend_mapping(ledger, code_commit, memory_commit)
         intent = begin_exact_file_git_mutation(
             args,
             leg="ledger",
             repository=contract.memory_worktree,
             path=contract.ledger_path,
-            intended_text=ledger_to_text(intended_ledger),
+            intended_text=repair.intended_text,
         )
-        write_ledger(contract.ledger_path, intended_ledger)
+        write_ledger(contract.ledger_path, repair.projected)
         require_git(contract.memory_worktree, ["add", "memory.md"])
         ledger_commit = commit_verified_staged(
             contract.memory_worktree,
@@ -280,7 +289,7 @@ def resume_external_commits(
         if not is_ancestor(contract.memory_worktree, memory_commit, memory_head):
             raise RuntimeError("closeout recovery memory commit is not reachable from ledger HEAD")
         ledger_commit = memory_head
-    if not created_commit:
+    if not repair.needs_write:
         report_operation_progress(
             args,
             "ledger-commit",
@@ -291,7 +300,7 @@ def resume_external_commits(
                 "ledgerCommit": ledger_commit,
             },
         )
-    return memory_commit, ledger_commit
+    return memory_commit, ledger_commit, repair.operator_payload()
 
 
 def _pending_ledger_record(

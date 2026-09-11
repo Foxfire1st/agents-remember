@@ -50,6 +50,24 @@ def _metadata_get(metadata: dict[str, object], *names: str) -> str:
 
 
 def parse_ledger_text(text: str) -> MemoryLedger:
+    """Parse and validate a ledger that must already be correct."""
+
+    ledger = parse_ledger_text_unvalidated(text)
+    validate_ledger(ledger)
+    return ledger
+
+
+def parse_ledger_text_unvalidated(text: str) -> MemoryLedger:
+    """Parse a ledger's structure without the header/first-row agreement check.
+
+    ``parse_ledger_text`` is the authority for a ledger that must already be right, and it is
+    what the source-side and integration readers use. Repairing a ledger needs to *read* one
+    whose header disagrees with its own first row -- that disagreement is one of the shapes
+    being repaired -- so the structural parse is exposed on its own. Every structural check
+    stays: the fence, the metadata fields, the schema, the two-column table, and at least one
+    row. Only the derived header is left to the caller to recompute.
+    """
+
     match = LEDGER_FENCE_RE.search(text)
     if not match:
         raise LedgerError("memory.md is missing a fenced `json ar-memory-ledger` metadata block")
@@ -89,8 +107,7 @@ def parse_ledger_text(text: str) -> MemoryLedger:
     if schema not in {LEDGER_SCHEMA, LEGACY_LEDGER_SCHEMA}:
         raise LedgerError(f"unsupported memory ledger schema: {schema}")
 
-    rows = parse_ledger_rows(text[match.end() :])
-    ledger = MemoryLedger(
+    return MemoryLedger(
         schema=schema,
         repo_name=repo_name,
         base_code_commit=base_code_commit,
@@ -98,10 +115,8 @@ def parse_ledger_text(text: str) -> MemoryLedger:
         last_verified_code_commit=last_verified_code_commit,
         last_memory_content_commit=last_memory_content_commit,
         sort_order=sort_order,
-        rows=rows,
+        rows=parse_ledger_rows(text[match.end() :]),
     )
-    validate_ledger(ledger)
-    return ledger
 
 
 def _ledger_rows_from(row_lines: list[str]) -> list[LedgerRow]:
@@ -188,6 +203,14 @@ def load_ledger(path: Path) -> MemoryLedger:
     if not path.exists():
         raise LedgerError(f"memory ledger does not exist: {path}")
     return parse_ledger_text(path.read_text(encoding="utf-8"))
+
+
+def load_ledger_unvalidated(path: Path) -> MemoryLedger:
+    """Load a ledger's structure so a malformed header can be recomputed rather than refused."""
+
+    if not path.exists():
+        raise LedgerError(f"memory ledger does not exist: {path}")
+    return parse_ledger_text_unvalidated(path.read_text(encoding="utf-8"))
 
 
 def write_ledger(path: Path, ledger: MemoryLedger) -> None:

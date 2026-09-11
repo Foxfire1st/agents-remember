@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any
 
 from agents_remember.kernel.memory_ledger import (
+    LedgerRow,
     find_mapping,
-    ledger_to_text,
-    load_ledger,
-    prepend_mapping,
+    load_ledger_unvalidated,
     write_ledger,
 )
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
@@ -18,6 +16,7 @@ from agents_remember.worktrees.integration.mutation_evidence import (
     begin_git_mutation,
     prove_git_commit,
 )
+from agents_remember.worktrees.ledger_projection import contract_ledger_projection
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
@@ -59,7 +58,9 @@ def external_closeout_commits(
     if recovered is not None:
         return recovered
     refresh = _refresh_external_memory(contract, args, change)
-    ledger = load_ledger(contract.ledger_path)
+    # Read the structure rather than the validated ledger: the existing mapping has to be found
+    # in a table whose header may be one of the shapes the projection is about to repair.
+    ledger = load_ledger_unvalidated(contract.ledger_path)
     existing_mapping = find_mapping(ledger, code_commit)
     memory_commit, memory_created = _commit_memory_content(
         contract,
@@ -69,11 +70,11 @@ def external_closeout_commits(
     )
     if not memory_created:
         _report_memory_commit(args, code_commit, memory_commit)
-    ledger_commit, ledger_created = _commit_ledger_mapping(
+    ledger_commit, ledger_created, ledger_repair = _commit_ledger_mapping(
         contract,
         args,
         effective_input,
-        _LedgerCommitFacts(ledger, existing_mapping, code_commit, memory_commit),
+        _LedgerCommitFacts(code_commit, memory_commit),
     )
     if not ledger_created:
         _report_ledger_commit(args, code_commit, memory_commit, ledger_commit)
@@ -84,6 +85,7 @@ def external_closeout_commits(
         refreshed_entities=refresh.entities,
         refreshed_route_overviews=refresh.route_overviews,
         route_index_refresh=refresh.route_index,
+        ledger_repair=ledger_repair,
     )
 
 
@@ -97,8 +99,6 @@ class _ExternalMemoryRefresh:
 
 @dataclass(frozen=True)
 class _LedgerCommitFacts:
-    ledger: Any
-    existing_mapping: Any
     code_commit: str
     memory_commit: str
 
@@ -204,26 +204,29 @@ def _commit_ledger_mapping(
     args: WorktreeArgs,
     effective_input: EffectiveCloseoutInput,
     facts: _LedgerCommitFacts,
-) -> tuple[str, bool]:
+) -> tuple[str, bool, dict[str, object]]:
+    """Recompute the ledger from its source, and write it only when it is not already right.
+
+    Reading and re-stamping what the file already says is what put a superseded row, a wrong
+    order, and a header disagreeing with its own first row into three landed ledgers in one
+    day. The projection is computed from the source ledger plus this branch's own true
+    mappings instead, so re-running closeout repairs a malformed or partially-merged table.
+    The payload reports what changed, and says so explicitly when nothing did.
+    """
+
     assert contract.memory_worktree is not None and contract.ledger_path is not None
-    if (
-        facts.existing_mapping is not None
-        and facts.existing_mapping.memory_commit == facts.memory_commit
-    ):
-        return head_commit(contract.memory_worktree), False
-    intended_ledger = prepend_mapping(
-        facts.ledger,
-        facts.code_commit,
-        facts.memory_commit,
-    )
+    additions = (LedgerRow(facts.code_commit, facts.memory_commit),)
+    repair = contract_ledger_projection(contract, additions)
+    if not repair.needs_write:
+        return head_commit(contract.memory_worktree), False, repair.operator_payload()
     ledger_intent = begin_exact_file_git_mutation(
         args,
         leg="ledger",
         repository=contract.memory_worktree,
         path=contract.ledger_path,
-        intended_text=ledger_to_text(intended_ledger),
+        intended_text=repair.intended_text,
     )
-    write_ledger(contract.ledger_path, intended_ledger)
+    write_ledger(contract.ledger_path, repair.projected)
     require_git(contract.memory_worktree, ["add", "memory.md"])
     committed = commit_verified_staged(
         contract.memory_worktree,
@@ -235,7 +238,7 @@ def _commit_ledger_mapping(
         repository=contract.memory_worktree,
         commit=committed,
     )
-    return committed, True
+    return committed, True, repair.operator_payload()
 
 
 def _report_ledger_commit(
@@ -267,11 +270,15 @@ def _resumed_external_outcome(
     )
     if not recovery_memory_commit:
         return None
-    memory_commit, ledger_commit = resume_external_commits(
+    memory_commit, ledger_commit, ledger_repair = resume_external_commits(
         contract,
         args,
         effective_input,
         code_commit=code_commit,
         memory_commit=recovery_memory_commit,
     )
-    return MemoryCloseoutOutcome(memory_commit=memory_commit, ledger_commit=ledger_commit)
+    return MemoryCloseoutOutcome(
+        memory_commit=memory_commit,
+        ledger_commit=ledger_commit,
+        ledger_repair=ledger_repair,
+    )
