@@ -74,6 +74,7 @@ unit-regression = [
   "mcp/tests/test_models.py",
   "mcp/tests/test_observer.py",
   "mcp/tests/test_observer_projection_attention.py",
+  "mcp/tests/test_parked_external_await_separation.py",
   "mcp/tests/test_platform_subprocess.py",
   "mcp/tests/test_provider_current_state.py",
   "mcp/tests/test_provider_degradation.py",

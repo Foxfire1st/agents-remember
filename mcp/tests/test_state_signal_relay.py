@@ -3,7 +3,8 @@
 Incident-#1 shape (a worker finishes without posting an inbox row and the manager
 still receives the done signal), origin attribution, busy-manager boundary hold with
 exactly one landing, dedupe across re-projection, owner rebinding after seat
-replacement, idle flap re-arm, and the non-reaction residue fact.
+replacement, idle flap re-arm, the non-reaction residue fact, and the open-turn
+boundary where a still-awaiting seat reports nothing to its owner.
 """
 
 from __future__ import annotations
@@ -572,6 +573,34 @@ class StateSignalRelayTests(unittest.TestCase):
         )
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         self.assertEqual(self._state_signals(), [])
+
+    def test_open_turn_never_wakes_the_owner_before_terminal_evidence(self) -> None:
+        """A turn that is still open is not completion truth.
+
+        The relay owns ended-turn reporting only. A seat waiting on an external condition keeps
+        its turn open, so it reports nothing to its owner even while stale adapter outcome fields
+        survive on its row; the same seat wakes its owner once its turn has ended.
+        """
+
+        self.catalog.upsert(_manager())
+        self.catalog.upsert(
+            replace(
+                _done_worker("worker-open"),
+                turn_state="working",
+                turn_state_changed_at=NOW.isoformat(),
+            )
+        )
+        ctx = self._ctx()
+
+        run_agent_notifier_sweep(ctx, now=NOW)
+        self.assertEqual(self._state_signals(), [])
+
+        self.catalog.upsert(_done_worker("worker-open"))
+        run_agent_notifier_sweep(ctx, now=NOW)
+        signals = self._state_signals()
+        self.assertEqual(len(signals), 1, signals)
+        self.assertEqual(signals[0].agentId, "manager-1")
+        self.assertEqual(signals[0].subjectAgentId, "worker-open")
 
 
 if __name__ == "__main__":  # pragma: no cover
