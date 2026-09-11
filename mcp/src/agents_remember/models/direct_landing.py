@@ -31,7 +31,6 @@ class DirectLandingResponse(ToolResponse):
     status: str | None = None
     detail: str | None = Field(default=None, max_length=8192)
     contractPath: str | None = None
-    doorGenerationId: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     projectionEffects: list[TaskDocProjectionEffect] | None = Field(
         default=None,
         max_length=8,

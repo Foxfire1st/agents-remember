@@ -29,6 +29,7 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentTopology,
 )
 from agents_remember.tasks.task_intent import task_intent_identity
+from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.integration.closeout.door_evidence import (
     capture_door_candidate_evidence,
     door_candidate_evidence_blockers,
@@ -618,8 +619,8 @@ def _series_sources(
     rows: list[dict[str, object]] = []
     activation_waiting: dict[TaskDocumentRef, tuple[str, ...]] = {}
     doors: list[tuple[_DoorSource, ResolvedTaskDocument, int]] = []
-    for order, master in enumerate(masters):
-        observed = _series_source(sprint, master, order, problems)
+    for master in masters:
+        observed = _series_source(sprint, master, problems)
         if observed.live_contract is not None:
             _observe_series_activation(
                 observed,
@@ -651,7 +652,6 @@ def _observe_series_activation(
 def _series_source(
     sprint: ResolvedTaskDocument,
     master: ResolvedTaskDocument,
-    order: int,
     problems: list[ProjectionSourceProblem],
 ) -> _SeriesSourceObservation:
     path = series_contract_path(master.path.parent)
@@ -698,11 +698,7 @@ def _series_source(
             )
         )
         return _SeriesSourceObservation(row)
-    door = (
-        (_DoorSource(path, contract, contract.closeout_door), master, order * 1000)
-        if contract.closeout_door is not None
-        else None
-    )
+    door = None
     return _SeriesSourceObservation(row, contract if live else None, door)
 
 
@@ -828,7 +824,7 @@ def _leaf_door_sources(
             )
             sources.append(_DoorSource(path, None, None))
             continue
-        sources.append(_DoorSource(path, contract, contract.closeout_door))
+        sources.append(_DoorSource(path, contract, live_closeout_door(contract)))
     return sources
 
 

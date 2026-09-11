@@ -10,10 +10,6 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationProjection,
     LifecycleOperationRecord,
 )
-from agents_remember.worktrees.integration.closeout.door import (
-    DoorContractReadFailure,
-    classify_door_publication,
-)
 from agents_remember.worktrees.integration.closeout.recovery_projection import (
     derive_closeout_recovery_commits,
 )
@@ -28,7 +24,6 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_project
     OperationProjectionContext,
     bind_projection_decision,
     operation_projection,
-    operation_projection_identity,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_read_decision import (
     lifecycle_journal_read_decision,
@@ -180,22 +175,6 @@ def unreadable_contract_operation_projections(
             or record.operationKind != kind
             or Path(record.contractPath).resolve(strict=False) != contract_path
         ):
-            continue
-        publication = record.doorPublication
-        if kind == "closeout" and publication is not None and publication.state == "intent":
-            observation = classify_door_publication(
-                publication,
-                DoorContractReadFailure(error_type, ""),
-            )
-            projections.append(
-                operation_projection(
-                    record,
-                    context=OperationProjectionContext(
-                        door=observation,
-                        doorIdentity=operation_projection_identity(record),
-                    ),
-                )
-            )
             continue
         surface = "the canonical task contract is unreadable for this retained operation"
         result = {

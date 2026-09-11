@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -39,6 +39,7 @@ from agents_remember.worktrees.integration.closeout.door import (
     DoorPublicationError,
     classify_door_publication,
     door_generation_for_operation,
+    live_closeout_door,
     prepare_door_publication,
     publish_door_intent,
 )
@@ -56,9 +57,6 @@ from agents_remember.worktrees.integration.configured_contract_authority import 
 )
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_series_contract_authority,
-)
-from agents_remember.worktrees.integration.integration_publication_fence import (
-    classify_integration_door_authority,
 )
 from agents_remember.worktrees.integration.lifecycle.generation.creation import (
     queued_operation_record,
@@ -182,15 +180,6 @@ def start_or_observe_operation(
         operation_input.configPath,
     )
     _validate_input_identity(contract, operation_input)
-    door_authority = classify_integration_door_authority(contract, None)
-    if not door_authority.valid:
-        raise LifecycleControlError(
-            door_authority.status,
-            door_authority.detail,
-            expected=door_authority.expected,
-            observed=door_authority.observed,
-            next_action="developer-decision",
-        )
     store = _store(contract, "integrate")
     retained = _retained_integration_recovery_record(store.read(), operation_input)
     if retained is None:
@@ -399,7 +388,7 @@ def _claim_closeout_operation(
         None,
         execution.timestamp,
     )
-    door = contract.closeout_door
+    door = live_closeout_door(contract, store.read())
     if door is None:
         raise LifecycleControlError(
             "closeout-door-missing",
@@ -479,7 +468,7 @@ def _prepare_closeout_claim(
         claimed_record = claimed_record.model_copy(
             update={"dependencies": lifecycle_operation_dependencies(claimed_record)}
         )
-        return claimed_record, replace(contract, closeout_door=claimed)
+        return claimed_record, contract
     if door.disposition == "claimed":
         _require_retained_closeout_owner(context.store, door, context.candidate)
         return context.queued, contract
@@ -729,7 +718,7 @@ def _replace_cancelled_closeout(
     queued = replacement.queued
     current = replacement.current
     contract = replacement.contract
-    successor = contract.closeout_door
+    successor = live_closeout_door(contract, current)
     observed = (
         getattr(successor, "disposition", None),
         current.generationDisposition,

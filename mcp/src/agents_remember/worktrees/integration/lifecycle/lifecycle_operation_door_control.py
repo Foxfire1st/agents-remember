@@ -9,6 +9,7 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.worktrees.integration.closeout.door import (
     DoorPublicationError,
+    live_closeout_door,
     publish_door_intent,
 )
 from agents_remember.worktrees.integration.configured_contract_authority import (
@@ -95,7 +96,6 @@ def complete_pending_door_locked(
                         record,
                         context=LifecycleControlProjectionContext(
                             allow_completed_disposition=True,
-                            door=classification,
                         ),
                     )
                     if item["action"] == action
@@ -130,7 +130,7 @@ def project_closeout_refresh(
 ) -> LifecycleOperationProjection:
     if dry_run or record.operationKind not in {"closeout", "direct-landing"}:
         return projection
-    door = contract.closeout_door
+    door = live_closeout_door(contract, record)
     if door is None:
         return projection
     try:

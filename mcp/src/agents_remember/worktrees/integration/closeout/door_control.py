@@ -11,6 +11,7 @@ from agents_remember.models.lifecycles.door import CloseoutDoorGeneration, Close
 from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.worktrees.integration.closeout.door import (
     DoorPublicationError,
+    live_closeout_door,
     prepare_door_publication,
     publish_door_intent,
 )
@@ -89,7 +90,7 @@ def _response(
     *,
     effects: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    generation = contract.closeout_door
+    generation = live_closeout_door(contract)
     unavailable = generation is not None and not isinstance(
         generation.taskIntent, TaskIntentIdentity
     )

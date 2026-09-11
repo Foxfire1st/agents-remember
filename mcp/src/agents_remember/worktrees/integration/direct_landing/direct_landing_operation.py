@@ -9,7 +9,6 @@ from agents_remember.models.lifecycles.direct_landing import (
     DirectLandingLedgerIntent,
     DirectLandingOperationInput,
 )
-from agents_remember.models.lifecycles.door import DoorPublicationEvidence
 from agents_remember.models.lifecycles.mutation_evidence import (
     CloseoutMutationLeg,
     GitMutationEvidence,
@@ -17,7 +16,6 @@ from agents_remember.models.lifecycles.mutation_evidence import (
 from agents_remember.models.lifecycles.operation import (
     LifecycleOperationRecord,
     LifecycleOperationRecoveryCommits,
-    lifecycle_operation_dependencies,
 )
 from agents_remember.worktrees.integration.closeout.recovery_projection import (
     derive_closeout_recovery_commits,
@@ -172,12 +170,16 @@ def direct_landing_record(
     contract: WorktreeContract,
     operation_input: DirectLandingOperationInput,
     candidate: LifecycleOperationCandidate,
-    door_publication: DoorPublicationEvidence | None,
 ) -> LifecycleOperationRecord:
-    """Build a journal snapshot; callers attach the claim intent before persistence."""
+    """Build the journal snapshot for one exact direct-landing request.
+
+    The record carries no door publication: a direct landing is admitted by its own
+    request (the series contract, the branch HEAD commit and tree and the effective
+    commit messages), not by a claimed closeout door.
+    """
 
     stamp = _stamp()
-    record = LifecycleOperationRecord(
+    return LifecycleOperationRecord(
         taskId=contract.task_id,
         taskName=contract.task_name,
         contractPath=contract.contract_path.as_posix(),
@@ -198,7 +200,6 @@ def direct_landing_record(
         startedAt=stamp,
         heartbeatAt=stamp,
         currentCommand="verify direct landing durable inputs",
-        doorPublication=door_publication,
         reportPath=located_lifecycle_operation_report_path(
             contract,
             "direct-landing",
@@ -208,9 +209,6 @@ def direct_landing_record(
         ),
         recoveryCommits=LifecycleOperationRecoveryCommits(codeCommit=operation_input.codeCommit),
     )
-    if door_publication is None:
-        return record
-    return record.model_copy(update={"dependencies": lifecycle_operation_dependencies(record)})
 
 
 def reconcile_direct_landing(

@@ -9,10 +9,6 @@ from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.models.task_intent import TaskIntentIdentity
-from agents_remember.worktrees.integration.closeout.door import (
-    DoorPublicationClassification,
-    classify_door_publication,
-)
 from agents_remember.worktrees.integration.closeout.initial_door_recovery import (
     classify_initial_closeout_door_recovery,
 )
@@ -57,7 +53,6 @@ class LifecycleControlProjectionContext:
     allow_completed_disposition: bool = False
     caller: DeclaredCaller | None = None
     integration: IntegrationOperationObservation | None = None
-    door: DoorPublicationClassification | None = None
 
 
 def legal_operation_controls(
@@ -72,11 +67,7 @@ def legal_operation_controls(
     base = _control_arguments(contract, record, context.caller)
     publication = record.doorPublication
     if publication is not None and publication.state == "intent":
-        observed_door = context.door or classify_door_publication(publication, contract)
-        if observed_door.state == "developer-decision":
-            return []
         pending = _pending_door_control(
-            contract,
             record,
             base,
             allow_completed_disposition=context.allow_completed_disposition,
@@ -153,11 +144,6 @@ def _evidence_controls(
     repair_controls = _repair_controls(observation, base)
     if repair_controls is not None:
         return observation, repair_controls
-    door_blocked = bool(
-        observation is not None and observation.door is not None and not observation.door.valid
-    )
-    if door_blocked:
-        return observation, []
     return observation, None
 
 
@@ -271,7 +257,6 @@ def generation_requires_recovery(record: LifecycleOperationRecord) -> bool:
 
 
 def _pending_door_control(
-    contract: WorktreeContract,
     record: LifecycleOperationRecord,
     base: dict[str, object],
     *,
@@ -287,7 +272,7 @@ def _pending_door_control(
     if action in {"retire", "supersede"} and not allow_completed_disposition:
         return None
     if action == "supersede":
-        return _supersede_control(contract, record, base)
+        return _supersede_control(record, base)
     return _control(
         action,
         base,
@@ -386,15 +371,14 @@ def _completed_direct_controls(
     *,
     allow_completed_disposition: bool,
 ) -> list[dict[str, Any]]:
-    if _is_exact_direct_successor(contract, record):
+    if _is_exact_direct_successor(record):
         return [_direct_successor_control(contract, record)]
-    if (_is_exact_direct_owner(contract, record), allow_completed_disposition) != (True, True):
+    if (_is_exact_direct_owner(record), allow_completed_disposition) != (True, True):
         return []
     return _completed_direct_owner_controls(contract, record, base)
 
 
 def _is_exact_direct_successor(
-    contract: WorktreeContract,
     record: LifecycleOperationRecord,
 ) -> bool:
     publication = record.doorPublication
@@ -402,13 +386,11 @@ def _is_exact_direct_successor(
         record.generationDisposition,
         publication.state if publication is not None else None,
         publication.generation.disposition if publication is not None else None,
-        contract.closeout_door if publication is None else publication.generation,
     )
-    return observed == ("superseded", "proven", "waiting", contract.closeout_door)
+    return observed == ("superseded", "proven", "waiting")
 
 
 def _is_exact_direct_owner(
-    contract: WorktreeContract,
     record: LifecycleOperationRecord,
 ) -> bool:
     publication = record.doorPublication
@@ -420,7 +402,6 @@ def _is_exact_direct_owner(
         publication.generation.disposition,
         publication.generation.operationFingerprint,
         publication.generation.claimedOperationKey,
-        publication.generation,
     )
     expected = (
         "active",
@@ -428,7 +409,6 @@ def _is_exact_direct_owner(
         "claimed",
         record.fingerprint,
         record.operationKey,
-        contract.closeout_door,
     )
     return observed == expected
 
@@ -440,7 +420,7 @@ def _completed_direct_owner_controls(
 ) -> list[dict[str, Any]]:
     controls = [_control("retire", base, "Retire this completed direct generation for audit.")]
     if _direct_code_candidate_advanced(contract, record):
-        controls.append(_supersede_control(contract, record, base))
+        controls.append(_supersede_control(record, base))
     return controls
 
 
@@ -454,12 +434,10 @@ def _completed_closeout_controls(
     if record.generationDisposition == "superseded":
         publication = record.doorPublication
         exact_successor = bool(
-            publication is not None
-            and publication.generation.disposition == "waiting"
-            and (publication.state == "intent" or contract.closeout_door == publication.generation)
+            publication is not None and publication.generation.disposition == "waiting"
         )
         return (
-            [_supersede_control(contract, record, base)]
+            [_supersede_control(record, base)]
             if allow_completed_disposition and exact_successor
             else []
         )
@@ -476,7 +454,7 @@ def _completed_closeout_controls(
         controls.extend(
             (
                 _control("retire", base, "Retire the completed unintegrated generation."),
-                _supersede_control(contract, record, base),
+                _supersede_control(record, base),
             )
         )
     return controls
@@ -495,7 +473,6 @@ def _integration_claim_active(contract: WorktreeContract) -> bool:
 
 
 def _supersede_control(
-    contract: WorktreeContract,
     record: LifecycleOperationRecord,
     base: dict[str, object],
 ) -> dict[str, Any]:
@@ -503,7 +480,7 @@ def _supersede_control(
     door = (
         publication.generation
         if publication is not None and publication.generation.disposition == "waiting"
-        else contract.closeout_door
+        else None
     )
     if door is None:
         return _control("supersede", base, "Publish one fresh waiting door successor.")

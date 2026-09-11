@@ -232,23 +232,15 @@ def require_closeout_door_dependencies(
 
 
 class DoorPublicationEvidence(_StrictModel):
-    """Write-once intent/proof for one exact contract publication."""
+    """Write-once intent/proof for one exact door generation.
+
+    The door lives in the operation journal alone: the worktree contract no longer
+    stores one, so there is no contract-byte pair to hash, compare or re-read. The
+    intent names the generation; proving it is the journal's own state transition.
+    """
 
     state: DoorPublicationState
     generation: CloseoutDoorGeneration
-    expectedBeforeContractSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    expectedPublishedContractSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    observedPublishedContractSha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-
-    @model_validator(mode="after")
-    def _proof_is_exact(self) -> DoorPublicationEvidence:
-        if self.state == "intent" and self.observedPublishedContractSha256 is not None:
-            raise ValueError("door publication intent cannot claim observed publication")
-        if self.state == "proven" and (
-            self.observedPublishedContractSha256 != self.expectedPublishedContractSha256
-        ):
-            raise ValueError("door publication proof must match the intended contract bytes")
-        return self
 
 
 class CloseoutDoorRequest(_StrictModel):

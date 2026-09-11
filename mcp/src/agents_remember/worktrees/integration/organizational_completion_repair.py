@@ -16,7 +16,10 @@ from agents_remember.models.lifecycles.operation import (
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentTopology
-from agents_remember.worktrees.integration.closeout.door import successor_waiting_door
+from agents_remember.worktrees.integration.closeout.door import (
+    live_closeout_door,
+    successor_waiting_door,
+)
 from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
 from agents_remember.worktrees.integration.integration_branch_types import IntegrationTarget
 from agents_remember.worktrees.integration.integration_ref_state import (
@@ -132,7 +135,7 @@ def _classify_organizational_repair_evidence(
         "contractSha256": _contract_sha256(contract),
         "closeoutStatus": contract.closeout_status,
         "integrationStatus": contract.integration_status,
-        "doorDisposition": (contract.closeout_door.disposition if contract.closeout_door else ""),
+        "doorDisposition": _live_door_disposition(contract),
     }
     live_sha = observed["contractSha256"]
     if live_sha == evidence.acceptedContractSha256:
@@ -560,7 +563,7 @@ def _require_repair_evidence(
 def _repair_binding(
     contract: WorktreeContract,
 ) -> tuple[TaskDocumentRef, TaskDocumentRef, str]:
-    door = _required_claimed_door(contract.closeout_door)
+    door = _required_claimed_door(live_closeout_door(contract))
     topology = TaskDocumentTopology(contract.coordination_root)
     master = topology.parent(door.taskDocumentRef)
     if master is None:
@@ -622,7 +625,7 @@ def _quality_repair_contract(
     repair_record: LifecycleOperationRecord,
 ) -> WorktreeContract:
     _require_reopenable_contract(contract, expected_commits)
-    door = _successor_repair_door(contract.closeout_door, repair_record)
+    door = _successor_repair_door(live_closeout_door(contract), repair_record)
     return amend_contract(
         replace(
             contract,
@@ -736,3 +739,8 @@ def _require_memory_source_unmoved(
             "organizational-completion-memory-source-moved",
             "quality repair refuses because the memory super moved after the failed gate",
         )
+
+
+def _live_door_disposition(contract: WorktreeContract) -> str:
+    door = live_closeout_door(contract)
+    return "" if door is None else door.disposition

@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 from contextlib import nullcontext
-from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
@@ -59,7 +58,7 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operations import
     start_or_observe_closeout_operation,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.worktree_contract import load_contract, write_contract
+from agents_remember.worktrees.worktree_contract import load_contract
 
 
 class MutationEvidenceRecorder:
@@ -143,17 +142,16 @@ def start_closeout_operation(
 
 
 def ensure_fixture_waiting_door(contract, *, force_synthetic: bool = False):
-    """Publish a typed test-only scheduling input for below-queue lifecycle suites."""
+    """Below-scheduling fixtures: lift the queue fence; the contract carries no door.
 
-    if contract.closeout_door is not None and not (
-        force_synthetic and contract.closeout_door.disposition == "waiting"
-    ):
-        door = contract.closeout_door
-        bypass = door.disposition == "waiting" and door.declaredBy.startswith("test-fixture:")
-        return contract, bypass
-    door = _fixture_waiting_door(contract)
-    write_contract(contract.contract_path, replace(contract, closeout_door=door))
-    return load_contract(contract.contract_path), True
+    A closeout door is journal-owned and the worktree contract has no field for it,
+    so this helper can no longer publish a synthetic waiting generation. It survives
+    only as the scheduling-fence bypass signal for suites that exercise behaviour
+    below the L3 queue boundary.
+    """
+
+    del force_synthetic
+    return contract, True
 
 
 def _fixture_waiting_door(

@@ -32,7 +32,6 @@ def require_completed_disposition(
     integration = located_lifecycle_operation_store(contract, "integrate").read()
     _require_idle_integration_claim(contract, integration, action)
     exact_owner = _completed_closeout_owner(contract, record) or _completed_direct_owner(
-        contract,
         record,
     )
     _require_completed_owner(contract, record, exact_owner)
@@ -105,7 +104,6 @@ def _completed_closeout_owner(
 
 
 def _completed_direct_owner(
-    contract: WorktreeContract,
     record: LifecycleOperationRecord,
 ) -> bool:
     publication = record.doorPublication
@@ -118,7 +116,6 @@ def _completed_direct_owner(
         getattr(generation, "operationKind", None),
         getattr(generation, "operationFingerprint", None),
         getattr(generation, "claimedOperationKey", None),
-        contract.closeout_door,
     )
     expected = (
         "direct-landing",

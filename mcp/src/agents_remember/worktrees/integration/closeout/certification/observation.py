@@ -32,6 +32,7 @@ from agents_remember.certification.repository_profiles.models import (
 from agents_remember.errors import CertificationContractError
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.task_intent import TaskIntentIdentity
+from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     is_ancestor,
@@ -98,7 +99,8 @@ def observe_certification_candidate(
     request: CandidateObservationRequest,
 ) -> ObservedCertificationCandidate:
     contract = request.contract
-    if contract.kind != "leaf" or not contract.leaf_id or contract.closeout_door is None:
+    door = live_closeout_door(contract)
+    if contract.kind != "leaf" or not contract.leaf_id or door is None:
         refuse("candidate-authority-invalid", "one addressed leaf and door", contract.kind)
     task = worktree_services().memory_quality.observe_contract_task(contract)
     topology = task.semanticTopologyDigest
@@ -109,7 +111,6 @@ def observe_certification_candidate(
             "canonical topology and task intent identities",
             task.model_dump(mode="json"),
         )
-    door = contract.closeout_door
     if door.disposition not in {"waiting", "claimed"}:
         refuse("candidate-door-not-admissible", ["waiting", "claimed"], door.disposition)
     if (

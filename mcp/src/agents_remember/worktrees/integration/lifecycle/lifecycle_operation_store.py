@@ -276,11 +276,7 @@ def _validate_door_publication_transition(
         raise RuntimeError("door publication evidence cannot be cleared")
     if before.state == "proven" and after != before:
         raise RuntimeError("proven door publication evidence is immutable")
-    if before.state == "intent" and (
-        after.generation != before.generation
-        or after.expectedBeforeContractSha256 != before.expectedBeforeContractSha256
-        or after.expectedPublishedContractSha256 != before.expectedPublishedContractSha256
-    ):
+    if before.state == "intent" and after.generation != before.generation:
         raise RuntimeError("door publication intent identity is immutable")
 
 
@@ -911,7 +907,10 @@ class LifecycleOperationStore:
     def _write(self, record: LifecycleOperationRecord) -> None:
         _OWNERSHIP.check_declared_writer()
         validated = LifecycleOperationRecord.model_validate(record.model_dump(mode="json"))
-        if validated.operationKind in {"closeout", "direct-landing"}:
+        # Only a closeout binds a leaf task intent. A direct landing is a
+        # series-contract, branch-addressed delivery: it has no leaf task document
+        # to bind and no closeout door to state one for it.
+        if validated.operationKind == "closeout":
             try:
                 require_task_intent_identity(
                     validated.taskIntent,

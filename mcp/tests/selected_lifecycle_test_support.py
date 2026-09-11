@@ -16,6 +16,7 @@ from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
 from agents_remember.worktrees.activation.atomic_series_activation import (
     publish_atomic_series_selection,
 )
+from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.integration.closeout.door_control import (
     DoorActor,
     closeout_door_tool,
@@ -51,7 +52,7 @@ def declare_selected_candidate(
     before this boundary. Existing doors are never silently refreshed or reselected.
     """
     contract = load_contract(contract.contract_path)
-    if contract.closeout_door is not None:
+    if live_closeout_door(contract) is not None:
         return contract
     assert contract.kind == "leaf"
     configured = config_path or contract.code_repo_path.parent / "settings.json"
@@ -134,8 +135,9 @@ def declare_selected_candidate(
     )
     assert result["ok"] is True and result["state"] == "waiting", result
     declared = load_contract(contract.contract_path)
-    assert declared.closeout_door is not None
-    assert not declared.closeout_door.declaredBy.startswith("test-fixture:")
+    declared_door = live_closeout_door(declared)
+    assert declared_door is not None
+    assert not declared_door.declaredBy.startswith("test-fixture:")
     return declared
 
 
@@ -153,7 +155,8 @@ def selected_contract(
     fixture = _fixture(root, candidate_file=candidate_file)
     contract = fixture.contracts[MASTER_A]
     contract = load_contract(contract.contract_path)
-    assert contract.closeout_door is not None
-    assert contract.closeout_door.disposition == "waiting"
-    assert not contract.closeout_door.declaredBy.startswith("test-fixture:")
+    live_door = live_closeout_door(contract)
+    assert live_door is not None
+    assert live_door.disposition == "waiting"
+    assert not live_door.declaredBy.startswith("test-fixture:")
     return contract
