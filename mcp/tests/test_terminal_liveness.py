@@ -6,10 +6,10 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -124,7 +124,6 @@ class _RaisingHost(_FakeHost):
         return super().probe_session(tmux_name)
 
 
-
 class TerminalCatalogLivenessTests(unittest.TestCase):
     def setUp(self) -> None:
         self._dir = tempfile.TemporaryDirectory()
@@ -232,7 +231,7 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
 
     def test_full_sweep_rate_limit_is_preserved(self) -> None:
         self.catalog.upsert(_entry("full-sweep"))
-        host = _FakeHost(TmuxProbeResult(exists=True, evidence="tmux-live"))
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
         sweeper = self._sweeper(
             host,
             sweep_interval_seconds=DEFAULT_LIVENESS_SWEEP_INTERVAL_SECONDS,
@@ -250,7 +249,7 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         self.assertEqual(host.calls, 2)
 
     def test_starting_rows_use_one_second_fast_path_and_four_row_cap(self) -> None:
-        host = _FakeHost(TmuxProbeResult(exists=True, evidence="tmux-live"))
+        host = _FakeHost(TmuxProbeResult(exists=True, evidence="alive"))
         sweeper = self._starting_sweeper(host)
         sweeper.refresh()
         self.assertEqual(host.calls, 0)
@@ -281,16 +280,16 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         self.clock.advance(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS / 2)
         sweeper.refresh()
         self.assertEqual(host.calls, 4)
-        self.assertEqual(
-            self.catalog.get(starting[4].id).control_state,
-            "starting",
-        )
+        fifth = self.catalog.get(starting[4].id)
+        assert fifth is not None
+        self.assertEqual(fifth.control_state, "starting")
 
         self.clock.advance(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS / 2)
         sweeper.refresh()
         self.assertEqual(host.calls, 5)
-        self.assertEqual(self.catalog.get(starting[4].id).control_state, "ready")
-
+        fifth = self.catalog.get(starting[4].id)
+        assert fifth is not None
+        self.assertEqual(fifth.control_state, "ready")
 
     def test_host_failure_series_survives_restart_and_success_resets(self) -> None:
         self.catalog.upsert(_entry("host-restart"))
@@ -437,7 +436,6 @@ class TerminalCatalogLivenessTests(unittest.TestCase):
         assert recovered.control_raw is not None
         self.assertNotIn("controlReadFailures", recovered.control_raw)
         self.assertEqual(host.calls, 5)
-
 
     def test_contended_full_sweep_returns_committed_snapshot_without_second_probe(self) -> None:
         self.catalog.upsert(replace(_entry("full"), kind="terminal", harness=None))
