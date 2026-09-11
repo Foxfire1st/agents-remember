@@ -15,6 +15,7 @@ from agents_remember.controlplane.attention_dismissals import AttentionDismissal
 from agents_remember.controlplane.records import GateRecord
 from agents_remember.observer.projection import (
     AgentPickupNode,
+    CloseoutQueueNode,
     DriftSnapshotNode,
     EnclosureNode,
     EngineProcessFacts,
@@ -86,6 +87,7 @@ class AnalyticalInputs:
     ledgers: list[LedgerNode] = field(default_factory=list)
     task_documents: list[TaskDocNode] = field(default_factory=list)
     series: list[SeriesNode] = field(default_factory=list)
+    closeout_queues: list[CloseoutQueueNode] = field(default_factory=list)
     engine_process_facts: list[EngineProcessFacts] = field(default_factory=list)
     engine_start_progress: list[dict[str, Any]] = field(default_factory=list)
     gates: list[GateRecord] = field(default_factory=list)

@@ -273,7 +273,7 @@ class HarnessSubmissionAuthority:
         record, against the one adapter the authority was constructed with, so the answer it gives
         is the answer that still holds at dispatch (:meth:`_invoke_adapter` only asserts it). A
         refusal here is clean and terminal -- an ``unsupported`` receipt, the session untouched --
-        whereas refusing at dispatch could only produce an ``unknown`` ambiguity barrier, because
+        whereas refusing at dispatch could only produce an ``unknown`` ambiguity blocker, because
         by then the authority can no longer say whether bytes crossed the wire.
         """
 
@@ -373,7 +373,7 @@ class HarnessSubmissionAuthority:
                 return known
             ref = record.ref
         # Reconciliation queries only the already-active ambiguous operation.  It never admits or
-        # dispatches a second ordinary operation while the unknown barrier is installed.
+        # dispatches a second ordinary operation while the unknown blocker is installed.
         result = await self._adapter.reconcile(request_id)
         if result.request_id != request_id:
             raise HarnessControlError("adapter reconciliation request id does not match")
@@ -661,7 +661,7 @@ class HarnessSubmissionAuthority:
     async def _unknown_after_preflight_claim(
         self, record: OperationRecord, exc: HarnessAdapterDisconnectedError
     ) -> None:
-        """Install the ambiguity barrier for a preflight that claims it may have sent bytes."""
+        """Install the ambiguity blocker for a preflight that claims it may have sent bytes."""
 
         async with self._lock:
             self._active = record.key
@@ -705,7 +705,7 @@ class HarnessSubmissionAuthority:
         Every failure mode here turns on what the adapter can certify. A busy adapter, or a
         disconnect it proves happened before the write, is safely requeued. A disconnect that may
         have sent, any other exception, and a result the authority cannot read coherently all
-        install the ambiguity barrier instead of guessing which side of the wire the bytes are on.
+        install the ambiguity blocker instead of guessing which side of the wire the bytes are on.
         """
 
         try:
@@ -814,7 +814,7 @@ class HarnessSubmissionAuthority:
         also known to be over -- a buffered completion, or the adapter's own ``terminalCompletion``
         stamp. ``unknown`` with a buffered completion is that same evidence arriving in the other
         order and settles identically; ``unknown`` without one cannot be certified in either
-        direction and installs the ambiguity barrier.
+        direction and installs the ambiguity blocker.
         """
 
         receipt = self._verified_prompt_receipt(record, result)
@@ -896,7 +896,7 @@ class HarnessSubmissionAuthority:
             # Do not hot-loop. A direct adapter readiness event wakes the dispatcher.
 
     async def _incoherent_method_result(self, record: OperationRecord, error: Exception) -> None:
-        """Install an ambiguity barrier when post-call adapter evidence is incoherent.
+        """Install an ambiguity blocker when post-call adapter evidence is incoherent.
 
         The adapter method has already returned, so the authority cannot certify that the
         operation was not applied.  Projecting rejection or silently dispatching the next

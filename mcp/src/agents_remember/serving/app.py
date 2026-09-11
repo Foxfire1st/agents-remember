@@ -114,7 +114,7 @@ from agents_remember.serving._app_terminal_routes import (
     _write_paste_image,
 )
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
-from agents_remember.serving.build_info import resolve_serving_build
+from agents_remember.serving.build_info import process_serving_build
 from agents_remember.serving.change_watcher import ProjectionInputWatcher
 from agents_remember.serving.changeset import register_changeset_routes
 from agents_remember.serving.conversation.authorization import LocalOperatorAuthorizationResolver
@@ -135,6 +135,7 @@ from agents_remember.serving.projector import (
     ProjectionReplay,
     Projector,
 )
+from agents_remember.serving.requirements import register_requirements_routes
 from agents_remember.serving.seat_events import log_turn_state_change_event
 from agents_remember.serving.static import mount_static
 from agents_remember.serving.terminal import TerminalHost
@@ -146,6 +147,7 @@ from agents_remember.serving.terminal_liveness import (
     LivenessProbe,
     TerminalCatalogLivenessConfig,
     TerminalCatalogLivenessSweeper,
+    TerminalLivenessActions,
     utc_now,
 )
 from agents_remember.serving.terminal_paste import TerminalPaster
@@ -190,6 +192,7 @@ def _build_serving_runtime(
     )
     liveness_config = TerminalCatalogLivenessConfig()
     interaction_synchronizer = HostedInteractionSynchronizer(observer_root(config))
+    terminal_execution_registrar = collaborators.register_terminal_execution_evidence
     liveness_sweeper = TerminalCatalogLivenessSweeper(
         catalog,
         host,
@@ -198,8 +201,18 @@ def _build_serving_runtime(
             hysteresis=liveness_config,
             on_control_snapshot=interaction_synchronizer.observe,
         ),
-        on_turn_state_change=lambda observation: log_turn_state_change_event(
-            config, observation.entry
+        actions=TerminalLivenessActions(
+            on_turn_state_change=lambda observation: log_turn_state_change_event(
+                config, observation.entry
+            ),
+            register_execution_evidence=(
+                None
+                if terminal_execution_registrar is None
+                else lambda entries: terminal_execution_registrar(
+                    config.coordination_root,
+                    entries,
+                )
+            ),
         ),
     )
     runtime = _ServingRuntime(
@@ -212,12 +225,13 @@ def _build_serving_runtime(
         liveness_config=liveness_config,
         liveness_sweeper=liveness_sweeper,
         # Resolved ONCE at boot: the stamp that makes a stale serving process visible.
-        build=resolve_serving_build(),
+        build=process_serving_build(),
         # The deterministic agent-notifier sweep runs on its own decoupled cadence
         # (default ~10s, settings-controlled), zero tokens, pure code. "The model is never the
         # polling layer": every predicate reads TerminalCatalog/OperatorInboxStore/
         # ExpectationRowStore DIRECTLY, never the projection.
         heartbeat_store=AgentNotifierHeartbeatStore(observer_root(config)),
+        register_inbox_execution_evidence=collaborators.register_inbox_execution_evidence,
         interval=cadence.interval,
     )
     # The serving daemon samples labeled provider
@@ -266,6 +280,7 @@ def create_app(
     register_files_routes(app, config)
     register_changeset_routes(app, config)
     register_notes_routes(app, config)
+    register_requirements_routes(app, config)
     register_harness_control_routes(
         app,
         ConversationRuntime(

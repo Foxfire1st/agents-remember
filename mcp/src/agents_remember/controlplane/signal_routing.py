@@ -8,17 +8,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, cast
 
 from agents_remember.controlplane.operator_inbox_records import (
     AgentRole,
     InboxMessageKind,
     OperatorInboxEntry,
 )
-from agents_remember.controlplane.seats import SeatDirectory, SeatRow
+from agents_remember.controlplane.seats import (
+    SeatDirectory,
+    SeatRow,
+    current_seat_occupant,
+)
+from agents_remember.errors import SeatOccupancyError, StructuralRoutingError
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
-_LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
+_LEAF_ROLES = frozenset({"worker", "curator"})
 
 
 class TaskHierarchy(Protocol):
@@ -26,9 +31,7 @@ class TaskHierarchy(Protocol):
 
     def parent(self, ref: TaskDocumentRef) -> TaskDocumentRef | None: ...
 
-
-class StructuralRoutingError(ValueError):
-    """A structural route is absent or ambiguous; routing fails instead of guessing."""
+    def altitude(self, ref: TaskDocumentRef) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -47,31 +50,12 @@ def _current_occupant(
     document: TaskDocumentRef,
     role: AgentRole,
 ) -> RoutedOwner:
-    primary = [
-        row
-        for row in catalog.list()
-        if row.status == "running"
-        and row.binding_role == role
-        and row.task_document_ref == document
-    ]
-    if len(primary) > 1:
-        raise StructuralRoutingError(f"multiple running occupants claim {document.key} as {role}")
-    candidates = primary
-    if not candidates:
-        candidates = [
-            row
-            for row in catalog.list()
-            if row.status == "running"
-            and row.binding_role == role
-            and row.replacement_for_task_document_ref == document
-        ]
-        if len(candidates) > 1:
-            raise StructuralRoutingError(
-                f"multiple running replacements claim {document.key} as {role}"
-            )
-    if not candidates:
+    try:
+        occupant = current_seat_occupant(catalog.list(), document=document, role=role)
+    except SeatOccupancyError as exc:
+        raise StructuralRoutingError(str(exc)) from exc
+    if occupant is None:
         return RoutedOwner(role=role, task_document_ref=document)
-    occupant = candidates[0]
     return RoutedOwner(
         role=role,
         task_document_ref=document,
@@ -144,11 +128,19 @@ def _structural_parent_owner(
     *,
     document: TaskDocumentRef,
     role: str,
+    structural_parent: tuple[TaskDocumentRef | None, str | None] = (None, None),
 ) -> RoutedOwner | None:
     """Resolve the structural parent of one role/document binding, if it has one."""
 
     if role in _LEAF_ROLES:
         return derive_manager_owner(catalog, hierarchy, task_document_ref=document)
+    if role == "reviewer":
+        return _reviewer_parent_owner(
+            catalog,
+            hierarchy,
+            document=document,
+            structural_parent=structural_parent,
+        )
     if role == "manager":
         return _current_occupant(
             catalog,
@@ -160,6 +152,55 @@ def _structural_parent_owner(
     if role == "system-specialist":
         return _current_occupant(catalog, document=document, role="orchestrator")
     return None
+
+
+def _reviewer_parent_owner(
+    catalog: SeatDirectory,
+    hierarchy: TaskHierarchy,
+    *,
+    document: TaskDocumentRef,
+    structural_parent: tuple[TaskDocumentRef | None, str | None],
+) -> RoutedOwner:
+    parent_document, parent_role = structural_parent
+    if (parent_document is None) != (parent_role is None):
+        raise StructuralRoutingError(
+            f"reviewer {document.key} has an incomplete structural parent address"
+        )
+    if parent_document is not None and parent_role is not None:
+        _validate_reviewer_parent(hierarchy, document, parent_document, parent_role)
+        return _current_occupant(
+            catalog,
+            document=parent_document,
+            role=cast(AgentRole, parent_role),
+        )
+    altitude = hierarchy.altitude(document)
+    if altitude == "leaf":
+        # Pre-polymorphic reviewer rows were leaf-only and had one deterministic owner.
+        return derive_manager_owner(catalog, hierarchy, task_document_ref=document)
+    raise StructuralRoutingError(
+        f"{altitude} reviewer {document.key} has no plane-stamped structural parent"
+    )
+
+
+def _validate_reviewer_parent(
+    hierarchy: TaskHierarchy,
+    document: TaskDocumentRef,
+    parent_document: TaskDocumentRef,
+    parent_role: str,
+) -> None:
+    altitude = hierarchy.altitude(document)
+    allowed = (
+        {(_required_parent(hierarchy, document), "manager")}
+        if altitude == "leaf"
+        else {(document, "manager")}
+        if altitude == "master"
+        else {(document, "architect"), (document, "orchestrator")}
+    )
+    if (parent_document, parent_role) not in allowed:
+        raise StructuralRoutingError(
+            f"reviewer {document.key} has invalid structural parent "
+            f"{parent_document.key} as {parent_role}"
+        )
 
 
 def derive_signal_owner(
@@ -190,6 +231,10 @@ def derive_signal_owner(
             hierarchy,
             document=document,
             role=sender.binding_role,
+            structural_parent=(
+                sender.structural_parent_task_document_ref,
+                sender.structural_parent_role,
+            ),
         )
         or RoutedOwner()
     )
@@ -289,6 +334,8 @@ def derive_row_owner(
     document = entry.subjectTaskDocumentRef
     role = entry.seatRole or entry.senderRole
     if document is None or role is None:
+        return _owner_for_stamped_seat(catalog, entry)
+    if role == "reviewer" and entry.ownerTaskDocumentRef is not None:
         return _owner_for_stamped_seat(catalog, entry)
     return _structural_parent_owner(
         catalog,

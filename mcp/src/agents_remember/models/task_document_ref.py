@@ -11,6 +11,9 @@ from pathlib import PurePosixPath
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+MAX_TASK_REPOSITORY_LENGTH = 128
+MAX_TASK_DOCUMENT_PATH_LENGTH = 4096
+
 
 class TaskDocumentRef(BaseModel):
     """One JSON-primary task document under ``tasks/<repository>``.
@@ -35,6 +38,10 @@ class TaskDocumentRef(BaseModel):
     @classmethod
     def _repository_is_one_segment(cls, value: str) -> str:
         cleaned = value.strip()
+        if len(cleaned) > MAX_TASK_REPOSITORY_LENGTH:
+            raise ValueError(
+                f"repository exceeds {MAX_TASK_REPOSITORY_LENGTH} canonical characters"
+            )
         if not cleaned or cleaned in {".", ".."} or "/" in cleaned or "\\" in cleaned:
             raise ValueError("repository must be one non-blank path segment")
         return cleaned
@@ -43,6 +50,10 @@ class TaskDocumentRef(BaseModel):
     @classmethod
     def _path_is_confined_json(cls, value: str) -> str:
         cleaned = value.strip().replace("\\", "/")
+        if len(cleaned) > MAX_TASK_DOCUMENT_PATH_LENGTH:
+            raise ValueError(
+                f"task document path exceeds {MAX_TASK_DOCUMENT_PATH_LENGTH} canonical characters"
+            )
         path = PurePosixPath(cleaned)
         if not cleaned or path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
             raise ValueError("task document path must be a confined relative path")

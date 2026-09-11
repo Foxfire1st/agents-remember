@@ -2,13 +2,7 @@
 // grammar on real DOM, the attention strip, gate/brief markers, bulk end with honest previews,
 // bus-footer removal, and the cross-surface consistency contract (rail dot ≡ HeaderStrip dot).
 import { Profiler } from "react";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  within,
-} from "@testing-library/react";
+import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { attentionRollup, buildRailModel } from "../../data/railModel";
@@ -18,11 +12,7 @@ import { lifecycleNoticeStore } from "../../data/sessionLifecycle";
 import { fromTerminalSessionInfo, sessionStore } from "../../data/sessions";
 import { seatVisualState } from "../../data/stateGrammar";
 import { dashboardStore } from "../../data/store";
-import {
-  catalogRow,
-  FLEET,
-  FLEET_TASK_DOCUMENTS,
-} from "../../test/fixtures/catalogRows";
+import { catalogRow, FLEET, FLEET_TASK_DOCUMENTS } from "../../test/fixtures/catalogRows";
 import { agentPickup, analytics, lifecycleWithGate, taskDoc } from "../../test/fixtures/wire";
 import type { AgentNotifierHeartbeat, TaskDocNode } from "../../types/projection";
 import { HeaderStrip } from "./HeaderStrip";
@@ -92,17 +82,11 @@ describe("rail-state matrix (R14 — one grammar on real DOM)", () => {
       const visual = seatVisualState(session);
       const dot = getByTestId(`rail-dot-${session.id}`);
       expect(dot.getAttribute("data-state"), session.id).toBe(visual.key);
-      expect(dot.getAttribute("data-state-pulse"), session.id).toBe(
-        String(visual.pulse),
-      );
-      expect(dot.getAttribute("data-state-color"), session.id).toBe(
-        visual.color,
-      );
+      expect(dot.getAttribute("data-state-pulse"), session.id).toBe(String(visual.pulse));
+      expect(dot.getAttribute("data-state-color"), session.id).toBe(visual.color);
       // The rail dot SPEAKS its state word (aria-label), never color-only.
       expect(dot.getAttribute("role"), session.id).toBe("img");
-      expect(dot.getAttribute("aria-label"), session.id).toBe(
-        `state: ${visual.word}`,
-      );
+      expect(dot.getAttribute("aria-label"), session.id).toBe(`state: ${visual.word}`);
     }
   });
 
@@ -120,14 +104,10 @@ describe("rail-state matrix (R14 — one grammar on real DOM)", () => {
     });
     const first = renderRail();
     const marker = first.getByTestId("rail-set-unacked-worker-l4");
-    expect(marker.getAttribute("aria-label")).toContain(
-      "unacknowledged set outcome",
-    );
+    expect(marker.getAttribute("aria-label")).toContain("unacknowledged set outcome");
     expect(first.queryByTestId("rail-set-unacked-scout")).toBeNull();
     first.unmount();
-    act(() =>
-      sessionCockpitStore.getState().acknowledgeSetOutcomes("worker-l4"),
-    );
+    act(() => sessionCockpitStore.getState().acknowledgeSetOutcomes("worker-l4"));
     const second = renderRail();
     expect(second.queryByTestId("rail-set-unacked-worker-l4")).toBeNull();
   });
@@ -162,9 +142,9 @@ describe("rail-state matrix (R14 — one grammar on real DOM)", () => {
 
   it("the input? chip tooltip carries the prompt preview (R16)", () => {
     const { getByTestId } = renderRail();
-    expect(
-      getByTestId("rail-status-worker-tui").getAttribute("title"),
-    ).toContain("Apply the migration to harness_control_api.py");
+    expect(getByTestId("rail-status-worker-tui").getAttribute("title")).toContain(
+      "Apply the migration to harness_control_api.py",
+    );
   });
 });
 
@@ -178,9 +158,7 @@ describe("task-projected hierarchy (EFA-L19)", () => {
     expect(architect.closest("[data-testid^='rail-sprint-']")).toBe(sprintBox);
     expect(architect.closest("[data-testid^='rail-master-']")).toBeNull();
     expect(
-      getByTestId("rail-row-orchestrator").closest(
-        "[data-testid^='rail-master-']",
-      ),
+      getByTestId("rail-row-orchestrator").closest("[data-testid^='rail-master-']"),
     ).toBeNull();
     const manager = within(masterBox).getByTestId("rail-row-manager-l4");
     expect(manager.textContent).toContain("Own adapter capability · manager-L4");
@@ -189,9 +167,7 @@ describe("task-projected hierarchy (EFA-L19)", () => {
 
   it("leaf clusters indent under the manager with the active seat on top", () => {
     const { getByTestId } = renderRail();
-    const cluster = getByTestId(
-      `rail-cluster-${SERVING_LEAF_KEY}`,
-    );
+    const cluster = getByTestId(`rail-cluster-${SERVING_LEAF_KEY}`);
     const rows = within(cluster).getAllByTestId(/^rail-row-/);
     expect(rows.map((row) => row.getAttribute("data-testid"))).toEqual([
       "rail-row-worker-l4", // ACTIVE (working) sorts to the top
@@ -200,35 +176,71 @@ describe("task-projected hierarchy (EFA-L19)", () => {
     ]);
   });
 
+  it("renders master and plane-stamped sprint reviewers in their owned review context", () => {
+    const masterRef = {
+      repository: "agents-remember",
+      path: "260714_own-adapter-capability/task.json",
+    };
+    const sprintRef = { repository: "agents-remember", path: "260700_sprint/task.json" };
+    sessionStore.getState().hydrate([
+      ...fleet(),
+      fromTerminalSessionInfo(
+        catalogRow({
+          id: "master-reviewer",
+          label: "review-master",
+          seatRole: "reviewer",
+          spawnRole: "reviewer",
+          taskDocumentRef: masterRef,
+          structuralParentTaskDocumentRef: masterRef,
+          structuralParentRole: "manager",
+        }),
+      ),
+      fromTerminalSessionInfo(
+        catalogRow({
+          id: "sprint-reviewer",
+          label: "review-plan",
+          seatRole: "reviewer",
+          spawnRole: "reviewer",
+          taskDocumentRef: sprintRef,
+          structuralParentTaskDocumentRef: sprintRef,
+          structuralParentRole: "architect",
+        }),
+      ),
+    ]);
+
+    const { getByTestId } = renderRail();
+    expect(
+      within(getByTestId(`rail-master-${ADAPTER_MASTER_KEY}`)).getByTestId(
+        "rail-row-master-reviewer",
+      ).textContent,
+    ).toContain("master reviewer · review-master");
+    expect(
+      within(getByTestId(`rail-sprint-${SPRINT_KEY}`)).getByTestId("rail-row-sprint-reviewer")
+        .textContent,
+    ).toContain("plan reviewer · review-plan");
+  });
+
   it("the tree toggle swaps to the spawn-edge provenance view (R5 palette/button toggle)", () => {
     const { getByTestId, queryByTestId } = renderRail();
     expect(queryByTestId("rail-spawn-tree")).toBeNull();
     fireEvent.click(getByTestId("rail-tree-toggle"));
     expect(sessionCockpitStore.getState().orchestrationTreeView).toBe(true);
     expect(getByTestId("rail-spawn-tree")).toBeDefined();
-    expect(
-      window.localStorage.getItem("cockpit.sessions.orchestration-tree"),
-    ).toBe("true");
+    expect(window.localStorage.getItem("cockpit.sessions.orchestration-tree")).toBe("true");
   });
 });
 
 describe("fleet attention strip (R12)", () => {
   it("renders live rollup counts as filter buttons and focuses the first matching seat", () => {
     const { getByTestId, onFocusSession } = renderRail();
-    expect(getByTestId("rail-attention-input").textContent).toContain(
-      "1 need input",
-    );
-    expect(getByTestId("rail-attention-failed").textContent).toContain(
-      "1 failed",
-    );
+    expect(getByTestId("rail-attention-input").textContent).toContain("1 need input");
+    expect(getByTestId("rail-attention-failed").textContent).toContain("1 failed");
     fireEvent.click(getByTestId("rail-attention-input"));
     expect(onFocusSession).toHaveBeenCalledWith("worker-tui");
     // The set is highlighted after the click.
-    expect(
-      getByTestId("rail-row-worker-tui").getAttribute(
-        "data-attention-highlight",
-      ),
-    ).toBe("true");
+    expect(getByTestId("rail-row-worker-tui").getAttribute("data-attention-highlight")).toBe(
+      "true",
+    );
   });
 
   it("the filter highlight expires once the underlying state resolves (review finding 3)", () => {
@@ -241,38 +253,24 @@ describe("fleet attention strip (R12)", () => {
       };
     };
     const view = render(
-      <SessionRail
-        onFocusSession={onFocusSession}
-        focusedSessionId={null}
-        {...props()}
-      />,
+      <SessionRail onFocusSession={onFocusSession} focusedSessionId={null} {...props()} />,
     );
     fireEvent.click(view.getByTestId("rail-attention-input"));
-    expect(
-      view
-        .getByTestId("rail-row-worker-tui")
-        .getAttribute("data-attention-highlight"),
-    ).toBe("true");
+    expect(view.getByTestId("rail-row-worker-tui").getAttribute("data-attention-highlight")).toBe(
+      "true",
+    );
     // The pending question is answered (the poll delivers the resolved state).
     act(() => {
-      sessionStore
-        .getState()
-        .patch("worker-tui", {
-          turnState: "turn-ended",
-          controlPendingInteraction: undefined,
-        });
+      sessionStore.getState().patch("worker-tui", {
+        turnState: "turn-ended",
+        controlPendingInteraction: undefined,
+      });
     });
     view.rerender(
-      <SessionRail
-        onFocusSession={onFocusSession}
-        focusedSessionId={null}
-        {...props()}
-      />,
+      <SessionRail onFocusSession={onFocusSession} focusedSessionId={null} {...props()} />,
     );
     expect(
-      view
-        .getByTestId("rail-row-worker-tui")
-        .getAttribute("data-attention-highlight"),
+      view.getByTestId("rail-row-worker-tui").getAttribute("data-attention-highlight"),
     ).toBeNull();
   });
 
@@ -290,11 +288,9 @@ describe("fleet attention strip (R12)", () => {
 
   it("master headers carry the dominant attention rollup badge", () => {
     const { getByTestId } = renderRail();
-    expect(
-      getByTestId(
-        `rail-master-attention-${COCKPIT_MASTER_KEY}`,
-      ).textContent,
-    ).toContain("1 need input");
+    expect(getByTestId(`rail-master-attention-${COCKPIT_MASTER_KEY}`).textContent).toContain(
+      "1 need input",
+    );
   });
 });
 
@@ -322,8 +318,7 @@ describe("gate + brief joins (R13, R8)", () => {
             repository: "agents-remember",
             title: "serving",
             kind: "subTask",
-            docPath:
-              "tasks/agents-remember/260714_own-adapter-capability/04_serving.md",
+            docPath: "tasks/agents-remember/260714_own-adapter-capability/04_serving.md",
           }),
         ],
         agentPickups: [],
@@ -331,12 +326,8 @@ describe("gate + brief joins (R13, R8)", () => {
     });
     const { getByTestId, queryByTestId } = renderRail();
     const badge = getByTestId("rail-gate-worker-l4");
-    expect(badge.getAttribute("title")).toBe(
-      "gate plan-approval — decision pending",
-    );
-    expect(
-      getByTestId("rail-row-worker-l4").getAttribute("data-attention-gate"),
-    ).toBe("true");
+    expect(badge.getAttribute("title")).toBe("gate plan-approval — decision pending");
+    expect(getByTestId("rail-row-worker-l4").getAttribute("data-attention-gate")).toBe("true");
     expect(queryByTestId("rail-gate-worker-caps")).toBeNull(); // no gate on that leaf
   });
 
@@ -360,9 +351,7 @@ describe("gate + brief joins (R13, R8)", () => {
     const { getByTestId, queryByTestId } = renderRail();
     const marker = getByTestId("rail-brief-worker-l4");
     expect(marker.textContent).toContain("brief");
-    expect(marker.querySelector("[aria-hidden='true']")?.textContent).toBe(
-      "✉",
-    );
+    expect(marker.querySelector("[aria-hidden='true']")?.textContent).toBe("✉");
     expect(queryByTestId("rail-brief-worker-caps")).toBeNull();
   });
 });
@@ -371,9 +360,7 @@ describe("completed folder + bulk end (R17)", () => {
   it("folds landed seats per master, collapsed by default, expandable", () => {
     const { getByTestId, queryByTestId } = renderRail();
     expect(queryByTestId("rail-row-landed-w1")).toBeNull();
-    const toggle = getByTestId(
-      `rail-done-toggle-${ADAPTER_MASTER_KEY}`,
-    );
+    const toggle = getByTestId(`rail-done-toggle-${ADAPTER_MASTER_KEY}`);
     expect(toggle.textContent).toContain("completed · 2");
     fireEvent.click(toggle);
     expect(getByTestId("rail-row-landed-w1")).toBeDefined();
@@ -409,17 +396,11 @@ describe("completed folder + bulk end (R17)", () => {
       }),
     );
     const { getByTestId, findByTestId } = renderRail();
-    expect(getByTestId("rail-bulk-sprint").textContent).toBe(
-      "✕ end 3 completed",
-    );
-    const masterBulk = getByTestId(
-      `rail-bulk-master-${ADAPTER_MASTER_KEY}`,
-    );
+    expect(getByTestId("rail-bulk-sprint").textContent).toBe("✕ end 3 completed");
+    const masterBulk = getByTestId(`rail-bulk-master-${ADAPTER_MASTER_KEY}`);
     expect(masterBulk.textContent).toBe("✕ end 2 done");
     fireEvent.click(masterBulk);
-    const confirm = await findByTestId(
-      `rail-bulk-confirm-${ADAPTER_MASTER_KEY}`,
-    );
+    const confirm = await findByTestId(`rail-bulk-confirm-${ADAPTER_MASTER_KEY}`);
     expect(confirm.textContent).toContain("reviewer-done-1");
     expect(confirm.textContent).toContain("worker-done-1");
     fireEvent.click(getByTestId("rail-bulk-execute"));
@@ -464,9 +445,7 @@ describe("freshness (R15) + bus-footer removal (F-c)", () => {
       pollHealth: { lastBeatAt: null, missedBeats: 3, healthy: false },
     });
     const { getByTestId } = renderRail();
-    expect(getByTestId("rail-poll-stale").textContent).toContain(
-      "3 beats missed",
-    );
+    expect(getByTestId("rail-poll-stale").textContent).toContain("3 beats missed");
   });
 
   it("renders NO rail-bus-footer — inbox counts + agent-notifier liveness live in the top bar (F-c ruling)", () => {
@@ -497,21 +476,15 @@ describe("zero-state (R9 — never an unexplained empty rail)", () => {
     sessionStore.getState().hydrate([]);
     const { getByTestId } = renderRail();
     expect(getByTestId("rail-zero-state").textContent).toContain("no chats");
-    expect(getByTestId("rail-zero-state").textContent).toContain(
-      "raw terminal",
-    );
+    expect(getByTestId("rail-zero-state").textContent).toContain("raw terminal");
   });
 
   it("waiting(reason) renders steady muted-amber when a reason is supplied (reserved AEO word)", () => {
     sessionStore
       .getState()
-      .hydrate([
-        fromTerminalSessionInfo(catalogRow({ id: "w", turnState: "working" })),
-      ]);
+      .hydrate([fromTerminalSessionInfo(catalogRow({ id: "w", turnState: "working" }))]);
     // No wire source sets waitingReason yet — the grammar is rendered-ready; assert via grammar.
-    expect(
-      seatVisualState({ turnState: "working", waitingReason: "ci run 8323" }),
-    ).toMatchObject({
+    expect(seatVisualState({ turnState: "working", waitingReason: "ci run 8323" })).toMatchObject({
       key: "waiting",
       color: "mutedAmber",
       pulse: false,
@@ -520,10 +493,7 @@ describe("zero-state (R9 — never an unexplained empty rail)", () => {
 });
 
 describe("L8: measured rail virtualization boundary", () => {
-  const virtualRow = (
-    index: number,
-    overrides: Parameters<typeof catalogRow>[0] = {},
-  ) =>
+  const virtualRow = (index: number, overrides: Parameters<typeof catalogRow>[0] = {}) =>
     fromTerminalSessionInfo(
       catalogRow({
         id: `virtual-seat-${index}`,
@@ -539,29 +509,22 @@ describe("L8: measured rail virtualization boundary", () => {
   const seedFlatFleet = (size: number) => {
     sessionStore
       .getState()
-      .hydrate(
-        Array.from({ length: size }, (_, index) => virtualRow(index + 1)),
-      );
+      .hydrate(Array.from({ length: size }, (_, index) => virtualRow(index + 1)));
   };
 
-  const expectRenderedBoundary = (
-    view: ReturnType<typeof renderRail>,
-    expectedRows: number,
-  ) => {
+  const expectRenderedBoundary = (view: ReturnType<typeof renderRail>, expectedRows: number) => {
     const rows = view.getAllByTestId(/^rail-row-/);
     const virtualized = expectedRows > RAIL_VIRTUALIZE_THRESHOLD;
     expect(rows).toHaveLength(expectedRows);
-    expect(
-      view.getByTestId("session-rail").getAttribute("data-rendered-row-count"),
-    ).toBe(String(expectedRows));
-    expect(
-      view.getByTestId("session-rail").getAttribute("data-virtualized"),
-    ).toBe(String(virtualized));
+    expect(view.getByTestId("session-rail").getAttribute("data-rendered-row-count")).toBe(
+      String(expectedRows),
+    );
+    expect(view.getByTestId("session-rail").getAttribute("data-virtualized")).toBe(
+      String(virtualized),
+    );
     for (const row of rows) {
       expect(row.style.contentVisibility).toBe(virtualized ? "auto" : "");
-      expect(row.style.containIntrinsicSize).toBe(
-        virtualized ? "auto 2rem" : "",
-      );
+      expect(row.style.containIntrinsicSize).toBe(virtualized ? "auto 2rem" : "");
     }
   };
 
@@ -619,9 +582,7 @@ describe("L8: measured rail virtualization boundary", () => {
       }),
     ];
     sessionStore.getState().hydrate([
-      ...Array.from({ length: RAIL_VIRTUALIZE_THRESHOLD }, (_, index) =>
-        virtualRow(index + 1),
-      ),
+      ...Array.from({ length: RAIL_VIRTUALIZE_THRESHOLD }, (_, index) => virtualRow(index + 1)),
       virtualRow(1001, {
         status: "landed",
         taskDocumentRef: { repository: "agents-remember", path: "virtual-master/leaf-a.json" },
@@ -642,9 +603,7 @@ describe("L8: measured rail virtualization boundary", () => {
   it("uses landed rows in the flattened tree population at the exact 50/51 boundary", () => {
     const seedTreeFleet = (liveRows: number) => {
       sessionStore.getState().hydrate([
-        ...Array.from({ length: liveRows }, (_, index) =>
-          virtualRow(index + 1),
-        ),
+        ...Array.from({ length: liveRows }, (_, index) => virtualRow(index + 1)),
         virtualRow(1001, {
           status: "landed",
           taskDocumentRef: { repository: "agents-remember", path: "tree-master/leaf-a.json" },
@@ -706,7 +665,9 @@ describe("L6/F-g: immediate terminate + failure honesty + cleanup outcome + lega
     const end = getByTestId("rail-end-worker-l4");
     // The honest name · leaf · state moved to the button title (was the armed confirm copy).
     expect(end.getAttribute("title")).toContain("worker-L4-serving");
-    expect(end.getAttribute("title")).toContain("task 260714_own-adapter-capability/04_serving.json");
+    expect(end.getAttribute("title")).toContain(
+      "task 260714_own-adapter-capability/04_serving.json",
+    );
     expect(end.getAttribute("title")).toContain("state working");
     fireEvent.click(end);
     await act(async () => {});
@@ -786,9 +747,7 @@ describe("L6/F-g: immediate terminate + failure honesty + cleanup outcome + lega
   it("harvested title/turn hints join the row TOOLTIP as labeled hints — never the grammar dot", () => {
     act(() => {
       ptyHarvestStore.getState().recordTitle("scout", "vim · adapter.rs");
-      ptyHarvestStore
-        .getState()
-        .recordTurnHint("scout", { hint: "command-running", at: 1 });
+      ptyHarvestStore.getState().recordTurnHint("scout", { hint: "command-running", at: 1 });
     });
     const { getByTestId, sessions } = renderRail();
     const row = getByTestId("rail-row-scout");

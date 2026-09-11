@@ -1,10 +1,10 @@
 """Server-side seat-retire authority policy (260707-HFX-L8, issue #12).
 
-Authority split (developer ruling 2026-07-07): a manager lives OUTSIDE the master stack it
-manages, so it may retire only the worker/reviewer/curator seats of its OWN master -- it can never unseat
-itself by construction (a manager's own seat is never a worker/reviewer of its own master). The
-orchestrator holds the portfolio view and may retire any seat, including a completed manager. No
-seat ever retires itself. Refusals are loud and name the exact policy clause that fired.
+Authority split (developer ruling 2026-07-07): a manager may retire the leaf execution seats of its
+own master and its same-master master-exit reviewer. The architect may retire its same-sprint
+plan-review reviewer. The orchestrator holds the portfolio view and may retire any seat, including
+a completed manager or super-exit reviewer. No seat ever retires itself. Refusals are loud and name
+the exact policy clause that fired.
 """
 
 from __future__ import annotations
@@ -29,14 +29,17 @@ class SeatRef:
     session_id: str
     task_document_ref: TaskDocumentRef | None
     seat_role: str
+    structural_parent_task_document_ref: TaskDocumentRef | None = None
+    structural_parent_role: str | None = None
 
 
 def check_retire_authority(actor: SeatRef, target: SeatRef, topology: TaskDocumentTopology) -> None:
     """Raise :class:`RetirePolicyError` unless ``actor`` may retire ``target``.
 
     Owner-never-self-retires is checked FIRST, unconditionally -- no role's authority ever
-    overrides it. A manager may then retire only a worker/reviewer/curator of its own master; anything
-    else it name-refuses. Only the orchestrator has portfolio-wide retire authority.
+    overrides it. A manager may then retire only a worker/reviewer/curator on one of its leaves or
+    its same-master reviewer. The architect may retire only its same-sprint reviewer. Only the
+    orchestrator has portfolio-wide retire authority.
     """
     if actor.session_id == target.session_id:
         raise RetirePolicyError("a seat never retires itself (owner-never-self-retires)")
@@ -52,14 +55,31 @@ def check_retire_authority(actor: SeatRef, target: SeatRef, topology: TaskDocume
         if (
             actor.task_document_ref is None
             or target.seat_role not in MANAGER_RETIRE_ROLES
-            or target_parent != actor.task_document_ref
+            or (
+                target_parent != actor.task_document_ref
+                and not (
+                    target.seat_role == "reviewer"
+                    and target.task_document_ref == actor.task_document_ref
+                )
+            )
         ):
             raise RetirePolicyError(
-                "manager may retire only worker/reviewer/curator seats of its own master "
+                "manager may retire only worker/reviewer/curator seats of its own master: "
+                "on its leaves or as its same-master reviewer "
                 f"({actor.task_document_ref!r}); target is {target.seat_role!r} "
                 f"under {target_parent!r}"
             )
         return
+    if actor.seat_role == "architect":
+        if (
+            actor.task_document_ref is not None
+            and target.task_document_ref == actor.task_document_ref
+            and target.seat_role == "reviewer"
+            and target.structural_parent_task_document_ref == actor.task_document_ref
+            and target.structural_parent_role == "architect"
+        ):
+            return
+        raise RetirePolicyError("architect may retire only its same-sprint plan-review reviewer")
     if actor.seat_role == "orchestrator":
         return
     raise RetirePolicyError(f"role {actor.seat_role!r} has no retire authority")

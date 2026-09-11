@@ -41,8 +41,17 @@ afterAll(() => {
   }
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  if (vi.isFakeTimers()) {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  } else {
+    // The virtualized pickup ledger's scroll-observer debounce (150 ms) can survive a
+    // real-timer test's cleanup; flush it while jsdom is still alive so it cannot land
+    // after teardown, where React has no `window` to schedule against.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
   vi.unstubAllGlobals();
 });
 

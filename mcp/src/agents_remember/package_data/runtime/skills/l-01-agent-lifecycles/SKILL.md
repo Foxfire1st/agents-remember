@@ -21,20 +21,29 @@ lifecycle, and no role reads another role's file.
    to you.
 3. **Else** (a developer opened this session) → you are the developer-facing **free chat** — a
    launcher, not a role seat (ruled 2026-07-09). Research-only questions are answered inline with
-   no role taken. The moment the ask is role-shaped (a sprint, a task, any durable change), do NOT
-   assume the architect role in this chat: resolve the target sprint, then open that sprint in
-   Operations and use its role control to **create or switch to the architect chat bound to the
-   sprint document**. The dashboard and control plane choose the runtime occupant and inject the
-   role; this launcher never handles a session id. The architect profile — harness/model/effort —
-   comes from `orchestration.roles.architect` in settings. The resulting architect runs
-   `roles/architect.md` and owns that sprint's developer conversation.
+   no role taken. For ordinary role-shaped work (a sprint, a task, any durable change that is not
+   an explicit task-seat takeover), do NOT assume the architect role in this chat: resolve the
+   target sprint, compile one complete brief
+   from `templates/architect-brief.md`, and call
+   `dispatch_agent(task_document_ref=<canonical sprint document>, role="architect",
+   brief=<compiled brief>)` once. No plane-injected hosted identity selects ambient-launcher mode;
+   the canonical target document and architect altitude supply its authority. The launcher never
+   submits caller identity or handles a session id. The control plane chooses the settings-owned
+   harness/model/effort, creates the seat, and durably pins the exact brief. On `dispatched` or
+   `dispatch-queued`, switch the developer conversation to the canonical `(sprint document,
+   architect)` chat and stop role work here; both results mean the brief is durable, so never send
+   a second brief. The resulting architect runs `roles/architect.md`. An explicit
+   developer-declared task-seat takeover is the bounded exception below: it dispatches the named
+   role on that role's canonical task document instead of first creating an architect.
    For a first sprint, free chat uses the ordinary durable task workflow to create the master and
    first leaf before this launch; that bounded bootstrap creates scope data, not a global role seat.
 
 There is no fourth entry, and the edge cases are decided: an **unresolvable `AR_SPAWN_ROLE`
-value** (no matching `roles/<value>.md`) falls through to condition 2 (the brief); a role-env
-session **whose brief never arrives** announces itself on the inbox and waits — it never
-improvises a task; `AR_SPAWN_ROLE=orchestrator` is valid only as a spawned backend seat or a
+value** (no matching `roles/<value>.md`) is malformed hosted identity and fails closed — it never
+falls through to a pasted brief or free-chat routing. A role env without the matching
+plane-injected hosted-session identity fails closed for the same reason. A valid role-env session
+**whose brief never arrives** announces itself on the inbox and waits — it never improvises a
+task; `AR_SPAWN_ROLE=orchestrator` is valid only as a spawned backend seat or a
 backend takeover chair — the developer still talks to the **architect**, not the orchestrator.
 The spool-up chain is fixed and self-driving (ruled 2026-07-09): free chat spawns the
 **architect for the resolved sprint**; the architect spawns the **orchestrator** for that sprint's
@@ -54,20 +63,35 @@ or build hats (the hat-collapse rule). A spawned role seat never wears another r
 
 When the developer says *"you are the orchestrator/manager/worker for task X"* (or equivalent),
 that is a **task-seat takeover**, not a loose role hint. Before analysis, profile checks,
-dispatch, or implementation, open the named task document in Operations and switch to or create
-the role at its canonical altitude: sprint for architect/orchestrator/optional sprint roles,
-master for manager, leaf for worker/reviewer/curator.
+dispatch, or implementation, resolve the named task document and converge on that role's canonical
+seat at its canonical altitude: sprint for architect/orchestrator/optional sprint roles, master for
+manager, leaf for worker/curator, and leaf/master/sprint for a reviewer according to the exact
+review seam. `dispatch_agent` reuses a viable occupant or its durable
+queued brief for the same `(task document, role)`; takeover never means manually replacing a live
+incumbent. Only the lifecycle-owned transaction may retire one generation that it has positively
+proved failed.
 
 Operational checklist:
 
 1. Resolve the canonical JSON-primary task document and the role being claimed.
-2. Use the Operations role switch/create control; do not call a terminal attach primitive and do
-   not read, request, paste, or retain a session/lifecycle/agent id.
+2. Compile the role's complete canonical brief and call `dispatch_agent` once with that document,
+   role, and brief. An identity-free developer chat uses ambient-launcher mode; it does not submit
+   caller identity, call a terminal attach/session primitive, or read, request, paste, or retain a
+   session/lifecycle/agent id. Repeating the exact call after an advertised recovery is idempotent:
+   it reconciles the canonical seat and pinned brief instead of creating a duplicate.
 3. If desired, call `rename_self(label=...)` after the hosted role chat is active.
 4. Verify Operations and Chats show the expected `(taskDocumentRef, role)` row before continuing.
 
-If the role control cannot establish that document+role binding, record the structural blocker and
-ask for the missing document or role authority. Do not improvise an exact-id attachment.
+If `dispatch_agent` cannot establish that document+role binding, record the structural blocker.
+For `source-lineage-stale` or `source-lineage-unavailable`, follow the refusal's ordered,
+contract-addressed `worktree_sync` recovery and retry the same document+role. A retained merge
+conflict is a resumable reconciliation phase: resolve mechanically derivable conflicts, run the
+advertised continuation, and then retry dispatch. That retry converges on any viable existing
+occupant or durable queued brief; never clear either one merely to make the retry look fresh.
+Escalate only when the conflicting changes encode a semantic truth that current requirements and
+evidence cannot resolve. For other structural
+refusals, ask for the missing document or role authority. Never improvise an exact-id attachment or
+ask for branch, occupant, session, lifecycle, or agent ids.
 
 ## Developer Clarification Triage
 
@@ -160,8 +184,10 @@ system-owned. **A spawned role that never touches mutating AR tools simply never
 lifecycle — that is correct, not a violation.** A spawned role runs its **own** lifecycle when it
 runs one; it never adopts its spawner's. The session↔task-seat association is the catalog binding
 made at dispatch: canonical task document plus role, not lifecycle adoption. Sprint roles bind to
-the sprint document, managers to master documents, and workers/reviewers/curators to leaf
-documents. Different roles may coexist on one document; only a second live occupant of the same
+the sprint document, managers to master documents, workers/curators to leaf documents, and
+reviewers bind to the exact leaf, master, or sprint document whose review seam they adjudicate.
+The plane stamps that reviewer's canonical parent document+role; it never derives the parent from
+an occupant id. Different roles may coexist on one document; only a second live occupant of the same
 `(task document, role)` seat collides.
 
 **Notify-and-stop is safe by design (HFX2-L1..L4, landed):** ending a turn on
@@ -200,55 +226,177 @@ section; they do not restate it.
 | --- | --- | --- | --- |
 | Leaf | the leaf's owning seat (manager; architect in tight/flat mode) | spawned worker (no-commit contract) | spawned reviewer, criteria catalog + liberty |
 | Master | the manager | the leaf workers | the master-exit seam reviewer (verdict rides `master-handover-approval`) |
-| Portfolio | the backend orchestrator (developer-facing decisions relayed through the architect) | the STRATEGIST (spawn-first) | reviewer with the plan-review catalog |
+| Portfolio plan | the architect | strategist when approved; orchestrator on a sanctioned strategist skip | reviewer with the plan-review catalog |
 
-**Independent route review is mandatory after every code-change session.** Once implementation
-and its focused acceptance are stable, the owning seat partitions the changed surface by
-material major route (architecture/control-plane ownership boundary, informed by governing route
-overviews and the import/call graph). The reviewer chair fans out one independent reviewer per
-affected major route. Each route reviewer reads the diff and its surroundings, tests likely side
-effects, and reports source-backed findings; the chair records a route-coverage table and one
-verdict. One reviewer may not silently collapse several routes into a generic diff skim. No code
-change proceeds to curator, closeout, integration, or handover without this verdict. A fix returns
-to the same builder and the same route reviewer delta-verifies it; touching a new major route adds
-that route to the review partition. This mandatory post-code gate also applies to direct/solo work:
-independence requires another agent, never builder self-review.
+**Independent route review is opt-in and explicit.** Run it only when the developer or the
+approved task/role brief requests review; closeout and integration never require or launch it.
+When requested, every review is dispatched with an explicit mode: `reviewMode=baseline` or
+`reviewMode=fix-verification`. A baseline review of a standalone or organizational code-changing
+leaf partitions the entire agreed surface by material major route (architecture/control-plane
+ownership boundary, informed by governing route overviews and the import/call graph). The reviewer
+chair fans out one independent reviewer per affected major route. Each route reviewer reads the
+diff and its surroundings, tests likely side effects, and reports source-backed findings; the chair
+records a complete route-coverage table and one verdict. One reviewer may not silently collapse
+several routes into a generic diff skim. An atomic child leaf does not receive an independent
+route-review record: its accumulated child changes become the review scope of one independent
+atomic-master review, published on the canonical master and enforced only when that review was
+requested. Direct/solo work follows the same requested altitude. Independence requires another
+agent, never builder self-review. The reviewer seat is also never the author/implementer seat
+itself, and every requirement verdict must cite evidence of the requirement's class: rendering/
+visibility requirements need mounted-UI proof, scheduling/ordering requirements need operation-
+level proof, and data-model requirements need artifact-level proof — evidence of the wrong class
+is verdict laundering, not a pass.
 
-The chair persists the passing or blocking result through
-`task_doc(operation="record_route_review", review={verdict, verdictRef, routes:[...]})` after the
-durable verdict and every route evidence file exist. The control plane, not the chair or manager,
-stamps the exact current Git candidate tree and review time into the leaf document. Curator dispatch
-and closeout recompute that tree and refuse an absent, blocking, stale, or missing-artifact record.
-This is the executable post-code gate; prose, a chat claim, or an unbound evidence reference does
-not satisfy it.
+**R27/R28 simple review rule.** If no review state is present, the used-round count is zero and the
+next review is a baseline; do not create a pristine marker or refuse because legacy review history
+is absent. Before reviewer work, the owner calls `task_doc(operation="begin_review")`; after the
+result, the owner records it with `task_doc(operation="record_review")` or the existing
+`task_doc(operation="record_route_review")` route result. Review 1 is thorough: inspect the entire
+agreed scope, applicable criteria, required routes, and lenses, then record the fixed original issue
+list with precise statements, evidence, and fix-acceptance criteria. Reviews 2 and 3 carry that
+list, the immediately preceding result, and worker fixes/evidence; they verify only listed issues,
+write fixed/unfixed dispositions for every preceding item, and leave a remaining set that is a
+subset of the preceding set. Unknown, duplicate, rewritten, reintroduced, newly discovered, or
+outside-list issues, new criteria, new routes/lenses, whole-review requests, and passing with
+unresolved items are refused. A changed candidate, source, requirement version, model, seat,
+route, or report label does not reset the list. A pending round may resume; a new review begins the
+next round.
 
-**Complexity-scored tiers (per leaf, at dispatch).** The owning seat scores three axes — blast
+After three rounds, stop and ask the developer directly for authorization. Wait for explicit
+authorization, record the developer's instruction, and only then run the specifically authorized
+extra round. No agent may self-authorize an extra round, and no code path needs to prove human
+authorship or build a separate authentication mechanism.
+
+Mechanical tests and worker diagnosis are evidence and may not publish reviewer findings or reset
+review authority. This rule applies equally to native, hosted, plan, integration, route, lens,
+replacement, resumed, bootstrap, diagnostic, delta, and final review labels.
+
+**Requirement compilation precedes task topology.** After intent and scope are established, the
+architect compiles every independently falsifiable obligation into a canonical requirement index
+with a stable ID and explicit version. Clauses that can be violated, reviewed, owned, evidenced, or
+superseded independently are separate requirements. Before any sprint/master/leaf task document is
+created, every ID + version has one self-contained, version-addressed packet using
+`../w-02-light-task-workflow/requirement-packet-template.md`, including the problem, required
+behavior, rationale, scope and exclusions, preservation boundaries, failure/recovery behavior,
+examples, forbidden overreach, expected evidence, authority/provenance, dependencies, and open
+truth gaps. Material state, sequence, ownership, and interaction relationships get diagrams.
+
+A fresh agent cold-reads each packet without the planning transcript and must be able to explain
+what changes, what stays unchanged, the important failure states, and proof of conformance. The
+architect presents the complete corpus for developer approval and creates task topology only after
+that approval; every approved packet records the durable ruling. Masters and leaves carry filtered
+ID + version + canonical-packet links, never
+rewritten requirement contracts. Each leaf owns exactly one primary requirement revision; several
+leaves may implement independently executable manifestations of one revision, while adjacent
+requirements are dependency/preservation context only. A requirement change increments its
+version, cites durable developer approval, invalidates affected acceptance state, and rebriefs
+affected leaves.
+
+**Requirement acceptance is per stable ID and version, never aggregate.** Before dispatch, the owner
+projects the leaf's one owned primary revision, with its stable ID + version, approved packet, and
+durable corpus-ruling citation, plus separately labelled dependency/preservation context into the
+builder brief. Adjacent context is verified as a constraint and cannot be claimed closed by this
+leaf. The builder's handoff contains one acceptance block for the owned primary revision:
+`satisfied`, `blocked`, or `approved-change`; delivery/implementation rationale and citations;
+verification rationale that
+states both the demonstrated behavior and the failure it would catch; verification citations; and
+the exact command/result or durable evidence reference. Code citations name file paths and
+symbols. Non-code work uses the same contract with deliverable paths plus sections/anchors instead
+of invented code fields. A `blocked` or `approved-change` block also explains why the original
+requirement cannot be delivered unchanged, names the changed delivery when one exists, and cites
+the durable developer ruling. General prose or an aggregate "requirements addressed" claim is not
+an acceptance envelope.
+
+The independent reviewer inspects the owned primary packet revision and cited artifacts itself and
+adjudicates that exact manifestation as `accepted` or `rejected`, with its own rationale. Missing
+rationale, an unapproved packet revision, missing or wrong-class
+evidence, or invalid citations forces rejection of that requirement;
+the overall verdict cannot pass while any requirement is rejected. An accurately reported
+`blocked` row may be accepted as a truthful handoff, but it still requires a BLOCK recommendation
+until the requirement is delivered or becomes an approved change. The durable-evidence
+stable-contract-or-expiry promotion hold point remains a separate review dimension and cannot
+substitute for requirement acceptance evidence.
+
+**Requirement revisions and delivery attempts are separate axes.** The canonical `ID@version`
+states semantic intent and changes only through explicit developer approval. A leaf-local attempt
+ID states what one exact candidate was handed to independent review for one leaf manifestation of
+that revision. The builder advances that ID only when handing a candidate to review, or when a
+reviewer rejection requires a successor handoff. Internal implementation, test, and evidence
+reruns do not mint attempts; preserve them separately as experimental protocol events with the
+candidate identity, command, result, failure cause, repair, and expected proof for the next run.
+
+Before review handoff, the builder appends an immutable worker attempt record to the leaf's
+detailed journal. It binds the revision, manifestation, predecessor and carried findings when
+present, exact candidate tree/commit or appropriate non-code digest/anchors, and its own
+requirement-specific status, rationale, citations, findings, failure class, and a content-addressed
+reference to immutable expanded evidence. The frozen expanded artifact carries shared definitions
+and complete command results; do not duplicate the complete master acceptance envelope or
+experimental-run body inside every attempt. After rejection, the repaired candidate is handed off
+through a successor attempt. No prior worker record is edited or deleted; an unrelated later
+candidate does not reopen an accepted attempt.
+
+Validate the complete worker record before append. Append plus exact-candidate review handoff is
+one logical formal-attempt boundary. A malformed pre-handoff row is preserved, receives an
+append-only `non-attempt-correction`/void reference, and consumes no attempt ID; the corrected row
+uses that same next ID at handoff. A malformed handed-off row is already a formal attempt: the
+independent reviewer rejects it, and the worker may append a successor only at the next review
+handoff. The worker never self-rejects or silently replaces either row.
+
+The independent reviewer appends a separate reviewer record against that exact attempt and exact
+candidate after inspecting the artifacts itself. It chooses `accepted` or `rejected`, supplies its
+own rationale/citations, and classifies every rejection finding as exactly one of `implementation
+defect`, `evidence gap`, `requirement contradiction/overconstraint`, `test/tool defect`, or
+`external blocker`. A requirement contradiction/overconstraint is rejected and routed through the
+architect for developer-approved revision; builders and reviewers may propose a revision but never
+rewrite or approve one. The reviewer does not modify the worker record, and acceptance never floats
+to a later candidate.
+
+Rejection closes that attempt and a repair appends a successor citing the predecessor and listed
+findings. Accepted attempts stay closed. During successor verification, an outside-list regression,
+changed route, or changed requirement goes directly to the developer; it does not add a finding,
+reopen a resolved item, or reset the review. A worker, reviewer, changed candidate, or summary
+cannot reopen acceptance unilaterally. Same-reviewer verification and shrinking findings stay in
+force; an architect takeover continues the same attempt lineage.
+
+The detailed per-leaf worker and reviewer records are authority. A master maintains a rebuildable
+summary linking those records and showing attempts, rejection history, current state, and dominant
+open failure class per requirement manifestation. The summary is a disposable observation only:
+it is never a requirement contract, lifecycle/closeout gate, queue authority, or task-authoring
+lock. Missing or stale summary state is rebuilt from leaf journals and cannot block work.
+
+Before hosted reviewer dispatch or native reviewer work, when review was requested, the owner calls
+`task_doc(operation="begin_review")`. After the durable verdict and route evidence exist, the
+chair records the result with `task_doc(operation="record_review")` or the existing
+`task_doc(operation="record_route_review")` route result. The task document remains the review
+authority; prose, a chat claim, or an unbound evidence reference does not satisfy a requested
+review. Atomic child leaves defer a requested review to the canonical master integration review.
+
+**Complexity-scored tiers (per leaf, at dispatch when review is requested).** The owning seat scores three axes — blast
 radius (doctrine/enforcement/public surface vs leaf-local) · novelty (new subsystem vs
 pattern-following) · size (files × steps) — into three tiers: **direct** (ordinary build channel
-plus the mandatory independent route review; no additional loop machinery),
+plus the requested independent route review; no additional loop machinery),
 **builder-verified** (builder implements; owner additionally verifies report-vs-artifact; the
-mandatory route review still runs), **full loop** (builder + independent reviewer rounds, with the
-mandatory route partition as the review scope floor). The
+requested route review still runs), **full loop** (builder + independent reviewer rounds, with the
+route partition as the review scope floor where the leaf owns that seam). The
 strategist's blast-radius register is the scoring input when an orchestration task exists. A
 leaf's loop mark (tier + scope: manager | orchestrator — the owning level runs the loop with ITS
 agent set) is recorded on the leaf doc with a decision-log entry. A master whose leaves all score
-`direct` avoids iterative full-loop machinery, but its code leaves still receive independent
-route review. The knobs tune review depth and round machinery; they never disable the post-code
-independence gate.
+`direct` avoids iterative full-loop machinery. Atomic leaves still defer a requested route review
+to the one master integration seam; standalone and organizational leaves retain their requested
+review scope. The knobs tune review depth and round machinery; they do not create a review when
+none was requested.
 
-**Rounds and the HARD cap.** A round = implement → review. **Hard cap: 3 rounds per loop — and
-ONLY full end-to-end rounds count against it.** Residuals of a passing round are landed and
-**delta-verified by the SAME reviewer via a follow-up message** (it retains everything it already
-verified, at a fraction of a fresh round's cost); **fix rounds resume the SAME builder**. A fresh
-reviewer is spawned only for a full round or when new scope opens. Delta-verifies close rounds;
-they do not open them.
+**Rounds and local convergence.** A governed review has at most three rounds: one thorough baseline
+and two fix-verification rounds. A pending round may resume; a new review counts the next round.
+Residuals of a passing round are verified by the same reviewer where the lifecycle uses follow-up
+verification; fix rounds resume the same builder. Reviews 2 and 3 verify only the original listed
+issues. Any outside-list matter goes to the developer and is not a successor finding.
 
-**The convergence rule (the real control; the cap is the backstop).** Every round must SHRINK the
-open finding set. A round that does not shrink it escalates immediately, regardless of the count;
-a monotonically converging loop may never hit the cap at all. At the cap, or on non-convergence,
-the owner does not spin another round — it **escalates one seat up the ladder (worker → manager →
-orchestrator → architect → developer) with the full round history attached**; the escalation packet IS the
-upper seat's visibility.
+**The convergence rule.** Every fix-verification round must shrink or honestly retain the listed
+open set with fixed/unfixed dispositions. At three rounds, or when a further round is needed, ask
+the developer directly and wait for explicit authorization; record that instruction before any
+authorized extra work. Do not spin an unapproved round, split the scope, or create a new finding
+list.
 
 **Quo-vadis (the written developer-escalation criterion).** A question is developer-worthy when it
 is a **high-blast-radius truth** — answered wrong it means big rewrites later (architecture
@@ -257,10 +405,12 @@ agent settings live). Quo-vadis questions escalate IMMEDIATELY to the architect 
 regardless of round count.
 Presentation-grade choices (2px vs 3px) never do — the owner rules and logs.
 
-**Criteria catalogs (the reviewer as test bench).** Criteria are never made up on the spot: every
-review runs its type's standing catalog from `criteria/` (code-seam · doctrine ·
-onboarding-memory · report-verification · plan-review) plus an exploratory mandate, under the
-promotion ratchet (each catalog carries it). `roles/reviewer.md` binds them.
+**Criteria catalogs (the reviewer as test bench).** The baseline review runs its type's standing
+catalog from `criteria/` (code-seam · doctrine · onboarding-memory · report-verification ·
+plan-review), the required routes, and the exploratory mandate, under the promotion ratchet.
+Fix-verification uses the sealed baseline and only the standing criteria/evidence needed to
+verify its listed IDs; it has no exploratory mandate, whole-catalog rediscovery, new-lens duty, or
+catalog-promotion authority. `roles/reviewer.md` binds the review mode and evidence packet.
 
 **Per-level agent sets.** Each level runs its loop with its own harness/model/effort set — the
 orchestrator-level set (the strongest models) and the manager-level set (cheaper, possibly
@@ -273,17 +423,18 @@ strategist pre-run, and it occurs only after developer approval; settings cannot
 
 Once the developer accepts an orchestrated series/portfolio plan, that acceptance is standing
 authority for the owning seats to execute the subordinate edges in that series. Managers govern
-their workers and leaf closeouts. The orchestrator governs managers, master handovers, master →
-super integrations, and the same closeout/finalize/cleanup mechanics when it wears a manager or
-worker hat in a flat/direct run. These edges do **not** stop for a new developer approval just
+their workers, leaf readiness, and released leaf closeouts. The orchestrator governs managers,
+the portfolio queue, organizational leaf → super releases, atomic master → super handovers, and
+the same closeout/finalize/cleanup mechanics when it wears a manager or worker hat in a flat/direct
+run. These edges do **not** stop for a new developer approval just
 because a commit, lifecycle finalization, cleanup, or integration command is next; the owner runs
-the preview/check, records the accepted-series authority in the intent note or decision log, and
+the transaction preview, records the accepted-series authority in the intent note or decision log, and
 continues.
 
 This does **not** weaken the escalation ladder. Developer approval is still required for the final
 completed super integration branch / PR-carryover gate, for any human-pinned gate that is actually
 raised (`integration-approval`, `push-approval`, `cleanup-approval`), for scope changes beyond the
-accepted plan, for red checks that cannot be fixed inside the task, and for quo-vadis decisions.
+accepted plan, for unresolved transaction conflicts or scope blockers, and for quo-vadis decisions.
 Owner-never-self-approves means verdicts and delegated gates need the configured distinct decider;
 it does not force a developer hand-off for mechanical closeout of in-scope work the owning seat
 performed directly under standing series authority.
@@ -304,15 +455,30 @@ For ordinary spawned seats, settings are the sole developer-controlled spend sur
 `dispatch_agent` callers declare the canonical task document, role, brief, and optional label;
 they never declare harness/model/effort or direct launch/session spend controls.
 
-### Hosted role dispatch is one structural transaction
+### `dispatch_agent` has two disjoint caller kinds
 
-Every role that dispatches another hosted role calls `dispatch_agent` once with the child's real
-task document, role, and complete brief. The control plane performs the internal transaction:
+| Caller kind | Recognition | Authority | Forbidden shortcut |
+| --- | --- | --- | --- |
+| Plane-hosted seat | Plane-injected hosted identity is present | Current seat plus direct-child scope policy | Treating a plane authorization failure as ambient |
+| Ambient launcher | Plane-injected hosted identity is absent | Canonical target-document resolution plus target role-altitude validation; there is no parent seat | Fabricating caller identity or using ambient mode as an in-hierarchy escape |
 
-1. authorize the direct-child relationship from the caller's ambient document+role seat;
-2. resolve source lineage from that canonical task document before process creation: a manager
-   requires the master to contain its super; a worker/reviewer/curator requires both super → master
-   and master → leaf, for code and external memory when enabled;
+The public request is identical in both modes: canonical target document, target role, complete
+brief, and optional label. Caller kind comes only from process context; the request never chooses
+it. Both modes use the same settings resolution, internal seat creation, readiness proof, exact
+brief pinning, rollback, and canonical `(task document, role)` publication. A stale, invalid,
+mismatched, unbound, or unauthorized plane identity remains a plane refusal and never falls back.
+
+### Role dispatch is one structural transaction
+
+Every launcher or role that dispatches a hosted role calls `dispatch_agent` once with the target's
+real task document, role, and complete brief. The control plane performs the internal transaction:
+
+1. select caller kind from process identity, then either authorize the plane seat's direct-child
+   relationship or validate the ambient launcher's target document and role altitude;
+2. resolve source lineage from that canonical task document before process creation: an
+   organizational leaf requires super → leaf, while an atomic path requires super → master → leaf,
+   for code and external memory when enabled; a manager's admission proves its nature-appropriate
+   source edge before it can read or dispatch;
 3. create and bind the child using settings-owned launch knobs only when every applicable edge is
    current;
 4. prove readiness privately;
@@ -320,10 +486,13 @@ task document, role, and complete brief. The control plane performs the internal
 6. return only structural status (`dispatched` or `dispatch-queued`) and delivery state.
 
 A `source-lineage-stale` or `source-lineage-unavailable` result means no child process was created.
-Use its ordered, contract-addressed `worktree_sync` recovery, then dispatch the same document+role
-again. Never ask for branch commit ids or occupant ids: task identity is the input and the control
-plane owns the Git proof. This early refusal prevents a fresh seat from reading stale code or stale
-onboarding before anyone notices the master or leaf fell behind its parent.
+Use its ordered, contract-addressed `worktree_sync` recovery, resolve any retained mechanically
+derivable merge conflict through the advertised continuation, then dispatch the same document+role
+again. A conflict requiring a genuinely semantic ruling follows the ordinary escalation path; it
+is not silently converted into abandonment. Never ask for branch commit ids or occupant ids: task
+identity is the input and the control plane owns the Git proof. This early refusal prevents a fresh
+seat from reading stale code or stale onboarding before anyone notices the master or leaf fell
+behind its parent.
 
 The model never receives the spawned occupant's runtime id and never calls readiness, exact inbox,
 attach, or raw retire operations. A queued brief is already durable and follows the ordinary
@@ -422,14 +591,17 @@ reuse, complexity thresholds) lives in the same block — meaning in
 ```
 main
   └── super-integration (orchestrator-owned, off main)
-        ├── master-A branch (off super)  ── leaves land via C-11
-        ├── integrate A → super (orchestrator worktree, C-11)
-        ├── master-B branch (off the moved super — sees A)
+        ├── organizational master A (logical owner; leaves land directly on super)
+        ├── atomic master B (isolated branch; all leaves land there, then B lands once)
+        ├── later leaves refresh from moved super before closeout; closeout performs that
+        │     refresh itself when it is a plain fast-forward, and refresh, closeout and
+        │     landing stay adjacent per leaf so the line cannot move between them
         └── … final: super → main PR + memory carry-over + push
 ```
 
-The full topology — dependency-ordered dispatch, the integration-duty procedure, the two
-conflict-resolution modes, leaf moves — lives in **`roles/orchestrator.md`** and only there.
+The full topology — canonical graph, execution-nature classification, ready-frontier recomputation,
+landing procedures, conflict routing, and leaf moves — lives in **`roles/orchestrator.md`** and
+only there.
 
 ## Credits
 

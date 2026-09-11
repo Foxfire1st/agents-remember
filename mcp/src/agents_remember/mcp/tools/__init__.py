@@ -10,6 +10,7 @@ from __future__ import annotations
 from .base import PUBLIC_TOOLS, RESERVED_TOOLS, TRANSPORT
 from .base import _tool_payload as _tool_payload  # re-exported for tool-response tests
 from .benchmark import codex_benchmark_prepare_payload, codex_benchmark_run_payload
+from .closeout_queue import closeout_queue_payload
 from .core import (
     context_packet_payload,
     ping_payload,
@@ -18,6 +19,8 @@ from .core import (
     server_info_payload,
     skills_install_payload,
 )
+from .curator_coherence import curator_coherence_payload
+from .direct_landing import direct_landing_payload
 from .gates import (
     gate_create_payload,
     gate_decide_payload,
@@ -49,6 +52,8 @@ from .memory import (
     memory_carryover_plan_payload,
     memory_init_payload,
     memory_quality_check_payload,
+    memory_quality_check_poll_payload,
+    memory_quality_check_start_payload,
     route_index_refresh_payload,
 )
 from .operator_inbox import (
@@ -94,7 +99,7 @@ from .worktree import (
     worktree_closeout_apply_payload,
     worktree_closeout_preview_payload,
     worktree_integrate_payload,
-    worktree_operation_cancel_payload,
+    worktree_operation_control_payload,
     worktree_start_payload,
     worktree_status_payload,
     worktree_sync_payload,
@@ -116,9 +121,12 @@ __all__ = [
     "cgc_symbol_search_payload",
     "cgc_visualize_payload",
     "citation_fix_payload",
+    "closeout_queue_payload",
     "codex_benchmark_prepare_payload",
     "codex_benchmark_run_payload",
     "context_packet_payload",
+    "curator_coherence_payload",
+    "direct_landing_payload",
     "dispatch_agent_payload",
     "drift_check_payload",
     "gate_create_payload",
@@ -143,6 +151,8 @@ __all__ = [
     "memory_carryover_plan_payload",
     "memory_init_payload",
     "memory_quality_check_payload",
+    "memory_quality_check_poll_payload",
+    "memory_quality_check_start_payload",
     "message_child_payload",
     "message_parent_payload",
     "operator_inbox_consume_payload",
@@ -178,7 +188,7 @@ __all__ = [
     "worktree_closeout_apply_payload",
     "worktree_closeout_preview_payload",
     "worktree_integrate_payload",
-    "worktree_operation_cancel_payload",
+    "worktree_operation_control_payload",
     "worktree_start_payload",
     "worktree_status_payload",
     "worktree_sync_payload",

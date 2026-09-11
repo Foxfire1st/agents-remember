@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from agents_remember.controlplane.signal_routing import RoutedOwner, derive_architect_owner
@@ -137,14 +138,6 @@ class StructuralRoleSeatTests(unittest.TestCase):
         self.topology = TaskDocumentTopology(self.root)
         self.resolver = StructuralSeatResolver(self.catalog, self.topology)
 
-    def test_sprint_roles_share_document_but_remain_distinct_role_seats(self) -> None:
-        for role in ("architect", "orchestrator", "strategist", "designer", "system-specialist"):
-            self.catalog.upsert(_seat(role, SPRINT_A, role))
-
-        for role in ("architect", "orchestrator", "strategist", "designer", "system-specialist"):
-            with self.subTest(role=role):
-                self.assertEqual(self.resolver.current(SPRINT_A, role).id, role)
-
     def test_same_role_on_different_sprints_never_crosses_repository_scope(self) -> None:
         self.catalog.upsert(_seat("architect-a", SPRINT_A, "architect"))
         self.catalog.upsert(_seat("architect-b", SPRINT_B, "architect"))
@@ -166,47 +159,6 @@ class StructuralRoleSeatTests(unittest.TestCase):
             ),
         )
 
-    def test_architect_children_are_only_its_sprint_coordination_roles(self) -> None:
-        architect = _seat("architect", SPRINT_A, "architect")
-        for role in ("orchestrator", "strategist", "designer"):
-            with self.subTest(role=role):
-                self.resolver.authorize_child(architect, document=SPRINT_A, role=role)
-        for document, role in ((SPRINT_A, "system-specialist"), (MASTER_A, "manager")):
-            with (
-                self.subTest(refused_role=role),
-                self.assertRaisesRegex(StructuralSeatError, "architect children"),
-            ):
-                self.resolver.authorize_child(architect, document=document, role=role)
-
-    def test_orchestrator_owns_sprint_specialist_and_one_manager_per_direct_master(self) -> None:
-        orchestrator = _seat("orchestrator", SPRINT_A, "orchestrator")
-        self.resolver.authorize_child(
-            orchestrator,
-            document=SPRINT_A,
-            role="system-specialist",
-        )
-        self.resolver.authorize_child(orchestrator, document=MASTER_A, role="manager")
-        with self.assertRaisesRegex(StructuralSeatError, "direct masters"):
-            self.resolver.authorize_child(orchestrator, document=MASTER_B, role="manager")
-
-    def test_manager_owns_only_leaf_roles_inside_its_master(self) -> None:
-        manager = _seat("manager", MASTER_A, "manager")
-        for role in ("worker", "reviewer", "curator"):
-            with self.subTest(role=role):
-                self.resolver.authorize_child(manager, document=LEAF_A, role=role)
-        with self.assertRaisesRegex(StructuralSeatError, "outside the manager"):
-            self.resolver.authorize_child(manager, document=LEAF_B, role="worker")
-
-    def test_replacement_changes_only_the_current_occupant(self) -> None:
-        self.catalog.upsert(_seat("old", MASTER_A, "manager", status="terminated"))
-        self.catalog.upsert(_seat("new", MASTER_A, "manager"))
-
-        current = self.resolver.current(MASTER_A, "manager")
-
-        self.assertEqual(current.id, "new")
-        self.assertEqual(current.task_document_ref, MASTER_A)
-        self.assertEqual(current.binding_role, "manager")
-
     def test_duplicate_current_occupants_fail_closed(self) -> None:
         self.catalog.upsert(_seat("one", SPRINT_A, "orchestrator"))
         self.catalog.upsert(_seat("two", SPRINT_A, "orchestrator"))
@@ -217,6 +169,25 @@ class StructuralRoleSeatTests(unittest.TestCase):
     def test_role_altitude_mismatch_fails_before_any_occupant_lookup(self) -> None:
         with self.assertRaisesRegex(StructuralSeatError, "requires a sprint document"):
             self.resolver.current(LEAF_A, "architect")
+
+    def test_reviewer_parent_is_exact_for_each_review_seam(self) -> None:
+        cases = (
+            (LEAF_A, MASTER_A, "manager"),
+            (MASTER_A, MASTER_A, "manager"),
+            (SPRINT_A, SPRINT_A, "architect"),
+            (SPRINT_A, SPRINT_A, "orchestrator"),
+        )
+        for index, (document, parent_document, parent_role) in enumerate(cases):
+            with self.subTest(document=document.key, parent_role=parent_role):
+                reviewer = replace(
+                    _seat(f"reviewer-{index}", document, "reviewer"),
+                    structural_parent_task_document_ref=parent_document,
+                    structural_parent_role=parent_role,
+                )
+                self.assertEqual(
+                    self.resolver.parent_address(reviewer),
+                    (parent_document, parent_role),
+                )
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -1,4 +1,3 @@
-import io
 import json
 import shutil
 import subprocess
@@ -8,15 +7,21 @@ import unittest
 from argparse import Namespace
 from contextlib import (
     contextmanager,
-    redirect_stdout,
 )
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.certification.repository_profiles.canonical import (
+    repository_profile_digest,
+)
+from agents_remember.certification.repository_profiles.models import (
+    RepositoryCertificationProfile,
+)
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
@@ -26,21 +31,41 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.memory import baseline as adopt_baseline
-from agents_remember.tasks import TaskDocument, write_task_doc
-from agents_remember.worktrees import git_worktree_manager as worktree_manager
-from agents_remember.worktrees.route_review import code_candidate_tree
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.tasks import (
+    SprintExecutionGraph,
+    SprintExecutionNode,
+    TaskDocument,
+    read_task_doc,
+    write_task_doc,
+)
+from agents_remember.tasks.document_refs import ResolvedTaskDocument
+from agents_remember.tasks.store import json_path_for
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    publish_new_lifecycle_operation_location,
+)
+from agents_remember.worktrees.route_review import (
+    build_route_review,
+    document_ref,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
     RepoBranchPlan,
     WorktreeContract,
+    contract_publication_text,
     default_contract,
     default_series_contract,
-    load_contract,
     write_contract,
+)
+from closeout_input_test_support import MutationEvidenceRecorder
+from curator_coherence_test_support import (
+    write_curator_evidence,
+    write_curator_task_topology,
 )
 
 drift = adopt_baseline.drift
+TEST_CERTIFICATION_PROFILE_REFERENCE = Path("mcp/certification-profile-v1.json")
 
 
 def _benchmark_git_subcommands(recorder: mock.Mock) -> list[str]:
@@ -86,7 +111,45 @@ def init_repo(repo: Path, branch: str = "main") -> str:  # pragma: no cover
     (repo / "README.md").write_text("# Test Repo\n", encoding="utf-8")
     git(repo, "add", "README.md")
     git(repo, "commit", "-m", "Initial commit")
-    return git(repo, "rev-parse", "HEAD")
+    commit = git(repo, "rev-parse", "HEAD")
+    git(repo, "update-ref", f"refs/remotes/origin/{branch}", commit)
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{branch}")
+    return commit
+
+
+def install_fixture_profile(repository_root: Path, repository_id: str) -> Path:
+    """Install the checked-in profile shape with fixture-owned repository identity."""
+
+    raw = json.loads((MCP_SRC.parent / "certification-profile-v1.json").read_text(encoding="utf-8"))
+    raw.update(
+        {
+            "repositoryId": repository_id,
+            "profileId": f"{repository_id}-certification",
+            "profileDigest": "0" * 64,
+        }
+    )
+    profile = RepositoryCertificationProfile.model_validate(raw)
+    profile = profile.model_copy(update={"profileDigest": repository_profile_digest(profile)})
+    destination = repository_root / TEST_CERTIFICATION_PROFILE_REFERENCE
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(profile.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return destination
+
+
+def seed_memory_ledger(memory_repo: Path, repo_name: str, code_commit: str) -> str:
+    """Commit the canonical initial ledger for an external-memory test source."""
+
+    memory_content = git(memory_repo, "rev-parse", "HEAD")
+    write_ledger(
+        memory_repo / "memory.md",
+        create_initial_ledger(repo_name, code_commit, memory_content),
+    )
+    git(memory_repo, "add", "memory.md")
+    git(memory_repo, "commit", "-m", "Add memory ledger")
+    return git(memory_repo, "rev-parse", "HEAD")
 
 
 def write_current_task_lineage(
@@ -96,13 +159,48 @@ def write_current_task_lineage(
     master_name: str,
     leaf_id: str,
 ) -> Path:
-    """Create a current super -> master -> leaf contract chain for structural tests."""
+    """Create a current organizational sprint-super -> leaf lineage."""
     repo = coordination_root / "fixture-repositories" / repo_name
     base = init_repo(repo, "main")
-    master_branch = f"ar/{master_name}"
+    super_branch = "super"
     leaf_branch = f"ar/{leaf_id}"
-    git(repo, "branch", master_branch, "main")
-    git(repo, "branch", leaf_branch, master_branch)
+    git(repo, "branch", super_branch, "main")
+    git(repo, "branch", leaf_branch, super_branch)
+    task_root = coordination_root / "tasks" / repo_name
+    master_path = task_root / master_name / "task.json"
+    master = read_task_doc(master_path)
+    write_task_doc(
+        master_path.parent,
+        master.model_copy(update={"executionNature": "organizational"}),
+    )
+    master_ref = TaskDocumentRef(repository=repo_name, path=f"{master_name}/task.json")
+    sprint_path = task_root / "sprint" / "task.json"
+    if sprint_path.exists():
+        sprint = read_task_doc(sprint_path)
+        sprint = sprint.model_copy(
+            update={
+                "orchestrates": [master_name],
+                "integrationBranch": super_branch,
+                "executionGraph": SprintExecutionGraph(
+                    nodes=[SprintExecutionNode(ref=master_ref)], edges=[]
+                ),
+            }
+        )
+    else:
+        sprint = TaskDocument.model_validate(
+            {
+                "id": "SPRINT",
+                "slug": "sprint",
+                "title": "Sprint",
+                "kind": "master",
+                "repo": repo_name,
+                "createdAt": "2026-07-07T10:00",
+                "orchestrates": [master_name],
+                "integrationBranch": super_branch,
+                "executionGraph": {"nodes": [master_ref.model_dump()], "edges": []},
+            }
+        )
+    write_task_doc(sprint_path.parent, sprint)
     task = ContractTask(
         name=master_name,
         repo_name=repo_name,
@@ -110,22 +208,12 @@ def write_current_task_lineage(
         workflow_kind="light-task",
         memory_mode="disabled",
     )
-    master = default_series_contract(
-        task,
-        code=RepoBranchPlan(
-            repo_path=repo,
-            source_branch="main",
-            work_branch=master_branch,
-            base_commit=base,
-        ),
-    )
-    write_contract(master.contract_path, master)
     leaf = default_contract(
         task,
         leaf=LeafIdentity(worktree_name=leaf_id, leaf_id=leaf_id),
         code=RepoBranchPlan(
             repo_path=repo,
-            source_branch=master_branch,
+            source_branch=super_branch,
             work_branch=leaf_branch,
             base_commit=base,
         ),
@@ -319,15 +407,21 @@ def initialized_memory_repo(
     return git(memory_repo, "rev-parse", "HEAD")
 
 
-def open_external_contract_fixture(root: Path):
+def open_external_contract_fixture(root: Path, *, lifecycle_id: str = ""):
     code_repo = root / "repo-a"
-    code_base = init_repo(code_repo, "main")
+    init_repo(code_repo, "main")
+    install_fixture_profile(code_repo, "repo-a")
+    git(code_repo, "add", "-A")
+    git(code_repo, "commit", "-m", "Add repository certification profile")
+    code_base = git(code_repo, "rev-parse", "HEAD")
     memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
     memory_seed = init_repo(memory_repo, "main")
     write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_seed))
     git(memory_repo, "add", "memory.md")
     git(memory_repo, "commit", "-m", "Add memory ledger")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
+    git(code_repo, "branch", "super", code_base)
+    git(memory_repo, "branch", "super", memory_base)
     contract = default_contract(
         ContractTask(
             name="Commit Approval Thing",
@@ -336,16 +430,16 @@ def open_external_contract_fixture(root: Path):
             workflow_kind="chat-task",
             memory_mode="external",
         ),
-        leaf=LeafIdentity(worktree_name="commit-approval-thing"),
+        leaf=LeafIdentity(worktree_name="commit-approval-thing", lifecycle_id=lifecycle_id),
         code=RepoBranchPlan(
             repo_path=code_repo,
-            source_branch="main",
+            source_branch="super",
             work_branch="ar/commit-approval-thing",
             base_commit=code_base,
         ),
         memory=RepoBranchPlan(
             repo_path=memory_repo,
-            source_branch="main",
+            source_branch="super",
             work_branch="ar/commit-approval-thing",
             base_commit=memory_base,
         ),
@@ -361,17 +455,21 @@ def open_external_contract_fixture(root: Path):
         code=RepoBranchPlan(
             repo_path=code_repo,
             source_branch="main",
-            work_branch="main",
+            work_branch="super",
             base_commit=code_base,
         ),
         memory=RepoBranchPlan(
             repo_path=memory_repo,
             source_branch="main",
-            work_branch="main",
+            work_branch="super",
             base_commit=memory_base,
         ),
     )
     write_contract(parent.contract_path, parent)
+    publish_new_lifecycle_operation_location(
+        parent,
+        contract_text=contract_publication_text(parent.contract_path, parent),
+    )
     contract = replace(contract, parent_contract_path=parent.contract_path)
     assert contract.memory_worktree is not None
     git(
@@ -381,7 +479,7 @@ def open_external_contract_fixture(root: Path):
         "-b",
         contract.code_work_branch,
         str(contract.code_worktree),
-        "main",
+        "super",
     )
     git(
         memory_repo,
@@ -390,14 +488,18 @@ def open_external_contract_fixture(root: Path):
         "-b",
         contract.memory_work_branch,
         str(contract.memory_worktree),
-        "main",
+        "super",
     )
     write_contract(contract.contract_path, contract)
+    publish_new_lifecycle_operation_location(
+        contract,
+        contract_text=contract_publication_text(contract.contract_path, contract),
+    )
     return contract
 
 
-def dirty_open_external_contract_fixture(root: Path):
-    contract = open_external_contract_fixture(root)
+def dirty_open_external_contract_fixture(root: Path, *, lifecycle_id: str = ""):
+    contract = open_external_contract_fixture(root, lifecycle_id=lifecycle_id)
     (contract.code_worktree / "feature.txt").write_text("feature\n", encoding="utf-8")
     assert contract.memory_worktree is not None
     write_file_onboarding(
@@ -414,39 +516,51 @@ def write_passing_route_review(contract: WorktreeContract) -> None:
     report = contract.task_root / "notes/reports/test-reviewer-verdict.md"
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text("# Test reviewer verdict\n\nPass.\n", encoding="utf-8")
+    document = TaskDocument.model_validate(
+        {
+            "id": contract.leaf_id,
+            "slug": contract.leaf_id,
+            "title": contract.task_name,
+            "kind": "subTask",
+            "repo": contract.repo_name,
+            "createdAt": "2026-08-13T00:00:00+00:00",
+            "lifecycleId": contract.lifecycle_id or None,
+            "enclosures": [
+                {
+                    "leafId": contract.leaf_id,
+                    "enclosurePath": contract.contract_path.as_posix(),
+                }
+            ],
+        }
+    )
+    document_path = json_path_for(contract.task_root, document)
+    review = build_route_review(
+        contract,
+        ResolvedTaskDocument(
+            ref=document_ref(contract, document_path),
+            path=document_path,
+            document=document,
+        ),
+        {
+            "verdict": "pass",
+            "verdictRef": "notes/reports/test-reviewer-verdict.md",
+            "routes": [
+                {
+                    "route": "test-fixture",
+                    "verdict": "pass",
+                    "evidenceRef": "notes/reports/test-reviewer-verdict.md",
+                }
+            ],
+        },
+        now=datetime(2026, 8, 13, tzinfo=UTC),
+    )
     write_task_doc(
         contract.task_root,
-        TaskDocument.model_validate(
-            {
-                "id": contract.leaf_id,
-                "slug": contract.leaf_id,
-                "title": contract.task_name,
-                "kind": "subTask",
-                "repo": contract.repo_name,
-                "createdAt": "2026-08-13T00:00:00+00:00",
-                "lifecycleId": contract.lifecycle_id or None,
-                "enclosures": [
-                    {
-                        "leafId": contract.leaf_id,
-                        "enclosurePath": contract.contract_path.as_posix(),
-                    }
-                ],
-                "routeReview": {
-                    "candidateTree": code_candidate_tree(contract),
-                    "verdict": "pass",
-                    "verdictRef": "notes/reports/test-reviewer-verdict.md",
-                    "reviewedAt": "2026-08-13T00:00:00+00:00",
-                    "routes": [
-                        {
-                            "route": "test-fixture",
-                            "verdict": "pass",
-                            "evidenceRef": "notes/reports/test-reviewer-verdict.md",
-                        }
-                    ],
-                },
-            }
-        ),
+        document.model_copy(update={"routeReview": review}),
     )
+    if contract.memory_mode == "external" and contract.kind == "leaf":
+        caller_ref = write_curator_task_topology(contract)
+        write_curator_evidence(contract, caller_ref=caller_ref)
 
 
 def claimed_external_contract_fixture(root: Path):
@@ -478,12 +592,14 @@ def _series_parent_fixture(
     code_base = git(code_repo, "rev-parse", "HEAD")
     memory_base = git(memory_repo, "rev-parse", "HEAD")
     slug = task_name.lower().replace(" ", "-")
-    code_branch = f"ar/{slug}-master"
-    memory_branch = f"ar/{slug}-master"
+    code_branch = f"ar/{slug}"
+    memory_branch = f"ar/{slug}"
     code_worktree = root / f"{slug}-master-code"
     memory_worktree = root / f"{slug}-master-memory"
-    git(code_repo, "worktree", "add", "-b", code_branch, str(code_worktree), code_base)
-    git(memory_repo, "worktree", "add", "-b", memory_branch, str(memory_worktree), memory_base)
+    git(code_repo, "branch", "super", code_base)
+    git(memory_repo, "branch", "super", memory_base)
+    git(code_repo, "worktree", "add", "-b", code_branch, str(code_worktree), "super")
+    git(memory_repo, "worktree", "add", "-b", memory_branch, str(memory_worktree), "super")
     parent = default_series_contract(
         ContractTask(
             name=task_name,
@@ -494,13 +610,13 @@ def _series_parent_fixture(
         ),
         code=RepoBranchPlan(
             repo_path=code_repo,
-            source_branch="main",
+            source_branch="super",
             work_branch=code_branch,
             base_commit=code_base,
         ),
         memory=RepoBranchPlan(
             repo_path=memory_repo,
-            source_branch="main",
+            source_branch="super",
             work_branch=memory_branch,
             base_commit=memory_base,
         ),
@@ -523,7 +639,11 @@ def committed_range_external_contract_fixture(root: Path):
     (raw.txt has no onboarding), and the working tree is clean.
     """
     code_repo = root / "repo-a"
-    code_base = init_repo(code_repo, "main")
+    init_repo(code_repo, "main")
+    install_fixture_profile(code_repo, "repo-a")
+    git(code_repo, "add", "-A")
+    git(code_repo, "commit", "-m", "Add repository certification profile")
+    code_base = git(code_repo, "rev-parse", "HEAD")
     memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
     memory_seed = init_repo(memory_repo, "main")
     write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_seed))
@@ -549,13 +669,13 @@ def committed_range_external_contract_fixture(root: Path):
         code=RepoBranchPlan(
             repo_path=code_master,
             source_branch=parent.code_work_branch,
-            work_branch="ar/committed-range-thing",
+            work_branch="ar/committed-range-thing-leaf",
             base_commit=code_base,
         ),
         memory=RepoBranchPlan(
             repo_path=memory_master,
             source_branch=parent.memory_work_branch,
-            work_branch="ar/committed-range-thing",
+            work_branch="ar/committed-range-thing-leaf",
             base_commit=memory_base,
         ),
     )
@@ -604,7 +724,11 @@ def closed_external_contract_fixture(
     root: Path, code_path: str = "feature.txt", code_content: str = "feature\n"
 ):
     code_repo = root / "repo-a"
-    code_base = init_repo(code_repo, "main")
+    init_repo(code_repo, "main")
+    install_fixture_profile(code_repo, "repo-a")
+    git(code_repo, "add", "-A")
+    git(code_repo, "commit", "-m", "Add repository certification profile")
+    code_base = git(code_repo, "rev-parse", "HEAD")
     memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
     memory_seed = init_repo(memory_repo, "main")
     write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_seed))
@@ -629,13 +753,13 @@ def closed_external_contract_fixture(
         code=RepoBranchPlan(
             repo_path=code_master,
             source_branch=parent.code_work_branch,
-            work_branch="ar/integrate-thing",
+            work_branch="ar/integrate-thing-leaf",
             base_commit=code_base,
         ),
         memory=RepoBranchPlan(
             repo_path=memory_master,
             source_branch=parent.memory_work_branch,
-            work_branch="ar/integrate-thing",
+            work_branch="ar/integrate-thing-leaf",
             base_commit=memory_base,
         ),
     )
@@ -683,12 +807,14 @@ def closed_external_contract_fixture(
 def closeout_args(contract, *, dry_run: bool = False) -> Namespace:
     return Namespace(
         contract_path=contract.contract_path,
+        certification_profile=Path("mcp/certification-profile-v1.json"),
         approved=not dry_run,
         approval_note="" if dry_run else "developer approved commit preview",
         code_commit_message="Add feature",
         memory_commit_message="Document feature",
         ledger_commit_message="Sync ledger",
         dry_run=dry_run,
+        operation_progress=None if dry_run else MutationEvidenceRecorder(),
     )
 
 
@@ -700,16 +826,6 @@ def integrate_args(contract, *, dry_run: bool = False) -> Namespace:
         ledger_commit_message="",
         dry_run=dry_run,
     )
-
-
-def integrated_external_contract_fixture(root: Path):
-    contract = dirty_open_external_contract_fixture(root)
-    with redirect_stdout(io.StringIO()):
-        assert worktree_manager.command_closeout(closeout_args(contract)) == 0
-    closed = load_contract(contract.contract_path)
-    with redirect_stdout(io.StringIO()):
-        assert worktree_manager.command_integrate(integrate_args(closed)) == 0
-    return load_contract(contract.contract_path)
 
 
 class WorktreeSupportTests(unittest.TestCase):

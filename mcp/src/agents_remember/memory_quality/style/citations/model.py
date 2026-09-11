@@ -68,8 +68,18 @@ def documents_in(onboarding_root: Path, only: str | None = None) -> list[Path]:
     nothing and then reports clean is the defect this master found six times over -- a gate
     reporting success over a scope nobody stated.
     """
+    root = onboarding_root.resolve()
     if only is None:
-        return sorted(path for path in onboarding_root.rglob("*.md") if path.is_file())
+        return [
+            _document_for(root, path.relative_to(root).as_posix())
+            for path in sorted(root.rglob("*.md"))
+            if path.is_file()
+        ]
+    return [_document_for(root, only)]
+
+
+def _document_for(root: Path, only: str) -> Path:
+    """Resolve one canonical current document for both full and selected walks."""
     relative = PurePosixPath(only)
     if (
         not only
@@ -79,22 +89,18 @@ def documents_in(onboarding_root: Path, only: str | None = None) -> list[Path]:
         or any(part in {"", ".", ".."} for part in only.split("/"))
     ):
         raise ValueError(
-            f"--document {only!r} must be one canonical relative .md path under {onboarding_root}"
+            f"--document {only!r} must be one canonical relative .md path under {root}"
         )
-    root = onboarding_root.resolve()
     lexical = root.joinpath(*relative.parts)
     try:
         selected = lexical.resolve(strict=True)
     except (OSError, RuntimeError, ValueError) as error:
-        raise ValueError(
-            f"--document {only!r} names no document under {onboarding_root}"
-        ) from error
+        raise ValueError(f"--document {only!r} names no document under {root}") from error
     if selected != lexical or root not in selected.parents or not selected.is_file():
         raise ValueError(
-            f"--document {only!r} must name one regular canonical document confined under "
-            f"{onboarding_root}"
+            f"--document {only!r} must name one regular canonical document confined under {root}"
         )
-    return [selected]
+    return selected
 
 
 def normalised(text: str) -> str:

@@ -32,6 +32,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
+from agents_remember.errors import SeatOccupancyError
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 
@@ -77,6 +78,12 @@ class SeatRow(Protocol):
     def spawned_by_lifecycle(self) -> str | None: ...
 
     @property
+    def structural_parent_task_document_ref(self) -> TaskDocumentRef | None: ...
+
+    @property
+    def structural_parent_role(self) -> str | None: ...
+
+    @property
     def spawn_role(self) -> str | None: ...
 
     @property
@@ -106,3 +113,58 @@ class SeatDirectory(Protocol):
     def get(self, session_id: str) -> SeatRow | None: ...
 
     def list(self) -> Sequence[SeatRow]: ...
+
+
+def _seat_claimants[SeatRowT: SeatRow](
+    rows: Sequence[SeatRowT],
+    *,
+    document: TaskDocumentRef,
+    role: str,
+    replacement: bool,
+) -> list[SeatRowT]:
+    return [
+        row
+        for row in rows
+        if row.status == "running"
+        and row.binding_role == role
+        and (
+            row.replacement_for_task_document_ref == document
+            if replacement
+            else row.task_document_ref == document
+        )
+    ]
+
+
+def _one_claimant[SeatRowT: SeatRow](
+    claimants: Sequence[SeatRowT],
+    *,
+    ambiguity: str,
+) -> SeatRowT | None:
+    if len(claimants) > 1:
+        raise SeatOccupancyError(ambiguity)
+    return claimants[0] if claimants else None
+
+
+def current_seat_occupant[SeatRowT: SeatRow](
+    rows: Sequence[SeatRowT],
+    *,
+    document: TaskDocumentRef,
+    role: str,
+) -> SeatRowT | None:
+    """Resolve one canonical seat occupant, preferring its incumbent over one staged heir.
+
+    ``replacement_for_task_document_ref`` is the same structural address in a staged state,
+    never a second namespace.  One incumbent and one staged heir may coexist while a handover is
+    prepared; only the incumbent is current until it leaves.  Multiple incumbents or multiple
+    heirs are corrupt/ambiguous and fail closed even when the other side would otherwise win.
+    """
+
+    primary = _one_claimant(
+        _seat_claimants(rows, document=document, role=role, replacement=False),
+        ambiguity=f"multiple running occupants claim {document.key} as {role}",
+    )
+    replacement = _one_claimant(
+        _seat_claimants(rows, document=document, role=role, replacement=True),
+        ambiguity=f"multiple running replacements claim {document.key} as {role}",
+    )
+    return primary if primary is not None else replacement

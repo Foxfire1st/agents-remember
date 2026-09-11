@@ -1,0 +1,307 @@
+"""Versioned contract-owned closeout-door source generations."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Literal, Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from agents_remember.models.closeout.source import (
+    CandidateAdmissionFacts,
+    SchedulingGradeInput,
+)
+from agents_remember.models.declared_caller import DeclaredCaller
+from agents_remember.models.lifecycles.evidence_dependencies import (
+    EVIDENCE_DEPENDENCY_VALIDATOR,
+    EvidenceDependencies,
+    EvidenceDependencyError,
+    build_evidence_dependencies,
+    canonical_sha256,
+    dependency,
+    require_evidence_dependencies,
+)
+from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.task_intent import TaskIntentIdentity, TaskIntentState
+
+CloseoutDoorDisposition = Literal["waiting", "deferred", "withdrawn", "claimed"]
+DoorPublicationState = Literal["intent", "proven"]
+DoorPriority = Literal["critical", "high", "normal", "low"]
+CloseoutDoorAction = Literal[
+    "status",
+    "declare",
+    "defer",
+    "resume",
+    "withdraw",
+    "update-provenance",
+]
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class DoorEvidenceFact(_StrictModel):
+    path: str = Field(min_length=1, max_length=8192)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class DoorProvenance(_StrictModel):
+    """One typed, content-bound provenance leg."""
+
+    state: Literal["proven", "not-applicable"]
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evidence: list[DoorEvidenceFact] = Field(default_factory=list, max_length=256)
+
+    @model_validator(mode="after")
+    def _not_applicable_has_no_evidence(self) -> DoorProvenance:
+        if self.state == "not-applicable" and self.evidence:
+            raise ValueError("not-applicable provenance cannot carry evidence")
+        return self
+
+
+class DoorAdmissionProvenance(_StrictModel):
+    resourceReady: bool = True
+    resourceReason: str = Field(default="", max_length=8192)
+    admissionReady: bool = True
+    admissionReason: str = Field(default="", max_length=8192)
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _false_facts_are_explained(self) -> Self:
+        self.resourceReason = self.resourceReason.strip()
+        self.admissionReason = self.admissionReason.strip()
+        if not self.resourceReady and not self.resourceReason:
+            raise ValueError("resourceReason is required when resourceReady is false")
+        if not self.admissionReady and not self.admissionReason:
+            raise ValueError("admissionReason is required when admissionReady is false")
+        return self
+
+
+class DoorSchedulingProvenance(_StrictModel):
+    priority: DoorPriority
+    judgmentId: str = Field(min_length=1, max_length=256)
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evidence: list[DoorEvidenceFact] = Field(default_factory=list, max_length=256)
+
+
+class CloseoutDoorGeneration(_StrictModel):
+    """One complete immutable identity whose disposition is the only mutable source cell."""
+
+    schemaVersion: Literal["ar-closeout-door/v1"] = "ar-closeout-door/v1"
+    generationId: str = Field(pattern=r"^[0-9a-f]{64}$")
+    predecessorGenerationId: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    disposition: CloseoutDoorDisposition
+    taskId: str = Field(min_length=1, max_length=4096)
+    taskName: str = Field(min_length=1, max_length=4096)
+    taskDocumentRef: TaskDocumentRef
+    owningMasterTaskDocumentRef: TaskDocumentRef
+    sprintTaskDocumentRef: TaskDocumentRef
+    contractPath: str = Field(min_length=1, max_length=8192)
+    candidateTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    memoryCandidateTree: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
+    codeBaseCommit: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    memoryBaseCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
+    ledgerMemoryCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
+    taskTopologyFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    taskIntent: TaskIntentState
+    reviewProvenance: DoorProvenance
+    memoryProvenance: DoorProvenance
+    ledgerProvenance: DoorProvenance
+    admissionProvenance: DoorAdmissionProvenance
+    schedulingProvenance: DoorSchedulingProvenance
+    dependencies: EvidenceDependencies | None = None
+    declaredBy: str = Field(min_length=1, max_length=8192)
+    declaredAt: str = Field(min_length=1, max_length=256)
+    operationKind: LifecycleOperationKind | None = None
+    operationFingerprint: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+    claimedOperationKey: str = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _decode_legacy_missing_intent(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "taskIntent" not in value:
+            return {**value, "taskIntent": {"state": "missing-intent"}}
+        return value
+
+    @model_validator(mode="after")
+    def _identity_is_coherent(self) -> CloseoutDoorGeneration:
+        claimed = self.disposition == "claimed"
+        operation_cells = (
+            self.operationKind is not None,
+            bool(self.operationFingerprint),
+            bool(self.claimedOperationKey),
+        )
+        if (claimed and not all(operation_cells)) or (not claimed and any(operation_cells)):
+            raise ValueError(
+                "claimed door requires one exact operation; source dispositions carry none"
+            )
+        if self.taskDocumentRef.repository != self.sprintTaskDocumentRef.repository or (
+            self.owningMasterTaskDocumentRef.repository != self.sprintTaskDocumentRef.repository
+        ):
+            raise ValueError("door task, master, and sprint references must share a repository")
+        return self
+
+
+@dataclass(frozen=True)
+class DoorDependencyInputs:
+    candidate_tree: str
+    memory_candidate_tree: str
+    task_topology_fingerprint: str
+    task_intent: TaskIntentState
+    review: DoorProvenance
+    memory: DoorProvenance
+    ledger: DoorProvenance
+    admission: DoorAdmissionProvenance
+    scheduling: DoorSchedulingProvenance
+    predecessor: str
+
+
+def closeout_door_dependencies(inputs: DoorDependencyInputs) -> EvidenceDependencies:
+    """Declare exactly the prerequisite records read by one source generation."""
+
+    if not isinstance(inputs.task_intent, TaskIntentIdentity):
+        raise ValueError("closeout door dependencies require digest-bearing task intent")
+    return build_evidence_dependencies(
+        "closeout-door/v1",
+        [
+            dependency("code-tree", "candidate", inputs.candidate_tree, algorithm="git-object"),
+            *(
+                [
+                    dependency(
+                        "memory-tree",
+                        "candidate",
+                        inputs.memory_candidate_tree,
+                        algorithm="git-object",
+                    )
+                ]
+                if inputs.memory_candidate_tree
+                else []
+            ),
+            dependency("semantic-topology", "leaf-placement", inputs.task_topology_fingerprint),
+            dependency("task-intent", "leaf", inputs.task_intent.digest),
+            dependency("review-record", "route-review", inputs.review.fingerprint),
+            dependency("coherence-record", "curator-coherence", inputs.memory.fingerprint),
+            dependency("ledger-provenance", "ledger", inputs.ledger.fingerprint),
+            dependency("admission", "candidate-admission", inputs.admission.fingerprint),
+            dependency("scheduling", "grade", inputs.scheduling.fingerprint),
+            dependency(
+                "validator",
+                EVIDENCE_DEPENDENCY_VALIDATOR,
+                canonical_sha256(EVIDENCE_DEPENDENCY_VALIDATOR),
+            ),
+            *(
+                [dependency("predecessor-record", "prior-door", inputs.predecessor)]
+                if inputs.predecessor
+                else []
+            ),
+        ],
+    )
+
+
+def require_closeout_door_dependencies(
+    generation: CloseoutDoorGeneration,
+) -> EvidenceDependencies:
+    """Require the declared dependency set to match every canonical source input."""
+
+    expected = closeout_door_dependencies(
+        DoorDependencyInputs(
+            candidate_tree=generation.candidateTree,
+            memory_candidate_tree=generation.memoryCandidateTree,
+            task_topology_fingerprint=generation.taskTopologyFingerprint,
+            task_intent=generation.taskIntent,
+            review=generation.reviewProvenance,
+            memory=generation.memoryProvenance,
+            ledger=generation.ledgerProvenance,
+            admission=generation.admissionProvenance,
+            scheduling=generation.schedulingProvenance,
+            predecessor=generation.predecessorGenerationId,
+        )
+    )
+    observed = require_evidence_dependencies(
+        generation.dependencies,
+        record_type="closeout-door/v1",
+    )
+    if observed != expected:
+        raise EvidenceDependencyError(
+            "closeout-door-dependencies-stale",
+            "closeout door direct dependencies do not match its canonical source inputs",
+        )
+    return observed
+
+
+# The contract-byte digests this model carried while the door lived in the worktree
+# contract. They have no meaning now (the door is journal-owned), so they are not fields
+# and nothing can write them again. Operation records already on disk still carry them.
+_RETIRED_DOOR_CONTRACT_DIGEST_FIELDS = (
+    "expectedBeforeContractSha256",
+    "expectedPublishedContractSha256",
+    "observedPublishedContractSha256",
+)
+
+
+class DoorPublicationEvidence(_StrictModel):
+    """Write-once intent/proof for one exact door generation.
+
+    The door lives in the operation journal alone: the worktree contract no longer
+    stores one, so there is no contract-byte pair to hash, compare or re-read. The
+    intent names the generation; proving it is the journal's own state transition.
+    """
+
+    state: DoorPublicationState
+    generation: CloseoutDoorGeneration
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_contract_digests(cls, value: Any) -> Any:
+        """Read a persisted door publication that predates the contract-byte cut.
+
+        The retired digests are dropped on the way in, exactly as the contract parser
+        ignores a retired ``closeout_door:`` block: the key is never read, and the next
+        rewrite heals it away. Only these three names are tolerated, so every other
+        unknown key stays a hard ``extra_forbidden`` refusal.
+        """
+
+        if not isinstance(value, dict):
+            return value
+        if not any(name in value for name in _RETIRED_DOOR_CONTRACT_DIGEST_FIELDS):
+            return value
+        return {
+            key: item
+            for key, item in value.items()
+            if key not in _RETIRED_DOOR_CONTRACT_DIGEST_FIELDS
+        }
+
+
+class CloseoutDoorRequest(_StrictModel):
+    """Contract-addressed source control, distinct from projection operations."""
+
+    action: CloseoutDoorAction
+    contract_path: str = Field(min_length=1, max_length=8192)
+    candidate_task_document_ref: TaskDocumentRef | None = None
+    expected_generation_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    grade: SchedulingGradeInput | None = None
+    admission: CandidateAdmissionFacts | None = None
+    caller: DeclaredCaller | None = None
+
+    @model_validator(mode="after")
+    def _payload_matches_action(self) -> CloseoutDoorRequest:
+        source_write = self.action in {"declare", "update-provenance"}
+        if source_write != (self.grade is not None and self.admission is not None):
+            raise ValueError(
+                "declare/update-provenance require grade and admission; other actions forbid them"
+            )
+        if not source_write and self.candidate_task_document_ref is not None:
+            raise ValueError("only source publication actions accept a candidate task assertion")
+        generation_required = self.action in {
+            "defer",
+            "resume",
+            "withdraw",
+            "update-provenance",
+        }
+        if generation_required != (self.expected_generation_id is not None):
+            raise ValueError(
+                "door transition/update actions require expected_generation_id; status/declare forbid it"
+            )
+        return self

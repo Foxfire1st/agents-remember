@@ -1,9 +1,9 @@
 # Onboarding-Coherency Template
 
-A durable report a fan-out sub-agent writes for the **adversarial reviewer's** third lens
-(onboarding-vs-code) and for the **orchestrator's** memory-quality checks. It is the paired
-`read_ar_files` + `memory_quality_check` + `drift_check` review made durable — the check that the
-memory repo stayed in lockstep with the code, since **orchestrator quality ∝ memory-repo quality**.
+A durable report a curator writes for the affected onboarding handoff and, when review is explicitly
+requested, the reviewer's onboarding-vs-code lens. It records c-05 sidecar/overview/index/entity
+changes and scoped checks for the affected paths. Full memory-quality or drift suites are separate
+developer-requested operations and are not routine closeout or integration gates.
 
 ## Rules
 
@@ -21,7 +21,7 @@ memory repo stayed in lockstep with the code, since **orchestrator quality ∝ m
 
 | Field     | Value                                   |
 | --------- | --------------------------------------- |
-| for       | reviewer (<seam>) | orchestrator         |
+| for       | curator handoff | reviewer (<seam>) | orchestrator         |
 | author    | <analysis role / bounded fan-out label> |
 | scope     | <change set reviewed>                    |
 | written   | <YYYY-MM-DDTHH:MM>                        |
@@ -34,15 +34,18 @@ memory repo stayed in lockstep with the code, since **orchestrator quality ∝ m
 | New source file | Sidecar created? | check_missing_onboarding clean? | Finding |
 | --------------- | ---------------- | ------------------------------- | ------- |
 
-## Drift & Quality
-- drift_check: clean | <N> actionable (list)
-- memory_quality_check: pass | <findings>
+## Scoped Checks
+- c-05 affected-onboarding check: pass | failed | blocked | not-run — <scope/command/result>
+- git diff --check: pass | failed | blocked | not-run — <command/result>
+- Other named scoped checks: pass | failed | blocked | not-run — <scope/command/result>
+- Full memory-quality/drift suite: not run unless explicitly requested — <request/result if any>
 - Ledger maps code HEAD: yes | <gap>
 
 ## Overviews
 - Route/repository overviews current for touched routes: yes | <which are stale>
 - Moved/added/deleted slices reflected in governing overviews: yes | <gap>
 
-## Bottom Line
-- Onboarding-vs-code coherent: yes | NO — <the specific gaps, as candidate fix leaves>
+## Handoff
+- Affected onboarding ready for closeout transaction: yes | NO — <specific gaps>
+- Failed/not-run checks reported without a full-green claim: yes | NO — <gap>
 ```

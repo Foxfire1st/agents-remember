@@ -127,6 +127,11 @@ def _post_address(
     )
     if message_kind == "dispatch-brief" or not has_owner or catalog is None:
         return address
+    # A structural caller already supplied the complete durable address.  Keep private occupant
+    # correlation in owner/delivery evidence; do not densify the envelope's destination with the
+    # current session id and recreate the dead-id replacement bug in a nominally canonical row.
+    if _is_canonical_structural_address(address):
+        return address
     if message_kind == "decision-item":
         return InboxAddress(
             task_document_ref=owner.task_document_ref,
@@ -141,6 +146,15 @@ def _post_address(
         lifecycle_id=owner.lifecycle_id,
         agent_id=owner.agent_id,
         recipient_role=owner.role,
+    )
+
+
+def _is_canonical_structural_address(address: InboxAddress) -> bool:
+    return (
+        address.task_document_ref is not None
+        and address.recipient_role is not None
+        and address.agent_id is None
+        and address.lifecycle_id is None
     )
 
 
@@ -221,6 +235,13 @@ def _persist_post(
     entry: OperatorInboxEntry,
     dispatch_target: TerminalCatalogEntry | None,
 ) -> None:
+    """Cross the durable commit point, then perform post-commit maintenance.
+
+    ``append`` is the commit boundary. Compaction and expectation publication happen afterward;
+    a structural dispatch caller must reconcile the exact appended row before compensating for an
+    exception from either later stage.
+    """
+
     store.append(entry)
     store.compact(now=datetime.now(UTC))
     if dispatch_target is not None and config is not None:

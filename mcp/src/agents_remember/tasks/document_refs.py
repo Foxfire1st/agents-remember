@@ -6,21 +6,33 @@ but it never decides who a seat's parent or child is.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks.document import TaskDocument
-from agents_remember.tasks.store import read_task_doc
+from agents_remember.tasks.document import (
+    LEAF_ROLES,
+    MASTER_ROLES,
+    REVIEWER_ALTITUDES,
+    SPRINT_ROLES,
+    LeafPlacement,
+    SprintExecutionGraph,
+    SprintExecutionNode,
+    TaskDocument,
+    derived_leaf_placement,
+)
+from agents_remember.tasks.store import (
+    TaskDocSourceSnapshot,
+    read_task_doc_with_source,
+)
 
 TaskAltitude = Literal["sprint", "master", "leaf"]
 
-SPRINT_ROLES = frozenset(
-    {"architect", "orchestrator", "strategist", "designer", "system-specialist"}
-)
-MASTER_ROLES = frozenset({"manager"})
-LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
+# SPRINT_ROLES / MASTER_ROLES / LEAF_ROLES keep their canonical home in
+# ``tasks.document`` (the SprintSeat schema validates against them); this module
+# re-exports them for the altitude checks below and existing importers.
 
 
 class TaskDocumentRefError(ValueError):
@@ -31,6 +43,26 @@ class TaskDocumentRefError(ValueError):
         super().__init__(detail)
 
 
+def refuse_segment_nodes_on_atomic_masters(
+    nodes: list[SprintExecutionNode],
+    nature_by_ref: Mapping[TaskDocumentRef, str | None],
+) -> None:
+    """Refuse segment nodes on atomic masters (atomic masters are lump-only).
+
+    Shared by ``TaskDocumentTopology.validate_execution_topology`` and the graph
+    authoring draft check so the node-kind rule has one home and one refusal
+    dialect.
+    """
+
+    for node in nodes:
+        if node.kind == "segment" and nature_by_ref.get(node.ref) == "atomic":
+            raise TaskDocumentRefError(
+                "task-execution-graph-node-kind-invalid",
+                f"atomic master {node.ref.key} admits lump nodes only; refused segment "
+                f"node with leafIds={node.leafIds!r}",
+            )
+
+
 @dataclass(frozen=True)
 class ResolvedTaskDocument:
     ref: TaskDocumentRef
@@ -38,26 +70,71 @@ class ResolvedTaskDocument:
     document: TaskDocument
 
 
+@dataclass(frozen=True)
+class MasterLeafPlacement:
+    """One commanded master's live leaf-to-segment placement report (L11-R2/R6).
+
+    Read paths surface ``placement.unknown_leaf_ids`` and
+    ``placement.unplaced_leaf_ids`` as facts; only the graph-authoring write path
+    refuses an incomplete partition.
+    """
+
+    master: ResolvedTaskDocument
+    placement: LeafPlacement
+
+
 class TaskDocumentTopology:
     """Read-only resolver for one coordination root's canonical task hierarchy."""
 
-    def __init__(self, coordination_root: Path) -> None:
+    def __init__(
+        self,
+        coordination_root: Path,
+        *,
+        accepted_sources: Sequence[TaskDocSourceSnapshot] = (),
+        source_observer: Callable[[TaskDocSourceSnapshot], None] | None = None,
+    ) -> None:
         self.coordination_root = coordination_root.resolve()
+        self._accepted_sources = {
+            source.json_path.resolve(strict=False): source for source in accepted_sources
+        }
+        self._source_observer = source_observer
 
-    def resolve(self, ref: TaskDocumentRef) -> ResolvedTaskDocument:
-        root = self._repo_root(ref.repository)
-        path = (root / ref.path).resolve(strict=False)
-        if not path.is_relative_to(root):
-            raise TaskDocumentRefError(
-                "task-document-outside-root",
-                f"task document {ref.path!r} escapes tasks/{ref.repository}",
-            )
-        if not path.is_file():
+    def resolve(
+        self,
+        ref: TaskDocumentRef,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> ResolvedTaskDocument:
+        if overrides is not None and (document := overrides.get(ref)) is not None:
+            root = self._repo_root(ref.repository)
+            path = (root / ref.path).resolve(strict=False)
+            if not path.is_relative_to(root):
+                raise TaskDocumentRefError(
+                    "task-document-outside-root",
+                    f"task document {ref.path!r} escapes tasks/{ref.repository}",
+                )
+            if document.repo != ref.repository:
+                raise TaskDocumentRefError(
+                    "task-document-repo-mismatch",
+                    f"task document {ref.key} declares repo {document.repo!r}",
+                )
+            return ResolvedTaskDocument(ref=ref, path=path, document=document)
+        path = self.path_for_ref(ref)
+        source = self._accepted_sources.get(path)
+        if (source is None and not path.is_file()) or (
+            source is not None and source.json_bytes is None
+        ):
             raise TaskDocumentRefError(
                 "task-document-not-found", f"task document does not exist: {path}"
             )
         try:
-            document = read_task_doc(path)
+            if source is None:
+                document, source = read_task_doc_with_source(path)
+                self._accepted_sources[path] = source
+                if self._source_observer is not None:
+                    self._source_observer(source)
+            else:
+                assert source.json_bytes is not None
+                document = TaskDocument.model_validate_json(source.json_bytes)
         except (OSError, ValueError) as exc:
             raise TaskDocumentRefError(
                 "task-document-invalid", f"cannot read task document {path}: {exc}"
@@ -68,6 +145,18 @@ class TaskDocumentTopology:
                 f"task document {path} declares repo {document.repo!r}, expected {ref.repository!r}",
             )
         return ResolvedTaskDocument(ref=ref, path=path, document=document)
+
+    def path_for_ref(self, ref: TaskDocumentRef) -> Path:
+        """Return the exact confined JSON path without requiring it to exist."""
+
+        root = self._repo_root(ref.repository)
+        path = (root / ref.path).resolve(strict=False)
+        if not path.is_relative_to(root):
+            raise TaskDocumentRefError(
+                "task-document-outside-root",
+                f"task document {ref.path!r} escapes tasks/{ref.repository}",
+            )
+        return path
 
     def canonical_ref(self, repository: str, path: str | Path) -> TaskDocumentRef:
         """Confine an absolute or repository-relative path and return its canonical reference."""
@@ -126,6 +215,11 @@ class TaskDocumentTopology:
             return "sprint"
         if len(parents) == 1:
             return "master"
+        if not parents and resolved.document.executionNature != "organizational":
+            # Explicit atomic or nature-less legacy master (L13-R5e): a standalone
+            # master resolves as a master without migration; only an explicit
+            # organizational standalone master stays a dead-end.
+            return "master"
         if not parents:
             raise TaskDocumentRefError(
                 "task-document-parent-missing",
@@ -141,7 +235,11 @@ class TaskDocumentTopology:
         if resolved.document.kind != "master":
             return self._leaf_parent(resolved).ref
         parents = self._sprint_parents(resolved)
-        if resolved.document.orchestrates and not parents:
+        if (
+            resolved.document.orchestrates or resolved.document.executionNature != "organizational"
+        ) and not parents:
+            # Standalone sprint, or a standalone master: an explicit atomic nature
+            # or the atomic-sequential default (L13-R5e) — either way no parent edge.
             return None
         if len(parents) == 1:
             return parents[0].ref
@@ -150,23 +248,26 @@ class TaskDocumentTopology:
 
     def validate_role(self, ref: TaskDocumentRef, role: str) -> TaskAltitude:
         expected = (
-            "sprint"
+            REVIEWER_ALTITUDES
+            if role == "reviewer"
+            else frozenset({"sprint"})
             if role in SPRINT_ROLES
-            else "master"
+            else frozenset({"master"})
             if role in MASTER_ROLES
-            else "leaf"
+            else frozenset({"leaf"})
             if role in LEAF_ROLES
-            else None
+            else frozenset()
         )
-        if expected is None:
+        if not expected:
             raise TaskDocumentRefError(
                 "seat-role-unsupported", f"role {role!r} has no structural task altitude"
             )
         actual = self.altitude(ref)
-        if actual != expected:
+        if actual not in expected:
+            expected_label = "/".join(sorted(expected))
             raise TaskDocumentRefError(
                 "seat-role-altitude-mismatch",
-                f"role {role!r} requires a {expected} document, got {actual}: {ref.key}",
+                f"role {role!r} requires a {expected_label} document, got {actual}: {ref.key}",
             )
         return actual
 
@@ -185,6 +286,224 @@ class TaskDocumentTopology:
                     children.append(self.canonical_ref(ref.repository, candidate))
             return tuple(dict.fromkeys(children))
         return tuple(parent.ref for parent in self._commanded_masters(resolved))
+
+    def commanded_masters(
+        self,
+        sprint: ResolvedTaskDocument,
+        *,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> tuple[ResolvedTaskDocument, ...]:
+        """The sprint's exact alias-commanded masters, honoring pending overrides.
+
+        Unlike ``children`` this never re-resolves the sprint from disk, so it works
+        for a candidate sprint document that has not been published yet.
+        """
+
+        return self._commanded_masters_exact(sprint, overrides or {})
+
+    def validate_execution_topology(
+        self,
+        sprint_ref: TaskDocumentRef,
+        *,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> tuple[ResolvedTaskDocument, ...]:
+        """Validate one sprint's exact commanded membership and execution contract.
+
+        Legacy documents remain parseable so graph authoring can inspect them. They
+        never acquire inferred meaning: the first topology consumer reports a
+        migration-required status until both the sprint graph and every commanded
+        master's execution nature exist (bootstrap: ``task_doc.author_execution_graph``).
+        """
+
+        candidates = overrides or {}
+        sprint = self.resolve(sprint_ref, candidates)
+        if sprint.document.kind != "master" or not sprint.document.orchestrates:
+            raise TaskDocumentRefError(
+                "task-execution-graph-sprint-required",
+                f"execution graph requires an orchestration sprint: {sprint_ref.key}",
+            )
+        graph = sprint.document.executionGraph
+        if graph is None:
+            raise TaskDocumentRefError(
+                "task-execution-topology-migration-required",
+                f"orchestration sprint {sprint_ref.key} has no executionGraph; "
+                "bootstrap one with task_doc.author_execution_graph",
+            )
+        commanded = self._commanded_masters_exact(sprint, candidates)
+        commanded_refs = {master.ref for master in commanded}
+        graph_refs = set(graph.master_refs())
+        if graph_refs != commanded_refs:
+            missing = sorted(ref.key for ref in commanded_refs - graph_refs)
+            extra = sorted(ref.key for ref in graph_refs - commanded_refs)
+            raise TaskDocumentRefError(
+                "task-execution-graph-membership-invalid",
+                f"executionGraph membership must exactly match orchestrates; "
+                f"missing={missing!r}, extra={extra!r}",
+            )
+        nature_by_ref: dict[TaskDocumentRef, str | None] = {}
+        for master in commanded:
+            if master.document.executionNature is None:
+                raise TaskDocumentRefError(
+                    "task-execution-topology-migration-required",
+                    f"commanded master {master.ref.key} has no executionNature; "
+                    "set one with task_doc.author_execution_graph (set_nature)",
+                )
+            nature_by_ref[master.ref] = master.document.executionNature
+        refuse_segment_nodes_on_atomic_masters(graph.nodes, nature_by_ref)
+        self.validate_sprint_linkage(sprint_ref, overrides=candidates)
+        return commanded
+
+    def validate_sprint_linkage(
+        self,
+        sprint_ref: TaskDocumentRef,
+        *,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> None:
+        """Hard-fail NEW-shape sprint↔master linkage drift (L14-R5).
+
+        Every subTasks row carrying a typed ``masterRef`` must resolve to exactly one
+        master document the sprint commands (orchestrates membership), no two rows may
+        type the same master, and the target may not itself orchestrate. Legacy rows
+        (seat-doc ``file``, no ``masterRef``) are not checked here — they are reported
+        as drift facts by ``linkage_report`` instead (L14-R7 backward tolerance).
+        """
+
+        candidates = overrides or {}
+        sprint = self.resolve(sprint_ref, candidates)
+        linked = [row for row in sprint.document.subTasks if row.masterRef is not None]
+        if not linked:
+            return
+        # The schema confines masterRef rows to orchestration sprints, so the document
+        # here always commands masters; only the typed rows themselves are checked.
+        commanded_refs = {
+            master.ref for master in self._commanded_masters_exact(sprint, candidates)
+        }
+        seen: set[TaskDocumentRef] = set()
+        for row in linked:
+            ref = cast(TaskDocumentRef, row.masterRef)
+            if ref.repository != sprint.ref.repository:
+                raise TaskDocumentRefError(
+                    "task-sprint-linkage-cross-repo",
+                    f"row {row.number!r} links outside the sprint repository: {ref.key}",
+                )
+            resolved = self.resolve(ref, candidates)
+            if resolved.document.kind != "master" or resolved.document.orchestrates:
+                raise TaskDocumentRefError(
+                    "task-sprint-linkage-target-not-a-master",
+                    f"row {row.number!r} masterRef must name a commanded master document, "
+                    f"got {ref.key}",
+                )
+            if ref in seen:
+                raise TaskDocumentRefError(
+                    "task-sprint-linkage-row-duplicate",
+                    f"multiple rows link the same master {ref.key}",
+                )
+            seen.add(ref)
+            if ref not in commanded_refs:
+                raise TaskDocumentRefError(
+                    "task-sprint-linkage-membership-invalid",
+                    f"row {row.number!r} links {ref.key}, which orchestrates does not command",
+                )
+
+    def execution_leaf_placement(
+        self,
+        sprint_ref: TaskDocumentRef,
+        *,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> tuple[MasterLeafPlacement, ...]:
+        """Return each commanded master's live leaf placement after topology validation.
+
+        The re-validation hook (L11-R6): computed against the master's *live* subTasks
+        rows, so a leaf set that changed after graph authoring shows up as unknown or
+        unplaced facts. Lump-only masters report an empty placement.
+        """
+
+        candidates = overrides or {}
+        masters = self.validate_execution_topology(sprint_ref, overrides=overrides)
+        sprint = self.resolve(sprint_ref, candidates)
+        graph = sprint.document.executionGraph
+        if graph is None:  # pragma: no cover - validate_execution_topology already refused
+            raise TaskDocumentRefError(
+                "task-execution-topology-migration-required",
+                f"orchestration sprint {sprint_ref.key} has no executionGraph",
+            )
+        completed = {master.ref for master in masters if master.document.status == "Completed"}
+        return tuple(
+            MasterLeafPlacement(
+                master=master,
+                placement=derived_leaf_placement(
+                    graph,
+                    master.ref,
+                    [row.number for row in master.document.subTasks],
+                    completed,
+                ),
+            )
+            for master in masters
+        )
+
+    def execution_waves(self, sprint_ref: TaskDocumentRef) -> list[list[SprintExecutionNode]]:
+        """Return the graph-derived waves after exact cross-document validation."""
+
+        sprint = self.resolve(sprint_ref)
+        self.validate_execution_topology(sprint_ref, overrides={sprint_ref: sprint.document})
+        graph = cast(SprintExecutionGraph, sprint.document.executionGraph)
+        return graph.derived_waves()
+
+    def execution_sprints_affected_by_master(
+        self,
+        master_ref: TaskDocumentRef,
+        *,
+        original: TaskDocument | None,
+        candidate: TaskDocument,
+    ) -> tuple[ResolvedTaskDocument, ...]:
+        """Return every sprint whose alias-based command may change under a master edit."""
+
+        aliases = {Path(master_ref.path).parent.name, candidate.id, candidate.title}
+        if original is not None:
+            aliases.update({original.id, original.title})
+        return tuple(
+            sprint
+            for sprint in repository_master_documents(self, master_ref.repository)
+            if sprint.ref != master_ref
+            and sprint.document.orchestrates
+            and aliases.intersection(sprint.document.orchestrates)
+        )
+
+    def projection_sprints_affected_by_master(
+        self,
+        master_ref: TaskDocumentRef,
+        *,
+        original: TaskDocument | None,
+        candidate: TaskDocument,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> tuple[ResolvedTaskDocument, ...]:
+        """Return readable projection consumers without promoting unrelated parse failures.
+
+        Projection refresh is derived after authoritative task publication.  One malformed
+        unrelated task document has no authority to veto that write; its own projection reader
+        remains fail-closed when addressed.  Strict execution-topology callers continue to use
+        :meth:`execution_sprints_affected_by_master`.
+        """
+
+        aliases = {Path(master_ref.path).parent.name, candidate.id, candidate.title}
+        if original is not None:
+            aliases.update({original.id, original.title})
+        candidates = overrides or {}
+        sprints: list[ResolvedTaskDocument] = []
+        for ref in self._master_document_refs(master_ref.repository, overrides=candidates):
+            if ref == master_ref:
+                continue
+            try:
+                sprint = self.resolve(ref, candidates)
+            except TaskDocumentRefError:
+                continue
+            if (
+                sprint.document.kind == "master"
+                and sprint.document.orchestrates
+                and aliases.intersection(sprint.document.orchestrates)
+            ):
+                sprints.append(sprint)
+        return tuple(sprints)
 
     def _repo_root(self, repository: str) -> Path:
         return (self.coordination_root / "tasks" / repository).resolve(strict=False)
@@ -210,21 +529,31 @@ class TaskDocumentTopology:
             )
         return parent
 
-    def _master_documents(self, repository: str) -> tuple[ResolvedTaskDocument, ...]:
+    def _master_document_refs(
+        self,
+        repository: str,
+        *,
+        overrides: Mapping[TaskDocumentRef, TaskDocument] | None = None,
+    ) -> tuple[TaskDocumentRef, ...]:
         root = self._repo_root(repository)
-        if not root.is_dir():
-            return ()
-        documents: list[ResolvedTaskDocument] = []
-        for path in sorted(root.rglob("task.json")):
-            relative = path.relative_to(root)
-            if "0_archive" in relative.parts or "enclosures" in relative.parts:
-                continue
-            resolved = self.resolve(
-                TaskDocumentRef(repository=repository, path=relative.as_posix())
-            )
-            if resolved.document.kind == "master":
-                documents.append(resolved)
-        return tuple(documents)
+        refs: set[TaskDocumentRef] = set()
+        if root.is_dir():
+            for path in sorted(root.rglob("task.json")):
+                relative = path.relative_to(root)
+                if "0_archive" in relative.parts or "enclosures" in relative.parts:
+                    continue
+                refs.add(TaskDocumentRef(repository=repository, path=relative.as_posix()))
+        for ref in overrides or {}:
+            parts = Path(ref.path).parts
+            if (
+                ref.repository == repository
+                and parts
+                and parts[-1] == "task.json"
+                and "0_archive" not in parts
+                and "enclosures" not in parts
+            ):
+                refs.add(ref)
+        return tuple(sorted(refs, key=lambda ref: ref.key))
 
     def _sprint_parents(self, master: ResolvedTaskDocument) -> tuple[ResolvedTaskDocument, ...]:
         names = {
@@ -234,7 +563,7 @@ class TaskDocumentTopology:
         }
         return tuple(
             candidate
-            for candidate in self._master_documents(master.ref.repository)
+            for candidate in repository_master_documents(self, master.ref.repository)
             if candidate.ref != master.ref
             and candidate.document.orchestrates
             and any(name in names for name in candidate.document.orchestrates)
@@ -243,10 +572,81 @@ class TaskDocumentTopology:
     def _commanded_masters(self, sprint: ResolvedTaskDocument) -> tuple[ResolvedTaskDocument, ...]:
         commanded = set(sprint.document.orchestrates)
         matches: list[ResolvedTaskDocument] = []
-        for candidate in self._master_documents(sprint.ref.repository):
+        for candidate in repository_master_documents(self, sprint.ref.repository):
             if candidate.ref == sprint.ref:
                 continue
             names = {candidate.path.parent.name, candidate.document.id, candidate.document.title}
             if commanded.intersection(names):
                 matches.append(candidate)
         return tuple(matches)
+
+    def _commanded_masters_exact(
+        self,
+        sprint: ResolvedTaskDocument,
+        overrides: Mapping[TaskDocumentRef, TaskDocument],
+    ) -> tuple[ResolvedTaskDocument, ...]:
+        commanded = set(sprint.document.orchestrates)
+        available: dict[TaskDocumentRef, ResolvedTaskDocument] = {}
+        for ref in self._master_document_refs(
+            sprint.ref.repository,
+            overrides=overrides,
+        ):
+            if ref == sprint.ref:
+                continue
+            try:
+                candidate = self.resolve(ref, overrides)
+            except TaskDocumentRefError:
+                # Exact sprint membership is addressed by the declared directory alias, id, or
+                # title.  An unreadable document at a different canonical directory address owns
+                # none of those readable facts and cannot veto this sprint.  A directly addressed
+                # directory remains fail-closed.  This is one scoped resolver policy, not a second
+                # reader or a compatibility fallback.
+                if Path(ref.path).parent.name in commanded:
+                    raise
+                continue
+            if candidate.document.kind == "master":
+                available[ref] = candidate
+        resolved: list[ResolvedTaskDocument] = []
+        for commanded_name in sprint.document.orchestrates:
+            matches = [
+                candidate
+                for candidate in available.values()
+                if commanded_name
+                in {
+                    candidate.path.parent.name,
+                    candidate.document.id,
+                    candidate.document.title,
+                }
+            ]
+            if len(matches) != 1:
+                raise TaskDocumentRefError(
+                    "task-execution-graph-membership-invalid",
+                    f"orchestrates entry {commanded_name!r} resolves to {len(matches)} masters",
+                )
+            resolved.append(matches[0])
+        refs = [master.ref for master in resolved]
+        if len(refs) != len(set(refs)):
+            raise TaskDocumentRefError(
+                "task-execution-graph-membership-invalid",
+                "orchestrates contains multiple aliases for the same commanded master",
+            )
+        return tuple(resolved)
+
+
+def repository_master_documents(
+    topology: TaskDocumentTopology,
+    repository: str,
+) -> tuple[ResolvedTaskDocument, ...]:
+    """Return every canonical master document in one repository task tree.
+
+    Branch authority is repository-global: a leaf under one sprint must not claim another
+    sprint's super or atomic integration ref. Repository census is a module-level query over
+    topology primitives rather than another responsibility on the topology object itself.
+    """
+
+    documents: list[ResolvedTaskDocument] = []
+    for ref in topology._master_document_refs(repository):
+        resolved = topology.resolve(ref)
+        if resolved.document.kind == "master":
+            documents.append(resolved)
+    return tuple(documents)

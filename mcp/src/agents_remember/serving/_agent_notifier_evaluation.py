@@ -12,6 +12,7 @@ from agents_remember.controlplane.signal_routing import (
     is_seat_dead,
     task_chain_has_progress,
 )
+from agents_remember.errors import SeatOccupancyError, StructuralRoutingError
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.agent_notifier_models import AgentNotifierContext, AgentNotifierFinding
 from agents_remember.serving.agent_notifier_models import SweepState as _SweepState
@@ -149,7 +150,11 @@ def evaluate_rebind_findings(
             continue
         if not is_seat_dead(catalog, row.agentId):
             continue
-        owner = derive_row_owner(catalog, topology, row)
+        try:
+            owner = derive_row_owner(catalog, topology, row)
+        except StructuralRoutingError:
+            # One ambiguous replacement chain fences only this row from rebind evaluation.
+            continue
         if owner.agent_id is not None and owner.agent_id != row.agentId:
             findings.append(
                 AgentNotifierFinding(
@@ -270,6 +275,28 @@ def _stale_turn_state_due(  # pragma: no cover
     )
 
 
+def _safe_stale_turn_state_due(
+    catalog: TerminalCatalogPort,
+    topology: TaskHierarchy,
+    entry: TerminalCatalogEntry,
+    *,
+    now: datetime,
+    stale_seconds: float,
+) -> bool:
+    """Fence one structurally invalid seat without aborting the liveness scan."""
+
+    try:
+        return _stale_turn_state_due(
+            catalog,
+            topology,
+            entry,
+            now=now,
+            stale_seconds=stale_seconds,
+        )
+    except (SeatOccupancyError, StructuralRoutingError):
+        return False
+
+
 def evaluate_seat_liveness_findings(
     catalog: TerminalCatalogPort,
     topology: TaskHierarchy,
@@ -290,7 +317,7 @@ def evaluate_seat_liveness_findings(
         if entry.kind != "harness" or entry.status != "running":
             continue
         if entry.turn_state is not None and entry.turn_state_changed_at is not None:
-            if not _stale_turn_state_due(
+            if not _safe_stale_turn_state_due(
                 catalog, topology, entry, now=now, stale_seconds=stale_seconds
             ):
                 continue
@@ -326,12 +353,16 @@ def evaluate_dead_upstream_findings(
             continue
         if entry.binding_role not in ("worker", "reviewer", "curator", "manager"):
             continue
-        owner = derive_signal_owner(
-            catalog,
-            topology,
-            sender_agent_id=entry.id,
-            message_kind="state-signal",
-        )
+        try:
+            owner = derive_signal_owner(
+                catalog,
+                topology,
+                sender_agent_id=entry.id,
+                message_kind="state-signal",
+            )
+        except StructuralRoutingError:
+            # A corrupt upstream seat must not suppress unrelated findings or the heartbeat.
+            continue
         if owner.task_document_ref is None or owner.agent_id is not None:
             continue
         findings.append(
@@ -372,9 +403,7 @@ def evaluate_predicates(  # pragma: no cover
         budgeted = [
             entry
             for entry in sweep.redeliverable_entries
-            if not _inactivity_signal_chain_progressed(ctx.catalog, topology, entry)
-            and not state_signal_held_on_boundary(ctx.catalog, entry)
-            and not _row_target_dead(ctx.catalog, entry)
+            if _redelivery_route_is_actionable(ctx.catalog, topology, entry)
         ][: sweep.redeliver_budget]
         findings += [
             AgentNotifierFinding(
@@ -402,3 +431,20 @@ def evaluate_predicates(  # pragma: no cover
         limit=max(1, ctx.redeliver_budget),
     )
     return findings
+
+
+def _redelivery_route_is_actionable(
+    catalog: TerminalCatalogPort,
+    topology: TaskHierarchy,
+    entry: OperatorInboxEntry,
+) -> bool:
+    """Return false when only this row's structural route cannot be proven."""
+
+    try:
+        return (
+            not _inactivity_signal_chain_progressed(catalog, topology, entry)
+            and not state_signal_held_on_boundary(catalog, entry)
+            and not _row_target_dead(catalog, entry)
+        )
+    except (SeatOccupancyError, StructuralRoutingError):
+        return False

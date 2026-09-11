@@ -25,8 +25,8 @@ from agents_remember.models.terminal_catalog import (
 )
 from agents_remember.serving.harness_control_client import read_control_snapshot
 from agents_remember.serving.hosted_control_projection import (
-    mark_legacy_control_unsupported,
-    project_control_snapshot,
+    control_snapshot_entry,
+    legacy_control_unsupported_entry,
     snapshot_turn_state,
 )
 from agents_remember.serving.ports import TerminalCatalogPort
@@ -134,6 +134,14 @@ class _PendingInteractionSync:
 Clock = Callable[[], datetime]
 
 
+@dataclass(frozen=True)
+class TerminalLivenessActions:
+    on_turn_state_change: Callable[[TerminalLivenessObservation], None] | None = None
+    register_execution_evidence: (
+        Callable[[tuple[TerminalCatalogEntry, ...]], frozenset[str]] | None
+    ) = None
+
+
 def utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -148,13 +156,17 @@ class TerminalCatalogLivenessSweeper:
         *,
         now: Clock | None = None,
         probe: LivenessProbe = DEFAULT_LIVENESS_PROBE,
-        on_turn_state_change: Callable[[TerminalLivenessObservation], None] | None = None,
+        actions: TerminalLivenessActions | None = None,
     ) -> None:
+        actions = actions or TerminalLivenessActions()
         self._catalog = catalog
         self._host = host
         self._now = now or utc_now
         self._probe = probe
-        self._on_turn_state_change = on_turn_state_change
+        self._on_turn_state_change = actions.on_turn_state_change
+        # No registrar authorizes no reclamation of task-bound leaf seats. That is a
+        # fail-closed dependency-injection state, never a second evidence reader.
+        self._register_execution_evidence = actions.register_execution_evidence
         self._lock = threading.Lock()
         self._last_sweep_at: datetime | None = None
         self._last_starting_sweep_at: datetime | None = None
@@ -164,16 +176,16 @@ class TerminalCatalogLivenessSweeper:
         if self._rate_limited(moment):
             return self._refresh_starting_rows(moment)
         if not self._lock.acquire(blocking=False):
-            return self._catalog.list()
+            return self._catalog.list_committed()
         try:
             moment = self._now()
             if self._rate_limited(moment):
                 return self._catalog.list()
             self._last_sweep_at = moment
-            # One disk read + one disk write for the whole sweep. The
-            # per-entry probes' read-modify-writes and the terminated-row reclamation all hit the batch's
-            # in-memory buffer; the single atomic commit lands on ``batch()`` exit. Without this each of
-            # the n probes re-read and rewrote the full catalog file -- O(n^2) disk work per sweep.
+            # One batch owns the liveness observations. Reclamation happens only after that lock
+            # is released, because durable task registration takes the task CAS and no process may
+            # nest that beneath the catalog lock. Without the batch the n probes would still
+            # re-read and rewrite the full catalog file -- O(n^2) disk work per sweep.
             # The hosted-interaction synchronizer is NOT run inside the batch: its inbox/gate locks
             # must never be taken under the catalog lock, so its evidence is
             # collected here and drained by ``_run_deferred_interaction_syncs`` after the commit.
@@ -185,7 +197,20 @@ class TerminalCatalogLivenessSweeper:
                     )
                     for entry in self._catalog.list()
                 ]
-                self._catalog.compact(now=moment)
+            terminal_rows = tuple(
+                entry
+                for entry in self._catalog.list(include_terminated=True)
+                if entry.status == "terminated"
+            )
+            registered_execution_ids = (
+                self._register_execution_evidence(terminal_rows)
+                if self._register_execution_evidence is not None
+                else frozenset()
+            )
+            self._catalog.compact(
+                now=moment,
+                registered_execution_ids=registered_execution_ids,
+            )
             self._run_deferred_interaction_syncs(pending_syncs)
             if self._on_turn_state_change is not None:
                 for observation in observations:
@@ -208,24 +233,22 @@ class TerminalCatalogLivenessSweeper:
         path runs the same observe_terminal_liveness, so with_liveness_failure's minimum window
         still gates exit marking.
         """
-        if self._starting_rate_limited(moment):
-            return self._catalog.list()
-        entries = self._catalog.list()
-        starting = [
-            entry
-            for entry in entries
-            if entry.kind == "harness"
-            and entry.status == "running"
-            and entry.control_state == "starting"
-        ][:4]  # cap the fast-path batch so a starting-row burst stays bounded
-        if not starting:
-            return entries
         if not self._lock.acquire(blocking=False):
-            return entries
+            return self._catalog.list_committed()
         try:
             moment = self._now()
             if self._starting_rate_limited(moment):
                 return self._catalog.list()
+            entries = self._catalog.list()
+            starting = [
+                entry
+                for entry in entries
+                if entry.kind == "harness"
+                and entry.status == "running"
+                and entry.control_state == "starting"
+            ][:4]  # cap the fast-path batch so a starting-row burst stays bounded
+            if not starting:
+                return entries
             self._last_starting_sweep_at = moment
             pending_syncs: list[_PendingInteractionSync] = []
             with self._catalog.batch():
@@ -358,7 +381,7 @@ def _observe_alive(
     pane_text = capture(entry.tmux_name)
     pane_diagnostic = classify_turn_state(pane_text, harness=entry.harness)
     if entry.control_endpoint is None:
-        projected = mark_legacy_control_unsupported(catalog, entry)
+        projected = legacy_control_unsupported_entry(entry)
         projected = replace(
             projected,
             control_raw={
@@ -382,7 +405,7 @@ def _observe_alive(
     # terminal cursors advance only on a successful read, so a failed read leaves the
     # row at the pre-window position and the next sweep re-reads the same evidence.
     terminal_read = _terminal_evidence(probe, entry)
-    projected = project_control_snapshot(catalog, entry, snapshot)
+    projected = control_snapshot_entry(entry, snapshot)
     projected = replace(
         projected,
         control_raw={**(projected.control_raw or {}), "paneDiagnostic": pane_diagnostic.state},

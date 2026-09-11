@@ -16,7 +16,6 @@ from agents_remember.kernel.onboarding_doc import (
     new_history_lines,
     normalize_route,
     onboarding_metadata_row,
-    route_contains_changed_path,
     table_metadata,
 )
 from agents_remember.kernel.route_index import build_route_indexes
@@ -38,6 +37,11 @@ from agents_remember.worktrees.modules.models import (
     RouteOverviewRefreshPlan,
     SidecarBodyClassification,
     VerifiedChange,
+)
+from agents_remember.worktrees.modules.onboarding_acceptance import (
+    OnboardingBodyGateEvidence,
+    apply_route_no_impact,
+    apply_sidecar_no_impact,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -129,13 +133,14 @@ def route_overview_metadata_refresh_plan_for_context(
     memory_tree: Path | None = None,
     memory_verified_commit: str = "",
 ) -> RouteOverviewRefreshPlan:
-    """Plan verification stamps for source-matched and task-edited route overviews.
+    """Plan verification stamps for nearest governing and task-edited overviews.
 
     A curator can repair a route whose source drift predates the leaf's current code
     range (for example after a source-branch sync).  Such an overview is still part of
     this closeout transaction even though none of ``changed_paths`` falls below its
     route.  Include every route overview changed since the task's verified memory
     baseline so the body gate can validate it and closeout can stamp it atomically.
+    Untouched ancestors outside that closed set must not receive verification stamps.
     """
     required: list[dict[str, str]] = []
     missing_metadata: list[str] = []
@@ -143,6 +148,7 @@ def route_overview_metadata_refresh_plan_for_context(
     changed_memory = (
         _changed_memory_paths(tree, memory_verified_commit) if tree is not None else set()
     )
+    overviews = []
     for overview_path in sorted(context.onboarding_root.rglob("overview.md")):
         if not filesystem.is_file(overview_path):
             continue
@@ -150,6 +156,14 @@ def route_overview_metadata_refresh_plan_for_context(
         if metadata.get("doc_type", "").strip("`") not in ROUTE_OVERVIEW_DOC_TYPES:
             continue
         source_route = normalize_route(metadata.get("sourceRoute", "."))
+        overviews.append((overview_path, metadata, source_route))
+    routes = [source_route for _, _, source_route in overviews]
+    governing_routes = {
+        route
+        for path in changed_paths
+        if (route := _nearest_governing_route(path, routes)) is not None
+    }
+    for overview_path, metadata, source_route in overviews:
         changed_in_memory = False
         if tree is not None:
             try:
@@ -158,7 +172,7 @@ def route_overview_metadata_refresh_plan_for_context(
                 )
             except ValueError:
                 changed_in_memory = False
-        if not route_contains_changed_path(source_route, changed_paths) and not changed_in_memory:
+        if source_route not in governing_routes and not changed_in_memory:
             continue
         rel_path = overview_path.relative_to(context.onboarding_root).as_posix()
         if "lastVerifiedCommitHash" not in metadata or "lastVerifiedCommitDate" not in metadata:
@@ -378,8 +392,7 @@ def require_updated_route_overview_content(
     plan: RouteOverviewRefreshPlan,
     changed_paths: list[str],
     *,
-    memory_tree: Path | None = None,
-    memory_verified_commit: str = "",
+    body_gate: OnboardingBodyGateEvidence | None = None,
 ) -> list[str]:
     """Fail closeout when a domain-evident route overview lacks an honest update.
 
@@ -387,17 +400,18 @@ def require_updated_route_overview_content(
     door for that change: stamping its verification header over an untouched
     body silently presents stale route documentation as current. The overview
     must therefore pair a meaningful body change with a new Update History
-    entry, or carry an explicit ``No route impact:`` history entry recording
-    that the route was reviewed and intentionally left unchanged. Returns the
-    marker-attested routes so closeout payloads can surface them.
+    entry, or have an exact candidate-bound no-route-impact decision. Returns
+    the accepted routes so closeout payloads can surface them.
     """
+    evidence = body_gate or OnboardingBodyGateEvidence()
     classification = classify_route_overview_updates(
         context,
         plan,
         changed_paths,
-        memory_tree=memory_tree,
-        memory_verified_commit=memory_verified_commit,
+        memory_tree=evidence.memory_tree,
+        memory_verified_commit=evidence.memory_verified_commit,
     )
+    classification = apply_route_no_impact(classification, evidence.accepted_no_impact)
     stale = classification["stale"]
     untraced = classification["untraced"]
     if stale or untraced:
@@ -417,10 +431,9 @@ def require_updated_route_overview_content(
             "whose governed sources changed; "
             + "; ".join(details)
             + ". Update each overview body through the c-05-create-or-update-onboarding-files "
-            "skill and record the change in its Update History, or record an explicit "
-            "'No route impact: <reason>' Update History entry when the route was reviewed "
-            "and is unaffected. Advancing lastVerifiedCommitHash on stale content is a "
-            "prohibited metadata-only refresh."
+            "skill and record the change in its Update History, or publish an exact "
+            "candidate-bound no-route-impact judgment through curator_coherence. Advancing "
+            "lastVerifiedCommitHash on stale content is a prohibited metadata-only refresh."
         )
     return classification["attested_no_impact"]
 
@@ -431,6 +444,7 @@ def validate_route_overview_refresh_plan_for_context(
     *,
     memory_tree: Path | None = None,
     memory_verified_commit: str = "",
+    accepted_no_impact: frozenset[str] = frozenset(),
 ) -> RouteOverviewRefreshPlan:
     plan = route_overview_metadata_refresh_plan_for_context(
         context,
@@ -449,8 +463,11 @@ def validate_route_overview_refresh_plan_for_context(
         context,
         plan,
         changed_paths,
-        memory_tree=memory_tree,
-        memory_verified_commit=memory_verified_commit,
+        body_gate=OnboardingBodyGateEvidence(
+            memory_tree=memory_tree,
+            memory_verified_commit=memory_verified_commit,
+            accepted_no_impact=accepted_no_impact,
+        ),
     )
     return plan
 
@@ -461,10 +478,14 @@ def refresh_route_overview_metadata_for_context(
     *,
     memory_tree: Path | None = None,
     memory_verified_commit: str = "",
+    accepted_no_impact: frozenset[str] = frozenset(),
 ) -> list[dict[str, str]]:
     verified_commit = change.commit
     verified_date = change.commit_date
-    plan = validate_route_overview_refresh_plan_for_context(
+    # Closeout owns a mechanical metadata commit.  Body review and curator
+    # judgments remain explicit operations outside this Git transaction.
+    _ = accepted_no_impact
+    plan = route_overview_metadata_refresh_plan_for_context(
         context,
         change.changed_paths,
         memory_tree=memory_tree,
@@ -682,13 +703,17 @@ def route_overview_metadata_refresh_plan(
 
 
 def validate_route_overview_refresh_plan(
-    contract: WorktreeContract, changed_paths: list[str]
+    contract: WorktreeContract,
+    changed_paths: list[str],
+    *,
+    accepted_no_impact: frozenset[str] = frozenset(),
 ) -> RouteOverviewRefreshPlan:
     return validate_route_overview_refresh_plan_for_context(
         contract_context(contract),
         changed_paths,
         memory_tree=contract.memory_worktree,
         memory_verified_commit=contract_memory_verified_commit(contract),
+        accepted_no_impact=accepted_no_impact,
     )
 
 
@@ -755,6 +780,7 @@ def require_updated_sidecar_content(
     *,
     memory_tree: Path | None = None,
     memory_verified_commit: str = "",
+    accepted_no_impact: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Fail closeout when a changed source file's sidecar lacks an honest update.
 
@@ -762,16 +788,15 @@ def require_updated_sidecar_content(
     unchanged sidecar body silently defeats the commit-hash-based drift check,
     and a body edit without a new Update History entry loses traceability. A
     changed source file's sidecar must therefore pair a meaningful body change
-    with a new history entry; a history-only edit passes only when the new
-    entry carries the explicit ``No content impact:`` marker. Returns the
-    marker-attested source paths so closeout payloads can surface them. The
-    check is a no-op when no sidecar onboarding is required for the changed
-    files.
+    with a new history entry or have an exact candidate-bound no-content-impact
+    decision. Returns accepted source paths so closeout payloads can surface
+    them. The check is a no-op when no sidecar onboarding is required.
     """
 
     classification = classify_sidecar_updates(
         context, plan, memory_tree=memory_tree, memory_verified_commit=memory_verified_commit
     )
+    classification = apply_sidecar_no_impact(classification, accepted_no_impact)
     stale = classification["stale"]
     untraced = classification["untraced"]
     if stale or untraced:
@@ -791,10 +816,9 @@ def require_updated_sidecar_content(
             "files, not only refreshed verification metadata; "
             + "; ".join(details)
             + ". Update each sidecar body through the c-05-create-or-update-onboarding-files "
-            "skill and record the change in its Update History, or record an explicit "
-            "'No content impact: <reason>' Update History entry when the body is verified "
-            "current. Advancing lastVerifiedCommitHash on stale content is a prohibited "
-            "metadata-only refresh."
+            "skill and record the change in its Update History, or publish an exact "
+            "candidate-bound no-content-impact judgment through curator_coherence. Advancing "
+            "lastVerifiedCommitHash on stale content is a prohibited metadata-only refresh."
         )
     return classification["attested_no_impact"]
 
@@ -804,9 +828,9 @@ def validate_onboarding_refresh_plan_for_context(
     changed_paths: list[str],
     *,
     working_paths: list[str] | None = None,
-    memory_tree: Path | None = None,
-    memory_verified_commit: str = "",
+    body_gate: OnboardingBodyGateEvidence | None = None,
 ) -> OnboardingRefreshPlan:
+    evidence = body_gate or OnboardingBodyGateEvidence()
     plan = onboarding_refresh_plan_for_context(context, changed_paths, working_paths=working_paths)
     missing = plan["missing"]
     unsupported = plan["unsupported"]
@@ -822,7 +846,11 @@ def validate_onboarding_refresh_plan_for_context(
             + ". Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
         )
     require_updated_sidecar_content(
-        context, plan, memory_tree=memory_tree, memory_verified_commit=memory_verified_commit
+        context,
+        plan,
+        memory_tree=evidence.memory_tree,
+        memory_verified_commit=evidence.memory_verified_commit,
+        accepted_no_impact=evidence.accepted_no_impact,
     )
     for item in plan["required"]:
         onboarding_path = Path(item["onboarding_file"])
@@ -836,18 +864,100 @@ def validate_onboarding_refresh_plan_for_context(
     return plan
 
 
+def validate_memory_refresh_attestations(
+    context,
+    changed_paths: list[str],
+    *,
+    working_paths: list[str] | None = None,
+    body_gate: OnboardingBodyGateEvidence | None = None,
+    route_body_gate: OnboardingBodyGateEvidence | None = None,
+) -> dict[str, list[str]]:
+    """Run the shared sidecar and route-body gates for one exact candidate.
+
+    Curator preparation and closeout must apply the same current-memory checks.  Keep
+    this as composition of the existing validators so neither caller can accidentally
+    publish a green result from only one of the two refresh surfaces.
+    """
+    sidecar_evidence = body_gate or OnboardingBodyGateEvidence()
+    route_evidence = route_body_gate or sidecar_evidence
+    errors: list[str] = []
+    sidecar_plan: OnboardingRefreshPlan | None = None
+    sidecar_gate: SidecarBodyClassification = {
+        "stale": [],
+        "untraced": [],
+        "attested_no_impact": [],
+    }
+    try:
+        sidecar_plan = validate_onboarding_refresh_plan_for_context(
+            context,
+            changed_paths,
+            working_paths=working_paths,
+            body_gate=sidecar_evidence,
+        )
+        sidecar_gate = apply_sidecar_no_impact(
+            classify_sidecar_updates(
+                context,
+                sidecar_plan,
+                memory_tree=sidecar_evidence.memory_tree,
+                memory_verified_commit=sidecar_evidence.memory_verified_commit,
+            ),
+            sidecar_evidence.accepted_no_impact,
+        )
+    except RuntimeError as error:
+        errors.append(f"sidecar onboarding: {error}")
+
+    overview_gate: RouteOverviewBodyClassification = {
+        "stale": [],
+        "untraced": [],
+        "attested_no_impact": [],
+        "stamped_without_body_review": [],
+    }
+    try:
+        overview_plan = validate_route_overview_refresh_plan_for_context(
+            context,
+            changed_paths,
+            memory_tree=route_evidence.memory_tree,
+            memory_verified_commit=route_evidence.memory_verified_commit,
+            accepted_no_impact=route_evidence.accepted_no_impact,
+        )
+        overview_gate = apply_route_no_impact(
+            classify_route_overview_updates(
+                context,
+                overview_plan,
+                changed_paths,
+                memory_tree=route_evidence.memory_tree,
+                memory_verified_commit=route_evidence.memory_verified_commit,
+            ),
+            route_evidence.accepted_no_impact,
+        )
+    except RuntimeError as error:
+        errors.append(f"route overview: {error}")
+    if errors:
+        raise RuntimeError("external-memory refresh validation failed; " + "; ".join(errors))
+    return {
+        "attested_sidecars": sidecar_gate["attested_no_impact"],
+        "attested_overviews": overview_gate["attested_no_impact"],
+        "stamped_overviews": overview_gate["stamped_without_body_review"],
+        "unonboarded_paths": [] if sidecar_plan is None else sidecar_plan["unonboarded"],
+    }
+
+
 def validate_onboarding_refresh_plan(
     contract: WorktreeContract,
     changed_paths: list[str],
     *,
     working_paths: list[str] | None = None,
+    accepted_no_impact: frozenset[str] = frozenset(),
 ) -> OnboardingRefreshPlan:
     return validate_onboarding_refresh_plan_for_context(
         contract_context(contract),
         changed_paths,
         working_paths=working_paths,
-        memory_tree=contract.memory_worktree,
-        memory_verified_commit=contract_memory_verified_commit(contract),
+        body_gate=OnboardingBodyGateEvidence(
+            memory_tree=contract.memory_worktree,
+            memory_verified_commit=contract_memory_verified_commit(contract),
+            accepted_no_impact=accepted_no_impact,
+        ),
     )
 
 
@@ -857,15 +967,16 @@ def refresh_onboarding_metadata_for_context(
     *,
     memory_tree: Path | None = None,
     memory_verified_commit: str = "",
+    accepted_no_impact: frozenset[str] = frozenset(),
 ) -> list[dict[str, str]]:
     verified_commit = change.commit
     verified_date = change.commit_date
-    plan = validate_onboarding_refresh_plan_for_context(
+    # Closeout stamps existing metadata; it does not certify onboarding content.
+    _ = memory_verified_commit, accepted_no_impact
+    plan = onboarding_refresh_plan_for_context(
         context,
         change.changed_paths,
         working_paths=change.working_paths,
-        memory_tree=memory_tree,
-        memory_verified_commit=memory_verified_commit,
     )
     refreshed: list[dict[str, str]] = []
     for item in plan["required"]:
@@ -956,11 +1067,15 @@ def _refresh_regenerated_documents(
 
 
 def refresh_onboarding_metadata(
-    contract: WorktreeContract, change: VerifiedChange
+    contract: WorktreeContract,
+    change: VerifiedChange,
+    *,
+    accepted_no_impact: frozenset[str] = frozenset(),
 ) -> list[dict[str, str]]:
     return refresh_onboarding_metadata_for_context(
         contract_context(contract),
         change,
         memory_tree=contract.memory_worktree,
         memory_verified_commit=contract_memory_verified_commit(contract),
+        accepted_no_impact=accepted_no_impact,
     )

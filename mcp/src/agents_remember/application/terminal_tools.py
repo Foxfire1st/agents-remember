@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast, get_args
+from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 from uuid import uuid4
 
 from agents_remember.controlplane.operator_inbox_records import (
@@ -33,6 +33,7 @@ from agents_remember.models.terminal import (
 )
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
+    migrated_seat_role,
 )
 from agents_remember.observer.ambient import ambient
 from agents_remember.observer.events import now_iso
@@ -60,6 +61,12 @@ from agents_remember.serving.retire_policy import (
     check_retire_authority,
 )
 from agents_remember.serving.seat_events import log_rename_event, log_retire_event
+from agents_remember.serving.task_binding import (
+    ResolvedTaskBinding,
+    TaskBindingRequest,
+    TaskDocumentResolutionFailure,
+    resolve_task_binding,
+)
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
@@ -519,6 +526,10 @@ class RetiredSpawnInputs:
     session_commands: list[str] | None = None
 
 
+CallerKind = Literal["plane", "ambient", "unattributed"]
+"""How a spawn was requested: by a plane-hosted seat, by an ambient launcher, or unattributed."""
+
+
 @dataclass(frozen=True)
 class SpawnedBy:
     """The spawner's own provenance: the catalog session and lifecycle that requested the
@@ -526,6 +537,9 @@ class SpawnedBy:
 
     session_id: str | None = None
     lifecycle_id: str | None = None
+    caller_kind: CallerKind | None = None
+    structural_parent_task_document_ref: TaskDocumentRef | None = None
+    structural_parent_role: str | None = None
 
 
 @dataclass(frozen=True)
@@ -592,12 +606,11 @@ def _caller_spend_override_refusal(
         return None
     fields = ", ".join(removed)
     detail = (
-        "spawn_agent_session no longer accepts caller-selected spend fields "
-        f"({fields}) for ordinary agent-driven spawns. Configure harness/model/effort and "
+        "the internal spawn_agent_session primitive does not accept caller-selected spend fields "
+        f"({fields}). Public role callers use dispatch_agent; configure harness/model/effort and "
         "launch/session spend controls in agentic settings under orchestration.roles, "
-        "orchestration.rolesPerLevel, orchestration.spawn, or orchestration.harnesses; call "
-        "spawn_agent_session with role (env.AR_SPAWN_ROLE), level, task_document_ref, label, env, and "
-        "provenance only, with context omitted and submit=false."
+        "orchestration.rolesPerLevel, orchestration.spawn, or orchestration.harnesses. Internal "
+        "dispatch invokes this primitive only after those settings are resolved."
     )
     return spawn_refusal(
         "spend-override-unsupported",
@@ -615,11 +628,9 @@ def _brief_delivery_separate_refusal(
     if context is None and not submit:
         return None
     detail = (
-        "brief delivery is separate: call spawn_agent_session without context and with submit=false; "
-        "then call hosted_session_readiness(session_id=<returned session>, wait_seconds=<bound>); "
-        "only after status='ready', post one operator_inbox entry with the exact agent_id, "
-        "message_kind='dispatch-brief', and deliver_to_hosted=true; treat the seat as briefed only "
-        "when deliveryState='delivered' and adapterDeliveryState is accepted or queued."
+        "brief delivery is owned by public dispatch_agent as one transaction; the internal "
+        "spawn_agent_session primitive accepts no brief. Call dispatch_agent once with the "
+        "canonical task document, target role, and complete brief."
     )
     return spawn_refusal("brief-delivery-separate", None, kind, detail=detail)
 
@@ -643,35 +654,6 @@ def _spawn_request_refusal(
     if brief_refusal is not None:
         return brief_refusal
     return _caller_spend_override_refusal(seat, retired)
-
-
-def _resolve_spawn_document(
-    config: McpRuntimeConfig, task_ref: TaskDocumentRef | None, *, kind: str
-) -> tuple[TaskDocumentRef | None, dict[str, Any] | None]:
-    """Validate one optional canonical task-document reference before any spawn side effect."""
-    if task_ref is None:
-        return None, None
-    try:
-        return TaskDocumentTopology(config.coordination_root).resolve(task_ref).ref, None
-    except TaskDocumentRefError as exc:
-        return None, _task_ref_refusal_result("spawn_agent_session", task_ref, exc, kind=kind)
-
-
-def _resolve_spawn_documents(
-    config: McpRuntimeConfig,
-    task_document_ref: TaskDocumentRef | None,
-    replacement_for_task_document_ref: TaskDocumentRef | None,
-    *,
-    kind: str,
-) -> tuple[TaskDocumentRef | None, TaskDocumentRef | None, dict[str, Any] | None]:
-    """Resolve both spawn document references; the first invalid one refuses the spawn."""
-    resolved_document, refusal = _resolve_spawn_document(config, task_document_ref, kind=kind)
-    if refusal is not None:
-        return None, None, refusal
-    resolved_replacement, refusal = _resolve_spawn_document(
-        config, replacement_for_task_document_ref, kind=kind
-    )
-    return resolved_document, resolved_replacement, refusal
 
 
 @dataclass(frozen=True)
@@ -780,6 +762,41 @@ def _spawn_launch_request(
     )
 
 
+def _spawn_task_binding(
+    config: McpRuntimeConfig,
+    seat: SpawnSeat,
+    spawned_by: SpawnedBy,
+    seat_role: str,
+) -> tuple[ResolvedTaskBinding | None, dict[str, Any] | None]:
+    """Resolve the complete spawn binding and translate its one public refusal dialect."""
+    try:
+        binding = resolve_task_binding(
+            config.coordination_root,
+            TaskBindingRequest(
+                task_document_ref=seat.task_document_ref,
+                replacement_for_task_document_ref=seat.replacement_for_task_document_ref,
+                seat_role=seat_role,
+                structural_parent_task_document_ref=(
+                    spawned_by.structural_parent_task_document_ref
+                ),
+                structural_parent_role=spawned_by.structural_parent_role,
+            ),
+        )
+    except TaskDocumentResolutionFailure as exc:
+        return None, _task_ref_refusal_result(
+            "spawn_agent_session", exc.ref, exc.error, kind=seat.kind
+        )
+    if binding.refusal is not None:
+        return None, spawn_refusal(
+            binding.refusal.status,
+            None,
+            seat.kind,
+            detail=binding.refusal.detail,
+            source_lineage=binding.refusal.source_lineage,
+        )
+    return binding, None
+
+
 def spawn_agent_session_tool(
     config: McpRuntimeConfig,
     *,
@@ -813,14 +830,17 @@ def spawn_agent_session_tool(
     caller_refusal = _spawn_request_refusal(seat, retired)
     if caller_refusal is not None:
         return caller_refusal
-    task_document_ref, replacement_for_task_document_ref, refusal = _resolve_spawn_documents(
-        config,
-        seat.task_document_ref,
-        seat.replacement_for_task_document_ref,
-        kind=seat.kind,
+    seat_role = migrated_seat_role(
+        persisted=None,
+        spawn_role=(seat.env or {}).get("AR_SPAWN_ROLE"),
+        kind="harness" if seat.kind == "harness" else "terminal",
     )
+    binding, refusal = _spawn_task_binding(config, seat, spawned_by, seat_role)
     if refusal is not None:
         return refusal
+    assert binding is not None  # no refusal => one resolved binding
+    task_document_ref = binding.task_document_ref
+    replacement_for_task_document_ref = binding.replacement_for_task_document_ref
     plan, refusal = _spawn_launch_plan(
         config,
         seat,
@@ -847,6 +867,9 @@ def spawn_agent_session_tool(
             spawn_level_source=plan.spawn_level_source,
             spawned_by_session=spawned_by.session_id,
             spawned_by_lifecycle=spawned_by.lifecycle_id or _ambient_lifecycle_id(),
+            spawned_by_kind=spawned_by.caller_kind,
+            structural_parent_task_document_ref=(spawned_by.structural_parent_task_document_ref),
+            structural_parent_role=spawned_by.structural_parent_role,
         ),
     )
 
@@ -890,6 +913,13 @@ def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> d
         "tmuxName": entry.tmux_name,
         "spawnedBySession": entry.spawned_by_session,
         "spawnedByLifecycle": entry.spawned_by_lifecycle,
+        "spawnedByKind": entry.spawned_by_kind,
+        "structuralParentTaskDocumentRef": (
+            entry.structural_parent_task_document_ref.model_dump()
+            if entry.structural_parent_task_document_ref is not None
+            else None
+        ),
+        "structuralParentRole": entry.structural_parent_role,
         "spawnRole": entry.spawn_role,
         # The resolved dispatch level + how it was supplied (rolesPerLevel resolution input).
         "spawnLevel": entry.spawn_level,
@@ -964,8 +994,9 @@ def session_retire_tool(
 
     ``actor_session_id`` is the RETIRING seat's own catalog session id (self-declared, mirroring the
     ``spawned_by_session`` provenance pattern -- there is no ambient "who am I" session-id
-    resolution). Authority: owner-never-self-retires; a manager retires only worker/reviewer seats
-    of its own master; the orchestrator retires anything. Idempotent against an already-retired
+    resolution). Authority: owner-never-self-retires; a manager retires only leaf execution seats
+    and its same-master reviewer, an architect only its same-sprint plan reviewer, and the
+    orchestrator anything. Idempotent against an already-retired
     target -- a second retire call reports ``already-retired``, never re-stamps provenance.
     """
     catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
@@ -991,11 +1022,19 @@ def session_retire_tool(
                 session_id=actor_entry.id,
                 task_document_ref=actor_entry.binding_task_document_ref,
                 seat_role=actor_entry.binding_role,
+                structural_parent_task_document_ref=(
+                    actor_entry.structural_parent_task_document_ref
+                ),
+                structural_parent_role=actor_entry.structural_parent_role,
             ),
             SeatRef(
                 session_id=target_entry.id,
                 task_document_ref=target_entry.binding_task_document_ref,
                 seat_role=target_entry.binding_role,
+                structural_parent_task_document_ref=(
+                    target_entry.structural_parent_task_document_ref
+                ),
+                structural_parent_role=target_entry.structural_parent_role,
             ),
             TaskDocumentTopology(config.coordination_root),
         )

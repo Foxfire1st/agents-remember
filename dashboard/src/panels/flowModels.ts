@@ -61,8 +61,8 @@ const ROUTER: FlowModel = {
     "l-01-agent-lifecycles routes every session by EXACTLY three conditions: AR_SPAWN_ROLE set → " +
     "run that role's lifecycle; else a fresh-session role brief as first message → that role " +
     "(the brief IS the session start); else the session is developer-facing free chat. Edge cases are " +
-    "decided: an unresolvable role value falls through to the brief; a brief that never arrives " +
-    "means announce-and-wait, never improvise. The invariant ladder binds every path: approved " +
+    "decided: an unresolvable role or incomplete hosted identity fails closed; a valid hosted role " +
+    "whose brief never arrives announces and waits, never improvises. The invariant ladder binds every path: approved " +
     "task doc → branch (intent) → worktree only where something is built — and chat is never a " +
     "build route.",
   segments: [
@@ -72,7 +72,8 @@ const ROUTER: FlowModel = {
       title: "the three conditions — in order, no fourth entry",
       lines: [
         { line: "1 · AR_SPAWN_ROLE set → run roles/<value>.md   (designer = the same hat in another chair)" },
-        { line: "⟁ unresolvable value → fall through to condition 2 · no brief arrives → announce on the inbox and WAIT", junction: true },
+        { line: "⟁ unresolvable role or incomplete hosted identity → FAIL CLOSED · never brief/free-chat fallback", junction: true },
+        { line: "⟁ valid hosted role but no brief arrives → announce on the inbox and WAIT", junction: true },
         { line: "2 · first message is a role brief in a fresh session → that role" },
         { line: "3 · otherwise: free chat → create/resolve sprint + first leaf → sprint-bound architect" },
       ],
@@ -397,15 +398,16 @@ const DESIGNER: FlowModel = {
   ],
 };
 
-// --- adversarial reviewer (the two seams) ---------------------------------------------------------
+// --- adversarial reviewer (one role, four structural review seats) -------------------------------
 
 const REVIEWER: FlowModel = {
   id: "reviewer",
   label: "Reviewer",
   title: "adversarial reviewer — verdicts are evidence, not decisions",
   takeaway:
-    "Spawned at exactly two seams: MASTER-EXIT (before a manager hands its integration branch to the " +
-    "orchestrator) and SUPER-EXIT (before the backend orchestrator hands the super branch to the architect/developer). " +
+    "One reviewer role occupies four explicit structural review seats: leaf route/full-loop review " +
+    "binds the leaf under its manager; MASTER-EXIT binds the master under that manager; portfolio plan " +
+    "review binds the sprint under the architect; and SUPER-EXIT binds the sprint under the orchestrator. " +
     "It reviews the accumulated change set through three lenses — completion vs task docs, code " +
     "quality per tools.md, and onboarding-vs-code — fanning out sub-agents that write durable " +
     "reports. Its verdict is a templated artifact that attaches to the handover gate as JUDGE " +
@@ -414,7 +416,18 @@ const REVIEWER: FlowModel = {
     "never prose complaints. The same seat serves every three-party loop's review (leaf full-loop, " +
     "portfolio plan review) with its type's criteria catalog — criteria are never made up on the spot.",
   segments: [
-    { kind: "start", label: "▸ spawned at a seam (AR_SPAWN_ROLE=reviewer) — master-exit or super-exit + change-set context", next: "intake", nextStatus: "proposed" },
+    { kind: "start", label: "▸ spawned at an exact review seat (AR_SPAWN_ROLE=reviewer) — leaf · master-exit · plan · super-exit", next: "intake", nextStatus: "proposed" },
+    {
+      kind: "rundown",
+      title: "review seat → canonical task altitude + plane-owned parent",
+      lines: [
+        { line: "leaf route/full-loop → leaf document · parent = manager" },
+        { line: "master-exit → master document · parent = manager" },
+        { line: "portfolio plan → sprint document · parent = architect" },
+        { line: "super-exit → sprint document · parent = orchestrator" },
+        { line: "⟁ parent address is stamped as document + role; occupant ids never become authority", junction: true },
+      ],
+    },
     { kind: "node", phase: "intake", tool: "scope the review", detail: "integration branch diff · the master's/portfolio's task docs · the seam's rubric", next: "three-lens review", nextStatus: "proposed" },
     {
       kind: "rundown",

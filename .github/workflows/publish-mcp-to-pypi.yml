@@ -47,7 +47,26 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.13.15"
+
+      - name: Prove the exact Python runtime
+        run: |
+          . scripts/python-runtime-contract.env
+          python scripts/check-python-runtime.py \
+            --expected-version "$AR_PYTHON_VERSION" \
+            --require-linux-pidfd
+
+      - name: Install locked Python build dependencies
+        run: |
+          . scripts/python-runtime-contract.env
+          python -m pip install --disable-pip-version-check "uv==$AR_UV_VERSION"
+          UV_PROJECT_ENVIRONMENT=mcp/.venv uv sync \
+            --project mcp \
+            --python "$(command -v python)" \
+            --no-managed-python \
+            --frozen \
+            --all-extras
+          uv pip check --python mcp/.venv/bin/python
 
       - name: Install dashboard dependencies
         working-directory: dashboard
@@ -67,14 +86,11 @@ jobs:
       # `servingBuild.dashboardBuild`. A plain copy would ship the bundle without its
       # build identity.
       - name: Place dashboard bundle into MCP package data
-        run: python scripts/sync-dashboard.py
-
-      - name: Install build
-        run: python -m pip install --upgrade build
+        run: mcp/.venv/bin/python scripts/sync-dashboard.py
 
       - name: Build wheel and sdist
         working-directory: mcp
-        run: python -m build
+        run: .venv/bin/python -m build
 
       # Removing the bundle from version control makes "the release quietly shipped no
       # dashboard" a reachable failure. Assert both distributions carry the bundle and the
@@ -118,6 +134,14 @@ jobs:
               sys.exit("release artifact is incomplete -- missing " + "; ".join(missing))
           print(f"dashboard bundle and fingerprint present in {wheel.name} and {sdist.name}")
           PY
+
+      - name: Install and start the wheel in a clean Python 3.13 environment
+        run: |
+          wheel="$(find mcp/dist -maxdepth 1 -type f -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          python -m venv /tmp/agents-remember-wheel-check
+          /tmp/agents-remember-wheel-check/bin/python -m pip install "$wheel"
+          /tmp/agents-remember-wheel-check/bin/agents-remember-mcp --help
 
       - name: Upload package distributions
         uses: actions/upload-artifact@v5

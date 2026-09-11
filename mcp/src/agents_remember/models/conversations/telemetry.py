@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from typing import Generic, Literal, TypeVar
+from typing import Literal
 
 from pydantic import Field
 
@@ -19,15 +19,13 @@ from agents_remember.models.conversations.primitives import (
     WireModel,
 )
 
-T = TypeVar("T")
-
 
 class MetricScope(WireModel):
     kind: Literal["account", "project", "session", "turn", "conversation"]
     safe_id: str | None = None
 
 
-class MetricEvidence(WireModel, Generic[T]):
+class MetricEvidence[T](WireModel):
     value: T
     unit: NonEmptyText
     origin: NonEmptyText

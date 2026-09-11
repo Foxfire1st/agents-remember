@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.harnesses import HARNESSES, Harness
@@ -66,7 +66,7 @@ KNOWN_GATE_DELEGATION_FIELDS = frozenset({"policy", "kinds", "requireReviewerVer
 KNOWN_GATE_POLICY_KIND_FIELDS = frozenset({"role", "requireReviewerVerdict"})
 # Optional hard cap for the full Dagger quality gate. When absent, the container runtime's
 # host RAM and swap own pressure response; this scalar remains for constrained lifecycle runs.
-KNOWN_QUALITY_GATE_FIELDS = frozenset({"memoryCapBytes", "executor"})
+KNOWN_QUALITY_GATE_FIELDS = frozenset({"memoryCapBytes"})
 KNOWN_LOOPS_FIELDS = frozenset({"defaults", "perLevel", "perMaster"})
 KNOWN_LOOP_DEFAULTS_FIELDS = frozenset({"maxRounds", "reviewerReuse", "complexity"})
 KNOWN_LOOP_COMPLEXITY_FIELDS = frozenset({"fullLoopAt", "builderAt"})
@@ -135,8 +135,11 @@ DEFAULT_EXPECTATION_SLA_SECONDS: dict[str, float] = {
 # reference; argv is definable only through the explicit harnesses family (260703-L16).
 HARNESS_IDS = tuple(harness.id for harness in HARNESSES)
 
-# The L12 loop defaults (docs/reference/settings-json.md, Orchestration Loops).
-DEFAULT_LOOP_MAX_ROUNDS = 3
+# The review budget is an authority boundary, not a tunable orchestration preference.
+# Keep the default and the parser's hard ceiling together so settings cannot authorize a
+# fourth review by supplying a larger positive ``maxRounds`` value.
+MAX_REVIEW_ROUNDS = 3
+DEFAULT_LOOP_MAX_ROUNDS = MAX_REVIEW_ROUNDS
 DEFAULT_REVIEWER_REUSE = "delta-verify"
 DEFAULT_LOOP_PER_LEVEL: dict[str, str] = {
     "leaf": "scored",
@@ -244,20 +247,16 @@ class AgentNotifierSettings:
     escalation_budget: int = DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET
 
 
-QualityExecutor = Literal["dagger"]
-
-
 @dataclass(frozen=True)
 class QualityGateSettings:
     """``orchestration.qualityGate`` -- the full quality gate's resource knobs.
 
-    ``memory_cap_bytes=None`` leaves the full Dagger container under its runtime's
-    host-managed RAM and swap policy. An explicit value is passed into the pinned graph's
-    inner wrapper. Targeted leaf runs never use this knob.
+    The repository profile owns its executor adapter. ``memory_cap_bytes=None`` leaves
+    the full adapter under its runtime's host-managed RAM and swap policy. An explicit
+    value is passed through the declared adapter contract. Targeted leaf runs never use it.
     """
 
     memory_cap_bytes: int | None = None
-    executor: QualityExecutor = "dagger"
 
 
 @dataclass(frozen=True)

@@ -51,6 +51,8 @@ const taskDoc: TaskDocNode = {
   subTasks: [],
   sections: [],
   orchestrates: [],
+  seats: [],
+  executionWaves: [],
 };
 
 function seed(queue: AttentionItem[], docs: TaskDocNode[] = []) {

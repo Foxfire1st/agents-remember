@@ -73,9 +73,7 @@ class FakeBroadcastChannel {
   }
 }
 
-function openedResponse(
-  overrides: Record<string, unknown> = {},
-): Response {
+function openedResponse(overrides: Record<string, unknown> = {}): Response {
   return new Response(
     JSON.stringify({
       session: "generated-id",
@@ -268,7 +266,10 @@ describe("sessionStore (6e hardening)", () => {
   });
 
   it("binds a session to a task document and resolves it structurally", () => {
-    const task = { repository: "agents-remember", path: "260628_operations-integration/260628-L5.json" };
+    const task = {
+      repository: "agents-remember",
+      path: "260628_operations-integration/260628-L5.json",
+    };
     sessionStore.getState().add("Chat", "agent-1");
     sessionStore.getState().setTask("agent-1", task);
     expect(findSessionForTask(task)?.id).toBe("agent-1");
@@ -283,7 +284,9 @@ describe("sessionStore (6e hardening)", () => {
     sessionStore.getState().setTask("seeker", task); // owner already holds it → no-op
 
     expect(findSessionForTask(task)?.id).toBe("owner");
-    expect(sessionStore.getState().sessions.find((s) => s.id === "seeker")?.taskDocumentRef).toBeUndefined();
+    expect(
+      sessionStore.getState().sessions.find((s) => s.id === "seeker")?.taskDocumentRef,
+    ).toBeUndefined();
   });
 
   it("applies a server-authoritative task assignment over a stale local same-role owner", () => {
@@ -295,21 +298,39 @@ describe("sessionStore (6e hardening)", () => {
     sessionStore.getState().applyTaskAssignment("seeker", task, "chat");
 
     expect(findSessionForTask(task)?.id).toBe("seeker");
-    expect(sessionStore.getState().sessions.find((s) => s.id === "owner")?.taskDocumentRef).toBeUndefined();
+    expect(
+      sessionStore.getState().sessions.find((s) => s.id === "owner")?.taskDocumentRef,
+    ).toBeUndefined();
   });
 
   it("keeps different role seats on the same task while replacing only the matching role", () => {
     const task = { repository: "repo", path: "master/leaf-1.json" };
     sessionStore.getState().hydrate([
-      { id: "worker-old", label: "Worker", taskDocumentRef: task, seatRole: "worker", status: "running" },
-      { id: "reviewer", label: "Reviewer", taskDocumentRef: task, seatRole: "reviewer", status: "running" },
+      {
+        id: "worker-old",
+        label: "Worker",
+        taskDocumentRef: task,
+        seatRole: "worker",
+        status: "running",
+      },
+      {
+        id: "reviewer",
+        label: "Reviewer",
+        taskDocumentRef: task,
+        seatRole: "reviewer",
+        status: "running",
+      },
       { id: "worker-new", label: "Replacement worker", status: "running" },
     ]);
 
     sessionStore.getState().applyTaskAssignment("worker-new", task, "worker");
 
-    expect(sessionStore.getState().sessions.find((s) => s.id === "worker-old")?.taskDocumentRef).toBeUndefined();
-    expect(sessionStore.getState().sessions.find((s) => s.id === "reviewer")?.taskDocumentRef).toEqual(task);
+    expect(
+      sessionStore.getState().sessions.find((s) => s.id === "worker-old")?.taskDocumentRef,
+    ).toBeUndefined();
+    expect(
+      sessionStore.getState().sessions.find((s) => s.id === "reviewer")?.taskDocumentRef,
+    ).toEqual(task);
     expect(sessionStore.getState().sessions.find((s) => s.id === "worker-new")).toMatchObject({
       taskDocumentRef: task,
       seatRole: "worker",
@@ -318,7 +339,9 @@ describe("sessionStore (6e hardening)", () => {
 
   it("frees a task seat so an exited owner no longer blocks a new bind", () => {
     const task = { repository: "repo", path: "master/leaf-1.json" };
-    sessionStore.getState().hydrate([{ id: "dead", label: "Chat 1", taskDocumentRef: task, status: "exited" }]);
+    sessionStore
+      .getState()
+      .hydrate([{ id: "dead", label: "Chat 1", taskDocumentRef: task, status: "exited" }]);
     expect(findSessionForTask(task)).toBeUndefined();
     sessionStore.getState().add("Chat", "fresh");
     sessionStore.getState().setTask("fresh", task);
@@ -327,7 +350,9 @@ describe("sessionStore (6e hardening)", () => {
 
   it("frees a task seat so a landed owner no longer blocks a new bind", () => {
     const task = { repository: "repo", path: "master/leaf-1.json" };
-    sessionStore.getState().hydrate([{ id: "landed", label: "Chat 1", taskDocumentRef: task, status: "landed" }]);
+    sessionStore
+      .getState()
+      .hydrate([{ id: "landed", label: "Chat 1", taskDocumentRef: task, status: "landed" }]);
     expect(findSessionForTask(task)).toBeUndefined();
     sessionStore.getState().add("Chat", "fresh");
     sessionStore.getState().setTask("fresh", task);
@@ -429,6 +454,8 @@ describe("sessionStore (6e hardening)", () => {
         landedEdge: "leaf-integration",
         spawnedBySession: "manager",
         spawnedByLifecycle: "LC0",
+        structuralParentTaskDocumentRef: { repository: "repo", path: "master/task.json" },
+        structuralParentRole: "manager",
         spawnedLabel: "Worker",
         turnState: "turn-ended",
         turnStateChangedAt: "2026-07-09T00:01:00Z",
@@ -449,6 +476,8 @@ describe("sessionStore (6e hardening)", () => {
       landedEdge: "leaf-integration",
       spawnedBySession: "manager",
       spawnedByLifecycle: "LC0",
+      structuralParentTaskDocumentRef: { repository: "repo", path: "master/task.json" },
+      structuralParentRole: "manager",
       spawnedLabel: "Worker",
       turnState: "turn-ended",
       turnStateChangedAt: "2026-07-09T00:01:00Z",
@@ -523,18 +552,21 @@ describe("sessionStore (6e hardening)", () => {
       failure: "protocol",
       fetchResult: () => Promise.resolve(new Response("not-json", { status: 200 })),
     },
-  ])("$name cannot materialize, activate, or advertise a ghost row", async ({ failure, fetchResult }) => {
-    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
-    vi.stubGlobal("crypto", { randomUUID: () => "ghost-id" });
-    vi.stubGlobal("fetch", vi.fn(fetchResult));
+  ])(
+    "$name cannot materialize, activate, or advertise a ghost row",
+    async ({ failure, fetchResult }) => {
+      vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+      vi.stubGlobal("crypto", { randomUUID: () => "ghost-id" });
+      vi.stubGlobal("fetch", vi.fn(fetchResult));
 
-    const result = await createSession("Claude Code", "harness", "claude");
+      const result = await createSession("Claude Code", "harness", "claude");
 
-    expect(result).toMatchObject({ outcome: "failed", failure });
-    expect(sessionStore.getState().sessions).toEqual([]);
-    expect(sessionStore.getState().activeId).toBeNull();
-    expect(FakeBroadcastChannel.messages).toEqual([]);
-  });
+      expect(result).toMatchObject({ outcome: "failed", failure });
+      expect(sessionStore.getState().sessions).toEqual([]);
+      expect(sessionStore.getState().activeId).toBeNull();
+      expect(FakeBroadcastChannel.messages).toEqual([]);
+    },
+  );
 
   it("a raw response claiming harness authority cannot materialize, activate, or advertise", async () => {
     vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);

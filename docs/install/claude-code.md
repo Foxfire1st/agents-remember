@@ -69,18 +69,26 @@ with the directive text:
 ```markdown
 **Agents Remember — session start.**
 
-If `AR_SPAWN_ROLE` is set, or your first user message is a role brief from an
-orchestrating agent: **ignore this notice entirely — your brief is your session
-start.**
+If `AR_SPAWN_ROLE` is set, it must resolve to its canonical role file and arrive
+with the plane-injected hosted-session identity. An unresolvable role or an
+incomplete hosted identity fails closed; it never falls through to a pasted
+brief or ambient free chat. With valid hosted identity—or when the first user
+message is a role brief and no hosted identity was declared—the brief is the
+session start.
 
 Otherwise you are the developer-facing **free chat**: read
-`ar-coordination/AGENTS.md`; answer research inline, or create/resolve the
-durable sprint and first leaf before opening that sprint's architect seat.
+`ar-coordination/AGENTS.md`; answer research inline, or for ordinary role-shaped work create/resolve the
+durable sprint and first leaf, compile the canonical architect brief, and call
+`dispatch_agent` once on that sprint document with role `architect`.
 ```
 
 The directive is entry-only by design: a spawned role's session start is the
 role brief its orchestrating agent compiled, while free chat remains a launcher
-rather than a global role identity.
+rather than a global role identity. An explicit developer-declared task-seat
+takeover instead targets the named role on its canonical task document. With no plane identity the call uses
+ambient target-document/role-altitude validation; later hosted dispatch uses
+plane identity and direct-child scope. Both pin the brief in one transaction,
+and a plane refusal never falls back to ambient.
 
 The starter package registers the hook in `.claude/settings.json`:
 

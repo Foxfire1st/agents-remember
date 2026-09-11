@@ -90,12 +90,18 @@ class TerminalCatalogEntry:
     # the live slot. This is the same document identity, never a second address namespace.
     replacement_for_task_document_ref: TaskDocumentRef | None = None
     # Spawned-by provenance (L2 agent dispatch): the spawning session id + lifecycle id when this row
-    # was created by the ``spawn_agent_session`` tool (an orchestrator spawning a manager, a manager
-    # spawning a worker). Written only when set, so a
+    # was created by the internal ``spawn_agent_session`` primitive behind public
+    # ``dispatch_agent``. Written only when set, so a
     # hand-opened or dashboard-opened row reads both back as ``None``. The dashboard reads these to
     # render the orchestration tree (spawner -> spawned edges) once that surface lands.
     spawned_by_session: str | None = None
     spawned_by_lifecycle: str | None = None
+    spawned_by_kind: str | None = None
+    # Plane-owned structural parent address. This is distinct from spawn ancestry: it records the
+    # canonical document+role seat that owns a reviewer manifestation when the reviewer role can
+    # validly live at more than one altitude. Occupant ids remain correlation-only.
+    structural_parent_task_document_ref: TaskDocumentRef | None = None
+    structural_parent_role: str | None = None
     # The l-01 role this session was spawned AS (``AR_SPAWN_ROLE`` seeded into the spawn env by the
     # dispatching seat -- orchestrator/strategist/manager/worker/reviewer/designer), recorded at first
     # spawn so the Chats command tree (L14) can group command chats without re-reading tmux env.
@@ -119,6 +125,10 @@ class TerminalCatalogEntry:
     resolved_effort: str | None = None
     session_log_entry_id: str | None = None
     session_log_path: Path | None = None
+    # The durable inbox row that completed this occupant's one-call spawn transaction. This is
+    # private reconciliation evidence, not a delivery address. It remains after bounded inbox
+    # compaction so a retry cannot mistake a briefed live seat for a crash-stranded process.
+    dispatch_brief_entry_id: str | None = None
     # Protocol-backed control metadata (260713-PHA-L1): additive and absent on legacy/plain-terminal
     # rows. ``control_endpoint`` is a user-private local socket; the exact identity tuple remains
     # id + tmux_name + created_at, and every IPC request repeats it.
@@ -208,6 +218,11 @@ class TerminalCatalogEntry:
             ),
             spawned_by_session=_optional_str(data, "spawnedBySession"),
             spawned_by_lifecycle=_optional_str(data, "spawnedByLifecycle"),
+            spawned_by_kind=_optional_str(data, "spawnedByKind"),
+            structural_parent_task_document_ref=_optional_task_document_ref(
+                data, "structuralParentTaskDocumentRef"
+            ),
+            structural_parent_role=_optional_str(data, "structuralParentRole"),
             spawn_role=spawn_role,
             launch_args=_string_tuple(data.get("launchArgs")),
             prompt_keywords=_string_tuple(data.get("promptKeywords")),
@@ -218,6 +233,7 @@ class TerminalCatalogEntry:
             resolved_effort=_optional_str(data, "resolvedEffort"),
             session_log_entry_id=_optional_str(data, "sessionLogEntryId"),
             session_log_path=_optional_path(data, "sessionLogPath"),
+            dispatch_brief_entry_id=_optional_str(data, "dispatchBriefEntryId"),
             control_state=_control_state(data.get("controlState")),
             control_endpoint=_optional_path(data, "controlEndpoint"),
             control_protocol=_optional_str(data, "controlProtocol"),
@@ -294,6 +310,11 @@ class TerminalCatalogEntry:
                     ),
                     "spawnedBySession": self.spawned_by_session,
                     "spawnedByLifecycle": self.spawned_by_lifecycle,
+                    "spawnedByKind": self.spawned_by_kind,
+                    "structuralParentTaskDocumentRef": _optional_task_document_ref_json(
+                        self.structural_parent_task_document_ref
+                    ),
+                    "structuralParentRole": self.structural_parent_role,
                     "spawnRole": self.spawn_role,
                     "launchArgs": _optional_list(self.launch_args),
                     "promptKeywords": _optional_list(self.prompt_keywords),
@@ -304,6 +325,7 @@ class TerminalCatalogEntry:
                     "resolvedEffort": self.resolved_effort,
                     "sessionLogEntryId": self.session_log_entry_id,
                     "sessionLogPath": _optional_path_text(self.session_log_path),
+                    "dispatchBriefEntryId": self.dispatch_brief_entry_id,
                     "controlState": self.control_state,
                     "controlEndpoint": _optional_path_text(self.control_endpoint),
                     "controlProtocol": self.control_protocol,
@@ -377,12 +399,22 @@ class TerminalCatalogEntry:
         task_document_ref: TaskDocumentRef,
         seat_role: str,
     ) -> TerminalCatalogEntry:
-        """A copy moved to one ``(task document, role)`` binding in one catalog write."""
+        """Move to one seat, retaining address-bound brief proof only for that same seat."""
+
+        same_address = (
+            self.binding_task_document_ref == task_document_ref and self.binding_role == seat_role
+        )
 
         return replace(
             self,
             task_document_ref=task_document_ref,
             seat_role=seat_role,
+            replacement_for_task_document_ref=None,
+            dispatch_brief_entry_id=(self.dispatch_brief_entry_id if same_address else None),
+            structural_parent_task_document_ref=(
+                self.structural_parent_task_document_ref if same_address else None
+            ),
+            structural_parent_role=self.structural_parent_role if same_address else None,
         )
 
     def with_retirement(

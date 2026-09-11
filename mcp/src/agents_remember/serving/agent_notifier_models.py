@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -96,6 +97,11 @@ class AgentNotifierContext:
     event_store: EventStore
     heartbeat_store: AgentNotifierHeartbeatStore
     coordination_root: Path
+    # No registrar authorizes no deletion of task-bound leaf reports. Production injects the
+    # task-plane registrar; unit seams that omit it remain fail-closed, not compatibility readers.
+    register_execution_evidence: (
+        Callable[[tuple[OperatorInboxEntry, ...]], frozenset[str]] | None
+    ) = None
     stale_seat_seconds: float = 120.0
     redeliver_rate_limit_seconds: float | None = None
     signal_cooldown_seconds: float = 900.0

@@ -40,9 +40,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from agents_remember.models.core import ServingBuildPayload
 from agents_remember.observer.projection import WorkspaceProjection
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatPayload
-from agents_remember.serving.build_info import ServingBuild, ServingBuildPayload
+from agents_remember.serving.build_info import ServingBuild
 
 
 class ServedWorkspaceProjection(WorkspaceProjection):

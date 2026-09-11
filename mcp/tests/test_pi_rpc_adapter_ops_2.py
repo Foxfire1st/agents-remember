@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from collections.abc import AsyncGenerator, Mapping
+from pathlib import Path
 from typing import cast
 
 from agents_remember.errors import (
@@ -21,7 +22,6 @@ from agents_remember.serving.harness_control_models import (
 from agents_remember.serving.pi_rpc_adapter import PiAdapterLimits, PiRpcAdapter
 from agents_remember.serving.pi_rpc_protocol import PiRpcJsonlDecoder
 from test_pi_rpc_adapter import (
-    FIXTURES,
     _direct_submit,
     _FakePiTransport,
     _identity,
@@ -30,6 +30,8 @@ from test_pi_rpc_adapter import (
     _prompt,
     _TransportSequence,
 )
+
+ACTIVITY_FIXTURE = Path(__file__).parent / "fixtures/pi_rpc/activity.jsonl"
 
 
 class PiRpcAdapterTests2(unittest.IsolatedAsyncioTestCase):
@@ -87,7 +89,7 @@ class PiRpcAdapterTests2(unittest.IsolatedAsyncioTestCase):
         stream = cast(AsyncGenerator[AdapterEvent], adapter.subscribe())
         decoder = PiRpcJsonlDecoder()
         frames: list[Mapping[str, object]] = []
-        for line in (FIXTURES / "activity.jsonl").read_bytes().splitlines(keepends=True):
+        for line in ACTIVITY_FIXTURE.read_bytes().splitlines(keepends=True):
             frames.extend(decoder.feed(line))
         try:
             events = []

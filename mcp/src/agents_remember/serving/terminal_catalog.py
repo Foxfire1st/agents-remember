@@ -14,6 +14,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from agents_remember.controlplane.seats import current_seat_occupant
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import (
@@ -48,6 +49,19 @@ def terminal_catalog_path(coordination_root: Path) -> Path:
     return coordination_root / "logs" / "dashboard" / "terminal-sessions.json"
 
 
+def _leaf_execution_entry(entry: TerminalCatalogEntry) -> bool:
+    leaf_role = entry.binding_role in {"worker", "curator"} or (
+        entry.binding_role == "reviewer" and entry.spawn_level in {None, "leaf"}
+    )
+    return leaf_role and any(
+        ref is not None
+        for ref in (
+            entry.task_document_ref,
+            entry.replacement_for_task_document_ref,
+        )
+    )
+
+
 class TerminalCatalog:
     """JSON-backed catalog for dashboard-owned terminal sessions."""
 
@@ -69,6 +83,14 @@ class TerminalCatalog:
             return entries
         return [entry for entry in entries if entry.status != "terminated"]
 
+    def list_committed(self, *, include_terminated: bool = False) -> list[TerminalCatalogEntry]:
+        """Read the last committed atomic snapshot without waiting for this instance's batch."""
+
+        entries = self._read_disk()
+        if include_terminated:
+            return entries
+        return [entry for entry in entries if entry.status != "terminated"]
+
     def get(self, session_id: str) -> TerminalCatalogEntry | None:
         return next((entry for entry in self._read_snapshot() if entry.id == session_id), None)
 
@@ -81,22 +103,15 @@ class TerminalCatalog:
         coexist on the sprint. Gating on ``status == "running"`` means a completed or terminated
         holder frees only its own structural role slot.
         """
-        occupants = [
-            entry
-            for entry in self.list()
-            if entry.task_document_ref == task_document_ref
-            and entry.status == "running"
-            and entry.binding_role == seat_role
-        ]
-        if len(occupants) > 1:
-            raise ValueError(
-                f"multiple running occupants claim {task_document_ref.key} as {seat_role}"
-            )
-        return occupants[0] if occupants else None
+        return current_seat_occupant(self.list(), document=task_document_ref, role=seat_role)
 
     def upsert(self, entry: TerminalCatalogEntry) -> None:
         with self._catalog_access():
-            entries = [current for current in self._read() if current.id != entry.id]
+            entries = self._read()
+            matching = [current for current in entries if current.id == entry.id]
+            if len(matching) == 1 and matching[0] == entry:
+                return
+            entries = [current for current in entries if current.id != entry.id]
             entries.append(entry)
             self._write(entries)
 
@@ -298,7 +313,11 @@ class TerminalCatalog:
                     self._write_disk(entries)
 
     def compact(
-        self, *, now: datetime, retain_seconds: float = TERMINATED_RETENTION_SECONDS
+        self,
+        *,
+        now: datetime,
+        retain_seconds: float = TERMINATED_RETENTION_SECONDS,
+        registered_execution_ids: frozenset[str] = frozenset(),
     ) -> int:
         """Reclaim ``terminated`` tombstones older than ``retain_seconds`` so the file stays bounded.
 
@@ -306,7 +325,10 @@ class TerminalCatalog:
         the catalog is re-read on every sweep, so unbounded tombstone growth is the reclamation gap. Only
         ``terminated`` rows past the window are dropped -- ``running``/``exited`` rows are live, and
         ``landed`` rows are inspectable archives reclaimed by the L11 manual group-cleanup, never here.
-        Provenance survives in the observer lifecycle event stream, so no separate archive file is kept.
+        A task-bound worker/curator or leaf-altitude reviewer row is retained until its id is explicitly authorized
+        by the task-owned execution registrar. That registrar publishes one bounded first-evidence
+        marker before reclamation, so routine retention cannot turn historical execution into
+        "never started". Other row provenance remains in the observer lifecycle event stream.
         Returns the number of rows reclaimed. Composes inside ``batch()`` (drops from the buffer, folded
         into the one commit write).
         """
@@ -318,6 +340,7 @@ class TerminalCatalog:
                 if not (
                     entry.status == "terminated"
                     and _terminated_beyond(entry, now=now, retain_seconds=retain_seconds)
+                    and (not _leaf_execution_entry(entry) or entry.id in registered_execution_ids)
                 )
             ]
             if len(kept) == len(entries):
@@ -406,6 +429,35 @@ class TerminalCatalog:
             TerminalCatalogEntryWire.model_validate(row)
         payload = {"schema": "ar-dashboard-terminal-sessions/v2", "sessions": rows}
         atomic_write_text(self.path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+class DispatchBriefReceiptStore:
+    """Dispatch-specific receipt mutation over the terminal catalog's atomic storage unit.
+
+    Terminal lifecycle mutation and dispatch commit-point evidence are separate responsibilities.
+    This collaborator keeps the receipt rule out of the general catalog surface while composing
+    with the catalog's existing cross-process lock and in-memory batch.
+    """
+
+    def __init__(self, catalog: TerminalCatalog) -> None:
+        self._catalog = catalog
+
+    def bind(self, session_id: str, *, entry_id: str) -> TerminalCatalogEntry | None:
+        """Idempotently bind one pinned-brief receipt to the exact private occupant."""
+
+        with self._catalog._catalog_access():
+            entries = self._catalog._read()
+            index = _index_of(entries, session_id)
+            if index is None:
+                return None
+            current = entries[index]
+            if current.dispatch_brief_entry_id not in {None, entry_id}:
+                raise ValueError("seat generation already has a different dispatch brief")
+            updated = replace(current, dispatch_brief_entry_id=entry_id)
+            if updated != current:
+                entries[index] = updated
+                self._catalog._write(entries)
+            return updated
 
 
 def _terminated_beyond(

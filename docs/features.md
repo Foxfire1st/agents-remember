@@ -297,8 +297,13 @@ Memory is only as good as the discipline that keeps it honest, and that
 discipline is the second half of the product. Sessions route by role through
 one skill (`l-01-agent-lifecycles`): a spawned agent follows the role brief
 that spawned it, and a developer-facing session is **free chat**. It answers
-research inline, creates or resolves the first durable sprint and leaf when needed,
-then launches that sprint-bound architect lifecycle:
+research inline and, for ordinary role-shaped work, creates or resolves the first durable sprint
+and leaf when needed, then compiles the canonical architect brief and calls `dispatch_agent` once
+on that sprint document with role `architect`. An explicit developer-declared task-seat takeover
+instead targets the named role on its canonical task document. With no plane identity the launcher is
+authorized by target-document resolution and role altitude; later hosted seats use
+plane identity and direct-child scope. Both paths durably pin the exact brief, and a
+plane refusal never falls back to ambient. The resulting sprint-bound architect runs:
 
 ```text
 request → trust-checkpoint → reframe-research → decide → build → close

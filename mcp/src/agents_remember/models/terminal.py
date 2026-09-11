@@ -89,7 +89,7 @@ VALID_SPAWN_AGENT_SESSION_STATUSES: frozenset[SpawnAgentSessionStatus] = frozens
 
 
 class SpawnAgentSessionResponse(ToolResponse):
-    """``spawn_agent_session``: create and bind a hosted seat without delivering its brief."""
+    """Internal ``spawn_agent_session`` result; public callers use ``dispatch_agent``."""
 
     operation: Literal["spawn_agent_session"] = "spawn_agent_session"
     status: SpawnAgentSessionStatus
@@ -105,6 +105,9 @@ class SpawnAgentSessionResponse(ToolResponse):
     # Spawned-by provenance recorded on the catalog row (the dashboard orchestration-tree seam).
     spawnedBySession: str | None = None
     spawnedByLifecycle: str | None = None
+    spawnedByKind: Literal["plane", "ambient", "unattributed"] | None = None
+    structuralParentTaskDocumentRef: TaskDocumentRef | None = None
+    structuralParentRole: str | None = None
     # The AR_SPAWN_ROLE recorded on the catalog row (L14: the Chats command-tree grouping key).
     spawnRole: str | None = None
     # The RESOLVED dispatch level (leaf|master|portfolio) and whether the dispatcher supplied it

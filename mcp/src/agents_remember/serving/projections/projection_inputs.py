@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from agents_remember.controlplane.attention_dismissals import (
     AttentionDismissalRecord,
@@ -24,6 +24,7 @@ from agents_remember.observer.event_retention import prune_expired_lifecycle_eve
 from agents_remember.observer.events import Event
 from agents_remember.observer.projection import (
     AgentPickupNode,
+    CloseoutQueueNode,
     DriftSnapshotNode,
     EnclosureNode,
     EngineProcessFacts,
@@ -63,6 +64,9 @@ from agents_remember.serving.projections.snapshots import (
     read_task_documents,
     read_tool_reports,
     refresh_engine_process_landing,
+)
+from agents_remember.serving.projections.snapshots_impl._closeout_queue import (
+    read_closeout_queues,
 )
 from pydantic import BaseModel
 
@@ -137,6 +141,7 @@ class ProjectionInputs:
     ledgers: list[LedgerNode]
     task_documents: list[TaskDocNode]
     series: list[SeriesNode]
+    closeout_queues: list[CloseoutQueueNode]
     engine_process_facts: list[EngineProcessFacts]
     engine_start_progress: list[dict[str, Any]]
     gates: list[GateRecord]
@@ -176,7 +181,6 @@ RepoSurfaceReader = Callable[
     ["McpRuntimeConfig", datetime],
     tuple[list[SidecarStaleNode], list[RouteCoverageNode], list[LedgerNode]],
 ]
-NodeT = TypeVar("NodeT", bound=BaseModel)
 
 
 @dataclass(frozen=True)
@@ -196,6 +200,7 @@ class ProjectionInputState:
     def __init__(self, *, contract_cache: ContractSnapshotCache | None = None) -> None:
         self._contract_cache = contract_cache or ContractSnapshotCache()
         self._contracts: ContractSnapshot | None = None
+        self._task_refresh_pending = False
         self._enclosures: list[EnclosureNode] = []
         self._lifecycle_logs: list[list[Event]] = []
         self._providers: list[ProviderNode] = []
@@ -207,6 +212,7 @@ class ProjectionInputState:
         self._expectation_rows: list[ExpectationRowNode] = []
         self._task_documents: list[TaskDocNode] = []
         self._series: list[SeriesNode] = []
+        self._closeout_queues: list[CloseoutQueueNode] = []
         self._engine_process_facts: list[EngineProcessFacts] = []
         self._engine_start_progress: list[dict[str, Any]] = []
         self._gates: list[GateRecord] = []
@@ -227,6 +233,7 @@ class ProjectionInputState:
         now = pass_.now
         self._advance_ages(now)
         pass_ = replace(pass_, tasks_changed=self._refresh_tasks(config, pass_))
+        self._closeout_queues = read_closeout_queues(config.coordination_root, now=pass_.now)
         self._refresh_lifecycles(observer_root, pass_, lifecycle_reader=readers.lifecycle)
         provider_groups = admitted_worktree_groups(self._enclosures, self._lifecycle_logs, now=now)
         engine_groups = active_enclosure_worktree_groups(
@@ -260,6 +267,7 @@ class ProjectionInputState:
             ledgers=ledgers,
             task_documents=self._task_documents,
             series=self._series,
+            closeout_queues=self._closeout_queues,
             engine_process_facts=self._engine_process_facts,
             engine_start_progress=self._engine_start_progress,
             gates=self._gates,
@@ -268,14 +276,24 @@ class ProjectionInputState:
         )
 
     def _refresh_tasks(self, config: McpRuntimeConfig, pass_: RefreshPass) -> bool:
-        if not pass_.refresh.affects(ProjectionDomain.TASKS) and self._contracts is not None:
+        if (
+            not pass_.refresh.affects(ProjectionDomain.TASKS)
+            and self._contracts is not None
+            and not self._task_refresh_pending
+        ):
             return False
-        self._contracts = self._contract_cache.build(config.coordination_root / "tasks")
-        self._enclosures = read_enclosures(config.coordination_root, contracts=self._contracts)
-        self._task_documents = read_task_documents(
-            config.coordination_root, enclosures=self._enclosures, now=pass_.now
+        self._task_refresh_pending = True
+        contracts = self._contract_cache.build(config.coordination_root / "tasks")
+        enclosures = read_enclosures(config.coordination_root, contracts=contracts)
+        task_documents = read_task_documents(
+            config.coordination_root, enclosures=enclosures, now=pass_.now
         )
-        self._series = read_series_documents(config.coordination_root, now=pass_.now)
+        series = read_series_documents(config.coordination_root, now=pass_.now)
+        self._contracts = contracts
+        self._enclosures = enclosures
+        self._task_documents = task_documents
+        self._series = series
+        self._task_refresh_pending = False
         return True
 
     def _refresh_lifecycles(
@@ -411,7 +429,9 @@ class ProjectionInputState:
         ]
 
 
-def _advance_model_age(nodes: list[NodeT], field: str, elapsed: float) -> list[NodeT]:
+def _advance_model_age[NodeT: BaseModel](
+    nodes: list[NodeT], field: str, elapsed: float
+) -> list[NodeT]:
     advanced: list[NodeT] = []
     for node in nodes:
         value = getattr(node, field)

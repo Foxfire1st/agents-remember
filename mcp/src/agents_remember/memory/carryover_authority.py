@@ -1,4 +1,4 @@
-"""Required official-memory authority for carryover writes."""
+"""Required target-memory storage authority for carryover writes."""
 
 from __future__ import annotations
 
@@ -29,14 +29,14 @@ SUPPORTED_STORAGE_MODES = {
 SUPPORTED_STORAGE_DESTINATIONS = SUPPORTED_STORAGE_MODES - {"hybrid"}
 
 
-def required_official_storage(official_memory: Path) -> StorageSettings:
-    """Resolve explicit official-memory storage settings or refuse carryover."""
+def required_target_storage(target_memory: Path) -> StorageSettings:
+    """Resolve explicit recovery-leaf storage settings or refuse carryover."""
 
-    settings_path = official_memory / "system" / "settings.md"
+    settings_path = target_memory / "system" / "settings.md"
     json_path = path_settings_path_for(settings_path)
     if not json_path.exists() and not settings_path.exists():
         raise AuthorityError(
-            "official memory must provide route-index authority in "
+            "target memory must provide route-index authority in "
             f"{json_path.as_posix()} or {settings_path.as_posix()}"
         )
 
@@ -45,7 +45,7 @@ def required_official_storage(official_memory: Path) -> StorageSettings:
             raw_settings = json.loads(json_path.read_text(encoding="utf-8"))
             if not _json_declares_effective_route_index_authority(raw_settings):
                 raise AuthorityError(
-                    f"official memory settings do not declare storage/path authority: {json_path}"
+                    f"target memory settings do not declare storage/path authority: {json_path}"
                 )
             storage, _cross_repo = parse_coordination_settings(settings_path, "external")
         else:
@@ -53,7 +53,7 @@ def required_official_storage(official_memory: Path) -> StorageSettings:
             storage = _effective_markdown_storage(blocks)
             if storage is None:
                 raise AuthorityError(
-                    f"official memory settings do not declare storage/path authority: {settings_path}"
+                    f"target memory settings do not declare storage/path authority: {settings_path}"
                 )
         _validate_storage_labels(storage, json_path if json_path.exists() else settings_path)
     except AuthorityError:
@@ -61,7 +61,7 @@ def required_official_storage(official_memory: Path) -> StorageSettings:
     except (OSError, ValueError) as error:
         authority_path = json_path if json_path.exists() else settings_path
         raise AuthorityError(
-            f"invalid official-memory route-index authority in {authority_path}: {error}"
+            f"invalid target-memory route-index authority in {authority_path}: {error}"
         ) from error
     return storage
 
@@ -405,16 +405,16 @@ def _markdown_has_storage_selection(block: str) -> bool:
 def _validate_storage_labels(storage: StorageSettings, authority_path: Path) -> None:
     if storage.mode not in SUPPORTED_STORAGE_MODES:
         raise AuthorityError(
-            f"unsupported official-memory storage mode {storage.mode!r} in {authority_path}"
+            f"unsupported target-memory storage mode {storage.mode!r} in {authority_path}"
         )
     if storage.default not in SUPPORTED_STORAGE_DESTINATIONS:
         raise AuthorityError(
-            f"unsupported official-memory storage default {storage.default!r} in {authority_path}"
+            f"unsupported target-memory storage default {storage.default!r} in {authority_path}"
         )
     for index, rule in enumerate(storage.path_rules):
         label = rule.get("storage")
         if label is not None and label not in SUPPORTED_STORAGE_DESTINATIONS:
             raise AuthorityError(
-                "unsupported official-memory path-rule storage "
+                "unsupported target-memory path-rule storage "
                 f"{label!r} at index {index} in {authority_path}"
             )

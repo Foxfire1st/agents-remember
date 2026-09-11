@@ -28,7 +28,7 @@ from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
 from agents_remember.controlplane.records import GateVerdict
 from agents_remember.controlplane.store import GateStore
 from agents_remember.models.operator_inbox import OperatorInboxPostResponse
-from agents_remember.models.tool_response import finalize_tool_response
+from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.observer import observer_root
 from agents_remember.observer.events import now_iso
 from agents_remember.observer.projection import TaskDocNode

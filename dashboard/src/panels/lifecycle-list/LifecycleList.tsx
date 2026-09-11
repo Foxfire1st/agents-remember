@@ -768,7 +768,7 @@ function docRow(
     secondary: doc.kind,
     variant,
     meta: rowMetaText(
-      progressHint(progress),
+      progressHint(progress, doc.discardedCount ?? 0),
       doc.status,
       servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs),
     ),
@@ -816,7 +816,10 @@ function seriesRow(
     secondary: "master",
     variant,
     meta: rowMetaText(
-      progressHint({ done: series.doneCount, total: series.totalCount }),
+      progressHint(
+        { done: series.doneCount, total: series.totalCount },
+        series.discardedCount,
+      ),
       series.status,
       servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs),
     ),
@@ -1148,8 +1151,10 @@ function subTaskProgress(items: TaskDocNode["subTasks"]): { done: number; total:
   };
 }
 
-function progressHint(progress: { done: number; total: number }): string {
-  return progress.total > 0 ? `${progress.done}/${progress.total}` : "";
+function progressHint(progress: { done: number; total: number }, discardedCount = 0): string {
+  const completed = progress.total > 0 ? `${progress.done}/${progress.total}` : "";
+  const discarded = discardedCount > 0 ? `${discardedCount} discarded` : "";
+  return [completed, discarded].filter(Boolean).join(" · ");
 }
 
 function rowMetaText(progress: string, status: string, staleSeconds: number | undefined): string {

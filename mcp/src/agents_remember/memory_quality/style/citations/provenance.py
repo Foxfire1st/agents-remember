@@ -3,10 +3,12 @@
 Code and memory are separate Git repositories, so a code verification stamp cannot be used
 to read a memory source. The external-memory ledger supplies that mapping, and each mapped
 commit must be reachable from its repository's current history rather than merely present in
-the object database. Dependency source is not in either repository; its reproducible identity
-is a concrete PEP 440 equality on the Python surface or the exact npm package-lock version on
-the JavaScript surface. Names never pool across those ecosystems. A permissive range is useful
-installation policy but is not historical evidence of what was reviewed.
+the object database; a selected prepared code proof may additionally retain the verified code
+history anchors from its explicit predecessor chain while current bytes are checked separately. Dependency source is not in either
+repository; its reproducible identity is a concrete PEP 440 equality on the Python surface or
+the exact npm package-lock version on the JavaScript surface. Names never pool across those
+ecosystems. A permissive range is useful installation policy but is not historical evidence of
+what was reviewed.
 """
 
 from __future__ import annotations
@@ -48,6 +50,7 @@ class LockedVersion:
 class GitHistory:
     root: Path
     name: str
+    reachable_heads: tuple[str, ...] = ()
     _commits: dict[str, Read] = field(default_factory=dict)
     _files: dict[tuple[str, str], Read] = field(default_factory=dict)
 
@@ -68,19 +71,21 @@ class GitHistory:
                 )
                 return self._commits[stamp]
             commit = resolved.stdout.strip()
-            reachable = run_git(
-                self.root,
-                ["merge-base", "--is-ancestor", commit, "HEAD"],
-                timeout=GIT_METADATA_TIMEOUT_SECONDS,
+            reachable = any(
+                run_git(
+                    self.root,
+                    ["merge-base", "--is-ancestor", commit, head],
+                    timeout=GIT_METADATA_TIMEOUT_SECONDS,
+                ).returncode
+                == 0
+                for head in ("HEAD", *self.reachable_heads)
             )
-            if reachable.returncode != 0:
+            if not reachable:
                 self._commits[stamp] = Read(
                     None,
-                    _git_error(
-                        reachable.stderr,
-                        f"{self.name} history stamp {stamp} resolves to {commit}, but that commit "
-                        f"is not reachable from the current {self.name} history",
-                    ),
+                    f"{self.name} history stamp {stamp} resolves to {commit}, but that commit "
+                    f"is not reachable from the current {self.name} history or a retained "
+                    "verified history anchor",
                 )
                 return self._commits[stamp]
             self._commits[stamp] = Read(commit)
@@ -106,11 +111,16 @@ class GitHistory:
 class Histories:
     code_root: Path
     memory_root: Path
+    retained_code_history_commits: tuple[str, ...] = ()
     code: GitHistory = field(init=False)
     memory: GitHistory = field(init=False)
 
     def __post_init__(self) -> None:
-        self.code = GitHistory(self.code_root, "code")
+        self.code = GitHistory(
+            self.code_root,
+            "code",
+            reachable_heads=self.retained_code_history_commits,
+        )
         self.memory = GitHistory(self.memory_root, "memory")
 
     def memory_commit(self, code_commit: str) -> Read:

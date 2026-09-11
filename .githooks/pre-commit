@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
-# Fast pre-commit tier: certify the STAGED content — the thing the commit will
-# actually contain — with ruff, Pyright, and the generated-copy checks. Under
-# half a minute on a warm checkout. Tests run only through lifecycle-owned Dagger.
+# Fast pre-commit tier: check the STAGED content — the thing the commit will
+# actually contain — with deterministic lint/type/generated-copy checks. Under
+# half a minute on a warm checkout. Full quality and test operations are explicit
+# developer-requested workflows, not automatic closeout or integration work.
 #
 # Bypass intentionally with `git commit --no-verify`, remembering that the flag
 # turns off every check, not just the one that annoyed you.

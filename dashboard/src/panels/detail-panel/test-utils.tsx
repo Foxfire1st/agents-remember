@@ -36,7 +36,9 @@ export function taskDoc(over: Partial<TaskDocNode> & Pick<TaskDocNode, "kind" | 
     openQuestions: [],
     references: [],
     orchestrates: [],
+    executionWaves: [],
     subTasks: [],
+    seats: [],
     sections: [],
     ...over,
   };
@@ -49,6 +51,8 @@ export function seriesNode(over: Partial<SeriesNode> & Pick<SeriesNode, "seriesI
     status: "inProgress",
     objective: "",
     subTasks: [],
+    discardedCount: 0,
+    discardedSubTasks: [],
     doneCount: 0,
     totalCount: 0,
     seriesTokenTotal: 0,
@@ -448,6 +452,13 @@ export function stubCounters() {
 export function stubNotes(
   notes: Array<{ name: string; path: string; size: number; language: string }>,
   body = "note body",
+  requirements: Array<{
+    name: string;
+    path: string;
+    address: string;
+    size: number;
+    sha256: string;
+  }> = [],
 ) {
   const fn = vi.fn(async (url: string) => {
     if (url.startsWith("/api/task-document")) {
@@ -471,6 +482,19 @@ export function stubNotes(
         content: body,
       };
       return { ok: true, status: 200, json: async () => payload } as unknown as Response;
+    }
+    if (url.startsWith("/api/requirements/list")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          repo: "agents-remember",
+          master: "m",
+          document: "m/task.json",
+          registered: requirements.length > 0,
+          requirements,
+        }),
+      } as unknown as Response;
     }
     return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
   });

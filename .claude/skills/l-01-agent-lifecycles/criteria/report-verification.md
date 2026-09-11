@@ -4,8 +4,10 @@ The standing criteria an **adversarial reviewer** (`../roles/reviewer.md`) — a
 verifying a builder round — MUST run over every report, claim, and summary in the change set:
 builder reports, owner claims, handover packets. **Standing from day one** in every review type:
 report-vs-artifact caught real defects in three separate engagements before this catalog existed.
-Criteria are never made up on the spot: the standing list below is the regression floor, run every
-time; the exploratory mandate and the promotion ratchet keep the catalog alive.
+Criteria are never made up on the spot. A baseline review runs the standing list below as its
+regression floor and may use the exploratory mandate and promotion ratchet. A
+fix-verification uses only the sealed baseline evidence needed for its outstanding IDs; it
+does not recensus this catalog or add a criterion.
 
 ## Standing Criteria (MUST RUN — the regression floor)
 
@@ -15,10 +17,41 @@ time; the exploratory mandate and the promotion ratchet keep the catalog alive.
 was refreshed" is verified against the artifact itself, not trusted — claim by claim, no sampling
 of the load-bearing ones.
 
+  A claim that "the tree contains only intended changes" is refuted against BOTH content and mode
+  rows: `git status --short` plus `git diff HEAD --numstat` for content, and `git diff HEAD
+  --summary` for mode-only changes — exec-bit drops on hooks/scripts are behaviorally meaningful
+  (git skips non-executable hooks) and silent to content diffs. Run the check in the same
+  filesystem view as the claimed change set (a 9P/Windows client can show mode rows the WSL-side
+  tree does not carry).
+
+  The same claim must also cover **every nonignored untracked path**, not only the `??` name shown
+  by status. Enumerate those paths with a NUL-delimited Git inventory (for example,
+  `git ls-files --others --exclude-standard -z`) or an equivalently path-safe API; never pass the
+  result through shell word splitting or newline parsing. For every exact path, in that same
+  filesystem view:
+
+  - use `lstat`-equivalent semantics and record the filesystem type plus numeric mode and any
+    executable significance;
+  - for a regular file, record its size and inspect bounded content: escaped/bounded text bytes,
+    or an explicit binary/sensitive classification with a content hash instead of an unlimited
+    raw dump;
+  - for a symlink, record the link itself and its link-target text without following the target;
+  - for a directory or special object, record its type and explicitly accept, reject, or route it
+    for further inspection rather than opening it as an ordinary file; and
+  - record whether the object is intended or unintended in the candidate.
+
+  If an object disappears, changes identity, or cannot be inspected between inventory and
+  evidence capture, report that race or limitation explicitly and re-establish a consistent view;
+  do not silently skip it or make a complete-tree claim. This is a semantic review obligation,
+  not a second verifier or permission to dump arbitrary untracked bytes into a report.
+
 - Catching evidence, three separate engagements (260703-L8): review 3 caught a **hand-aligned
-  test** behind a wiring claim; cycle 6's closeout gate caught **"refreshed" overviews that were
+  test** behind a wiring claim; cycle 6's scoped handoff caught **"refreshed" overviews that were
   history-only**; review 4 caught the **OWNER's own canvas overclaim** (L8 decision log, cycle-7
-  entry) — builder reports and owner claims fail the same way.
+  entry) — builder reports and owner claims fail the same way. Fourth engagement
+  (260815-DAG-L12): 10 files carried mode-only changes (100755→100644, incl.
+  `.githooks/pre-commit`) absent from the worker's file list, contradicting "the tree contains
+  only intended changes".
 
 ### RV-2 — CLASS-completeness *(promoted to standing at 260703-L18 — 2 catches)*
 
@@ -66,8 +99,8 @@ A green result or measurement without matching target provenance is not evidence
 
 ## Candidate Criteria (seeded exploratory — one catching engagement each; promote at ≥2)
 
-Run under the exploratory mandate; a candidate is proposed for promotion into the standing list
-when it catches in a second engagement (the ratchet below).
+Run under the exploratory mandate during a baseline review only; a candidate is proposed for
+promotion into the standing list when it catches in a second engagement (the ratchet below).
 
 ### RV-3 — Partial-fix-creates-falsehoods *(candidate — 1 catch)*
 
@@ -82,18 +115,21 @@ after the change.
 
 ## Exploratory Mandate
 
-Beyond the standing list, the reviewer owes **novel lenses** (the brief sets N; default 2): ways
-THIS report could mislead that the catalog does not name yet. Every novel finding-class that
-survives refutation is proposed as a catalog amendment in the verdict.
+During a baseline review, beyond the standing list, the reviewer owes **novel lenses** (the brief sets
+N; default 2): ways THIS report could mislead that the catalog does not name yet. Every novel
+finding-class that survives refutation is proposed as a catalog amendment in the verdict. A
+Fix-verification has no novel-lens or new-catalog duty and cannot turn an observation outside
+the sealed issue list into a finding.
 
 ## Promotion Ratchet
 
-- A **candidate** criterion that catches a real defect in **≥2 separate engagements** is promoted
+- A **candidate** criterion that catches a real defect in **≥2 separate first-review engagements** is promoted
   into the standing list above, with its catching evidence cited — escaped bugs become permanent
   tests (RV-1 is itself the precedent: promoted on three catches). Promotion is proposed in the
   verdict and lands on the loop owner's acceptance.
 - A **standing** criterion that fires nothing for **N consecutive engagements** (default 5)
   demotes to spot-check.
-- A criterion that can be **mechanized graduates out of the catalog into a gate** — the closeout
-  body gate (which catches history-only "refreshes" at commit time, where prose requests did not)
+- A criterion that can be **mechanized graduates out of the catalog into a scoped diagnostic** —
+  the curator handoff check (which catches history-only "refreshes" before the Git transaction, where
+  prose requests did not)
   is the working example.

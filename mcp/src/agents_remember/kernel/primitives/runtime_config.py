@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import warnings
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agents_remember.errors import AgentsRememberError
@@ -19,6 +19,7 @@ from agents_remember.kernel.agentic_settings import (
     load_agentic_settings,
     parse_gate_delegation,
 )
+from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.gate_policy import DEFAULT_GATE_POLICY, GatePolicy
 from agents_remember.kernel.primitives.identity import (
@@ -78,6 +79,7 @@ class RepositoryScope:
     path: Path
     memory_root: Path | None = None
     contract_path: Path | None = None
+    certification_profile: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,10 @@ class McpRuntimeConfig:
     providers: dict[str, ProviderScope] = field(default_factory=dict)
     timeout_caps: dict[str, int] = field(default_factory=dict)
     benchmarks_enabled: bool = False
+    # Policy gate for sanctioned direct execution (branch-addressed
+    # series-contract bindings and the direct landing operation): explicit
+    # opt-ins that refuse unless this is enabled. Fail-closed default.
+    direct_execution_enabled: bool = False
     dashboard: DashboardSettings = field(default_factory=DashboardSettings)
     orchestration: OrchestrationSettings = field(default_factory=OrchestrationSettings)
     provider_degradation: ProviderDegradationSettings = field(
@@ -267,9 +273,13 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         coordination_root,
         workspace_root,
     )
+    _require_unique_repository_git_identities(repositories)
     providers = parse_providers(data.get("providers", {}), coordination_root, workspace_root)
     timeout_caps = parse_timeout_caps(data.get("timeoutCaps", {}))
     benchmarks_enabled = parse_benchmarks_enabled(data.get("benchmarksEnabled", False))
+    direct_execution_enabled = parse_direct_execution_enabled(
+        data.get("directExecutionEnabled", False)
+    )
     dashboard = parse_dashboard_settings(data.get("dashboard"))
     try:
         provider_degradation = parse_provider_degradation_settings(data.get("providerDegradation"))
@@ -292,6 +302,7 @@ def config_from_mapping(data: dict[str, Any], config_path: Path) -> McpRuntimeCo
         providers=providers,
         timeout_caps=timeout_caps,
         benchmarks_enabled=benchmarks_enabled,
+        direct_execution_enabled=direct_execution_enabled,
         dashboard=dashboard,
         orchestration=orchestration,
         provider_degradation=provider_degradation,
@@ -318,6 +329,7 @@ def _parse_repository_entry(
     )
     if contract_path is not None and not path_is_relative_to(contract_path, coordination_root):
         raise ConfigError(f"repository {repo_id} contractPath must be inside the coordinator root")
+    certification_profile = _optional_repository_profile_reference(repo_id, value)
     # memorySettingsIncludes was dead plumbing (parsed, never consumed); it was
     # removed with 260703-L13. A leftover key in an existing settings file is
     # tolerated-ignored like any other unknown repository field.
@@ -326,7 +338,35 @@ def _parse_repository_entry(
         path=repo_path,
         memory_root=memory_root,
         contract_path=contract_path,
+        certification_profile=certification_profile,
     )
+
+
+def _optional_repository_profile_reference(
+    repo_id: str,
+    value: dict[str, Any],
+) -> Path | None:
+    raw = value.get("certificationProfile")
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw:
+        raise ConfigError(
+            f"repository {repo_id} certificationProfile must be one non-empty relative path"
+        )
+    path = PurePosixPath(raw)
+    if (
+        path.is_absolute()
+        or not path.parts
+        or "\\" in raw
+        or (path.parts and len(path.parts[0]) >= 2 and path.parts[0][1] == ":")
+        or path.as_posix() != raw
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise ConfigError(
+            f"repository {repo_id} certificationProfile must be a canonical, "
+            "traversal-free repository-relative POSIX path"
+        )
+    return Path(*path.parts)
 
 
 def parse_repositories(
@@ -345,6 +385,53 @@ def parse_repositories(
             repo_id, value, coordination_root, workspace_root
         )
     return repositories
+
+
+def _require_unique_repository_git_identities(
+    repositories: dict[str, RepositoryScope],
+) -> None:
+    """Refuse two configured repository ids that own one physical Git repository."""
+
+    owners: dict[Path, tuple[str, str]] = {}
+    for repo_id, repository in repositories.items():
+        code_identity = _configured_git_identity(repository.path)
+        if code_identity is not None:
+            _claim_configured_git_identity(owners, code_identity, repo_id, "code")
+        memory_identity = (
+            _configured_git_identity(repository.memory_root)
+            if repository.memory_root is not None
+            else None
+        )
+        # An internal memory directory is intentionally part of the code repository, not
+        # a second external-memory authority edge.
+        if memory_identity is not None and memory_identity != code_identity:
+            _claim_configured_git_identity(owners, memory_identity, repo_id, "memory")
+
+
+def _configured_git_identity(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    result = run_git(path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip()
+    return Path(value).resolve() if value else None
+
+
+def _claim_configured_git_identity(
+    owners: dict[Path, tuple[str, str]],
+    identity: Path,
+    repo_id: str,
+    side: str,
+) -> None:
+    previous = owners.get(identity)
+    if previous is not None and previous[0] != repo_id:
+        raise ConfigError(
+            f"repository ids {previous[0]!r} ({previous[1]}) and {repo_id!r} ({side}) "
+            f"share Git common-dir {identity.as_posix()}; one physical repository must "
+            "have exactly one configured owner"
+        )
+    owners[identity] = (repo_id, side)
 
 
 def default_memory_root(repo_path: Path, coordination_root: Path, repo_id: str) -> Path:
@@ -435,6 +522,12 @@ def provider_runtime_name(provider_id: str) -> str:
         return names[provider_id]
     except KeyError as error:
         raise ConfigError(f"unsupported provider id: {provider_id}") from error
+
+
+def parse_direct_execution_enabled(raw: object) -> bool:
+    if not isinstance(raw, bool):
+        raise ConfigError("directExecutionEnabled must be a boolean")
+    return raw
 
 
 def parse_benchmarks_enabled(raw: object) -> bool:
@@ -696,6 +789,7 @@ def _checkout_runtime_config(
         repositories={"agents-remember": repository},
         providers={},
         benchmarks_enabled=False,
+        direct_execution_enabled=False,
         dashboard=DashboardSettings(auto_start=False),
         orchestration=OrchestrationSettings(),
         retirement=RetirementSettings(

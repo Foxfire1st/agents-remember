@@ -4,21 +4,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import cast
 
 from agents_remember.controlplane.operator_inbox_records import (
     OperatorInboxEntry,
     state_signal_landed,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.signal_routing import TaskHierarchy, is_seat_dead
+from agents_remember.controlplane.seats import current_seat_occupant
+from agents_remember.controlplane.signal_routing import (
+    TaskHierarchy,
+    derive_signal_owner,
+    is_seat_dead,
+)
+from agents_remember.errors import SeatOccupancyError, StructuralRoutingError
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry, seat_at_turn_boundary
 from agents_remember.serving.agent_notifier_models import AgentNotifierFinding
 from agents_remember.serving.inbox_delivery import target_session_for_entry
 from agents_remember.serving.ports import TerminalCatalogPort
+from agents_remember.tasks.document_refs import TaskDocumentRefError
 
 NON_REACTION_WINDOW_SECONDS = 300.0
 COMPOUND_IDLE_SWEEP_LATENCY_SECONDS = 10.0
-_LEAF_ROLES = frozenset({"worker", "reviewer", "curator"})
+_LEAF_ROLES = frozenset({"worker", "curator"})
 
 
 @dataclass(frozen=True)
@@ -47,12 +55,31 @@ def _manager_owned_subordinate(
 
     manager_document = manager.binding_task_document_ref
     entry_document = entry.binding_task_document_ref
+    unstamped_manager_reviewer = (
+        entry.binding_role == "reviewer"
+        and entry.structural_parent_task_document_ref is None
+        and entry.structural_parent_role is None
+        and entry_document is not None
+        and hierarchy.altitude(entry_document) == "leaf"
+        and hierarchy.parent(entry_document) == manager_document
+    )
+    stamped_manager_reviewer = (
+        entry.binding_role == "reviewer"
+        and entry.structural_parent_role == "manager"
+        and entry.structural_parent_task_document_ref == manager_document
+    )
     return bool(
         manager_document is not None
         and entry_document is not None
         and manager.binding_role == "manager"
-        and entry.binding_role in _LEAF_ROLES
-        and hierarchy.parent(entry_document) == manager_document
+        and (
+            (
+                entry.binding_role in _LEAF_ROLES
+                and hierarchy.parent(entry_document) == manager_document
+            )
+            or unstamped_manager_reviewer
+            or stamped_manager_reviewer
+        )
     )
 
 
@@ -62,32 +89,72 @@ def _manager_for_subordinate(
     entry: TerminalCatalogEntry,
 ) -> TerminalCatalogEntry | None:
     document = entry.binding_task_document_ref
-    if document is None or entry.binding_role not in _LEAF_ROLES:
+    if document is None:
         return None
-    master = hierarchy.parent(document)
+    if entry.binding_role in _LEAF_ROLES:
+        master = hierarchy.parent(document)
+    elif entry.binding_role == "reviewer" and entry.structural_parent_role == "manager":
+        master = entry.structural_parent_task_document_ref
+    elif (
+        entry.binding_role == "reviewer"
+        and entry.structural_parent_task_document_ref is None
+        and entry.structural_parent_role is None
+    ):
+        altitude = hierarchy.altitude(document)
+        master = hierarchy.parent(document) if altitude == "leaf" else None
+    else:
+        return None
     if master is None:
         return None
-    primary = [
-        row
-        for row in catalog.list()
-        if row.status == "running"
-        and row.binding_role == "manager"
-        and row.task_document_ref == master
+    return current_seat_occupant(catalog.list(), document=master, role="manager")
+
+
+def _current_manager_rows(
+    rows: list[TerminalCatalogEntry],
+) -> list[TerminalCatalogEntry]:
+    """Select one current manager per canonical master seat from a running snapshot."""
+
+    documents = {
+        row.binding_task_document_ref
+        for row in rows
+        if row.binding_role == "manager" and row.binding_task_document_ref is not None
+    }
+    managers: list[TerminalCatalogEntry] = []
+    for document in documents:
+        try:
+            manager = cast(
+                TerminalCatalogEntry,
+                current_seat_occupant(rows, document=document, role="manager"),
+            )
+        except SeatOccupancyError:
+            # An observer must not choose between conflicting generations or abort unrelated
+            # signal delivery. The ambiguous canonical seat simply emits no derived idle signal.
+            continue
+        # Each document was projected from this same running-manager snapshot, so one
+        # primary or staged-replacement claimant exists unless the seat was ambiguous above.
+        managers.append(manager)
+    return managers
+
+
+def _running_harness_rows(catalog: TerminalCatalogPort) -> list[TerminalCatalogEntry]:
+    return [
+        entry for entry in catalog.list() if entry.kind == "harness" and entry.status == "running"
     ]
-    if len(primary) > 1:
-        raise ValueError(f"multiple managers claim {master.key}")
-    if primary:
-        return primary[0]
-    replacements = [
-        row
-        for row in catalog.list()
-        if row.status == "running"
-        and row.binding_role == "manager"
-        and row.replacement_for_task_document_ref == master
-    ]
-    if len(replacements) > 1:
-        raise ValueError(f"multiple replacement managers claim {master.key}")
-    return replacements[0] if replacements else None
+
+
+def _manager_idle_members(
+    hierarchy: TaskHierarchy,
+    running: list[TerminalCatalogEntry],
+    manager: TerminalCatalogEntry,
+) -> tuple[TerminalCatalogEntry, ...]:
+    return (
+        manager,
+        *(
+            entry
+            for entry in running
+            if entry.id != manager.id and _manager_owned_subordinate(hierarchy, manager, entry)
+        ),
+    )
 
 
 def compound_idle_sets(
@@ -96,21 +163,14 @@ def compound_idle_sets(
 ) -> dict[str, tuple[TerminalCatalogEntry, ...]]:
     """Every current manager whose complete running task-owned set is at a boundary."""
 
-    running = [
-        entry for entry in catalog.list() if entry.kind == "harness" and entry.status == "running"
-    ]
+    running = _running_harness_rows(catalog)
     sets: dict[str, tuple[TerminalCatalogEntry, ...]] = {}
-    for manager in (entry for entry in running if entry.binding_role == "manager"):
-        members = [manager]
-        members.extend(
-            entry
-            for entry in running
-            if entry.id != manager.id and _manager_owned_subordinate(hierarchy, manager, entry)
-        )
+    for manager in _current_manager_rows(running):
+        members = _manager_idle_members(hierarchy, running, manager)
         if len(members) == 1:
             continue
         if all(member.turn_state in {"turn-ended", "awaiting-input"} for member in members):
-            sets[manager.id] = tuple(members)
+            sets[manager.id] = members
     return sets
 
 
@@ -128,7 +188,11 @@ def compound_idle_signature(members: tuple[TerminalCatalogEntry, ...]) -> str:
 def state_signal_held_on_boundary(catalog: TerminalCatalogPort, entry: OperatorInboxEntry) -> bool:
     if entry.messageKind != "state-signal" or state_signal_landed(entry):
         return False
-    target = target_session_for_entry(catalog, entry)
+    try:
+        target = target_session_for_entry(catalog, entry)
+    except SeatOccupancyError:
+        # Ambiguity fences this row from redelivery but must not abort unrelated sweep work.
+        return True
     return target is not None and target.status == "running"
 
 
@@ -139,8 +203,19 @@ def evaluate_state_signal_findings(
     return [
         finding
         for entry in catalog.list()
-        if (finding := _state_signal_finding(catalog, hierarchy, entry)) is not None
+        if (finding := _safe_state_signal_finding(catalog, hierarchy, entry)) is not None
     ]
+
+
+def _safe_state_signal_finding(
+    catalog: TerminalCatalogPort,
+    hierarchy: TaskHierarchy,
+    entry: TerminalCatalogEntry,
+) -> AgentNotifierFinding | None:
+    try:
+        return _state_signal_finding(catalog, hierarchy, entry)
+    except (SeatOccupancyError, StructuralRoutingError, TaskDocumentRefError):
+        return None
 
 
 def current_state_signal_finding(
@@ -153,7 +228,7 @@ def current_state_signal_finding(
     entry = catalog.get(session_id)
     if entry is None:
         return None
-    finding = _state_signal_finding(catalog, hierarchy, entry)
+    finding = _safe_state_signal_finding(catalog, hierarchy, entry)
     if finding is None or finding.source_id != source_id:
         return None
     return entry, finding
@@ -164,11 +239,11 @@ def _state_signal_finding(
     hierarchy: TaskHierarchy,
     entry: TerminalCatalogEntry,
 ) -> AgentNotifierFinding | None:
-    manager = _manager_for_subordinate(catalog, hierarchy, entry)
+    owner_id = _notifier_subject_owner_id(catalog, hierarchy, entry)
     if not (
         entry.kind == "harness"
         and entry.status == "running"
-        and manager is not None
+        and owner_id is not None
         and entry.turn_state == "turn-ended"
         and entry.terminal_outcome in {"completed", "interrupted"}
         and entry.terminal_evidence_id is not None
@@ -226,8 +301,18 @@ def evaluate_non_reaction_findings(
     return [
         finding
         for entry in catalog.list()
-        if (finding := _non_reaction_finding(evaluation, entry)) is not None
+        if (finding := _safe_non_reaction_finding(evaluation, entry)) is not None
     ]
+
+
+def _safe_non_reaction_finding(
+    evaluation: _NonReactionEvaluation,
+    entry: TerminalCatalogEntry,
+) -> AgentNotifierFinding | None:
+    try:
+        return _non_reaction_finding(evaluation, entry)
+    except (SeatOccupancyError, StructuralRoutingError):
+        return None
 
 
 def current_non_reaction_finding(
@@ -243,7 +328,7 @@ def current_non_reaction_finding(
     if entry is None:
         return None
     current = runtime.inbox_store.current()
-    current_finding = _non_reaction_finding(
+    current_finding = _safe_non_reaction_finding(
         _NonReactionEvaluation(runtime, current, now, window),
         entry,
     )
@@ -256,15 +341,7 @@ def _non_reaction_finding(
     evaluation: _NonReactionEvaluation,
     entry: TerminalCatalogEntry,
 ) -> AgentNotifierFinding | None:
-    is_subject = (
-        entry.binding_role == "manager"
-        or _manager_for_subordinate(
-            evaluation.runtime.catalog,
-            evaluation.runtime.hierarchy,
-            entry,
-        )
-        is not None
-    )
+    is_subject = _is_non_reaction_subject(evaluation, entry)
     if not (
         entry.kind == "harness"
         and entry.status == "running"
@@ -291,6 +368,52 @@ def _non_reaction_finding(
     )
 
 
+def _is_non_reaction_subject(
+    evaluation: _NonReactionEvaluation,
+    entry: TerminalCatalogEntry,
+) -> bool:
+    """Whether this exact generation currently owns a manager or subordinate seat."""
+
+    document = entry.binding_task_document_ref
+    current_manager = (
+        current_seat_occupant(evaluation.runtime.catalog.list(), document=document, role="manager")
+        if entry.binding_role == "manager" and document is not None
+        else None
+    )
+    if current_manager is not None and current_manager.id == entry.id:
+        return True
+    if entry.binding_role not in {*_LEAF_ROLES, "reviewer"}:
+        return False
+    return (
+        _notifier_subject_owner_id(
+            evaluation.runtime.catalog,
+            evaluation.runtime.hierarchy,
+            entry,
+        )
+        is not None
+    )
+
+
+def _notifier_subject_owner_id(
+    catalog: TerminalCatalogPort,
+    hierarchy: TaskHierarchy,
+    entry: TerminalCatalogEntry,
+) -> str | None:
+    """Resolve only the subordinate classes the notifier historically owns, plus all reviewers."""
+
+    if entry.binding_role in _LEAF_ROLES:
+        manager = _manager_for_subordinate(catalog, hierarchy, entry)
+        return manager.id if manager is not None else None
+    if entry.binding_role != "reviewer":
+        return None
+    return derive_signal_owner(
+        catalog,
+        hierarchy,
+        sender_agent_id=entry.id,
+        message_kind="state-signal",
+    ).agent_id
+
+
 def _oldest_landed_episode(
     current: dict[str, OperatorInboxEntry], entry: TerminalCatalogEntry
 ) -> tuple[OperatorInboxEntry, datetime] | None:
@@ -314,6 +437,25 @@ def _oldest_landed_episode(
     return oldest, accepted_at
 
 
+def _boundary_follows_last_attempt(entry: OperatorInboxEntry, boundary_at: datetime) -> bool:
+    """Whether this boundary is a new delivery opportunity for one pending row.
+
+    A row carrying no attempt clock has nothing to compare against. Only a state-signal row
+    reaches that state with its delivery still owned by this boundary path: rebinding it to a
+    replacement occupant deliberately restarts its attempt clock, so the replacement's current
+    boundary is that row's first admissible one. Every other no-attempt row keeps the ordinary
+    redelivery path and is not a drain candidate.
+    """
+
+    if entry.lastAttemptAt is None:
+        return entry.messageKind == "state-signal"
+    try:
+        attempted_at = datetime.fromisoformat(entry.lastAttemptAt)
+    except ValueError:
+        return False
+    return boundary_at > attempted_at
+
+
 def evaluate_boundary_drain_findings(
     catalog: TerminalCatalogPort,
     current: dict[str, OperatorInboxEntry],
@@ -326,9 +468,11 @@ def evaluate_boundary_drain_findings(
             continue
         if entry.agentId is not None and is_seat_dead(catalog, entry.agentId):
             continue
-        if entry.lastAttemptAt is None:
+        try:
+            target = target_session_for_entry(catalog, entry)
+        except SeatOccupancyError:
+            # This row remains pending until its own canonical seat becomes unambiguous.
             continue
-        target = target_session_for_entry(catalog, entry)
         if (
             target is None
             or not seat_at_turn_boundary(target)
@@ -337,10 +481,9 @@ def evaluate_boundary_drain_findings(
             continue
         try:
             boundary_at = datetime.fromisoformat(target.turn_state_changed_at)
-            attempted_at = datetime.fromisoformat(entry.lastAttemptAt)
         except ValueError:
             continue
-        if boundary_at <= attempted_at:
+        if not _boundary_follows_last_attempt(entry, boundary_at):
             continue
         findings.append(
             AgentNotifierFinding(

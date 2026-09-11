@@ -11,7 +11,7 @@ import json
 import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TypeVar, cast, get_args
+from typing import cast, get_args
 
 from agents_remember.controlplane.durable_store import SCHEMA_VERSION, schema_version_supported
 from agents_remember.errors import AgentsRememberError
@@ -85,8 +85,6 @@ DEFAULT_CLOSEOUT_STATUS: CloseoutStatus = "not-started"
 DEFAULT_INTEGRATION_STATUS: IntegrationStatus = "not-started"
 DEFAULT_CLEANUP_STATUS: CleanupStatus = "pending"
 
-_Cell = TypeVar("_Cell", bound=str)
-
 
 class ContractError(AgentsRememberError):
     """Raised when a worktree contract cannot be parsed or validated."""
@@ -103,13 +101,13 @@ def _scalar(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def _vocabulary_cell(
+def _vocabulary_cell[Cell: str](
     raw: str,
-    vocabulary: frozenset[_Cell],
+    vocabulary: frozenset[Cell],
     field_name: str,
-    fallback: _Cell,
+    fallback: Cell,
     quarantined: list[str],
-) -> _Cell:
+) -> Cell:
     """One parsed front-matter cell, narrowed onto the vocabulary it must belong to.
 
     Total on purpose. The contract file is untrusted input -- hand-edited, written by an
@@ -135,7 +133,7 @@ def _vocabulary_cell(
     if not value:
         return fallback
     if value in vocabulary:
-        return cast(_Cell, value)
+        return cast(Cell, value)
     quarantined.append(f"{field_name}={value!r} read as {fallback!r}")
     return fallback
 
@@ -389,7 +387,7 @@ def default_contract(
         lifecycle_id=leaf.lifecycle_id,
         leaf_id=persisted_leaf,
         parent_task_name=task.parent_task_name,
-        parent_contract_path=task.parent_contract_path or series_contract_path(task_root),
+        parent_contract_path=task.parent_contract_path,
     )
 
 
@@ -417,7 +415,7 @@ def default_series_contract(
         task_root=task_root,
         contract_path=contract_path,
         task_artifact=task_root / "task.md",
-        worktree_group=task_root / "enclosures",
+        worktree_group=worktree_group_for(task.coordination_root, task.repo_name, task.name),
         code_repo_path=code.repo_path,
         code_source_branch=code.source_branch,
         code_work_branch=code.work_branch,
@@ -455,9 +453,7 @@ def load_contract(path: Path) -> WorktreeContract:
     """
     if not path.exists():
         raise ContractError(f"worktree contract does not exist: {path}")
-    front_matter = _extract_front_matter(path.read_text(encoding="utf-8"), path)
-    data = _parse_limited_yaml(front_matter)
-    contract = _contract_from_data(data, path)
+    contract = parse_contract_text(path.read_text(encoding="utf-8"), path=path)
     if contract.unknown_cells:
         logger.warning(
             "worktree contract %s carries %d cell(s) outside their vocabulary: %s",
@@ -465,14 +461,29 @@ def load_contract(path: Path) -> WorktreeContract:
             len(contract.unknown_cells),
             "; ".join(contract.unknown_cells),
         )
+    return contract
+
+
+def parse_contract_text(text: str, *, path: Path) -> WorktreeContract:
+    """Parse exact retained contract bytes without inventing a temporary-file authority."""
+
+    front_matter = _extract_front_matter(text, path)
+    data = _parse_limited_yaml(front_matter)
+    contract = _contract_from_data(data, path)
     validate_contract(contract, path=path)
     return contract
 
 
+def contract_publication_text(path: Path, contract: WorktreeContract) -> str:
+    """Return the exact canonical UTF-8 text that :func:`write_contract` publishes."""
+
+    normalized = normalize_contract_leaf_id(contract)
+    validate_contract(normalized, path=path)
+    return contract_to_text(normalized)
+
+
 def write_contract(path: Path, contract: WorktreeContract) -> None:
-    contract = normalize_contract_leaf_id(contract)
-    validate_contract(contract, path=path)
-    atomic_write_text(path, contract_to_text(contract))
+    atomic_write_text(path, contract_publication_text(path, contract))
 
 
 def heal_contract_leaf_ids(coordination_root: Path, *, dry_run: bool = False) -> dict[str, object]:

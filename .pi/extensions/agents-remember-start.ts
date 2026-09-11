@@ -55,8 +55,10 @@ export default function (pi: Pi): void {
       "Otherwise you are the developer-facing **free chat** session: read",
       `\`${WORKSPACE_ROOT}/ar-coordination/AGENTS.md\` and treat those rules as workspace`,
       "instructions. Answer research inline; for role-shaped work, create or resolve the",
-      "durable sprint and first leaf, then open its sprint-bound architect seat. Free chat",
-      "never becomes a global architect identity."
+      "durable sprint and first leaf, compile the canonical architect brief, then call",
+      "`dispatch_agent` once on the sprint document with role `architect`. Hand over after",
+      "that exact brief is durable. Free chat never becomes a global architect identity",
+      "and never calls a session primitive."
     ].join("\n");
 
     return {

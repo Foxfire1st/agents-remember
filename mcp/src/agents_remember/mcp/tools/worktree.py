@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.application.task_ref import TaskRef
+from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_tools import (
     DEFAULT_START_EXECUTION,
     DEFAULT_TASK_BASES,
     CloseoutApproval,
     CloseoutCommitMessages,
+    OperationControlRequest,
     StartExecution,
     TaskBases,
     TaskIdentity,
@@ -20,12 +21,17 @@ from agents_remember.application.worktree_tools import (
     worktree_closeout_apply_tool,
     worktree_closeout_preview_tool,
     worktree_integrate_tool,
-    worktree_operation_cancel_tool,
+    worktree_operation_control_tool,
     worktree_status_tool,
     worktree_sync_tool,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.lifecycles.operation import IntegrateStrategy
+from agents_remember.models.certification.corrective import RedCatalogDisposition
+from agents_remember.models.declared_caller import DeclaredCaller
+from agents_remember.models.lifecycles.operation import (
+    IntegrateStrategy,
+)
+from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
 
 from .base import _tool_payload
 
@@ -47,7 +53,8 @@ def worktree_sync_payload(
     config: McpRuntimeConfig,
     contract_path: str,
     *,
-    memory_sync_choice: str | None = None,
+    memory_sync_choice: MemorySyncChoice | None = None,
+    resolution_action: SyncResolutionAction | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -56,6 +63,7 @@ def worktree_sync_payload(
             config,
             contract_path=contract_path,
             memory_sync_choice=memory_sync_choice,
+            resolution_action=resolution_action,
             dry_run=dry_run,
         ),
     )
@@ -73,8 +81,16 @@ def worktree_attach_payload(
     )
 
 
-def worktree_status_payload(config: McpRuntimeConfig, task: TaskRef) -> dict[str, Any]:
-    return _tool_payload("worktree_status", worktree_status_tool(config, task))
+def worktree_status_payload(
+    config: McpRuntimeConfig,
+    task: TaskRef,
+    *,
+    caller: DeclaredCaller | None = None,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "worktree_status",
+        worktree_status_tool(config, task, caller=caller),
+    )
 
 
 def worktree_closeout_preview_payload(
@@ -93,10 +109,18 @@ def worktree_closeout_apply_payload(
     contract_path: str,
     messages: CloseoutCommitMessages,
     approval: CloseoutApproval,
+    *,
+    corrective_dispositions: tuple[RedCatalogDisposition, ...] = (),
 ) -> dict[str, Any]:
     return _tool_payload(
         "worktree_closeout_apply",
-        worktree_closeout_apply_tool(config, contract_path, messages, approval),
+        worktree_closeout_apply_tool(
+            config,
+            contract_path,
+            messages,
+            approval,
+            corrective_dispositions=corrective_dispositions,
+        ),
     )
 
 
@@ -120,23 +144,13 @@ def worktree_integrate_payload(
     )
 
 
-def worktree_operation_cancel_payload(
+def worktree_operation_control_payload(
     config: McpRuntimeConfig,
-    contract_path: str,
-    *,
-    operation_kind: str,
-    intent_note: str,
-    dry_run: bool = False,
+    request: OperationControlRequest,
 ) -> dict[str, Any]:
     return _tool_payload(
-        "worktree_operation_cancel",
-        worktree_operation_cancel_tool(
-            config,
-            contract_path=contract_path,
-            operation_kind=operation_kind,
-            intent_note=intent_note,
-            dry_run=dry_run,
-        ),
+        "worktree_operation_control",
+        worktree_operation_control_tool(config, request),
     )
 
 

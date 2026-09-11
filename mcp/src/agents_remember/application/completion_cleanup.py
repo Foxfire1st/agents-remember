@@ -77,7 +77,7 @@ def _retire_reported_leaf_seats(
     task_document_ref: TaskDocumentRef,
     closure: SeatClosure,
 ) -> dict[str, list[str]]:
-    """Retire eligible leaf seats after the durable turn-report ordering barrier."""
+    """Retire eligible leaf seats after the durable turn-report ordering blocker."""
     reports = OperatorInboxStore(observer_root(config)).current().values()
     reported_sessions = {
         report.senderAgentId
@@ -119,7 +119,7 @@ def _completion_candidates(
     return [
         entry
         for entry in catalog.list(include_terminated=True)
-        if entry.task_document_ref == task_document_ref
+        if entry.binding_task_document_ref == task_document_ref
         and entry.status != "terminated"
         and entry.binding_role in CLOSABLE_LEAF_ROLES
     ]

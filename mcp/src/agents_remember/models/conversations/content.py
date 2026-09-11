@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
@@ -108,7 +108,7 @@ class UnknownVendorBlock(WireModel):
     evidence_ref: NonEmptyText
 
 
-ConversationContentBlock: TypeAlias = Annotated[
+type ConversationContentBlock = Annotated[
     MarkdownBlock
     | TextBlock
     | ThinkingBlock

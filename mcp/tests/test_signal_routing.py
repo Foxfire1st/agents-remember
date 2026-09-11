@@ -38,6 +38,9 @@ class _Hierarchy:
             SPRINT: None,
         }[ref]
 
+    def altitude(self, ref: TaskDocumentRef) -> str:
+        return "leaf" if ref in {LEAF, PARALLEL_LEAF} else "master" if ref == MASTER else "sprint"
+
 
 class SignalRoutingTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -102,6 +105,45 @@ class SignalRoutingTests(unittest.TestCase):
 
         self.assertEqual(owner.agent_id, "manager-new")
         self.assertEqual(owner.task_document_ref, MASTER)
+
+    def test_polymorphic_reviewer_routes_to_its_plane_stamped_current_parent(self) -> None:
+        cases = (
+            ("master-reviewer", MASTER, MASTER, "manager"),
+            ("plan-reviewer", SPRINT, SPRINT, "architect"),
+            ("super-reviewer", SPRINT, SPRINT, "orchestrator"),
+        )
+        for reviewer_id, document, parent_document, parent_role in cases:
+            with self.subTest(reviewer=reviewer_id):
+                self._upsert(parent_role, task_document_ref=parent_document, seat_role=parent_role)
+                self._upsert(
+                    reviewer_id,
+                    task_document_ref=document,
+                    seat_role="reviewer",
+                    structural_parent_task_document_ref=parent_document,
+                    structural_parent_role=parent_role,
+                )
+                owner = derive_signal_owner(
+                    self.catalog,
+                    self.hierarchy,
+                    sender_agent_id=reviewer_id,
+                    message_kind="turn-report",
+                )
+                self.assertEqual(owner.agent_id, parent_role)
+                self.assertEqual(owner.task_document_ref, parent_document)
+
+    def test_unstamped_master_reviewer_does_not_invent_a_manager_parent(self) -> None:
+        self._upsert("manager", task_document_ref=MASTER, seat_role="manager")
+        self._upsert("reviewer", task_document_ref=MASTER, seat_role="reviewer")
+
+        with self.assertRaisesRegex(
+            StructuralRoutingError, "master reviewer .* has no plane-stamped structural parent"
+        ):
+            derive_signal_owner(
+                self.catalog,
+                self.hierarchy,
+                sender_agent_id="reviewer",
+                message_kind="turn-report",
+            )
 
     def test_missing_manager_never_falls_through_to_orchestrator(self) -> None:
         self._upsert("orchestrator", task_document_ref=SPRINT, seat_role="orchestrator")

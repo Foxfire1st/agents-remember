@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from tempfile import TemporaryDirectory
+from typing import Any, Literal
 
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.git_command import run_git, run_git_with_index
@@ -30,29 +31,28 @@ def require_git(repo: Path, args: list[str]) -> str:
 
 
 def worktree_candidate_tree(repo: Path, index_path: Path) -> str:
-    """Hash the full add-all candidate without touching the worktree's real index."""
+    """Hash the full add-all candidate through one invocation-owned Git index."""
+    # The caller selects a scratch namespace; every observation owns its physical index.
     index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.unlink(missing_ok=True)
-    try:
+    with TemporaryDirectory(prefix=f".{index_path.name}-", dir=index_path.parent) as temporary:
+        isolated_index = Path(temporary) / "index"
         for action, args in (
             ("seed candidate index", ["read-tree", "HEAD"]),
             ("materialize candidate tree", ["add", "-A"]),
         ):
-            result = run_git_with_index(repo, args, index_path)
+            result = run_git_with_index(repo, args, isolated_index)
             if result.returncode != 0:
                 raise RuntimeError(
                     f"could not {action}: "
                     f"{_transport_safe_git_diagnostic(result.stderr.strip() or result.stdout.strip())}"
                 )
-        result = run_git_with_index(repo, ["write-tree"], index_path)
+        result = run_git_with_index(repo, ["write-tree"], isolated_index)
         if result.returncode != 0:
             raise RuntimeError(
                 "could not resolve candidate tree: "
                 f"{_transport_safe_git_diagnostic(result.stderr.strip() or result.stdout.strip())}"
             )
         return result.stdout.strip()
-    finally:
-        index_path.unlink(missing_ok=True)
 
 
 def current_branch(repo: Path) -> str:
@@ -63,8 +63,25 @@ def head_commit(repo: Path, ref: str = "HEAD") -> str:
     return require_git(repo, ["rev-parse", ref])
 
 
+def local_branch_ref(branch: str) -> str:
+    """Return the explicit local-ref spelling for a branch authority cell."""
+
+    normalized = branch.removeprefix("refs/heads/")
+    if not normalized or normalized == "HEAD" or normalized.startswith("refs/"):
+        raise RuntimeError(f"invalid local branch authority: {branch!r}")
+    return f"refs/heads/{normalized}"
+
+
+def branch_commit(repo: Path, branch: str) -> str:
+    """Resolve one exact local branch, never a same-named tag or remote ref."""
+
+    return require_git(repo, ["rev-parse", "--verify", f"{local_branch_ref(branch)}^{{commit}}"])
+
+
 def branch_exists(repo: Path, branch: str) -> bool:
-    return run_git(repo, ["rev-parse", "--verify", "--quiet", branch]).returncode == 0
+    return (
+        run_git(repo, ["show-ref", "--verify", "--quiet", local_branch_ref(branch)]).returncode == 0
+    )
 
 
 def repository_identity(repo: Path | None) -> Path | None:
@@ -109,8 +126,34 @@ def ensure_git_identity(repo: Path) -> None:
 
 
 def ensure_worktree(
-    repo: Path, worktree: Path, branch: str, source_branch: str, dry_run: bool
+    contract: WorktreeContract,
+    *,
+    side: Literal["code", "memory"],
+    dry_run: bool,
 ) -> str:
+    """Create one exact contract-owned ordinary worktree after live authority validation."""
+
+    from agents_remember.worktrees.integration.integration_branch_authority import (  # noqa: PLC0415
+        require_ordinary_worktree,
+    )
+
+    if contract.kind != "leaf":
+        raise RuntimeError("worktree creation requires an ordinary leaf contract")
+    require_ordinary_worktree(contract, operation="worktree_start")
+    if side == "code":
+        repo = contract.code_repo_path
+        worktree = contract.code_worktree
+        branch = contract.code_work_branch
+        source_branch = contract.code_source_branch
+    elif contract.memory_mode == "external" and contract.memory_repo_path is not None:
+        if contract.memory_worktree is None:
+            raise RuntimeError("external-memory worktree authority is missing its target path")
+        repo = contract.memory_repo_path
+        worktree = contract.memory_worktree
+        branch = contract.memory_work_branch
+        source_branch = contract.memory_source_branch
+    else:
+        raise RuntimeError("memory worktree creation requires an external-memory contract")
     if worktree.exists():
         return "existing"
     if dry_run:
@@ -143,11 +186,11 @@ def run_pre_commit_hook_if_configured(repo: Path) -> bool:
 
 
 def commit_verified_staged(repo: Path, message: str) -> str:
-    """Commit exactly the staged tree a preceding strict gate certified.
+    """Commit exactly the staged tree without invoking repository hooks.
 
-    The caller has already staged and verified the index.  In particular, this helper
-    must neither restage the working tree nor rerun a hook after the gate's pytest-final
-    subprocess.
+    The caller has already staged and verified the intended index. In particular, this
+    helper must neither restage the working tree nor rerun a hook after the caller's
+    transaction or quality preparation.
     """
     if run_git(repo, ["diff", "--cached", "--quiet"]).returncode == 0:
         return head_commit(repo)

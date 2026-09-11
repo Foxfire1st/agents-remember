@@ -3,7 +3,8 @@
 Incident-#1 shape (a worker finishes without posting an inbox row and the manager
 still receives the done signal), origin attribution, busy-manager boundary hold with
 exactly one landing, dedupe across re-projection, owner rebinding after seat
-replacement, idle flap re-arm, and the non-reaction residue fact.
+replacement, idle flap re-arm, the non-reaction residue fact, and the open-turn
+boundary where a still-awaiting seat reports nothing to its owner.
 """
 
 from __future__ import annotations
@@ -13,9 +14,10 @@ import unittest
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 from unittest import mock
 
+from agents_remember.controlplane import signal_routing as signal_routing_module
 from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
 from agents_remember.controlplane.expectation_rows import ExpectationRowStore
 from agents_remember.controlplane.operator_inbox_records import (
@@ -28,31 +30,16 @@ from agents_remember.controlplane.operator_inbox_records import (
     state_signal_landed,
 )
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
-from agents_remember.controlplane.operator_inbox_transitions import RedeliveryFloor
 from agents_remember.controlplane.signal_routing import RoutedOwner
 from agents_remember.models.conversations.control_wire import SubmissionReceipt
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.observer.store import EventStore
+from agents_remember.serving import _agent_notifier_actions as notifier_actions
 from agents_remember.serving._agent_notifier_actions import act_on_finding
 from agents_remember.serving.agent_notifier import AgentNotifierContext, run_agent_notifier_sweep
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatStore
-from agents_remember.serving.agent_notifier_models import AgentNotifierFinding
-from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
-from agents_remember.serving.inbox_delivery import (
-    DeliveryAdmission,
-    InboxDeliveryLog,
-    deliver_inbox_entry,
-)
-from agents_remember.serving.owner_signals import (
-    OwnerSignal,
-    OwnerSignalOptions,
-    _post_owner_signal,
-)
-from agents_remember.serving.seat_turn_truth import record_non_reaction_emitted
 from agents_remember.serving.state_signals import (
     NonReactionRuntime,
-    current_non_reaction_finding,
-    current_state_signal_finding,
     evaluate_non_reaction_findings,
     evaluate_state_signal_findings,
 )
@@ -61,15 +48,11 @@ from agents_remember.serving.terminal_catalog import TerminalCatalog, TerminalCa
 from agents_remember.serving.terminal_paste import PasteResult, TerminalPaster
 from agents_remember.serving.terminal_tmux import TmuxProbeResult
 from agents_remember.tasks import TaskDocument, write_task_doc
-from agents_remember.tasks.document_refs import TaskDocumentTopology
+from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 
 NOW = datetime(2026, 7, 13, 15, 41, 0, tzinfo=UTC)
-SPRINT = TaskDocumentRef(repository="repo-a", path="sprint/task.json")
 MASTER = TaskDocumentRef(repository="repo-a", path="260707_master/task.json")
 LEAF = TaskDocumentRef(repository="repo-a", path="260707_master/leaf-9.json")
-REBOUND_LEAF = TaskDocumentRef(repository="repo-a", path="260707_master/leaf-rebound.json")
-OTHER_MASTER = TaskDocumentRef(repository="repo-a", path="other-master/task.json")
-OTHER_LEAF = TaskDocumentRef(repository="repo-a", path="other-master/leaf.json")
 
 
 def _entry(
@@ -303,220 +286,6 @@ class StateSignalRelayTests(unittest.TestCase):
         run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=10))
         self.assertEqual(len(self._state_signals()), 1)
 
-    def test_dedupe_keys_per_seat_and_turn(self) -> None:
-        self.catalog.upsert(_manager())
-        self.catalog.upsert(_done_worker())
-        ctx = self._ctx()
-        run_agent_notifier_sweep(ctx, now=NOW)
-        self.assertEqual(len(self._state_signals()), 1)
-
-        self.catalog.upsert(replace(_done_worker(), terminal_evidence_id="turn-10"))
-        run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=10))
-        signals = self._state_signals()
-        self.assertEqual(len(signals), 2)
-        self.assertTrue(any("turn-9" in signal.response for signal in signals))
-        self.assertTrue(any("turn-10" in signal.response for signal in signals))
-
-    def test_current_finding_helpers_fail_closed_for_missing_and_malformed_truth(self) -> None:
-        self.assertIsNone(
-            current_state_signal_finding(
-                self.catalog,
-                self.topology,
-                session_id="missing",
-                source_id="missing-turn",
-            )
-        )
-        no_address = AgentNotifierFinding(kind="non-reaction-due", detail="missing")
-        self.assertIsNone(
-            current_non_reaction_finding(self._non_reaction_runtime(), no_address, now=NOW)
-        )
-        missing_seat = AgentNotifierFinding(
-            kind="non-reaction-due",
-            detail="missing-row",
-            session_id="missing",
-            source_id="missing-row",
-        )
-        self.assertIsNone(
-            current_non_reaction_finding(self._non_reaction_runtime(), missing_seat, now=NOW)
-        )
-
-        self.catalog.upsert(_manager())
-        malformed = replace(
-            _done_worker("reviewer-malformed"),
-            spawn_role="reviewer",
-            seat_role="reviewer",
-            terminal_outcome=None,
-            terminal_evidence_id=None,
-        )
-        self.catalog.upsert(malformed)
-        self.inbox_store.append(
-            self._landed_row(
-                entry_id="malformed-landed", target_id="reviewer-malformed"
-            ).model_copy(update={"adapterAcceptedAt": "not-a-timestamp"})
-        )
-        malformed_episode = AgentNotifierFinding(
-            kind="non-reaction-due",
-            detail="malformed-landed",
-            session_id="reviewer-malformed",
-            source_id="malformed-landed",
-        )
-        self.assertIsNone(
-            current_non_reaction_finding(self._non_reaction_runtime(), malformed_episode, now=NOW)
-        )
-
-    def test_state_signal_action_revalidates_every_current_terminal_predicate(self) -> None:
-        self.catalog.upsert(_manager())
-        mutations = {
-            "terminated": lambda entry: replace(entry, status="terminated"),
-            "exited": lambda entry: replace(entry, status="exited"),
-            "working": lambda entry: replace(entry, turn_state="working"),
-            "cross-master": lambda entry: replace(entry, task_document_ref=OTHER_LEAF),
-            "unbound": lambda entry: replace(entry, task_document_ref=None),
-            "evidence-replaced": lambda entry: replace(entry, terminal_evidence_id="turn-new"),
-        }
-
-        for name, mutate in mutations.items():
-            with self.subTest(name=name):
-                worker_id = f"worker-{name}"
-                worker = _done_worker(worker_id)
-                self.catalog.upsert(worker)
-                finding = next(
-                    item
-                    for item in evaluate_state_signal_findings(self.catalog, self.topology)
-                    if item.session_id == worker_id
-                )
-                self.catalog.upsert(mutate(worker))
-
-                result = act_on_finding(self._ctx(), finding, now=NOW)
-
-                self.assertEqual(result.outcome, "skipped")
-                self.assertEqual(self._state_signals(), [])
-                current = self.catalog.get(worker_id)
-                assert current is not None
-                self.assertIsNone(current.state_signal_emitted_for)
-
-    def test_actions_use_fresh_same_master_reparent_and_leaf_metadata(self) -> None:
-        self.catalog.upsert(_manager())
-
-        completed = _done_worker("worker-rebound")
-        self.catalog.upsert(completed)
-        completed_finding = next(
-            item
-            for item in evaluate_state_signal_findings(self.catalog, self.topology)
-            if item.session_id == completed.id
-        )
-        self.catalog.upsert(replace(_manager(), status="terminated"))
-        self.catalog.upsert(_manager("manager-2"))
-        self.catalog.upsert(replace(completed, task_document_ref=REBOUND_LEAF))
-        self.assertNotEqual(completed_finding.task_document_ref, REBOUND_LEAF)
-
-        result = act_on_finding(self._ctx(), completed_finding, now=NOW)
-
-        self.assertEqual(result.outcome, "unconfirmed")
-        completed_signal = next(
-            row for row in self._state_signals() if row.subjectAgentId == completed.id
-        )
-        self.assertEqual(completed_signal.agentId, "manager-2")
-        self.assertEqual(completed_signal.taskDocumentRef, MASTER)
-        self.assertEqual(completed_signal.subjectTaskDocumentRef, REBOUND_LEAF)
-        self.assertEqual(completed_signal.seatRole, "worker")
-
-        reviewer = replace(
-            _done_worker("reviewer-rebound"),
-            spawn_role="reviewer",
-            seat_role="reviewer",
-            terminal_outcome=None,
-            terminal_evidence_id=None,
-            turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
-        )
-        self.catalog.upsert(reviewer)
-        self.inbox_store.append(
-            self._landed_row(entry_id="reviewer-rebound-landed", target_id=reviewer.id)
-        )
-        reviewer_finding = next(
-            item
-            for item in evaluate_non_reaction_findings(
-                self.catalog,
-                self.topology,
-                self.inbox_store,
-                now=NOW,
-            )
-            if item.session_id == reviewer.id
-        )
-        self.catalog.upsert(replace(reviewer, task_document_ref=REBOUND_LEAF))
-        self.assertNotEqual(reviewer_finding.task_document_ref, REBOUND_LEAF)
-
-        result = act_on_finding(self._ctx(), reviewer_finding, now=NOW)
-
-        self.assertEqual(result.outcome, "unconfirmed")
-        reviewer_signal = next(
-            row for row in self._state_signals() if row.subjectAgentId == reviewer.id
-        )
-        self.assertEqual(reviewer_signal.agentId, "manager-2")
-        self.assertEqual(reviewer_signal.taskDocumentRef, MASTER)
-        self.assertEqual(reviewer_signal.subjectTaskDocumentRef, REBOUND_LEAF)
-        self.assertEqual(reviewer_signal.seatRole, "reviewer")
-
-    def test_owned_reviewer_and_curator_terminal_outcomes_remain_manager_visible(self) -> None:
-        self.catalog.upsert(_manager())
-        reviewer = replace(
-            _done_worker("reviewer-1"),
-            spawn_role="reviewer",
-            seat_role="reviewer",
-            terminal_evidence_id="review-turn",
-        )
-        curator = replace(
-            _done_worker("curator-1"),
-            spawn_role="curator",
-            seat_role="curator",
-            terminal_outcome="interrupted",
-            terminal_evidence_id="curator-turn",
-        )
-        self.catalog.upsert(reviewer)
-        self.catalog.upsert(curator)
-
-        run_agent_notifier_sweep(self._ctx(), now=NOW)
-        signals = self._state_signals()
-        self.assertEqual(len(signals), 2)
-        self.assertEqual({signal.agentId for signal in signals}, {"manager-1"})
-        self.assertEqual({signal.subjectAgentId for signal in signals}, {"reviewer-1", "curator-1"})
-
-    def test_reviewer_non_reaction_remains_manager_visible(self) -> None:
-        self.catalog.upsert(_manager())
-        reviewer = replace(
-            _done_worker("reviewer-1"),
-            spawn_role="reviewer",
-            seat_role="reviewer",
-            terminal_outcome=None,
-            terminal_evidence_id=None,
-            turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
-        )
-        self.catalog.upsert(reviewer)
-        self.inbox_store.append(
-            create_operator_inbox_entry(
-                InboxMessage(ask="nudge", response="resp"),
-                entry_id="reviewer-landed-1",
-                now=(NOW - timedelta(minutes=10)).isoformat(),
-                routing=InboxRouting(address=InboxAddress(agent_id="reviewer-1")),
-                poster=InboxPoster(created_by="system", created_via="cli"),
-            ).model_copy(
-                update={
-                    "state": "landed",
-                    "deliveryState": "delivered",
-                    "adapterDeliveryState": "accepted",
-                    "deliveredToSession": "reviewer-1",
-                    "adapterAcceptedAt": (NOW - timedelta(minutes=10)).isoformat(),
-                }
-            )
-        )
-
-        run_agent_notifier_sweep(self._ctx(), now=NOW)
-        signals = self._state_signals()
-        self.assertEqual(len(signals), 1)
-        self.assertEqual(signals[0].agentId, "manager-1")
-        self.assertEqual(signals[0].subjectAgentId, "reviewer-1")
-        self.assertIn("non-reaction", signals[0].ask)
-
     def test_non_reaction_action_revalidates_current_topology_and_landed_episode(self) -> None:
         self.catalog.upsert(_manager())
         mutations = {
@@ -578,40 +347,6 @@ class StateSignalRelayTests(unittest.TestCase):
                 current = self.catalog.get(worker_id)
                 assert current is not None
                 self.assertIsNone(current.non_reaction_emitted_for)
-
-    def test_non_reaction_routes_from_the_current_cross_master_binding(self) -> None:
-        self.catalog.upsert(_manager())
-        self.catalog.upsert(replace(_manager("manager-foreign"), task_document_ref=OTHER_MASTER))
-        reviewer = replace(
-            _done_worker("reviewer-cross-master"),
-            spawn_role="reviewer",
-            seat_role="reviewer",
-            terminal_outcome=None,
-            terminal_evidence_id=None,
-            turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
-        )
-        row = self._landed_row(entry_id="landed-cross-master", target_id=reviewer.id)
-        self.catalog.upsert(reviewer)
-        self.inbox_store.append(row)
-        finding = next(
-            item
-            for item in evaluate_non_reaction_findings(
-                self.catalog,
-                self.topology,
-                self.inbox_store,
-                now=NOW,
-            )
-            if item.session_id == reviewer.id
-        )
-        self.catalog.upsert(replace(reviewer, task_document_ref=OTHER_LEAF))
-
-        result = act_on_finding(self._ctx(), finding, now=NOW)
-
-        self.assertEqual(result.outcome, "unconfirmed")
-        signal = self._state_signals()[0]
-        self.assertEqual(signal.agentId, "manager-foreign")
-        self.assertEqual(signal.taskDocumentRef, OTHER_MASTER)
-        self.assertEqual(signal.subjectTaskDocumentRef, OTHER_LEAF)
 
     def test_busy_manager_holds_at_boundary_then_lands_exactly_once(self) -> None:
         manager = replace(
@@ -681,36 +416,6 @@ class StateSignalRelayTests(unittest.TestCase):
             self.assertEqual(submit.call_count, 1)
             self.assertEqual(len(self._state_signals()), 1)
 
-    def test_interrupted_signal_carries_developer_origin(self) -> None:
-        self.catalog.upsert(_manager())
-        self.catalog.upsert(
-            replace(
-                _done_worker(),
-                terminal_outcome="interrupted",
-                interrupted_by="developer",
-            )
-        )
-        run_agent_notifier_sweep(self._ctx(), now=NOW)
-        signals = self._state_signals()
-        self.assertEqual(len(signals), 1)
-        self.assertIn("interrupted", signals[0].ask)
-        self.assertIn("interrupted_by=developer", signals[0].response)
-        self.assertNotIn("completed", signals[0].ask)
-
-    def test_interrupted_signal_with_unknown_origin(self) -> None:
-        self.catalog.upsert(_manager())
-        self.catalog.upsert(
-            replace(
-                _done_worker(),
-                terminal_outcome="interrupted",
-                interrupted_by="unknown",
-            )
-        )
-        run_agent_notifier_sweep(self._ctx(), now=NOW)
-        signals = self._state_signals()
-        self.assertEqual(len(signals), 1)
-        self.assertIn("interrupted_by=unknown", signals[0].response)
-
     def test_owner_rebinding_after_manager_replacement(self) -> None:
         self.catalog.upsert(replace(_manager(), status="exited"))
         self.catalog.upsert(
@@ -730,132 +435,124 @@ class StateSignalRelayTests(unittest.TestCase):
         self.assertEqual(len(signals), 1)
         self.assertEqual(signals[0].agentId, "manager-2")
 
-    def test_idle_flap_rearms_for_a_new_turn(self) -> None:
-        manager = replace(
-            _manager(),
+    def test_master_exit_reviewer_signal_reaches_current_manager(self) -> None:
+        self.catalog.upsert(replace(_manager("manager-old"), status="exited"))
+        self.catalog.upsert(replace(_manager("manager-current"), turn_state="working"))
+        reviewer = _entry(
+            "reviewer-master-exit",
+            task_document_ref=MASTER,
+            spawn_role="reviewer",
+            seat_role="reviewer",
+            structural_parent_task_document_ref=MASTER,
+            structural_parent_role="manager",
             turn_state="turn-ended",
             turn_state_changed_at=NOW.isoformat(),
-            control_endpoint=Path("/tmp/manager.sock"),
-            control_state="ready",
+            terminal_outcome="completed",
+            terminal_outcome_at=NOW.isoformat(),
+            terminal_evidence_id="review-turn-1",
         )
-        self.catalog.upsert(manager)
-        self.catalog.upsert(_done_worker())
-        ctx = self._ctx()
-        with mock.patch(
-            "agents_remember.serving.inbox_delivery.submit_control_prompt",
-            side_effect=lambda _target, _text, submission: self._accepted_receipt(
-                submission.request_id
-            ),
-        ) as submit:
-            run_agent_notifier_sweep(ctx, now=NOW)
-            self.assertEqual(submit.call_count, 1)
+        self.catalog.upsert(reviewer)
 
-            # Manager goes active, then idle again, and the worker completes a new turn.
-            self.catalog.upsert(
-                replace(
-                    manager,
-                    turn_state="working",
-                    turn_state_changed_at=(NOW + timedelta(minutes=1)).isoformat(),
-                )
-            )
-            run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=2))
-            self.catalog.upsert(
-                replace(
-                    manager,
-                    turn_state="turn-ended",
-                    turn_state_changed_at=(NOW + timedelta(minutes=3)).isoformat(),
-                )
-            )
-            self.catalog.upsert(replace(_done_worker(), terminal_evidence_id="turn-10"))
-            run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=4))
-            self.assertEqual(submit.call_count, 2)
-            self.assertEqual(len(self._state_signals()), 2)
+        run_agent_notifier_sweep(self._ctx(), now=NOW)
 
-    def test_non_reaction_residue_relays_distinct_fact(self) -> None:
-        self.catalog.upsert(_manager())
-        self.catalog.upsert(
-            replace(
-                _done_worker(),
-                terminal_outcome=None,
-                terminal_evidence_id=None,
-                turn_state="turn-ended",
-                turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
-            )
-        )
-        landed = create_operator_inbox_entry(
-            InboxMessage(ask="nudge", response="resp"),
-            entry_id="landed-1",
-            now=(NOW - timedelta(minutes=10)).isoformat(),
-            routing=InboxRouting(address=InboxAddress(agent_id="worker-1")),
-            poster=InboxPoster(created_by="system", created_via="cli"),
-        ).model_copy(
-            update={
-                "state": "landed",
-                "deliveryState": "delivered",
-                "adapterDeliveryState": "accepted",
-                "deliveredToSession": "worker-1",
-                "adapterAcceptedAt": (NOW - timedelta(minutes=10)).isoformat(),
-            }
-        )
-        self.inbox_store.append(landed)
-        ctx = self._ctx()
-
-        run_agent_notifier_sweep(ctx, now=NOW)
         signals = self._state_signals()
         self.assertEqual(len(signals), 1)
-        self.assertIn("non-reaction", signals[0].ask)
-        self.assertIn("landed-1", signals[0].response)
-        self.assertNotIn("unconsumed", signals[0].response)
-        worker = self.catalog.get("worker-1")
-        assert worker is not None
-        self.assertEqual(worker.non_reaction_emitted_for, "landed-1")
+        signal = signals[0]
+        self.assertEqual(signal.agentId, "manager-current")
+        self.assertEqual(signal.taskDocumentRef, MASTER)
+        self.assertEqual(signal.recipientRole, "manager")
+        self.assertEqual(signal.subjectTaskDocumentRef, MASTER)
+        self.assertEqual(signal.subjectAgentId, "reviewer-master-exit")
+        self.assertEqual(signal.seatRole, "reviewer")
 
-        # Same episode: no second relay.
-        run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=1))
-        self.assertEqual(len(self._state_signals()), 1)
-
-    def test_non_reaction_dedupe_marker_suppresses_repeat(self) -> None:
+    def test_topology_refusal_fences_one_subject_and_keeps_unrelated_finding(self) -> None:
         self.catalog.upsert(_manager())
+        self.catalog.upsert(_done_worker("worker-malformed"))
         self.catalog.upsert(
-            replace(
-                _done_worker(),
-                terminal_outcome=None,
-                terminal_evidence_id=None,
-                turn_state="turn-ended",
-                turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
+            _done_worker(
+                "worker-valid",
+                task_document_ref=TaskDocumentRef(
+                    repository="repo-a", path="260707_master/leaf-rebound.json"
+                ),
             )
         )
-        landed = create_operator_inbox_entry(
-            InboxMessage(ask="nudge", response="resp"),
-            entry_id="landed-1",
-            now=(NOW - timedelta(minutes=10)).isoformat(),
-            routing=InboxRouting(address=InboxAddress(agent_id="worker-1")),
-            poster=InboxPoster(created_by="system", created_via="cli"),
-        ).model_copy(
-            update={
-                "state": "landed",
-                "deliveryState": "delivered",
-                "adapterDeliveryState": "accepted",
-                "deliveredToSession": "worker-1",
-                "adapterAcceptedAt": (NOW - timedelta(minutes=10)).isoformat(),
-            }
-        )
-        self.inbox_store.append(landed)
-        self.assertEqual(
-            len(
-                evaluate_non_reaction_findings(
-                    self.catalog, self.topology, self.inbox_store, now=NOW
-                )
-            ),
-            1,
-        )
-        record_non_reaction_emitted(self.catalog, "worker-1", "landed-1")
-        self.assertEqual(
-            evaluate_non_reaction_findings(self.catalog, self.topology, self.inbox_store, now=NOW),
-            [],
-        )
-        run_agent_notifier_sweep(self._ctx(), now=NOW)
+
+        class _RefusalTopology:
+            def __init__(self, status: str) -> None:
+                self.status = status
+
+            def parent(self, ref: TaskDocumentRef) -> TaskDocumentRef | None:
+                if ref == LEAF:
+                    raise TaskDocumentRefError(self.status, "test topology refusal")
+                return self._topology.parent(ref)
+
+            def altitude(self, ref: TaskDocumentRef) -> str:
+                return self._topology.altitude(ref)
+
+            _topology = self.topology
+
+        for status in ("task-document-parent-missing", "task-document-parent-ambiguous"):
+            with self.subTest(status=status):
+                findings = evaluate_state_signal_findings(self.catalog, _RefusalTopology(status))
+                self.assertEqual([finding.session_id for finding in findings], ["worker-valid"])
+
+    def test_owner_disappearance_after_revalidation_keeps_source_eligible(self) -> None:
+        manager = _manager("manager-race", turn_state="working")
+        self.catalog.upsert(manager)
+        self.catalog.upsert(_done_worker("worker-race"))
+        finding = evaluate_state_signal_findings(self.catalog, self.topology)[0]
+
+        real_derive_signal_owner = signal_routing_module.derive_signal_owner
+
+        def remove_current_manager(
+            catalog: TerminalCatalog,
+            hierarchy: TaskDocumentTopology,
+            *,
+            sender_agent_id: str | None,
+            message_kind: Literal["state-signal"],
+            task_document_ref: TaskDocumentRef | None = None,
+        ) -> RoutedOwner:
+            self.catalog.upsert(replace(manager, status="exited"))
+            return real_derive_signal_owner(
+                catalog,
+                hierarchy,
+                sender_agent_id=sender_agent_id,
+                message_kind=message_kind,
+                task_document_ref=task_document_ref,
+            )
+
+        with mock.patch.object(
+            notifier_actions,
+            "derive_signal_owner",
+            side_effect=remove_current_manager,
+        ):
+            result = act_on_finding(self._ctx(), finding, now=NOW)
+
+        self.assertEqual(result.outcome, "skipped")
+        self.assertIn("no routable owner", result.detail or "")
         self.assertEqual(self._state_signals(), [])
+        current = self.catalog.get("worker-race")
+        assert current is not None
+        self.assertIsNone(current.state_signal_emitted_for)
+
+    def test_action_topology_refusal_fences_subject_without_marker(self) -> None:
+        self.catalog.upsert(_manager("manager-refused", turn_state="working"))
+        self.catalog.upsert(_done_worker("worker-refused"))
+        finding = evaluate_state_signal_findings(self.catalog, self.topology)[0]
+
+        with mock.patch.object(
+            notifier_actions,
+            "derive_signal_owner",
+            side_effect=TaskDocumentRefError("task-document-parent-ambiguous", "test action"),
+        ):
+            result = act_on_finding(self._ctx(), finding, now=NOW)
+
+        self.assertEqual(result.outcome, "skipped")
+        self.assertIn("test action", result.detail or "")
+        self.assertEqual(self._state_signals(), [])
+        current = self.catalog.get("worker-refused")
+        assert current is not None
+        self.assertIsNone(current.state_signal_emitted_for)
 
     def test_no_done_signal_for_killed_or_hung_seats(self) -> None:
         self.catalog.upsert(_manager())
@@ -877,258 +574,33 @@ class StateSignalRelayTests(unittest.TestCase):
         run_agent_notifier_sweep(self._ctx(), now=NOW)
         self.assertEqual(self._state_signals(), [])
 
-    def test_no_signal_for_failed_or_unknown_terminal_outcomes(self) -> None:
+    def test_open_turn_never_wakes_the_owner_before_terminal_evidence(self) -> None:
+        """A turn that is still open is not completion truth.
+
+        The relay owns ended-turn reporting only. A seat waiting on an external condition keeps
+        its turn open, so it reports nothing to its owner even while stale adapter outcome fields
+        survive on its row; the same seat wakes its owner once its turn has ended.
+        """
+
         self.catalog.upsert(_manager())
-        self.catalog.upsert(replace(_done_worker("worker-failed"), terminal_outcome="failed"))
-        self.catalog.upsert(replace(_done_worker("worker-unknown"), terminal_outcome="unknown"))
         self.catalog.upsert(
             replace(
-                _done_worker("worker-no-evidence-id"),
-                terminal_outcome="completed",
-                terminal_evidence_id=None,
-            )
-        )
-        run_agent_notifier_sweep(self._ctx(), now=NOW)
-        self.assertEqual(self._state_signals(), [])
-
-    def test_repeat_fire_renews_the_same_row(self) -> None:
-        self.catalog.upsert(_manager())
-        self.catalog.upsert(_done_worker())
-        ctx = self._ctx()
-        run_agent_notifier_sweep(ctx, now=NOW)
-        first = self._state_signals()
-        self.assertEqual(len(first), 1)
-        row_id = first[0].id
-        # Simulate a lost marker between persist and marker write: re-projection re-fires
-        # and must renew the SAME durable row, never mint a sibling.
-        worker = self.catalog.get("worker-1")
-        assert worker is not None
-        self.catalog.upsert(replace(worker, state_signal_emitted_for=None))
-        run_agent_notifier_sweep(ctx, now=NOW + timedelta(seconds=10))
-        signals = self._state_signals()
-        self.assertEqual(len(signals), 1)
-        self.assertEqual(signals[0].id, row_id)
-        worker = self.catalog.get("worker-1")
-        assert worker is not None
-        self.assertEqual(worker.state_signal_emitted_for, "turn-9")
-
-    def test_non_reaction_ignores_young_and_malformed_rows(self) -> None:
-        self.catalog.upsert(_manager())
-        # Young and malformed accepted evidence on a worker does not fire.
-        self.catalog.upsert(
-            replace(
-                _done_worker("worker-young"),
-                terminal_outcome=None,
-                terminal_evidence_id=None,
-                turn_state="turn-ended",
+                _done_worker("worker-open"),
+                turn_state="working",
                 turn_state_changed_at=NOW.isoformat(),
             )
         )
-        self.catalog.upsert(
-            replace(
-                _done_worker("worker-bad-ts"),
-                terminal_outcome=None,
-                terminal_evidence_id=None,
-                turn_state="turn-ended",
-                turn_state_changed_at=(NOW - timedelta(minutes=10)).isoformat(),
-            )
-        )
-        for seat_id, accepted_at in (
-            ("worker-young", (NOW - timedelta(minutes=1)).isoformat()),
-            ("worker-bad-ts", "not-a-timestamp"),
-        ):
-            self.inbox_store.append(
-                create_operator_inbox_entry(
-                    InboxMessage(ask="nudge", response="resp"),
-                    entry_id=f"landed-{seat_id}",
-                    now=(NOW - timedelta(minutes=10)).isoformat(),
-                    routing=InboxRouting(address=InboxAddress(agent_id=seat_id)),
-                    poster=InboxPoster(created_by="system", created_via="cli"),
-                ).model_copy(
-                    update={
-                        "deliveryState": "delivered",
-                        "adapterDeliveryState": "accepted",
-                        "deliveredToSession": seat_id,
-                        "adapterAcceptedAt": accepted_at,
-                    }
-                )
-            )
-        run_agent_notifier_sweep(self._ctx(), now=NOW)
+        ctx = self._ctx()
+
+        run_agent_notifier_sweep(ctx, now=NOW)
         self.assertEqual(self._state_signals(), [])
 
-    def test_boundary_drain_skips_rows_without_a_fresh_boundary(self) -> None:
-        manager = replace(
-            _manager(),
-            turn_state="turn-ended",
-            turn_state_changed_at=(NOW + timedelta(minutes=1)).isoformat(),
-            control_endpoint=Path("/tmp/manager.sock"),
-            control_state="ready",
-        )
-        self.catalog.upsert(manager)
-        self.catalog.upsert(replace(manager, id="manager-no-boundary", turn_state_changed_at=None))
-        self.catalog.upsert(
-            replace(
-                manager,
-                id="manager-bad-boundary",
-                turn_state_changed_at="not-a-timestamp",
-            )
-        )
-        self.catalog.upsert(
-            replace(
-                manager,
-                id="manager-old-boundary",
-                turn_state_changed_at=(NOW - timedelta(minutes=3)).isoformat(),
-            )
-        )
-        for seat_id, row_id in (
-            ("manager-1", "row-fresh"),
-            ("manager-1", "row-none-last"),
-            ("manager-1", "row-consumed"),
-            ("manager-no-boundary", "row-no-boundary"),
-            ("manager-bad-boundary", "row-bad-boundary"),
-            ("manager-old-boundary", "row-old-boundary"),
-        ):
-            self.inbox_store.append(
-                create_operator_inbox_entry(
-                    InboxMessage(ask="nudge", response="resp", message_kind="message"),
-                    entry_id=row_id,
-                    now=NOW.isoformat(),
-                    routing=InboxRouting(address=InboxAddress(agent_id=seat_id)),
-                    poster=InboxPoster(created_by="system", created_via="cli"),
-                ).model_copy(
-                    update={
-                        "lastAttemptAt": (
-                            None
-                            if row_id == "row-none-last"
-                            else (NOW - timedelta(minutes=2)).isoformat()
-                        ),
-                        "nextAttemptAt": (NOW + timedelta(hours=1)).isoformat(),
-                        "state": "consumed" if row_id == "row-consumed" else "pending",
-                        "deliveryState": "queued",
-                        "adapterDeliveryState": "queued",
-                    }
-                )
-            )
-        self.inbox_store.append(
-            create_operator_inbox_entry(
-                InboxMessage(
-                    ask="Agent notifier observed state-signal: completed (turn-9)",
-                    response="resp",
-                    message_kind="state-signal",
-                ),
-                entry_id="row-landed",
-                now=NOW.isoformat(),
-                routing=InboxRouting(address=InboxAddress(agent_id="manager-1")),
-                poster=InboxPoster(created_by="agent-notifier", created_via="cli"),
-            ).model_copy(
-                update={
-                    "lastAttemptAt": (NOW - timedelta(minutes=2)).isoformat(),
-                    "deliveryState": "delivered",
-                    "adapterDeliveryState": "accepted",
-                    "adapterAcceptedAt": (NOW - timedelta(minutes=2)).isoformat(),
-                }
-            )
-        )
-        # row-fresh targets the fresh boundary: the only pushable one, drained by the sweep.
-        ctx = self._ctx()
-        with mock.patch(
-            "agents_remember.serving.inbox_delivery.submit_control_prompt",
-            side_effect=lambda _target, _text, submission: self._accepted_receipt(
-                submission.request_id
-            ),
-        ) as submit:
-            run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=2))
-        self.assertEqual(submit.call_count, 1)
-        self.assertEqual(self.inbox_store.current()["row-fresh"].adapterDeliveryState, "accepted")
-        for skipped in (
-            "row-none-last",
-            "row-consumed",
-            "row-no-boundary",
-            "row-bad-boundary",
-            "row-old-boundary",
-        ):
-            self.assertNotEqual(
-                self.inbox_store.current()[skipped].adapterDeliveryState, "accepted"
-            )
-
-    def test_boundary_drain_pushes_other_pending_rows_for_the_seat(self) -> None:
-        manager = replace(
-            _manager(),
-            turn_state="working",
-            turn_state_changed_at=(NOW - timedelta(minutes=1)).isoformat(),
-            control_endpoint=Path("/tmp/manager.sock"),
-            control_state="ready",
-        )
-        self.catalog.upsert(manager)
-        ordinary = create_operator_inbox_entry(
-            InboxMessage(ask="please proceed", response="resp", message_kind="message"),
-            entry_id="ordinary-1",
-            now=NOW.isoformat(),
-            routing=InboxRouting(address=InboxAddress(agent_id="manager-1")),
-            poster=InboxPoster(created_by="system", created_via="cli"),
-        )
-        self.inbox_store.append(ordinary)
-        # The ordinary row was attempted while the manager was mid-turn and held.
-        with mock.patch(
-            "agents_remember.serving.inbox_delivery.submit_control_prompt",
-            return_value=SubmissionReceipt(
-                request_id="ordinary-1",
-                acceptance="queued",
-                submitted_at=NOW.isoformat(),
-                accepted_at=NOW.isoformat(),
-            ),
-        ):
-            deliver_inbox_entry(
-                InboxDeliveryLog(
-                    store=self.inbox_store,
-                    entry=ordinary,
-                    at=NOW.isoformat(),
-                    floor=RedeliveryFloor(current=self.inbox_store.current()),
-                ),
-                sessions=HostedSessionRuntime(catalog=self.catalog, host=_FakeHost()),  # type: ignore[arg-type]
-                paster=_accepted_paster(),
-                admission=DeliveryAdmission(boundary=True),
-            )
-        self.catalog.upsert(
-            replace(
-                manager,
-                turn_state="turn-ended",
-                turn_state_changed_at=(NOW + timedelta(minutes=1)).isoformat(),
-            )
-        )
-        ctx = self._ctx()
-        with mock.patch(
-            "agents_remember.serving.inbox_delivery.submit_control_prompt",
-            side_effect=lambda _target, _text, submission: self._accepted_receipt(
-                submission.request_id
-            ),
-        ) as submit:
-            run_agent_notifier_sweep(ctx, now=NOW + timedelta(minutes=2))
-        self.assertEqual(submit.call_count, 1)
-        row = self.inbox_store.current()["ordinary-1"]
-        self.assertEqual(row.deliveryState, "delivered")
-        self.assertEqual(row.adapterDeliveryState, "accepted")
-
-    def test_post_owner_signal_without_sweep_reads_the_store_fold(self) -> None:
-        self.catalog.upsert(_manager())
-        ctx = self._ctx()
-        delivery_state = _post_owner_signal(
-            ctx,
-            RoutedOwner(role="manager", agent_id="manager-1"),
-            OwnerSignal(
-                message_kind="state-signal",
-                ask="Agent notifier observed state-signal: completed (turn-9)",
-                response="worker done",
-                task_document_ref=LEAF,
-                seat_role="worker",
-                subject_agent_id="worker-1",
-            ),
-            OwnerSignalOptions(now=NOW),
-        )
-        self.assertEqual(delivery_state, "unconfirmed")
+        self.catalog.upsert(_done_worker("worker-open"))
+        run_agent_notifier_sweep(ctx, now=NOW)
         signals = self._state_signals()
-        self.assertEqual(len(signals), 1)
+        self.assertEqual(len(signals), 1, signals)
         self.assertEqual(signals[0].agentId, "manager-1")
+        self.assertEqual(signals[0].subjectAgentId, "worker-open")
 
 
 if __name__ == "__main__":  # pragma: no cover

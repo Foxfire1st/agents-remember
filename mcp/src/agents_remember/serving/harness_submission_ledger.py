@@ -115,7 +115,7 @@ class OperationRecord:
         at: str,
         bridge_epoch: str,
     ) -> None:
-        """Install the ambiguity barrier and settle whoever is waiting on this operation."""
+        """Install the ambiguity blocker and settle whoever is waiting on this operation."""
 
         self.state = "unknown"
         self.detail = detail

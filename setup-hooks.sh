@@ -41,6 +41,6 @@ echo "[setup-hooks] core.hooksPath -> .githooks (fast pre-commit and targeted no
 git config blame.ignoreRevsFile .git-blame-ignore-revs
 echo "[setup-hooks] blame.ignoreRevsFile -> .git-blame-ignore-revs (mechanical reformats skipped by git blame)"
 
-if [ ! -x ".venv/bin/python" ] && ! command -v python3 >/dev/null 2>&1; then
-  echo "[setup-hooks] tip: install the dev env so the hook can run: pip install -e \"mcp[dev]\"" >&2
+if [ ! -x "mcp/.venv/bin/python" ]; then
+  echo "[setup-hooks] tip: create the canonical Linux/WSL dev env with scripts/bootstrap-mcp-venv.sh" >&2
 fi

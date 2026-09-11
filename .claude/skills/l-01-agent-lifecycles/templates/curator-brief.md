@@ -1,7 +1,8 @@
 # Template — Curator Brief
 
 The dispatch packet the **manager** (or the architect in a flat series) compiles for a **curator**,
-spawned fresh per leaf after builder code exists and the reviewer verdict is available. **The brief
+spawned fresh per leaf after builder code exists and, when requested, the reviewer verdict is
+available. **The brief
 is the curator's entire session start** — it replaces the front half the spawner already ran. This
 is the change-set and intent feeding contract: the curator never infers either from transcript
 memory. It is FED the landed change set, existing intent anchors, the leaf task doc, approved
@@ -43,8 +44,23 @@ below, then stop.
 
 ## Task inputs
 - Leaf task doc: `<leaf-doc-path>` (read it first — objective, requirements, decision log).
+- Approved requirement corpus ruling: `<durable developer approval citation>`.
+- Primary requirement revision: `<stable-id>@<version>` — canonical packet `<packet-path>`.
+- Worker delivery attempt: `<attempt-id>` — a candidate handoff identity separate from the
+  semantic requirement revision and from every evidence digest.
+- Adjacent preservation/dependency revisions: `<stable-id>@<version> — <packet-path> | none`.
+- Requirement adjudication: `<reviewer-verdict-path | none when review was not requested>` —
+  attach the reviewer's independent `accepted | rejected` row only when this leaf has an approved
+  review. For an atomic child, any requested route-review adjudication is deferred to the
+  accumulated canonical master integration review; retain worker evidence and report rejected or
+  worker-blocked revisions as blockers, never current intent to write into onboarding.
+- Review mode: `<baseline | fix-verification | none>`.
+- Sealed review baseline / predecessor: `<sealed baseline ref> / <immediately preceding result or
+  N/A>` when review was requested.
+- Outstanding issue IDs: `<exact IDs and dispositions supplied by the reviewer | none>` — when
+  review exists, preserve these judgments and do not discover, add, reopen, or broaden findings.
 - notes/: `<series-notes-path>` — the builder turn report
-  (`notes/reports/<leaf-id>-worker-report.md`), the mandatory route-review verdict, and
+  (`notes/reports/<leaf-id>-worker-report.md`), the optional route-review verdict, and
   any other task-local notes naming a factual current-state clarification.
 
 ## Three-way intent inputs
@@ -56,13 +72,14 @@ below, then stop.
 
 ### Ruled change intent
 - Developer decisions and approved design notes: `<paths + concise rulings>`.
-- Task requirements that authorize a contract change: `<requirement ids>`.
+- Task requirements that authorize a contract change: `<exact stable-id>@<version> — <canonical
+  packet path>; repeat for each applicable revision`.
 - Explicit non-goals: `<non-goals>`.
 
 ### Implemented reality
 - Fed code range/diff source: `<exact base-to-head or reviewed working-tree evidence>`.
 - Builder report: `<path>`.
-- Reviewer verdict: `<path or flat/solo review evidence>`.
+- Reviewer verdict: `<path or flat/solo review evidence | none when not requested>`.
 - Verification evidence: `<commands/artifacts>`.
 
 ## Routing rule (mgmt-L4 design — apply this before writing anything)
@@ -82,47 +99,31 @@ change with no contract impact receives a precise reviewed no-impact entry rathe
 architecture prose.
 
 If the pass reveals an incident, opportunity, or alternate frame, keep it out of current intent
-unless it is already ruled and proven. List it as a capture candidate in the final report; do not
-invent a register or silently promote speculative forward learning into repository truth.
+unless it is already ruled and proven. Use the coherence judgment's `capture-candidate`
+disposition with explicit evidence; do not invent a register or silently promote speculative
+forward learning into repository truth.
 
 ## Tool surface
 - Native reads in the code worktree; native reads/edits in the memory worktree.
-- `c-02-memory-quality-control` for the pre-closeout missing-onboarding and quality worklist.
-- `c-05-create-or-update-onboarding-files` skill workflows for sidecars and entity catalogs.
-- `memory_quality_check` for the complete checklist and `route_index_refresh` only to apply stale
-  indexes named by it — always with
-  `contract_path="<enclosure-contract-path>"`.
+- `c-05-create-or-update-onboarding-files` skill workflows for affected sidecars, overviews,
+  indexes, and entity catalogs.
+- `git diff --check` and any scoped checks named by the manager brief.
+- An explicitly requested narrow `memory_quality_check` or `curator_coherence` diagnostic, always
+  with `contract_path="<enclosure-contract-path>"`; these are never routine closeout/integration
+  prerequisites.
 - Inbox for one clarification row back to <owning-seat contact> if the fed change set is missing or
   ambiguous — never invent a change set from memory.
 - No `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*` tools, no code edits.
 
-## Self-check (before you report — your output is checked at closeout)
-Own the complete pre-closeout memory worklist. As the final intake action, run the full leaf-scoped
-quality check and open its `reportPath` at
-`<worktree-enclosure>/reports/curator-memory-quality.md`. That single atomically overwritten file
-combines current-additions coverage, full quality, source-change candidates, and route-index drift.
-Repair everything it reports that can be made true from the fed dirty worktree, rerun the same full
-call, and keep iterating until `curatorActionableCount=0` and
-`checklistStatus=ready-for-closeout`. Never create a timestamped copy or a second checklist. Do not
-write the completion report while any curator-owned finding remains.
+## Scoped checks (before you report)
+Repair the affected onboarding files named by the brief. Run `git diff --check` in the memory
+worktree and every other named scoped check after repairs and before handoff. Record the exact
+commands, scope, and passed/failed/blocked/not-run result. Do not run a full memory suite or create
+a curator certification for routine curation. Full memory quality is a separate operation only on
+explicit developer request.
 
-The contract-scoped quality call temporarily compares unstamped cards from the leaf's code-base
-commit to the dirty worktree, so changed claims surface before a closeout commit exists. Repair every
-enforced `citation_claim_reopened`, unresolved range, absent anchor, shape/history/entity defect, and
-missing sidecar. Only explicitly report-only/surfaced claim-review findings may remain without an
-edit. The real code-commit stamp and commit-derived entity fingerprint remain closeout-owned; never
-fabricate them. Expected dirty-source drift or missing real-commit verification may be reported only
-after proving there is no underlying curator-actionable defect.
-
-1. Run `memory_quality_check(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")`
-   before editing and use the returned file as the exact worklist.
-2. Create/update every required sidecar and repair every enforced
-   content/citation/shape/history/entity finding. Apply
-   `route_index_refresh(repo_id="<repo-id>", contract_path="<enclosure-contract-path>")` only when
-   the checklist names stale indexes.
-3. Rerun the same full quality call until its curator gate is zero; separately disposition every
-   source-change candidate and allowed real-commit residual in the coherence report.
-4. Run `git diff --check` in the memory worktree, plus any other check named above.
+The actual code commit, memory commit, ledger row, and any commit-derived fingerprints belong to
+the closeout transaction. Never fabricate a future hash or call a scoped result full green.
 
 A `cit:(...)` wrapped in backticks is read as a QUOTATION of the citation grammar — which is how
 these documents document it — so it is not checked; write a real citation unbackticked.
@@ -132,18 +133,15 @@ WRITES, so an unscoped call dirties a repo you do not own and blocks the next `w
 Confirm `onboardingRoot` in each response is `<memory-worktree-path>/onboarding` and `reportPath`
 is inside this leaf's enclosure `reports/` directory. A finding count
 implausible for this change set is a measurement problem to investigate and escalate, not permission
-to pass incomplete onboarding. Closeout's post-commit rerun is the hard gate, not the first time the
-curator learns about repairable work.
+to pass incomplete onboarding. The closeout transaction consumes this scoped handoff and does not
+rerun a full memory suite automatically.
 
-## Coherence report (mandatory, last act)
-Write `<notes-reports-path>/<leaf-id>-curator-report.md`: changed onboarding files (with which
-change-set item or notes/ item each one routes to and why); preserved, extended, superseded, and
-contradicted contracts; route index results; memory-quality `findingCount` and exact
-`onboardingRoot`; reference checks; capture candidates kept out of current intent; blockers; and
-the exact commands run. This report — together with the builder's code and the reviewer's verdict
-— is exactly the manager's three closeout inputs.
-Write this only after the curator-owned worklist is empty. If evidence or tooling prevents that,
-send a blocker report instead of a completion report.
+## Curator handoff (last act)
+Return the changed onboarding paths, current-intent reconciliation, exact scoped commands/results,
+and any failed, blocked, or not-run checks. Do not write a hand-versioned certification file or
+claim that a scoped result is full memory quality. `curator_coherence` may run only when the
+developer explicitly requests that separate diagnostic; report its typed result without making it
+a closeout/integration gate.
 ```
 
 ---
@@ -156,13 +154,19 @@ send a blocker report instead of a completion report.
   curator dispatch. `dispatch_agent` repeats the proof and refuses before process creation if the
   lineage moves between the manager's check and the dispatch transaction.
 - `<enclosure-contract-path>` is the leaf's `series-contract.md` under the master's
-  `enclosures/<leaf-id>/`. Without it the curator cannot run the closeout check on its own work,
-  and its `route_index_refresh` writes into the official memory repo.
+  `enclosures/<leaf-id>/`. Use it to scope any explicitly requested diagnostic; an unscoped
+  `route_index_refresh` writes into the official memory repo.
 - Pull the change-set counters/paths from the leaf's actual landed range (the leaf contract's
   recorded base commit through the builder's current HEAD/worktree state) — do not hand the curator
   a stale or guessed diff.
-- Attach the builder turn report and the candidate-bound route-review verdict as the notes/
-  inputs; the curator does not re-request evidence that already exists in `notes/reports/`.
+- Attach the builder turn report and, when review was requested, the candidate-bound route-review
+  verdict as the notes/ inputs; the curator does not re-request evidence that already exists in
+  `notes/reports/`. For an atomic child, attach the master-integration review scope only when the
+  owning manager supplies it; the curator does not create a per-leaf route-review record.
 - Deliver as an echo-confirmed paste; only count delivery on a post-boot echo.
-- This brief runs strictly AFTER builder code exists and `task_doc.record_route_review` has bound
-  the reviewer verdict to the current candidate tree — never before, and never in place of either.
+- This brief runs strictly AFTER builder code exists. When review was requested, the owner calls
+  `task_doc(operation="begin_review")` before reviewer work, then
+  `task_doc(operation="record_review")` or the existing
+  `task_doc(operation="record_route_review")` after the result for standalone/organizational
+  leaves. Atomic child leaves proceed without a per-leaf route-review record, and the canonical
+  master binds a requested review only at master-to-parent integration.

@@ -1,6 +1,6 @@
 """The declared response contract for every HTTP route the serving app registers.
 
-**Why this module exists at all.** Not one of the 61 HTTP routes declared a
+**Why this module exists at all.** Not one of the original 61 HTTP routes declared a
 ``response_model``. Twenty-five of them (the conversation surface) already *dumped* a strict
 :class:`~agents_remember.models.conversations.primitives.WireModel`, which proves a model existed --
 not that the route declared its contract. Nothing anywhere said what
@@ -8,7 +8,7 @@ not that the route declared its contract. Nothing anywhere said what
 
 **Why the declaration alone is not the gate.** FastAPI applies ``response_model`` only to
 values it serializes itself: ``fastapi.routing.get_request_handler`` returns a ``Response``
-instance untouched and never reaches ``serialize_response``. Of the 61 handlers, **57** return
+instance untouched and never reaches ``serialize_response``. Of the 63 handlers, **59** return
 a ``Response`` subclass (``JSONResponse``/``Response``/``StreamingResponse``) directly and
 **two** -- ``GET /api/stream`` and ``GET /api/events`` -- are async generators feeding an
 ``EventSourceResponse``; on all 59 the decorator contributes an OpenAPI schema and **validates
@@ -28,7 +28,7 @@ the model did not know about simply reached the cockpit. With ``response_model``
 ``extra="forbid"`` they now answer **HTTP 500** (``ResponseValidationError``) if the payload
 gains a key, loses a required one, or changes a type. That is a deliberate fail-loud trade and
 not a silent one -- but it is a real hazard on ``/api/terminal/sessions``, because
-``TerminalCatalogEntry`` carries 36 optional fields and is actively grown: a future leaf adding
+``TerminalCatalogEntry`` carries 56 optional fields and is actively grown: a future leaf adding
 one to ``to_json`` and forgetting ``TerminalCatalogEntryWire`` would take down the cockpit's
 session list, not degrade it.
 
@@ -310,6 +310,9 @@ class TerminalCatalogEntryWire(WireResponse):
     replacement_for_task_document_ref: TaskDocumentRef | None = None
     spawned_by_session: str | None = None
     spawned_by_lifecycle: str | None = None
+    spawned_by_kind: str | None = None
+    structural_parent_task_document_ref: TaskDocumentRef | None = None
+    structural_parent_role: str | None = None
     spawn_role: str | None = None
     launch_args: list[str] | None = None
     prompt_keywords: list[str] | None = None
@@ -320,6 +323,7 @@ class TerminalCatalogEntryWire(WireResponse):
     resolved_effort: str | None = None
     session_log_entry_id: str | None = None
     session_log_path: str | None = None
+    dispatch_brief_entry_id: str | None = None
     control_state: str | None = None
     control_endpoint: str | None = None
     control_protocol: str | None = None
@@ -754,6 +758,43 @@ class NoteContents(WireResponse):
     language: str
     size: int
     truncated: bool
+    content: str
+
+
+# --- task-local requirements ----------------------------------------------------------------
+
+
+class RequirementRow(WireResponse):
+    """One canonical Markdown packet under a task master's ``requirements/`` root."""
+
+    name: str
+    path: str
+    address: str
+    size: int
+    sha256: str
+
+
+class RequirementsListing(WireResponse):
+    """``GET /api/requirements/list``: the registered root selected by task context."""
+
+    repo: str
+    master: str
+    document: str
+    registered: bool
+    requirements: list[RequirementRow]
+
+
+class RequirementContents(WireResponse):
+    """``GET /api/requirements/read``: exact UTF-8 bytes decoded from one packet."""
+
+    repo: str
+    master: str
+    document: str
+    name: str
+    path: str
+    address: str
+    size: int
+    sha256: str
     content: str
 
 

@@ -8,7 +8,22 @@ from pydantic import Field
 
 from agents_remember.kernel.coordination_context.models import MemoryMode
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
+from agents_remember.models.closeout.input import (
+    CloseoutCorrectedCall,
+    CloseoutInvalidField,
+    ResolvedCloseoutPlan,
+)
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
+from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
+from agents_remember.models.lifecycles.operation_wait import LifecycleWaitOutcome
+from agents_remember.models.quality import QualityGateResult
+from agents_remember.models.structural.atomic_series_activation import (
+    AtomicSeriesActivationRecord,
+    AtomicSeriesObservedState,
+    AtomicSeriesSourcePair,
+)
+from agents_remember.models.task_document_ref import TaskDocumentRef
 
 # Worktree wire vocabulary (moved from worktrees.worktree_contract / modules.guidance).
 WorkflowKind = Literal["chat-task", "light-task"]
@@ -33,20 +48,43 @@ NextOperation = Literal[
     "request_integration_decision",
     "developer_decision",
     "request_carryover_decision",
-    "request_cleanup_decision",
+    "retry_cleanup",
     "done",
 ]
 NextTool = Literal[
     "worktree_status",
     "worktree_closeout_apply",
     "worktree_integrate",
-    "memory_carryover_apply",
+    "memory_carryover_plan",
     "worktree_cleanup",
 ]
 SourceLineageState = Literal["current", "blocked", "unavailable"]
 SourceLineageEdgeState = Literal["current", "behind", "diverged", "unavailable"]
-SourceLineageRelation = Literal["super-to-master", "master-to-leaf"]
+SourceLineageRelation = Literal["super-to-master", "master-to-leaf", "super-to-leaf"]
 SourceLineageSide = Literal["code", "memory"]
+SyncResolutionAction = Literal["continue", "cancel"]
+MemorySyncChoice = Literal["merge-memory", "skip-memory"]
+SyncSide = Literal["code", "memory"]
+SyncPhase = Literal[
+    "running-code",
+    "code-resolution-required",
+    "running-memory",
+    "memory-resolution-required",
+    "finalizing",
+    "cancelling",
+    "completed",
+    "cancelled",
+]
+SyncOperationState = Literal[
+    "running",
+    "resolution-required",
+    "cancelling",
+    "completed",
+    "cancelled",
+    "journal-malformed",
+    "journal-identity-invalid",
+    "quarantined",
+]
 
 
 class SourceLineageEdge(StrictResponseModel):
@@ -79,6 +117,102 @@ class SourceLineageProjection(StrictResponseModel):
     summary: str
     edges: list[SourceLineageEdge]
     recoveries: list[SourceLineageRecovery]
+
+
+class SyncOperationProjection(StrictResponseModel):
+    """Stable read-only view of the enclosure-root sync journal."""
+
+    state: SyncOperationState
+    phase: SyncPhase | Literal["journal-read", "quarantined"]
+    contractPath: str
+    journalContractPath: str | None = None
+    identityMismatch: bool = False
+    side: SyncSide | None = None
+    conflictFiles: tuple[str, ...] = ()
+    summary: str
+    nextArgs: dict[str, object] | None = None
+    cancelArgs: dict[str, object] | None = None
+    evidencePath: str | None = None
+
+
+class SyncResolutionProjection(StrictResponseModel):
+    """What the agent must settle, and whether a parked candidate is part of it.
+
+    ``wipRestore`` marks a resolution that is re-applying the work-in-progress the sync
+    parked rather than a plain merge conflict. ``sync_transaction_results`` has emitted it
+    since it introduced the parked-WIP path; this field is what makes that path able to
+    describe itself. Without it the model refused its own projection with
+    ``extra_forbidden``, so a resolution that needed agent action surfaced as a
+    serialization error instead of the guidance the agent needed.
+    """
+
+    side: SyncSide
+    owner: Literal["agent"] = "agent"
+    worktree: str | None = None
+    files: list[str] = Field(default_factory=list)
+    wipRestore: bool = False
+
+
+class AtomicSeriesActivationFact(StrictResponseModel):
+    """Read-only source-pair activation evidence carried by status/refusals."""
+
+    address: str | None = Field(default=None, max_length=4096)
+    sourcePairFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    state: AtomicSeriesObservedState
+    record: AtomicSeriesActivationRecord | None = None
+    errorType: str | None = Field(default=None, max_length=256)
+    detail: str | None = Field(default=None, max_length=8192)
+
+
+class AtomicSeriesAdmissionActivation(StrictResponseModel):
+    """Activation snapshot nested in an admission refusal."""
+
+    path: str = Field(min_length=1, max_length=4096)
+    observedState: AtomicSeriesObservedState
+    recordPresent: bool
+    sourcePairFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    revision: int | None = Field(default=None, ge=1)
+    selectedAt: str | None = Field(default=None, max_length=128)
+    selectedMaster: TaskDocumentRef | None = None
+    selectedContractPath: str | None = Field(default=None, max_length=4096)
+    errorType: str | None = Field(default=None, max_length=256)
+    detail: str | None = Field(default=None, max_length=8192)
+
+
+class AtomicSeriesAdmissionRequested(StrictResponseModel):
+    master: TaskDocumentRef | None = None
+    contractPath: str | None = Field(default=None, max_length=4096)
+
+
+class AtomicSeriesAdmissionBlocking(StrictResponseModel):
+    master: TaskDocumentRef
+    contractPath: str = Field(min_length=1, max_length=4096)
+    state: AtomicSeriesObservedState
+    revision: int = Field(ge=1)
+    selectedAt: str = Field(min_length=1, max_length=128)
+
+
+class AtomicSeriesAdmissionStatusAction(StrictResponseModel):
+    tool: Literal["worktree_status"] = "worktree_status"
+    args: dict[str, object]
+
+
+class AtomicSeriesAdmission(StrictResponseModel):
+    """Bounded explanation of why an activation boundary admitted or refused work."""
+
+    classification: Literal["wait", "corrective-action"]
+    operation: str = Field(min_length=1, max_length=256)
+    requested: AtomicSeriesAdmissionRequested
+    sourcePair: AtomicSeriesSourcePair | None = None
+    sourcePairFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    activation: AtomicSeriesAdmissionActivation | None = None
+    blocking: AtomicSeriesAdmissionBlocking | None = None
+    retryPrecondition: str = Field(min_length=1, max_length=8192)
+    statusAction: AtomicSeriesAdmissionStatusAction | None = None
+    status: str = Field(min_length=1, max_length=256)
+    detail: str = Field(min_length=1, max_length=8192)
+    expected: dict[str, object] | None = None
+    observed: dict[str, object] | None = None
 
 
 # Every vocabulary below is imported from whoever produces it, never retyped here. Retyped
@@ -132,8 +266,22 @@ class WorktreeSummary(StrictResponseModel):
     # that they were substituted, and the file heals the next time a lifecycle tool writes it.
     unknownContractCells: list[str] | None = None
     error: str | None = None
+    errorEvidence: dict[str, object] | None = None
+    status: str | None = None
+    summary: str | None = Field(default=None, max_length=8192)
+    detail: str | None = Field(default=None, max_length=8192)
+    expected: dict[str, object] | None = None
+    observed: dict[str, object] | None = None
+    nextAction: Literal["developer-decision"] | None = None
+    developerDecisionRequired: bool | None = None
+    decisionSurface: str | None = Field(default=None, max_length=8192)
     lifecycleOperation: LifecycleOperationProjection | None = None
     sourceLineage: SourceLineageProjection | None = None
+    syncOperation: SyncOperationProjection | None = None
+    atomicSeriesActivation: AtomicSeriesActivationFact | None = None
+    admission: AtomicSeriesAdmission | None = None
+    retryPrecondition: str | None = Field(default=None, max_length=8192)
+    statusAction: AtomicSeriesAdmissionStatusAction | None = None
 
 
 class WorktreeCommandResponse(FlexibleToolResponse):
@@ -156,8 +304,18 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     # progress as running / stale (dead heartbeat) / ok /
     # ready-with-failed-phases / failed, with currentPhase and seedFallback.
     providers: dict[str, Any] | None = None
-    lifecycleOperation: LifecycleOperationProjection | None = None
     source_lineage: SourceLineageProjection | None = None
+    status: str | None = None
+    detail: str | None = Field(default=None, max_length=8192)
+    invalidFields: list[CloseoutInvalidField] | None = None
+    resolvedPlan: ResolvedCloseoutPlan | None = None
+    correctedCall: CloseoutCorrectedCall | None = None
+    code_quality_gate: QualityGateResult | None = None
+    quality_gate: QualityGateResult | None = None
+    atomicSeriesActivation: AtomicSeriesActivationFact | None = None
+    admission: AtomicSeriesAdmission | None = None
+    retryPrecondition: str | None = Field(default=None, max_length=8192)
+    statusAction: AtomicSeriesAdmissionStatusAction | None = None
 
 
 class WorktreeStartResponse(WorktreeCommandResponse):
@@ -170,22 +328,79 @@ class WorktreeAttachResponse(WorktreeCommandResponse):
 
 class WorktreeStatusResponse(WorktreeCommandResponse):
     operation: Literal["worktree_status"] = "worktree_status"
+    lifecycleOperations: list[LifecycleOperationProjection] = Field(default_factory=list)
+    syncOperation: SyncOperationProjection | None = None
+
+
+class WorktreeEnclosureAdoptResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_enclosure_adopt"] = "worktree_enclosure_adopt"
+    publicationRequestId: str | None = None
+    locatorPath: str | None = None
+    manifestPath: str | None = None
+    contractSha256: str | None = None
+    manifestSha256: str | None = None
+    artifacts: list[dict[str, object]] = Field(default_factory=list)
+    removalCondition: str | None = None
+
+
+class WorktreeStatusWaitResponse(WorktreeCommandResponse):
+    """Read-only bounded wait on lifecycle meaningful-state changes (CCR-R15).
+
+    Addressed by canonical contract, operation kind, expected public generation,
+    and an opaque typed after_revision cursor from a prior snapshot.  On
+    change it returns the compact R18-coherent status plus the next cursor; on
+    timeout it returns the unchanged snapshot and cursor without claiming
+    failure.  Never carries an operation key, PID, or worker/queue/gate
+    authority.
+    """
+
+    operation: Literal["worktree_status_wait"] = "worktree_status_wait"
+    outcome: LifecycleWaitOutcome
+    operationKind: LifecycleOperationKind | None = None
+    successorGeneration: int | None = None
+    meaningfulRevision: int | None = None
+    timeoutSeconds: float | None = None
+    elapsedSeconds: float | None = None
+    lifecycleOperation: LifecycleOperationProjection | None = None
+    nextArgs: dict[str, object] | None = None
 
 
 class WorktreeSyncResponse(WorktreeCommandResponse):
     operation: Literal["worktree_sync"] = "worktree_sync"
+    phase: SyncPhase | Literal["quarantined"] | None = None
+    resolution: SyncResolutionProjection | None = None
+    resolutionOwner: Literal["agent"] | None = None
+    nextOperation: str | None = None
+    nextTool: Literal["worktree_sync"] | None = None
+    nextArgs: dict[str, object] | None = None
+    cancelArgs: dict[str, object] | None = None
+    evidencePath: str | None = None
+    invalidField: Literal["memory_sync_choice", "resolution_action"] | None = None
+    manualRepair: dict[str, object] | None = None
 
 
-class WorktreeCloseoutPreviewResponse(WorktreeCommandResponse):
+class _WorktreeCloseoutResponse(WorktreeCommandResponse):
+    pairIdentity: MemoryCandidatePairIdentity | None = None
+    pairStatus: str | None = Field(default=None, max_length=256)
+    pairField: str | None = Field(default=None, max_length=256)
+    expected: dict[str, Any] | None = Field(default=None, max_length=32)
+    observed: dict[str, Any] | None = Field(default=None, max_length=32)
+    nextAction: str | None = Field(default=None, max_length=8192)
+    nextArgs: dict[str, Any] | None = Field(default=None, max_length=32)
+
+
+class WorktreeCloseoutPreviewResponse(_WorktreeCloseoutResponse):
     operation: Literal["worktree_closeout_preview"] = "worktree_closeout_preview"
 
 
-class WorktreeCloseoutApplyResponse(WorktreeCommandResponse):
+class WorktreeCloseoutApplyResponse(_WorktreeCloseoutResponse):
     operation: Literal["worktree_closeout_apply"] = "worktree_closeout_apply"
+    lifecycleOperation: LifecycleOperationProjection | None = None
 
 
 class WorktreeIntegrateResponse(WorktreeCommandResponse):
     operation: Literal["worktree_integrate"] = "worktree_integrate"
+    lifecycleOperation: LifecycleOperationProjection | None = None
     # Declared even though the worktree envelope is intentionally flexible: these are stable
     # completion-cleanup products, not incidental worktree-module details.
     autoClosedSeats: list[str] = Field(default_factory=list)
@@ -194,8 +409,40 @@ class WorktreeIntegrateResponse(WorktreeCommandResponse):
     autoLandedSeats: list[str] = Field(default_factory=list)
 
 
-class WorktreeOperationCancelResponse(WorktreeCommandResponse):
-    operation: Literal["worktree_operation_cancel"] = "worktree_operation_cancel"
+class WorktreeOperationControlResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_operation_control"] = "worktree_operation_control"
+    lifecycleOperation: LifecycleOperationProjection | None = None
+    expected: dict[str, object] = Field(default_factory=dict)
+    observed: dict[str, object] = Field(default_factory=dict)
+    nextAction: str = ""
+    nextTool: (
+        Literal["worktree_operation_control", "worktree_integrate", "direct_landing"] | None
+    ) = None
+    nextArgs: dict[str, object] | None = None
+    developerDecisionRequired: bool = False
+    decisionSurface: str | None = None
+
+
+class WorktreeLegacyOperationResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_legacy_operation"] = "worktree_legacy_operation"
+    lifecycleOperation: LifecycleOperationProjection | None = None
+    operationKind: str | None = None
+    legacyDigest: str | None = None
+    migratable: bool | None = None
+    migrationReason: str | None = None
+    archivable: bool | None = None
+    archiveReason: str | None = None
+    archivePath: str | None = None
+    terminalEvidence: dict[str, object] | None = None
+    removalCondition: str | None = None
+    removalGuard: dict[str, object] | None = None
+    expected: dict[str, object] = Field(default_factory=dict)
+    observed: dict[str, object] = Field(default_factory=dict)
+    nextAction: str = ""
+    nextTool: str | None = None
+    nextArgs: dict[str, object] | None = None
+    developerDecisionRequired: bool = False
+    decisionSurface: str | None = None
 
 
 class WorktreeCleanupResponse(WorktreeCommandResponse):

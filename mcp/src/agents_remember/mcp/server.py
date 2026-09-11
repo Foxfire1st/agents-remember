@@ -4,6 +4,7 @@ import argparse
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.fastmcp.server import Settings as FastMCPSettings
 
 from agents_remember.application.runtime import startup as server_startup
@@ -21,7 +22,32 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 
 from .compact_content import install_compact_content
+from .public_surface import DISPATCH_AGENT_INPUT_FIELDS
 from .registration import TOOL_REGISTRARS
+
+
+class AgentsRememberMCP(FastMCP):
+    """FastMCP boundary with the project's strict public dispatch contract.
+
+    FastMCP 1.x generates argument models whose undeclared fields are ignored.  That
+    would turn a caller-supplied model/effort or other spend knob into a silent no-op.
+    The project owns a stricter contract: advertise the flat schema as closed and reject
+    every undeclared dispatch input before the registered handler runs.
+    """
+
+    async def list_tools(self) -> list[Any]:
+        tools = await super().list_tools()
+        for tool in tools:
+            if tool.name == "dispatch_agent":
+                tool.inputSchema = {**tool.inputSchema, "additionalProperties": False}
+        return tools
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        if name == "dispatch_agent":
+            extras = sorted(set(arguments) - DISPATCH_AGENT_INPUT_FIELDS)
+            if extras:
+                raise ToolError("dispatch_agent rejects undeclared inputs: " + ", ".join(extras))
+        return await super().call_tool(name, arguments)
 
 
 def _complete_fastmcp_settings() -> None:
@@ -36,7 +62,7 @@ def create_server(config: McpRuntimeConfig) -> Any:
     # tags tool calls onto it once a lifecycle is started.
     server_startup.initialize_mcp_application(config)
     _complete_fastmcp_settings()
-    server = FastMCP("Agents Remember")
+    server = AgentsRememberMCP("Agents Remember")
     # The tool surface itself lives in `.registration`, one module per family; this loop is
     # the only place that decides which families a server advertises.
     for register_tools in TOOL_REGISTRARS:

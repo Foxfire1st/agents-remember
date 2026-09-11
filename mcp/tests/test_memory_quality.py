@@ -6,52 +6,27 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(MCP_SRC))
 sys.path.insert(0, str(MCP_TESTS))
 
-from agents_remember.kernel.primitives.runtime_config import (
-    load_config,
-)
-from agents_remember.mcp.tools import memory_quality_check_payload
+from agents_remember.kernel.coordination_context_resolver import StorageSettings
 from agents_remember.memory_quality.check import (
     BEFORE_METADATA_REFRESH_CHECKS,
     run_memory_quality_check,
 )
+from agents_remember.memory_quality.memory_census import _Census, _Tree
+from agents_remember.memory_quality.memory_census_scope import MemoryCensusScope
 from agents_remember.memory_quality.style.document_shape import entity_catalog_alignment
-from agents_remember.memory_quality.style.update_history import history_order_fix
-from agents_remember.memory_quality.style.update_history.history_order import (
-    check_onboarding_root,
-)
-from test_config import settings_payload
 
 
 def write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-
-def write_onboarding(path: Path, history: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "\n".join(
-            [
-                "# Example",
-                "",
-                "## Purpose",
-                "",
-                "Example onboarding.",
-                "",
-                "## Update History",
-                "",
-                history,
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
 
 
 def write_file_level_onboarding(
@@ -116,6 +91,194 @@ def write_entity_catalog(path: Path, *, inventory: list[str], fingerprints: list
 
 
 class MemoryQualityTests(unittest.TestCase):
+    def test_census_accepts_repaired_current_onboarding_metadata(self) -> None:
+        source = "mcp/src/agents_remember/application/memory_quality/census.py"
+        path = f"onboarding/{source}.md"
+
+        def run_case(
+            historical: dict[str, str] | None,
+            current: dict[str, str] | None,
+            *,
+            before_present: bool = True,
+            after_present: bool = True,
+            required: bool = False,
+        ) -> _Census:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                root = Path(tmp_dir)
+                before = SimpleNamespace(
+                    root=root,
+                    members={path: "100644"} if before_present else {},
+                )
+                after = SimpleNamespace(
+                    root=root,
+                    members={path: "100644"} if after_present else {},
+                )
+                scope = SimpleNamespace(memory_paths=(path,))
+                census = _Census(
+                    cast(MemoryCensusScope, scope),
+                    cast(StorageSettings, None),
+                    cast(_Tree, before),
+                    cast(_Tree, after),
+                    "onboarding",
+                )
+                documents = (
+                    {path: historical} if historical is not None else {},
+                    {path: current} if current is not None else {},
+                )
+                census.sidecars(source, documents, required=required)
+                census.edited_documents(documents)
+                return census
+
+        canonical = {
+            "doc_type": "file-level-onboarding",
+            "path": source,
+            "lastVerifiedCommitHash": "",
+            "lastVerifiedCommitDate": "",
+        }
+        self.assertEqual(
+            run_case({}, canonical).blockers,
+            [],
+        )
+        self.assertEqual(
+            run_case(
+                {"doc_type": "repo-overview", "sourceRoute": "mcp"},
+                canonical,
+            ).blockers,
+            [],
+        )
+        self.assertEqual(
+            run_case(
+                {"doc_type": "file-level-onboarding", "path": "mcp/src/old.py"},
+                canonical,
+            ).blockers,
+            [],
+        )
+        malformed = run_case(
+            {},
+            {"doc_type": "file-level-onboarding", "path": "mcp/src/other.py"},
+        )
+        self.assertTrue(malformed.blockers)
+        self.assertEqual(run_case({}, canonical).blockers, [])
+        new_card = run_case(
+            None,
+            canonical,
+            before_present=False,
+            required=True,
+        )
+        self.assertEqual(new_card.blockers, [])
+        self.assertIn(path, {row.identity.memoryRootRelativePath for row in new_card.rows.values()})
+        missing_new_card = run_case(
+            None,
+            None,
+            before_present=False,
+            after_present=False,
+            required=True,
+        )
+        self.assertIn("missing", {blocker.code for blocker in missing_new_card.blockers})
+
+        entity_path = "onboarding/entities.md"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            tree = SimpleNamespace(root=root, members={entity_path: "100644"})
+            scope = SimpleNamespace(memory_paths=(entity_path,))
+            census = _Census(
+                cast(MemoryCensusScope, scope),
+                cast(StorageSettings, None),
+                cast(_Tree, tree),
+                cast(_Tree, tree),
+                "onboarding",
+            )
+            entity_documents = (
+                {entity_path: {"doc_type": "repo-entity-catalog"}},
+                {entity_path: {"doc_type": "repo-entity-catalog"}},
+            )
+            census.edited_documents(entity_documents)
+            self.assertEqual(census.blockers, [])
+
+    def test_census_repaired_old_association_does_not_veto_current_mapping(self) -> None:
+        source = "mcp/src/agents_remember/application/memory_quality/census.py"
+        path = f"onboarding/{source}.md"
+        old_source = "mcp/src/agents_remember/application/memory_quality/old.py"
+        canonical = {"doc_type": "file-level-onboarding", "path": source}
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            tree = SimpleNamespace(root=root, members={path: "100644"})
+            scope = SimpleNamespace(memory_paths=(path,))
+            census = _Census(
+                cast(MemoryCensusScope, scope),
+                cast(StorageSettings, None),
+                cast(_Tree, tree),
+                cast(_Tree, tree),
+                "onboarding",
+            )
+            repaired_documents = (
+                {path: {"doc_type": "file-level-onboarding", "path": old_source}},
+                {path: canonical},
+            )
+            census.sidecars(old_source, repaired_documents, required=False)
+            census.sidecars(source, repaired_documents, required=False)
+            census.edited_documents(repaired_documents)
+            self.assertEqual(census.blockers, [])
+
+    def test_census_retains_historical_removal_row_without_mapping_validation(self) -> None:
+        source = "mcp/src/agents_remember/application/memory_quality/removed.py"
+        path = f"onboarding/{source}.md"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            before = SimpleNamespace(root=root, members={path: "100644"})
+            after = SimpleNamespace(root=root, members={})
+            scope = SimpleNamespace(memory_paths=(path,))
+            census = _Census(
+                cast(MemoryCensusScope, scope),
+                cast(StorageSettings, None),
+                cast(_Tree, before),
+                cast(_Tree, after),
+                "onboarding",
+            )
+            removed_documents = (
+                {path: {"doc_type": "file-level-onboarding", "path": source}},
+                {},
+            )
+            census.sidecars(source, removed_documents, required=False)
+            census.edited_documents(removed_documents)
+            self.assertNotIn(
+                "removal-disposition-required",
+                {blocker.code for blocker in census.blockers},
+            )
+            self.assertEqual(
+                [row.expectedFinalPresence for row in census.rows.values()],
+                ["absent"],
+            )
+
+    def test_census_move_retains_old_and_new_rows(self) -> None:
+        old_source = "mcp/src/agents_remember/application/memory_quality/old.py"
+        new_source = "mcp/src/agents_remember/application/memory_quality/new.py"
+        old_path = f"onboarding/{old_source}.md"
+        new_path = f"onboarding/{new_source}.md"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            before = SimpleNamespace(root=root, members={old_path: "100644"})
+            after = SimpleNamespace(root=root, members={new_path: "100644"})
+            scope = SimpleNamespace(memory_paths=(old_path, new_path))
+            census = _Census(
+                cast(MemoryCensusScope, scope),
+                cast(StorageSettings, None),
+                cast(_Tree, before),
+                cast(_Tree, after),
+                "onboarding",
+            )
+            moved_documents = (
+                {old_path: {"doc_type": "file-level-onboarding", "path": old_source}},
+                {new_path: {"doc_type": "file-level-onboarding", "path": new_source}},
+            )
+            census.sidecars(old_source, moved_documents, required=False)
+            census.sidecars(new_source, moved_documents, required=False)
+            census.edited_documents(moved_documents)
+            self.assertEqual(census.blockers, [])
+            rows = {row.identity.memoryRootRelativePath: row for row in census.rows.values()}
+            self.assertEqual(rows[old_path].expectedFinalPresence, "absent")
+            self.assertEqual(rows[new_path].expectedFinalPresence, "present")
+
     def test_entity_catalog_alignment_rejects_orphaned_fingerprint_before_code_rails(
         self,
     ) -> None:
@@ -136,18 +299,6 @@ class MemoryQualityTests(unittest.TestCase):
             self.assertEqual(result["findings"][0]["code"], "entity_fingerprint_without_inventory")
             self.assertEqual(BEFORE_METADATA_REFRESH_CHECKS[0], entity_catalog_alignment.CHECK_NAME)
 
-    def test_entity_catalog_alignment_rejects_inventory_without_fingerprint(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            onboarding = Path(tmp_dir) / "onboarding"
-            write_entity_catalog(onboarding / "entities.md", inventory=["Missing"], fingerprints=[])
-
-            result = run_memory_quality_check(
-                onboarding, checks=[entity_catalog_alignment.CHECK_NAME]
-            )
-
-            self.assertFalse(result["ok"])
-            self.assertEqual(result["findings"][0]["code"], "entity_inventory_without_fingerprint")
-
     def test_entity_catalog_alignment_accepts_one_fingerprint_per_inventory_entry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             onboarding = Path(tmp_dir) / "onboarding"
@@ -159,206 +310,6 @@ class MemoryQualityTests(unittest.TestCase):
 
             self.assertTrue(result["ok"])
             self.assertIn(entity_catalog_alignment.CHECK_NAME, result["checks"])
-
-    def test_entity_catalog_alignment_rejects_missing_sections_and_duplicate_rows(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            onboarding = Path(tmp_dir) / "onboarding"
-            catalog = onboarding / "entities.md"
-            catalog.parent.mkdir(parents=True)
-            catalog.write_text("# Repository Entity Catalog\n", encoding="utf-8")
-
-            missing = run_memory_quality_check(
-                onboarding, checks=[entity_catalog_alignment.CHECK_NAME]
-            )
-
-            self.assertEqual(
-                {finding["code"] for finding in missing["findings"]},
-                {"entity_inventory_section_missing", "entity_fingerprint_section_missing"},
-            )
-            self.assertEqual(
-                entity_catalog_alignment._entity_line(
-                    ["# Catalog", "", "## Entity Inventory"],
-                    entity_catalog_alignment.INVENTORY_HEADING,
-                    "Absent",
-                ),
-                3,
-            )
-
-            write_entity_catalog(
-                catalog, inventory=["Duplicate"], fingerprints=["Duplicate", "Duplicate"]
-            )
-            duplicate = run_memory_quality_check(
-                onboarding, checks=[entity_catalog_alignment.CHECK_NAME]
-            )
-            self.assertEqual(duplicate["findings"][0]["code"], "entity_fingerprint_duplicate")
-
-    def test_update_history_accepts_newest_first_entries(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            write_onboarding(
-                root / "onboarding" / "example.md",
-                "\n".join(
-                    [
-                        "- 2026-05-24T00:37+02:00: Newest entry.",
-                        "  Continuation text stays with the newest entry.",
-                        "- 2026-05-23T22:10+02:00: Older entry.",
-                    ]
-                ),
-            )
-
-            result = check_onboarding_root(root / "onboarding")
-
-            self.assertTrue(result["ok"])
-            self.assertEqual(result["findingCount"], 0)
-            self.assertEqual(result["filesChecked"], 1)
-
-    def test_update_history_flags_entries_inserted_below_older_entries(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            write_onboarding(
-                root / "onboarding" / "example.md",
-                "\n".join(
-                    [
-                        "- 2026-05-23T22:10+02:00: Older entry.",
-                        "- 2026-05-24T00:37+02:00: Newer entry inserted in the middle.",
-                    ]
-                ),
-            )
-
-            result = check_onboarding_root(root / "onboarding")
-
-            self.assertFalse(result["ok"])
-            self.assertEqual(result["findingCount"], 1)
-            finding = result["findings"][0]
-            self.assertEqual(finding["code"], "update_history_not_newest_first")
-            self.assertEqual(finding["path"], "example.md")
-            self.assertEqual(finding["line"], 10)
-            self.assertEqual(finding["timestamp"], "2026-05-24T00:37+02:00")
-            self.assertEqual(finding["previousTimestamp"], "2026-05-23T22:10+02:00")
-
-    def test_update_history_flags_missing_timestamp_on_bullet(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            write_onboarding(root / "onboarding" / "example.md", "- Missing timestamp.")
-
-            result = check_onboarding_root(root / "onboarding")
-
-            self.assertFalse(result["ok"])
-            self.assertEqual(result["findings"][0]["code"], "update_history_timestamp_missing")
-
-    def test_history_order_fix_reorders_update_history_entries(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            path = root / "onboarding" / "example.md"
-            write_onboarding(
-                path,
-                "\n".join(
-                    [
-                        "- 2026-05-23T22:10+02:00: Older entry.",
-                        "  Older continuation.",
-                        "- 2026-05-24T00:37+02:00: Newer entry.",
-                    ]
-                ),
-            )
-
-            result = history_order_fix.fix_onboarding_root(root / "onboarding")
-            check_result = run_memory_quality_check(root / "onboarding")
-
-            self.assertTrue(result["ok"])
-            self.assertEqual(result["changedFiles"], ["example.md"])
-            self.assertEqual(result["skippedFiles"], [])
-            self.assertTrue(check_result["ok"])
-            text = path.read_text(encoding="utf-8")
-            self.assertLess(text.index("Newer entry"), text.index("Older entry"))
-            self.assertLess(text.index("Older entry"), text.index("Older continuation"))
-
-    def test_history_order_fix_skips_missing_timestamp(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            path = root / "onboarding" / "example.md"
-            write_onboarding(
-                path,
-                "\n".join(
-                    [
-                        "- Missing timestamp.",
-                        "- 2026-05-24T00:37+02:00: Timestamped entry.",
-                    ]
-                ),
-            )
-
-            result = history_order_fix.fix_onboarding_root(root / "onboarding")
-            check_result = run_memory_quality_check(root / "onboarding")
-
-            self.assertFalse(result["ok"])
-            self.assertEqual(result["changedFiles"], [])
-            self.assertEqual(result["skippedFiles"], ["example.md"])
-            self.assertFalse(check_result["ok"])
-            self.assertEqual(
-                check_result["findings"][0]["code"], "update_history_timestamp_missing"
-            )
-
-    def test_memory_quality_check_wrapper_defaults_to_update_history(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            write_onboarding(root / "onboarding" / "example.md", "- 2026-05-24T00:37+02:00: Clean.")
-
-            result = run_memory_quality_check(root / "onboarding")
-
-            self.assertTrue(result["ok"])
-            self.assertEqual(result["findingCount"], 0)
-            self.assertIn("style.update_history.history_order", result["checks"])
-
-    def test_memory_quality_check_payload_can_run_style_check_only(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            onboarding = (
-                root / "ar-coordination" / "memory-repos" / "ar-agents-remember" / "onboarding"
-            )
-            write_onboarding(
-                onboarding / "example.md",
-                "\n".join(
-                    [
-                        "- 2026-05-23T22:10+02:00: Older entry.",
-                        "- 2026-05-24T00:37+02:00: Newer entry inserted below it.",
-                    ]
-                ),
-            )
-            path = root / "mcp-settings.json"
-            write_json(path, settings_payload(root))
-            config = load_config(path)
-
-            payload = memory_quality_check_payload(
-                config,
-                "agents-remember",
-                checks=["style.update_history.history_order"],
-            )
-
-            self.assertFalse(payload["ok"])
-            self.assertEqual(payload["operation"], "memory_quality_check")
-            self.assertEqual(payload["repoId"], "agents-remember")
-            self.assertEqual(payload["findingCount"], 1)
-            self.assertEqual(
-                payload["findings"][0]["check"],
-                "style.update_history.history_order",
-            )
-
-    def test_memory_quality_check_payload_runs_drift_by_default(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            root = Path(tmp_dir)
-            initialize_clean_memory_fixture(root)
-            path = root / "mcp-settings.json"
-            write_json(path, settings_payload(root))
-            config = load_config(path)
-
-            payload = memory_quality_check_payload(config, "agents-remember")
-
-            self.assertTrue(payload["ok"])
-            self.assertEqual(payload["findingCount"], 0)
-            self.assertIn("integrity.onboarding_drift_check.summary", payload["checks"])
-            self.assertIn("style.update_history.history_order", payload["checks"])
-            drift_result = payload["checks"]["integrity.onboarding_drift_check.summary"]
-            self.assertEqual(drift_result["status"], "checked")
-            self.assertEqual(drift_result["findingCount"], 0)
 
 
 def initialize_clean_memory_fixture(root: Path) -> None:

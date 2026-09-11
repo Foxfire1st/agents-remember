@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import type { WorkspaceProjection } from "../types/projection";
+import type { CloseoutQueueNode, WorkspaceProjection } from "../types/projection";
 import { asServedProjection } from "../test/servedProjection";
 import { reparsed, agentNotifierHeartbeat } from "../test/fixtures/wire";
 import { dashboardStore } from "./store";
@@ -18,6 +18,26 @@ const projection = asServedProjection(snapshot);
 // every closed vocabulary to be exercised — six states need six lifecycles — and a hard-coded 2
 // is exactly the kind of hand-kept second copy this leaf is about.
 const FIXTURE_LIFECYCLES = projection.lifecycles.length;
+
+const RESET_QUEUE: CloseoutQueueNode = {
+  sprintRef: { repository: "repo-reset", path: "scenario-a/task.json" },
+  revision: 37,
+  serviceCondition: "valid-built",
+  sourceClassification: "active",
+  sourceFingerprint: "ab".repeat(32),
+  sourceProblems: [],
+  members: [
+    {
+      generationId: "cd".repeat(32),
+      taskDocumentRef: { repository: "repo-reset", path: "scenario-a/stale-leaf.json" },
+      owningMaster: { repository: "repo-reset", path: "scenario-a/task.json" },
+      classification: "ready",
+      priority: "normal",
+      order: 0,
+      reasons: [],
+    },
+  ],
+};
 
 beforeEach(() => {
   dashboardStore.setState({
@@ -79,6 +99,18 @@ describe("dashboard store", () => {
   it("marks the connection signal-lost", () => {
     dashboardStore.getState().setConn("signal-lost");
     expect(dashboardStore.getState().conn).toBe("signal-lost");
+  });
+
+  it("clears a seeded closeout queue and increments generation exactly once on reset", () => {
+    dashboardStore.setState({ closeoutQueues: [RESET_QUEUE] });
+    const generationBeforeReset = dashboardStore.getState().gen;
+    expect(dashboardStore.getState().closeoutQueues).toEqual([RESET_QUEUE]);
+
+    dashboardStore.getState().reset();
+
+    const resetState = dashboardStore.getState();
+    expect(resetState.closeoutQueues).toEqual([]);
+    expect(resetState.gen).toBe(generationBeforeReset + 1);
   });
 });
 

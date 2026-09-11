@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agents_remember.application.lifecycle_tools import (
+from agents_remember.application.lifecycle.lifecycle_tools import (
     lifecycle_block_tool,
     lifecycle_end_tool,
     lifecycle_phase_tool,

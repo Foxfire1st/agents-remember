@@ -6,14 +6,19 @@ import {
   createSession,
   notifySessionCatalogChanged,
   registerConnection,
-  sessionRole,
   sessionSeatRole,
   sessionStore,
   terminalOpenFailureMessage,
-  useSessions,
   type OpenSession,
   type SessionRole,
 } from '../data/sessions';
+import {
+  ROLE_LABELS,
+  useRailChatSessions,
+  type SprintRole,
+  type TaskChatRole,
+} from '../data/railChatSelection';
+import { reviewerContextLabel } from '../data/reviewerContext';
 import { submitSessionText, waitForSubmissionReady } from '../data/submitClient';
 import {
   attachSessionToTask,
@@ -48,24 +53,6 @@ import { SessionComposer } from './SessionComposer';
 // session); both surfaces resolve the same catalog identity.
 
 const Terminal = lazy(() => import('./Terminal').then((module) => ({ default: module.Terminal })));
-
-const SPRINT_ROLE_ORDER = [
-  'architect',
-  'orchestrator',
-  'strategist',
-  'designer',
-  'system-specialist',
-] as const;
-const LEAF_ROLE_ORDER = ['worker', 'reviewer', 'curator'] as const;
-type SprintRole = (typeof SPRINT_ROLE_ORDER)[number];
-
-const ROLE_LABELS: Record<SprintRole, string> = {
-  architect: 'Architect',
-  orchestrator: 'Orchestrator',
-  strategist: 'Strategist',
-  designer: 'Designer',
-  'system-specialist': 'System Specialist',
-};
 
 const wrap = css({
   display: 'flex',
@@ -325,114 +312,6 @@ function leafContextStepLines(steps: TaskDocNode['steps']): string[] {
   return steps.length > 0 ? steps.flatMap(stepLines) : ['- (none projected)'];
 }
 
-function taskDocumentForRef(
-  ref: TaskDocumentRef | undefined,
-  taskDocuments: TaskDocNode[],
-): TaskDocNode | undefined {
-  return ref
-    ? taskDocuments.find((doc) => sameTaskDocumentRef(taskDocumentRefForDoc(doc), ref))
-    : undefined;
-}
-
-function taskAltitude(doc: TaskDocNode | undefined): 'sprint' | 'master' | 'leaf' | undefined {
-  if (!doc) return undefined;
-  if (doc.kind !== 'master') return 'leaf';
-  return doc.orchestrates.length > 0 ? 'sprint' : 'master';
-}
-
-function workingLeafSeat(left: OpenSession, right: OpenSession): number {
-  const working = (session: OpenSession) =>
-    session.liveTurnWorking ||
-    session.turnState === 'working' ||
-    session.controlActivity === 'running';
-  const activeDelta = Number(working(right)) - Number(working(left));
-  if (activeDelta !== 0) return activeDelta;
-  return (
-    LEAF_ROLE_ORDER.indexOf(sessionSeatRole(left) as (typeof LEAF_ROLE_ORDER)[number]) -
-      LEAF_ROLE_ORDER.indexOf(sessionSeatRole(right) as (typeof LEAF_ROLE_ORDER)[number]) ||
-    left.id.localeCompare(right.id)
-  );
-}
-
-function useRailChatSessions(
-  taskDocumentRef: TaskDocumentRef | undefined,
-  taskDocuments: TaskDocNode[],
-  selectedSprintRole: SprintRole | undefined,
-): {
-  sessions: OpenSession[];
-  chatSession: OpenSession | undefined;
-  terminalSession: OpenSession | undefined;
-  freeChat: OpenSession | undefined;
-  mountedSessionIds: Set<string>;
-  altitude: 'sprint' | 'master' | 'leaf' | undefined;
-  sprintSeats: OpenSession[];
-  missingSprintRoles: SprintRole[];
-} {
-  const sessions = useSessions((state) => state.sessions);
-  const doc = taskDocumentForRef(taskDocumentRef, taskDocuments);
-  const altitude = taskAltitude(doc);
-  const bound = sessions.filter(
-    (session) =>
-      isRunning(session) && sameTaskDocumentRef(session.taskDocumentRef, taskDocumentRef),
-  );
-  const sprintSeats =
-    altitude === 'sprint'
-      ? bound
-          .filter((session) => SPRINT_ROLE_ORDER.includes(sessionSeatRole(session) as SprintRole))
-          .sort(
-            (left, right) =>
-              SPRINT_ROLE_ORDER.indexOf(sessionSeatRole(left) as SprintRole) -
-              SPRINT_ROLE_ORDER.indexOf(sessionSeatRole(right) as SprintRole),
-          )
-      : [];
-  const missingSprintRoles = SPRINT_ROLE_ORDER.filter(
-    (role) => !sprintSeats.some((session) => sessionSeatRole(session) === role),
-  );
-  const taskChat =
-    altitude === 'sprint'
-      ? (sprintSeats.find((session) => sessionSeatRole(session) === selectedSprintRole) ??
-        sprintSeats[0])
-      : altitude === 'master'
-        ? bound.find((session) => sessionSeatRole(session) === 'manager')
-        : altitude === 'leaf'
-          ? [...bound]
-              .filter((session) =>
-                LEAF_ROLE_ORDER.includes(
-                  sessionSeatRole(session) as (typeof LEAF_ROLE_ORDER)[number],
-                ),
-              )
-              .sort(workingLeafSeat)[0]
-          : undefined;
-  const matches = (session: OpenSession, role: SessionRole): boolean =>
-    isRunning(session) && sessionRole(session) === role && !session.taskDocumentRef;
-  const currentSession = (role: SessionRole): OpenSession | undefined =>
-    [...sessions].reverse().find((session) => matches(session, role));
-  const chatSession = taskDocumentRef ? taskChat : currentSession('chat');
-  const terminalSession = taskDocumentRef ? undefined : currentSession('terminal');
-  const freeChat = chatSession && !chatSession.taskDocumentRef ? chatSession : undefined;
-  const [mountedSessionIds, setMountedSessionIds] = useState<Set<string>>(() => new Set());
-  useEffect(() => {
-    setMountedSessionIds((current) => {
-      const sessionIds = new Set(sessions.map((session) => session.id));
-      const next = new Set([...current].filter((id) => sessionIds.has(id)));
-      if (chatSession) next.add(chatSession.id);
-      if (terminalSession) next.add(terminalSession.id);
-      if (next.size === current.size && [...next].every((id) => current.has(id))) return current;
-      return next;
-    });
-  }, [chatSession, terminalSession, sessions]);
-  return {
-    sessions,
-    chatSession,
-    terminalSession,
-    freeChat,
-    mountedSessionIds,
-    altitude,
-    sprintSeats,
-    missingSprintRoles,
-  };
-}
-
 function useRailChatSubmissions(
   leafKey: string | undefined,
   taskDocumentRef: TaskDocumentRef | undefined,
@@ -595,9 +474,9 @@ function RailChatImpl({
   engineProcesses = [],
   contextMaster,
 }: RailChatProps) {
-  const [selectedSprintRole, setSelectedSprintRole] = useState<SprintRole | undefined>();
+  const [selectedTaskRole, setSelectedTaskRole] = useState<TaskChatRole | undefined>();
   useEffect(
-    () => setSelectedSprintRole(undefined),
+    () => setSelectedTaskRole(undefined),
     [taskDocumentRef?.repository, taskDocumentRef?.path],
   );
   const {
@@ -608,8 +487,9 @@ function RailChatImpl({
     mountedSessionIds,
     altitude,
     sprintSeats,
+    masterSeats,
     missingSprintRoles,
-  } = useRailChatSessions(taskDocumentRef, taskDocuments, selectedSprintRole);
+  } = useRailChatSessions(taskDocumentRef, taskDocuments, selectedTaskRole);
   const { leafContextNote, sessionOpenError, startChat, openTerminal, deliverLeafContext } =
     useRailChatSubmissions(
       leafKey,
@@ -623,16 +503,17 @@ function RailChatImpl({
     (sessionId, lk) => deliverLeafContext(sessionId, lk),
   );
   const detected = useDetectedHarnesses();
-  const startSprintRole = sprintRoleStarter(detected, setSelectedSprintRole, startChat);
+  const startSprintRole = sprintRoleStarter(detected, setSelectedTaskRole, startChat);
   return (
     <RailChatBody
       leafKey={leafKey}
       taskDocumentRef={taskDocumentRef}
       altitude={altitude}
       sprintSeats={sprintSeats}
+      masterSeats={masterSeats}
       missingSprintRoles={missingSprintRoles}
-      selectedSprintRole={
-        (chatSession ? sessionSeatRole(chatSession) : selectedSprintRole) as SprintRole | undefined
+      selectedTaskRole={
+        (chatSession ? sessionSeatRole(chatSession) : selectedTaskRole) as TaskChatRole | undefined
       }
       contextMaster={contextMaster}
       sessions={sessions}
@@ -646,7 +527,7 @@ function RailChatImpl({
       leafAttachError={leafAttachError}
       leafTree={leafTree}
       onStartChat={startChat}
-      onSelectSprintRole={setSelectedSprintRole}
+      onSelectTaskRole={setSelectedTaskRole}
       onStartSprintRole={startSprintRole}
       onOpenTerminal={openTerminal}
       onTerminate={terminateRailSession}
@@ -660,8 +541,9 @@ interface RailChatBodyProps {
   taskDocumentRef: TaskDocumentRef | undefined;
   altitude: 'sprint' | 'master' | 'leaf' | undefined;
   sprintSeats: OpenSession[];
+  masterSeats: OpenSession[];
   missingSprintRoles: SprintRole[];
-  selectedSprintRole: SprintRole | undefined;
+  selectedTaskRole: TaskChatRole | undefined;
   contextMaster: string | undefined;
   sessions: OpenSession[];
   chatSession: OpenSession | undefined;
@@ -674,7 +556,7 @@ interface RailChatBodyProps {
   leafAttachError: string | null;
   leafTree: TaskTreeNode[];
   onStartChat: (harness: HarnessInfo, role?: string) => void;
-  onSelectSprintRole: (role: SprintRole) => void;
+  onSelectTaskRole: (role: TaskChatRole) => void;
   onStartSprintRole: (role: SprintRole) => void;
   onOpenTerminal: () => void;
   onTerminate: (id: string) => void;
@@ -686,8 +568,9 @@ function RailChatBody({
   taskDocumentRef,
   altitude,
   sprintSeats,
+  masterSeats,
   missingSprintRoles,
-  selectedSprintRole,
+  selectedTaskRole,
   contextMaster,
   sessions,
   chatSession,
@@ -700,7 +583,7 @@ function RailChatBody({
   leafAttachError,
   leafTree,
   onStartChat,
-  onSelectSprintRole,
+  onSelectTaskRole,
   onStartSprintRole,
   onOpenTerminal,
   onTerminate,
@@ -714,13 +597,14 @@ function RailChatBody({
         leafContextNote={leafContextNote}
         sessionOpenError={sessionOpenError}
       />
-      {altitude === 'sprint' ? (
-        <SprintRoleControls
-          existing={sprintSeats}
-          missing={missingSprintRoles}
-          selected={selectedSprintRole}
+      {altitude === 'sprint' || altitude === 'master' ? (
+        <TaskRoleControls
+          altitude={altitude}
+          existing={altitude === 'sprint' ? sprintSeats : masterSeats}
+          missing={altitude === 'sprint' ? missingSprintRoles : []}
+          selected={selectedTaskRole}
           canCreate={detected.length > 0}
-          onSelect={onSelectSprintRole}
+          onSelect={onSelectTaskRole}
           onCreate={onStartSprintRole}
         />
       ) : null}
@@ -789,7 +673,8 @@ function RailChatNotes({
   );
 }
 
-function SprintRoleControls({
+function TaskRoleControls({
+  altitude,
   existing,
   missing,
   selected,
@@ -797,17 +682,18 @@ function SprintRoleControls({
   onSelect,
   onCreate,
 }: {
+  altitude: 'sprint' | 'master';
   existing: OpenSession[];
   missing: SprintRole[];
-  selected: SprintRole | undefined;
+  selected: TaskChatRole | undefined;
   canCreate: boolean;
-  onSelect: (role: SprintRole) => void;
+  onSelect: (role: TaskChatRole) => void;
   onCreate: (role: SprintRole) => void;
 }) {
   return (
-    <div className={roleSwitcher} data-testid="rail-sprint-role-controls">
+    <div className={roleSwitcher} data-testid={`rail-${altitude}-role-controls`}>
       {existing.map((session) => {
-        const role = sessionSeatRole(session) as SprintRole;
+        const role = sessionSeatRole(session) as TaskChatRole;
         return (
           <button
             key={role}
@@ -1094,11 +980,12 @@ function Pane({
   onTerminate: (id: string) => void;
 }) {
   const seatRole = sessionSeatRole(session);
+  const contextRole = seatRole === 'reviewer' ? reviewerContextLabel(session) : seatRole;
   return (
     <div className={pane} data-testid={`rail-pane-${paneRole}`}>
       <div className={paneHeader}>
-        <span className={paneTitle} title={`${seatRole} · ${session.label}`}>
-          {seatRole} · {session.label}
+        <span className={paneTitle} title={`${contextRole} · ${session.label}`}>
+          {contextRole} · {session.label}
         </span>
         <button
           type="button"

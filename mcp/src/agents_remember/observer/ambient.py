@@ -239,7 +239,7 @@ class AmbientLifecycle:
         Modeled on :meth:`block`, but there is no gate and no wait: the model
         declares the turn complete and stops. The state is non-terminal -- the
         next AR tool call auto-resumes it (``resume_from_await``) at the
-        ``_tool_payload`` choke point -- so this is a notification, not a barrier.
+        ``_tool_payload`` choke point -- so this is a notification, not a blocker.
         """
         with self._lock:
             current = self._require_active()

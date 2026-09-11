@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agents_remember.controlplane.seats import current_seat_occupant
+from agents_remember.errors import SeatOccupancyError
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.ports import TerminalCatalogPort
@@ -33,58 +35,54 @@ class StructuralSeatResolver:
             self.topology.validate_role(document, role)
         except TaskDocumentRefError as exc:
             raise StructuralSeatError(exc.status, str(exc)) from exc
-        rows = [
-            row
-            for row in self.catalog.list()
-            if row.status == "running"
-            and row.binding_role == role
-            and row.task_document_ref == document
-        ]
-        if len(rows) > 1:
-            raise StructuralSeatError(
-                "structural-seat-ambiguous",
-                f"multiple running occupants claim {document.key} as {role}",
-            )
-        if rows:
-            return rows[0]
-        replacements = [
-            row
-            for row in self.catalog.list()
-            if row.status == "running"
-            and row.binding_role == role
-            and row.replacement_for_task_document_ref == document
-        ]
-        if len(replacements) > 1:
-            raise StructuralSeatError(
-                "structural-seat-ambiguous",
-                f"multiple running replacements claim {document.key} as {role}",
-            )
-        if replacements:
-            return replacements[0]
+        try:
+            occupant = current_seat_occupant(self.catalog.list(), document=document, role=role)
+        except SeatOccupancyError as exc:
+            raise StructuralSeatError("structural-seat-ambiguous", str(exc)) from exc
+        if occupant is not None:
+            return occupant
         raise StructuralSeatError(
             "structural-seat-missing", f"no running occupant for {document.key} as {role}"
         )
 
-    def parent(self, caller: TerminalCatalogEntry) -> TerminalCatalogEntry:
-        """Resolve the caller's current structural parent without spawn ancestry."""
+    def parent_address(self, caller: TerminalCatalogEntry) -> tuple[TaskDocumentRef, str]:
+        """Return the caller's canonical parent address without requiring a live occupant."""
 
         document = caller.binding_task_document_ref
         if document is None:
             raise StructuralSeatError("ambient-seat-unbound", "caller has no task document")
         role = caller.binding_role
-        if role in {"worker", "reviewer", "curator"}:
-            parent_document = self._parent_document(document)
-            return self.current(parent_document, "manager")
+        if role == "reviewer":
+            return self._reviewer_parent_address(caller, document)
+        if role in {"worker", "curator"}:
+            return self._parent_document(document), "manager"
         if role == "manager":
-            parent_document = self._parent_document(document)
-            return self.current(parent_document, "orchestrator")
+            return self._parent_document(document), "orchestrator"
         if role == "system-specialist":
-            return self.current(document, "orchestrator")
+            return document, "orchestrator"
         if role in {"orchestrator", "strategist", "designer"}:
-            return self.current(document, "architect")
+            return document, "architect"
         raise StructuralSeatError(
             "structural-parent-unsupported", f"role {role!r} has no messageable parent"
         )
+
+    def child_address(
+        self,
+        caller: TerminalCatalogEntry,
+        *,
+        document: TaskDocumentRef,
+        role: str,
+    ) -> tuple[TaskDocumentRef, str]:
+        """Return an authorized canonical child address even while its seat is vacant."""
+
+        self.authorize_child(caller, document=document, role=role)
+        return document, role
+
+    def parent(self, caller: TerminalCatalogEntry) -> TerminalCatalogEntry:
+        """Resolve the caller's current structural parent without spawn ancestry."""
+
+        document, role = self.parent_address(caller)
+        return self.current(document, role)
 
     def child(
         self,
@@ -95,8 +93,8 @@ class StructuralSeatResolver:
     ) -> TerminalCatalogEntry:
         """Resolve one authorized direct child inside the caller's document scope."""
 
-        self.authorize_child(caller, document=document, role=role)
-        return self.current(document, role)
+        child_document, child_role = self.child_address(caller, document=document, role=role)
+        return self.current(child_document, child_role)
 
     def authorize_child(
         self,
@@ -119,35 +117,93 @@ class StructuralSeatResolver:
                 "orchestrator",
                 "strategist",
                 "designer",
+                "reviewer",
             }:
                 raise StructuralSeatError(
                     "structural-child-refused",
-                    "architect children are its sprint orchestrator, strategist, and designer",
+                    "architect children are its sprint orchestrator, strategist, designer, "
+                    "and plan-review reviewer",
                 )
         elif caller.binding_role == "orchestrator":
-            same_sprint_specialist = document == caller_document and role == "system-specialist"
+            same_sprint_child = document == caller_document and role in {
+                "system-specialist",
+                "reviewer",
+            }
             master_manager = (
                 role == "manager" and self._parent_document(document) == caller_document
             )
-            if not same_sprint_specialist and not master_manager:
+            if not same_sprint_child and not master_manager:
                 raise StructuralSeatError(
                     "structural-child-refused",
-                    "orchestrator children are its sprint specialists and managers on direct masters",
+                    "orchestrator children are its sprint specialists, its super-exit reviewer, "
+                    "and managers on direct masters",
                 )
         elif caller.binding_role == "manager":
-            if role not in {"worker", "reviewer", "curator"}:
-                raise StructuralSeatError(
-                    "structural-child-refused", "manager children are worker/reviewer/curator seats"
-                )
-            if self._parent_document(document) != caller_document:
-                raise StructuralSeatError(
-                    "structural-child-refused", "requested leaf is outside the manager's master"
-                )
+            self._authorize_manager_child(caller_document, document, role)
         else:
             raise StructuralSeatError(
                 "structural-child-refused",
                 f"role {caller.binding_role!r} does not own subordinate seats",
             )
+
+    def _authorize_manager_child(
+        self,
+        caller_document: TaskDocumentRef,
+        document: TaskDocumentRef,
+        role: str,
+    ) -> None:
+        if document == caller_document and role == "reviewer":
+            return
+        if document == caller_document or role not in {"worker", "reviewer", "curator"}:
+            raise StructuralSeatError(
+                "structural-child-refused",
+                "manager children are worker/reviewer/curator seats on its leaves and its "
+                "master-exit reviewer on the master",
+            )
+        if self._parent_document(document) != caller_document:
+            raise StructuralSeatError(
+                "structural-child-refused",
+                "requested leaf is outside the manager's master",
+            )
+
+    def _reviewer_parent_address(
+        self,
+        caller: TerminalCatalogEntry,
+        document: TaskDocumentRef,
+    ) -> tuple[TaskDocumentRef, str]:
+        """Validate the plane-stamped owner of a polymorphic reviewer seat."""
+
+        parent_document = caller.structural_parent_task_document_ref
+        parent_role = caller.structural_parent_role
+        altitude = self.topology.altitude(document)
+        if parent_document is None and parent_role is None:
+            if altitude == "leaf":
+                # Reviewer rows that predate polymorphic reviewer seats were leaf-only. Preserve
+                # that one deterministic migration meaning without guessing a higher-level owner.
+                return self._parent_document(document), "manager"
+            raise StructuralSeatError(
+                "structural-parent-unproven",
+                f"{altitude} reviewer {document.key} has no plane-stamped structural parent",
+            )
+        if parent_document is None or parent_role is None:
+            raise StructuralSeatError(
+                "structural-parent-incomplete",
+                f"reviewer {document.key} has an incomplete structural parent address",
+            )
+        allowed = (
+            {(self._parent_document(document), "manager")}
+            if altitude == "leaf"
+            else {(document, "manager")}
+            if altitude == "master"
+            else {(document, "architect"), (document, "orchestrator")}
+        )
+        if (parent_document, parent_role) not in allowed:
+            raise StructuralSeatError(
+                "structural-parent-mismatch",
+                f"reviewer {document.key} at {altitude} has invalid structural parent "
+                f"{parent_document.key} as {parent_role}",
+            )
+        return parent_document, parent_role
 
     def _parent_document(self, document: TaskDocumentRef) -> TaskDocumentRef:
         try:

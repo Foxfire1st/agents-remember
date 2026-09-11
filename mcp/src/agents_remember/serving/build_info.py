@@ -6,10 +6,10 @@ per-request work) and rides the state payload (``/api/state`` + the SSE ``snapsh
 event) as ``servingBuild``; the cockpit renders it muted in the header so a stale server
 is visible at a glance.
 
-``commit`` is best-effort: running from a source checkout it is the repo's short HEAD
-hash; from an installed wheel (no git metadata) it is ``None`` and the package version
-carries the identity alone. Failures never propagate -- an unstampable build serves as
-``version``-only, never a crash.
+``sourceDigest`` is the content address of the importable Python package. It distinguishes
+equal-version source checkouts and installed artifacts, while ``commit`` remains useful
+checkout provenance. Failures never propagate: an unstampable field is omitted rather
+than guessed.
 
 ``dirty`` marks a checkout whose working tree has uncommitted code (tracked modifications
 or untracked, non-ignored files) at resolve time: a fix-round daemon serves its base
@@ -23,44 +23,23 @@ read as a verified-pristine claim, an honest unknown mirrors ``commit``'s ``None
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import sys
 from dataclasses import dataclass
+from functools import cache
 from importlib import resources
 from pathlib import Path
-
-from pydantic import BaseModel, ConfigDict
 
 import agents_remember
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.primitives.version import SERVER_VERSION
+from agents_remember.models.core import ServingBuildPayload
 from agents_remember.observer.events import now_iso
 
 # Boot-time probes: the stamp is best-effort and must never delay app creation, so a
 # git that does not answer in two seconds is treated as "unstampable" like any other
 # failure. Kept tight deliberately, against the runner's general-purpose local bound.
 _PROBE_TIMEOUT_SECONDS = 2
-
-
-class ServingBuildPayload(BaseModel):
-    """The declared camelCase wire form of the stamp, as it rides ``servingBuild``.
-
-    A model rather than a hand-built ``dict[str, Any]`` because this object is a field of
-    the served state contract (``serving.served_state.ServedWorkspaceProjection``), and a
-    contract whose members are untyped dicts only pretends to be one.
-
-    The honest-unknown rule of this module is expressed as ``None`` on every best-effort
-    field: callers serialize with ``exclude_none=True``, so an unresolvable commit, an
-    unbuilt dashboard bundle and an unprovable tree are all OMITTED rather than emitted as
-    a null or a fabricated "clean".
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    version: str
-    bootedAt: str
-    commit: str | None = None
-    dashboardBuild: str | None = None
-    # Only ever True or absent -- see ``ServingBuild.payload``.
-    dirty: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -73,12 +52,18 @@ class ServingBuild:
     dashboard_build: str | None = None
     # Tri-state: True = proven dirty, False = proven clean, None = unprovable (fail-open).
     dirty: bool | None = False
+    source_digest: str | None = None
+    python_executable: str | None = None
+    package_root: str | None = None
 
     def payload(self) -> ServingBuildPayload:
         """The declared wire form of this stamp (serialize with ``exclude_none=True``)."""
         return ServingBuildPayload(
             version=self.version,
             bootedAt=self.booted_at,
+            sourceDigest=self.source_digest,
+            pythonExecutable=self.python_executable,
+            packageRoot=self.package_root,
             commit=self.commit,
             dashboardBuild=self.dashboard_build,
             # Only a PROVEN-dirty tree carries the marker; clean (False) AND unprovable
@@ -86,6 +71,34 @@ class ServingBuild:
             # "clean" fact -- absence is not a pristine claim.
             dirty=True if self.dirty else None,
         )
+
+
+def runtime_source_digest(package_root: Path) -> str | None:
+    """Content-address the importable Python source without cache or path noise.
+
+    The package version and checkout commit are insufficient for equal-version wheels and
+    dirty source candidates. Hashing sorted relative paths plus file bytes makes those
+    artifacts distinguishable while remaining stable when the same package moves.
+    """
+    with contextlib.suppress(OSError):
+        sources = sorted(
+            path
+            for path in package_root.rglob("*.py")
+            if path.is_file() and "__pycache__" not in path.parts
+        )
+        if not sources:
+            return None
+        digest = hashlib.sha256(b"agents-remember-python-source-v1\0")
+        for path in sources:
+            relative = path.relative_to(package_root).as_posix().encode("utf-8")
+            body = path.read_bytes()
+            digest.update(relative)
+            digest.update(b"\0")
+            digest.update(str(len(body)).encode("ascii"))
+            digest.update(b"\0")
+            digest.update(body)
+        return f"sha256:{digest.hexdigest()}"
+    return None
 
 
 def _git_short_head(anchor: Path) -> str | None:
@@ -138,14 +151,24 @@ def _dashboard_build_fingerprint() -> str | None:
 
 
 def resolve_serving_build(*, anchor: Path | None = None) -> ServingBuild:
-    """Resolve the stamp once at boot: package version + best-effort commit + boot time."""
+    """Resolve the exact package/runtime stamp once at process boot."""
     root = anchor if anchor is not None else Path(agents_remember.__file__).resolve().parent
     commit = _git_short_head(root)
     return ServingBuild(
         version=SERVER_VERSION,
         commit=commit,
         booted_at=now_iso(),
+        source_digest=runtime_source_digest(root),
+        python_executable=Path(sys.executable).resolve().as_posix(),
+        package_root=root.resolve().as_posix(),
         dashboard_build=_dashboard_build_fingerprint(),
         # Only a real checkout can be dirty; off-checkout stays the clean version-only path.
         dirty=_git_worktree_dirty(root) if commit is not None else False,
     )
+
+
+@cache
+def process_serving_build() -> ServingBuild:
+    """Return the one immutable serving identity for this Python process."""
+
+    return resolve_serving_build()

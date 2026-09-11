@@ -450,13 +450,7 @@
           "type": "string"
         },
         "lane": {
-          "enum": [
-            "repo",
-            "worktree",
-            "lifecycle"
-          ],
-          "title": "Lane",
-          "type": "string"
+          "$ref": "#/$defs/AttentionLane"
         },
         "lifecycleId": {
           "anyOf": [
@@ -495,13 +489,7 @@
           "title": "Repoid"
         },
         "severity": {
-          "enum": [
-            "alarm",
-            "warn",
-            "info"
-          ],
-          "title": "Severity",
-          "type": "string"
+          "$ref": "#/$defs/AttentionSeverity"
         },
         "signalTs": {
           "anyOf": [
@@ -540,6 +528,167 @@
         "title"
       ],
       "title": "AttentionItem",
+      "type": "object"
+    },
+    "AttentionLane": {
+      "enum": [
+        "repo",
+        "worktree",
+        "lifecycle"
+      ],
+      "type": "string"
+    },
+    "AttentionSeverity": {
+      "enum": [
+        "alarm",
+        "warn",
+        "info"
+      ],
+      "type": "string"
+    },
+    "CloseoutCandidateNode": {
+      "additionalProperties": false,
+      "description": "One exact-current member of the disposable scheduling projection.",
+      "properties": {
+        "classification": {
+          "title": "Classification",
+          "type": "string"
+        },
+        "generationId": {
+          "title": "Generationid",
+          "type": "string"
+        },
+        "order": {
+          "default": 0,
+          "title": "Order",
+          "type": "integer"
+        },
+        "owningMaster": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        },
+        "priority": {
+          "title": "Priority",
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Reasons",
+          "type": "array"
+        },
+        "taskDocumentRef": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        }
+      },
+      "required": [
+        "generationId",
+        "taskDocumentRef",
+        "owningMaster",
+        "classification",
+        "priority"
+      ],
+      "title": "CloseoutCandidateNode",
+      "type": "object"
+    },
+    "CloseoutProjectionProblemNode": {
+      "additionalProperties": false,
+      "description": "Bounded repair evidence for a non-admitting projection.",
+      "properties": {
+        "address": {
+          "title": "Address",
+          "type": "string"
+        },
+        "errorType": {
+          "title": "Errortype",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "repairAction": {
+          "title": "Repairaction",
+          "type": "string"
+        },
+        "state": {
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "address",
+        "state",
+        "errorType",
+        "repairAction"
+      ],
+      "title": "CloseoutProjectionProblemNode",
+      "type": "object"
+    },
+    "CloseoutQueueNode": {
+      "additionalProperties": false,
+      "description": "Exact effective state for one disposable sprint scheduling projection.",
+      "properties": {
+        "members": {
+          "items": {
+            "$ref": "#/$defs/CloseoutCandidateNode"
+          },
+          "maxItems": 256,
+          "title": "Members",
+          "type": "array"
+        },
+        "revision": {
+          "default": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "serviceCondition": {
+          "title": "Servicecondition",
+          "type": "string"
+        },
+        "sourceClassification": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourceclassification"
+        },
+        "sourceFingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourcefingerprint"
+        },
+        "sourceProblems": {
+          "items": {
+            "$ref": "#/$defs/CloseoutProjectionProblemNode"
+          },
+          "maxItems": 256,
+          "title": "Sourceproblems",
+          "type": "array"
+        },
+        "sprintRef": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        }
+      },
+      "required": [
+        "sprintRef",
+        "serviceCondition"
+      ],
+      "title": "CloseoutQueueNode",
       "type": "object"
     },
     "CommitRefNode": {
@@ -607,17 +756,8 @@
           "title": "Exists"
         },
         "factState": {
-          "default": "missing",
-          "enum": [
-            "observed",
-            "derived",
-            "planned",
-            "missing",
-            "stale",
-            "not-applicable"
-          ],
-          "title": "Factstate",
-          "type": "string"
+          "$ref": "#/$defs/ProcessFactState",
+          "default": "missing"
         },
         "path": {
           "anyOf": [
@@ -633,6 +773,131 @@
         }
       },
       "title": "CommitRefNode",
+      "type": "object"
+    },
+    "DiscardUnstartedProofNode": {
+      "additionalProperties": false,
+      "description": "Persisted proof facts retained after an unstarted leaf source is discarded.",
+      "properties": {
+        "childJson": {
+          "additionalProperties": true,
+          "title": "Childjson",
+          "type": "object"
+        },
+        "childMarkdown": {
+          "additionalProperties": true,
+          "title": "Childmarkdown",
+          "type": "object"
+        },
+        "commitState": {
+          "title": "Commitstate",
+          "type": "string"
+        },
+        "doorState": {
+          "title": "Doorstate",
+          "type": "string"
+        },
+        "enclosureState": {
+          "title": "Enclosurestate",
+          "type": "string"
+        },
+        "fingerprint": {
+          "title": "Fingerprint",
+          "type": "string"
+        },
+        "locatorState": {
+          "title": "Locatorstate",
+          "type": "string"
+        },
+        "operationState": {
+          "title": "Operationstate",
+          "type": "string"
+        },
+        "reviewState": {
+          "title": "Reviewstate",
+          "type": "string"
+        },
+        "seatState": {
+          "title": "Seatstate",
+          "type": "string"
+        },
+        "taskDocumentRef": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        },
+        "taskState": {
+          "title": "Taskstate",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "taskDocumentRef",
+        "taskState",
+        "enclosureState",
+        "locatorState",
+        "doorState",
+        "operationState",
+        "seatState",
+        "reviewState",
+        "commitState",
+        "childJson",
+        "childMarkdown",
+        "fingerprint"
+      ],
+      "title": "DiscardUnstartedProofNode",
+      "type": "object"
+    },
+    "DiscardedSubTaskNode": {
+      "additionalProperties": false,
+      "description": "One master-owned, machine-readable discard-unstarted audit entry.",
+      "properties": {
+        "discardedAt": {
+          "title": "Discardedat",
+          "type": "string"
+        },
+        "disposition": {
+          "title": "Disposition",
+          "type": "string"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "number": {
+          "title": "Number",
+          "type": "string"
+        },
+        "proof": {
+          "$ref": "#/$defs/DiscardUnstartedProofNode"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "scope": {
+          "default": "",
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "name",
+        "file",
+        "disposition",
+        "reason",
+        "discardedAt",
+        "proof"
+      ],
+      "title": "DiscardedSubTaskNode",
       "type": "object"
     },
     "DriftSnapshotNode": {
@@ -957,18 +1222,7 @@
           "type": "array"
         },
         "health": {
-          "enum": [
-            "nominal",
-            "running",
-            "blocked",
-            "failed",
-            "stale",
-            "skipped",
-            "unknown",
-            "complete"
-          ],
-          "title": "Health",
-          "type": "string"
+          "$ref": "#/$defs/ProcessHealth"
         },
         "heartbeatAgeSeconds": {
           "anyOf": [
@@ -1390,17 +1644,8 @@
           "title": "Detail"
         },
         "factState": {
-          "default": "planned",
-          "enum": [
-            "observed",
-            "derived",
-            "planned",
-            "missing",
-            "stale",
-            "not-applicable"
-          ],
-          "title": "Factstate",
-          "type": "string"
+          "$ref": "#/$defs/ProcessFactState",
+          "default": "planned"
         },
         "kind": {
           "title": "Kind",
@@ -1564,14 +1809,55 @@
       "title": "LedgerRefNode",
       "type": "object"
     },
+    "LifecycleApprovalObservation": {
+      "additionalProperties": false,
+      "description": "Approval claim read from the same exact journal revision.",
+      "properties": {
+        "state": {
+          "enum": [
+            "claimed",
+            "unclaimed"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "LifecycleApprovalObservation",
+      "type": "object"
+    },
     "LifecycleOperationProjection": {
       "additionalProperties": false,
-      "description": "Public task-addressed view; process and resume identities never cross the wire.",
+      "description": "One coherent, task-addressed lifecycle journal observation.",
       "properties": {
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LifecycleApprovalObservation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "cancellable": {
           "default": false,
           "title": "Cancellable",
           "type": "boolean"
+        },
+        "componentBindings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LifecycleProjectionComponentBindings"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "currentCommand": {
           "default": "",
@@ -1606,6 +1892,18 @@
           "default": null,
           "title": "Finishedat"
         },
+        "generation": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generation"
+        },
         "guidance": {
           "anyOf": [
             {
@@ -1630,13 +1928,47 @@
           "default": null,
           "title": "Heartbeatat"
         },
+        "identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LifecycleProjectionIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "kind": {
           "enum": [
             "closeout",
-            "integrate"
+            "integrate",
+            "direct-landing"
           ],
           "title": "Kind",
           "type": "string"
+        },
+        "legalControls": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "maxItems": 32,
+          "title": "Legalcontrols",
+          "type": "array"
+        },
+        "meaningfulRevision": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Meaningfulrevision"
         },
         "phase": {
           "enum": [
@@ -1646,6 +1978,7 @@
             "quality",
             "approval-claim",
             "recovering-after-claim",
+            "recovering-private-preparation",
             "code-commit",
             "memory-refresh",
             "memory-commit",
@@ -1654,12 +1987,37 @@
             "integration-quality",
             "source-merge",
             "contract-finalization",
+            "door-publication",
+            "termination-required",
+            "direct-preflight",
+            "direct-memory-commit",
+            "direct-ledger-commit",
+            "direct-terminal-publication",
             "completed",
             "failed",
             "cancelled"
           ],
           "title": "Phase",
           "type": "string"
+        },
+        "projectionEffects": {
+          "items": {
+            "$ref": "#/$defs/TaskDocProjectionEffect"
+          },
+          "maxItems": 8,
+          "title": "Projectioneffects",
+          "type": "array"
+        },
+        "recommendedAction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LifecycleRecommendedAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "reportPath": {
           "title": "Reportpath",
@@ -1678,6 +2036,12 @@
           "default": null,
           "title": "Result"
         },
+        "schemaVersion": {
+          "const": "lifecycle-operation-projection/v1",
+          "default": "lifecycle-operation-projection/v1",
+          "title": "Schemaversion",
+          "type": "string"
+        },
         "startedAt": {
           "anyOf": [
             {
@@ -1690,17 +2054,57 @@
           "default": null,
           "title": "Startedat"
         },
-        "status": {
-          "enum": [
-            "queued",
-            "running",
-            "input-required",
-            "completed",
-            "failed",
-            "cancelled"
-          ],
-          "title": "Status",
+        "stateMatrixVersion": {
+          "const": "lifecycle-operation-state-matrix/v1",
+          "default": "lifecycle-operation-state-matrix/v1",
+          "title": "Statematrixversion",
           "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "enum": [
+                "queued",
+                "running",
+                "input-required",
+                "termination-required",
+                "completed",
+                "failed",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "enum": [
+                "unreadable",
+                "incoherent"
+              ],
+              "type": "string"
+            }
+          ],
+          "title": "Status"
+        },
+        "taskIntent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskIntentIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "worker": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LifecycleWorkerObservation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1870,6 +2274,243 @@
       "title": "LifecycleProjection",
       "type": "object"
     },
+    "LifecycleProjectionComponentBindings": {
+      "additionalProperties": false,
+      "description": "Identity digest claimed by every optional nested projection component.",
+      "properties": {
+        "approval": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approval"
+        },
+        "legalControls": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Legalcontrols",
+          "type": "array"
+        },
+        "recommendedAction": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recommendedaction"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result"
+        },
+        "worker": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Worker"
+        }
+      },
+      "title": "LifecycleProjectionComponentBindings",
+      "type": "object"
+    },
+    "LifecycleProjectionIdentity": {
+      "additionalProperties": false,
+      "description": "One exact journal snapshot and its admitted candidate/plan.",
+      "properties": {
+        "candidateTupleDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidatetupledigest",
+          "type": "string"
+        },
+        "contractPath": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Contractpath",
+          "type": "string"
+        },
+        "generation": {
+          "minimum": 1,
+          "title": "Generation",
+          "type": "integer"
+        },
+        "identityDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Identitydigest",
+          "type": "string"
+        },
+        "operationKind": {
+          "enum": [
+            "closeout",
+            "integrate",
+            "direct-landing"
+          ],
+          "title": "Operationkind",
+          "type": "string"
+        },
+        "planIdentityDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Planidentitydigest",
+          "type": "string"
+        },
+        "recordRevision": {
+          "minimum": 1,
+          "title": "Recordrevision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "operationKind",
+        "contractPath",
+        "generation",
+        "recordRevision",
+        "candidateTupleDigest",
+        "planIdentityDigest",
+        "identityDigest"
+      ],
+      "title": "LifecycleProjectionIdentity",
+      "type": "object"
+    },
+    "LifecycleRecommendedAction": {
+      "additionalProperties": false,
+      "description": "Required recovery edge, distinct from optional legal controls.",
+      "properties": {
+        "action": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "arguments": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Arguments"
+        },
+        "mutating": {
+          "default": false,
+          "title": "Mutating",
+          "type": "boolean"
+        },
+        "summary": {
+          "maxLength": 2048,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool"
+        }
+      },
+      "required": [
+        "action",
+        "summary"
+      ],
+      "title": "LifecycleRecommendedAction",
+      "type": "object"
+    },
+    "LifecycleWorkerObservation": {
+      "additionalProperties": false,
+      "description": "Public liveness class without exposing process or lease authority.",
+      "properties": {
+        "detail": {
+          "maxLength": 1024,
+          "title": "Detail",
+          "type": "string"
+        },
+        "identityRetained": {
+          "title": "Identityretained",
+          "type": "boolean"
+        },
+        "observedAt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observedat"
+        },
+        "state": {
+          "enum": [
+            "live",
+            "termination-requested",
+            "termination-required",
+            "exited"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "workerIdentitySha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Workeridentitysha256"
+        }
+      },
+      "required": [
+        "state",
+        "identityRetained",
+        "detail"
+      ],
+      "title": "LifecycleWorkerObservation",
+      "type": "object"
+    },
     "Metrics": {
       "additionalProperties": false,
       "description": "Workspace rollups: 3a point counts + the 3b derived aggregates.\n\nThe ``*Count`` fields below are not a free-form list: they are exactly\n:data:`STATE_COUNT_FIELDS` (one per non-terminal lifecycle state) plus ``lifecycleCount``,\nthe all-states total. They stay written out because they are the served contract the\ndashboard reads by name and pyright checks by name; what makes them non-drifting is that\nthe reducer fills them from the vocabulary and a test asserts this declaration equals it.\n\n``stalenessHistogram`` buckets every onboarding sidecar by the age of its\n``lastVerifiedCommitDate`` (slice 3b, surface 11) -- the git-free\nverification-age distribution note 03 wanted, computed without classifying\ndrift. Per-lifecycle token *series* live on each ``LifecycleProjection``; these\nare the workspace-wide rollups.",
@@ -1915,22 +2556,212 @@
       "title": "Metrics",
       "type": "object"
     },
+    "ProcessFactState": {
+      "enum": [
+        "observed",
+        "derived",
+        "planned",
+        "missing",
+        "stale",
+        "not-applicable"
+      ],
+      "type": "string"
+    },
+    "ProcessHealth": {
+      "enum": [
+        "nominal",
+        "running",
+        "blocked",
+        "failed",
+        "stale",
+        "skipped",
+        "unknown",
+        "complete"
+      ],
+      "type": "string"
+    },
+    "ProjectionInvalidationResult": {
+      "additionalProperties": false,
+      "properties": {
+        "diagnostic": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectionSourceProblem"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "outcome": {
+          "enum": [
+            "persisted-empty",
+            "already-empty",
+            "recovered-malformed",
+            "would-recover-malformed",
+            "would-persist-empty",
+            "failed"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "title": "ProjectionInvalidationResult",
+      "type": "object"
+    },
+    "ProjectionRebuildResult": {
+      "additionalProperties": false,
+      "properties": {
+        "memberCount": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Membercount",
+          "type": "integer"
+        },
+        "outcome": {
+          "enum": [
+            "published",
+            "already-current",
+            "source-changed",
+            "source-unreadable",
+            "would-publish",
+            "not-attempted"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision"
+        },
+        "sourceClassification": {
+          "anyOf": [
+            {
+              "enum": [
+                "active",
+                "terminal"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourceclassification"
+        },
+        "sourceFingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourcefingerprint"
+        },
+        "sourceProblems": {
+          "items": {
+            "$ref": "#/$defs/ProjectionSourceProblem"
+          },
+          "maxItems": 256,
+          "title": "Sourceproblems",
+          "type": "array"
+        }
+      },
+      "required": [
+        "outcome"
+      ],
+      "title": "ProjectionRebuildResult",
+      "type": "object"
+    },
+    "ProjectionSourceProblem": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "title": "Address",
+          "type": "string"
+        },
+        "errorType": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Errortype",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "task",
+            "door",
+            "series",
+            "projection"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "repairAction": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "title": "Repairaction",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "missing",
+            "unreadable",
+            "invalid"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "address",
+        "state",
+        "errorType",
+        "repairAction"
+      ],
+      "title": "ProjectionSourceProblem",
+      "type": "object"
+    },
     "ProviderBootNode": {
       "additionalProperties": false,
       "description": "One isolated engine in a worktree's provider runtime: CGC (code) or GrepAI (memory).\n\nThe boot *sequence* (seed/clone/watcher phases) lives on the owning\n:class:`EngineProcessNode` because provider setup is one progress file per worktree\ngroup; this node is the engine's identity + its current runtime health.",
       "properties": {
         "factState": {
-          "default": "observed",
-          "enum": [
-            "observed",
-            "derived",
-            "planned",
-            "missing",
-            "stale",
-            "not-applicable"
-          ],
-          "title": "Factstate",
-          "type": "string"
+          "$ref": "#/$defs/ProcessFactState",
+          "default": "observed"
         },
         "id": {
           "title": "Id",
@@ -2116,6 +2947,19 @@
             "$ref": "#/$defs/TaskDecisionNode"
           },
           "title": "Decisions",
+          "type": "array"
+        },
+        "discardedCount": {
+          "default": 0,
+          "title": "Discardedcount",
+          "type": "integer"
+        },
+        "discardedSubTasks": {
+          "items": {
+            "$ref": "#/$defs/DiscardedSubTaskNode"
+          },
+          "maxItems": 256,
+          "title": "Discardedsubtasks",
           "type": "array"
         },
         "docPath": {
@@ -2481,7 +3325,8 @@
         "relation": {
           "enum": [
             "super-to-master",
-            "master-to-leaf"
+            "master-to-leaf",
+            "super-to-leaf"
           ],
           "title": "Relation",
           "type": "string"
@@ -2722,9 +3567,85 @@
           "default": null,
           "title": "Design"
         },
+        "discardedCount": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Discardedcount"
+        },
+        "discardedSubTasks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DiscardedSubTaskNode"
+              },
+              "maxItems": 256,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Discardedsubtasks"
+        },
         "docPath": {
           "title": "Docpath",
           "type": "string"
+        },
+        "executionGraph": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskExecutionGraphNode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "executionGraphView": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskExecutionGraphView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "executionNature": {
+          "anyOf": [
+            {
+              "enum": [
+                "organizational",
+                "atomic"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Executionnature"
+        },
+        "executionWaves": {
+          "items": {
+            "items": {
+              "$ref": "#/$defs/TaskExecutionNode"
+            },
+            "type": "array"
+          },
+          "title": "Executionwaves",
+          "type": "array"
         },
         "id": {
           "title": "Id",
@@ -2795,6 +3716,13 @@
           "title": "Requirements",
           "type": "array"
         },
+        "seats": {
+          "items": {
+            "$ref": "#/$defs/TaskSeatNode"
+          },
+          "title": "Seats",
+          "type": "array"
+        },
         "sections": {
           "items": {
             "$ref": "#/$defs/TaskSectionNode"
@@ -2846,6 +3774,84 @@
       "title": "TaskDocNode",
       "type": "object"
     },
+    "TaskDocProjectionEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "invalidation": {
+          "$ref": "#/$defs/ProjectionInvalidationResult"
+        },
+        "nextAction": {
+          "anyOf": [
+            {
+              "maxLength": 8192,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nextaction"
+        },
+        "priorRevision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Priorrevision"
+        },
+        "priorSourceFingerprint": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Priorsourcefingerprint"
+        },
+        "queueExisted": {
+          "title": "Queueexisted",
+          "type": "boolean"
+        },
+        "rebuild": {
+          "$ref": "#/$defs/ProjectionRebuildResult"
+        },
+        "rebuiltRevision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rebuiltrevision"
+        },
+        "sprintTaskDocumentRef": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        }
+      },
+      "required": [
+        "sprintTaskDocumentRef",
+        "queueExisted",
+        "invalidation",
+        "rebuild"
+      ],
+      "title": "TaskDocProjectionEffect",
+      "type": "object"
+    },
     "TaskDocumentRef": {
       "additionalProperties": false,
       "description": "One JSON-primary task document under ``tasks/<repository>``.\n\n``path`` is coordination-root-relative *inside* the repository task root.  Keeping\nthe root out of the value makes the reference stable when the same coordination\ntree is mounted at another absolute location, while ``repository`` prevents two\nrepositories with the same task-folder layout from colliding.",
@@ -2864,6 +3870,307 @@
         "path"
       ],
       "title": "TaskDocumentRef",
+      "type": "object"
+    },
+    "TaskExecutionEdgeNode": {
+      "additionalProperties": false,
+      "description": "One reasoned dependency edge in a sprint task document.",
+      "properties": {
+        "judgmentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judgmentid"
+        },
+        "predecessor": {
+          "$ref": "#/$defs/TaskExecutionEndpointNode"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "successor": {
+          "$ref": "#/$defs/TaskExecutionEndpointNode"
+        }
+      },
+      "required": [
+        "predecessor",
+        "successor",
+        "reason"
+      ],
+      "title": "TaskExecutionEdgeNode",
+      "type": "object"
+    },
+    "TaskExecutionEndpointNode": {
+      "additionalProperties": false,
+      "description": "One resolved-form edge endpoint: the master ref plus the segment-sampling leaf id.\n\nThe persisted grammar also allows a bare ref (lump/legacy); the before-validator\nlifts that form so the served shape is uniform.",
+      "properties": {
+        "leafId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Leafid"
+        },
+        "ref": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "TaskExecutionEndpointNode",
+      "type": "object"
+    },
+    "TaskExecutionGraphNode": {
+      "additionalProperties": false,
+      "description": "Persisted AON graph projected without adding scheduler judgment.",
+      "properties": {
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/TaskExecutionEdgeNode"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/TaskExecutionNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        }
+      },
+      "title": "TaskExecutionGraphNode",
+      "type": "object"
+    },
+    "TaskExecutionGraphView": {
+      "additionalProperties": false,
+      "description": "The render-ready sprint graph, ordered by derived wave then node order.\n\nNodes within a wave keep the persisted declaration order, so a re-render\nwith an unchanged graph is byte-stable.",
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/TaskExecutionNodeView"
+          },
+          "title": "Nodes",
+          "type": "array"
+        }
+      },
+      "title": "TaskExecutionGraphView",
+      "type": "object"
+    },
+    "TaskExecutionNode": {
+      "additionalProperties": false,
+      "description": "One graph node: a whole-master lump or a leaf-segment of one master (L11-R1).",
+      "properties": {
+        "kind": {
+          "default": "master",
+          "title": "Kind",
+          "type": "string"
+        },
+        "leafIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Leafids",
+          "type": "array"
+        },
+        "ref": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "TaskExecutionNode",
+      "type": "object"
+    },
+    "TaskExecutionNodeView": {
+      "additionalProperties": false,
+      "description": "Render-ready per-node sprint graph model (L12-R4).\n\n``nodeId`` is a stable semantic identity: a lump's master ref key, or the\nref key plus a segment ordinal for a segmented master. ``waveIndex`` is the\n1-based derived wave; ``frontierState`` is derived mechanically from task\nstatuses and the graph edges -- the dashboard styles, never re-derives.",
+      "properties": {
+        "executionNature": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Executionnature"
+        },
+        "frontierState": {
+          "enum": [
+            "landed",
+            "ready",
+            "waiting",
+            "in-flight"
+          ],
+          "title": "Frontierstate",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "lump",
+            "segment"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "leafIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Leafids",
+          "type": "array"
+        },
+        "leafTitles": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Leaftitles",
+          "type": "array"
+        },
+        "masterRef": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        },
+        "masterTitle": {
+          "title": "Mastertitle",
+          "type": "string"
+        },
+        "nodeId": {
+          "title": "Nodeid",
+          "type": "string"
+        },
+        "predecessors": {
+          "items": {
+            "$ref": "#/$defs/TaskExecutionPredecessorNode"
+          },
+          "title": "Predecessors",
+          "type": "array"
+        },
+        "waveIndex": {
+          "title": "Waveindex",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "nodeId",
+        "kind",
+        "masterRef",
+        "masterTitle",
+        "waveIndex",
+        "frontierState"
+      ],
+      "title": "TaskExecutionNodeView",
+      "type": "object"
+    },
+    "TaskExecutionPredecessorNode": {
+      "additionalProperties": false,
+      "description": "One predecessor edge of a projected graph node with its recorded reason.",
+      "properties": {
+        "judgmentId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Judgmentid"
+        },
+        "predecessorRef": {
+          "$ref": "#/$defs/TaskDocumentRef"
+        },
+        "predecessorTitle": {
+          "title": "Predecessortitle",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "predecessorRef",
+        "predecessorTitle",
+        "reason"
+      ],
+      "title": "TaskExecutionPredecessorNode",
+      "type": "object"
+    },
+    "TaskIntentIdentity": {
+      "additionalProperties": false,
+      "description": "Canonical task-intent schema plus its exact projection digest.",
+      "properties": {
+        "digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "schema": {
+          "const": "task-intent/v1",
+          "default": "task-intent/v1",
+          "title": "Schema",
+          "type": "string"
+        }
+      },
+      "required": [
+        "digest"
+      ],
+      "title": "TaskIntentIdentity",
+      "type": "object"
+    },
+    "TaskSeatNode": {
+      "additionalProperties": false,
+      "description": "One first-class seat of an orchestration sprint (L14-R3).\n\nMirrors ``tasks.document.SprintSeat``: the sprint document owns the seat record, so seat task\ndocuments leave the sprint's task index (existing ones stay on disk as historical records).\n``identity`` is a correlatable session or catalog id — provenance for correlation, never an\nauthority source.",
+      "properties": {
+        "identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identity"
+        },
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "state": {
+          "default": "planned",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "title": "TaskSeatNode",
       "type": "object"
     },
     "TaskSectionNode": {
@@ -3035,6 +4342,17 @@
           "default": null,
           "title": "Linkedlifecycleid"
         },
+        "masterRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskDocumentRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "name": {
           "title": "Name",
           "type": "string"
@@ -3131,6 +4449,21 @@
     },
     "analytics": {
       "$ref": "#/$defs/Analytics"
+    },
+    "closeoutQueues": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/CloseoutQueueNode"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Closeoutqueues"
     },
     "enclosures": {
       "items": {

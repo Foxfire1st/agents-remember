@@ -16,6 +16,10 @@ from typing import Any, NamedTuple
 import uvicorn
 
 import agents_remember
+from agents_remember.application.task_docs.task_execution_registration import (
+    register_operator_inbox_execution_evidence,
+    register_terminal_catalog_execution_evidence,
+)
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
 from agents_remember.controlplane.durable_store import declare_process_role
 from agents_remember.kernel.primitives.runtime_config import (
@@ -23,6 +27,7 @@ from agents_remember.kernel.primitives.runtime_config import (
     load_config,
 )
 from agents_remember.serving import daemon as serving_daemon
+from agents_remember.serving._app_common import ServingCollaborators
 from agents_remember.serving.app import create_app
 from agents_remember.serving.change_watcher import DEFAULT_HEARTBEAT_SECONDS
 from agents_remember.serving.projector import ProjectionCadence, ProjectionReplay
@@ -50,6 +55,10 @@ _DEV_HEARTBEAT_ENV = "AR_DASHBOARD_DEV_HEARTBEAT"
 # are force-closed, which is exactly the desired behaviour on shutdown. uvicorn types this as whole
 # seconds (``int | None``), so keep it an int.
 DASHBOARD_GRACEFUL_SHUTDOWN_SECONDS = 3
+EXECUTION_REGISTRATION_COLLABORATORS = ServingCollaborators(
+    register_terminal_execution_evidence=register_terminal_catalog_execution_evidence,
+    register_inbox_execution_evidence=register_operator_inbox_execution_evidence,
+)
 
 
 def _dev_app():
@@ -81,6 +90,7 @@ def _dev_app():
             interval=float(os.environ.get(_DEV_INTERVAL_ENV, "1.0")),
             heartbeat=float(heartbeat_env) if heartbeat_env else None,
         ),
+        collaborators=EXECUTION_REGISTRATION_COLLABORATORS,
     )
 
 
@@ -253,7 +263,9 @@ def _build_app(
     if not args.sim:
         return _DashboardApp(
             create_app(
-                config, cadence=ProjectionCadence(interval=args.interval, heartbeat=args.heartbeat)
+                config,
+                cadence=ProjectionCadence(interval=args.interval, heartbeat=args.heartbeat),
+                collaborators=EXECUTION_REGISTRATION_COLLABORATORS,
             ),
             None,
         )
@@ -266,6 +278,7 @@ def _build_app(
         sim.config,
         cadence=ProjectionCadence(interval=args.interval),
         replay=ProjectionReplay(now=sim.clock.now, before_tick=sim.feeder.feed),
+        collaborators=EXECUTION_REGISTRATION_COLLABORATORS,
     )
     return _DashboardApp(app, sim)
 

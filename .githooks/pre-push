@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
 # Targeted pre-push tier: preserve Git's ref-update input as provenance, then run
 # deterministic non-test checks without staging, stashing, or mutating the index.
-# Leaf acceptance belongs to closeout and runs only in Dagger.
+# This hook reports targeted deterministic checks only. Closeout and integration
+# publish Git code/memory/ledger transactions without launching full acceptance.
 #
 # Bypass intentionally with `git push --no-verify`.
 

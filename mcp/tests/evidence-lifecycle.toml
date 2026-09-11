@@ -1,0 +1,1015 @@
+schema_version = "ar-test-evidence-lifecycle/v3"
+large_fixture_bytes = 25000
+
+[[contract]]
+id = "ar-durable-store/1.0-process-race-evidence"
+owner = "mcp/src/agents_remember/controlplane/durable_store.py"
+evidence_node = "mcp/tests/test_provider_store_durability.py::ProviderStoreDurabilityTests::test_no_record_is_lost_when_an_append_races_a_compaction"
+
+[[contract]]
+id = "conversation-control-public-route-contract"
+owner = "mcp/src/agents_remember/serving/conversation/control/api.py"
+evidence_node = "mcp/tests/test_conversation_control_api.py::ControlApiTests::test_interrupt_ack_settle_replay_and_single_write"
+
+[[contract]]
+id = "next-supported-pi-rpc-activity-recording"
+owner = "mcp/src/agents_remember/serving/pi_rpc_events.py"
+evidence_node = "mcp/tests/test_pi_rpc_adapter_ops_2.py::PiRpcAdapterTests2::test_get_state_drives_stream_compaction_and_pending_activity"
+
+[[contract]]
+id = "synthetic-test-evidence-candidate"
+owner = "mcp/test_support/agents_remember_test_support/testing/evidence_lifecycle.py"
+evidence_node = "mcp/tests/test_dependency_ownership_ast_helpers.py::test_repository_inputs_reach_their_supported_consumers"
+
+[[artifact]]
+path = "mcp/tests/_control_plane.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "conversation-control-route-contract"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "canonical conversation models plus caller-scripted adapter events"
+introduced_by = "260718-CHATS-L3"
+lifetime = "permanent"
+permanence_rationale = "The shared port composes real bridge, IPC, catalog, and route boundaries."
+replacement_contract = "contract:conversation-control-public-route-contract"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_conversation_control_api.py",
+  "mcp/tests/test_conversation_control_attachments.py",
+  "mcp/tests/test_conversation_control_queue.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_store_durability.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "durable-store-contract"
+category = "stress-durability"
+fidelity = "process-race"
+cadence = "scheduled-release"
+source_version_or_generator = "bounded process-interleaving harness over production stores"
+introduced_by = "260731-EFA-L7"
+lifetime = "permanent"
+permanence_rationale = "It reproduces process-scale lost-update and unlink races not expressible as unit assertions."
+replacement_contract = "contract:ar-durable-store/1.0-process-race-evidence"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_controlplane_store_durability.py",
+  "mcp/tests/test_provider_store_durability.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_adapter_event_scripts.py"
+kind = "shared-support"
+authority = "external-spec-derived"
+owner = "conversation-provider-event-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "caller-owned Codex, Pi, and Claude terminal frame scripts"
+introduced_by = "260824-PDLS-L7"
+lifetime = "permanent"
+permanence_rationale = "Provider frames remain independent from the production reducers that consume them."
+replacement_contract = "node:mcp/tests/test_conversation_control_api.py::ControlApiTests::test_interrupt_ack_settle_replay_and_single_write"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_conversation_control_api.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_agent_wire_fixtures.py"
+kind = "shared-support"
+authority = "external-spec-derived"
+owner = "codex-agent-wire-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "independent minimal frames derived from the vendored Codex app-server protocol"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "The synthetic frames independently pin provider field names and event ordering."
+replacement_contract = "node:mcp/tests/test_codex_app_server_adapter_reconnect.py::test_reconnect_resumes_reads_and_reconciles_without_resend"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_codex_adapter_thread_routing_and_registry.py",
+  "mcp/tests/test_codex_app_server_adapter_reconnect.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_evidence_catalog_fixture.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "synthetic-evidence-candidate-contract"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "typed synthetic lifecycle-catalog builder"
+introduced_by = "260824-PDLS-L7"
+lifetime = "permanent"
+permanence_rationale = "Selection, retry, and bootstrap tests need one lifecycle-valid candidate builder."
+replacement_contract = "contract:synthetic-test-evidence-candidate"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_code_quality_targeted.py",
+  "mcp/tests/test_pytest_bootstrap_boundaries.py",
+  "mcp/tests/test_quality_retry_proof.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_quality_admission.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "quality-test-admission"
+category = "architecture-fitness"
+fidelity = "repository-structure"
+cadence = "affected"
+source_version_or_generator = "explicit modeled admission input for quality-plan tests"
+introduced_by = "260731-EFA-L7"
+lifetime = "permanent"
+permanence_rationale = "Focused quality-plan tests share a modeled admission input; real delivery still requires its own Dagger admission."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_python_suite_refuses_missing_or_mismatched_dagger_attestation"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_causal_quality_preflight.py",
+  "mcp/tests/test_file_size_detector.py",
+  "mcp/tests/test_quality_retry_proof.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/codex_app_server_0_144_3.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "codex-app-server-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Codex app-server 0.144.3 observed wire frames"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained while the 0.144.3 protocol shape remains a supported compatibility input."
+replacement_contract = "node:mcp/tests/test_codex_app_server_adapter_reconnect.py::test_reconnect_resumes_reads_and_reconciles_without_resend"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_codex_adapter_thread_routing_and_registry.py",
+  "mcp/tests/test_codex_app_server_adapter.py",
+  "mcp/tests/test_codex_app_server_adapter_correlation.py",
+  "mcp/tests/test_codex_app_server_adapter_reconnect.py",
+  "mcp/tests/test_codex_app_server_adapter_turns.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/pi_rpc/activity.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "pi-rpc-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Pi RPC 0.80.7 activity event stream"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained while the recorded Pi activity frames are supported parser inputs."
+replacement_contract = "contract:next-supported-pi-rpc-activity-recording"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_pi_rpc_adapter_ops_2.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/claude_stream_json/2.1.210/initialization.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "claude-stream-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Claude CLI 2.1.210 stream-json initialization"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained as the primary Claude initialization conformance shape."
+replacement_contract = "node:mcp/tests/test_harness_control_claude_stream_1.py::ClaudeStreamJsonAdapterTests1::test_launch_preserves_arguments_environment_and_requires_structured_init"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_harness_control_claude.py",
+  "mcp/tests/test_harness_control_claude_interrupt.py",
+  "mcp/tests/test_harness_control_claude_stream_1.py",
+  "mcp/tests/test_harness_control_claude_stream_2.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/claude_stream_json/2.1.210/interactions.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "claude-stream-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Claude CLI 2.1.210 stream-json interaction"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained as the primary Claude interaction conformance shape."
+replacement_contract = "node:mcp/tests/test_harness_control_claude_stream_1.py::ClaudeStreamJsonAdapterTests1::test_permissions_and_ask_user_question_use_durable_interaction_response"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_harness_control_claude.py",
+  "mcp/tests/test_harness_control_claude_interrupt.py",
+  "mcp/tests/test_harness_control_claude_stream_1.py",
+  "mcp/tests/test_harness_control_claude_stream_2.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/claude_stream_json/2.1.210/turn.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "claude-stream-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Claude CLI 2.1.210 stream-json turn"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained as the primary Claude turn conformance shape."
+replacement_contract = "node:mcp/tests/test_harness_control_claude_stream_1.py::ClaudeStreamJsonAdapterTests1::test_correlated_acceptance_retry_activity_and_terminal_result_are_distinct"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_harness_control_claude.py",
+  "mcp/tests/test_harness_control_claude_interrupt.py",
+  "mcp/tests/test_harness_control_claude_stream_1.py",
+  "mcp/tests/test_harness_control_claude_stream_2.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/claude_stream_json/2.1.217/interrupt.jsonl"
+kind = "recording"
+authority = "external-recorded"
+owner = "claude-stream-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Claude CLI 2.1.217 interrupted stream-json turn"
+introduced_by = "260718-CHATS"
+lifetime = "versioned"
+permanence_rationale = "Retained to prove native interrupt settlement for the supported Claude shape."
+replacement_contract = "node:mcp/tests/test_harness_control_claude_interrupt.py::ClaudeInterruptTests::test_accepted_interrupt_settles_interrupted_not_failed"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_harness_control_claude.py",
+  "mcp/tests/test_harness_control_claude_interrupt.py",
+  "mcp/tests/test_harness_control_claude_stream_1.py",
+  "mcp/tests/test_harness_control_claude_stream_2.py",
+]
+
+[[artifact]]
+path = "mcp/tests/closeout_fixture_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "closeout-liveness-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "typed closeout and lifecycle fixture composition"
+introduced_by = "260824-closeout-liveness-recovery"
+lifetime = "permanent"
+permanence_rationale = "The helper owns the shared closeout repository topology used by eighteen lifecycle suites."
+replacement_contract = "node:mcp/tests/test_transaction_only_worktree_delivery.py::test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_operation_certification_selection.py",
+]
+
+[[artifact]]
+path = "mcp/tests/closeout_input_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "closeout-input-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "typed closeout input and repository authority builders"
+introduced_by = "260824-PDLS"
+lifetime = "permanent"
+permanence_rationale = "The helper is the single test-side composition root for closeout inputs across lifecycle and tool boundaries."
+replacement_contract = "node:mcp/tests/test_transaction_only_worktree_delivery.py::test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_activation_admission_registered.py",
+  "mcp/tests/test_atomic_master_review_public.py",
+  "mcp/tests/test_atomic_master_review_scope.py",
+  "mcp/tests/test_atomic_series_activation.py",
+  "mcp/tests/test_atomic_series_landing_l3.py",
+  "mcp/tests/test_author_execution_graph.py",
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_closeout_certification_entrypoint.py",
+  "mcp/tests/test_closeout_kept_rules_pins.py",
+  "mcp/tests/test_closeout_queue.py",
+  "mcp/tests/test_compact_content.py",
+  "mcp/tests/test_config.py",
+  "mcp/tests/test_context_packet.py",
+  "mcp/tests/test_direct_landing.py",
+  "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_lifecycle_finalize.py",
+  "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_mcp_stdio_transport.py",
+  "mcp/tests/test_operation_certification_selection.py",
+  "mcp/tests/test_provider_current_state.py",
+  "mcp/tests/test_quality_gate_public_contract.py",
+  "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_spawn_agent_session.py",
+  "mcp/tests/test_task_doc_structural_publication_l2.py",
+  "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_task_sprint_linkage.py",
+  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_tools.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_worktree_closeout_quality_gate.py",
+  "mcp/tests/test_worktree_quality_gate_runner.py",
+  "mcp/tests/test_worktree_support.py",
+  "mcp/tests/test_worktree_support_tests_1.py",
+]
+
+[[artifact]]
+path = "mcp/tests/curator_coherence_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "curator-coherence-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "typed task-topology, attestation, and explicit-judgment fixture inputs routed through production curator-coherence publication"
+introduced_by = "260828-MCAR-L02"
+lifetime = "permanent"
+permanence_rationale = "Closeout fixtures need one shared input author that preserves the production canonical writer and exact validation boundary."
+replacement_contract = "node:mcp/tests/test_final_full_memory_coherence_certification.py::test_final_certification_refuses_without_current_coherence"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_activation_admission_registered.py",
+  "mcp/tests/test_atomic_master_review_public.py",
+  "mcp/tests/test_atomic_master_review_scope.py",
+  "mcp/tests/test_atomic_series_activation.py",
+  "mcp/tests/test_atomic_series_landing_l3.py",
+  "mcp/tests/test_author_execution_graph.py",
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_closeout_certification_entrypoint.py",
+  "mcp/tests/test_closeout_kept_rules_pins.py",
+  "mcp/tests/test_closeout_queue.py",
+  "mcp/tests/test_compact_content.py",
+  "mcp/tests/test_config.py",
+  "mcp/tests/test_context_packet.py",
+  "mcp/tests/test_direct_landing.py",
+  "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_lifecycle_finalize.py",
+  "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_mcp_stdio_transport.py",
+  "mcp/tests/test_operation_certification_selection.py",
+  "mcp/tests/test_provider_current_state.py",
+  "mcp/tests/test_quality_gate_public_contract.py",
+  "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_spawn_agent_session.py",
+  "mcp/tests/test_task_doc_structural_publication_l2.py",
+  "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_task_sprint_linkage.py",
+  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_tools.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_worktree_closeout_quality_gate.py",
+  "mcp/tests/test_worktree_quality_gate_runner.py",
+  "mcp/tests/test_worktree_support.py",
+  "mcp/tests/test_worktree_support_tests_1.py",
+]
+
+[[artifact]]
+path = "mcp/tests/conftest.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "isolated-pytest-composition"
+category = "architecture-fitness"
+fidelity = "repository-structure"
+cadence = "affected"
+source_version_or_generator = "isolated unit composition; --certify adds Dagger delivery services"
+introduced_by = "260824-PDLS"
+lifetime = "permanent"
+permanence_rationale = "Every test uses isolated local state; certification services load only for explicit --certify delivery."
+replacement_contract = "node:mcp/tests/test_pytest_bootstrap_boundaries.py::PytestBootstrapBoundaryTests::test_environment_is_candidate_bound_scrubbed_disposable_and_reversible"
+consumer_scope = "all-tests"
+
+[[artifact]]
+path = "mcp/tests/integration_branch_authority_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "integration-branch-authority-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "real Git integration-branch authority fixture"
+introduced_by = "260824-PDLS"
+lifetime = "permanent"
+permanence_rationale = "The helper owns one real-Git authority setup shared by integration and lifecycle suites."
+replacement_contract = "node:mcp/tests/test_integration_branch_authority.py::IntegrationBranchAuthorityTests::test_external_pair_cas_retains_torn_pair_without_clobbering_memory_race"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+]
+
+[[artifact]]
+path = "mcp/tests/lifecycle_control_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "lifecycle-control-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "typed lifecycle control and interruption helpers"
+introduced_by = "260824-PDLS"
+lifetime = "permanent"
+permanence_rationale = "The helper centralizes lifecycle control setup without duplicating product transition policy."
+replacement_contract = "node:mcp/tests/test_lifecycle_operations.py::test_cancel_before_boundary_proves_exit_before_releasing_worker_authority"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_lifecycle_operations.py",
+]
+
+[[artifact]]
+path = "mcp/tests/lifecycle_enclosure_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "lifecycle-enclosure-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "typed enclosure and worktree fixture composition"
+introduced_by = "260824-PDLS"
+lifetime = "permanent"
+permanence_rationale = "The helper owns reusable enclosure construction for adoption, discard, and reopen evidence."
+replacement_contract = "node:mcp/tests/test_task_reopen.py::ReopenResetTests::test_contract_publish_failure_rolls_back_docs_and_landing"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_task_reopen.py",
+]
+
+[[artifact]]
+path = "mcp/tests/structural_seat_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "structural-seat-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "structural role-seat lifecycle fixture"
+introduced_by = "260826-role-seat-repair"
+lifetime = "permanent"
+permanence_rationale = "The helper owns the shared generation and seat topology for succession and recovery proofs."
+replacement_contract = "node:mcp/tests/test_structural_dispatch_recovery.py::StructuralDispatchRecoveryTests::test_pre_append_failure_retires_only_the_proven_unbriefed_generation"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_structural_dispatch_recovery.py",
+]
+
+[[artifact]]
+path = "mcp/tests/task_reopen_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "task-reopen-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "task reopen repository and document fixture"
+introduced_by = "260824-PDLS"
+lifetime = "permanent"
+permanence_rationale = "The helper composes one authoritative reopen world shared by reset, authority, and guard tests."
+replacement_contract = "node:mcp/tests/test_task_reopen.py::ReopenResetTests::test_resets_contract_doc_and_master_index"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_task_reopen.py",
+]
+
+[[artifact]]
+path = "mcp/tests/certification_registry_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "canonical-certification-registry-test-port"
+category = "public-contract"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "canonical certification models and repository-neutral rail declarations"
+introduced_by = "260831-CCR-L11"
+lifetime = "permanent"
+permanence_rationale = "The helper owns the reusable registry composition for admission, plan, result, and scaling proofs."
+replacement_contract = "node:mcp/tests/test_certification_plan_authority.py::test_result_publication_refuses_deleted_inserted_and_substituted_plan_catalogs"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_certification_plan_authority.py",
+  "mcp/tests/test_certification_rail_registry.py",
+  "mcp/tests/test_closeout_certification_recovery.py",
+]
+
+[[artifact]]
+path = "mcp/tests/repository_profile_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "repository-certification-profile-test-port"
+category = "public-contract"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "repository-neutral certification profile fixtures and the Agents Remember profile loader"
+introduced_by = "260831-CCR-L22"
+lifetime = "permanent"
+permanence_rationale = "The helper is the single test-side composition root for portable profile, adapter, decoder, execution, and publication proofs."
+replacement_contract = "node:mcp/tests/test_repository_certification_profiles.py::test_two_language_distinct_repositories_compile_the_same_four_gate_protocol"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_clean_quality_executor.py",
+  "mcp/tests/test_closeout_certification_entrypoint.py",
+  "mcp/tests/test_closeout_certification_recovery.py",
+  "mcp/tests/test_code_certification_execution.py",
+  "mcp/tests/test_environment_reconstruction.py",
+  "mcp/tests/test_gate_certificate_authority.py",
+  "mcp/tests/test_gate_certification_evidence.py",
+  "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_operation_certification_selection.py",
+  "mcp/tests/test_quality_gate_public_contract.py",
+  "mcp/tests/test_quality_report_publication_security.py",
+  "mcp/tests/test_repository_certification_profiles.py",
+  "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_worktree_closeout_quality_gate.py",
+  "mcp/tests/test_worktree_quality_gate_runner.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/repository_profiles/node/package.json"
+kind = "fixture"
+authority = "internal-hand-authored"
+owner = "mcp/tests/repository_profile_test_support.py"
+category = "public-contract"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "minimal Node repository manifest consumed by the portable profile runtime identity"
+introduced_by = "260831-CCR-L22"
+lifetime = "permanent"
+permanence_rationale = "The fixture proves a non-Python repository can execute its own admitted Gate 1-4 commands and artifacts."
+replacement_contract = "node:mcp/tests/test_repository_certification_profiles.py::test_distinct_fixture_adapters_and_decoders_complete_the_declared_protocol"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_clean_quality_executor.py",
+  "mcp/tests/test_closeout_certification_entrypoint.py",
+  "mcp/tests/test_closeout_certification_recovery.py",
+  "mcp/tests/test_code_certification_execution.py",
+  "mcp/tests/test_environment_reconstruction.py",
+  "mcp/tests/test_gate_certificate_authority.py",
+  "mcp/tests/test_gate_certification_evidence.py",
+  "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_operation_certification_selection.py",
+  "mcp/tests/test_quality_gate_public_contract.py",
+  "mcp/tests/test_quality_report_publication_security.py",
+  "mcp/tests/test_repository_certification_profiles.py",
+  "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_worktree_closeout_quality_gate.py",
+  "mcp/tests/test_worktree_quality_gate_runner.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/repository_profiles/node/package-lock.json"
+kind = "fixture"
+authority = "internal-hand-authored"
+owner = "mcp/tests/repository_profile_test_support.py"
+category = "public-contract"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "minimal locked Node runtime manifest consumed by the portable profile runtime identity"
+introduced_by = "260831-CCR-L22"
+lifetime = "permanent"
+permanence_rationale = "The lockfile freezes the portable Node fixture runtime input and participates in the admitted semantic digest."
+replacement_contract = "node:mcp/tests/test_repository_certification_profiles.py::test_distinct_fixture_adapters_and_decoders_complete_the_declared_protocol"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_clean_quality_executor.py",
+  "mcp/tests/test_closeout_certification_entrypoint.py",
+  "mcp/tests/test_closeout_certification_recovery.py",
+  "mcp/tests/test_code_certification_execution.py",
+  "mcp/tests/test_environment_reconstruction.py",
+  "mcp/tests/test_gate_certificate_authority.py",
+  "mcp/tests/test_gate_certification_evidence.py",
+  "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_operation_certification_selection.py",
+  "mcp/tests/test_quality_gate_public_contract.py",
+  "mcp/tests/test_quality_report_publication_security.py",
+  "mcp/tests/test_repository_certification_profiles.py",
+  "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_worktree_closeout_quality_gate.py",
+  "mcp/tests/test_worktree_quality_gate_runner.py",
+]
+
+[[artifact]]
+path = "mcp/tests/test-evidence-lanes.toml"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "explicit-evidence-lane-population"
+category = "architecture-fitness"
+fidelity = "repository-structure"
+cadence = "affected"
+source_version_or_generator = "closed file and exact-node evidence-lane membership"
+introduced_by = "260827-PDLS-remediation"
+lifetime = "permanent"
+permanence_rationale = "The manifest removes the unmarked-unit fallback and binds selection, cadence, retry, and reporting to one explicit population."
+replacement_contract = "node:mcp/tests/test_evidence_lanes.py::EvidenceLaneRegistryTests::test_incomplete_or_ambiguous_registry_is_refused"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_catalog_selection.py",
+  "mcp/tests/test_causal_quality_preflight.py",
+  "mcp/tests/test_code_quality_check_scope.py",
+  "mcp/tests/test_code_quality_targeted.py",
+  "mcp/tests/test_dependency_ownership_ast_helpers.py",
+  "mcp/tests/test_evidence_lanes.py",
+  "mcp/tests/test_file_size_detector.py",
+  "mcp/tests/test_pytest_bootstrap_boundaries.py",
+  "mcp/tests/test_quality_diagnostics.py",
+  "mcp/tests/test_quality_retry_proof.py",
+  "mcp/tests/test_repository_certification_profiles.py",
+  "mcp/tests/test_suite_budget.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/codex_driver.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "real Codex app-server driver and candidate MCP discovery"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The clean-room route must exercise the supported Codex process and public MCP discovery boundary."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gate_four_not_applicable_result_does_not_claim_real_codex_execution"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+  "scripts/e2e_harness/scenario_evidence.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/dispatch_sentinels.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "public dispatch schema rejection sentinels"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The hosted leg needs explicit failure sentinels that distinguish discovery from model timeout."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gate_four_not_applicable_result_does_not_claim_real_codex_execution"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/codex_driver.py",
+  "scripts/e2e_harness/responses_server.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+  "scripts/e2e_harness/scenario_evidence.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/fixture.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "disposable canonical task, contract, runtime, and repository fixture"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "Each run needs a fresh authority fixture built from production models rather than copied state."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gate_four_not_applicable_result_does_not_claim_real_codex_execution"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/codex_driver.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+  "scripts/e2e_harness/scenario_evidence.py",
+  "scripts/e2e_harness/scenario_runtime.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/reporting.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "checkpoint recorder and atomic JSON evidence writer"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The scenario requires one typed checkpoint vocabulary and durable per-run evidence projection."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gate_four_not_applicable_result_does_not_claim_real_codex_execution"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+  "scripts/e2e_harness/scenario_evidence.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/responses_server.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "scripted Responses API server over the public dispatch advertisement"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "Real Codex needs a deterministic independent response peer that still consumes the advertised MCP schema."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gate_four_not_applicable_result_does_not_claim_real_codex_execution"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/codex_driver.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+  "scripts/e2e_harness/scenario_evidence.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/responses_sse.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "minimal OpenAI Responses SSE frames consumed by real Codex"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The deterministic provider peer must emit an independent supported wire sequence."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gate_four_not_applicable_result_does_not_claim_real_codex_execution"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/codex_driver.py",
+  "scripts/e2e_harness/responses_server.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+  "scripts/e2e_harness/scenario_evidence.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/run.py"
+kind = "recording-generator"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "two fresh no-retry Dagger replications of the ambient role-chat route"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The acceptance route must regenerate candidate-bound checkpoint evidence inside Dagger."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gate_four_not_applicable_result_does_not_claim_real_codex_execution"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/repository_profile_test_support.py",
+  "mcp/tests/source_selection_test_support.py",
+  "mcp/tests/test_agents_remember_quality.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/scenario.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "canonical ambient spawn, hosted handoff, vacancy, and replacement scenario"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The cross-process behavior is one ordered scenario whose checkpoints cannot be reduced to unit assertions."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gate_four_not_applicable_result_does_not_claim_real_codex_execution"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/scenario_control.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "public control submission and durable observation helpers"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The scenario must drive and observe the real control and inbox boundaries without internal handler shortcuts."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gate_four_not_applicable_result_does_not_claim_real_codex_execution"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/scenario_evidence.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "checkpoint definitions and independently observed route evidence"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "The route needs stable requirement-linked checkpoints separated from scenario mutation code."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gate_four_not_applicable_result_does_not_claim_real_codex_execution"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/scenario_runtime.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "integration"
+fidelity = "process-race"
+cadence = "affected"
+source_version_or_generator = "fixture tmux socket lifecycle and spawned-process teardown"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "Process isolation and cleanup need one bounded owner that proves no host tmux authority is reused."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gate_four_not_applicable_result_does_not_claim_real_codex_execution"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/scenario.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/selection.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "ambient-role-chat-e2e"
+category = "architecture-fitness"
+fidelity = "repository-structure"
+cadence = "affected"
+source_version_or_generator = "explicit affected-path projection with source-derived direct-import closure test"
+introduced_by = "260821-ARSPAWN-L5"
+lifetime = "permanent"
+permanence_rationale = "Targeted acceptance must fail when a directly imported harness dependency can green-skip the scenario."
+replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gate_four_not_applicable_result_does_not_claim_real_codex_execution"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/run.py",
+]
+
+[[artifact]]
+path = "mcp/tests/gate_certification_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "repository-gate-certification-test-port"
+category = "public-contract"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "exact repository gate admission, publication and retained certificate APIs"
+introduced_by = "260831-CCR-L30"
+lifetime = "permanent"
+permanence_rationale = "One fixture builds isolated Git candidates and real retained report bytes for gate consumer and retention proofs."
+replacement_contract = "node:mcp/tests/test_closeout_certification_recovery.py::test_unchanged_interruption_reuses_the_original_exact_certificates"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_closeout_certification_entrypoint.py",
+  "mcp/tests/test_closeout_certification_recovery.py",
+  "mcp/tests/test_code_certification_execution.py",
+  "mcp/tests/test_gate_certification_evidence.py",
+  "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_operation_certification_selection.py",
+  "mcp/tests/test_quality_gate_public_contract.py",
+  "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_worktree_quality_gate_runner.py",
+]
+
+[[artifact]]
+path = "mcp/tests/integration_certification_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "integration-certification-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "actual integration operation owners and exact original certificate publications"
+introduced_by = "260831-CCR-L33"
+lifetime = "permanent"
+permanence_rationale = "One fixture owns real integration journals and retained certificate bytes across integration and renderer boundary tests."
+replacement_contract = "node:mcp/tests/test_quality_gate_public_contract.py::QualityGatePublicContractTests::test_recovery_refuses_same_id_decoder_byte_drift"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_quality_gate_public_contract.py",
+]
+
+[[artifact]]
+path = "mcp/tests/source_selection_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "repository-source-applicability-test-port"
+category = "public-contract"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "typed candidate source-selection and applicability compiler fixtures"
+introduced_by = "260831-CCR-L33"
+lifetime = "permanent"
+permanence_rationale = "One explicitly counterfactual fixture owner supplies frozen source declarations for compiler and executor boundary tests."
+replacement_contract = "node:mcp/tests/test_repository_certification_profiles.py::test_selector_result_refuses_unreasoned_output_and_targeted_full_expansion"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_agents_remember_quality.py",
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_certification_lane_bridge.py",
+  "mcp/tests/test_clean_quality_executor.py",
+  "mcp/tests/test_closeout_certification_entrypoint.py",
+  "mcp/tests/test_closeout_certification_recovery.py",
+  "mcp/tests/test_code_certification_execution.py",
+  "mcp/tests/test_environment_reconstruction.py",
+  "mcp/tests/test_gate_certificate_authority.py",
+  "mcp/tests/test_gate_certification_evidence.py",
+  "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_operation_certification_selection.py",
+  "mcp/tests/test_quality_gate_public_contract.py",
+  "mcp/tests/test_quality_report_publication_security.py",
+  "mcp/tests/test_repository_certification_profiles.py",
+  "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_worktree_closeout_quality_gate.py",
+  "mcp/tests/test_worktree_quality_gate_runner.py",
+]
+
+[[artifact]]
+path = "mcp/tests/selected_lifecycle_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "selected-lifecycle-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "real task, profile, door, frozen admission and atomic lifecycle selection owners"
+introduced_by = "260831-CCR-L33"
+lifetime = "permanent"
+permanence_rationale = "Lifecycle journal tests require real selected admission and successor references; completion helpers exercise bookkeeping without asserting certification acceptance."
+replacement_contract = "node:mcp/tests/test_lifecycle_operations.py::test_start_returns_immediately_and_duplicate_observes_one_launch"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_transaction_only_worktree_delivery.py",
+]

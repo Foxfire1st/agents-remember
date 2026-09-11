@@ -20,11 +20,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
+from agents_remember.models.task_document import MasterExecutionNature
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.observer.lifecycle_state import (
@@ -34,13 +35,18 @@ from agents_remember.observer.lifecycle_state import (
     Phase,
     State,
 )
+from agents_remember.observer.projection_closeout import (
+    CloseoutProjectionProblemNode,
+    DiscardedSubTaskNode,
+)
+from agents_remember.observer.projection_graph import TaskExecutionGraphView
 
-AttentionSeverity: TypeAlias = Literal["alarm", "warn", "info"]
-AttentionLane: TypeAlias = Literal["repo", "worktree", "lifecycle"]
-ProcessFactState: TypeAlias = Literal[
+type AttentionSeverity = Literal["alarm", "warn", "info"]
+type AttentionLane = Literal["repo", "worktree", "lifecycle"]
+type ProcessFactState = Literal[
     "observed", "derived", "planned", "missing", "stale", "not-applicable"
 ]
-ProcessHealth: TypeAlias = Literal[
+type ProcessHealth = Literal[
     "nominal", "running", "blocked", "failed", "stale", "skipped", "unknown", "complete"
 ]
 
@@ -599,6 +605,27 @@ class TaskSubTaskRefNode(BaseModel):
     # it links to — the dashboard renders such a row as a "→" cross-series jump (slice 6g). Null for an
     # in-series slice row.
     linkedLifecycleId: str | None = None
+    # The typed master link (L14-R1): on an orchestration sprint, the exact commanded master document
+    # this row tracks — the dashboard opens that document directly (sprint → master drill-down). Null
+    # for an ordinary master's leaf rows and for legacy slug-only membership rows.
+    masterRef: TaskDocumentRef | None = None
+
+
+class TaskSeatNode(BaseModel):
+    """One first-class seat of an orchestration sprint (L14-R3).
+
+    Mirrors ``tasks.document.SprintSeat``: the sprint document owns the seat record, so seat task
+    documents leave the sprint's task index (existing ones stay on disk as historical records).
+    ``identity`` is a correlatable session or catalog id — provenance for correlation, never an
+    authority source.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: str
+    label: str = ""
+    identity: str | None = None
+    state: str = "planned"  # planned | active | retired
 
 
 class TaskSectionNode(BaseModel):
@@ -612,6 +639,98 @@ class TaskSectionNode(BaseModel):
     kind: str
     heading: str
     body: str = ""
+
+
+class TaskExecutionEndpointNode(BaseModel):
+    """One resolved-form edge endpoint: the master ref plus the segment-sampling leaf id.
+
+    The persisted grammar also allows a bare ref (lump/legacy); the before-validator
+    lifts that form so the served shape is uniform.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    ref: TaskDocumentRef
+    leafId: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_bare_ref(cls, value: Any) -> Any:
+        if isinstance(value, TaskDocumentRef):
+            return {"ref": value}
+        if isinstance(value, dict) and "ref" not in value and "repository" in value:
+            return {"ref": value}
+        return value
+
+
+class TaskExecutionNode(BaseModel):
+    """One graph node: a whole-master lump or a leaf-segment of one master (L11-R1)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = "master"
+    ref: TaskDocumentRef
+    leafIds: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lift_bare_ref(cls, value: Any) -> Any:
+        if isinstance(value, TaskDocumentRef):
+            return {"ref": value}
+        if isinstance(value, dict) and "ref" not in value and "repository" in value:
+            return {"ref": value}
+        return value
+
+
+class TaskExecutionEdgeNode(BaseModel):
+    """One reasoned dependency edge in a sprint task document."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    predecessor: TaskExecutionEndpointNode
+    successor: TaskExecutionEndpointNode
+    reason: str
+    judgmentId: str | None = None
+
+
+class TaskExecutionGraphNode(BaseModel):
+    """Persisted AON graph projected without adding scheduler judgment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nodes: list[TaskExecutionNode] = Field(default_factory=list)
+    edges: list[TaskExecutionEdgeNode] = Field(default_factory=list)
+
+
+class CloseoutCandidateNode(BaseModel):
+    """One exact-current member of the disposable scheduling projection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    generationId: str
+    taskDocumentRef: TaskDocumentRef
+    owningMaster: TaskDocumentRef
+    classification: str
+    priority: str
+    order: int = 0
+    reasons: list[str] = Field(default_factory=list, max_length=256)
+
+
+class CloseoutQueueNode(BaseModel):
+    """Exact effective state for one disposable sprint scheduling projection."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sprintRef: TaskDocumentRef
+    revision: int = 0
+    serviceCondition: str
+    sourceClassification: str | None = None
+    sourceFingerprint: str | None = None
+    sourceProblems: list[CloseoutProjectionProblemNode] = Field(
+        default_factory=list,
+        max_length=256,
+    )
+    members: list[CloseoutCandidateNode] = Field(default_factory=list, max_length=256)
 
 
 class TaskDocNode(BaseModel):
@@ -653,6 +772,13 @@ class TaskDocNode(BaseModel):
     # Master docs use these for the series index + ordered render plan; non-master task docs may
     # carry freeform sections. Empty when the document has no authored sections.
     subTasks: list[TaskSubTaskRefNode] = Field(default_factory=list)
+    # Only master documents own discard-unstarted audit history. ``None`` distinguishes a
+    # non-master task from a master whose typed history is present and empty.
+    discardedCount: int | None = None
+    discardedSubTasks: list[DiscardedSubTaskNode] | None = Field(
+        default=None,
+        max_length=256,
+    )
     sections: list[TaskSectionNode] = Field(default_factory=list)
     # The lifecycle of the parent master this doc declares via its `master` ref, when that ref points to
     # a master in another series (a different lifecycle) -- drives a "↑ parent series" breadcrumb (6g).
@@ -661,6 +787,18 @@ class TaskDocNode(BaseModel):
     # orchestration task -- the master task names it commands. The dashboard derives the
     # orchestration > master > leaf hierarchy from it; docs without the field render as before.
     orchestrates: list[str] = Field(default_factory=list)
+    # The sprint's first-class seats (L14-R3): non-empty only on an orchestration sprint master;
+    # the dashboard renders them as structure, never as seat task documents.
+    seats: list[TaskSeatNode] = Field(default_factory=list)
+    # A commanded master's declared Git execution nature. None is an explicit legacy/migration
+    # signal, never an organizational default.
+    executionNature: MasterExecutionNature | None = None
+    # Sprint-only persisted graph plus mechanically derived topological waves.
+    executionGraph: TaskExecutionGraphNode | None = None
+    executionWaves: list[list[TaskExecutionNode]] = Field(default_factory=list)
+    # Render-ready per-node sprint graph (L12-R4): the dashboard renders this view directly and
+    # never joins raw refs to titles or re-derives waves/frontier state from the persisted graph.
+    executionGraphView: TaskExecutionGraphView | None = None
 
 
 class SeriesSubTaskNode(BaseModel):
@@ -711,6 +849,8 @@ class SeriesNode(BaseModel):
     createdAt: str = ""
     objective: str = ""
     subTasks: list[SeriesSubTaskNode] = Field(default_factory=list)
+    discardedCount: int = 0
+    discardedSubTasks: list[DiscardedSubTaskNode] = Field(default_factory=list, max_length=256)
     doneCount: int = 0
     totalCount: int = 0
     seriesTokenTotal: int = 0
@@ -1015,5 +1155,8 @@ class WorkspaceProjection(BaseModel):
     # so the two views share one definition of "active". The join key matches the worktree-scoped
     # `ProviderNode.worktreeGroup` (a basename) and `Path(EnclosureNode.worktreeGroup).name`.
     activeWorktreeGroups: list[str] = Field(default_factory=list)
+    # Projected closeout queues (one per sprint master with an execution graph), carrying candidate
+    # states, grades, waiting reasons, and the active atomic blocker (L8-R1/R2/R5).
+    closeoutQueues: list[CloseoutQueueNode] | None = None
     metrics: Metrics = Field(default_factory=Metrics)
     analytics: Analytics = Field(default_factory=Analytics)

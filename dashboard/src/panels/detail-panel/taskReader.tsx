@@ -5,21 +5,31 @@ import type { ReactNode } from "react";
 
 import { cx } from "../../../styled-system/css";
 import { Markdown } from "../../grammar/Markdown";
+import { TaskRequirementLinksProvider } from "../../grammar/TaskRequirementLinks";
 import { ProgressFill } from "../../grammar/ProgressFill";
 import {
   type TaskDocumentBodyState,
 } from "../../data/useTaskDocumentBody";
 import { orderedByCreation } from "../../data/taskHierarchy";
-import { qualifiedLeafKey } from "../../data/taskIdentity";
+import {
+  qualifiedLeafKey,
+  taskDocSelectionKey,
+  taskDocumentRefForDoc,
+} from "../../data/taskIdentity";
 import type {
+  DiscardedSubTaskNode,
   ProviderNode,
   SubTaskRow,
   TaskCodeExampleNode,
   TaskDecisionNode,
   TaskDocNode,
+  TaskDocumentRef,
   TaskSectionNode,
   TaskStepNode,
 } from "../../types/projection";
+import type { TaskArtifactReaderTarget as NotesReaderTarget } from "../../data/taskArtifacts";
+import { CloseoutQueue } from "../CloseoutQueue";
+import { SprintGraphView } from "../sprint-graph/SprintGraphView";
 import { DocChangeSetBar } from "./changeSetBar";
 import {
   dirName,
@@ -71,8 +81,28 @@ import {
   taskdocTitle,
 } from "./styles";
 import type { ChangeSetTarget } from "../changeset/ChangeSetViewer";
-import type { NotesReaderTarget } from "../notes-reader/NotesReaderViewer";
 import { TaskNotes } from "../TaskNotes";
+
+function TaskRequirementBoundary({
+  doc,
+  onOpenNotes,
+  children,
+}: {
+  doc: Pick<TaskDocNode, "repository" | "docPath">;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
+  children: ReactNode;
+}) {
+  return (
+    <TaskRequirementLinksProvider
+      repo={doc.repository}
+      master={dirName(doc.docPath)}
+      document={taskDocumentRefForDoc(doc)?.path}
+      onOpenArtifact={onOpenNotes}
+    >
+      {children}
+    </TaskRequirementLinksProvider>
+  );
+}
 
 export function TaskContent({
   docs,
@@ -81,6 +111,7 @@ export function TaskContent({
   onJump,
   onOpenChangeSet,
   onOpenNotes,
+  docPathForRef,
 }: {
   docs: TaskDocNode[];
   bodyState: TaskDocumentBodyState | undefined;
@@ -88,6 +119,7 @@ export function TaskContent({
   onJump: (id: string) => void;
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
   onOpenNotes?: (target: NotesReaderTarget) => void;
+  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
 }) {
   if (docs.length === 0) {
     return <p className="muted">No task document bound to this task.</p>;
@@ -104,6 +136,7 @@ export function TaskContent({
         onJump={onJump}
         onOpenChangeSet={onOpenChangeSet}
         onOpenNotes={onOpenNotes}
+        docPathForRef={docPathForRef}
       />
     );
   }
@@ -123,25 +156,17 @@ export function TaskContent({
 // The master overview: identity + objective, then its ordered render plan (`sections`). A
 // `subTasks` section renders the clickable index in place; `sharedDecisions` renders the decision
 // table. If no section drives the index but the master carries one, it is appended.
-export function MasterOverview({
+function MasterOverviewHeader({
   doc,
   bodyState,
-  sliceDocs,
-  onOpen,
-  onJump,
   onOpenChangeSet,
-  onOpenNotes,
 }: {
   doc: MasterDocView;
   bodyState: TaskDocumentBodyState | undefined;
-  sliceDocs: TaskDocNode[];
-  onOpen: (slug: string) => void;
-  onJump: (id: string) => void;
   onOpenChangeSet?: (target: ChangeSetTarget) => void;
-  onOpenNotes?: (target: NotesReaderTarget) => void;
 }) {
   return (
-    <div className={taskdoc}>
+    <>
       <div className={taskdocHead}>
         <span className={badge}>{doc.kind}</span>
         <span className={taskdocTitle}>{doc.title}</span>
@@ -157,13 +182,58 @@ export function MasterOverview({
         />
       ) : null}
       <MasterTokenSummary total={doc.seriesTokenTotal} />
+    </>
+  );
+}
+
+export function MasterOverview({
+  doc,
+  bodyState,
+  sliceDocs,
+  onOpen,
+  onJump,
+  onOpenChangeSet,
+  onOpenNotes,
+  docPathForRef,
+}: {
+  doc: MasterDocView;
+  bodyState: TaskDocumentBodyState | undefined;
+  sliceDocs: TaskDocNode[];
+  onOpen: (slug: string) => void;
+  onJump: (id: string) => void;
+  onOpenChangeSet?: (target: ChangeSetTarget) => void;
+  onOpenNotes?: (target: NotesReaderTarget) => void;
+  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
+}) {
+  return (
+    <TaskRequirementBoundary doc={doc} onOpenNotes={onOpenNotes}>
+    <div className={taskdoc}>
+      <MasterOverviewHeader
+        doc={doc}
+        bodyState={bodyState}
+        onOpenChangeSet={onOpenChangeSet}
+      />
       {/* Pinned navigation: the sub-task index sits above the description, always reachable. The
           authored `subTasks` section still renders its own copy in place (MasterSection). */}
       {doc.subTasks.length > 0 ? (
         <Section title="Sub-tasks">
-          <SubTaskIndex refs={doc.subTasks} sliceDocs={sliceDocs} onOpen={onOpen} onJump={onJump} />
+          <SubTaskIndex
+            refs={doc.subTasks}
+            sliceDocs={sliceDocs}
+            onOpen={onOpen}
+            onJump={onJump}
+            docPathForRef={docPathForRef}
+          />
         </Section>
       ) : null}
+      {doc.discardedSubTasks && doc.discardedSubTasks.length > 0 ? (
+        <Section title={`Discarded before start (${doc.discardedCount ?? doc.discardedSubTasks.length})`}>
+          <DiscardedSubTaskHistory items={doc.discardedSubTasks} />
+        </Section>
+      ) : null}
+      {/* Graph rendering is optional, but a legal sprint projection stays reachable without it. */}
+      <SprintGraphSection doc={doc} />
+      <CloseoutQueue sprintRef={taskDocumentRefForDoc(doc)} />
       {doc.objective ? (
         <Section title="Objective">
           <Markdown>{doc.objective}</Markdown>
@@ -177,6 +247,7 @@ export function MasterOverview({
           sliceDocs={sliceDocs}
           onOpen={onOpen}
           onJump={onJump}
+          docPathForRef={docPathForRef}
         />
       ))}
       {/* The series' coordination notes (design records, friction ledger, reports/) —
@@ -190,9 +261,20 @@ export function MasterOverview({
         />
       ) : null}
     </div>
+    </TaskRequirementBoundary>
   );
 }
 
+// The wave-grid is optional. CloseoutQueue is mounted by the master surface independently because
+// atomic-sequential orchestration sprints are supported without an authored execution graph.
+function SprintGraphSection({ doc }: { doc: MasterDocView }) {
+  if (!doc.executionGraphView) return null;
+  return (
+    <Section title="Execution graph">
+      <SprintGraphView graphView={doc.executionGraphView} />
+    </Section>
+  );
+}
 export function MasterTokenSummary({ total }: { total: number | undefined }) {
   if (total === undefined) return null;
   return (
@@ -209,12 +291,14 @@ export function MasterSection({
   sliceDocs,
   onOpen,
   onJump,
+  docPathForRef,
 }: {
   section: TaskSectionNode;
   doc: MasterDocView;
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
+  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
 }) {
   return (
     <Section title={section.heading}>
@@ -226,10 +310,50 @@ export function MasterSection({
           onOpen={onOpen}
           onJump={onJump}
           testidPrefix="subtask-mid"
+          docPathForRef={docPathForRef}
         />
       ) : null}
       {section.kind === "sharedDecisions" ? <DecisionList items={doc.decisions} /> : null}
     </Section>
+  );
+}
+
+// A sprint row carrying a typed masterRef (L14-R1): opens the commanded master document directly
+// — the sprint → master leg of the drill-down (L14-R2). Only a task-doc master's rows can carry
+// one (`SeriesSubTaskNode` has no such field), so like the cross-series link this is structurally
+// unreachable for a series rendered via `seriesAsMasterDoc`.
+function MasterRefIndexRow({
+  ref,
+  masterRef,
+  masterPath,
+  position,
+  label,
+  meta,
+  onJump,
+  testidPrefix,
+}: {
+  ref: SubTaskRow;
+  masterRef: TaskDocumentRef;
+  masterPath: string;
+  position: number;
+  label: string;
+  meta: ReactNode;
+  onJump: (id: string) => void;
+  testidPrefix: string;
+}) {
+  return (
+    <li key={subTaskKey(ref, position - 1)}>
+      <button
+        type="button"
+        className={crossButton}
+        onClick={() => onJump(taskDocSelectionKey(masterPath))}
+        data-testid={`${testidPrefix}-master-${position}`}
+        title={`open the ${masterRef.path} master document`}
+      >
+        <span>⇒ {label}</span>
+        {meta}
+      </button>
+    </li>
   );
 }
 
@@ -242,6 +366,7 @@ function SubTaskIndexRow({
   onOpen,
   onJump,
   testidPrefix,
+  docPathForRef,
 }: {
   ref: SubTaskRow;
   position: number;
@@ -249,14 +374,30 @@ function SubTaskIndexRow({
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
   testidPrefix: string;
+  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
 }) {
   const match = sliceForRef(sliceDocs, ref);
   const { displayNumber, displayName } = subTaskDisplay(match, ref);
   const label = `${displayNumber}. ${displayName}`;
   const meta = subTaskMeta(match, ref);
+  // masterRef first (L14-R2), then the older behaviors; an unprojected masterRef target falls through.
+  const masterRef = "masterRef" in ref ? ref.masterRef : undefined;
+  const masterPath = masterRef && docPathForRef ? docPathForRef(masterRef) : undefined;
+  if (masterRef && masterPath) {
+    return (
+      <MasterRefIndexRow
+        ref={ref}
+        masterRef={masterRef}
+        masterPath={masterPath}
+        position={position}
+        label={label}
+        meta={meta}
+        onJump={onJump}
+        testidPrefix={testidPrefix}
+      />
+    );
+  }
   // A row whose ref points at another master is a parallel/external series → jump lifecycles.
-  // Only a task-doc master's rows can cross-link: `SeriesSubTaskNode` has no such field, so
-  // this branch is structurally unreachable for a series rendered via `seriesAsMasterDoc`.
   const linkedLifecycleId = "linkedLifecycleId" in ref ? ref.linkedLifecycleId : undefined;
   if (linkedLifecycleId) {
     return (
@@ -326,12 +467,14 @@ export function SubTaskIndex({
   onOpen,
   onJump,
   testidPrefix = "subtask-open",
+  docPathForRef,
 }: {
   refs: SubTaskRow[];
   sliceDocs: TaskDocNode[];
   onOpen: (slug: string) => void;
   onJump: (id: string) => void;
   testidPrefix?: string;
+  docPathForRef?: (ref: TaskDocumentRef) => string | undefined;
 }) {
   if (refs.length === 0) {
     return <p className="muted">No sub-tasks indexed.</p>;
@@ -351,6 +494,7 @@ export function SubTaskIndex({
           onOpen={onOpen}
           onJump={onJump}
           testidPrefix={testidPrefix}
+          docPathForRef={docPathForRef}
         />
       ))}
     </ul>
@@ -505,6 +649,7 @@ export function TaskReader({
   const progress = taskStepProgress(doc);
   const leafKey = qualifiedLeafKey(doc);
   return (
+    <TaskRequirementBoundary doc={doc} onOpenNotes={onOpenNotes}>
     <div className={taskdoc} data-task-leaf-key={leafKey}>
       <div className={taskdocHead}>
         <span className={badge}>{doc.kind}</span>
@@ -524,6 +669,7 @@ export function TaskReader({
       ) : null}
       <TaskReaderSections doc={doc} bodyState={bodyState} onOpenNotes={onOpenNotes} />
     </div>
+    </TaskRequirementBoundary>
   );
 }
 
@@ -558,6 +704,19 @@ export function Bullets({ items }: { items: string[] }) {
       {items.map((item) => (
         <li key={item}>
           <Markdown inline>{item}</Markdown>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function DiscardedSubTaskHistory({ items }: { items: DiscardedSubTaskNode[] }) {
+  return (
+    <ul className={taskdocBullets}>
+      {items.map((item) => (
+        <li key={`${item.number}:${item.proof.fingerprint}`}>
+          <strong>{item.number}. {item.name}</strong>
+          {` — ${item.reason} · ${item.discardedAt} · proof ${item.proof.fingerprint}`}
         </li>
       ))}
     </ul>

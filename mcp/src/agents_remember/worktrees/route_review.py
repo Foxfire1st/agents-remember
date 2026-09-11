@@ -2,27 +2,276 @@
 
 from __future__ import annotations
 
+import hashlib
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import ValidationError
 
+from agents_remember.errors import TaskIntentError
+from agents_remember.models.lifecycles.evidence_dependencies import (
+    EVIDENCE_DEPENDENCY_VALIDATOR,
+    EvidenceDependencyError,
+    build_evidence_dependencies,
+    canonical_sha256,
+    dependency,
+    require_evidence_dependencies,
+)
+from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.tasks import RouteReviewRecord
+from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.leaf_doc import resolve_terminal_leaf_doc
+from agents_remember.tasks.task_intent import (
+    require_current_task_intent,
+    task_intent_identity,
+)
 from agents_remember.worktrees.modules.git import require_git, worktree_candidate_tree
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
 class RouteReviewError(ValueError):
-    """The leaf lacks a passing review for its exact current candidate tree."""
+    """A candidate lacks a passing review for its exact current route."""
 
     def __init__(self, status: str, detail: str) -> None:
         self.status = status
         super().__init__(detail)
 
 
+_ROUTE_REVIEW_RECORD_STATUSES = frozenset(
+    {
+        "route-review-required",
+        "route-review-evidence-stale",
+        "route-review-dependencies-stale",
+        "route-review-task-intent-missing",
+        "route-review-task-intent-unavailable",
+        "route-review-task-intent-stale",
+    }
+)
+_MASTER_REVIEW_RECORD_STATUSES = frozenset(
+    {
+        "route-review-master-required",
+        "route-review-master-scope-stale",
+        "route-review-master-dependencies-stale",
+        "route-review-master-task-intent-stale",
+        "route-review-evidence-stale",
+        "route-review-task-intent-missing",
+        "route-review-task-intent-unavailable",
+        "route-review-task-intent-stale",
+    }
+)
+_MASTER_REVIEW_OWNER_STATUSES = frozenset(
+    {
+        "route-review-atomic-owner-invalid",
+        "route-review-atomic-owner-missing",
+        "route-review-atomic-child-invalid",
+        "route-review-master-membership-invalid",
+        "route-review-master-binding-invalid",
+    }
+)
+_MASTER_REVIEW_CANDIDATE_STATUSES = frozenset({"route-review-master-candidate-unreadable"})
+_MASTER_REVIEW_BLOCKED_STATUSES = frozenset({"route-review-master-blocked"})
+
+
+@dataclass(frozen=True)
+class _RouteReviewProjectionPlan:
+    expected: dict[str, object]
+    observed: dict[str, object]
+    next_action: str
+    summary: str
+    next_operation: str
+    required_args: list[str] | None
+    inspection_tool: Literal["task_doc", "worktree_status"] = "task_doc"
+
+
+def _route_review_projection_plan(
+    status: str,
+    *,
+    boundary: Literal["closeout", "integration"],
+) -> _RouteReviewProjectionPlan:
+    integration = boundary == "integration"
+    retry_target = "integration" if integration else "closeout"
+    if integration and status in _MASTER_REVIEW_CANDIDATE_STATUSES:
+        plan = _RouteReviewProjectionPlan(
+            {"candidate": "readable journaled Git candidate commit"},
+            {"candidateStatus": "unreadable"},
+            "inspect_task_document",
+            "Inspect the exact worktree_status address and restore a readable journaled "
+            f"candidate before retrying {retry_target}.",
+            "inspect_task_document",
+            None,
+            "worktree_status",
+        )
+    elif integration and status in _MASTER_REVIEW_OWNER_STATUSES:
+        plan = _RouteReviewProjectionPlan(
+            {"atomicMaster": "canonical series owner and child membership"},
+            {"routeReviewStatus": status},
+            "inspect_task_document",
+            f"Inspect or correct the canonical atomic-master owner before retrying {retry_target}.",
+            "inspect_task_document",
+            None,
+        )
+    elif integration and status in _MASTER_REVIEW_BLOCKED_STATUSES:
+        plan = _RouteReviewProjectionPlan(
+            {"routeReview": "current passing review of the accumulated master candidate"},
+            {"routeReview": "blocked"},
+            "developer-decision",
+            "The independent master route review blocks this integration; resolve that review "
+            f"decision before retrying {retry_target}.",
+            "developer-decision",
+            None,
+        )
+    elif integration and status in _MASTER_REVIEW_RECORD_STATUSES:
+        observed: dict[str, object] = (
+            {"routeReview": "missing"}
+            if status == "route-review-master-required"
+            else {"routeReviewStatus": status}
+        )
+        plan = _RouteReviewProjectionPlan(
+            {"routeReview": "current passing review of the accumulated master candidate"},
+            observed,
+            "record_route_review",
+            "Record or refresh the independent master route review for the exact accumulated "
+            f"candidate, then retry {retry_target}.",
+            "record_route_review",
+            ["review"],
+        )
+    elif status == "route-review-task-document-missing":
+        plan = _RouteReviewProjectionPlan(
+            {"taskDocument": "canonical leaf task document with route-review authority"},
+            {"taskDocument": "missing"},
+            "inspect_task_document",
+            "Restore or inspect the canonical leaf task document, then record a current "
+            f"route review before retrying {retry_target}.",
+            "inspect_task_document",
+            None,
+        )
+    elif status == "route-review-blocked":
+        plan = _RouteReviewProjectionPlan(
+            {"routeReview": "current passing independent review"},
+            {"routeReview": "blocked"},
+            "developer-decision",
+            "The independent route review blocks this candidate; resolve that review decision "
+            f"before retrying {retry_target}.",
+            "developer-decision",
+            None,
+        )
+    elif status in _ROUTE_REVIEW_RECORD_STATUSES:
+        plan = _RouteReviewProjectionPlan(
+            {"routeReview": "current passing review bound to this candidate"},
+            {"routeReviewStatus": status},
+            "record_route_review",
+            "Record or refresh the route review for the exact current candidate, then retry "
+            f"{retry_target}.",
+            "record_route_review",
+            ["review"],
+        )
+    else:
+        plan = _RouteReviewProjectionPlan(
+            {"routeReview": "valid current review authority"},
+            {"routeReviewStatus": status},
+            "developer-decision",
+            f"Resolve the route-review admission failure ({status}) before retrying {retry_target}.",
+            "developer-decision",
+            None,
+        )
+    return plan
+
+
+def route_review_refusal_projection(
+    status: str,
+    detail: str,
+    *,
+    contract: WorktreeContract | None = None,
+    boundary: Literal["closeout", "integration"] = "closeout",
+) -> dict[str, object]:
+    """Project one route-review refusal into truthful, task-bound recovery guidance.
+
+    The route gate remains the authority for whether a review is required.  This helper only
+    explains the already-established refusal at an application boundary.  A task-addressed
+    ``task_doc`` retry is emitted only when the caller has the exact contract, so an admission
+    finding without that identity cannot accidentally invent a review payload or destination.
+    """
+
+    integration = boundary == "integration"
+    plan = _route_review_projection_plan(status, boundary=boundary)
+
+    result: dict[str, object] = {
+        "status": status,
+        "detail": detail,
+        "expected": plan.expected,
+        "observed": plan.observed,
+        "nextAction": plan.next_action,
+    }
+    next_step: dict[str, object] = {
+        "summary": plan.summary,
+        "nextOperation": plan.next_operation,
+    }
+    if contract is not None:
+        contract_path = contract.contract_path.as_posix()
+        result["contractPath"] = contract_path
+        if integration:
+            result["statusAction"] = {
+                "tool": "worktree_status",
+                "args": {
+                    "repo_id": contract.repo_name,
+                    "contract_path": contract_path,
+                },
+            }
+        if plan.next_action == "inspect_task_document":
+            next_args = {
+                "repo_id": contract.repo_name,
+                "contract_path": contract_path,
+            }
+            if plan.inspection_tool == "task_doc":
+                next_args["operation"] = "get"
+            result["nextTool"] = plan.inspection_tool
+            result["nextArgs"] = next_args
+            next_step["nextTool"] = plan.inspection_tool
+            next_step["nextArgs"] = next_args
+        elif plan.next_action == "record_route_review":
+            next_args = {
+                "repo_id": contract.repo_name,
+                "operation": "record_route_review",
+                "contract_path": contract_path,
+            }
+            result["nextTool"] = "task_doc"
+            result["nextArgs"] = next_args
+            next_step["nextTool"] = "task_doc"
+            next_step["nextArgs"] = next_args
+        if plan.required_args:
+            result["nextRequiredArgs"] = plan.required_args
+            next_step["nextRequiredArgs"] = plan.required_args
+    if integration:
+        result["developerDecisionRequired"] = plan.next_action == "developer-decision"
+    result["nextStep"] = next_step
+    return result
+
+
+def route_review_refusal_fields(
+    error: RouteReviewError,
+    *,
+    contract: WorktreeContract,
+    boundary: Literal["closeout", "integration"] = "closeout",
+) -> dict[str, object]:
+    """Project a typed route-review error with the exact contract identity."""
+
+    return route_review_refusal_projection(
+        error.status,
+        str(error),
+        contract=contract,
+        boundary=boundary,
+    )
+
+
 def code_candidate_tree(contract: WorktreeContract) -> str:
+    if contract.kind == "series":
+        return require_git(
+            contract.code_repo_path,
+            ["rev-parse", f"refs/heads/{contract.code_work_branch}^{{tree}}"],
+        )
     return worktree_candidate_tree(
         contract.code_worktree,
         contract.worktree_group / "reports" / ".route-review-candidate.index",
@@ -32,8 +281,9 @@ def code_candidate_tree(contract: WorktreeContract) -> str:
 def code_change_present(contract: WorktreeContract) -> bool:
     """Whether the full current candidate differs from the leaf's accepted base tree."""
     candidate = code_candidate_tree(contract)
+    repository = contract.code_repo_path if contract.kind == "series" else contract.code_worktree
     base_tree = require_git(
-        contract.code_worktree,
+        repository,
         ["rev-parse", f"{contract.code_base_commit}^{{tree}}"],
     )
     return candidate != base_tree
@@ -41,9 +291,10 @@ def code_change_present(contract: WorktreeContract) -> bool:
 
 def build_route_review(
     contract: WorktreeContract,
-    task_root: Path,
+    candidate: ResolvedTaskDocument,
     payload: dict[str, Any],
     *,
+    branch_addressed: bool = False,
     now: datetime | None = None,
 ) -> RouteReviewRecord:
     """Validate reviewer-authored evidence and stamp the current tree/time in the plane."""
@@ -55,19 +306,44 @@ def build_route_review(
             "record_route_review accepts only verdict, verdictRef, and routes; "
             f"the plane owns candidateTree and reviewedAt (unknown: {sorted(unknown)})",
         )
-    if contract.kind != "leaf":
+    if contract.kind != "leaf" and not (branch_addressed and contract.kind == "series"):
         raise RouteReviewError("route-review-invalid-altitude", "route review belongs to a leaf")
     try:
-        record = RouteReviewRecord.model_validate(
-            {
-                **payload,
-                "candidateTree": code_candidate_tree(contract),
-                "reviewedAt": (now or datetime.now(UTC)).replace(microsecond=0).isoformat(),
-            }
+        intent = task_intent_identity(contract.task_root, candidate)
+        candidate_tree = code_candidate_tree(contract)
+        stamped = _stamp_evidence_digests(contract.task_root, payload)
+        dependencies = build_evidence_dependencies(
+            "route-review/v1",
+            [
+                dependency("code-tree", "candidate", candidate_tree, algorithm="git-object"),
+                dependency("task-intent", "leaf", intent.digest),
+                dependency(
+                    "validator",
+                    EVIDENCE_DEPENDENCY_VALIDATOR,
+                    canonical_sha256(EVIDENCE_DEPENDENCY_VALIDATOR),
+                ),
+                *(
+                    dependency("evidence-bytes", ref, digest)
+                    for ref, digest in _stamped_evidence(stamped).items()
+                ),
+            ],
         )
-    except ValidationError as exc:
+        record_payload = {
+            **stamped,
+            "candidateTree": candidate_tree,
+            "reviewedAt": (now or datetime.now(UTC)).replace(microsecond=0).isoformat(),
+            "taskIntent": intent.model_dump(mode="json", by_alias=True),
+            "dependencies": dependencies.model_dump(mode="json"),
+        }
+        record_payload["recordDigest"] = canonical_sha256(record_payload)
+        record = RouteReviewRecord.model_validate(record_payload)
+    except (EvidenceDependencyError, TaskIntentError, ValidationError) as exc:
+        if isinstance(exc, TaskIntentError):
+            raise RouteReviewError(exc.status, exc.detail) from exc
+        if isinstance(exc, EvidenceDependencyError):
+            raise RouteReviewError(exc.status, exc.detail) from exc
         raise RouteReviewError("route-review-invalid", str(exc)) from exc
-    _require_evidence_files(task_root, record)
+    _require_evidence_files(contract.task_root, record)
     return record
 
 
@@ -84,6 +360,11 @@ def require_current_route_review(contract: WorktreeContract) -> dict[str, object
             f"leaf {contract.leaf_id!r} has no task document for route-review evidence",
         )
     _path, document = found
+    candidate = ResolvedTaskDocument(
+        ref=document_ref(contract, _path),
+        path=_path,
+        document=document,
+    )
     review = document.routeReview
     if review is None:
         raise RouteReviewError(
@@ -95,42 +376,174 @@ def require_current_route_review(contract: WorktreeContract) -> dict[str, object
             "route-review-blocked",
             f"independent route review blocks this candidate; see {review.verdictRef}",
         )
-    current = code_candidate_tree(contract)
-    if review.candidateTree != current:
-        raise RouteReviewError(
-            "route-review-stale",
-            "the code candidate changed after independent route review; rerun route review "
-            f"(reviewed {review.candidateTree}, current {current})",
-        )
+    current_intent = require_current_route_review_task_intent(contract, candidate)
     _require_evidence_files(contract.task_root, review)
     return {
         "required": True,
         "status": "current",
-        "candidateTree": current,
+        "candidateTree": review.candidateTree,
+        "taskIntent": current_intent.model_dump(mode="json", by_alias=True),
         "verdict": review.verdict,
         "verdictRef": review.verdictRef,
         "routeCount": len(review.routes),
     }
 
 
+def require_current_route_review_task_intent(
+    contract: WorktreeContract,
+    candidate: ResolvedTaskDocument,
+) -> TaskIntentIdentity:
+    """Require the candidate's review to bind its current canonical task intent."""
+
+    review = candidate.document.routeReview
+    if review is None:
+        raise RouteReviewError(
+            "route-review-required",
+            "the current code change has no independent route-review record",
+        )
+    try:
+        current_intent = task_intent_identity(contract.task_root, candidate)
+        accepted_intent = require_current_task_intent(
+            review.taskIntent,
+            current_intent,
+            owner="route-review",
+            next_action="record_route_review",
+        )
+    except TaskIntentError as exc:
+        raise RouteReviewError(exc.status, exc.detail) from exc
+    _require_current_dependencies(review)
+    return accepted_intent
+
+
+def document_ref(contract: WorktreeContract, path: Path) -> TaskDocumentRef:
+    """Return one confined task reference without selecting identity from prose."""
+
+    root = contract.coordination_root / "tasks" / contract.repo_name
+    resolved = path.resolve(strict=False)
+    if not resolved.is_relative_to(root.resolve()):
+        raise RouteReviewError(
+            "route-review-task-document-outside-root",
+            "route-review task document is outside configured repository tasks",
+        )
+    return TaskDocumentRef(
+        repository=contract.repo_name,
+        path=resolved.relative_to(root.resolve()).as_posix(),
+    )
+
+
 def _require_evidence_files(task_root: Path, review: RouteReviewRecord) -> None:
-    refs = {review.verdictRef, *(route.evidenceRef for route in review.routes)}
+    expected = {
+        review.verdictRef: review.verdictSha256,
+        **{route.evidenceRef: route.evidenceSha256 for route in review.routes},
+    }
     root = task_root.resolve()
-    for ref in sorted(refs):
-        supplied = Path(ref)
-        if supplied.is_absolute():
+    for ref, digest in sorted(expected.items()):
+        observed = _evidence_file_sha256(root, ref)
+        if digest != observed:
             raise RouteReviewError(
-                "route-review-evidence-outside-task",
-                f"route-review evidence must use a task-relative path: {ref}",
+                "route-review-evidence-stale",
+                f"route-review evidence bytes changed after publication: {ref}",
             )
-        resolved = (root / supplied).resolve(strict=False)
-        if not resolved.is_relative_to(root):
+
+
+def _require_current_dependencies(review: RouteReviewRecord) -> None:
+    if not isinstance(review.taskIntent, TaskIntentIdentity):
+        raise RouteReviewError(
+            "route-review-task-intent-missing",
+            "route review has no digest-bearing task intent dependency",
+        )
+    evidence = {
+        review.verdictRef: review.verdictSha256,
+        **{route.evidenceRef: route.evidenceSha256 for route in review.routes},
+    }
+    try:
+        expected = build_evidence_dependencies(
+            "route-review/v1",
+            [
+                dependency(
+                    "code-tree",
+                    "candidate",
+                    review.candidateTree,
+                    algorithm="git-object",
+                ),
+                dependency("task-intent", "leaf", review.taskIntent.digest),
+                *(
+                    dependency("evidence-bytes", ref, digest)
+                    for ref, digest in sorted(evidence.items())
+                ),
+                dependency(
+                    "validator",
+                    EVIDENCE_DEPENDENCY_VALIDATOR,
+                    canonical_sha256(EVIDENCE_DEPENDENCY_VALIDATOR),
+                ),
+            ],
+        )
+        observed = require_evidence_dependencies(
+            review.dependencies,
+            record_type="route-review/v1",
+        )
+    except EvidenceDependencyError as exc:
+        raise RouteReviewError(exc.status, exc.detail) from exc
+    if observed != expected:
+        raise RouteReviewError(
+            "route-review-dependencies-stale",
+            "route-review direct dependencies do not match its canonical record inputs",
+        )
+
+
+def _stamp_evidence_digests(task_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    verdict_ref = payload.get("verdictRef")
+    routes = payload.get("routes")
+    if not isinstance(verdict_ref, str) or not isinstance(routes, list):
+        raise RouteReviewError(
+            "route-review-invalid",
+            "route-review verdictRef and routes must be supplied before evidence is stamped",
+        )
+    root = task_root.resolve()
+    stamped_routes: list[dict[str, Any]] = []
+    for route in routes:
+        if not isinstance(route, dict) or not isinstance(route.get("evidenceRef"), str):
             raise RouteReviewError(
-                "route-review-evidence-outside-task",
-                f"route-review evidence escapes the task root: {ref}",
+                "route-review-invalid",
+                "every route-review route must carry one evidenceRef",
             )
-        if not resolved.is_file():
-            raise RouteReviewError(
-                "route-review-evidence-missing",
-                f"route-review evidence does not exist: {ref}",
-            )
+        ref = route["evidenceRef"]
+        stamped_routes.append({**route, "evidenceSha256": _evidence_file_sha256(root, ref)})
+    return {
+        **payload,
+        "verdictSha256": _evidence_file_sha256(root, verdict_ref),
+        "routes": stamped_routes,
+    }
+
+
+def _stamped_evidence(payload: dict[str, Any]) -> dict[str, str]:
+    evidence = {str(payload["verdictRef"]): str(payload["verdictSha256"])}
+    routes = payload["routes"]
+    assert isinstance(routes, list)  # _stamp_evidence_digests establishes this shape
+    for route in routes:
+        assert isinstance(route, dict)
+        evidence[str(route["evidenceRef"])] = str(route["evidenceSha256"])
+    return evidence
+
+
+def _evidence_file_sha256(root: Path, ref: str) -> str:
+    supplied = Path(ref)
+    if supplied.is_absolute():
+        raise RouteReviewError(
+            "route-review-evidence-outside-task",
+            f"route-review evidence must use a task-relative path: {ref}",
+        )
+    resolved = (root / supplied).resolve(strict=False)
+    if not resolved.is_relative_to(root):
+        raise RouteReviewError(
+            "route-review-evidence-outside-task",
+            f"route-review evidence escapes the task root: {ref}",
+        )
+    try:
+        payload = resolved.read_bytes()
+    except OSError as exc:
+        raise RouteReviewError(
+            "route-review-evidence-missing",
+            f"route-review evidence does not exist: {ref}",
+        ) from exc
+    return hashlib.sha256(payload).hexdigest()

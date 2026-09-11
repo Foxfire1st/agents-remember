@@ -73,7 +73,7 @@ At task start the agent orients and checks memory health:
 
 ```text
 context_packet(repo_id="my-app")
-memory_quality_check(repo_id="my-app")
+memory_quality_check(request={"mode":"sync", "repo_id":"my-app"})
 ```
 
 It then reads the source file and its onboarding note together before proposing a change. After the change is approved and lands, the onboarding is refreshed and re-verified against the new commit — so the note stays true to the code.
@@ -89,7 +89,7 @@ That repo contains the live onboarding layer, so you can inspect how by-path mem
 
 Before the Quickstart, make sure the host has:
 
-- **[uv](https://docs.astral.sh/uv/)** (for `uvx`) or pip, and **Python 3.11+** — the agent runs the MCP server with `uvx`, which picks a compatible interpreter.
+- **[uv](https://docs.astral.sh/uv/)** (for `uvx`) or pip, and **Python 3.13** — the package supports `>=3.13,<3.14`; repository development uses the verified source-built 3.13.15 contract documented in the MCP README.
 - **Git**, with `user.name` / `user.email` configured (memory and worktree commits need an author; otherwise a placeholder identity is used).
 - **Docker** running, only if you enable the optional providers. The semantic-memory provider (grepai) also uses a Dockerized Ollama and pulls an embedding model (`nomic-embed-text`) on first setup — no host Ollama install needed.
 
@@ -133,7 +133,7 @@ That is the normal first-run path. `skills_install()` remains available as a
 maintenance/manual MCP tool, but the starter packages already provide the
 initial skills and harness files.
 
-After that, normal work runs through the `l-01-agent-lifecycles` skill: developer-facing free chat answers research inline and launches a sprint-bound architect after the durable sprint and first leaf exist; spawned backend seats follow their role briefs. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
+After that, normal work runs through the `l-01-agent-lifecycles` skill: developer-facing free chat answers research inline and, for ordinary role-shaped work after the durable sprint and first leaf exist, compiles the canonical architect brief and calls `dispatch_agent` once on that sprint document. An explicit developer-declared task-seat takeover instead targets the named role on its canonical task document. The identity-free launcher hands over after the exact brief is durable; later plane-hosted seats use the same tool under structural child-scope authority. Spawned backend seats follow their role briefs. The agent resolves the active context with `c-08-ar-coordination-context-resolver`, checks memory quality with `c-02-memory-quality-control`, reads relevant onboarding beside code, and updates onboarding after approved changes.
 
 ## Run The Dashboard
 
@@ -166,8 +166,8 @@ upgrade is picked up by the next session
 ([Settings Reference](docs/reference/settings-json.md)).
 
 Pinning a version is the debugging/repro path, not the default: `uv tool
-install 'agents-remember-mcp==3.0.0rc7'`, or one-shot without installing,
-`uvx --from 'agents-remember-mcp==3.0.0rc7' agents-remember dashboard`.
+install 'agents-remember-mcp==3.0.0rc8'`, or one-shot without installing,
+`uvx --from 'agents-remember-mcp==3.0.0rc8' agents-remember dashboard`.
 
 > **Pre-release note (until 3.0.0 final):** the dashboard currently ships in
 > `3.0.0rcN` pre-releases, which default version resolution skips. Install with
@@ -245,9 +245,35 @@ certified commit without a rerun. Full Dagger runs once when each master integra
 into super. PR validation, tagging, and publishing do not rerun acceptance. See
 CONTRIBUTING.md for the tier table and staged-content contract.
 
-Agents Remember acceptance runs only through that Dagger graph. Keep
-`orchestration.qualityGate.executor` set to `"dagger"`; a direct host invocation of
-pytest or the Python wrapper is refused, not treated as diagnostic evidence.
+Agents Remember declares that Dagger graph in its repository-owned
+`mcp/certification-profile-v1.json`, selected explicitly by
+`repositories.agents-remember.certificationProfile` in the MCP authority settings. The framework
+does not discover a wrapper or carry an Agents Remember command/report inventory. Ordinary Python development uses pytest directly, without Dagger admission, coverage,
+repository certification, or an autouse application service graph:
+
+```bash
+mcp/.venv/bin/python -m pytest                         # default unit loop
+mcp/.venv/bin/python -m pytest mcp/tests/test_example.py # one changed behavior
+mcp/.venv/bin/python -m pytest -m integration           # delivery boundary checks
+```
+
+The default excludes the `integration` marker. Local inputs, temporary resources, and
+explicit test doubles remain ordinary tests; real publication/recovery, competing writers,
+application wiring, and whole-repository observations run separately. Imported test classes
+are exercised only in their defining module. Four workers are the default; use `-n=0` for
+serial debugging. Tests use disposable home/config/cache directories and scrub inherited
+Git selectors, live opt-ins and credentials. They never declare a daemon identity.
+
+Delivery runs both populations together (`-m ""`) in the existing shared Dagger environment.
+Only explicit `--certify` loads the retained certification plugins and requires genuine
+Dagger admission. Combined branch coverage feeds the **90% changed-production-code floor**
+and the existing **CRAP threshold of 30**. Tests and verification-only support are excluded
+from production scoring. Coverage and CRAP are not part of the ordinary unit command.
+Direct targeted Vitest unit/component commands also remain available.
+
+The full evidence taxonomy, lifecycle metadata, fixture-authority rule, dependency-owned
+selection/retry behavior, stress cadence, and causal-failure contract are documented in
+[`docs/design/python-evidence-system.md`](docs/design/python-evidence-system.md).
 Leaf/focused acceptance is Dagger `mode=targeted`, while the single master-altitude
 full-repository acceptance is Dagger `mode=full`. Both require an explicit Git
 `diff-base`; the public Dagger function refuses an empty base instead of comparing
@@ -293,7 +319,7 @@ ar-coordination/
 
 ## Status
 
-Agents Remember is at `3.0.0rc7` and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the notes for your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases) — the repository's canonical changelog — before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
+Agents Remember is at `3.0.0rc8` and actively developed. The core path — by-path onboarding, drift checks, and approval-gated updates — is in real use and stable enough to rely on. The public contracts listed under [Stability](#stability) are held stable across minor releases and change only on a major bump; the internals beneath them and the optional semantic/relationship providers may still evolve, so pin a version and read the notes for your target version in [GitHub Releases](https://github.com/Foxfire1st/agents-remember/releases) — the repository's canonical changelog — before upgrading. The Claude Code path is the most exercised; other harnesses are supported but less battle-tested.
 
 The 3.0 arc: the working session itself is now observable and steerable — a system-managed agent lifecycle with durable approval gates and an event/projection layer, served as the mission-control browser cockpit directly from the MCP package (`agents-remember dashboard`; [#2](https://github.com/Foxfire1st/agents-remember/issues/2), [#43](https://github.com/Foxfire1st/agents-remember/issues/43)). The `rc` tag means the cockpit surface is still settling toward the final 3.0.0 contract; the architecture beneath it is the one described above.
 

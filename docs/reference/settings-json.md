@@ -6,7 +6,7 @@ Agents Remember has FOUR settings families, each with exactly one home:
 | --- | --- | --- |
 | Boot infrastructure (repos, providers, transport, timeoutCaps, dashboard) | MCP authority settings file (outside the coordinator root) | boot |
 | Memory topology (`onboarding.storage`, `pathRules`, `crossRepo`) | memory-root `system/settings.json` (beside `settings.md`) | per resolution |
-| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate executor/resource policy) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
+| **Agentic settings** (`orchestration.*`: gate delegation, loops, roles + rolesPerLevel, concurrency, spawn preference, harness definitions, qualityGate resource policy) | **coordinator `system/settings.json`** (global), `<code-repo>/system/settings.json` (local override) | per use (`gateDelegation`: boot snapshot) |
 | Provider lifecycle settings | server-generated from the authority config (`--from-settings`) | per command |
 
 `system/settings.md` remains the human and agent prose guidance file beside a
@@ -117,7 +117,8 @@ watch settings internally.
   "transcriptRoot": "C:/absolute/path/to/ar-coordination/logs/mcp",
   "repositories": {
     "agents-remember": {
-      "contractPath": null
+      "contractPath": null,
+      "certificationProfile": "mcp/certification-profile-v1.json"
     }
   },
   "providers": {
@@ -199,6 +200,16 @@ file is tolerated and ignored.)
 
 `repositories.<repo-id>.contractPath` may point at a coordination-root-local
 contract file. It must not point outside the coordinator root.
+
+`repositories.<repo-id>.certificationProfile` selects exactly one
+repository-relative certification profile for code closeout and master integration. The path is
+resolved inside `workspaceRoot/<repo-id>` and must be canonical, traversal-free, symlink-free, and
+name one regular file. It is never discovered by filename, wrapper presence, repository name, or
+historical success. A repository may omit this field while it has no code certification to run;
+any operation that would certify or commit code then refuses with
+`certification-profile-invalid` before a repository rail starts. See
+[Repository Certification Profiles](repository-certification-profile.md) for the versioned
+contract and authoring procedure.
 
 `providers` is an allow-list keyed by supported provider id. Provider entries
 must be empty objects because runtime roots, data roots, logs, requirements,
@@ -358,6 +369,12 @@ with every parameter, vocabulary, and refusal is
    with an explicitly unproven outcome rather than entering an impossible proof retry loop.
    Session-command application by itself does not prove brief delivery.
 
+These settings are consumed by the same public `dispatch_agent` transaction for both caller kinds.
+A plane-hosted seat is authorized from injected identity and direct-child scope; an identity-free
+developer launcher is authorized by canonical target-document resolution and target role altitude.
+The request does not carry caller identity or a mode selector, and a plane refusal never falls back
+to ambient. Harness/model/effort remain settings-owned in both modes.
+
 Inside the private control plane, hosted role dispatch uses an exact runtime correlation through
 three states: create returns `spawned-unbriefed`; readiness advances that occupant to
 harness-ready; one durable exact-pinned `dispatch-brief` starts the briefed-by deadline row. This
@@ -432,29 +449,25 @@ passed smoke.
 
 ### orchestration.qualityGate
 
-`orchestration.qualityGate` selects the canonical executor and owns optional
-full-wrapper resource overrides. The full wrapper runs exactly once per master, at the master
-integration gate. The only accepted executor is the pinned Dagger clean-Ubuntu graph; GitHub PR
-checks do not run it. Dagger reconstructs the exact staged candidate,
-including the real read-only Codex protocol probe, and exports its current and
-final evidence into the owning enclosure's self-overwriting `reports/` files.
+`orchestration.qualityGate` owns only the optional full-gate memory override. Repository
+execution authority belongs to the explicit
+`repositories.<repo-id>.certificationProfile`, including the selected sandbox adapter and result
+decoder. A repository profile may declare Dagger as its certifying adapter; unavailable declared
+runtime prerequisites fail instead of falling back to host execution.
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `executor` | `"dagger"` | The only accepted value is `"dagger"`, which runs the canonical wrapper in the pinned clean Ubuntu graph. Host wrapper and test execution refuse; an unavailable Dagger engine is an error, not a fallback. |
 | `memoryCapBytes` | omitted (container runtime manages resources) | Optional positive hard cap applied by the Dagger container's inner wrapper. A capped kill fails and names this policy key; there is no host systemd/RLIMIT execution path. |
 
 ```jsonc
 "orchestration": {
   "qualityGate": {
-    "executor": "dagger",
     "memoryCapBytes": 8589934592
   }
 }
 ```
 
-The executor applies to lifecycle-owned leaf-closeout and master-integration acceptance. The
-memory cap remains a full-master resource policy; deterministic pre-push checks and leaf
+The memory cap remains a full-master resource policy; deterministic pre-push checks and leaf
 integration run no acceptance. An explicit cap is an opt-in restriction, not the default resource
 policy; the gate treats a capped kill as a failure, never a skip.
 
@@ -534,17 +547,22 @@ Semantics, as the loop doctrine defines them
   reviewer is spawned only for a full round or when new scope opens.
 - `defaults.complexity` maps the dispatch-time complexity score (blast radius ·
   novelty · size) to tiers: at/above `fullLoopAt` a leaf runs the full loop
-  (builder + independent reviewer); at/above `builderAt` it runs
-  builder-verified (builder + owner report-vs-artifact check + the mandatory independent
+  (builder + applicable independent reviewer); at/above `builderAt` it runs
+  builder-verified (builder + owner report-vs-artifact check + the applicable independent
   route review; no iterative full-loop rounds);
-  below both it is direct (ordinary build + the mandatory independent route review;
-  no iterative loop machinery).
+  below both it is direct (ordinary build + the applicable independent route review;
+  no iterative loop machinery). Atomic child leaves defer independent route review to the
+  accumulated canonical master at master-to-parent integration; standalone and organizational
+  leaves retain independent leaf review.
 - `perLevel.leaf.loop: "scored"` — the owning seat scores each leaf at
   dispatch. `perLevel.master.loop: "seam-required"` names the default loop
   posture; `"none"` configures a manager without iterative loop rounds (a master whose
-  leaves all score direct still runs candidate-bound route review on every code leaf).
-  **This knob governs the LOOP only (review rounds): it cannot disable leaf route review,
-  curator/closeout admission, or the master-exit SEAM gate.** The master-exit seam
+  leaves all score direct still runs the applicable candidate-bound route review at each
+  owning altitude).
+  **This knob governs the LOOP only (review rounds): it cannot disable an applicable
+  standalone/organizational leaf route review, curator/closeout admission, or the master-exit
+  SEAM gate.** Atomic-child review remains deferred to master integration by execution nature;
+  the knob does not disable or move that gate. The master-exit seam
   is unconditional doctrine — no knob value touches it. Loop posture names
   are model-interpreted doctrine (validated as non-empty strings, not a closed
   set). Each level runs its loop with its own agent set

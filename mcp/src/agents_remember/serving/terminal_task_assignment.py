@@ -60,17 +60,22 @@ def task_binding_conflict_owner(
     seat_role: str,
     host: TaskAssignmentHost,
 ) -> str | None:
-    """Return the different live occupant of a structural seat, if one exists."""
+    """Return the different live occupant after re-evaluating any dead preferred generation."""
 
     if task_document_ref is None:
         return None
-    owner = catalog.active_for_task(task_document_ref, seat_role=seat_role)
-    if owner is None or owner.id == session_id:
-        return None
-    if not host.has_session(owner.tmux_name):
+    exited: set[str] = set()
+    while True:
+        owner = catalog.active_for_task(task_document_ref, seat_role=seat_role)
+        if owner is None or owner.id == session_id:
+            return None
+        if owner.id in exited:
+            # A catalog that could not publish the exit is not proof of vacancy.
+            return owner.id
+        if host.has_session(owner.tmux_name):
+            return owner.id
+        exited.add(owner.id)
         catalog.mark_exited(owner.id)
-        return None
-    return owner.id
 
 
 def replacement_binding_conflict_owner(
@@ -106,7 +111,25 @@ def assign_terminal_session_to_task(
     task_document_ref: TaskDocumentRef,
     role: str | None = None,
 ) -> TaskAssignmentResult:
-    """Move a running catalog session to one live-arbitrated document+role binding."""
+    """Move a session under the same catalog transaction as conflict re-evaluation."""
+
+    with runtime.catalog.batch():
+        return _assign_terminal_session_to_task(
+            runtime,
+            session_id=session_id,
+            task_document_ref=task_document_ref,
+            role=role,
+        )
+
+
+def _assign_terminal_session_to_task(
+    runtime: TaskAssignmentRuntime,
+    *,
+    session_id: str,
+    task_document_ref: TaskDocumentRef,
+    role: str | None,
+) -> TaskAssignmentResult:
+    """Validate and publish one task binding while the caller holds the catalog batch."""
 
     entry = runtime.catalog.get(session_id)
     if entry is None or entry.status != "running":

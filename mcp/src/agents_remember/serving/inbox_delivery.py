@@ -16,6 +16,7 @@ from agents_remember.controlplane.operator_inbox_transitions import (
     DeliveryAttempt,
     RedeliveryFloor,
 )
+from agents_remember.controlplane.seats import current_seat_occupant
 from agents_remember.errors import HarnessControlError
 from agents_remember.models.conversations.control_wire import (
     SubmissionReceipt,
@@ -369,27 +370,7 @@ def _structural_target(
     role = entry.recipientRole
     if document is None or role is None:
         return None
-    primary = [
-        target
-        for target in catalog.list()
-        if target.status == "running"
-        and target.binding_role == role
-        and target.task_document_ref == document
-    ]
-    if len(primary) > 1:
-        raise ValueError(f"ambiguous structural inbox target: {document.key} as {role}")
-    if primary:
-        return primary[0]
-    replacements = [
-        target
-        for target in catalog.list()
-        if target.status == "running"
-        and target.binding_role == role
-        and target.replacement_for_task_document_ref == document
-    ]
-    if len(replacements) > 1:
-        raise ValueError(f"ambiguous structural inbox replacement: {document.key} as {role}")
-    return replacements[0] if replacements else None
+    return current_seat_occupant(catalog.list(), document=document, role=role)
 
 
 def _correlated_target(

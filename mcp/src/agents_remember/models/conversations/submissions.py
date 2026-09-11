@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
@@ -63,7 +63,7 @@ class AssetSubmitBlock(WireModel):
     sha256: NonEmptyText
 
 
-ComposerSubmitBlock: TypeAlias = Annotated[
+type ComposerSubmitBlock = Annotated[
     TextSubmitBlock | AssetSubmitBlock, Field(discriminator="type")
 ]
 

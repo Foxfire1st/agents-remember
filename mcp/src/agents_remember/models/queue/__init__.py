@@ -1,0 +1,1 @@
+"""Queue-domain response models."""

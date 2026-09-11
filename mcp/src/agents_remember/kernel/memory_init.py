@@ -42,11 +42,55 @@ def _git_init_result(memory_root: Path, *, dry_run: bool, initialize_git: bool) 
         git["planned"] = True
         return git
     if (memory_root / ".git").exists():
+        head = run_git(memory_root, ["rev-parse", "--verify", "HEAD"])
+        if head.returncode == 0:
+            return git
+        symbolic = run_git(memory_root, ["symbolic-ref", "--quiet", "HEAD"])
+        local_heads = run_git(
+            memory_root,
+            ["for-each-ref", "--format=%(refname)", "refs/heads"],
+        )
+        if (
+            symbolic.returncode != 0
+            or symbolic.stdout.strip() != "refs/heads/main"
+            or local_heads.returncode != 0
+            or local_heads.stdout.strip()
+        ):
+            git.update(
+                {
+                    "repairAttempted": True,
+                    "returncode": 1,
+                    "stderr": (
+                        "existing unborn memory repository does not own the exact "
+                        "memory_init branch refs/heads/main"
+                    ),
+                }
+            )
+            return git
+        authority = run_git(
+            memory_root,
+            ["config", "--local", "agents-remember.defaultBranch", "main"],
+        )
+        git.update(
+            {
+                "repairAttempted": True,
+                "returncode": authority.returncode,
+                "stdout": authority.stdout,
+                "stderr": authority.stderr,
+            }
+        )
         return git
     # Through the one runner so GIT_DIR is stripped: `git init` honours GIT_DIR over
     # its cwd, so an inherited one would initialise the repository somewhere else
     # entirely and then report success for a memory root that never became a repo.
-    result = run_git(memory_root, ["init"])
+    result = run_git(memory_root, ["init", "-b", "main"])
+    if result.returncode == 0:
+        authority = run_git(
+            memory_root,
+            ["config", "--local", "agents-remember.defaultBranch", "main"],
+        )
+        if authority.returncode != 0:
+            result = authority
     git.update(
         {
             "ran": True,
@@ -85,8 +129,7 @@ def initialize_memory(
         memory_root / "system" / "sources.md": f"# {repo_id} Sources\n",
     }
 
-    created_dirs = _create_missing_dirs(paths, dry_run=dry_run)
-    created_files = _create_missing_files(files, dry_run=dry_run)
+    created_dirs = _create_missing_dirs([memory_root], dry_run=dry_run)
     git = _git_init_result(memory_root, dry_run=dry_run, initialize_git=initialize_git)
     if git.get("returncode", 0) != 0:
         return {
@@ -95,9 +138,12 @@ def initialize_memory(
             "repoId": repo_id,
             "memoryRoot": memory_root.as_posix(),
             "createdDirs": created_dirs,
-            "createdFiles": created_files,
+            "createdFiles": [],
             "git": git,
         }
+
+    created_dirs.extend(_create_missing_dirs(paths[1:], dry_run=dry_run))
+    created_files = _create_missing_files(files, dry_run=dry_run)
 
     return {
         "ok": True,

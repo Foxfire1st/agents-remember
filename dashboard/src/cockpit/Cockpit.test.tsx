@@ -253,6 +253,8 @@ function taskReaderProjection(): WorkspaceProjection {
           status: "inProgress",
           objective: "Master summary.",
           subTasks: master.subTasks,
+          discardedCount: 0,
+          discardedSubTasks: [],
           doneCount: 0,
           totalCount: 1,
           seriesTokenTotal: 0,

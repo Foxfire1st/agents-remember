@@ -4,17 +4,19 @@
 #     _gate.sh fast      pre-commit: check staged/index content, cheaply.
 #     _gate.sh targeted  pre-push:   report the pushed refs and repeat the
 #                                    deterministic non-test checks.
-#     _gate.sh full      manual:     refuse and point at the Dagger-only gate.
+#     _gate.sh full      manual:     explicit full workflow; hooks do not launch it.
 #
 # Enable once per clone:  ./setup-hooks.sh
-# Prerequisite:           pip install -e "mcp[dev]"
+# Prerequisite:           create mcp/.venv and install "mcp[dev]" into it
 #
-# The hook tiers run deterministic non-test checks only. Acceptance is owned by the
-# pinned Dagger graph exactly once at leaf closeout and once at master integration.
+# The hook tiers run deterministic non-test checks only. Closeout and integration
+# publish authorized Git code/memory/ledger transactions and do not launch automatic
+# full quality, test, memory-quality, curator-certification, or review operations.
+# Explicit developer-requested workflows may use the repository's configured executor.
 # Push, pull-request, tag, publish, and leaf-integration paths do not rerun it. Pull
 # requests still own GitHub's deterministic non-test checks. In linked worktrees,
-# use the primary worktree's virtual environment when necessary and put the current
-# checkout's source first on PYTHONPATH.
+# use the primary worktree's MCP development environment when necessary and put the
+# current checkout's source first on PYTHONPATH.
 
 set -u
 
@@ -31,6 +33,15 @@ esac
 
 root="$(git rev-parse --show-toplevel)" || exit 1
 cd "$root" || exit 1
+runtime_contract="$root/scripts/python-runtime-contract.env"
+if [ ! -f "$runtime_contract" ]; then
+  echo "[$label] canonical Python runtime contract is missing: $runtime_contract" >&2
+  exit 1
+fi
+# shellcheck source=../scripts/python-runtime-contract.env
+. "$runtime_contract"
+PYTHONPATH="$root/mcp/test_support:$root/mcp/src${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH
 
 # Primary worktree root = parent of the shared (common) git dir. For a linked
 # worktree this resolves to the main clone; for the main clone it resolves to
@@ -41,15 +52,32 @@ if [ -n "$common_git" ]; then
   main_root="$(CDPATH= cd -- "$common_git/.." 2>/dev/null && pwd)"
 fi
 
-if [ -x ".venv/bin/python" ]; then
-  py=".venv/bin/python"
-elif [ -n "$main_root" ] && [ -x "$main_root/.venv/bin/python" ]; then
-  py="$main_root/.venv/bin/python"
+# Scope reporting imports both MCP runtime and test-support modules. A repository-root
+# venv or system Python can see checkout source through PYTHONPATH while still lacking
+# the package dependencies, so only a complete MCP development environment is valid.
+dev_python_ready() {
+  if [ "$(uname -s)" = "Linux" ]; then
+    "$1" "$root/scripts/check-python-runtime.py" \
+      --expected-version "$AR_PYTHON_VERSION" \
+      --require-linux-pidfd >/dev/null 2>&1 || return 1
+  else
+    "$1" "$root/scripts/check-python-runtime.py" \
+      --expected-version "$AR_PYTHON_VERSION" >/dev/null 2>&1 || return 1
+  fi
+  "$1" -c \
+    'import pyright, ruff; import agents_remember_test_support.code_quality.scope_reporting' \
+    >/dev/null 2>&1
+}
+
+local_py="$root/mcp/.venv/bin/python"
+shared_py="$main_root/mcp/.venv/bin/python"
+if [ -x "$local_py" ] && dev_python_ready "$local_py"; then
+  py="$local_py"
+elif [ -n "$main_root" ] && [ -x "$shared_py" ] && dev_python_ready "$shared_py"; then
+  py="$shared_py"
 else
-  py="$(command -v python3 || command -v python)"
-fi
-if [ -z "$py" ]; then
-  echo "[$label] no python found; install the dev env: pip install -e 'mcp[dev]'" >&2
+  echo "[$label] complete MCP dev environment not found at mcp/.venv." >&2
+  echo "[$label] Linux/WSL repair: scripts/bootstrap-mcp-venv.sh --replace" >&2
   exit 1
 fi
 
@@ -83,7 +111,7 @@ generated_copy_checks() {
 }
 
 generated_projection_check() {
-  "$py" -m agents_remember.code_quality.scope_reporting \
+  "$py" -m agents_remember_test_support.code_quality.scope_reporting \
     --project-root "$root" generated --name projection --script scripts/sync-projection-types.py || return 1
   echo "[$label] checking generated projection copies..."
   if "$py" scripts/sync-projection-types.py --check; then
@@ -97,7 +125,7 @@ generated_projection_check() {
 generated_check() {
   generated_name=$1
   generated_script=$2
-  "$py" -m agents_remember.code_quality.scope_reporting \
+  "$py" -m agents_remember_test_support.code_quality.scope_reporting \
     --project-root "$root" generated --name "$generated_name" --script "$generated_script" || return 1
   echo "[$label] checking generated $generated_name copies..."
   if "$py" "$generated_script" --check; then
@@ -109,23 +137,24 @@ generated_check() {
 }
 
 report_wrapper_tier() {
-  "$py" -m agents_remember.code_quality.scope_reporting \
+  "$py" -m agents_remember_test_support.code_quality.scope_reporting \
     --project-root "$root" hook-tier --tier "$tier"
 }
 
 report_fixed_step() {
-  "$py" -m agents_remember.code_quality.scope_reporting \
+  "$py" -m agents_remember_test_support.code_quality.scope_reporting \
     --project-root "$root" fixed-step --name "$1"
 }
 
 report_untracked_scope() {
-  "$py" -m agents_remember.code_quality.scope_reporting \
+  "$py" -m agents_remember_test_support.code_quality.scope_reporting \
     --project-root "$root" untracked
 }
 
 # The host frontend rail is intentionally non-test: codegen, lint, and typecheck.
-# Vitest and Playwright refuse outside the pinned Dagger graph. A fresh checkout
-# without node_modules fails with the install instruction instead of skipping the gate.
+# Playwright remains outside this hook's deterministic non-test scope. Direct targeted Vitest is a
+# diagnostic-only developer loop, not part of this hook or closeout/integration evidence. A fresh
+# checkout without node_modules fails with the install instruction instead of skipping the gate.
 dashboard_checks() {
   if [ ! -f "dashboard/package.json" ]; then
     echo "[$label] dashboard/package.json missing; skipping the frontend rail." >&2
@@ -193,6 +222,14 @@ run_fast_checks() {
     echo "[$label] result: pyright FAIL" >&2
     return 1
   fi
+  report_fixed_step evidence-lifecycle || return 1
+  echo "[$label] evidence lifecycle catalog..."
+  if "$py" -m agents_remember_test_support.testing.evidence_lifecycle --project-root .; then
+    echo "[$label] result: evidence-lifecycle PASS"
+  else
+    echo "[$label] result: evidence-lifecycle FAIL" >&2
+    return 1
+  fi
   dashboard_checks || return 1
   echo "[$label] result: fast-tier PASS; acceptance tests run only in Dagger."
   return 0
@@ -205,7 +242,7 @@ run_targeted_checks() {
 }
 
 run_full_checks() {
-  echo "[$label] tests are Dagger-only; refusing host full-suite execution." >&2
+  echo "[$label] acceptance is Dagger-only; refusing host full-suite execution." >&2
   echo "[$label] run the pinned 'dagger call quality ... --mode=full' graph." >&2
   return 2
 }

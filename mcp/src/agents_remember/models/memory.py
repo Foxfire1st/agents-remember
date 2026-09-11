@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.base import FlexibleToolResponse, ToolResponse
 from agents_remember.models.drift import DriftStatus
+from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 
 
 class DriftCheckResponse(ToolResponse):
@@ -31,6 +32,21 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     operation: Literal["memory_quality_check"] = "memory_quality_check"
     repoId: str | None = None
     onboardingRoot: str | None = None
+    # Async run envelope: start admits background work and poll reads it by runId;
+    # the completed envelope carries the full result.
+    status: (
+        Literal[
+            "started",
+            "running",
+            "completed",
+            "failed",
+            "run-not-found",
+            "capacity-reached",
+            "scope-refused",
+        ]
+        | None
+    ) = None
+    runId: str | None = None
     checks: dict[str, Any] | list[dict[str, Any]] | None = None
     reportPath: str | None = Field(
         default=None,
@@ -39,7 +55,19 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
             "that this invocation atomically replaced."
         ),
     )
-    checklistStatus: Literal["action-required", "ready-for-closeout"] | None = None
+    attestationPath: str | None = Field(
+        default=None,
+        description="Structured readiness attestation paired to the rendered curator checklist.",
+    )
+    guidance: str | None = Field(default=None, max_length=8192)
+    checklistStatus: (
+        Literal["action-required", "coherence-required", "ready-for-closeout"] | None
+    ) = None
+    qualityChecklistStatus: Literal["action-required", "ready-for-closeout"] | None = None
+    coherenceStatus: str | None = Field(default=None, max_length=256)
+    coherenceCanonicalPath: str | None = Field(default=None, max_length=8192)
+    coherenceRecordDigest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    closeoutReady: bool | None = None
     curatorActionableCount: int | None = Field(default=None, ge=0)
     memoryRepairCount: int | None = Field(default=None, ge=0)
     missingOnboardingCount: int | None = Field(default=None, ge=0)
@@ -47,6 +75,57 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     sourceChangeCandidateCount: int | None = Field(default=None, ge=0)
     closeoutOwnedFindingCount: int | None = Field(default=None, ge=0)
     noteworthyFindingCount: int | None = Field(default=None, ge=0)
+    scopeAuthority: Literal["official-diagnostic", "leaf-candidate"] | None = None
+    acceptanceEligible: bool | None = None
+    contractPath: str | None = Field(default=None, max_length=8192)
+    pairIdentity: MemoryCandidatePairIdentity | None = None
+    pairStatus: str | None = Field(default=None, max_length=256)
+    pairField: str | None = Field(default=None, max_length=256)
+    detail: str | None = Field(default=None, max_length=8192)
+    expected: dict[str, Any] | None = Field(default=None, max_length=32)
+    observed: dict[str, Any] | None = Field(default=None, max_length=32)
+    nextAction: str | None = Field(default=None, max_length=8192)
+    nextArgs: dict[str, Any] | None = Field(default=None, max_length=32)
+
+
+class _MemoryQualityExecutionRequest(BaseModel):
+    """Fields shared by synchronous and asynchronous quality execution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    repo_id: str
+    checks: list[str] | None = None
+    detail_limit: int = 50
+    contract_path: str | None = None
+
+
+class MemoryQualitySyncRequest(_MemoryQualityExecutionRequest):
+    """Run one memory-quality request synchronously."""
+
+    mode: Literal["sync"]
+
+
+class MemoryQualityStartRequest(_MemoryQualityExecutionRequest):
+    """Start one bounded asynchronous memory-quality request."""
+
+    mode: Literal["start"]
+
+
+class MemoryQualityPollRequest(BaseModel):
+    """Poll one repository-owned run through the same admitted scope."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["poll"]
+    repo_id: str
+    run_id: str
+    contract_path: str | None = None
+
+
+type MemoryQualityCheckRequest = Annotated[
+    MemoryQualitySyncRequest | MemoryQualityStartRequest | MemoryQualityPollRequest,
+    Field(discriminator="mode"),
+]
 
 
 class CitationFixResponse(FlexibleToolResponse):

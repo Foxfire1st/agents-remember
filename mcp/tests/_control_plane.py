@@ -19,7 +19,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Literal, cast
 
-from agents_remember.errors import HarnessControlError
 from agents_remember.models.conversations.control_wire import (
     AcceptanceState,
     AdapterSnapshot,
@@ -31,7 +30,6 @@ from agents_remember.models.conversations.control_wire import (
 )
 from agents_remember.models.conversations.evidence import (
     AR_EVIDENCE_KEY,
-    AR_TERMINAL_OUTCOME_KEY,
 )
 from agents_remember.models.conversations.identity import (
     AuthorizationBinding,
@@ -68,7 +66,6 @@ from agents_remember.serving.harness_control_models import (
     PromptRequest,
     ReconciliationResult,
     ShutdownMode,
-    TranscriptEntry,
 )
 from agents_remember.serving.terminal_catalog import (
     TerminalCatalog,
@@ -108,11 +105,9 @@ class FakeControlAdapter:
         *,
         vendor_id: str = "thread-1",
         harness: Literal["codex", "pi", "claude"] = "codex",
-        interrupt_capable: bool = True,
     ) -> None:
         self.vendor_id = vendor_id
         self.harness = harness
-        self.interrupt_capable = interrupt_capable
         self.current: AdapterSnapshot | None = None
         self.events: asyncio.Queue[AdapterEvent | None] = asyncio.Queue()
         self.event_sequence = 0
@@ -122,7 +117,6 @@ class FakeControlAdapter:
         self.active_turn: str | None = None
         self.transcript_sequence = 0
         self.interrupt_error: Exception | None = None
-        self.last_interrupt: tuple[tuple[str, str], InterruptResult] | None = None
         self.auto_release = False
         self.submit_gate: asyncio.Event | None = None
         self.next_acceptance: str | None = None
@@ -215,39 +209,25 @@ class FakeControlAdapter:
         turn_id: str | None,
         expected_operation_id: str | None,
     ) -> InterruptResult:
-        if not self.interrupt_capable:
-            raise AssertionError("interrupt must not be called on a non-capable double")
         if self.interrupt_error is not None:
             raise self.interrupt_error
-        if self.harness == "codex":
-            if self.active_turn is None:
-                raise HarnessControlError("no active Codex turn to interrupt")
-            if turn_id is not None and turn_id != self.active_turn:
-                raise HarnessControlError("interrupt turn id does not match the active Codex turn")
-            active = self.active_turn
-        else:
-            active_operation = self.operations[-1] if self.operations else None
-            if active_operation is None or (
-                expected_operation_id is not None
-                and expected_operation_id != active_operation.operation_id
-            ):
-                raise HarnessControlError("no active Pi operation matches the expected identity")
-            active = expected_operation_id or "unknown"
-        pair = (turn_id or expected_operation_id or "", active)
-        if self.last_interrupt is not None and self.last_interrupt[0] == pair:
-            return self.last_interrupt[1]
+        correlations = tuple(
+            value for value in (turn_id, expected_operation_id) if value is not None
+        )
+        if len(correlations) != 1:
+            raise AssertionError(
+                "control topology must pass exactly one native interrupt correlation"
+            )
         self.interrupt_calls.append(
             {"turn_id": turn_id, "expected_operation_id": expected_operation_id}
         )
-        result = InterruptResult(
+        return InterruptResult(
             acknowledgement="accepted",
             bridge_epoch="",
             operation=self.operations[-1] if self.operations else None,
-            vendor_correlation_id=active,
+            vendor_correlation_id=correlations[0],
             detail="fake native interrupt acknowledged",
         )
-        self.last_interrupt = (pair, result)
-        return result
 
     async def respond(self, response: InteractionResponse) -> None:
         del response
@@ -306,136 +286,6 @@ class FakeControlAdapter:
                 raw=dict(raw),
                 operation=operation,
             )
-        )
-
-    def settle_turn(self, outcome: str = "interrupted") -> None:
-        """Emit the codex turn/completed settlement for the active turn."""
-
-        turn = self.active_turn or "turn-unknown"
-        self.active_turn = None
-        operation = self.operations[-1] if self.operations else None
-        self.emit(
-            "completed",
-            {
-                "codexMethod": "turn/completed",
-                AR_EVIDENCE_KEY: {
-                    "threadId": self.vendor_id,
-                    "turn": {"id": turn, "status": outcome, "items": []},
-                },
-            },
-            snapshot=replace(self.current, activity="idle", raw={}) if self.current else None,
-            operation=operation,
-        )
-
-    def pi_settle(self, stop_reason: str = "aborted") -> None:
-        """Emit the pi message_end settlement evidence + completion release."""
-
-        operation = self.operations[-1] if self.operations else None
-        self.emit(
-            "pi:message_end",
-            {
-                "piEvent": {"type": "message_end"},
-                AR_EVIDENCE_KEY: {
-                    "type": "message_end",
-                    "message": {"role": "assistant", "content": [], "stopReason": stop_reason},
-                },
-            },
-            snapshot=replace(self.current, activity="idle") if self.current else None,
-        )
-        self.emit(
-            "completed",
-            {"piEvent": {"type": "agent_end"}},
-            snapshot=replace(self.current, activity="idle") if self.current else None,
-            operation=operation,
-        )
-
-    def pi_emit_message_end(self, *, text: str, stop_reason: str) -> None:
-        """Emit ONE production content-FUL pi message_end, with no completion release.
-
-        Mirrors ``pi_rpc_events._message_event`` line 241 exactly: a message_end that
-        finishes with text content crosses as kind ``transcript`` (NOT ``pi:message_end``),
-        with a transcript entry minted and the *full* frame — ``stopReason`` included —
-        riding the reserved evidence key. Compose several of these plus one ``pi_release``
-        to drive a multi-message turn; pass an oversized ``text`` (> 32 KiB serialized) to
-        exercise the REAL bridge's evidence clip — the frame crosses ``AR_EVIDENCE_KEY`` and
-        is clipped by ``clip_evidence_payload`` exactly as in production, so the L3E
-        identity-preservation path is what is under test.
-        """
-
-        self.transcript_sequence += 1
-        frame = {
-            "type": "message_end",
-            "message": {
-                "role": "assistant",
-                "content": [{"type": "text", "text": text}],
-                "stopReason": stop_reason,
-            },
-        }
-        entry = TranscriptEntry(
-            sequence=self.transcript_sequence,
-            role="assistant",
-            text=text,
-            created_at=NOW,
-            raw=dict(frame),
-        )
-        self.emit(
-            "transcript",
-            {
-                "piEvent": {"type": "message_end"},
-                AR_EVIDENCE_KEY: dict(frame),
-            },
-            transcript=(entry,),
-            snapshot=replace(self.current, activity="idle") if self.current else None,
-        )
-
-    def pi_release(self) -> None:
-        """Emit the pi completion release (``agent_end``) for the active operation."""
-
-        operation = self.operations[-1] if self.operations else None
-        self.emit(
-            "completed",
-            {"piEvent": {"type": "agent_end"}},
-            snapshot=replace(self.current, activity="idle") if self.current else None,
-            operation=operation,
-        )
-
-    def pi_settle_with_content(self, stop_reason: str = "stop") -> None:
-        """Emit the ordinary content-FUL message_end settlement + completion release.
-
-        The content-less ``pi_settle`` above is only reachable on an interrupted-before-text
-        turn; this is the ordinary pi turn completion (one finished message, then release).
-        """
-
-        self.pi_emit_message_end(text="final answer", stop_reason=stop_reason)
-        self.pi_release()
-
-    def claude_settle(self, outcome: str = "cancelled") -> None:
-        """Emit the claude result settlement evidence with the adapter-correlated stamp.
-
-        Mirrors ``claude_stream_state._handle_result``: the completed event carries the native
-        result frame plus the adapter-attributed ``arTerminalOutcome`` classification — the
-        accepted-interrupt correlation the settlement ledger reads. ``cancelled`` reproduces
-        the probe-locked interrupted shape (error_during_execution/is_error +
-        aborted_streaming), ``failed`` the unprovoked error, ``completed`` natural completion.
-        """
-
-        operation = self.operations[-1] if self.operations else None
-        self.emit(
-            "completed",
-            {
-                "terminalOutcome": outcome,
-                AR_EVIDENCE_KEY: {
-                    "type": "result",
-                    "subtype": "success" if outcome == "completed" else "error_during_execution",
-                    "is_error": outcome != "completed",
-                    "terminal_reason": "aborted_streaming" if outcome == "cancelled" else None,
-                    "session_id": self.vendor_id,
-                    "uuid": f"claude-result-{outcome}",
-                    AR_TERMINAL_OUTCOME_KEY: outcome,
-                },
-            },
-            snapshot=replace(self.current, activity="idle") if self.current else None,
-            operation=operation,
         )
 
 

@@ -1,10 +1,13 @@
 [mcp_servers.agents-remember]
 command = "uvx"
 args = [
+    "--refresh-package",
+    "agents-remember-mcp",
     "agents-remember-mcp@latest",
     "--config",
     "<PATH/TO/YOUR/PROJECTS_FOLDER>/.codex/mcp/agents-remember-settings.json"
 ]
+env_vars = ["AR_HOSTED_SESSION_ID", "AR_SPAWN_ROLE"]
 
 [[hooks.SessionStart]]
 

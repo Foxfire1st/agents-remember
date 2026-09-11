@@ -12,12 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from agents_remember.errors import HarnessControlError
 from agents_remember.models.conversations.evidence import EvidencePage, NativeEvidencePage
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
 from agents_remember.serving.harness_control_client import read_control_evidence
 
 if TYPE_CHECKING:
     from agents_remember.serving.conversation.active.status import TurnTerminalEvidence
+    from agents_remember.serving.conversation.projectors import HarnessProjector
 
 InterruptOriginValue = Literal["developer", "unknown"]
 
@@ -30,6 +32,48 @@ continues from the persisted cursor on the next sweep (level-triggered)."""
 def read_entry_evidence(entry: TerminalCatalogEntry) -> EvidencePage:
     """Read the evidence page after the catalog's last processed terminal-evidence sequence."""
     return read_control_evidence(entry, after_sequence=entry.terminal_evidence_sequence or 0)
+
+
+def _projector_for(harness_id: str | None) -> HarnessProjector | None:
+    """Resolve the canonical projector before reading a harness evidence surface."""
+    if harness_id is None:
+        return None
+    from agents_remember.serving.conversation.projectors import projector_for  # noqa: PLC0415
+
+    return projector_for(harness_id)
+
+
+def _validated_evidence_cursor(page: EvidencePage, *, cursor: int | None) -> int | None:
+    """Validate one deque page and return the exact sequence inspected by this read.
+
+    The bridge's ``latest_sequence`` is the daemon tail, so it is only a usable cursor for a
+    complete page whose final frame reaches that tail. A truncated page advances to its final
+    returned frame, while a coherent empty page retains the persisted cursor verbatim.
+    """
+    persisted = cursor or 0
+    if page.evicted_before_sequence > persisted:
+        raise HarnessControlError(
+            "terminal evidence window was evicted before the persisted cursor "
+            f"({page.evicted_before_sequence} > {persisted})"
+        )
+    if any(frame.sequence <= persisted for frame in page.frames):
+        raise HarnessControlError(
+            "terminal evidence page contains a frame at or before the persisted cursor"
+        )
+    if page.truncated:
+        if not page.frames:
+            raise HarnessControlError("truncated terminal evidence page is empty")
+        return page.frames[-1].sequence
+    if not page.frames:
+        if page.latest_sequence > persisted:
+            raise HarnessControlError(
+                "complete terminal evidence page is empty ahead of the persisted cursor"
+            )
+        return cursor
+    last_sequence = page.frames[-1].sequence
+    if page.latest_sequence != last_sequence:
+        raise HarnessControlError("complete terminal evidence page does not reach the daemon tail")
+    return last_sequence
 
 
 @dataclass(frozen=True)
@@ -70,12 +114,11 @@ def latest_terminal_evidence(
     from agents_remember.serving.conversation.active.status import (  # noqa: PLC0415
         TurnTerminalEvidence,
     )
-    from agents_remember.serving.conversation.projectors import projector_for  # noqa: PLC0415
     from agents_remember.serving.conversation.projectors.common import (  # noqa: PLC0415
         MappedTurnOutcome,
     )
 
-    projector = projector_for(harness_id)
+    projector = _projector_for(harness_id)
     if projector is None:
         return None
     latest: TerminalEvidenceProjection | None = None
@@ -110,13 +153,12 @@ def latest_native_terminal_evidence(
     from agents_remember.serving.conversation.active.status import (  # noqa: PLC0415
         TurnTerminalEvidence,
     )
-    from agents_remember.serving.conversation.projectors import projector_for  # noqa: PLC0415
     from agents_remember.serving.conversation.projectors.common import (  # noqa: PLC0415
         MappedTurnOutcome,
         UnmappableShape,
     )
 
-    projector = projector_for(harness_id)
+    projector = _projector_for(harness_id)
     if projector is None:
         return None
     latest: TerminalEvidenceProjection | None = None
@@ -151,12 +193,18 @@ def read_entry_terminal_evidence(
     advance this sweep, so the missed window is re-read next sweep."""
     if entry.kind != "harness" or entry.harness is None or entry.control_endpoint is None:
         return TerminalEvidenceRead(projection=None)
+    if _projector_for(entry.harness) is None:
+        return TerminalEvidenceRead(projection=None)
     if entry.harness == "pi":
         return _read_pi_terminal_evidence(entry)
     page = read_entry_evidence(entry)
+    evidence_sequence = _validated_evidence_cursor(
+        page,
+        cursor=entry.terminal_evidence_sequence,
+    )
     return TerminalEvidenceRead(
         projection=latest_terminal_evidence(page, entry.harness),
-        evidence_sequence=page.latest_sequence,
+        evidence_sequence=evidence_sequence,
     )
 
 

@@ -19,12 +19,18 @@ from agents_remember.kernel.primitives.gate_vocab import (
     coerce_gate_kind,
 )
 from agents_remember.models.base import StrictResponseModel, ToolResponse
+from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 
 @dataclass(frozen=True)
 class StructuralLifecycleGateRequest:
-    """Agent-authored gate fields; seat identity is derived from ambient plane state."""
+    """Agent-authored gate fields; seat identity is plane-derived or declared.
+
+    ``caller`` carries the ambient caller identity when the process has no
+    plane-injected seat; the structural tool validates the declared
+    role/document against the same policy a hosted seat would face.
+    """
 
     kind: GateKind
     ask: dict[str, Any] | None = None
@@ -32,17 +38,24 @@ class StructuralLifecycleGateRequest:
     required_decision: list[str] | None = None
     evidence_refs: list[dict[str, Any]] | None = None
     wait: bool = True
+    caller: DeclaredCaller | None = None
 
 
 @dataclass(frozen=True)
 class StructuralGateDecisionRequest:
-    """A structural gate decision that never carries private gate correlations."""
+    """A structural gate decision that never carries private gate correlations.
+
+    ``caller`` carries the ambient caller identity when the process has no
+    plane-injected seat; the structural authorization validates the declared
+    role/document before any decision is recorded.
+    """
 
     task_document_ref: TaskDocumentRef
     kind: GateKind
     decision: str
     note: str | None = None
     evidence_refs: list[dict[str, Any]] | None = None
+    caller: DeclaredCaller | None = None
 
 
 class GateCreateResponse(ToolResponse):

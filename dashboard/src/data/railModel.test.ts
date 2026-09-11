@@ -99,7 +99,8 @@ describe('buildRailModel (sprint-local command groups and leaf-subordinate clust
       section.taskDocumentRef.path.startsWith('260714_own-adapter-capability/'),
     );
     const serving = master?.clusters.find((cluster) =>
-      cluster.taskDocumentRef.path.endsWith('/04_serving.json'));
+      cluster.taskDocumentRef.path.endsWith('/04_serving.json'),
+    );
     // worker-l4 is working → top; reviewer/curator idle keep base order.
     expect(serving?.seats.map((seat) => seat.id)).toEqual([
       'worker-l4',
@@ -117,9 +118,9 @@ describe('buildRailModel (sprint-local command groups and leaf-subordinate clust
     );
     const reordered = buildFleetModel(flipped)
       .sprints[0]?.masters.find((section) =>
-        section.taskDocumentRef.path.startsWith('260714_own-adapter-capability/'))
-      ?.clusters.find((cluster) =>
-        cluster.taskDocumentRef.path.endsWith('/04_serving.json'));
+        section.taskDocumentRef.path.startsWith('260714_own-adapter-capability/'),
+      )
+      ?.clusters.find((cluster) => cluster.taskDocumentRef.path.endsWith('/04_serving.json'));
     expect(reordered?.seats.map((seat) => seat.id)).toEqual([
       'curator-l4',
       'worker-l4',
@@ -147,22 +148,100 @@ describe('buildRailModel (sprint-local command groups and leaf-subordinate clust
     expect(buildFleetModel().completedUnattached.map((seat) => seat.id)).toEqual(['pi-probe']);
   });
 
-  it('keeps unclaimed non-command seats in unattached; terminated tombstones never render', () => {
-    const model2 = buildRailModel([
-      ...fleet,
-      fromTerminalSessionInfo(catalogRow({ id: 'tomb', status: 'terminated' })),
-    ], FLEET_DOCS);
-    expect(model2.unattached.map((seat) => seat.id)).toEqual(['scout']);
+  it('closes only a PLANNED retirement; an unplanned terminated row keeps its window', () => {
+    // `retire_entry` (auto_complete_seats) layers retirement provenance on the terminal mark.
+    const retired = fromTerminalSessionInfo(
+      catalogRow({
+        id: 'tomb-retired',
+        status: 'terminated',
+        terminatedAt: '2026-07-17T09:05:00Z',
+        retiredAt: '2026-07-17T09:05:00Z',
+        retiredBySession: 'manager-l6',
+        retiredReason: 'seat superseded',
+        retiredEdge: 'leaf-integration',
+      }),
+    );
+    // The /terminate route (mark_terminated) writes the status only: an unplanned shutdown.
+    const crashed = fromTerminalSessionInfo(
+      catalogRow({ id: 'tomb-crashed', status: 'terminated' }),
+    );
+    const model2 = buildRailModel([...fleet, retired, crashed], FLEET_DOCS);
+    expect(model2.unattached.map((seat) => seat.id)).toEqual(['scout', 'tomb-crashed']);
+    // The provenance-bearing mark alone is not the marker: a `landed` row keeps its window.
+    const landed = fromTerminalSessionInfo(
+      catalogRow({ id: 'tomb-landed', status: 'landed', landedReason: 'leaf integrated' }),
+    );
+    expect(
+      buildRailModel([...fleet, landed], FLEET_DOCS).completedUnattached.map((seat) => seat.id),
+    ).toEqual(['pi-probe', 'tomb-landed']);
+    // The spawn-tree provenance view applies the same rule.
+    expect(buildSpawnTree([...fleet, retired, crashed]).map((row) => row.session.id)).not.toContain(
+      'tomb-retired',
+    );
+    expect(buildSpawnTree([...fleet, crashed]).map((row) => row.session.id)).toContain(
+      'tomb-crashed',
+    );
   });
 
   it('surfaces altitude-invalid role bindings as unattached instead of guessing', () => {
-    const invalid = fromTerminalSessionInfo(catalogRow({
-      id: 'worker-on-master',
-      seatRole: 'worker',
-      taskDocumentRef: { repository: 'agents-remember', path: '260714_own-adapter-capability/task.json' },
-    }));
+    const invalid = fromTerminalSessionInfo(
+      catalogRow({
+        id: 'worker-on-master',
+        seatRole: 'worker',
+        taskDocumentRef: {
+          repository: 'agents-remember',
+          path: '260714_own-adapter-capability/task.json',
+        },
+      }),
+    );
     expect(buildRailModel([invalid], FLEET_DOCS).unattached.map((seat) => seat.id)).toEqual([
       'worker-on-master',
+    ]);
+  });
+
+  it('places master and sprint reviewers only under their exact generation-bound parent', () => {
+    const masterRef = {
+      repository: 'agents-remember',
+      path: '260714_own-adapter-capability/task.json',
+    };
+    const sprintRef = { repository: 'agents-remember', path: '260700_sprint/task.json' };
+    const masterReviewer = fromTerminalSessionInfo(
+      catalogRow({
+        id: 'master-reviewer',
+        seatRole: 'reviewer',
+        spawnRole: 'reviewer',
+        taskDocumentRef: masterRef,
+        structuralParentTaskDocumentRef: masterRef,
+        structuralParentRole: 'manager',
+      }),
+    );
+    for (const parentRole of ['architect', 'orchestrator'] as const) {
+      const sprintReviewer = fromTerminalSessionInfo(
+        catalogRow({
+          id: `sprint-reviewer-${parentRole}`,
+          seatRole: 'reviewer',
+          spawnRole: 'reviewer',
+          taskDocumentRef: sprintRef,
+          structuralParentTaskDocumentRef: sprintRef,
+          structuralParentRole: parentRole,
+        }),
+      );
+      const model = buildRailModel([masterReviewer, sprintReviewer], FLEET_DOCS);
+      expect(model.sprints[0]?.seats.map((seat) => seat.id)).toContain(sprintReviewer.id);
+      expect(model.sprints[0]?.masters[0]?.reviewer?.id).toBe('master-reviewer');
+      expect(model.unattached).toEqual([]);
+    }
+
+    const unstamped = fromTerminalSessionInfo(
+      catalogRow({
+        id: 'unstamped-master-reviewer',
+        seatRole: 'reviewer',
+        spawnRole: 'reviewer',
+        taskDocumentRef: masterRef,
+      }),
+    );
+    expect(buildRailModel([unstamped], FLEET_DOCS).unattached.map((seat) => seat.id)).toEqual([
+      'unstamped-master-reviewer',
     ]);
   });
 });

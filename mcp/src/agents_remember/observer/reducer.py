@@ -198,6 +198,7 @@ def project_workspace(
         enclosures=enriched,
         providers=providers,
         activeWorktreeGroups=sorted(structure.active_worktree_groups),
+        closeoutQueues=given.closeout_queues,
         metrics=_metrics(lifecycles, given.sidecar_staleness),
         analytics=analytics,
     )

@@ -1,147 +1,170 @@
-"""Dagger-only session setup that keeps the suite hermetic inside its clean graph.
-
-Fixtures commit in throwaway repositories but inherit the process environment. Git
-repo-pointer variables from a hook or shell can redirect those commands from their
-temporary ``cwd`` into a real repository and clobber it.
-
-Before any of that setup, collection refuses unless the Dagger quality graph minted
-the process nonce and wrote the matching container-local attestation file. Stripping
-Git variables from ``os.environ`` here, at conftest import (before
-any test is collected or run), makes every fixture ``git`` call -- in any test
-module, via any helper -- operate on its intended temp repo no matter how or
-where the suite is launched. This is the single guard that prevents the
-worktree/closeout fixtures from ever committing into a real project repo.
-
-A fallback commit identity is also provided so the committing fixtures never fail
-with "Author identity unknown" when no git user is configured (CI runners, fresh
-clones, automated evaluation runs).
-
-The autouse fixture rejects changes to the deliberately-enumerated module-level mutable state
-owned by ``_global_state.py``. It restores before reporting the leak, so the offending test is
-named and later tests are not poisoned.
-"""
+"""Local, isolated pytest; delivery certification is an explicit Dagger-only option."""
 
 from __future__ import annotations
 
 import os
 import sys
+import tempfile
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-# Pin the checkout under test ahead of any editable-install ``.pth`` entry before importing the
-# production attestation validator. Otherwise collection can validate the main checkout and then
-# execute a linked-worktree candidate.
-MCP_SRC = Path(__file__).resolve().parents[1] / "src"
-sys.path.insert(0, str(MCP_SRC))
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+sys.path[:0] = [
+    str(REPOSITORY_ROOT / "mcp" / "src"),
+    str(REPOSITORY_ROOT / "mcp" / "test_support"),
+]
 
-from agents_remember.code_quality.dagger_environment import DaggerEnvironmentError
-from agents_remember.code_quality.dagger_environment import (
-    require_dagger_test_environment as _require_dagger_test_environment,
+from agents_remember_test_support.testing.hermetic_bootstrap import (
+    activate_current_pytest_environment,
+    candidate_test_process,
 )
 
-
-def require_dagger_test_environment() -> None:
-    """Refuse collection outside the pinned Dagger quality graph."""
-    try:
-        _require_dagger_test_environment()
-    except DaggerEnvironmentError as error:
-        raise pytest.UsageError(str(error)) from error
-
-
-require_dagger_test_environment()
-
-from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
-
-declare_test_process()
-
-from agents_remember.application.worktree_services import (
-    bind_worktree_services,
-    build_default_worktree_services,
+# This is an actual pytest process, using the existing test isolation owner. No daemon,
+# lifecycle-worker identity, or Dagger capability is supplied to the ordinary test loop.
+_ENVIRONMENT_LEASE = activate_current_pytest_environment(
+    candidate_test_process(REPOSITORY_ROOT), os.environ
 )
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _isolate_xdist_worker_cache(
-    tmp_path_factory: pytest.TempPathFactory,
-    worker_id: str,
-) -> Iterator[None]:
-    """Keep process-global application caches private to each xdist worker."""
-    del worker_id
-    with mock.patch.dict(
-        os.environ,
-        {"XDG_CACHE_HOME": str(tmp_path_factory.getbasetemp() / "xdg-cache")},
+_TEMPORARY = tempfile.TemporaryDirectory(prefix="ar-pytest-", dir="/tmp")
+_ISOLATED_ROOT = Path(_TEMPORARY.name)
+_ISOLATED_ENVIRONMENT = mock.patch.dict(
+    os.environ,
+    {
+        "HOME": str(_ISOLATED_ROOT / "home"),
+        "XDG_CONFIG_HOME": str(_ISOLATED_ROOT / "config"),
+        "XDG_DATA_HOME": str(_ISOLATED_ROOT / "data"),
+        "XDG_CACHE_HOME": str(_ISOLATED_ROOT / "cache"),
+        "CODEX_HOME": str(_ISOLATED_ROOT / "codex"),
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+    },
+)
+_ISOLATED_ENVIRONMENT.start()
+for directory in ("home", "config", "data", "cache", "codex"):
+    (_ISOLATED_ROOT / directory).mkdir()
+# Inherited live opt-ins and credentials must never make an ordinary run contact a service.
+# Tests that exercise these inputs construct their own local environment explicitly.
+for name in tuple(os.environ):
+    if (
+        name.startswith(("AR_RUN_", "AR_SPAWN_", "AR_HOSTED_"))
+        or name.endswith(("_API_KEY", "_ACCESS_TOKEN", "_AUTH_TOKEN"))
+        or name
+        in {
+            "AGENTS_REMEMBER_REAL_MCP_CONFIG",
+            "AR_CLAUDE_STREAM_SMOKE",
+            "AR_CODEX_APP_SERVER_LIVE_SMOKE",
+            "AR_CODEX_APP_SERVER_LIVE_CONFORMANCE",
+            "SSH_AUTH_SOCK",
+            "GITHUB_TOKEN",
+            "GH_TOKEN",
+            "AWS_PROFILE",
+        }
     ):
-        yield
+        os.environ.pop(name, None)
 
-
-@pytest.fixture(scope="session", autouse=True)
-def _bind_worktree_services_for_session() -> Iterator[None]:
-    """Bind the worktree services for class-level setup that runs outside test scope."""
-    bind_worktree_services(build_default_worktree_services())
-    yield
-
-
-@pytest.fixture(autouse=True)
-def _bind_worktree_services() -> Iterator[None]:
-    """Bind the real worktree service bundle for every test.
-
-    Worktree operations consume providers/memory_quality through the bound
-    services port; tests that need a fake bind their own bundle.
-    """
-    bind_worktree_services(build_default_worktree_services())
-    yield
-    bind_worktree_services(build_default_worktree_services())
-
-
-from _global_state import restore_owned_mutable_state, snapshot_owned_mutable_state
-from _random_order import shuffle_items
-from agents_remember.kernel.git_command import GIT_REPOSITORY_SELECTOR_ENV
-
-# git's repo-pointer / object-store environment. Any of these, if inherited,
-# redirects a `git` subprocess away from its `cwd` and onto another repository.
-for _var in GIT_REPOSITORY_SELECTOR_ENV:
-    os.environ.pop(_var, None)
-
-# Self-contained identity for the throwaway fixture commits; defers to a real
-# identity if one is already exported.
-os.environ.setdefault("GIT_AUTHOR_NAME", "Agents Remember Tests")
-os.environ.setdefault("GIT_AUTHOR_EMAIL", "agents-remember-tests@example.invalid")
-os.environ.setdefault("GIT_COMMITTER_NAME", "Agents Remember Tests")
-os.environ.setdefault("GIT_COMMITTER_EMAIL", "agents-remember-tests@example.invalid")
+pytest_plugins = ("agents_remember_test_support.testing.pytest_bootstrap",)
+_INTEGRATION_FILES = pytest.StashKey[frozenset[Path]]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addini("unit_case_budget", "maximum selected unit cases", type="int", default=1000)
+    parser.addini(
+        "integration_case_budget", "maximum selected integration cases", type="int", default=100
+    )
     parser.addoption(
-        "--random-order-seed",
-        type=int,
-        default=None,
-        help="shuffle collected tests with this deterministic seed and report it in the header",
+        "--certify",
+        action="store_true",
+        help="load delivery evidence services after genuine Dagger admission",
     )
 
 
-def pytest_report_header(config: pytest.Config) -> str | None:
-    seed = config.getoption("random_order_seed")
-    return f"random-order seed: {seed}" if seed is not None else None
+def pytest_configure(config: pytest.Config) -> None:
+    # Read existing file membership once; no source census, dependency graph, or collection probe.
+    with (REPOSITORY_ROOT / "mcp/tests/test-evidence-lanes.toml").open("rb") as stream:
+        files = tomllib.load(stream)["files"]
+    config.stash[_INTEGRATION_FILES] = frozenset(
+        REPOSITORY_ROOT / path
+        for category in ("integration", "stress-durability")
+        for path in files[category]
+    )
+    if config.getoption("certify"):
+        from agents_remember_test_support.testing.certifying_bootstrap import (  # noqa: PLC0415
+            prepare_certifying_pytest_bootstrap,
+        )
+        from agents_remember_test_support.testing.dagger_admission import (  # noqa: PLC0415
+            DaggerAdmissionError,
+        )
+
+        try:
+            prepare_certifying_pytest_bootstrap(REPOSITORY_ROOT)
+        except DaggerAdmissionError as error:
+            raise pytest.UsageError(str(error)) from error
+        config.pluginmanager.import_plugin(
+            "agents_remember_test_support.pytest_certifying_bootstrap"
+        )
 
 
+def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    # Pure unit invocations do not import application/transaction test modules at all.
+    if (
+        config.option.markexpr == "not integration"
+        and collection_path in config.stash[_INTEGRATION_FILES]
+    ):
+        return True
+    return None
+
+
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    seed = config.getoption("random_order_seed")
-    if seed is not None:
-        shuffle_items(items, seed)
+    for item in items:
+        if item.path in config.stash[_INTEGRATION_FILES]:
+            item.add_marker(pytest.mark.integration)
+
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Enforce maintenance budgets on collected parametrized cases, without another scan."""
+    integration = sum(item.get_closest_marker("integration") is not None for item in session.items)
+    populations = {"unit": len(session.items) - integration, "integration": integration}
+    for lane, count in populations.items():
+        budget = session.config.getini(f"{lane}_case_budget")
+        if budget < 1 or count > budget:
+            raise pytest.UsageError(
+                f"{lane} suite has {count} cases; budget is {budget}. "
+                "Consolidate overlapping protection first. Budget growth requires an explicit "
+                "behavior, case-count, size and runtime tradeoff in the change description."
+            )
 
 
 @pytest.fixture(autouse=True)
-def reject_owned_global_state_leaks() -> Iterator[None]:
-    """Fail the test that leaks an owned global, after restoring all owned state."""
-    previous = snapshot_owned_mutable_state()
+def _integration_composition(request: pytest.FixtureRequest) -> Iterator[None]:
+    if request.node.get_closest_marker("integration") is not None and not request.config.getoption(
+        "certify"
+    ):
+        request.getfixturevalue("worktree_services")
     yield
-    changed = restore_owned_mutable_state(previous)
-    if changed:
-        pytest.fail(
-            "test leaked owned module-level mutable state; restore it inside the test:\n"
-            + "\n".join(changed),
-            pytrace=False,
-        )
+
+
+@pytest.fixture
+def worktree_services() -> Iterator[None]:
+    """Explicit application composition for boundary tests, never an autouse unit fixture."""
+    from agents_remember.application.worktree_services import (  # noqa: PLC0415
+        bind_worktree_services,
+        build_default_worktree_services,
+    )
+    from agents_remember.worktrees.services import reset_worktree_services  # noqa: PLC0415
+
+    bind_worktree_services(build_default_worktree_services())
+    try:
+        yield
+    finally:
+        reset_worktree_services()
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    del config
+    _ISOLATED_ENVIRONMENT.stop()
+    _ENVIRONMENT_LEASE.close()
+    _TEMPORARY.cleanup()

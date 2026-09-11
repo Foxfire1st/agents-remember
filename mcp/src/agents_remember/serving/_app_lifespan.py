@@ -5,7 +5,7 @@ import contextlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from functools import partial
-from typing import TYPE_CHECKING, ParamSpec, TypeVar
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
 
@@ -53,16 +53,13 @@ if TYPE_CHECKING:
         McpRuntimeConfig,
     )
 
-_Args = ParamSpec("_Args")
-_Result = TypeVar("_Result")
 
-
-async def _to_thread_drained_on_cancel(
-    function: Callable[_Args, _Result],
+async def _to_thread_drained_on_cancel[**Args, Result](
+    function: Callable[Args, Result],
     /,
-    *args: _Args.args,
-    **kwargs: _Args.kwargs,
-) -> _Result:
+    *args: Args.args,
+    **kwargs: Args.kwargs,
+) -> Result:
     """Do not let a cancelled lifespan return while its worker thread still writes."""
     worker = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
     try:
@@ -124,6 +121,14 @@ def _agent_notifier_context(
         event_store=EventStore(root),
         heartbeat_store=runtime.heartbeat_store,
         coordination_root=runtime.config.coordination_root,
+        register_execution_evidence=(
+            None
+            if runtime.register_inbox_execution_evidence is None
+            else partial(
+                runtime.register_inbox_execution_evidence,
+                runtime.config.coordination_root,
+            )
+        ),
         stale_seat_seconds=max(settings.agent_notifier.interval_seconds * 4, 60.0),
         redeliver_rate_limit_seconds=settings.agent_notifier.redeliver_rate_limit_seconds,
         signal_cooldown_seconds=settings.agent_notifier.signal_cooldown_seconds,
@@ -160,8 +165,17 @@ async def _agent_notifier_loop(runtime: _ServingRuntime) -> None:
             if not settings.agent_notifier.enabled:
                 await asyncio.sleep(settings.agent_notifier.interval_seconds)
                 continue
+            # Notifier predicates depend on current control/turn boundaries. Dashboard HTTP
+            # clients also refresh this catalog, but delivery correctness must not depend on a
+            # browser polling ``/api/terminal/sessions``. Refresh through the one liveness owner
+            # immediately before each headless notifier sweep.
+            await _to_thread_drained_on_cancel(runtime.liveness_sweeper.refresh)
             ctx = _agent_notifier_context(runtime, settings=settings)
-            await asyncio.to_thread(run_agent_notifier_sweep, ctx, now=runtime.liveness_clock())
+            await _to_thread_drained_on_cancel(
+                run_agent_notifier_sweep,
+                ctx,
+                now=runtime.liveness_clock(),
+            )
         except Exception:
             logger.exception("agent-notifier sweep failed; retrying next interval")
         await asyncio.sleep(settings.agent_notifier.interval_seconds)

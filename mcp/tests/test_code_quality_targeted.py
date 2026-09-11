@@ -2,22 +2,20 @@
 
 from __future__ import annotations
 
-import argparse
-import ast
-import json
 import subprocess
 import sys
 import tempfile
 import unittest
-from collections.abc import Mapping
 from pathlib import Path
-from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.code_quality import check, diff_coverage, targeted
-from agents_remember.code_quality.scope import ScopeError
+from _evidence_catalog_fixture import write_synthetic_evidence_catalog
+from agents_remember_test_support.code_quality import (
+    targeted,
+)
+from agents_remember_test_support.code_quality.dependency_ownership import SelectionReasonKind
 
 
 def run_git(root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -44,6 +42,9 @@ def write_quality_config(root: Path) -> None:
                 "branch = true",
                 "[tool.pytest.ini_options]",
                 'testpaths = ["tests"]',
+                "[tool.agents_remember]",
+                'product_package_roots = ["src/pkg"]',
+                'verification_package_roots = [".dagger/src/quality"]',
                 "",
             )
         ),
@@ -56,9 +57,13 @@ def targeted_repository(root: Path) -> str:
     run_git(root, "init", "--quiet", "--initial-branch=main")
     write_quality_config(root)
     (root / "src/pkg").mkdir(parents=True)
+    (root / ".dagger/src/quality").mkdir(parents=True)
     (root / "tests").mkdir()
+    (root / "mcp/tests").mkdir(parents=True)
     (root / "scripts").mkdir()
     (root / "src/pkg/__init__.py").write_text("", encoding="utf-8")
+    (root / ".dagger/src/quality/__init__.py").write_text("", encoding="utf-8")
+    (root / ".dagger/src/quality/support.py").write_text("VALUE = 1\n", encoding="utf-8")
     (root / "src/pkg/module.py").write_text("def value() -> int:\n    return 1\n", encoding="utf-8")
     (root / "src/pkg/relative.py").write_text(
         "from .module import value\nRELATIVE = value()\n", encoding="utf-8"
@@ -75,7 +80,9 @@ def targeted_repository(root: Path) -> str:
         "from pkg.importer import VALUE\nTOP = VALUE\n", encoding="utf-8"
     )
     (root / "tests/test_module.py").write_text(
-        "from pkg.module import value\n\ndef test_value() -> None:\n    assert value() == 1\n",
+        "from _support import SUPPORT\n"
+        "from pkg.module import value\n\n"
+        "def test_value() -> None:\n    assert value() == SUPPORT\n",
         encoding="utf-8",
     )
     (root / "tests/test_extra.py").write_text(
@@ -88,6 +95,18 @@ def targeted_repository(root: Path) -> str:
     )
     (root / "scripts/sync.py").write_text("VALUE = 1\n", encoding="utf-8")
     (root / "scripts/test_module.py").write_text("NAME_MATCH_DECOY = True\n", encoding="utf-8")
+    (root / "tests/_support.py").write_text("SUPPORT = 1\n", encoding="utf-8")
+    (root / "tests/conftest.py").write_text("\n", encoding="utf-8")
+    (root / "mcp/tests/_catalog_anchor.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (root / "mcp/tests/fixtures").mkdir()
+    (root / "mcp/tests/fixtures/owned.json").write_text("{}\n", encoding="utf-8")
+    write_synthetic_evidence_catalog(
+        root,
+        {
+            "mcp/tests/_catalog_anchor.py": ("tests/test_module.py",),
+            "mcp/tests/fixtures/owned.json": ("tests/test_extra.py",),
+        },
+    )
     run_git(root, "add", "-A")
     run_git(
         root,
@@ -101,42 +120,6 @@ def targeted_repository(root: Path) -> str:
         "baseline",
     )
     return run_git(root, "rev-parse", "HEAD").stdout.strip()
-
-
-def coverage_json_for(root: Path, relative_paths: list[Path]) -> dict[str, object]:
-    files: dict[str, object] = {}
-    for relative in relative_paths:
-        lines = (root / relative).read_text(encoding="utf-8").splitlines()
-        executed = [
-            number
-            for number, line in enumerate(lines, start=1)
-            if line.strip() and not line.strip().startswith("#")
-        ]
-        files[relative.as_posix()] = {
-            "executed_lines": executed,
-            "missing_lines": [],
-            "executed_branches": [],
-            "missing_branches": [],
-        }
-    return {"meta": {"format": 3, "branch_coverage": True}, "files": files}
-
-
-def fake_runner(
-    commands: list[list[str]],
-    coverage_json: Path,
-    root: Path,
-    coverage_paths: list[Path],
-) -> check.CommandRunner:
-    def run(name: str, command: list[str], cwd: Path, env: Mapping[str, str]) -> check.StepResult:
-        del cwd, env
-        commands.append(command)
-        if name == "pytest" and coverage_paths:
-            coverage_json.write_text(
-                json.dumps(coverage_json_for(root, coverage_paths)), encoding="utf-8"
-            )
-        return check.StepResult(name, 0, command)
-
-    return run
 
 
 class TargetedScopeDerivationTests(unittest.TestCase):
@@ -180,36 +163,22 @@ class TargetedScopeDerivationTests(unittest.TestCase):
                 derived.test_paths,
                 (Path("tests/test_extra.py"), Path("tests/test_module.py")),
             )
-
-    def test_internal_module_is_covered_through_its_public_import_home(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            base = targeted_repository(root)
-            (root / "src/pkg/internal.py").write_text(
-                "def inner() -> int:\n    return 1\n", encoding="utf-8"
+            self.assertIn(
+                SelectionReasonKind.NAME_HEURISTIC,
+                {
+                    reason.kind
+                    for reason in derived.test_impact.reasons_for(Path("tests/test_extra.py"))
+                },
             )
-            (root / "src/pkg/module.py").write_text(
-                "from pkg.internal import inner\n\ndef value() -> int:\n    return inner()\n",
-                encoding="utf-8",
+            self.assertIn(
+                SelectionReasonKind.IMPORT_CONSUMER,
+                {
+                    reason.kind
+                    for reason in derived.test_impact.reasons_for(Path("tests/test_module.py"))
+                },
             )
-            (root / "tests/test_module.py").write_text(
-                "from pkg.internal import inner\n"
-                "from pkg.module import value\n"
-                "\n"
-                "def test_value() -> None:\n"
-                "    assert value() == inner()\n",
-                encoding="utf-8",
-            )
-            run_git(root, "add", "-A")
 
-            derived = targeted.derive_targeted_scope(root, base)
-
-            self.assertIn(Path("src/pkg/internal.py"), derived.changed_paths)
-            # No test imports pkg.internal directly; the derived subset must
-            # reach it through pkg.module and its importers.
-            self.assertTrue(any(path.name == "test_module.py" for path in derived.test_paths))
-
-    def test_changed_production_module_without_tests_is_refused(self) -> None:
+    def test_changed_production_module_without_owner_refuses_without_broadening(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             base = targeted_repository(root)
@@ -218,427 +187,41 @@ class TargetedScopeDerivationTests(unittest.TestCase):
             )
             run_git(root, "add", "-A")
 
-            with self.assertRaisesRegex(ScopeError, "pkg.naked"):
-                targeted.derive_targeted_scope(root, base)
-
-    def test_string_referenced_module_is_covered_by_wiring_tests(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            base = targeted_repository(root)
-            (root / "src/pkg/wiring.py").write_text(
-                "def wire() -> int:\n    return 1\n", encoding="utf-8"
-            )
-            (root / "tests/test_wiring_registration.py").write_text(
-                'WIRING_PATH = "pkg.wiring"\n', encoding="utf-8"
-            )
-            run_git(root, "add", "-A")
-
             derived = targeted.derive_targeted_scope(root, base)
 
-            self.assertEqual(
-                derived.changed_paths,
-                (
-                    Path("src/pkg/wiring.py"),
-                    Path("tests/test_wiring_registration.py"),
-                ),
-            )
-            self.assertEqual(derived.test_paths, (Path("tests/test_wiring_registration.py"),))
-
-    def test_tests_only_change_leaves_production_coverage_empty(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            base = targeted_repository(root)
-            (root / "tests/test_module.py").write_text(
-                "from pkg.module import value\n\n"
-                "def test_value() -> None:\n"
-                "    assert value() == 2\n",
-                encoding="utf-8",
-            )
-
-            derived = targeted.derive_targeted_scope(root, base)
-
-            self.assertEqual(derived.changed_paths, (Path("tests/test_module.py"),))
-            self.assertEqual(derived.coverage_paths, ())
-            self.assertEqual(derived.test_paths, (Path("tests/test_module.py"),))
-
-    def test_no_python_changes_derives_an_empty_scope(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            base = targeted_repository(root)
-            (root / "README.md").write_text("docs only\n", encoding="utf-8")
-
-            derived = targeted.derive_targeted_scope(root, base)
-
-            self.assertEqual(derived.changed_paths, ())
-            self.assertEqual(derived.type_paths, ())
-
-    def test_scripts_only_change_has_no_test_subset_or_coverage(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            base = targeted_repository(root)
-            (root / "scripts/sync.py").write_text("VALUE = 2\n", encoding="utf-8")
-
-            derived = targeted.derive_targeted_scope(root, base)
-
-            self.assertEqual(derived.changed_paths, (Path("scripts/sync.py"),))
-            self.assertEqual(derived.coverage_paths, ())
+            self.assertFalse(derived.test_impact.complete)
             self.assertEqual(derived.test_paths, ())
+            self.assertEqual(
+                tuple(reason.source for reason in derived.test_impact.unresolved_inputs),
+                (Path("src/pkg/naked.py"),),
+            )
 
-    def test_module_for_path_returns_none_for_the_import_root_itself(self) -> None:
-        self.assertIsNone(targeted.module_for_path(Path("src"), (Path("src"),)))
-        self.assertIsNone(targeted.module_for_path(Path("__init__.py"), (Path("."),)))
-        self.assertEqual(
-            targeted.module_for_path(Path("src/pkg/__init__.py"), (Path("src"),)),
-            "pkg",
-        )
-
-    def test_resolve_relative_import_edges(self) -> None:
-        self.assertIsNone(targeted.resolve_relative_import("a.b", 3, None))
-        self.assertEqual(targeted.resolve_relative_import("a.b", 1, None), "a.b")
-        self.assertEqual(targeted.resolve_relative_import("a.b", 1, "x"), "a.b.x")
-
-    def test_import_from_modules_edges(self) -> None:
-        absolute = ast.parse("from x import y").body[0]
-        assert isinstance(absolute, ast.ImportFrom)
-        self.assertIn("x.y", targeted._import_from_modules(absolute, "pkg"))
-        star = ast.parse("from x import *").body[0]
-        assert isinstance(star, ast.ImportFrom)
-        modules = targeted._import_from_modules(star, "pkg")
-        self.assertNotIn("x.*", modules)
-        relative_without_root = ast.parse("from . import y").body[0]
-        assert isinstance(relative_without_root, ast.ImportFrom)
-        self.assertEqual(targeted._import_from_modules(relative_without_root, None), set())
-        bare = ast.ImportFrom(module=None, names=[], level=0)
-        self.assertEqual(targeted._import_from_modules(bare, "pkg"), set())
-
-    def test_file_imports_refuses_a_syntax_error(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            broken = Path(tmp) / "broken.py"
-            broken.write_text("def broken(:\n", encoding="utf-8")
-
-            with self.assertRaisesRegex(ScopeError, "could not parse"):
-                targeted.file_imports(broken, None)
-
-    def test_changed_paths_refuses_an_unknown_base(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            targeted_repository(root)
-
-            with self.assertRaisesRegex(ScopeError, "could not diff"):
-                targeted.changed_python_paths(root, "not-a-commit")
-
-    def test_git_transport_failure_is_a_scope_error(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            targeted_repository(root)
-            with (
-                mock.patch.object(targeted.git_command, "run_git", side_effect=OSError("boom")),
-                self.assertRaisesRegex(ScopeError, "could not run git"),
-            ):
-                targeted._git(root, ["diff"])
-
-    def test_string_reference_read_failure_is_a_scope_error(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            targeted_repository(root)
-            with (
-                mock.patch.object(Path, "read_text", side_effect=OSError("unreadable")),
-                self.assertRaisesRegex(ScopeError, "could not read"),
-            ):
-                targeted._string_reference_tests(
-                    root,
-                    [Path("tests")],
-                    "pkg.module",
-                    [Path("tests/test_module.py")],
-                )
-
-    def test_coverage_root_modules_skips_a_root_package_without_import_root(self) -> None:
-        modules = targeted._coverage_root_modules([Path("__init__.py")], (Path("."),))
-        self.assertEqual(modules, ())
-
-
-class TargetedWrapperRunTests(unittest.TestCase):
-    def test_targeted_run_prints_derivation_and_scopes_every_rail(self) -> None:
+    def test_shared_support_change_selects_static_import_consumers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             base = targeted_repository(root)
-            (root / "src/pkg/module.py").write_text(
-                "def value() -> int:\n    return 2\n", encoding="utf-8"
-            )
-            run_git(root, "add", "-A")
-            args = argparse.Namespace(
-                project_root=root,
-                coverage_json=root / "coverage.json",
-                threshold=30.0,
-                top=5,
-                diff_base=base,
-                diff_floor=100.0,
-                targeted=True,
-                memory_cap_bytes=None,
-            )
-            config = check.config_from_args(args)
-            commands: list[list[str]] = []
-            output: list[str] = []
+            (root / "tests/_support.py").write_text("SUPPORT = 2\n", encoding="utf-8")
 
-            exit_code = check.run_quality_check(
-                config,
-                runner=fake_runner(
-                    commands,
-                    root / "coverage.json",
-                    root,
-                    [Path("src/pkg/module.py")],
-                ),
-                printer=output.append,
-            )
-
-            self.assertEqual(exit_code, 0)
-            self.assertTrue(any("targeted changed files (1)" in line for line in output))
-            self.assertTrue(
-                any(
-                    "targeted reverse-import closure for pyright adds 5 file(s)" in line
-                    for line in output
-                )
-            )
-            self.assertTrue(any("targeted test subset (2 file(s))" in line for line in output))
-            ruff = commands[0]
-            self.assertEqual(ruff[2:], ["ruff", "check", "src/pkg/module.py"])
-            file_size = commands[2]
-            self.assertEqual(file_size[2], "agents_remember.code_quality.file_size")
-            self.assertIn("src/pkg/module.py", file_size)
-            layering = commands[3]
-            self.assertEqual(layering[2], "agents_remember.code_quality.layering")
-            pyright = commands[4]
-            self.assertIn("--pythonpath", pyright)
-            self.assertIn("src/pkg/module.py", pyright)
-            self.assertIn("src/pkg/importer.py", pyright)
-            self.assertIn("src/pkg/top.py", pyright)
-            # Radon report rails consume the changed production module FILES, not
-            # the pytest package roots: a module name would resolve to nothing at
-            # the repo root and make the report rail vacuous.
-            radon_cc = commands[5]
-            self.assertEqual(radon_cc[4], "src/pkg/module.py")
-            radon_mi = commands[6]
-            self.assertEqual(radon_mi[4], "src/pkg/module.py")
-            pytest = commands[7]
-            self.assertIn("tests/test_module.py", pytest)
-            self.assertIn("--cov=pkg", pytest)
-            self.assertNotIn("--cov=src/pkg", pytest)
-            # CRAP is scoped to the changed production module, not the whole package.
-            crap_scope = next(line for line in output if line.startswith("scope: CRAP-Calculator"))
-            self.assertIn("1 functions", crap_scope)
-
-    def test_radon_analyzes_the_changed_module_in_a_real_run(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            targeted_repository(root)
-            (root / "src/pkg/module.py").write_text(
-                "def value(flag: int) -> int:\n"
-                "    if flag == 1:\n        return 1\n"
-                "    if flag == 2:\n        return 2\n"
-                "    if flag == 3:\n        return 3\n"
-                "    if flag == 4:\n        return 4\n"
-                "    if flag == 5:\n        return 5\n"
-                "    return 0\n",
-                encoding="utf-8",
-            )
-            run_git(root, "add", "-A")
-
-            result_cc = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "radon",
-                    "cc",
-                    "src/pkg/module.py",
-                    "-s",
-                    "-n",
-                    "B",
-                    "--order",
-                    "SCORE",
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(result_cc.returncode, 0)
-            self.assertIn("module.py", result_cc.stdout)
-            self.assertIn("value", result_cc.stdout)
-
-            result_mi = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "radon",
-                    "mi",
-                    "src/pkg/module.py",
-                    "-s",
-                    "-n",
-                    "B",
-                ],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(result_mi.returncode, 0)
-            # The wrapper's mi rail applies radon's rank-B display filter, which can
-            # hide a small file; prove the rail consumed the file by rendering
-            # without the filter.
-            unfiltered_mi = subprocess.run(
-                [sys.executable, "-m", "radon", "mi", "src/pkg/module.py", "-s"],
-                cwd=root,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            self.assertEqual(unfiltered_mi.returncode, 0)
-            self.assertIn("module.py", unfiltered_mi.stdout)
-
-    def test_no_python_changes_short_circuits_to_pass(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            base = targeted_repository(root)
             derived = targeted.derive_targeted_scope(root, base)
-            full = check.derive_scope(root)
-            config = check.CheckConfig(
-                project_root=root,
-                scope=derived.to_gate_scope(full),
-                coverage_json=root / "coverage.json",
-                threshold=30.0,
-                top=5,
-                targeted=True,
-                targeted_base=diff_coverage.BaseResolution(base, "test"),
-                targeted_scope=derived,
+
+            self.assertEqual(derived.test_paths, (Path("tests/test_module.py"),))
+            self.assertTrue(derived.test_impact.complete)
+            self.assertEqual(
+                {reason.kind for reason in derived.test_impact.reasons_for(derived.test_paths[0])},
+                {SelectionReasonKind.IMPORT_CONSUMER},
             )
 
-            output: list[str] = []
-            commands: list[list[str]] = []
-            exit_code = check.run_quality_check(
-                config,
-                runner=fake_runner(commands, root / "coverage.json", root, []),
-                printer=output.append,
-            )
-
-            self.assertEqual(exit_code, 0)
-            self.assertEqual(commands, [])
-            self.assertTrue(any("no Python files changed" in line for line in output))
-            self.assertTrue(any("result: quality-wrapper PASS" in line for line in output))
-
-    def test_tests_only_run_marks_radon_crap_and_diff_as_not_applicable(self) -> None:
+    def test_verification_package_change_never_becomes_product_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             base = targeted_repository(root)
-            (root / "tests/test_module.py").write_text(
-                "from pkg.module import value\n\n"
-                "def test_value() -> None:\n"
-                "    assert value() == 2\n",
-                encoding="utf-8",
-            )
-            args = argparse.Namespace(
-                project_root=root,
-                coverage_json=root / "coverage.json",
-                threshold=30.0,
-                top=5,
-                diff_base=base,
-                diff_floor=100.0,
-                targeted=True,
-                memory_cap_bytes=None,
-            )
-            config = check.config_from_args(args)
-            commands: list[list[str]] = []
-            output: list[str] = []
+            verification = root / ".dagger/src/quality/support.py"
+            verification.write_text("VALUE = 2\n", encoding="utf-8")
 
-            exit_code = check.run_quality_check(
-                config,
-                runner=fake_runner(commands, root / "coverage.json", root, []),
-                printer=output.append,
-            )
+            derived = targeted.derive_targeted_scope(root, base)
 
-            self.assertEqual(exit_code, 0)
-            self.assertEqual(
-                [command[2] for command in commands],
-                [
-                    "ruff",
-                    "ruff",
-                    "agents_remember.code_quality.file_size",
-                    "agents_remember.code_quality.layering",
-                    "pyright",
-                    "pytest",
-                ],
-            )
-            self.assertTrue(
-                any("radon report and CRAP rails are not applicable" in line for line in output)
-            )
-            self.assertTrue(any("CRAP-Calculator PASS (not applicable)" in line for line in output))
-            self.assertTrue(any("diff-coverage PASS (not applicable)" in line for line in output))
-            self.assertFalse(any("## radon-cc" in line for line in output))
-
-    def test_scripts_only_run_skips_pytest_and_the_coverage_rails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            base = targeted_repository(root)
-            (root / "scripts/sync.py").write_text("VALUE = 2\n", encoding="utf-8")
-            args = argparse.Namespace(
-                project_root=root,
-                coverage_json=root / "coverage.json",
-                threshold=30.0,
-                top=5,
-                diff_base=base,
-                diff_floor=100.0,
-                targeted=True,
-                memory_cap_bytes=None,
-            )
-            config = check.config_from_args(args)
-            commands: list[list[str]] = []
-            output: list[str] = []
-
-            exit_code = check.run_quality_check(
-                config,
-                runner=fake_runner(commands, root / "coverage.json", root, []),
-                printer=output.append,
-            )
-
-            self.assertEqual(exit_code, 0)
-            self.assertEqual(
-                [command[2] for command in commands],
-                [
-                    "ruff",
-                    "ruff",
-                    "agents_remember.code_quality.file_size",
-                    "agents_remember.code_quality.layering",
-                    "pyright",
-                ],
-            )
-            self.assertTrue(
-                any("radon report and CRAP rails are not applicable" in line for line in output)
-            )
-            self.assertTrue(any("pytest rail is not applicable" in line for line in output))
-
-    def test_source_import_roots_resolves_files_to_the_package_import_root(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "src/pkg").mkdir(parents=True)
-            (root / "src/pkg/__init__.py").write_text("", encoding="utf-8")
-            (root / "src/pkg/module.py").write_text("VALUE = 1\n", encoding="utf-8")
-            (root / "scripts").mkdir()
-            (root / "scripts/sync.py").write_text("VALUE = 1\n", encoding="utf-8")
-
-            self.assertEqual(
-                check.source_import_roots(root, [Path("src/pkg/module.py")]),
-                [root / "src"],
-            )
-            self.assertEqual(
-                check.source_import_roots(root, [Path("scripts/sync.py")]),
-                [root / "scripts"],
-            )
-
-    def test_source_import_roots_keeps_a_root_package_at_the_repository_root(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "__init__.py").write_text("", encoding="utf-8")
-
-            self.assertEqual(
-                check.source_import_roots(root, [Path("__init__.py")]),
-                [root],
-            )
+            self.assertEqual(derived.changed_paths, (Path(".dagger/src/quality/support.py"),))
+            self.assertEqual(derived.lint_paths, derived.changed_paths)
+            self.assertIn(Path(".dagger/src/quality/support.py"), derived.type_paths)
+            self.assertEqual(derived.coverage_paths, ())
+            self.assertEqual(derived.coverage_root_modules, ("pkg",))

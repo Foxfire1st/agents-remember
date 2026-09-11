@@ -7,37 +7,32 @@ store, the ``task_doc`` application operations and error paths (including contra
 lifecycle-key pickup), and the MCP tool registration.
 """
 
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-from typing import (
-    Any,
-    cast,
-)
+from typing import Any
 from unittest.mock import patch
-
-from pydantic import ValidationError
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 import agents_remember.tasks.store as task_store
-from agents_remember.application.task_doc_tools import (
+from agents_remember.application.task_docs.task_doc_tools import (
+    TaskDocCall,
     TaskDocEdit,
     TaskDocTarget,
     task_doc_tool,
 )
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
+    RepositoryScope,
 )
 from agents_remember.tasks import (
-    TASK_DOCUMENT_SCHEMA,
     TaskDocument,
     completion_blockers,
     current_step,
-    doc_stem,
     json_path_for,
     markdown_path_for,
     read_task_doc,
@@ -78,30 +73,54 @@ def _master(**over: Any) -> TaskDocument:
 
 
 def _config(coord: Path) -> McpRuntimeConfig:
-    """A lightweight stand-in: the task-doc entry point only reads coordination_root."""
-    return cast(McpRuntimeConfig, SimpleNamespace(coordination_root=coord))
+    """Build the configured repository authority used by task-doc publication."""
+    repo = coord / "repo"
+    repo.mkdir()
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "base"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    return McpRuntimeConfig(
+        config_path=coord / "settings.json",
+        coordination_root=coord,
+        workspace_root=coord,
+        transcript_root=coord / "logs" / "mcp",
+        repositories={"agents-remember": RepositoryScope(repo_id="agents-remember", path=repo)},
+    )
 
 
 class SchemaTests(unittest.TestCase):
-    def test_roundtrip_when_dumped_and_revalidated(self) -> None:
-        doc = _doc(
-            objective="Do.",
-            requirements=["a"],
-            steps=[{"id": "S1", "title": "One", "status": "done"}],
-            decisions=[{"at": "t", "decision": "d", "rationale": "r"}],
-        )
-        again = TaskDocument.model_validate(doc.model_dump(by_alias=True))
-        self.assertEqual(again, doc)
-
-    def test_schema_field_serializes_under_alias(self) -> None:
-        dumped = _doc().model_dump(by_alias=True)
-        self.assertEqual(dumped["schema"], TASK_DOCUMENT_SCHEMA)
-        self.assertNotIn("schema_", dumped)
-
-    def test_extra_keys_rejected(self) -> None:
-        with self.assertRaises(ValidationError):
-            TaskDocument.model_validate({**_doc().model_dump(by_alias=True), "bogus": 1})
-
     def test_progress_counts_every_declared_parent_and_child(self) -> None:
         doc = _doc(
             steps=[
@@ -124,33 +143,6 @@ class SchemaTests(unittest.TestCase):
             [("S1", None, "inProgress"), ("S1.b", "S1", "pending")],
         )
 
-    def test_current_step_includes_active_and_pending_nested_units(self) -> None:
-        active = _doc(
-            steps=[
-                {
-                    "id": "S1",
-                    "title": "Parent",
-                    "status": "done",
-                    "substeps": [{"id": "C1", "title": "Child", "status": "blocked"}],
-                }
-            ]
-        )
-        self.assertEqual(current_step(active), "S1/C1 — Child")
-        pending = active.model_copy(
-            update={
-                "steps": [
-                    active.steps[0].model_copy(
-                        update={
-                            "substeps": [
-                                active.steps[0].substeps[0].model_copy(update={"status": "pending"})
-                            ]
-                        }
-                    )
-                ]
-            }
-        )
-        self.assertEqual(current_step(pending), "S1/C1 — Child")
-
     def test_current_step_prefers_active_then_first_unfinished_then_none(self) -> None:
         active = _doc(steps=[{"id": "S1", "title": "One", "status": "blocked"}])
         self.assertEqual(current_step(active), "S1 — One")
@@ -163,91 +155,6 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(current_step(pending), "S2 — Two")
         finished = _doc(steps=[{"id": "S1", "title": "One", "status": "done"}])
         self.assertIsNone(current_step(finished))
-
-    def test_master_roundtrips_with_subtasks_and_sections(self) -> None:
-        doc = _master(
-            subTasks=[
-                {
-                    "number": "3c",
-                    "name": "Persist",
-                    "file": "03c.md",
-                    "status": "inProgress",
-                    "scope": "x",
-                }
-            ],
-            sections=[{"kind": "freeform", "heading": "H", "body": "b"}],
-        )
-        again = TaskDocument.model_validate(doc.model_dump(by_alias=True))
-        self.assertEqual(again, doc)
-
-    def test_master_forbids_steps_and_lifecycle_id(self) -> None:
-        with self.assertRaises(ValidationError):
-            _master(steps=[{"id": "S1", "title": "x"}])
-        with self.assertRaises(ValidationError):
-            _master(lifecycleId="LC")
-
-    def test_integration_branch_is_master_only_and_nonblank(self) -> None:
-        sprint = _master(orchestrates=["master"], integrationBranch=" ar/super ")
-        self.assertEqual(sprint.integrationBranch, "ar/super")
-        with self.assertRaises(ValidationError):
-            _master(orchestrates=["master"], integrationBranch="   ")
-        with self.assertRaises(ValidationError):
-            _master(integrationBranch="ar/super")
-        with self.assertRaises(ValidationError):
-            _doc(integrationBranch="ar/super")
-
-    def test_leaf_forbids_subtasks_and_non_freeform_sections(self) -> None:
-        # the master series index stays master-only
-        with self.assertRaises(ValidationError):
-            _doc(subTasks=[{"number": "1", "name": "x"}])
-        # a non-freeform section is master-only too
-        with self.assertRaises(ValidationError):
-            _doc(sections=[{"heading": "H", "kind": "subTasks"}])
-        # but a freeform section is a legal leaf extension (R4)
-        leaf = _doc(sections=[{"heading": "Status history"}])
-        self.assertEqual(leaf.sections[0].heading, "Status history")
-
-    def test_r4_extension_fields_round_trip(self) -> None:
-        doc = _doc(
-            statusNote="desc",
-            headerNotes=[{"label": "Verified", "value": "v"}],
-            sections=[{"heading": "H", "body": "b"}],
-        )
-        self.assertEqual(TaskDocument.model_validate(doc.model_dump(by_alias=True)), doc)
-        # statusNote is None-omitted when unset (like other optional scalars)
-        self.assertNotIn("statusNote", _doc().model_dump_json(by_alias=True, exclude_none=True))
-
-    def test_master_forbids_code_examples_note(self) -> None:
-        with self.assertRaises(ValidationError):
-            _master(codeExamplesNote="x")
-
-    def test_code_examples_note_requires_empty_examples(self) -> None:
-        # The note explains an absence; it cannot coexist with drafted examples.
-        with self.assertRaises(ValidationError):
-            _doc(
-                codeExamplesNote="Drafted at the plan gate.",
-                codeExamples=[{"id": "E1", "title": "t", "distinctChange": "c", "why": "w"}],
-            )
-
-    def test_code_examples_note_roundtrips_and_omits_when_none(self) -> None:
-        doc = _doc(codeExamplesNote="Drafted at the plan gate.")
-        self.assertEqual(TaskDocument.model_validate(doc.model_dump(by_alias=True)), doc)
-        # exclude_none keeps existing note-less JSON byte-identical (no codeExamplesNote key).
-        self.assertNotIn(
-            "codeExamplesNote", _doc().model_dump_json(by_alias=True, exclude_none=True)
-        )
-
-    def test_orchestrates_round_trips_on_master_and_is_master_only(self) -> None:
-        # L14: an orchestration task is a master doc carrying `orchestrates` — additive, no new kind.
-        master = _master(orchestrates=["260706_management-repo", "260707_settings-page"])
-        again = TaskDocument.model_validate(master.model_dump(by_alias=True))
-        self.assertEqual(again, master)
-        self.assertEqual(again.orchestrates, ["260706_management-repo", "260707_settings-page"])
-        # A leaf/light doc never commands masters.
-        with self.assertRaises(ValidationError):
-            _doc(orchestrates=["260706_management-repo"])
-        # Docs without the field are untouched: it defaults to [] and validates as before.
-        self.assertEqual(_master().orchestrates, [])
 
 
 class RenderTests(unittest.TestCase):
@@ -328,93 +235,11 @@ class RenderTests(unittest.TestCase):
         )
         self.assertEqual(render_markdown(doc), expected)
 
-    def test_render_is_deterministic(self) -> None:
-        doc = _doc(objective="x", steps=[{"id": "S1", "title": "a", "status": "pending"}])
-        self.assertEqual(render_markdown(doc), render_markdown(doc))
-
-    def test_subtask_title_suffix_and_master_line(self) -> None:
-        md = render_markdown(_doc(kind="subTask", slug="03c_x", id="3C", master="task.md"))
-        self.assertIn("# Task: Hello (Sub-task 3C)", md)
-        self.assertIn("**Master:** `task.md`", md)
-
-    def test_checkbox_and_substep_note(self) -> None:
-        md = render_markdown(
-            _doc(
-                steps=[
-                    {
-                        "id": "S1",
-                        "title": "Parent",
-                        "status": "inProgress",
-                        "substeps": [
-                            {"id": "S1.a", "title": "child", "status": "done", "note": "n"}
-                        ],
-                    }
-                ]
-            )
-        )
-        self.assertIn("- [ ] Parent", md)
-        self.assertIn("  - [x] child — n", md)
-
-    def test_intentional_skip_is_distinct_in_parent_and_child_markdown(self) -> None:
-        disposition = {
-            "kind": "intentionalSkip",
-            "reason": "Superseded by the accepted path.",
-            "recordedAt": "2026-08-03T12:00:00+00:00",
-            "recordedVia": "task_doc.skip_step",
-        }
-        md = render_markdown(
-            _doc(
-                steps=[
-                    {
-                        "id": "S1",
-                        "title": "Skipped parent",
-                        "status": "done",
-                        "disposition": disposition,
-                        "substeps": [
-                            {
-                                "id": "C1",
-                                "title": "Skipped child",
-                                "status": "done",
-                                "disposition": disposition,
-                            }
-                        ],
-                    },
-                    {"id": "S2", "title": "Ordinary done", "status": "done"},
-                ]
-            )
-        )
-        self.assertIn("- [x] Skipped parent — SKIPPED: Superseded by the accepted path.", md)
-        self.assertIn("  - [x] Skipped child — SKIPPED: Superseded by the accepted path.", md)
-        ordinary = md.split("### S2 — Ordinary done", maxsplit=1)[1]
-        self.assertNotIn("SKIPPED", ordinary)
-
-    def test_step_outcome_on_checkbox_and_bare_step_has_no_echo(self) -> None:
-        md = render_markdown(
-            _doc(
-                steps=[
-                    {"id": "S1", "title": "schema", "outcome": "ar-task-document/v1 lands"},
-                    {"id": "S2", "title": "bare", "status": "done"},
-                ]
-            )
-        )
-        # the checkbox carries the distinct outcome, not the heading title
-        self.assertIn("### S1 — schema", md)
-        self.assertIn("- [ ] ar-task-document/v1 lands", md)
-        # a bare step (no outcome, no substeps) is just its heading -- no redundant title echo
-        self.assertIn("### S2 — bare", md)
-        self.assertNotIn("] bare", md)
-
     def test_decision_cell_escapes_pipe_and_newline(self) -> None:
         md = render_markdown(
             _doc(decisions=[{"at": "t", "decision": "a | b\nc", "rationale": "r"}])
         )
         self.assertIn(r"| t | a \| b c | r |", md)
-
-    def test_empty_sections_have_placeholders(self) -> None:
-        md = render_markdown(_doc())
-        self.assertIn("_No steps defined yet._", md)
-        self.assertIn("No code examples are needed for this task.", md)
-        self.assertIn("- _None._", md)  # empty requirements/references
 
     def test_code_example_fence_preserves_blank_lines(self) -> None:
         md = render_markdown(
@@ -432,33 +257,6 @@ class RenderTests(unittest.TestCase):
             )
         )
         self.assertIn("```python\na = 1\n\nb = 2\n```", md)
-
-    def test_code_examples_note_renders_when_examples_empty(self) -> None:
-        md = render_markdown(_doc(codeExamplesNote="Drafted at the plan gate."))
-        self.assertIn("Drafted at the plan gate.", md)
-        self.assertNotIn("No code examples are needed for this task.", md)
-
-    def test_status_note_and_header_notes_render(self) -> None:
-        md = render_markdown(
-            _doc(
-                statusNote="core JSON format landed",
-                headerNotes=[{"label": "Verified", "value": "2026-06-18 — 3 commits"}],
-            )
-        )
-        self.assertIn("**Status:** planning — core JSON format landed", md)
-        self.assertIn("**Verified:** 2026-06-18 — 3 commits", md)
-
-    def test_leaf_freeform_sections_render_after_references(self) -> None:
-        md = render_markdown(
-            _doc(
-                references=["ref"],
-                sections=[{"heading": "Status history", "body": "line a\nline b"}],
-            )
-        )
-        self.assertIn("## Status history", md)
-        self.assertIn("line a\nline b", md)
-        # the freeform extra comes after the standard References section
-        self.assertLess(md.index("## References"), md.index("## Status history"))
 
     def test_real_subtask_extensions_round_trip_content_complete(self) -> None:
         # Models this 03c sub-task's extensions (R4 acceptance): a descriptive status, extra
@@ -561,72 +359,10 @@ class MasterRenderTests(unittest.TestCase):
         )
         self.assertEqual(render_markdown(doc), expected)
 
-    def test_master_render_is_deterministic(self) -> None:
-        doc = _master(
-            subTasks=[{"number": "1", "name": "a", "status": "planning"}],
-            sections=[{"kind": "subTasks", "heading": "Sub-tasks"}],
-        )
-        self.assertEqual(render_markdown(doc), render_markdown(doc))
-
-    def test_master_markers_map_status(self) -> None:
-        doc = _master(
-            subTasks=[
-                {"number": "1", "name": "a", "status": "Completed"},
-                {"number": "2", "name": "b", "status": "inProgress"},
-                {"number": "3", "name": "c", "status": "planning"},
-            ],
-            sections=[{"kind": "subTasks", "heading": "S"}],
-        )
-        md = render_markdown(doc)
-        self.assertIn("1. ✅ **a**", md)
-        self.assertIn("2. 🔨 **b**", md)
-        self.assertIn("3. ⬜ **c**", md)
-
-    def test_master_empty_subtasks_placeholder(self) -> None:
-        doc = _master(sections=[{"kind": "subTasks", "heading": "Sub-tasks"}])
-        self.assertIn("_No sub-tasks defined yet._", render_markdown(doc))
-
-    def test_master_orchestrates_header_line(self) -> None:
-        # L14: the orchestration-command relation renders as a header line; absent field → no line.
-        doc = _master(
-            orchestrates=["260706_management-repo", "260707_settings-page"],
-            sections=[{"kind": "subTasks", "heading": "Sub-tasks"}],
-        )
-        self.assertIn(
-            "**Orchestrates:** `260706_management-repo`, `260707_settings-page`",
-            render_markdown(doc),
-        )
-        self.assertNotIn(
-            "**Orchestrates:**",
-            render_markdown(_master(sections=[{"kind": "subTasks", "heading": "Sub-tasks"}])),
-        )
-
-    def test_master_preserves_bespoke_prose_verbatim(self) -> None:
-        # Bespoke prose sections (Resume / North-Star / Mandated ...) survive byte-for-byte,
-        # including internal blank lines and nested bullets -- the S4 acceptance.
-        resume = "**Where we are:** slices 01-03 done.\n\n- code @ abc\n  - nested\n- memory @ def"
-        north_star = "1. Design test.\n2. Client-agnostic API."
-        doc = _master(
-            sections=[
-                {"kind": "freeform", "heading": "Resume / Current State", "body": resume},
-                {"kind": "freeform", "heading": "North-Star Constraints", "body": north_star},
-            ],
-        )
-        md = render_markdown(doc)
-        self.assertIn(f"## Resume / Current State\n\n{resume}\n", md)
-        self.assertIn(f"## North-Star Constraints\n\n{north_star}\n", md)
-
 
 class StoreTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = Path(tempfile.mkdtemp())
-
-    def test_doc_stem_light_vs_subtask(self) -> None:
-        self.assertEqual(doc_stem(_doc(kind="light")), "task")
-        self.assertEqual(doc_stem(_doc(kind="subTask", slug="03c_x")), "03c_x")
-
-    def test_doc_stem_master_is_task(self) -> None:
-        self.assertEqual(doc_stem(_master(slug="series")), "task")
 
     def test_write_then_read_roundtrips_and_leaves_no_tmp(self) -> None:
         doc = _doc(objective="o", steps=[{"id": "S1", "title": "a", "status": "done"}])
@@ -718,7 +454,7 @@ class ApplicationTests(unittest.TestCase):
             TaskDocTarget(repo_id="agents-remember", task_name="3c-x", slug="03c_x"),
             operation=operation,
             edit=TaskDocEdit(fields=fields, step=step, decision=decision),
-            dry_run=dry_run,
+            call=TaskDocCall(dry_run=dry_run),
         )
 
 

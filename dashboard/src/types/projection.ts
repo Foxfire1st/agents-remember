@@ -121,6 +121,37 @@ export interface AttentionItem {
   waitSeconds?: number;
 }
 
+export interface CloseoutCandidateNode {
+  classification: string;
+  generationId: string;
+  order: number;
+  owningMaster: TaskDocumentRef;
+  priority: string;
+  /** JSON Schema refinements: {"maxItems":256} */
+  reasons: string[];
+  taskDocumentRef: TaskDocumentRef;
+}
+
+export interface CloseoutProjectionProblemNode {
+  address: string;
+  errorType: string;
+  kind: string;
+  repairAction: string;
+  state: string;
+}
+
+export interface CloseoutQueueNode {
+  /** JSON Schema refinements: {"maxItems":256} */
+  members: CloseoutCandidateNode[];
+  revision: number;
+  serviceCondition: string;
+  sourceClassification?: string;
+  sourceFingerprint?: string;
+  /** JSON Schema refinements: {"maxItems":256} */
+  sourceProblems: CloseoutProjectionProblemNode[];
+  sprintRef: TaskDocumentRef;
+}
+
 export interface CommitRefNode {
   behindSource?: number;
   branch?: string;
@@ -129,6 +160,33 @@ export interface CommitRefNode {
   exists?: boolean;
   factState: ProcessFactState;
   path?: string;
+}
+
+export interface DiscardUnstartedProofNode {
+  childJson: Record<string, unknown>;
+  childMarkdown: Record<string, unknown>;
+  commitState: string;
+  doorState: string;
+  enclosureState: string;
+  fingerprint: string;
+  locatorState: string;
+  operationState: string;
+  reviewState: string;
+  seatState: string;
+  taskDocumentRef: TaskDocumentRef;
+  taskState: string;
+  version: string;
+}
+
+export interface DiscardedSubTaskNode {
+  discardedAt: string;
+  disposition: string;
+  file: string;
+  name: string;
+  number: string;
+  proof: DiscardUnstartedProofNode;
+  reason: string;
+  scope: string;
 }
 
 export interface DriftSnapshotNode {
@@ -270,20 +328,39 @@ export interface LedgerRefNode {
   memorySubject?: string;
 }
 
+export interface LifecycleApprovalObservation {
+  state: "claimed" | "unclaimed";
+}
+
 export interface LifecycleOperationProjection {
+  approval?: LifecycleApprovalObservation;
   cancellable: boolean;
+  componentBindings?: LifecycleProjectionComponentBindings;
   currentCommand: string;
   elapsedSeconds: number;
   failure?: string;
   finishedAt?: string;
+  generation?: number;
   guidance?: string;
   heartbeatAt?: string;
-  kind: "closeout" | "integrate";
-  phase: "queued" | "preflight" | "memory-preflight" | "quality" | "approval-claim" | "recovering-after-claim" | "code-commit" | "memory-refresh" | "memory-commit" | "ledger-commit" | "integration-replay" | "integration-quality" | "source-merge" | "contract-finalization" | "completed" | "failed" | "cancelled";
+  identity?: LifecycleProjectionIdentity;
+  kind: "closeout" | "integrate" | "direct-landing";
+  /** JSON Schema refinements: {"maxItems":32} */
+  legalControls: Record<string, unknown>[];
+  /** JSON Schema refinements: {"minimum":1} */
+  meaningfulRevision?: number;
+  phase: "queued" | "preflight" | "memory-preflight" | "quality" | "approval-claim" | "recovering-after-claim" | "recovering-private-preparation" | "code-commit" | "memory-refresh" | "memory-commit" | "ledger-commit" | "integration-replay" | "integration-quality" | "source-merge" | "contract-finalization" | "door-publication" | "termination-required" | "direct-preflight" | "direct-memory-commit" | "direct-ledger-commit" | "direct-terminal-publication" | "completed" | "failed" | "cancelled";
+  /** JSON Schema refinements: {"maxItems":8} */
+  projectionEffects: TaskDocProjectionEffect[];
+  recommendedAction?: LifecycleRecommendedAction;
   reportPath: string;
   result?: Record<string, unknown>;
+  schemaVersion: "lifecycle-operation-projection/v1";
   startedAt?: string;
-  status: "queued" | "running" | "input-required" | "completed" | "failed" | "cancelled";
+  stateMatrixVersion: "lifecycle-operation-state-matrix/v1";
+  status: "queued" | "running" | "input-required" | "termination-required" | "completed" | "failed" | "cancelled" | "unreadable" | "incoherent";
+  taskIntent?: TaskIntentIdentity;
+  worker?: LifecycleWorkerObservation;
 }
 
 export interface LifecycleProjection {
@@ -304,6 +381,56 @@ export interface LifecycleProjection {
   stateEnteredAt: string;
   tokenSeries: TokenSample[];
   tokens: number;
+}
+
+export interface LifecycleProjectionComponentBindings {
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  approval?: string;
+  /** JSON Schema refinements: {"maxItems":32} */
+  legalControls: string[];
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  recommendedAction?: string;
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  result?: string;
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  worker?: string;
+}
+
+export interface LifecycleProjectionIdentity {
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  candidateTupleDigest: string;
+  /** JSON Schema refinements: {"maxLength":4096,"minLength":1} */
+  contractPath: string;
+  /** JSON Schema refinements: {"minimum":1} */
+  generation: number;
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  identityDigest: string;
+  operationKind: "closeout" | "integrate" | "direct-landing";
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  planIdentityDigest: string;
+  /** JSON Schema refinements: {"minimum":1} */
+  recordRevision: number;
+}
+
+export interface LifecycleRecommendedAction {
+  /** JSON Schema refinements: {"maxLength":128,"minLength":1} */
+  action: string;
+  arguments?: Record<string, unknown>;
+  mutating: boolean;
+  /** JSON Schema refinements: {"maxLength":2048,"minLength":1} */
+  summary: string;
+  /** JSON Schema refinements: {"maxLength":256} */
+  tool?: string;
+}
+
+export interface LifecycleWorkerObservation {
+  /** JSON Schema refinements: {"maxLength":1024} */
+  detail: string;
+  identityRetained: boolean;
+  observedAt?: string;
+  state: "live" | "termination-requested" | "termination-required" | "exited";
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  workerIdentitySha256?: string;
 }
 
 type Camel<S extends string> = S extends `${infer Head}-${infer Tail}`
@@ -346,6 +473,37 @@ export function metricsFor(lifecycles: readonly LifecycleProjection[]): Metrics 
   };
 }
 
+export interface ProjectionInvalidationResult {
+  diagnostic?: ProjectionSourceProblem;
+  outcome: "persisted-empty" | "already-empty" | "recovered-malformed" | "would-recover-malformed" | "would-persist-empty" | "failed";
+  /** JSON Schema refinements: {"minimum":0} */
+  revision?: number;
+}
+
+export interface ProjectionRebuildResult {
+  /** JSON Schema refinements: {"minimum":0} */
+  memberCount: number;
+  outcome: "published" | "already-current" | "source-changed" | "source-unreadable" | "would-publish" | "not-attempted";
+  /** JSON Schema refinements: {"minimum":0} */
+  revision?: number;
+  sourceClassification?: "active" | "terminal";
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  sourceFingerprint?: string;
+  /** JSON Schema refinements: {"maxItems":256} */
+  sourceProblems: ProjectionSourceProblem[];
+}
+
+export interface ProjectionSourceProblem {
+  /** JSON Schema refinements: {"maxLength":8192,"minLength":1} */
+  address: string;
+  /** JSON Schema refinements: {"maxLength":256,"minLength":1} */
+  errorType: string;
+  kind: "task" | "door" | "series" | "projection";
+  /** JSON Schema refinements: {"maxLength":8192,"minLength":1} */
+  repairAction: string;
+  state: "missing" | "unreadable" | "invalid";
+}
+
 export interface ProviderBootNode {
   factState: ProcessFactState;
   id: string;
@@ -378,6 +536,9 @@ export interface SeriesNode {
   ageSeconds?: number;
   createdAt: string;
   decisions: TaskDecisionNode[];
+  discardedCount: number;
+  /** JSON Schema refinements: {"maxItems":256} */
+  discardedSubTasks: DiscardedSubTaskNode[];
   docPath: string;
   doneCount: number;
   objective: string;
@@ -411,6 +572,9 @@ export interface ServingBuild {
   commit?: string;
   dashboardBuild?: string;
   dirty?: boolean;
+  packageRoot?: string;
+  pythonExecutable?: string;
+  sourceDigest?: string;
   version: string;
 }
 
@@ -446,7 +610,7 @@ export interface SourceLineageEdge {
   contractPath: string;
   descendantBranch: string;
   detail?: string;
-  relation: "super-to-master" | "master-to-leaf";
+  relation: "super-to-master" | "master-to-leaf" | "super-to-leaf";
   side: "code" | "memory";
   sourceBranch: string;
   state: "current" | "behind" | "diverged" | "unavailable";
@@ -489,7 +653,14 @@ export interface TaskDocNode {
   currentStep?: string;
   decisions: TaskDecisionNode[];
   design?: string;
+  discardedCount?: number;
+  /** JSON Schema refinements: {"maxItems":256} */
+  discardedSubTasks?: DiscardedSubTaskNode[];
   docPath: string;
+  executionGraph?: TaskExecutionGraphNode;
+  executionGraphView?: TaskExecutionGraphView;
+  executionNature?: "organizational" | "atomic";
+  executionWaves: TaskExecutionNode[][];
   id: string;
   kind: string;
   lifecycleId?: string;
@@ -500,6 +671,7 @@ export interface TaskDocNode {
   references: string[];
   repository: string;
   requirements: string[];
+  seats: TaskSeatNode[];
   sections: TaskSectionNode[];
   status: string;
   steps: TaskStepNode[];
@@ -509,9 +681,84 @@ export interface TaskDocNode {
   title: string;
 }
 
+export interface TaskDocProjectionEffect {
+  invalidation: ProjectionInvalidationResult;
+  /** JSON Schema refinements: {"maxLength":8192} */
+  nextAction?: string;
+  /** JSON Schema refinements: {"minimum":0} */
+  priorRevision?: number;
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  priorSourceFingerprint?: string;
+  queueExisted: boolean;
+  rebuild: ProjectionRebuildResult;
+  /** JSON Schema refinements: {"minimum":0} */
+  rebuiltRevision?: number;
+  sprintTaskDocumentRef: TaskDocumentRef;
+}
+
 export interface TaskDocumentRef {
   path: string;
   repository: string;
+}
+
+export interface TaskExecutionEdgeNode {
+  judgmentId?: string;
+  predecessor: TaskExecutionEndpointNode;
+  reason: string;
+  successor: TaskExecutionEndpointNode;
+}
+
+export interface TaskExecutionEndpointNode {
+  leafId?: string;
+  ref: TaskDocumentRef;
+}
+
+export interface TaskExecutionGraphNode {
+  edges: TaskExecutionEdgeNode[];
+  nodes: TaskExecutionNode[];
+}
+
+export interface TaskExecutionGraphView {
+  nodes: TaskExecutionNodeView[];
+}
+
+export interface TaskExecutionNode {
+  kind: string;
+  leafIds: string[];
+  ref: TaskDocumentRef;
+}
+
+export interface TaskExecutionNodeView {
+  executionNature?: string;
+  frontierState: "landed" | "ready" | "waiting" | "in-flight";
+  kind: "lump" | "segment";
+  leafIds: string[];
+  leafTitles: string[];
+  masterRef: TaskDocumentRef;
+  masterTitle: string;
+  nodeId: string;
+  predecessors: TaskExecutionPredecessorNode[];
+  waveIndex: number;
+}
+
+export interface TaskExecutionPredecessorNode {
+  judgmentId?: string;
+  predecessorRef: TaskDocumentRef;
+  predecessorTitle: string;
+  reason: string;
+}
+
+export interface TaskIntentIdentity {
+  /** JSON Schema refinements: {"pattern":"^[0-9a-f]{64}$"} */
+  digest: string;
+  schema: "task-intent/v1";
+}
+
+export interface TaskSeatNode {
+  identity?: string;
+  label: string;
+  role: string;
+  state: string;
 }
 
 export interface TaskSectionNode {
@@ -546,6 +793,7 @@ export interface TaskSubStepNode {
 export interface TaskSubTaskRefNode {
   file: string;
   linkedLifecycleId?: string;
+  masterRef?: TaskDocumentRef;
   name: string;
   number: string;
   scope: string;
@@ -569,6 +817,7 @@ export type SubTaskRow = TaskSubTaskRefNode | SeriesSubTaskNode;
 export interface WorkspaceProjection {
   activeWorktreeGroups: string[];
   analytics: Analytics;
+  closeoutQueues?: CloseoutQueueNode[];
   enclosures: EnclosureNode[];
   generatedAt: string;
   lifecycles: LifecycleProjection[];

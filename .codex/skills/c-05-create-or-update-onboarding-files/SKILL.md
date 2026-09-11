@@ -124,7 +124,7 @@ Existing onboarding is durable memory, not disposable generated output. Preserve
 16. After creating, updating, moving, or deleting route overviews or file-level sidecars, refresh generated route indexes with MCP `route_index_refresh`.
 17. Keep each route overview's `## Hot Path Summary` short and current; it is copied into generated indexes for `c-04-retrieval-strategy-router` skill discovery.
 18. Do not delete onboarding for moved, split, merged, or deleted source until checking whether its documented behavior can be moved into a current onboarding target.
-19. Body before metadata: a changed source file's sidecar (and the nearest governing route overview) needs a real content update plus an `Update History` entry, or an explicit `No content impact:` / `No route impact:` reviewed-no-impact history entry. Closeout enforces this and surfaces attested documents; header-only or unmarked history-only refreshes fail.
+19. Body before metadata: a changed source file's sidecar (and the nearest governing route overview) needs a real content update plus an `Update History` entry, or an explicit `No content impact:` / `No route impact:` reviewed-no-impact history entry. The curator's scoped handoff enforces this and surfaces attested documents; header-only or unmarked history-only refreshes fail. Closeout consumes that handoff and does not rerun a memory-quality gate.
 20. In a worktree-backed task, run `worktree_status` and any needed `worktree_sync` before starting onboarding writes so memory entries are based on the current parent branch.
 
 ## Route Index Refresh
@@ -209,7 +209,7 @@ Before writing or revising onboarding content, read the `c-08-ar-coordination-co
 2. refresh verification metadata after the content update
 3. append a newest-first `Update History` entry instead of deleting or rewriting earlier history
 4. pair every body update with its `Update History` entry in the same pass:
-   closeout rejects a changed source whose sidecar gained only metadata or
+   the curator scoped handoff rejects a changed source whose sidecar gained only metadata or
    history edits, and rejects a body edit without a new history entry
 5. when a changed source genuinely warrants no onboarding content change (for
    example a version bump), record an explicit reviewed-no-impact entry instead
@@ -217,7 +217,7 @@ Before writing or revising onboarding content, read the `c-08-ar-coordination-co
    `Update History`, or `No route impact: <reason>` in a governing route
    overview's `Update History`. These markers are deliberate attestations after
    reviewing the document against the change — never a default shortcut — and
-   closeout surfaces every attested document in its tool response for review
+   the curator handoff surfaces every attested document in its report for the owning seat
 
 ### When code is moved, split, merged, or deleted
 

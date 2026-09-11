@@ -238,7 +238,7 @@ class PiRpcAdapterTests1(unittest.IsolatedAsyncioTestCase):
         finally:
             await adapter.stop("forced")
 
-    async def test_mutation_timeouts_hold_unknown_barrier_until_explicit_resolution(self) -> None:
+    async def test_mutation_timeouts_hold_unknown_blocker_until_explicit_resolution(self) -> None:
         for stalled_command in ("set_model", "get_state", "get_available_models"):
             with self.subTest(stalled_command=stalled_command):
                 transport = _FakePiTransport()
@@ -282,7 +282,7 @@ class PiRpcAdapterTests1(unittest.IsolatedAsyncioTestCase):
                         active.operation_id,
                         active.kind,
                         resolution="not-applied",
-                        detail="test operator cleared the unknown mutation barrier",
+                        detail="test operator cleared the unknown mutation blocker",
                     )
                     later = await asyncio.wait_for(later_task, timeout=1.0)
                     self.assertEqual((later.ok, later.acceptance), (True, "echo-verified"))

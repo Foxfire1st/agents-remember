@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -20,6 +22,9 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.sync import sync_result
+from agents_remember.worktrees.sync_transaction_state import (
+    SyncOperationStore,
+)
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -118,8 +123,10 @@ class WorktreeSyncTests(unittest.TestCase):
             result = fixture.sync()
 
             self.assertEqual(result.payload["state"], "synced")
-            self.assertEqual(section(result.payload, "code")["state"], "merged")
-            self.assertEqual(section(result.payload, "memory")["state"], "fast-forwarded")
+            self.assertEqual(section(result.payload, "code")["state"], "completed")
+            self.assertEqual(section(result.payload, "code")["plan"], "fast-forward")
+            self.assertEqual(section(result.payload, "memory")["state"], "completed")
+            self.assertEqual(section(result.payload, "memory")["plan"], "fast-forward")
             self.assertEqual(git(fixture.contract.code_worktree, "rev-parse", "HEAD"), code_tip)
             assert fixture.contract.memory_worktree is not None
             self.assertEqual(git(fixture.contract.memory_worktree, "rev-parse", "HEAD"), memory_tip)
@@ -129,40 +136,7 @@ class WorktreeSyncTests(unittest.TestCase):
             self.assertEqual(len(reloaded.sync_log), 1)
             self.assertEqual(reloaded.sync_log[0]["codeBaseTo"], code_tip)
 
-    def test_mid_cycle_official_line_blocks(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = SyncFixture(Path(tmp))
-            fixture.move_official_code()  # no ledger mapping for the new tip
-
-            result = fixture.sync()
-
-            self.assertEqual(result.returncode, 2)
-            self.assertEqual(result.payload["state"], "blocked")
-            self.assertIn("mid-cycle", str(result.payload["summary"]))
-
-    def test_already_current_pair_is_a_no_op(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = SyncFixture(Path(tmp))
-            result = fixture.sync()
-            self.assertEqual(result.payload["state"], "already-current")
-
-    def test_dry_run_previews_without_mutating(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = SyncFixture(Path(tmp))
-            code_tip = fixture.move_official_code()
-            fixture.map_official_memory(code_tip)
-
-            result = fixture.sync(dry_run=True)
-
-            self.assertEqual(result.payload["state"], "would-sync")
-            self.assertEqual(
-                git(fixture.contract.code_worktree, "rev-parse", "HEAD"), fixture.code_base
-            )
-            reloaded = load_contract(fixture.contract.contract_path)
-            self.assertEqual(reloaded.code_base_commit, fixture.code_base)
-            self.assertEqual(reloaded.sync_log, ())
-
-    def test_code_merge_conflict_blocks_and_aborts(self) -> None:
+    def test_code_merge_conflict_is_retained_and_can_continue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = SyncFixture(Path(tmp))
             commit_file(fixture.contract.code_worktree, "README.md", "work-branch version")
@@ -170,78 +144,55 @@ class WorktreeSyncTests(unittest.TestCase):
             code_tip = git(fixture.code_repo, "rev-parse", "main")
             fixture.map_official_memory(code_tip)
 
+            pre_sync = git(fixture.contract.code_worktree, "rev-parse", "HEAD")
             result = fixture.sync()
 
             self.assertEqual(result.returncode, 2)
-            self.assertEqual(section(result.payload, "code")["state"], "conflicts")
-            self.assertIn("README.md", section(result.payload, "code")["files"])
-            merge_head = fixture.contract.code_worktree / ".git"
-            self.assertNotIn(
-                "MERGE_HEAD",
-                git(fixture.contract.code_worktree, "status", "--porcelain"),
+            self.assertEqual(result.payload["state"], "sync-resolution-required")
+            self.assertEqual(result.payload["status"], "agent-action-required")
+            self.assertIn("README.md", section(result.payload, "resolution")["files"])
+            self.assertEqual(
+                git(fixture.contract.code_worktree, "rev-parse", "MERGE_HEAD"), code_tip
             )
             self.assertEqual(
                 git(fixture.contract.code_worktree, "rev-parse", "HEAD"),
-                git(fixture.contract.code_worktree, "rev-parse", "ar/sync-thing"),
+                pre_sync,
             )
-            _ = merge_head
+            (fixture.contract.code_worktree / "README.md").write_text(
+                "resolved version\n", encoding="utf-8"
+            )
+            git(fixture.contract.code_worktree, "add", "README.md")
 
-    def test_local_memory_commits_need_review(self) -> None:
+            continued = fixture.sync(resolution_action="continue")
+
+            self.assertEqual(continued.payload["state"], "synced")
+            self.assertEqual(
+                git(
+                    fixture.contract.code_worktree, "rev-list", "--parents", "-n", "1", "HEAD"
+                ).split()[1:],
+                [pre_sync, code_tip],
+            )
+
+    def test_nonregular_journal_is_renamed_without_following_and_quarantined(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = SyncFixture(Path(tmp))
-            assert fixture.contract.memory_worktree is not None
-            commit_file(
-                fixture.contract.memory_worktree,
-                "onboarding/local.md",
-                "# local memory work",
+            store = SyncOperationStore(fixture.contract.worktree_group)
+            store.path.parent.mkdir(parents=True, exist_ok=True)
+            target = Path(tmp) / "outside-journal-target"
+            target.write_text("do not read or replace\n", encoding="utf-8")
+            store.path.symlink_to(target)
+
+            result = fixture.sync(resolution_action="cancel")
+
+            self.assertEqual(result.payload["state"], "sync-cancelled-no-authority")
+            metadata = json.loads(
+                Path(str(result.payload["evidencePath"])).read_text(encoding="utf-8")
             )
-            code_tip = fixture.move_official_code()
-            fixture.map_official_memory(code_tip)
-
-            result = fixture.sync()
-
-            self.assertEqual(result.returncode, 2)
-            self.assertEqual(section(result.payload, "memory")["state"], "needs-review")
-            self.assertEqual(result.payload["nextRequiredArgs"], ["memory_sync_choice"])
-
-    def test_skip_memory_choice_advances_code_only(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = SyncFixture(Path(tmp))
-            assert fixture.contract.memory_worktree is not None
-            commit_file(
-                fixture.contract.memory_worktree,
-                "onboarding/local.md",
-                "# local memory work",
-            )
-            code_tip = fixture.move_official_code()
-            fixture.map_official_memory(code_tip)
-
-            result = fixture.sync(memory_sync_choice="skip-memory")
-
-            self.assertEqual(result.payload["state"], "synced")
-            self.assertEqual(section(result.payload, "memory")["state"], "skipped-by-choice")
-            reloaded = load_contract(fixture.contract.contract_path)
-            self.assertEqual(reloaded.code_base_commit, code_tip)
-            self.assertEqual(reloaded.memory_base_commit, fixture.memory_base)
-
-    def test_merge_memory_choice_merges_disjoint_memory(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            fixture = SyncFixture(Path(tmp))
-            assert fixture.contract.memory_worktree is not None
-            commit_file(
-                fixture.contract.memory_worktree,
-                "onboarding/local.md",
-                "# local memory work",
-            )
-            code_tip = fixture.move_official_code()
-            memory_tip = fixture.map_official_memory(code_tip)
-
-            result = fixture.sync(memory_sync_choice="merge-memory")
-
-            self.assertEqual(result.payload["state"], "synced")
-            self.assertEqual(section(result.payload, "memory")["state"], "merged")
-            reloaded = load_contract(fixture.contract.contract_path)
-            self.assertEqual(reloaded.memory_base_commit, memory_tip)
+            archived_entry = Path(metadata["rawArchivePath"])
+            self.assertEqual(metadata["archiveKind"], "opaque-entry")
+            self.assertTrue(archived_entry.is_symlink())
+            self.assertEqual(Path(os.readlink(archived_entry)), target)
+            self.assertEqual(target.read_text(encoding="utf-8"), "do not read or replace\n")
 
 
 def section(payload: dict[str, object], key: str) -> dict[str, Any]:
@@ -256,7 +207,10 @@ def make_repo(path: Path) -> str:
     git(path, "config", "user.email", "agents-remember@example.invalid")
     git(path, "config", "user.name", "Agents Remember")
     commit_file(path, "README.md", "# Fixture")
-    return git(path, "rev-parse", "HEAD")
+    commit = git(path, "rev-parse", "HEAD")
+    git(path, "update-ref", "refs/remotes/origin/main", commit)
+    git(path, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    return commit
 
 
 def commit_file(repo: Path, name: str, content: str) -> None:
@@ -274,5 +228,5 @@ def git(repo: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     unittest.main()

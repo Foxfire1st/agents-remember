@@ -80,8 +80,17 @@ function surface(visible: boolean) {
   );
 }
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  if (vi.isFakeTimers()) {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  } else {
+    // The conversation timeline's virtualizer debounces scroll (150 ms); a real-timer test
+    // that fired wheel/scroll may leave that callback pending past jsdom teardown, where
+    // React has no `window` to schedule against. Flush it while jsdom is still alive.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
   activeConversationStore.getState().reset();
   vi.clearAllMocks();
 });

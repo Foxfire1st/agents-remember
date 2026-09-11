@@ -15,14 +15,33 @@ worktree. With `force` it discards them (`git worktree remove --force`,
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeAlias
 
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import run_git
+from agents_remember.models.lifecycles.enclosure import TerminalWorktreeAbandonArguments
+from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
+    with_terminal_atomic_series_release,
+)
+from agents_remember.worktrees.integration.atomic_series_terminal import (
+    AtomicSeriesTerminalPermit,
+    publish_atomic_series_terminal_under_authority,
+    require_atomic_series_terminal_release,
+)
+from agents_remember.worktrees.integration.integration_branch_authority import (
+    require_terminal_worktree,
+)
+from agents_remember.worktrees.integration.terminal_enclosure_archive import (
+    terminal_archive_required_result,
+    terminal_contract_authority_if_present,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import (
     ENCLOSURE_REPORTS_DIRECTORY,
+    _terminal_mutation_authority,
+    _TerminalMutationAuthority,
+    _with_terminal_archive,
     delete_branch_force,
     delete_branch_if_merged,
     local_branch_presence,
@@ -30,10 +49,10 @@ from agents_remember.worktrees.modules.cleanup import (
     remove_registered_worktree,
 )
 from agents_remember.worktrees.modules.guidance import status_payload
-from agents_remember.worktrees.modules.integrate import integration_branch
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
+    legacy_series_reports_is_child_enclosure,
     terminal_preflight,
     terminal_result_blockers,
 )
@@ -46,8 +65,8 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 
-TerminalItems: TypeAlias = dict[str, dict[str, object]]
-AbandonOutputs: TypeAlias = tuple[
+type TerminalItems = dict[str, dict[str, object]]
+type AbandonOutputs = tuple[
     dict[str, object],
     TerminalItems,
     TerminalItems,
@@ -55,11 +74,37 @@ AbandonOutputs: TypeAlias = tuple[
 ]
 
 
+@dataclass(frozen=True)
+class _AbandonBranchTarget:
+    repository: Path
+    branch: str
+    source_branch: str
+
+
 def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if not args.approved and not args.dry_run:
         raise RuntimeError("abandon requires --approved (use dry_run to preview)")
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
+    terminal = terminal_contract_authority_if_present(contract)
+    if terminal is not None:
+        accepted_arguments = TerminalWorktreeAbandonArguments(force=args.force)
+        if (
+            terminal.archive.cleanupOperation != "worktree_abandon"
+            or terminal.archive.cleanupArguments != accepted_arguments
+        ):
+            return _terminal_archive_observation(contract, force=args.force)
+        if terminal.state == "cleanup-completed":
+            return with_terminal_atomic_series_release(
+                contract,
+                _already_abandoned(contract, force=args.force),
+                dry_run=args.dry_run,
+            )
+        contract = terminal.archived_contract
+    else:
+        if contract.kind == "series":
+            require_atomic_series_terminal_release(contract)
+        require_terminal_worktree(contract, operation="worktree_abandon")
     if (
         not args.dry_run
         and not args.force
@@ -91,7 +136,11 @@ def abandon_result(args: WorktreeArgs) -> WorktreeCommandResult:
             },
         )
 
-    return _abandon_reserved(args, contract, preflight)
+    return with_terminal_atomic_series_release(
+        contract,
+        _abandon_reserved(args, contract, preflight),
+        dry_run=args.dry_run,
+    )
 
 
 def _abandon_reserved(
@@ -136,7 +185,49 @@ def _abandon_with_guard(
     guard: TerminalGuard,
 ) -> WorktreeCommandResult:
     try:
-        outputs = _abandon_terminal_outputs(args, contract, preflight)
+        terminal_archive = terminal_archive_required_result(
+            contract,
+            operation="worktree_abandon",
+            arguments=TerminalWorktreeAbandonArguments(force=args.force),
+            dry_run=args.dry_run,
+        )
+        if terminal_archive.returncode != 0:
+            return terminal_archive
+        terminal_authority = (
+            None
+            if args.dry_run
+            else terminal_contract_authority_if_present(load_contract(contract.contract_path))
+        )
+
+        def publish(
+            series_permit: AtomicSeriesTerminalPermit | None = None,
+        ) -> WorktreeCommandResult:
+            current = load_contract(contract.contract_path)
+            if args.dry_run:
+                if current != contract:
+                    raise RuntimeError("abandon contract changed before preview")
+            else:
+                terminal = terminal_contract_authority_if_present(current)
+                if terminal is None:
+                    raise RuntimeError("abandon lost terminal archive authority before mutation")
+                current = terminal.archived_contract
+            outputs = _abandon_terminal_outputs(
+                args,
+                current,
+                preflight,
+                series_permit=series_permit,
+            )
+            result = _abandon_outputs_result(args, current, preflight, guard, outputs)
+            return _with_terminal_archive(result, terminal_archive)
+
+        if contract.kind == "series":
+            return publish_atomic_series_terminal_under_authority(
+                contract,
+                "worktree_abandon",
+                publish,
+                terminal_authority=terminal_authority,
+            )
+        return publish()
     except Exception as error:
         return WorktreeCommandResult(
             2,
@@ -150,6 +241,58 @@ def _abandon_with_guard(
                 "blockers": [{"terminal": "helper", "reason": str(error)}],
             },
         )
+
+
+def _terminal_archive_observation(
+    contract: WorktreeContract,
+    *,
+    force: bool,
+) -> WorktreeCommandResult:
+    return terminal_archive_required_result(
+        contract,
+        operation="worktree_abandon",
+        arguments=TerminalWorktreeAbandonArguments(force=force),
+        dry_run=False,
+    )
+
+
+def _already_abandoned(
+    contract: WorktreeContract,
+    *,
+    force: bool,
+) -> WorktreeCommandResult:
+    terminal_archive = _terminal_archive_observation(
+        contract,
+        force=force,
+    )
+    if terminal_archive.returncode != 0:
+        return terminal_archive
+    return _with_terminal_archive(
+        WorktreeCommandResult(
+            0,
+            {
+                "state": "abandoned",
+                **status_payload(contract),
+                "summary": "Worktree was already abandoned; terminal archive proof remains valid.",
+                "providers": {"state": "already-terminal"},
+                "removed_worktrees": {},
+                "branches": {},
+                "directories": {},
+                "blockers": [],
+                "alreadyTerminal": True,
+            },
+        ),
+        terminal_archive,
+    )
+
+
+def _abandon_outputs_result(
+    args: WorktreeArgs,
+    contract: WorktreeContract,
+    preflight: TerminalPreflight,
+    guard: TerminalGuard,
+    outputs: AbandonOutputs,
+) -> WorktreeCommandResult:
     providers, removed_worktrees, branches, directories = outputs
     blockers = terminal_result_blockers(
         providers=providers,
@@ -238,7 +381,14 @@ def _abandon_terminal_outputs(
     args: WorktreeArgs,
     contract: WorktreeContract,
     preflight: TerminalPreflight,
+    *,
+    series_permit: AtomicSeriesTerminalPermit | None = None,
 ) -> AbandonOutputs:
+    authority = _terminal_mutation_authority(
+        contract,
+        operation="worktree_abandon",
+        series_permit=series_permit,
+    )
     providers: dict[str, object] = worktree_services().provider_lifecycle.teardown(
         contract, dry_run=args.dry_run
     )
@@ -250,9 +400,19 @@ def _abandon_terminal_outputs(
     ):
         return providers, {}, {}, {}
     removed_worktrees = (
-        _abandon_worktrees(contract, dry_run=True, force=args.force)
+        _abandon_worktrees(
+            contract,
+            dry_run=True,
+            force=args.force,
+            authority=authority,
+        )
         if args.dry_run
-        else _abandon_worktrees(contract, dry_run=False, force=args.force)
+        else _abandon_worktrees(
+            contract,
+            dry_run=False,
+            force=args.force,
+            authority=authority,
+        )
     )
     if not args.dry_run and terminal_result_blockers(
         providers=providers,
@@ -264,7 +424,12 @@ def _abandon_terminal_outputs(
     branches = (
         preflight.branches
         if args.dry_run
-        else _abandon_branches(contract, dry_run=False, force=args.force)
+        else _abandon_branches(
+            contract,
+            dry_run=False,
+            force=args.force,
+            authority=authority,
+        )
     )
     if not args.dry_run and terminal_result_blockers(
         providers=providers,
@@ -282,11 +447,21 @@ def _abandon_terminal_outputs(
 
 
 def _abandon_worktrees(
-    contract: WorktreeContract, *, dry_run: bool, force: bool
+    contract: WorktreeContract,
+    *,
+    dry_run: bool,
+    force: bool,
+    authority: _TerminalMutationAuthority,
 ) -> dict[str, dict[str, object]]:
+    if contract.kind == "series":
+        return {}
     worktrees = {
         "code": remove_registered_worktree(
-            contract.code_repo_path, contract.code_worktree, dry_run, force=force
+            contract.code_repo_path,
+            contract.code_worktree,
+            dry_run,
+            force=force,
+            authority=authority,
         ),
     }
     if (
@@ -295,21 +470,32 @@ def _abandon_worktrees(
         and contract.memory_worktree is not None
     ):
         worktrees["memory"] = remove_registered_worktree(
-            contract.memory_repo_path, contract.memory_worktree, dry_run, force=force
+            contract.memory_repo_path,
+            contract.memory_worktree,
+            dry_run,
+            force=force,
+            authority=authority,
         )
     return worktrees
 
 
 def _abandon_branches(
-    contract: WorktreeContract, *, dry_run: bool, force: bool
+    contract: WorktreeContract,
+    *,
+    dry_run: bool,
+    force: bool,
+    authority: _TerminalMutationAuthority,
 ) -> dict[str, dict[str, object]]:
     branches = {
         "code": _abandon_branch(
-            contract.code_repo_path,
-            contract.code_work_branch,
-            contract.code_source_branch,
+            _AbandonBranchTarget(
+                contract.code_repo_path,
+                contract.code_work_branch,
+                contract.code_source_branch,
+            ),
             dry_run=dry_run,
             force=force,
+            authority=authority,
         ),
     }
     if (
@@ -318,26 +504,28 @@ def _abandon_branches(
         and contract.memory_work_branch
     ):
         branches["memory"] = _abandon_branch(
-            contract.memory_repo_path,
-            contract.memory_work_branch,
-            contract.memory_source_branch,
+            _AbandonBranchTarget(
+                contract.memory_repo_path,
+                contract.memory_work_branch,
+                contract.memory_source_branch,
+            ),
             dry_run=dry_run,
             force=force,
-        )
-        integration_work_branch = integration_branch(contract)
-        branches["memory_integration"] = _abandon_branch(
-            contract.memory_repo_path,
-            integration_work_branch,
-            contract.memory_source_branch,
-            dry_run=dry_run,
-            force=force,
+            authority=authority,
         )
     return branches
 
 
 def _abandon_branch(
-    repo: Path, branch: str, base_branch: str, *, dry_run: bool, force: bool
+    target: _AbandonBranchTarget,
+    *,
+    dry_run: bool,
+    force: bool,
+    authority: _TerminalMutationAuthority,
 ) -> dict[str, object]:
+    repo = target.repository
+    branch = target.branch
+    base_branch = target.source_branch
     source_refusal = _branch_presence_refusal(
         repo,
         base_branch,
@@ -355,7 +543,7 @@ def _abandon_branch(
     if branch_refusal is not None:
         return branch_refusal
     if force:
-        return delete_branch_force(repo, branch, dry_run)
+        return delete_branch_force(repo, branch, dry_run, authority=authority)
     try:
         unmerged = _unmerged_commits(repo, base_branch, branch)
     except RuntimeError as error:
@@ -368,7 +556,7 @@ def _abandon_branch(
             "unmergedCommits": unmerged,
             "hint": "re-run abandon with force=true to discard these commits",
         }
-    return delete_branch_if_merged(repo, branch, dry_run)
+    return delete_branch_if_merged(repo, branch, dry_run, authority=authority)
 
 
 def _branch_presence_refusal(
@@ -417,6 +605,28 @@ def _abandon_directories(
     contract: WorktreeContract, *, dry_run: bool, force: bool
 ) -> dict[str, dict[str, object]]:
     group = contract.worktree_group
+    lifecycle = group / ".lifecycle"
+    if contract.kind == "series":
+        reports = group / ENCLOSURE_REPORTS_DIRECTORY
+        return {
+            "reports": (
+                {
+                    "path": reports.as_posix(),
+                    "removed": False,
+                    "preserved": True,
+                    "reason": "child-enclosure",
+                }
+                if legacy_series_reports_is_child_enclosure(contract)
+                else worktree_services().provider_lifecycle.remove_tree(
+                    reports,
+                    dry_run=dry_run,
+                )
+            ),
+            "lifecycle": worktree_services().provider_lifecycle.remove_tree(
+                lifecycle,
+                dry_run=dry_run,
+            ),
+        }
     if force:
         directories = {
             "worktree_group": worktree_services().provider_lifecycle.remove_tree(
@@ -426,13 +636,18 @@ def _abandon_directories(
     else:
         reports_path = group / ENCLOSURE_REPORTS_DIRECTORY
         reports = worktree_services().provider_lifecycle.remove_tree(reports_path, dry_run=dry_run)
-        planned = (
-            {reports_path.resolve()}
-            if reports.get("removed") or reports.get("would_remove")
-            else set()
+        lifecycle_result = worktree_services().provider_lifecycle.remove_tree(
+            lifecycle,
+            dry_run=dry_run,
         )
+        planned: set[Path] = set()
+        if reports.get("removed") or reports.get("would_remove"):
+            planned.add(reports_path.resolve())
+        if lifecycle_result.get("removed") or lifecycle_result.get("would_remove"):
+            planned.add(lifecycle.resolve())
         directories = {
             "reports": reports,
+            "lifecycle": lifecycle_result,
             "worktree_group": remove_empty_dir(group, dry_run, planned),
         }
     if group.parent.exists():

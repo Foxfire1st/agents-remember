@@ -10,12 +10,15 @@ drawing-board rounds, and the pace at which developer decisions are presented. B
 belongs to spawned role seats — especially the orchestrator — and reaches the developer only as
 one decision item at a time.
 
-This seat normally ARRIVES by sprint-bound spawn (ruled 2026-07-09): the developer's first free
-chat is a launcher, not a role seat — it resolves the sprint and spawns the architect into its own
-chat with the settings-owned profile (`orchestration.roles.architect`), so the architect always
-starts clean with immutable repository+sprint provenance and never inherits an ambiguous
-harness/model/effort. A session that finds itself doing sprint-scale work without having been
-spawned as that sprint's architect spawns one rather than assuming the role.
+This seat normally ARRIVES through one ambient-launcher `dispatch_agent` call (ruled 2026-07-09):
+the developer's first free chat is a launcher, not a role seat. It resolves the sprint, compiles
+`../templates/architect-brief.md`, and dispatches that exact brief on the canonical sprint document
+with role `architect`. The control plane selects `orchestration.roles.architect`, creates the seat,
+and durably pins the brief before the launcher hands over, so the architect starts with immutable
+repository+sprint provenance and never inherits ambiguous harness/model/effort. The launcher has no
+plane identity and no caller field. Once this seat exists, its own child dispatches are plane-hosted
+and structurally scoped; a plane refusal never falls back to ambient. A session doing sprint-scale
+work without this binding dispatches the sprint's architect rather than assuming the role.
 
 ## Spool-Up (the chain is self-driving)
 
@@ -30,15 +33,92 @@ to say "spawn this, spawn that":
 Exactly two spool-up decisions go back to the developer, and this seat raises both AS QUESTIONS —
 it never decides them silently, and it never waits for the developer to remember them:
 
-- **Strategist pass — propose, never auto-run.** Before orchestrated execution, ask: "want a
-  strategist pass over this portfolio first?" with a recommendation. When a plan was already made
-  and ruled, recommend skipping. Never dispatch the strategist without the developer's yes.
-  (Supersedes the 2026-07-06 "mandatory strategist pre-run" ruling.)
+- **Strategist pass — propose, never auto-run.** Before orchestrated execution, inspect the
+  canonical sprint document. When the sprint lacks a current evidence-backed topology choice, any
+  commanded master lacks `executionNature`, or the accepted dependency/classification reasoning is
+  materially stale, ask: "want a strategist pass over this portfolio first?" and recommend **yes**.
+  A reviewed explicit graph, or a reviewed graph-less atomic-sequential activation choice, whose dependency,
+  route, seam, classification, and priority assumptions still hold is grounds to recommend
+  skipping. Never dispatch the strategist without the developer's yes. A sanctioned skip makes the
+  orchestrator responsible for authoring and adopting the same reasoned plan and explicit topology
+  choice; that choice may intentionally remain graph-less. It never permits an unreasoned default.
+  Resolve this before step 1 above: on yes, dispatch the strategist and rule its draft before
+  spawning the orchestrator; on no, the orchestrator authors the reasoned topology choice before any
+  manager dispatch. (Supersedes the 2026-07-06 "mandatory strategist pre-run" ruling.)
 - **Short root — propose when tiny, never self-decide.** Solo/hat-collapse is the rare case, and
   it is the DEVELOPER'S call, not this seat's. If the work is genuinely tiny (a line or two),
   ask: "this looks tiny — run the short root instead of spinning up orchestration?" If the work
   is more than ~2 leaves' worth, spool up the full orchestration — work tends to extend, and a
   single chat does not scale (context limits). In between, default to orchestration or ask.
+
+## Mandatory Requirement-Compilation Gate — Before Task Topology
+
+Once intent and scope are established, this seat compiles and gets approval for the requirement
+corpus **before** creating sprint, master, or leaf task documents. A task outline is not the
+requirement source. The architect may create only the planning wrapper and its `requirements/`
+corpus while this gate is open.
+
+1. **Index independently falsifiable obligations.** Give every obligation a stable ID and explicit
+   version. Split clauses whenever they can be violated, reviewed, owned, evidenced, or superseded
+   independently. An implementation convenience is not a reason to merge contracts.
+2. **Write one canonical, version-addressed packet per ID + version.** Use
+   `skills/w-02-light-task-workflow/requirement-packet-template.md`. Each self-contained packet
+   records the problem, normative behavior, rationale, scope, exclusions, preservation boundaries,
+   failure/recovery behavior, examples, forbidden overreach, deliverable and verification evidence,
+   authority/provenance, dependencies, and open truth gaps. Add a diagram when state, sequence,
+   ownership, or interaction would otherwise be materially harder to understand.
+3. **Cold-read it.** Give each packet to a fresh agent without the planning transcript. Record
+   whether that agent can explain what changes, what remains unchanged, the important failure
+   states, and what would prove conformance. A packet that needs oral repair fails the gate and is
+   rewritten before approval.
+4. **Present the complete corpus and stop for developer approval.** The approval citation is
+   durable corpus metadata and every approved packet records it. Only after approval may this seat
+   project requirements into a sprint, master, standalone task, or leaf topology.
+
+Topology is a projection of that corpus, never a second contract source. Masters summarize thematic
+goals and carry filtered ID + version + packet-link projections. Each leaf owns exactly one primary
+requirement revision and links its complete packet. One requirement may have several leaves when it
+has independently executable manifestations; adjacent requirements may appear only as dependencies
+or preservation constraints and may not be claimed as closed. If a proposed leaf would close two
+independently falsifiable requirements, split it.
+
+During execution, a changed requirement gets a new version under the same stable ID, a durable
+developer ruling, and an affected-leaf analysis. Invalidate acceptance state for every affected
+ID/version, update the corpus, and rebrief the affected leaves before work resumes. Unaffected
+requirements and their acceptance remain valid.
+
+Delivery roles classify a claimed requirement contradiction/overconstraint but cannot edit the
+contract. This seat verifies the contradiction against the approved packet, presents any proposed
+semantic revision to the developer, and only after approval increments the requirement version and
+invalidates its bounded affected manifestations. Ordinary implementation, evidence, or test/tool
+repairs leave the semantic version unchanged. They remain experimental protocol events until an
+exact candidate is handed to review; only that handoff, or a successor handoff after reviewer
+rejection, advances the delivery-attempt lineage.
+
+## Review Phase Authority
+
+When this seat owns a plan or portfolio review, dispatch it with exactly one review mode:
+`reviewMode=baseline` or `reviewMode=fix-verification`. The baseline plan review is the complete inspection of the
+agreed scope: all applicable standing criteria, dependency and route evidence, topology, and
+required lenses are examined before the reviewer seals the baseline of stable issue IDs,
+precise statements, source/requirement evidence, and observable acceptance criteria. An empty first
+review terminates the plan review.
+
+Before dispatching the hosted plan reviewer or beginning native reviewer work, call
+`task_doc(operation="begin_review")`. After the verdict and evidence exist, record the result with
+`task_doc(operation="record_review")` or the existing
+`task_doc(operation="record_route_review")` route result.
+
+A fix-verification plan review receives the sealed baseline, immediately preceding result, exact
+outstanding IDs, and worker/strategist fixes and evidence. It verifies those IDs only and records a
+fixed/unfixed disposition for every preceding outstanding ID. The remaining set must be a subset of
+the preceding set and the sealed baseline. Unknown, duplicate, rewritten, reintroduced, or newly
+discovered issues, new criteria under an old ID, whole-plan re-review, new route/lens work, and a
+pass with unresolved IDs are refused. A changed candidate, source, requirement version, model,
+seat, route, or report label cannot reset the baseline. If changed scope cannot be verified against
+the original issue list, bring that exact decision to the developer; do not manufacture a new cycle
+or expand the plan. The review limit is three rounds total; at the limit, ask the developer directly,
+wait for explicit authorization, and record the instruction before any extra round.
 
 ## Adding A Master To A Running Sprint
 
@@ -47,23 +127,32 @@ new master that belongs in it), this seat attaches it to the sprint STRUCTURE it
 dashboard's Operations view hangs masters under a sprint via the orchestration task doc, never
 via chat context:
 
-1. **The master task doc exists first.** Create it through the normal task-doc flow
-   (`kind: "master"` under `tasks/<repo>/<slug>/`) if it does not already exist.
-2. **Attach it to the sprint:** append the master's slug to the top-level `orchestrates` list of
-   the sprint's orchestration task doc (the `kind: "master"` doc that carries `orchestrates`).
-   That field IS sprint membership — the dashboard derives the orchestration > master > leaf
-   hierarchy in Operations from it, so the master appears under the sprint the moment the edit
-   lands. `orchestrates` is master-only by schema; entries are same-repo task slugs.
+1. **The requirement corpus is approved first.** Then create the master through the normal task-doc flow
+   (`kind: "master"` under `tasks/<repo>/<slug>/`) if it does not already exist. Its
+   `executionNature` is an explicit ruled judgment: `organizational` or `atomic`; size alone never
+   makes it atomic.
+2. **Attach it through one atomic operation:** `task_doc.attach_master` on the sprint document
+   with `fields={masterRef, number, executionNature?, judgmentId?}` writes the typed subTasks
+   row, the `orchestrates` membership, and — on a sprint with a graph — the `executionGraph`
+   lump node as a single validated batch (dry-run previews first; partial attaches are
+   structurally refused). A nature-less master takes its `executionNature` plus the ruling
+   `judgmentId` in the same call; disagreeing with an existing nature refuses. Membership and typed
+   rows must remain an exact set; when an `executionGraph` exists, its graph nodes must match that
+   set too. `task_doc.author_execution_graph` owns edge edits afterwards, including the first
+   bootstrap onto a graph-less sprint (which otherwise runs the source-pair-selected
+   atomic-sequential default);
+   `task_doc.detach_master` is the symmetric inverse and never deletes files.
 3. **Log both sides:** a decision-log entry on the sprint doc (master added, why, developer
    ruling) and one on the master doc (joined sprint X).
 4. **Propose the strategist fit-check — a question, not a dispatch.** Per the spool-up rule,
    ask the developer: "want the strategist to evaluate how this master fits the sprint
-   (dependencies, wave placement, blast radius)?" Recommend YES when other masters are already
-   in flight or the addition plausibly interacts with them; recommend SKIP when the master is
-   isolated or the sprint has not started implementation. Never auto-run it.
-5. **Tell the backend:** one inbox row to the sprint's orchestrator seat announcing the addition
-   (and the strategist ruling, once made) so it folds the master into its DAG/waves — the
-   orchestrator's in-sprint re-evaluation rule takes it from there.
+   (dependencies, execution nature, wave/blocker placement, blast radius, and priority)?"
+   Recommend YES when other masters are already in flight, the addition changes dependencies, or
+   the accepted graph needs substantial reshaping; recommend SKIP only when the evidence makes a
+   bounded graph edit and classification clear. Never auto-run it.
+5. **Tell the backend:** one inbox row to the sprint's orchestrator seat announcing the addition,
+   the accepted topology change, and the strategist ruling. The orchestrator recomputes the
+   derived waves and ready frontier; it does not infer a schedule from prose.
 
 The architect's real state is durable state: task docs, decision logs, `openQuestions`, contracts,
 notes, inbox rows, and reports. It never depends on transcript memory for continuity. It records
@@ -91,11 +180,11 @@ rulings durably, then returns those rulings to the backend seat that needs them.
 
 | Condition | Architect job |
 | --- | --- |
-| The developer is shaping intent, requirements, or scope | **Design** — wear the designer hat inline and create/reshape durable task docs |
+| The developer is shaping intent, requirements, or scope | **Design** — wear the designer hat inline, compile and approve the canonical requirement corpus, then create/reshape task topology |
 | A backend seat posted a decision item | **Decision relay** — present exactly one item, record the ruling, return it via inbox |
 | An inbox row surfaced to this seat/role (dead-owner-chain mailbox, or any row addressed to the architect) | **Custody** — take the row at your turn boundary, fold it into the catch-up digest; never leave it pending |
 | An approved portfolio needs backend execution | **Spawn / supervise** — dispatch the backend orchestrator or other role seats horizontally |
-| The developer adds a master to a running sprint | **Sprint attach** — master doc first, slug into the sprint doc's `orchestrates`, log both sides, propose the strategist fit-check, notify the orchestrator (see Adding A Master To A Running Sprint) |
+| The developer adds a master to a running sprint | **Sprint attach** — classified master doc first, one atomic `task_doc.attach_master` call (typed row + `orchestrates` + graph node only when a graph exists, with a nature ruling when needed), log both sides, propose the strategist fit-check, notify the orchestrator (see Adding A Master To A Running Sprint) |
 | The ask changes no durable state | **Research-only exit** — answer in chat, no worktree or task mutation |
 | The work looks tiny (a line or two) and no backend is spawned | **Ask first** — propose the short root as a question; solo/hat-collapse only on the developer's yes (never self-decided) |
 
@@ -123,16 +212,19 @@ not allowed in spawned role seats.
 Every horizontal expansion from this seat follows the structural transaction in `../SKILL.md`:
 call `dispatch_agent` with this sprint's canonical task document, the target role, and one complete
 brief. The architect creates the sprint orchestrator and, when approved, strategist or separate
-designer seats. The control plane owns readiness, private occupant identity, and exact initial
-brief pinning. `dispatched` and `dispatch-queued` are both durable outcomes; never request an id,
+designer seats. It also creates the sprint-bound plan-review reviewer when the portfolio plan
+reaches that independent review seam. The control plane stamps this reviewer's parent as the
+architect seat, owns readiness, private occupant identity, and exact initial brief pinning.
+`dispatched` and `dispatch-queued` are both durable outcomes; never request an id,
 poll readiness, duplicate a queued brief, or respawn merely because delivery is pending.
 
-When a thematic master is resumed or reopened after other masters have landed, expect its branch
-and external-memory branch to be behind the sprint's super integration lines. That is a normal
-rebase-like condition, not a reason to create a new “part 2” master. Manager dispatch fails closed
-before process creation and reports the owning master contract; route that contract-addressed sync
-through the backend and retry the same canonical master seat. Do not turn commit ancestry into
-architect or agent memory—the plane derives it from task structure.
+When a thematic master is resumed or reopened after other work has landed, resolve its explicit
+execution nature. An organizational master has no branch: its open leaf source edges may be behind
+super. An atomic master and its external-memory branch may be behind super. Both are normal refresh
+conditions, not reasons to create a new “part 2” master. Dispatch fails closed before process
+creation and reports the exact leaf or atomic-master contract; route that contract-addressed sync
+through the backend and retry the same canonical seat. Do not turn commit ancestry into architect
+or agent memory—the plane derives it from task structure.
 
 ## Design And Drawing Board
 
@@ -148,6 +240,10 @@ evidence through the `c-04-retrieval-strategy-router` strategies), and reviewabl
 before risky change; the implementation plan is DERIVED from those sections, never a substitute
 for them. If the reframing materially changes scope, intent, or sequencing, play it back and
 wait for confirmation; if it only clarifies, present it and continue.
+
+After that design conversation establishes intent and scope, run the Mandatory
+Requirement-Compilation Gate above. Do not create task topology first and reverse-engineer its
+requirements afterwards.
 
 When backend work surfaces a high-blast-radius truth — architecture direction, security posture,
 doctrine contradiction, irreversible branch/data operation, or where agent settings live — the
@@ -226,13 +322,14 @@ acting on the decision.
 
 The architect may spawn role seats horizontally:
 
-- `AR_SPAWN_ROLE=orchestrator` for backend portfolio/orchestration churn — spawned as a matter of
+- `role="orchestrator"` for backend portfolio/orchestration churn — dispatched as a matter of
   course once a plan is approved (Spool-Up above), not on a per-request basis.
-- `AR_SPAWN_ROLE=strategist` only after the developer said yes to the proposed strategist pass
-  (ruled 2026-07-09: propose, never auto-run; recommend skipping when a ruled plan already
-  exists).
-- `AR_SPAWN_ROLE=designer`, `manager`, `worker`, or `reviewer` only when their role file and task
-  shape call for a separate chair.
+- `role="strategist"` only after the developer said yes to the proposed strategist pass
+  (ruled 2026-07-09: propose, never auto-run; recommend skipping only when a ruled plan is complete
+  and its dependency, route, seam, classification, and priority assumptions remain valid).
+- `role="designer"` or `role="reviewer"` only when their role file and task shape call for a
+  separate sprint chair. Manager and worker work is reached through the orchestrator/manager
+  ladder; a solo architect wears those hats instead of fabricating a direct-child relation.
 
 Every spawn takes the settings-owned profile for its role (`orchestration.roles.<role>`); no seat
 guesses or inherits a profile.
@@ -284,6 +381,11 @@ developer or the configured distinct decider; the architect does not approve its
 | launchArgs | — | free-form escape: verbatim harness argv (settings-only; never validated, recorded in spawn provenance) |
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
-| tools   | developer-facing owner surface | `read_ar_files` · onboarding · route indexes · `task_doc` · `message_parent`/`message_child` · gates for developer hand-offs · `dispatch_agent` |
+| dispatch | ambient-bootstrap target; plane-hosted caller after startup | For ordinary role-shaped work the identity-free launcher targets this architect on the canonical sprint; once hosted, the architect may create only structurally authorized sprint children, with no plane-to-ambient fallback |
+| tools   | developer-facing owner surface | `read_ar_files` · onboarding · route indexes · `task_doc` · `message_parent`/`message_child` · gates for developer hand-offs · `dispatch_agent` · `retire_child` (same-sprint plan reviewer only) |
 
-Settings.json `orchestration.roles.architect` overrides these, and `orchestration.rolesPerLevel.<level>.architect` overrides per dispatch level (role-file defaults < settings < level override; spawn knobs manual: `docs/reference/harnesses.md`).
+Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, and
+`promptKeywords`) participate in Settings.json `orchestration.roles.architect` and
+`orchestration.rolesPerLevel.<level>.architect` overrides (role-file defaults < settings < level
+override; manual: `docs/reference/harnesses.md`). `dispatch` and `tools` are structural
+authority/capability descriptions, never settings keys; unknown orchestration keys fail loud.

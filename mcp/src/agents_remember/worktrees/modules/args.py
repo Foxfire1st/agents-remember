@@ -12,14 +12,21 @@ import argparse
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from agents_remember.kernel.primitives.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicy,
 )
-from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
+from agents_remember.models.closeout.input import EffectiveCloseoutInput
+from agents_remember.models.lifecycles.operation import (
+    LifecycleOperationRecoveryCommits,
+)
+from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
 from agents_remember.worktrees.modules.models import WorktreeProviderSetupConfig
+
+if TYPE_CHECKING:
+    from agents_remember.worktrees.integration.certification import IntegrationCertificationOwner
 
 
 @dataclass(frozen=True)
@@ -29,6 +36,7 @@ class WorktreeArgs:
     # Coordination / repository resolution
     code_repository_name: str | None = None
     code_repository_root: Path | None = None
+    certification_profile: Path | None = None
     coordination_root: Path | None = None
     workspace_root: Path | None = None
     topology: Literal["internal", "external"] | None = None
@@ -45,7 +53,8 @@ class WorktreeArgs:
     memory_mode: str | None = None
     memory_choice: str | None = None
     stale_base_choice: str | None = None
-    memory_sync_choice: str | None = None
+    memory_sync_choice: MemorySyncChoice | None = None
+    resolution_action: SyncResolutionAction | None = None
     custom_instruction: str | None = None
     lifecycle_id: str = ""
 
@@ -63,9 +72,9 @@ class WorktreeArgs:
     force: bool = False
     teardown_providers: bool = True
 
-    # Closeout / integrate commit messages
-    code_commit_message: str = ""
-    memory_commit_message: str = ""
+    # Closeout owns one normalized effective input. Integration's ledger message
+    # remains a separate operation input because it is not a closeout commit leg.
+    closeout_input: EffectiveCloseoutInput | None = None
     ledger_commit_message: str = ""
 
     # Gate enforcement policy
@@ -74,9 +83,11 @@ class WorktreeArgs:
     # Plane-owned lifecycle execution. Never populated from an agent/CLI namespace:
     # the detached worker injects these after resolving the task-bound operation record.
     operation_key: str = ""
+    operation_generation: int = 0
     candidate_tree: str | None = None
     approval_claimed: bool = False
     recovery_commits: LifecycleOperationRecoveryCommits | None = None
+    integration_certification_owner: IntegrationCertificationOwner | None = None
     operation_progress: Callable[[str, Mapping[str, object]], None] | None = None
 
     @classmethod

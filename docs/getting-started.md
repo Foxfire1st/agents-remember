@@ -107,7 +107,9 @@ A minimal starter `agents-remember-settings.json`:
   "coordinationRoot": "/absolute/path/to/ar-coordination",
   "workspaceRoot": "/absolute/path/to/workspace",
   "repositories": {
-    "<your-repo-name>": {}
+    "<your-repo-name>": {
+      "certificationProfile": "config/repository-certification.json"
+    }
   },
   "providers": {
     "codegraphcontext-code": {},
@@ -115,6 +117,14 @@ A minimal starter `agents-remember-settings.json`:
   }
 }
 ```
+
+`certificationProfile` is an explicit path inside that repository, not a conventional filename.
+Create the repository-owned file for its actual commands, artifacts, runtimes, selectors, and
+clean-room scenarios; do not copy the Agents Remember rail inventory into another repository.
+The `c-13-install-and-onboard` flow checks and compiles it before declaring code closeout ready.
+See [Repository Certification Profiles](reference/repository-certification-profile.md). A
+repository without this field can still be configured and onboarded, but any later operation that
+would certify code fails closed before running tests.
 
 The settings file must be absolute and must live **outside** the
 `ar-coordination/` runtime folder. See the [settings.json reference](reference/settings-json.md)
@@ -190,7 +200,7 @@ Providers are optional — memory, onboarding, drift, and task workflows all wor
 
 ## Start Working
 
-Sessions route by role through the `l-01-agent-lifecycles` skill: developer-facing free chat answers research inline and creates or resolves the durable sprint and first leaf before launching that sprint's **architect**; spawned backend seats follow their role briefs. For normal tasks the agent should:
+Sessions route by role through the `l-01-agent-lifecycles` skill: developer-facing free chat answers research inline and, for ordinary role-shaped work, creates or resolves the durable sprint and first leaf, compiles the canonical architect brief, then calls `dispatch_agent` once on that sprint document with role `architect`. An explicit developer-declared task-seat takeover instead targets the named role on its canonical task document. This identity-free ambient launcher hands over only after the exact brief is durable. Later plane-hosted seats use the same tool under structural child-scope authority; a plane refusal never falls back to ambient. Spawned backend seats follow their role briefs. For normal tasks the agent should:
 
 1. resolve the repository context with `c-08-ar-coordination-context-resolver`
 2. run `c-02-memory-quality-control` before planning against onboarding

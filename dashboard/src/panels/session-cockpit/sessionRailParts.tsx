@@ -12,7 +12,12 @@ import {
   type SpawnTreeRow,
 } from '../../data/railModel';
 import { turnHintWord, type PtyHarvest } from '../../data/ptyHarvest';
-import { sessionPendingInteractionPayload, type OpenSession } from '../../data/sessions';
+import { reviewerContextLabel } from '../../data/reviewerContext';
+import {
+  sessionPendingInteractionPayload,
+  sessionSeatRole,
+  type OpenSession,
+} from '../../data/sessions';
 import { hasUnackedSetAttention } from '../../data/setChips';
 import { seatVisualState, type SeatVisualState } from '../../data/stateGrammar';
 import type { GateNode } from '../../types/projection';
@@ -327,9 +332,16 @@ function railRowDerived(
   };
 }
 
+function railRowLabel(session: OpenSession, displayLabel: string | undefined): string {
+  if (displayLabel) return displayLabel;
+  if (sessionSeatRole(session) === 'reviewer')
+    return `${reviewerContextLabel(session)} · ${session.label}`;
+  return session.label;
+}
+
 export function RailRow({
   session,
-  displayLabel = session.label,
+  displayLabel,
   gateLeafKey,
   masterAttention,
   masterKey,
@@ -346,6 +358,7 @@ export function RailRow({
   onEnd,
   onDismissEndFailure,
 }: RailRowProps) {
+  const resolvedLabel = railRowLabel(session, displayLabel);
   const derived = railRowDerived(
     session,
     gateLeafKey,
@@ -382,7 +395,7 @@ export function RailRow({
     >
       <RailRowLabelGroup
         session={session}
-        displayLabel={displayLabel}
+        displayLabel={resolvedLabel}
         visual={visual}
         code={code}
         gate={gate}
@@ -514,6 +527,7 @@ function RailMasterBody({
 }) {
   return (
     <div className={masterBody}>
+      {master.reviewer ? <RailRow session={master.reviewer} {...rowProps} /> : null}
       {master.clusters.map((cluster) => (
         <div key={cluster.key} className={leafGroup} data-testid={`rail-cluster-${cluster.key}`}>
           <span className={leafCaption} title={cluster.label}>

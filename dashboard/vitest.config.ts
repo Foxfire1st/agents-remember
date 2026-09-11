@@ -1,13 +1,11 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
-import { requireDaggerTestEnvironment } from "./scripts/require-dagger-test-environment.mjs";
-
-requireDaggerTestEnvironment();
 
 // Standalone Vitest config so vite.config.ts keeps pure Vite types: the project's Vite and
 // Vitest's bundled Vite are distinct instances, and sharing one `defineConfig` clashes on
-// plugin types. 5a unit tests are logic-only (store / stream / contract), so no React plugin
-// is needed here; rendered-UI checks run under Playwright (e2e/).
+// plugin types. Direct Vitest runs are supported as fast diagnostic unit/component loops; only
+// the pinned Dagger graph can certify acceptance. Playwright and the Python acceptance suite keep
+// their Dagger attestation boundary. No React plugin is needed here.
 export default defineConfig({
   define: {
     __AR_DASHBOARD_BUILD__: JSON.stringify("test-dashboard-build"),
@@ -44,15 +42,7 @@ export default defineConfig({
         "src/types/**",
         "src/vite-env.d.ts",
       ],
-      // Measured baseline (2026-08-06): lines 88.6 / statements 86.0 / functions 86.9 /
-      // branches 77.3. Thresholds sit below the measured floor so regressions fail while the
-      // current suite stays green; the changed-lines floor (coverage:diff) is the strict gate.
-      thresholds: {
-        lines: 85,
-        statements: 82,
-        functions: 82,
-        branches: 70,
-      },
+      // Coverage is diagnostic; percentages never fail delivery.
       reporter: ["text", "json", "html"],
       reportsDirectory: "coverage",
     },

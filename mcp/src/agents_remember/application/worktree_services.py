@@ -8,10 +8,19 @@ from typing import Any
 
 from agents_remember.application import provider_runtime as provider_runtime_api
 from agents_remember.memory_quality import check as memory_quality_check_api
+from agents_remember.memory_quality.gate_five_rails import gate_five_memory_rails
+from agents_remember.memory_quality.incremental_scope.candidate import observe_contract_task
 from agents_remember.memory_quality.style.citations import (
     source_index_cache as citation_cache_api,
 )
+from agents_remember.models.task_document import CanonicalTaskObservation
 from agents_remember.providers import provider_setup as provider_setup_api
+from agents_remember.worktrees.integration.closeout.preparation.continuation import (
+    PreparedCloseoutContinuation,
+)
+from agents_remember.worktrees.integration.closeout.prepared_certification import (
+    PreparedMemoryCertificationAdapter,
+)
 from agents_remember.worktrees.services import (
     ProviderSetupRequestSpec,
     TerminalGuard,
@@ -128,8 +137,18 @@ class ProviderLifecycleAdapter:
         return provider_runtime_api.remove_tree(path, dry_run=dry_run)
 
 
+class CertificationMemoryRailsAdapter:
+    """memory_quality-backed implementation of :class:."""
+
+    def memory_rails(self, profile_id: str):
+        return gate_five_memory_rails(profile_id)
+
+
 class MemoryQualityAdapter:
     """memory_quality-backed implementation of :class:`MemoryQualityPort`."""
+
+    def observe_contract_task(self, contract: WorktreeContract) -> CanonicalTaskObservation:
+        return observe_contract_task(contract)
 
     def check_groups(self) -> tuple[tuple[str, ...], tuple[str, ...]]:
         return (
@@ -186,10 +205,14 @@ def build_default_worktree_services() -> WorktreeServices:
         provider_lifecycle=ProviderLifecycleAdapter(),
         memory_quality=MemoryQualityAdapter(),
         citation_guard=CitationGuardAdapter(),
+        certification_memory_rails=CertificationMemoryRailsAdapter(),
+        certification_continuation=PreparedCloseoutContinuation(),
+        prepared_memory_certification=PreparedMemoryCertificationAdapter(),
     )
 
 
 __all__ = [
+    "CertificationMemoryRailsAdapter",
     "CitationGuardAdapter",
     "MemoryQualityAdapter",
     "ProviderLifecycleAdapter",

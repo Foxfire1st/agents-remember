@@ -8,9 +8,10 @@ from agents_remember.application.context_packet import ContextPacketRequest, bui
 from agents_remember.application.coordination_tools import resolve_context_tool
 from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
 from agents_remember.application.runtime.skills import skills_install_tool
-from agents_remember.application.task_ref import TaskRef
+from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.tool_reports import write_tool_report
+from agents_remember.models.core import ServingBuildPayload
 
 from .. import SERVER_NAME, SERVER_VERSION
 from .base import PUBLIC_TOOLS, RESERVED_TOOLS, TRANSPORT, _tool_payload
@@ -28,7 +29,9 @@ def ping_payload() -> dict[str, Any]:
     )
 
 
-def server_info_payload(config: McpRuntimeConfig) -> dict[str, Any]:
+def server_info_payload(
+    config: McpRuntimeConfig, serving_build: ServingBuildPayload
+) -> dict[str, Any]:
     return _tool_payload(
         "server_info",
         {
@@ -47,6 +50,7 @@ def server_info_payload(config: McpRuntimeConfig) -> dict[str, Any]:
             "allowedProviderIds": list(config.allowed_provider_ids),
             "tools": list(PUBLIC_TOOLS),
             "reservedTools": list(RESERVED_TOOLS),
+            "servingBuild": serving_build.model_dump(mode="json", exclude_none=True),
         },
     )
 

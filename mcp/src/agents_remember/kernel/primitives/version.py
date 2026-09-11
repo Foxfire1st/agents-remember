@@ -17,7 +17,7 @@ def _resolve_server_version() -> str:
         # Single source of truth: the installed package metadata (mcp/pyproject.toml).
         return version("agents-remember-mcp")
     except PackageNotFoundError:  # running from a source checkout without an install
-        return "3.0.0rc7"
+        return "3.0.0rc8"
 
 
 SERVER_VERSION = _resolve_server_version()

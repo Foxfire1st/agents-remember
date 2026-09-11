@@ -1,7 +1,7 @@
 [tool.ruff]
 line-length = 100
-# Match the package's supported Python floor and the lowest CI interpreter.
-target-version = "py311"
+# Match the package's only supported Python minor line.
+target-version = "py313"
 
 [tool.ruff.lint]
 select = [
@@ -54,20 +54,23 @@ exclude = [
   "dist",
   "node_modules",
 ]
-pythonVersion = "3.11"
+pythonVersion = "3.13"
 typeCheckingMode = "basic"
 # The wrapper supplies its selected interpreter through ``--pythonpath`` so primary and linked
 # worktrees resolve the same environment; do not add checkout-local venvPath/venv declarations.
 executionEnvironments = [
   { root = "mcp/src", extraPaths = ["mcp/src"] },
-  { root = "mcp/tests", extraPaths = ["mcp/src", "mcp/tests"] },
-  { root = "scripts", extraPaths = ["mcp/src"] },
+  { root = "mcp/test_support", extraPaths = ["mcp/src", "mcp/test_support"] },
+  { root = "mcp/tests", extraPaths = ["mcp/src", "mcp/test_support", "mcp/tests"] },
+  { root = "scripts", extraPaths = ["mcp/src", "mcp/test_support"] },
 ]
 
 [tool.coverage.run]
 # CRAP and diff coverage consume Coverage.py statement and branch units. The CRAP reader
 # refuses JSON whose ``meta.branch_coverage`` is not true; keep branch measurement enabled.
 branch = true
+# Real Python children contribute to delivery coverage; ordinary pytest remains unmeasured.
+patch = ["subprocess"]
 
 [tool.agents_remember]
 # S4 (260731-EFA-L7): armed at full scope after L16 landed and worktree_sync completed
@@ -75,6 +78,14 @@ branch = true
 # no baseline, allowlist, or per-file exemption. Any file at or above the 1,200-line hard
 # limit in the detector's scope fails the wrapper.
 file_size_armed = true
+# Behavioral release rails follow operational ownership, not whether a module happens to be
+# importable or installed by the development environment. Every tracked top-level Python package
+# must appear in exactly one of these lists; adding an unclassified package fails the quality scope.
+product_package_roots = ["mcp/src/agents_remember"]
+verification_package_roots = [
+  ".dagger/src/agents_remember_quality",
+  "mcp/test_support/agents_remember_test_support",
+]
 
 [tool.radon]
 # Show only functions/classes that are at least mildly complex.
@@ -108,10 +119,11 @@ ignore = ".git,.hg,.mypy_cache,.pytest_cache,.ruff_cache,.venv,venv,node_modules
 no_assert = false
 
 [tool.pytest.ini_options]
-# The first pytest configuration this repository has ever had. There was no
-# `pytest.ini`, `setup.cfg` or `tox.ini` either, so every strictness switch below was
-# off by default and there was nowhere to declare a marker.
 minversion = "9.0"
+# Count parametrized items. Budget growth needs a documented protection/cost tradeoff,
+# not coverage-driven additions or silently raising these limits.
+unit_case_budget = 1000
+integration_case_budget = 150
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this
 # key to build its pytest step, so the wrapper no longer carries a second copy that can
@@ -119,21 +131,19 @@ minversion = "9.0"
 testpaths = ["mcp/tests"]
 
 addopts = [
-  # Use every logical CPU by default. pytest-xdist gives each worker its own temp root;
-  # mcp/tests/conftest.py also confines process-global application caches per worker.
-  "-n=auto",
+  # Ordinary edits exercise deterministic tests without delivery-only boundaries.
+  "-m", "not integration",
+  "-n=4",
   # An unregistered marker is a typo that quietly selects nothing. Fail on it.
   "--strict-markers",
   # An unknown or misspelled ini key is a setting that quietly does nothing. Fail on it.
   "--strict-config",
 ]
 
-# The house convention is `<Subject>Tests`, not pytest's default `Test<Subject>`. All
-# 485 such classes currently reach `unittest.TestCase`, which pytest collects whatever
-# `python_classes` says, so this changes nothing today -- 3077 tests collected with and
-# without it on 2026-07-31. It closes the prospective hole: a plain `PlainTests` class
-# that does not subclass TestCase is silently skipped, with no error and no report.
+# Collect the repository's <Subject>Tests convention as well as pytest's Test<Subject>.
 python_classes = ["Test*", "*Tests"]
+# Imported fixture/test classes are exercised in their defining module only.
+collect_imported_tests = false
 
 # An xfail that starts passing is either a bug someone fixed without noticing or a test
 # that stopped testing. Both should be seen rather than absorbed.
@@ -152,16 +162,6 @@ xfail_strict = true
 # Each ignore is pinned to a message *and* a category, so an ignore can only ever silence
 # the exact notice it was measured against and never a class of them.
 #
-# Every entry left is third party and unreachable from here. The two that were ours were
-# fixed rather than ignored, in this same change: `providers/grepai/seed.py` now enters its
-# `Popen` as a context manager, so a `stdout=PIPE` caller's read end is closed by the code
-# that opened it (test_seed_timeouts StallWatchdogTests, 4 tests); `_spawn_sleeper` in
-# test_dashboard_daemon.py closes the readiness pipe it reads one line from (StopTests, 2
-# tests); and the dashboard sim's throwaway coordination root is now closed by its owner --
-# `cli/dashboard.py::run` after the server stops, and `SimReplayTests._build_sim` via
-# addCleanup (test_serving.py, 5 tests). `mcp/tests/test_code_quality_check.py::
-# test_the_warning_ignore_list_is_capped` asserts the exact remaining count, so an entry
-# cannot be added or paid off without a visible edit to a test.
 filterwarnings = [
   "error",
 
@@ -178,38 +178,21 @@ filterwarnings = [
   "ignore:websockets.legacy is deprecated:DeprecationWarning",
 ]
 
-# Environment-gated integration paths. Eight of them, guarding fifteen tests: each is
-# guarded by an `AR_*` variable and skips when it is unset, so nothing exercises them
-# unless something sets it.
-#
-# Registering a marker is not the same as applying one, and for a while this list was
-# only the first. Every entry below was registered and documented while the tests
-# carried no `@pytest.mark.<name>` at all, so `pytest -m ar_run_pi_rpc_smoke` selected
-# *nothing* -- 0 of 3402, reported as a successful run of an empty selection, because
-# `--strict-markers` rejects an unknown marker and has nothing to say about a registered
-# one that decorates no test. All eight are applied now, and
-# `mcp/tests/test_gated_integration_runner.py` fails if any of them selects zero tests
-# again.
-#
-# `scripts/run-gated-integration.py` is the one selector per path. The two
-# credential-free paths can participate in lifecycle-owned Dagger acceptance:
-# `ar_run_pi_rpc_smoke`, which installs its own Pi build and drives it offline against
-# 127.0.0.1, and `agents_remember_real_mcp_config`, which spawns this repository's own
-# MCP server against a generated settings file. The other six need an installed,
-# signed-in vendor CLI and four bill for real model turns. They remain explicit opt-ins,
-# and like every pytest path they refuse execution outside the pinned Dagger graph.
-#
-# `mcp/tests/test_code_quality_check.py` asserts this list and the suite's actual
-# environment gates stay in step in both directions.
+# Optional live boundaries require explicit environment opt-ins and delivery execution.
+# Ordinary pytest defaults to -m 'not integration'; use -m integration for boundary
+# checks or -m '' for the combined population. --certify adds Dagger evidence services.
 markers = [
-  "fitness: inherited S1-S4 architecture fitness checks that run in the ordinary pytest suite",
-  "ar_run_pi_rpc_smoke: opt in with AR_RUN_PI_RPC_SMOKE=1 -- installs and drives the pinned Pi RPC build (test_pi_rpc_real_smoke.py: 1 class)",
-  "ar_run_control_plane_installed: opt in with AR_RUN_CONTROL_PLANE_INSTALLED=1 -- drives installed Codex and Pi runtimes through the control-plane seam (test_harness_control_plane_installed.py: 2 classes)",
-  "ar_run_control_installed: opt in with AR_RUN_CONTROL_INSTALLED=1 -- drives installed runtimes through the L3 control routes (test_conversation_control_installed.py: 2 classes)",
-  "ar_run_evidence_installed: opt in with AR_RUN_EVIDENCE_INSTALLED=1 -- drives installed runtimes through the production evidence seam (test_harness_control_evidence_installed.py: 2 classes)",
-  "ar_claude_stream_smoke: opt in with AR_CLAUDE_STREAM_SMOKE=1 -- live Claude stream-json smoke against the installed binary (test_harness_control_claude_smoke.py: 1 class)",
-  "ar_codex_app_server_live_smoke: opt in with AR_CODEX_APP_SERVER_LIVE_SMOKE=1 -- credential-safe live Codex app-server handshake, sends no prompt (test_codex_app_server_live.py: 1 test)",
-  "ar_codex_app_server_live_conformance: opt in with AR_CODEX_APP_SERVER_LIVE_CONFORMANCE=1 -- bounded live Codex conformance, sends two tiny turns (test_codex_app_server_live.py: 1 test)",
-  # Same hazard, older naming: an environment-gated integration path that predates the AR_ prefix.
-  "agents_remember_real_mcp_config: opt in by pointing AGENTS_REMEMBER_REAL_MCP_CONFIG at a real MCP config -- real MCP server integration (test_tools.py: 1 class)",
+  "integration: real publication, interruption, ownership, application wiring or repository boundary",
+  "evidence_unit: retained delivery evidence category",
+  "evidence_contract: retained delivery evidence category",
+  "evidence_integration: retained delivery evidence category",
+  "evidence_fitness: retained delivery evidence category",
+  "evidence_provider: retained delivery evidence category",
+  "evidence_stress: retained delivery evidence category",
+  "evidence_migration: retained delivery evidence category",
+  # Orthogonal to the evidence-category markers: this inherited selector names one reviewed
+  # architecture surface. It is explicit here so strict collection never depends on another
+  # plugin incidentally registering the same word.
+  "fitness: inherited S1-S4 architecture selector; evidence category remains manifest-owned",
+
 ]

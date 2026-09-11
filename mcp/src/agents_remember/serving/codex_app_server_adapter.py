@@ -73,6 +73,10 @@ from agents_remember.serving.codex_app_server_turns import (
     turn_start_params,
     verified_asset_path,
 )
+from agents_remember.serving.codex_mcp_readiness import (
+    REQUIRED_ROLE_MCP_TOOL,
+    wait_for_codex_mcp_tool,
+)
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
     SetResult,
@@ -90,6 +94,11 @@ from agents_remember.serving.harness_control_models import (
 )
 
 Clock = Callable[[], str]
+
+
+def _is_role_launch(launch: LaunchSpec) -> bool:
+    role = (launch.env or {}).get("AR_SPAWN_ROLE")
+    return isinstance(role, str) and bool(role.strip())
 
 
 class CodexAppServerAdapter:
@@ -132,6 +141,12 @@ class CodexAppServerAdapter:
             launch,
             resume_thread_id=self._settings.resume_thread_id,
         )
+        readiness = await self._role_mcp_readiness(launch)
+        if readiness is not None:
+            snapshot = replace(
+                snapshot,
+                raw={**snapshot.raw, "requiredMcpTool": readiness},
+            )
         self._threads.parent()
         self._snapshot = replace(
             snapshot,
@@ -147,8 +162,35 @@ class CodexAppServerAdapter:
             identity=launch.identity,
             capabilities=REQUIRED_ADAPTER_CAPABILITIES,
             snapshot=self._snapshot,
-            raw=self._session.capability_snapshot(),
+            raw={
+                **self._session.capability_snapshot(),
+                **({"requiredMcpTool": readiness} if readiness is not None else {}),
+            },
         )
+
+    async def _role_mcp_readiness(self, launch: LaunchSpec) -> dict[str, object] | None:
+        if not _is_role_launch(launch):
+            return None
+        transport = self._require_transport()
+        thread_id = self._session.thread_id
+        if thread_id is None:
+            raise CodexAppServerError("Codex role startup completed without a thread id")
+        try:
+            result = await wait_for_codex_mcp_tool(
+                transport,
+                thread_id=thread_id,
+                tool_name=REQUIRED_ROLE_MCP_TOOL,
+            )
+        except BaseException as error:
+            try:
+                await self._session.stop()
+            except BaseException as cleanup_error:
+                error.add_note(
+                    "Codex role startup cleanup also failed: "
+                    f"{type(cleanup_error).__name__}: {cleanup_error}"
+                )
+            raise
+        return result.to_json()
 
     async def snapshot(self) -> AdapterSnapshot:
         if self._snapshot is None:
@@ -770,6 +812,7 @@ class CodexAppServerAdapter:
             role="result",
             text=f"Codex turn {turn.get('status')}",
             created_at=completed_at,
+            request_id=operation.operation_id,
             vendor_correlation_id=turn_id,
             terminal_result=terminal_result(turn, completed_at=completed_at),
             raw={"codexTurnId": turn_id},

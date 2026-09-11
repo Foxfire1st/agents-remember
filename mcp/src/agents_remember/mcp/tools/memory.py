@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from agents_remember.application.memory_quality.controller import (
+    poll_memory_quality_request,
+    run_memory_quality_request,
+    start_memory_quality_request,
+)
 from agents_remember.application.memory_tools import (
     DEFAULT_CARRYOVER_MESSAGES,
     DEFAULT_CITATION_OPERATION_SCOPE,
@@ -19,11 +24,15 @@ from agents_remember.application.memory_tools import (
     memory_carryover_apply_tool,
     memory_carryover_plan_tool,
     memory_init_tool,
-    memory_quality_check_tool,
     route_index_refresh_tool,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.tool_reports import write_tool_report
+from agents_remember.models.memory import (
+    MemoryQualityPollRequest,
+    MemoryQualityStartRequest,
+    MemoryQualitySyncRequest,
+)
 
 from .base import _tool_payload
 
@@ -48,21 +57,35 @@ def drift_check_payload(
 
 def memory_quality_check_payload(
     config: McpRuntimeConfig,
-    repo_id: str,
-    *,
-    checks: list[str] | None = None,
-    detail_limit: int = 50,
-    contract_path: str | None = None,
+    request: MemoryQualitySyncRequest,
 ) -> dict[str, Any]:
     return _tool_payload(
         "memory_quality_check",
-        memory_quality_check_tool(
-            config,
-            repo_id=repo_id,
-            checks=checks,
-            detail_limit=detail_limit,
-            contract_path=contract_path,
-        ),
+        run_memory_quality_request(config, request),
+    )
+
+
+def memory_quality_check_start_payload(
+    config: McpRuntimeConfig,
+    request: MemoryQualityStartRequest,
+) -> dict[str, Any]:
+    """Start one bounded request; a successful admission carries its run id."""
+
+    return _tool_payload(
+        "memory_quality_check",
+        start_memory_quality_request(config, request),
+    )
+
+
+def memory_quality_check_poll_payload(
+    config: McpRuntimeConfig,
+    request: MemoryQualityPollRequest,
+) -> dict[str, Any]:
+    """Poll one started check through the repository recorded on its run."""
+
+    return _tool_payload(
+        "memory_quality_check",
+        poll_memory_quality_request(config, request),
     )
 
 

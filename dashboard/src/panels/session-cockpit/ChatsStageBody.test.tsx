@@ -101,7 +101,7 @@ beforeEach(() => {
   vi.mocked(hasWarmConversation).mockReturnValue(false);
 });
 
-afterEach(() => {
+afterEach(async () => {
   // TanStack Virtualizer owns a 150 ms scroll-observer debounce. Unmount while timers are still
   // fake, then discard that orphaned callback before restoring real time; restoring first can
   // promote it beyond jsdom teardown, where React no longer has a `window` to schedule against.
@@ -109,6 +109,11 @@ afterEach(() => {
   if (vi.isFakeTimers()) {
     vi.clearAllTimers();
     vi.useRealTimers();
+  } else {
+    // A real-timer test may leave the virtualizer's 150 ms scroll-observer debounce pending;
+    // let it fire while jsdom is still alive so it cannot land after teardown, where React
+    // has no `window` to schedule against.
+    await new Promise((resolve) => setTimeout(resolve, 200));
   }
   sessionStore.getState().hydrate([]);
   activeConversationStore.getState().reset();

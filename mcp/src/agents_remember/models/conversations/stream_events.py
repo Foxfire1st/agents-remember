@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
@@ -74,7 +74,7 @@ class GapMutation(WireModel):
     close_after_event: Literal[True] = True
 
 
-ConversationMutation: TypeAlias = Annotated[
+type ConversationMutation = Annotated[
     AppendItemMutation
     | AppendBlockDeltaMutation
     | UpsertItemMutation
