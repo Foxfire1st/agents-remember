@@ -30,7 +30,10 @@ from agents_remember.worktrees.closeout_input import (
     resolve_closeout_plan,
     resolved_plan_from_effective_input,
 )
-from agents_remember.worktrees.integration.closeout.door import classify_door_publication
+from agents_remember.worktrees.integration.closeout.door import (
+    classify_door_publication,
+    live_closeout_door,
+)
 from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
 )
@@ -257,8 +260,6 @@ def _require_recovery_identity(
     accepted_states = {current.candidateState}
     if current.closeoutFinalizedContractSha256 is not None:
         accepted_states.add(current.closeoutFinalizedContractSha256)
-    if current.doorPublication is not None:
-        accepted_states.add(current.doorPublication.expectedPublishedContractSha256)
     if contract_state not in accepted_states:
         raise RuntimeError(
             "closeout contract identity changed outside the accepted generation's proven output"
@@ -303,11 +304,16 @@ def _candidate_is_generation_output(
     )
 
 
-def _current_door_generation_id(contract: WorktreeContract) -> str:
-    door = contract.closeout_door
-    if door is None:
-        raise RuntimeError("closeout admission requires one exact door generation")
-    return door.generationId
+def _current_door_generation_id(contract: WorktreeContract) -> str | None:
+    """The live door generation id, or ``None`` when the contract has no live door.
+
+    The worktree contract no longer stores a door: a fresh admission has no
+    declared generation to bind, and the operation's own journal supplies one
+    once it publishes.
+    """
+
+    door = live_closeout_door(contract)
+    return None if door is None else door.generationId
 
 
 def _current_operation_task_intent(

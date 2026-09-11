@@ -39,6 +39,7 @@ from agents_remember.models.lifecycles.certification import (
     SelectedRecoveryDecision,
 )
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
+from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.integration.lifecycle.certification_observation import (
     observe_certification_publication,
 )
@@ -334,7 +335,7 @@ def _retained_contract_memory_tree(
             "the retained contract-owner bytes must parse as the selected contract",
             str(error),
         )
-    door = retained.closeout_door
+    door = live_closeout_door(retained)
     if door is None:
         refuse(
             "selected-contract-door-missing",

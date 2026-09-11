@@ -37,15 +37,13 @@ from agents_remember.worktrees.worktree_contract import (
     default_series_contract,
     write_contract,
 )
-from closeout_input_test_support import ensure_fixture_waiting_door
 from test_worktree_support import git, init_repo
 
 
 def direct_landing(*args, **kwargs):
-    """Exercise direct landing below the independently covered scheduling fence."""
+    """Exercise the production direct-landing path in process."""
 
-    with mock.patch("agents_remember.worktrees.direct_landing.require_first_ready_generation"):
-        return _production_direct_landing(*args, **kwargs)
+    return _production_direct_landing(*args, **kwargs)
 
 
 def _scratch_config(
@@ -130,7 +128,6 @@ def _series_fixture(root: Path, *, code_commit_message: str = "code commit") -> 
         ),
     )
     write_contract(contract.contract_path, contract)
-    contract, _fixture_bypass = ensure_fixture_waiting_door(contract)
     publish_new_lifecycle_operation_location(
         contract,
         contract_text=contract.contract_path.read_text(encoding="utf-8"),

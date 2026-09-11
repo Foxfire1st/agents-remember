@@ -19,6 +19,7 @@ from agents_remember.models.lifecycles.door import CloseoutDoorAction, CloseoutD
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
+from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.integration.closeout.door_control import (
     DoorActor,
     closeout_door_tool,
@@ -512,13 +513,14 @@ class QueueFixture:
         candidate = values.get("candidate")
         master = next(master for master, leaf in self.leaf_refs.items() if leaf == candidate)
         contract = load_contract(self.contracts[master].contract_path)
-        assert contract.closeout_door is not None
+        door = live_closeout_door(contract)
+        assert door is not None
         closeout_door_tool(
             self.cfg,
             CloseoutDoorRequest(
                 action=action,
                 contract_path=contract.contract_path.as_posix(),
-                expected_generation_id=contract.closeout_door.generationId,
+                expected_generation_id=door.generationId,
             ),
             actor=DoorActor(role="orchestrator", task_document_ref=SPRINT),
             admitted_contract=contract,

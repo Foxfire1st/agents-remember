@@ -273,10 +273,9 @@ source_version_or_generator = "typed closeout and lifecycle fixture composition"
 introduced_by = "260824-closeout-liveness-recovery"
 lifetime = "permanent"
 permanence_rationale = "The helper owns the shared closeout repository topology used by eighteen lifecycle suites."
-replacement_contract = "node:mcp/tests/test_closeout_certification_recovery.py::test_selection_recompiles_untrusted_proposals_before_selecting_original_references"
+replacement_contract = "node:mcp/tests/test_transaction_only_worktree_delivery.py::test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_closeout_certification_recovery.py",
   "mcp/tests/test_operation_certification_selection.py",
 ]
 
@@ -302,7 +301,6 @@ consumers = [
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
-  "mcp/tests/test_closeout_certification_recovery.py",
   "mcp/tests/test_closeout_kept_rules_pins.py",
   "mcp/tests/test_closeout_queue.py",
   "mcp/tests/test_compact_content.py",
@@ -351,7 +349,6 @@ consumers = [
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
-  "mcp/tests/test_closeout_certification_recovery.py",
   "mcp/tests/test_closeout_kept_rules_pins.py",
   "mcp/tests/test_closeout_queue.py",
   "mcp/tests/test_compact_content.py",

@@ -13,6 +13,7 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import Section, TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.store import json_path_for
+from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_controls import (
     LifecycleControlCommand,
     control_operation,
@@ -43,7 +44,7 @@ def publish_completed_disposition_task_authority(
 ) -> DeclaredCaller:
     """Publish real task, review, and planning authority for disposition tests."""
 
-    door = load_contract(contract.contract_path).closeout_door
+    door = live_closeout_door(load_contract(contract.contract_path))
     judgment_id = (
         door.schedulingProvenance.judgmentId if door is not None else FIXTURE_GRADE_JUDGMENT
     )

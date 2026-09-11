@@ -31,6 +31,7 @@ from agents_remember.worktrees.integration.closeout.door import (
     DoorPublicationClassification,
     DoorPublicationError,
     classify_door_publication,
+    live_closeout_door,
     prepare_door_publication,
     publish_door_intent,
 )
@@ -181,7 +182,6 @@ def control_operation(
             allow_completed_disposition=command.allow_completed_disposition,
             caller=command.caller,
             integration=observed.integration,
-            door=observed.door,
         ),
     )
     legal = {item["action"] for item in legal_rows}
@@ -357,7 +357,7 @@ def _resume(
             contract,
             record.input.configPath,
         )
-        _require_proven_closeout_door_for_launch(current_contract, record)
+        _require_proven_closeout_door_for_launch(record)
         current = recover_direct_landing_under_authority(current_contract, store, record)
         return operation_projection(
             current,
@@ -403,16 +403,14 @@ def _resume_closeout_publications(
     elif record.doorPublication.state == "intent":
         record = complete_pending_door(contract, store, record, dry_run=False)
         contract = load_contract(contract.contract_path)
-    _require_proven_closeout_door_for_launch(contract, record)
+    _require_proven_closeout_door_for_launch(record)
     return contract, record
 
 
 def _require_proven_closeout_door_for_launch(
-    contract: WorktreeContract,
     record: LifecycleOperationRecord,
 ) -> None:
     publication = record.doorPublication
-    observed_door = contract.closeout_door
     if (
         publication is not None
         and publication.state == "proven"
@@ -420,7 +418,6 @@ def _require_proven_closeout_door_for_launch(
         and publication.generation.operationKind == record.operationKind
         and publication.generation.operationFingerprint == record.fingerprint
         and publication.generation.claimedOperationKey == record.operationKey
-        and observed_door == publication.generation
     ):
         return
     raise LifecycleControlError(
@@ -438,9 +435,6 @@ def _require_proven_closeout_door_for_launch(
         observed={
             "publication": (
                 publication.model_dump(mode="json") if publication is not None else None
-            ),
-            "contractDoor": (
-                observed_door.model_dump(mode="json") if observed_door is not None else None
             ),
         },
         next_action="developer-decision",
@@ -596,7 +590,7 @@ def _resume_completed_supersede(
         _require_supersede_declaration_match(current_record, declaration_fingerprint)
         record = complete_pending_door_locked(current_contract, store, current_record)
         current_contract = load_contract(current_contract.contract_path)
-    _require_waiting_supersede_proof(current_contract, record)
+    _require_waiting_supersede_proof(record)
     projection = operation_projection(record, contract=current_contract)
     return project_closeout_refresh(
         projection,
@@ -607,15 +601,10 @@ def _resume_completed_supersede(
 
 
 def _require_waiting_supersede_proof(
-    contract: WorktreeContract,
     record: LifecycleOperationRecord,
 ) -> None:
     publication = record.doorPublication
-    if (
-        publication is None
-        or publication.generation.disposition != "waiting"
-        or (publication.state == "proven" and contract.closeout_door != publication.generation)
-    ):
+    if publication is None or publication.generation.disposition != "waiting":
         raise LifecycleControlError(
             "closeout-door-supersede-proof-required",
             "superseded journal history does not retain its exact waiting door successor",
@@ -824,7 +813,7 @@ def _refresh_resume_door(
 ) -> WorktreeContract:
     """Bind resume to the current source candidate before claiming its successor."""
 
-    current_door = contract.closeout_door
+    current_door = live_closeout_door(contract)
     if current_door is None:
         raise LifecycleControlError(
             "closeout-resume-door-missing",
@@ -891,7 +880,7 @@ def _refresh_resume_door(
             next_action="resume",
         )
     updated = load_contract(contract.contract_path)
-    door = updated.closeout_door
+    door = live_closeout_door(updated)
     if door is None:
         raise LifecycleControlError(
             "closeout-resume-door-missing",

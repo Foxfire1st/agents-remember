@@ -654,8 +654,11 @@ def _require_altitude_authority(record: LifecycleOperationRecord) -> None:
 def _require_task_intent_state(record: LifecycleOperationRecord) -> None:
     if record.operationKind == "integrate" and record.taskIntent is not None:
         raise ValueError("integrate operations do not carry leaf task intent")
-    if record.operationKind in {"closeout", "direct-landing"} and record.taskIntent is None:
-        raise ValueError("commit operations require a task-intent state")
+    # Only a closeout binds a leaf task intent. A direct landing is a
+    # series-contract, branch-addressed delivery: it has no leaf task document to
+    # bind, and it no longer carries a closeout door to state one for it.
+    if record.operationKind == "closeout" and record.taskIntent is None:
+        raise ValueError("closeout operation requires a task-intent state")
     if record.operationKind in {"closeout", "direct-landing"}:
         publications = [
             publication

@@ -23,6 +23,7 @@ from agents_remember.models.lifecycles.operation import OrganizationalTaskPublic
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, completion_blockers, render_markdown
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentTopology
+from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
 from agents_remember.worktrees.modules.git import is_ancestor, repository_identity, require_git
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
@@ -447,7 +448,6 @@ def _require_candidate_identity(
         or not integration_is_exact
         or contract.closeout_status != "completed"
         or candidate.disposition != "claimed"
-        or contract.closeout_door != candidate
         or candidate.sprintTaskDocumentRef != sprint_ref
         or candidate.contractPath != contract.contract_path.as_posix()
     ):
@@ -512,7 +512,7 @@ def _require_sibling_contract_identity(
     completing_contract = expected.completing_contract
     child_ref = expected.child_ref
     source_branch = expected.source_branch
-    door = contract.closeout_door
+    door = live_closeout_door(contract)
     identity_mismatch = any(
         (
             contract.kind != "leaf",

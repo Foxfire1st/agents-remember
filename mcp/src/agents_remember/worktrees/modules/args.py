@@ -20,8 +20,6 @@ from agents_remember.kernel.primitives.gate_policy import (
 )
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.operation import (
-    IntegrationPublicationIntent,
-    IntegrationQualityCertification,
     LifecycleOperationRecoveryCommits,
 )
 from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
@@ -89,8 +87,6 @@ class WorktreeArgs:
     candidate_tree: str | None = None
     approval_claimed: bool = False
     recovery_commits: LifecycleOperationRecoveryCommits | None = None
-    quality_certification: IntegrationQualityCertification | None = None
-    integration_publication: IntegrationPublicationIntent | None = None
     integration_certification_owner: IntegrationCertificationOwner | None = None
     operation_progress: Callable[[str, Mapping[str, object]], None] | None = None
 

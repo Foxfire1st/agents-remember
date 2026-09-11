@@ -14,10 +14,8 @@ from pathlib import Path
 from typing import cast, get_args
 
 from agents_remember.controlplane.durable_store import SCHEMA_VERSION, schema_version_supported
-from agents_remember.errors import AgentsRememberError, TaskIntentError
+from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.atomic_write import atomic_write_text
-from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
-from agents_remember.models.task_intent import require_task_intent_identity
 from agents_remember.models.worktree import (
     CleanupStatus,
     CloseoutStatus,
@@ -268,8 +266,6 @@ class WorktreeContract:
     leaf_id: str = ""
     parent_task_name: str = ""
     parent_contract_path: Path | None = None
-    # Durable declaration/disposition authority. Queue membership is derived elsewhere.
-    closeout_door: CloseoutDoorGeneration | None = None
     # The lifecycle this enclosure anchors (design §1.1): written by worktree_start
     # promotion, read by worktree_attach to resume. Additive on schema v1 -- old
     # contracts parse to "" (the v2 schema flip is the deliberate 3.0 cutover).
@@ -483,7 +479,6 @@ def contract_publication_text(path: Path, contract: WorktreeContract) -> str:
 
     normalized = normalize_contract_leaf_id(contract)
     validate_contract(normalized, path=path)
-    _require_publishable_closeout_door(normalized, path)
     return contract_to_text(normalized)
 
 
@@ -641,17 +636,6 @@ def _parse_sync_log(value: str) -> tuple[dict[str, str], ...]:
     return tuple(entry for entry in entries if isinstance(entry, dict))
 
 
-def _parse_closeout_door(value: str, contract_path: Path) -> CloseoutDoorGeneration | None:
-    if not value:
-        return None
-    try:
-        return CloseoutDoorGeneration.model_validate(json.loads(value))
-    except (json.JSONDecodeError, ValueError) as error:
-        raise ContractError(
-            f"invalid contract-owned closeout door (in {contract_path}): {error}"
-        ) from error
-
-
 def _human_review_lines(contract: WorktreeContract, approved: str) -> list[str]:
     lines = [
         "human_review:",
@@ -738,13 +722,6 @@ def contract_to_text(contract: WorktreeContract) -> str:
         lines.append(f"  parent_task_name: {contract.parent_task_name}")
     if contract.parent_contract_path is not None:
         lines.append(f"  parent_contract_path: {contract.parent_contract_path.as_posix()}")
-    if contract.closeout_door is not None:
-        encoded_door = json.dumps(
-            contract.closeout_door.model_dump(mode="json"),
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        lines.append(f"  closeout_door: {encoded_door}")
     lines.extend(
         [
             "",
@@ -848,19 +825,6 @@ def validate_contract(contract: WorktreeContract, *, path: Path) -> None:
         }.items():
             if value is None:
                 raise ContractError(f"external-memory contract missing {name} (in {path})")
-
-
-def _require_publishable_closeout_door(contract: WorktreeContract, path: Path) -> None:
-    if contract.closeout_door is None:
-        return
-    try:
-        require_task_intent_identity(
-            contract.closeout_door.taskIntent,
-            owner="closeout-door",
-            next_action="closeout_door.update-provenance",
-        )
-    except TaskIntentError as exc:
-        raise ContractError(f"{exc.status}: {exc.detail} (in {path})") from exc
 
 
 def _extract_front_matter(text: str, path: Path) -> str:
@@ -1086,7 +1050,6 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         leaf_id=coordination.get("leaf_id", ""),
         parent_task_name=coordination.get("parent_task_name", ""),
         parent_contract_path=_optional_path(coordination.get("parent_contract_path", "")),
-        closeout_door=_parse_closeout_door(coordination.get("closeout_door", ""), contract_path),
         lifecycle_id=lifecycle.get("id", ""),
         sync_log=_parse_sync_log(sync.get("log", "")),
     )

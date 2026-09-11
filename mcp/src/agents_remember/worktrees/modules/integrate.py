@@ -22,13 +22,6 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
     require_series_contract_authority,
 )
-from agents_remember.worktrees.integration.integration_claim_transfer import (
-    transfer_and_publish_integration_claim,
-)
-from agents_remember.worktrees.integration.integration_publication_fence import (
-    IntegrationDoorAuthorityConflict,
-    integration_door_decision_payload,
-)
 from agents_remember.worktrees.integration.integration_ref_transaction import (
     IntegratedCommits,
     IntegrationRefRace,
@@ -41,11 +34,6 @@ from agents_remember.worktrees.integration.integration_resolution_handoff import
 )
 from agents_remember.worktrees.integration.master_review_gate import (
     blocked_integration_payload,
-)
-from agents_remember.worktrees.integration.organizational_completion_integration import (
-    IntegrationBoundaryFacts,
-    prepare_integration_publication_intent,
-    preview_integration_boundary,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
@@ -62,12 +50,10 @@ from agents_remember.worktrees.modules.guidance import (
 )
 from agents_remember.worktrees.modules.integration_preflight_results import (
     atomic_landing_blocked_result,
-    prepared_integration_recovery,
 )
 from agents_remember.worktrees.modules.integration_publication import (
     IntegratePreview,
     IntegrationPublication,
-    publish_journaled_organizational_completion,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.series_closeout import (
@@ -540,31 +526,13 @@ def _apply_integration(
     prepared = _prepare_integration_commits(contract, args, sources)
     if isinstance(prepared, WorktreeCommandResult):
         return prepared
-    commits, boundary_facts = prepared
-    intent = args.integration_publication or prepare_integration_publication_intent(
-        contract,
-        operation_key=args.operation_key or "",
-        generation=args.operation_generation or 0,
-        facts=boundary_facts,
-    )
-    commit_tuple = (commits.code, commits.memory_content, commits.ledger)
-    try:
-        intent = transfer_and_publish_integration_claim(
-            contract, args, intent, commits=commit_tuple
-        )
-    except IntegrationDoorAuthorityConflict as error:
-        return WorktreeCommandResult(2, integration_door_decision_payload(error.evidence))
-    locked_args = replace(
-        args,
-        integration_publication=intent,
-    )
+    commits = prepared
     publication = IntegrationPublication(
         contract=contract,
         args=args,
-        locked_args=locked_args,
+        locked_args=args,
         sources=sources,
         commits=commits,
-        intent=intent,
         handover_warning=handover_warning,
     )
 
@@ -574,14 +542,11 @@ def _apply_integration(
                 contract,
                 lambda: _publish_integration_edge(publication),
             )
-            completed = publish_journaled_organizational_completion(result, intent)
         else:
             result = _publish_integration_edge(publication)
-            completed = publish_journaled_organizational_completion(result, intent)
     except AtomicLandingBlocked as error:
         return atomic_landing_blocked_result(contract, error)
-    assert completed is not None
-    return completed
+    return result
 
 
 def _publish_integration_edge(
@@ -652,16 +617,15 @@ def _prepare_integration_commits(
     contract: WorktreeContract,
     args: WorktreeArgs,
     sources: IntegrationSources,
-) -> WorktreeCommandResult | tuple[IntegratedCommits, IntegrationBoundaryFacts]:
-    recovered = prepared_integration_recovery(args)
-    return recovered or _prepare_fresh_integration_commits(contract, args, sources)
+) -> WorktreeCommandResult | IntegratedCommits:
+    return _prepare_fresh_integration_commits(contract, args, sources)
 
 
 def _prepare_fresh_integration_commits(
     contract: WorktreeContract,
     _args: WorktreeArgs,
     sources: IntegrationSources,
-) -> WorktreeCommandResult | tuple[IntegratedCommits, IntegrationBoundaryFacts]:
+) -> WorktreeCommandResult | IntegratedCommits:
     integrated_code_commit, blocked = _integrated_code_commit(contract, sources.current_code_source)
     if blocked is not None:
         return WorktreeCommandResult(2, blocked)
@@ -678,4 +642,4 @@ def _prepare_fresh_integration_commits(
         memory_content=integrated_memory_content_commit,
         ledger=integrated_ledger_commit,
     )
-    return commits, preview_integration_boundary(contract)
+    return commits
