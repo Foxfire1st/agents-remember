@@ -30,7 +30,12 @@ WorkflowKind = Literal["chat-task", "light-task"]
 HumanReviewStatus = Literal["pending-review", "approved"]
 CloseoutStatus = Literal["not-started", "completed"]
 LifecycleStatus = CloseoutStatus  # the published wire name for the closeout status
-IntegrationStatus = Literal["not-started", "completed", "blocked"]
+# ``checkpointed`` is the third terminal-adjacent value and the one this model was missing: the
+# master's current line has landed into its super branch and the master will continue. Without it a
+# partially landed master had to report ``not-started`` -- "nothing of mine has left" -- while its
+# content was already upstream, which is exactly the state that made a partial master's retirement
+# look safe.
+IntegrationStatus = Literal["not-started", "completed", "blocked", "checkpointed"]
 CleanupStatus = Literal["pending", "completed", "abandoned", "reopened"]
 WorktreePhase = Literal[
     "worktree-started",
@@ -407,6 +412,14 @@ class WorktreeIntegrateResponse(WorktreeCommandResponse):
     autoCloseDeferredSeats: list[str] = Field(default_factory=list)
     autoCloseFailedSeats: list[str] = Field(default_factory=list)
     autoLandedSeats: list[str] = Field(default_factory=list)
+
+
+class WorktreeCheckpointLandingResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_checkpoint_landing"] = "worktree_checkpoint_landing"
+    integrationStrategy: str = ""
+    integratedCodeCommit: str = ""
+    integratedMemoryContentCommit: str = ""
+    integratedLedgerCommit: str = ""
 
 
 class WorktreeRecordLandingResponse(WorktreeCommandResponse):

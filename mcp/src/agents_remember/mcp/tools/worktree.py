@@ -18,6 +18,7 @@ from agents_remember.application.worktree_tools import (
     summarized_worktree_start_tool,
     worktree_abandon_tool,
     worktree_attach_tool,
+    worktree_checkpoint_landing_tool,
     worktree_cleanup_tool,
     worktree_closeout_apply_tool,
     worktree_closeout_preview_tool,
@@ -137,6 +138,26 @@ def worktree_integrate_payload(
     return _tool_payload(
         "worktree_integrate",
         worktree_integrate_tool(
+            config,
+            contract_path=contract_path,
+            strategy=strategy,
+            ledger_commit_message=ledger_commit_message,
+            dry_run=dry_run,
+        ),
+    )
+
+
+def worktree_checkpoint_landing_payload(
+    config: McpRuntimeConfig,
+    contract_path: str,
+    *,
+    strategy: IntegrateStrategy = "ff-only",
+    ledger_commit_message: str = "",
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "worktree_checkpoint_landing",
+        worktree_checkpoint_landing_tool(
             config,
             contract_path=contract_path,
             strategy=strategy,

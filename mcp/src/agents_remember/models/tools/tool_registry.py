@@ -105,6 +105,7 @@ from agents_remember.models.terminal import (
 from agents_remember.models.worktree import (
     WorktreeAbandonResponse,
     WorktreeAttachResponse,
+    WorktreeCheckpointLandingResponse,
     WorktreeCleanupResponse,
     WorktreeCloseoutApplyResponse,
     WorktreeCloseoutPreviewResponse,
@@ -185,6 +186,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "worktree_closeout_preview": WorktreeCloseoutPreviewResponse,
     "worktree_closeout_apply": WorktreeCloseoutApplyResponse,
     "worktree_integrate": WorktreeIntegrateResponse,
+    "worktree_checkpoint_landing": WorktreeCheckpointLandingResponse,
     "worktree_record_landing": WorktreeRecordLandingResponse,
     "worktree_operation_control": WorktreeOperationControlResponse,
     "worktree_cleanup": WorktreeCleanupResponse,

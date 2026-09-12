@@ -55,10 +55,14 @@ from agents_remember.worktrees.modules.integration_publication import (
     IntegratePreview,
     IntegrationPublication,
 )
-from agents_remember.worktrees.modules.landing_record import record_landed_integration
+from agents_remember.worktrees.modules.landing_record import (
+    LandedIntegration,
+    record_landed_integration,
+)
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.series_closeout import (
     atomic_series_ledger_prefix,
+    publish_series_checkpoint_under_authority,
     publish_series_integration_under_authority,
 )
 from agents_remember.worktrees.source_lineage import (
@@ -375,10 +379,12 @@ def _integrated_result(
 ) -> WorktreeCommandResult:
     updated = record_landed_integration(
         contract,
-        strategy=args.strategy,
-        code_commit=commits.code,
-        memory_content_commit=commits.memory_content,
-        ledger_commit=commits.ledger,
+        landed=LandedIntegration(
+            strategy=args.strategy,
+            code_commit=commits.code,
+            memory_content_commit=commits.memory_content,
+            ledger_commit=commits.ledger,
+        ),
     )
     # The developer ruling: a completed leaf is reclaimed by an automatic procedure, not by
     # a prompt. Cleanup reuses the existing terminal procedure, including its refusal
@@ -426,11 +432,48 @@ def integrate_result(
     return _continue_integration(contract, args, sources, None)
 
 
+def checkpoint_landing_result(
+    args: WorktreeArgs,
+    current_contract: WorktreeContract,
+) -> WorktreeCommandResult:
+    """Land an unfinished atomic master's accumulated line into its super branch.
+
+    :func:`integrate_result` closes a finished master; this pauses an unfinished one. It shares the
+    entire preflight and the ref move with that route -- the series contract binding, the atomic
+    landing authority, the integration targets, the contract validation, the replay/ff source-state
+    gate, the source-lineage proof and the master-handover gate all still run -- and differs only in
+    its series authority and its recorded state. A partial master had no way to land at all before
+    this existed, because the only route assumed it was finished.
+    """
+
+    report_operation_progress(args, "preflight", current_command="validate checkpoint eligibility")
+    if not args.approved and not args.dry_run:
+        raise RuntimeError("checkpoint landing requires explicit developer approval")
+    assert args.contract_path is not None
+    contract = current_contract
+    if args.contract_path.resolve() != contract.contract_path.resolve():
+        raise RuntimeError("checkpoint contract path does not match the passed current contract")
+    if contract.kind != "series":
+        raise RuntimeError(
+            "checkpoint landing is defined only for an atomic series contract; a leaf lands "
+            "through worktree_integrate"
+        )
+    require_series_contract_authority(contract, operation="worktree_checkpoint_landing")
+    integration_targets(contract)
+    validate_integrate_contract(contract)
+    # A checkpoint is still a landing, so it earns the same Git-read protection as a final one: the
+    # recorded source branch must not have moved off the ancestry the candidate was verified at.
+    sources = _integration_replay_requirements(contract)
+    return _continue_integration(contract, args, sources, None, checkpoint=True)
+
+
 def _continue_integration(
     contract: WorktreeContract,
     args: WorktreeArgs,
     sources: IntegrationSources,
     operation: LifecycleOperationRecord | None,
+    *,
+    checkpoint: bool = False,
 ) -> WorktreeCommandResult:
     if args.strategy == "ff-only" and sources.replay_required:
         return _blocked_non_ff_result(contract, args, sources)
@@ -439,7 +482,7 @@ def _continue_integration(
     lineage_block = _integration_lineage_block(contract, persist=not args.dry_run)
     if lineage_block is not None:
         return lineage_block
-    return _handover_or_apply_integration(contract, args, sources)
+    return _handover_or_apply_integration(contract, args, sources, checkpoint=checkpoint)
 
 
 HANDOVER_GATE_KIND = "master-handover-approval"
@@ -449,6 +492,8 @@ def _handover_or_apply_integration(
     contract: WorktreeContract,
     args: WorktreeArgs,
     sources: IntegrationSources,
+    *,
+    checkpoint: bool = False,
 ) -> WorktreeCommandResult:
     # The master-exit seam consumer (mirror of the closeout gate): when a
     # master-handover-approval gate is addressed to this contract's master or
@@ -511,6 +556,7 @@ def _handover_or_apply_integration(
         args,
         sources,
         handover_warning=handover_warning,
+        checkpoint=checkpoint,
     )
 
 
@@ -520,6 +566,7 @@ def _apply_integration(
     sources: IntegrationSources,
     *,
     handover_warning: dict[str, object] | None,
+    checkpoint: bool = False,
 ) -> WorktreeCommandResult:
     """Land the code commit, then the memory commits, then merge both into their sources."""
     prepared = _prepare_integration_commits(contract, args, sources)
@@ -537,12 +584,20 @@ def _apply_integration(
 
     try:
         if contract.kind == "series":
-            result = publish_series_integration_under_authority(
+            # The two series routes differ in exactly one way: the final route proves the master is
+            # a finished unit, the checkpoint route does not. Every ref-protecting authority is
+            # identical on both.
+            publish = (
+                publish_series_checkpoint_under_authority
+                if checkpoint
+                else publish_series_integration_under_authority
+            )
+            result = publish(
                 contract,
-                lambda: _publish_integration_edge(publication),
+                lambda: _publish_integration_edge(publication, checkpoint=checkpoint),
             )
         else:
-            result = _publish_integration_edge(publication)
+            result = _publish_integration_edge(publication, checkpoint=checkpoint)
     except AtomicLandingBlocked as error:
         return atomic_landing_blocked_result(contract, error)
     return result
@@ -550,6 +605,8 @@ def _apply_integration(
 
 def _publish_integration_edge(
     publication: IntegrationPublication,
+    *,
+    checkpoint: bool = False,
 ) -> WorktreeCommandResult:
     current = load_contract(publication.contract.contract_path)
     if current != publication.contract:
@@ -604,11 +661,54 @@ def _publish_integration_edge(
         "contract-finalization",
         current_command="finalize integration contract edge",
     )
+    if checkpoint:
+        return _checkpoint_result(current, publication.locked_args, publication.commits)
     return _integrated_result(
         current,
         publication.locked_args,
         publication.commits,
         handover_warning=publication.handover_warning,
+    )
+
+
+def _checkpoint_result(
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    commits: IntegratedCommits,
+) -> WorktreeCommandResult:
+    """Record a non-final landing and reclaim nothing.
+
+    The difference from :func:`_integrated_result` is the whole feature: this writes
+    ``checkpointed`` rather than ``completed`` and does **not** run the automatic cleanup, so the
+    master keeps its worktrees, its branches and its enclosure, and the integration cell never
+    claims a completion that has not happened.
+    """
+
+    updated = record_landed_integration(
+        contract,
+        landed=LandedIntegration(
+            strategy=args.strategy,
+            code_commit=commits.code,
+            memory_content_commit=commits.memory_content,
+            ledger_commit=commits.ledger,
+        ),
+        checkpoint=True,
+    )
+    return WorktreeCommandResult(
+        0,
+        {
+            "state": "checkpointed",
+            **status_payload(updated),
+            "summary": (
+                "Checkpoint landing completed: this master's accumulated line landed into its "
+                f"source branch via {args.strategy}, and the master stays open. Nothing was "
+                "retired and no cleanup ran."
+            ),
+            "strategy": args.strategy,
+            "integrated_code_commit": commits.code,
+            "integrated_memory_content_commit": commits.memory_content,
+            "integrated_ledger_commit": commits.ledger,
+        },
     )
 
 

@@ -56,6 +56,7 @@ from agents_remember.worktrees.modules.guidance import (
 )
 from agents_remember.worktrees.modules.integrate import (
     blocked_integration_payload,
+    checkpoint_landing_result,
     integrate_result,
     validate_integrate_contract,
 )
@@ -107,6 +108,7 @@ __all__ = [
     "branch_exists",
     "build_parser",
     "changed_worktree_paths",
+    "checkpoint_landing_result",
     "cleanup_result",
     "closeout_changed_paths",
     "closeout_preview_payload",

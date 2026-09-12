@@ -263,14 +263,17 @@ def _require_series_task_terminal(
             "worktree_abandon refused: an atomic master must be declared abandoned (or "
             f"Completed) before its integration branch can retire; it is {status!r}"
         )
-    if status == "abandoned" and contract.integration_status == "completed":
-        # Abandoning a master asserts that none of its work was taken. Once part of it integrated
-        # that assertion is false, and the honest terminal route is completion: set the rows that
-        # never integrated to ``abandoned`` and complete the master.
+    if status == "abandoned" and contract.integration_status in {"completed", "checkpointed"}:
+        # Abandoning a master asserts that none of its work was taken. Once part of it landed --
+        # whether finally (``completed``) or at a checkpoint of a master that is still open
+        # (``checkpointed``) -- that assertion is false, and the honest terminal route is
+        # completion: set the rows that never integrated to ``abandoned`` and complete the master.
+        # ``checkpointed`` is precisely the case a partial landing used to hide: the master's line
+        # was already upstream while the contract still read ``not-started``.
         raise RuntimeError(
-            "worktree_abandon refused: this master already integrated, so its work cannot be "
-            "abandoned as a whole; mark the rows that never integrated abandoned and complete "
-            "the master instead"
+            "worktree_abandon refused: this master already landed work into its source branch, so "
+            "its work cannot be abandoned as a whole; mark the rows that never integrated abandoned "
+            "and complete the master instead"
         )
 
 

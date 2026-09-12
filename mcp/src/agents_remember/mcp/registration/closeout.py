@@ -24,6 +24,7 @@ from agents_remember.models.lifecycles.operation_kinds import (
 from ..tools import (
     direct_landing_payload,
     worktree_abandon_payload,
+    worktree_checkpoint_landing_payload,
     worktree_cleanup_payload,
     worktree_closeout_apply_payload,
     worktree_closeout_preview_payload,
@@ -169,6 +170,30 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         observe/recover it; conflicting input refuses. Protected-ref serialization applies only to
         the addressed landing and never blocks task-document authoring."""
         return worktree_integrate_payload(
+            config,
+            contract_path,
+            strategy=strategy,
+            ledger_commit_message=ledger_commit_message,
+            dry_run=dry_run,
+        )
+
+    @server.tool()
+    def worktree_checkpoint_landing(
+        *,
+        contract_path: str,
+        strategy: IntegrateStrategy = "ff-only",
+        ledger_commit_message: str = "",
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Land an UNFINISHED atomic master's accumulated line into its super branch and keep the
+        master open. Use this to pause a master: worktree_integrate refuses a partial master because
+        it proves a finished unit (task document Completed, one landed enclosure per canonical leaf),
+        and a paused master has neither, so this route shares that route's whole preflight and ref
+        move and drops only those two completion assumptions. It records the integration cell as
+        'checkpointed' rather than 'completed', retires nothing, and runs no cleanup, so the master's
+        worktrees, branches and enclosure survive for the work that continues. MUTATING: moves branch
+        refs; preview with dry_run=true."""
+        return worktree_checkpoint_landing_payload(
             config,
             contract_path,
             strategy=strategy,

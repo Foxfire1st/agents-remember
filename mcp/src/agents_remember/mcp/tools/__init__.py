@@ -95,6 +95,7 @@ from .terminal import (
 from .worktree import (
     worktree_abandon_payload,
     worktree_attach_payload,
+    worktree_checkpoint_landing_payload,
     worktree_cleanup_payload,
     worktree_closeout_apply_payload,
     worktree_closeout_preview_payload,
@@ -185,6 +186,7 @@ __all__ = [
     "task_reopen_payload",
     "worktree_abandon_payload",
     "worktree_attach_payload",
+    "worktree_checkpoint_landing_payload",
     "worktree_cleanup_payload",
     "worktree_closeout_apply_payload",
     "worktree_closeout_preview_payload",

@@ -47,6 +47,7 @@ PUBLIC_TOOLS = (
     "worktree_closeout_preview",
     "worktree_closeout_apply",
     "worktree_integrate",
+    "worktree_checkpoint_landing",
     "worktree_record_landing",
     "worktree_operation_control",
     "worktree_cleanup",

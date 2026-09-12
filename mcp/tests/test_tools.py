@@ -258,6 +258,27 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         )
         self.assertEqual(envelope["operation"], "worktree_record_landing")
 
+    def test_worktree_checkpoint_landing_has_a_response_model_that_validates(self) -> None:
+        # The set comparison above proves the name is registered, but not which model it points
+        # at: the two landing tools sit next to each other in the registry and their payloads
+        # differ only in the operation literal, so a swap between them still validates as a set.
+        envelope = finalize_tool_response(
+            "worktree_checkpoint_landing",
+            {
+                "ok": True,
+                "state": "checkpointed",
+                "taskId": "T",
+                "taskName": "master",
+                "contractPath": "/tmp/contract.md",
+                "integrationStrategy": "ff-only",
+                "integratedCodeCommit": "a" * 40,
+                "integratedMemoryContentCommit": "",
+                "integratedLedgerCommit": "",
+                "summary": "checkpointed",
+            },
+        )
+        self.assertEqual(envelope["operation"], "worktree_checkpoint_landing")
+
 
 def _permissive_registration_config() -> McpRuntimeConfig:
     """A registration-time config stub.

@@ -17,7 +17,10 @@ from __future__ import annotations
 
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import branch_exists, is_ancestor
-from agents_remember.worktrees.modules.landing_record import record_landed_integration
+from agents_remember.worktrees.modules.landing_record import (
+    LandedIntegration,
+    record_landed_integration,
+)
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
@@ -58,7 +61,14 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
     assert args.contract_path is not None
     contract = load_contract(args.contract_path)
     payload = _identity_payload(contract)
-    if contract.integration_status == "completed":
+    # A checkpointed contract has already recorded a landing, so it is "already recorded" too --
+    # and it must be, because the full-record path below writes ``completed`` plus
+    # ``cleanup="pending"``, which is exactly what ``worktree_cleanup`` requires. Letting the pull
+    # request route take that path would silently revoke the checkpoint's guarantee that a series
+    # landed while still open never becomes reclaimable. Completion stays on ``worktree_integrate``,
+    # which reaches it only once the series is genuinely terminal.
+    if contract.integration_status in {"completed", "checkpointed"}:
+        checkpointed = contract.integration_status == "checkpointed"
         return WorktreeCommandResult(
             0,
             {
@@ -67,7 +77,12 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
                 "integrationStrategy": contract.integration_strategy,
                 "landedCodeCommit": contract.integrated_code_commit,
                 "summary": (
-                    "This contract already records a completed integration "
+                    "This contract already records a checkpointed integration "
+                    f"(strategy {contract.integration_strategy!r}). The series is still open and "
+                    "cleanup is deliberately not pending, so the pull-request route has nothing "
+                    "to record; the series completes through worktree_integrate."
+                    if checkpointed
+                    else "This contract already records a completed integration "
                     f"(strategy {contract.integration_strategy!r}); nothing to record."
                 ),
             },
@@ -105,10 +120,12 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
         )
     updated = record_landed_integration(
         contract,
-        strategy=PR_STRATEGY,
-        code_commit=commit,
-        memory_content_commit=args.landed_memory_content_commit.strip(),
-        ledger_commit=args.landed_ledger_commit.strip(),
+        landed=LandedIntegration(
+            strategy=PR_STRATEGY,
+            code_commit=commit,
+            memory_content_commit=args.landed_memory_content_commit.strip(),
+            ledger_commit=args.landed_ledger_commit.strip(),
+        ),
     )
     return WorktreeCommandResult(
         0,

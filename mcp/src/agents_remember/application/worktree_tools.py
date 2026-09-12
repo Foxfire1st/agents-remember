@@ -424,6 +424,45 @@ def worktree_integrate_tool(
     return result
 
 
+def worktree_checkpoint_landing_tool(
+    config: McpRuntimeConfig,
+    *,
+    contract_path: str,
+    strategy: IntegrateStrategy = "ff-only",
+    ledger_commit_message: str = "",
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Land an unfinished atomic master's accumulated line into its super branch.
+
+    ``worktree_integrate`` closes a finished master: it proves the master's task document is
+    ``Completed`` and that every canonical leaf owns a landed enclosure. A master being paused has
+    neither, so before this route a partial master could not land at all. This shares that route's
+    entire preflight and ref move -- the series contract binding, the atomic landing authority, the
+    replay/ff source-state gate, the lineage proof and the master-handover gate -- and drops only the
+    two assumptions that the master is finished. It records ``checkpointed`` rather than
+    ``completed`` and retires nothing.
+    """
+
+    configured = admit_configured_contract(config, contract_path)
+    if isinstance(configured, ConfiguredContractRefused):
+        return project_configured_contract_refusal(
+            configured,
+            operation="worktree_checkpoint_landing",
+        )
+    args = git_worktree_manager.WorktreeArgs(
+        contract_path=configured.contract_path,
+        strategy=strategy,
+        approved=not dry_run,
+        ledger_commit_message=ledger_commit_message,
+        dry_run=dry_run,
+        gate_policy=config.orchestration.gate_policy,
+    )
+    return _worktree_result(
+        "worktree_checkpoint_landing",
+        git_worktree_manager.checkpoint_landing_result(args, configured.contract),
+    )
+
+
 def worktree_record_landing_tool(
     config: McpRuntimeConfig,
     *,

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -168,3 +169,27 @@ class RecordLandingTests(unittest.TestCase):
             again = _record(contract, landed_code_commit=landed)
 
             self.assertEqual(again.payload["state"], "already-recorded")
+
+    def test_a_checkpointed_series_is_not_upgraded_into_a_reclaimable_integration(self) -> None:
+        """A checkpoint landed a series that is still open, so this route must not close it.
+
+        The full-record path writes ``completed`` plus ``cleanup="pending"``, and that pending
+        cleanup is exactly what ``worktree_cleanup`` requires before it retires a branch. Taking
+        it here would revoke the checkpoint's guarantee and make an open series reclaimable, so a
+        checkpoint reads as already recorded and both cells keep the values the checkpoint wrote.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = _fixture(Path(tmp))
+            landed = _commit_on(contract.code_repo_path, "super", "landed.txt")
+            write_contract(
+                contract.contract_path,
+                replace(load_contract(contract.contract_path), integration_status="checkpointed"),
+            )
+
+            result = _record(contract, landed_code_commit=landed)
+
+            self.assertEqual(result.payload["state"], "already-recorded")
+            stored = load_contract(contract.contract_path)
+            self.assertEqual(stored.integration_status, "checkpointed")
+            self.assertEqual(stored.cleanup, "pending")

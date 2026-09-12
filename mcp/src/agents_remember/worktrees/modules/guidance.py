@@ -304,6 +304,28 @@ def _post_integration_phase(contract: WorktreeContract) -> LifecycleGuidance | N
                 args=contract_next_args(contract),
             ),
         }
+    if contract.integration_status == "checkpointed":
+        # A checkpoint lands the series without closing it, so cleanup is deliberately NOT
+        # pending and the series is still working. Deliberately the existing ``worktree-started``
+        # phase rather than a new member: ``WorktreePhase`` is a closed literal mirrored by the
+        # dashboard's phase order map and landing-phase set, so a new member is a cross-codebase
+        # change and the position it would describe is this one. The summary carries the
+        # checkpoint truth. Without this branch the phase falls through to the pre-integration
+        # ``integration-pending``, which points at ``worktree_integrate`` -- a tool that refuses
+        # while the series is open.
+        return {
+            "phase": "worktree-started",
+            "summary": (
+                "Integration is checkpointed: the series has landed into its source branch but "
+                "remains open, and cleanup is deliberately not pending. Continue the remaining "
+                "work; the series integrates again when it completes."
+            ),
+            **next_guidance(
+                "continue_work",
+                tool="worktree_status",
+                args=contract_next_args(contract),
+            ),
+        }
     return None
 
 

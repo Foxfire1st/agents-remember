@@ -225,6 +225,29 @@ def test_r3_closeout_ancestry_passes_when_the_source_is_still_at_the_recorded_ba
     _validate_closeout_source_heads(contract)  # does not raise
 
 
+def test_r3_closeout_accepts_the_source_head_a_checkpoint_landed(tmp_path: Path) -> None:
+    """R3: a checkpoint moves the source branch itself, so its recorded head is an expected one.
+
+    A checkpointed contract is always a series contract, and the checkpoint records the commit
+    it moved the source branch to. Reading the expected heads as base-only made that very same
+    recorded move refuse as "source branch moved since task start" -- AR's own landing reported
+    as foreign movement. A source that moved anywhere else is still refused.
+    """
+
+    git, repo, base, candidate = _git_repo(tmp_path)
+    git(repo, "merge", "--no-ff", "-m", "land the checkpoint", "ar/task-one")
+    landed = git(repo, "rev-parse", "HEAD")
+    contract = _git_contract(
+        repo,
+        code_base_commit=base,
+        code_commit=candidate,
+        integration_status="checkpointed",
+        integrated_code_commit=landed,
+    )
+
+    _validate_closeout_source_heads(contract)  # does not raise
+
+
 def test_r3_closeout_refuses_when_the_source_branch_moved(tmp_path: Path) -> None:
     """R3: a source branch that is not the recorded base refuses closeout."""
 

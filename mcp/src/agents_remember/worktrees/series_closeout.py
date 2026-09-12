@@ -69,6 +69,43 @@ def publish_series_integration_under_authority[T](
     return publication()
 
 
+def publish_series_checkpoint_under_authority[T](
+    contract: WorktreeContract,
+    publication: Callable[[], T],
+) -> T:
+    """Hold the exact task/ref authority through one non-final master exit.
+
+    :func:`publish_series_integration_under_authority` proves the atomic master is a **finished
+    unit**: its task document is ``Completed`` and every canonical leaf has its own landed
+    enclosure. A master being paused has neither, so before this route existed a partial master had
+    no way to land its accumulated line at all.
+
+    This route keeps every authority that protects *other* owners' refs -- the series contract
+    binding, the atomic landing authority, the source-lineage proof, the replay/ff source-state gate
+    and the master-handover gate all still run in the caller -- and drops only the two assumptions
+    that the master is finished. It retires nothing: no cleanup runs, and the recorded state is
+    ``checkpointed`` rather than ``completed``.
+
+    A genuinely complete master is refused here and pointed at the final route, so a checkpoint can
+    never downgrade a finished integration to a weaker claim.
+    """
+
+    if contract.kind != "series":
+        raise RuntimeError("atomic series checkpoint authority requires a series contract")
+    topology = TaskDocumentTopology(contract.coordination_root)
+    master_ref = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
+    if topology.resolve(master_ref).document.status == "Completed":
+        raise CloseoutQueueError(
+            "atomic-series-checkpoint-master-complete",
+            "this atomic master is already Completed; land it with worktree_integrate, whose route "
+            "records a completed integration, rather than with the checkpoint route",
+        )
+    current = load_contract(contract.contract_path)
+    if current != contract:
+        raise RuntimeError("atomic series contract changed before protected landing")
+    return publication()
+
+
 def _require_every_atomic_leaf_landed(series: WorktreeContract) -> None:
     _exact_atomic_landing_chain(series)
 

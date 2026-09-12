@@ -14,7 +14,7 @@ was discarded.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from agents_remember.worktrees.worktree_contract import (
     ContractCells,
@@ -24,25 +24,45 @@ from agents_remember.worktrees.worktree_contract import (
 )
 
 
+@dataclass(frozen=True)
+class LandedIntegration:
+    """The facts one landing records: the route that performed it and the commits it moved."""
+
+    strategy: str
+    code_commit: str
+    memory_content_commit: str = ""
+    ledger_commit: str = ""
+
+
 def record_landed_integration(
     contract: WorktreeContract,
     *,
-    strategy: str,
-    code_commit: str,
-    memory_content_commit: str = "",
-    ledger_commit: str = "",
+    landed: LandedIntegration,
+    checkpoint: bool = False,
 ) -> WorktreeContract:
-    """Publish that this contract's code landed, and return the updated contract."""
+    """Publish that this contract's code landed, and return the updated contract.
 
+    ``checkpoint`` selects *how much* landed, and it is the only difference between a paused master
+    and a finished one. A checkpoint records ``checkpointed`` and deliberately leaves ``cleanup``
+    alone, because nothing is being reclaimed; the final landing records ``completed`` and marks
+    cleanup pending. Keeping both behind this one function is what stops the two routes drifting
+    into two different meanings of "landed".
+    """
+
+    cells = (
+        ContractCells(integration_status="checkpointed")
+        if checkpoint
+        else ContractCells(integration_status="completed", cleanup="pending")
+    )
     updated = amend_contract(
         replace(
             contract,
-            integration_strategy=strategy,
-            integrated_code_commit=code_commit,
-            integrated_memory_content_commit=memory_content_commit,
-            integrated_ledger_commit=ledger_commit,
+            integration_strategy=landed.strategy,
+            integrated_code_commit=landed.code_commit,
+            integrated_memory_content_commit=landed.memory_content_commit,
+            integrated_ledger_commit=landed.ledger_commit,
         ),
-        ContractCells(integration_status="completed", cleanup="pending"),
+        cells,
     )
     write_contract(contract.contract_path, updated)
     return updated

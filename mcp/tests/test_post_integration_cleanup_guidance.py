@@ -60,3 +60,27 @@ def test_the_cleanup_decision_is_no_longer_in_the_next_operation_vocabulary() ->
 
     assert "retry_cleanup" in get_args(NextOperation)
     assert "request_cleanup_decision" not in get_args(NextOperation)
+
+
+def test_a_checkpointed_series_keeps_working_instead_of_being_told_to_integrate(
+    tmp_path: Path,
+) -> None:
+    """A checkpoint lands the series without closing it, so its position is still working.
+
+    A checkpoint publishes the closeout edge while the series stays open. Without its own
+    branch the projection therefore read as closeout-done-and-awaiting-integration:
+    ``integration-pending`` with ``worktree_integrate``, the tool that refuses while the
+    series is open. The move out of a checkpoint is the single one the checkpoint lands into,
+    because the next thing that happens is the remaining work.
+    """
+
+    contract = replace(_integrated_contract(tmp_path), integration_status="checkpointed")
+
+    guidance = lifecycle_guidance(contract)
+
+    assert guidance["phase"] == "worktree-started"
+    assert guidance["nextOperation"] == "continue_work"
+    assert guidance.get("nextTool") == "worktree_status"
+    assert guidance.get("nextArgs", {})["contract_path"] == contract.contract_path.as_posix()
+    assert "checkpointed" in guidance["summary"]
+    assert "cleanup is deliberately not pending" in guidance["summary"]
