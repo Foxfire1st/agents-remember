@@ -53,7 +53,7 @@ NextOperation = Literal[
     "request_integration_decision",
     "developer_decision",
     "request_carryover_decision",
-    "retry_cleanup",
+    "finalize",
     "done",
 ]
 NextTool = Literal[
@@ -62,6 +62,7 @@ NextTool = Literal[
     "worktree_integrate",
     "memory_carryover_plan",
     "worktree_cleanup",
+    "lifecycle_finalize_task",
 ]
 SourceLineageState = Literal["current", "blocked", "unavailable"]
 SourceLineageEdgeState = Literal["current", "behind", "diverged", "unavailable"]

@@ -292,16 +292,17 @@ def _post_integration_phase(contract: WorktreeContract) -> LifecycleGuidance | N
         return {
             "phase": "cleanup-pending",
             "summary": (
-                "Carryover completed, but the automatic post-integration cleanup did not "
-                "complete. Read the integration result's cleanup report, clear the refusal, "
-                "then retry worktree_cleanup."
+                "The landing is complete; the remaining move is finalizing the task edge, "
+                "which reclaims the code and memory worktrees and reconciles the leaf document "
+                "and its master row."
             ),
             # surfaced onto EngineProcessNode.carryoverDoneAt for the dashboard (05m; 5k renders)
             "carryoverDoneAt": carryover_done_at,
             **next_guidance(
-                "retry_cleanup",
-                tool="worktree_cleanup",
+                "finalize",
+                tool="lifecycle_finalize_task",
                 args=contract_next_args(contract),
+                required_args=["contract_path"],
             ),
         }
     if contract.integration_status == "checkpointed":

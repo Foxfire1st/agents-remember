@@ -15,7 +15,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
@@ -29,7 +28,6 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     require_terminal_worktree,
 )
 from agents_remember.worktrees.integration.integration_ref_transaction import IntegratedCommits
-from agents_remember.worktrees.modules import integrate
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.integrate import _checkpoint_result
 from agents_remember.worktrees.modules.landing_record import (
@@ -215,20 +213,27 @@ class CheckpointResultTests(unittest.TestCase):
         reset_worktree_services()
 
     def test_checkpoint_result_publishes_without_running_cleanup(self) -> None:
-        # The other half of "retires nothing": the final route reclaims the worktrees and branches
-        # through ``run_automatic_cleanup``, and this route must not call it at all.
+        # "Retires nothing" is the property of every landing route now that reclamation belongs
+        # to ``lifecycle_finalize_task``, and the checkpoint is where it is easiest to lose: its
+        # payload goes through the ordinary status projection. ``cleanup`` is deliberately moved
+        # off its default first, so a route that reclaimed -- or merely rewrote the cell -- stays
+        # distinguishable from one that left the enclosure alone.
         with tempfile.TemporaryDirectory() as tmp:
             contract = _fixture(Path(tmp))
             commits = IntegratedCommits(code=_ANY_COMMIT, memory_content="", ledger="")
+            reopened = amend_contract(contract, ContractCells(cleanup="reopened"))
+            write_contract(contract.contract_path, reopened)
 
-            with mock.patch.object(integrate, "run_automatic_cleanup") as cleanup:
-                result = _checkpoint_result(contract, WorktreeArgs(strategy="ff-only"), commits)
+            result = _checkpoint_result(reopened, WorktreeArgs(strategy="ff-only"), commits)
 
-            cleanup.assert_not_called()
             self.assertEqual((result.returncode, result.payload["state"]), (0, "checkpointed"))
-            self.assertEqual(
-                load_contract(contract.contract_path).integration_status, "checkpointed"
-            )
+            # The ``cleanup`` key is the untouched contract cell, and no reclamation report was
+            # published beside it.
+            self.assertEqual(result.payload["cleanup"], "reopened")
+            self.assertNotIn("removed", result.payload)
+            stored = load_contract(contract.contract_path)
+            self.assertEqual(stored.integration_status, "checkpointed")
+            self.assertEqual(stored.cleanup, "reopened")
 
 
 class SeriesCheckpointAuthorityTests(unittest.TestCase):

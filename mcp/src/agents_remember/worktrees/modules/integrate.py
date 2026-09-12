@@ -35,7 +35,6 @@ from agents_remember.worktrees.integration.master_review_gate import (
     blocked_integration_payload,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
-from agents_remember.worktrees.modules.automatic_cleanup import run_automatic_cleanup
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     current_branch,
@@ -335,7 +334,10 @@ def _dry_run_result(
             "gateId": preview.guard.gate_id,
             "reason": preview.guard.reason,
         },
-        "cleanup_reminder": "On apply, the code and memory worktrees plus merged local task branches are cleaned up automatically.",
+        "cleanup_reminder": (
+            "On apply, the integration lands the refs; the code and memory worktrees are "
+            "reclaimed when the task edge is finalized."
+        ),
     }
     if preview.handover_warning is not None:
         payload["handover_gate_warning"] = preview.handover_warning
@@ -377,7 +379,7 @@ def _integrated_result(
     *,
     handover_warning: dict[str, object] | None,
 ) -> WorktreeCommandResult:
-    updated = record_landed_integration(
+    record_landed_integration(
         contract,
         landed=LandedIntegration(
             strategy=args.strategy,
@@ -386,20 +388,22 @@ def _integrated_result(
             ledger_commit=commits.ledger,
         ),
     )
-    # The developer ruling: a completed leaf is reclaimed by an automatic procedure, not by
-    # a prompt. Cleanup reuses the existing terminal procedure, including its refusal
-    # authority; its outcome is reported here and never fails the landing that preceded it.
-    cleanup = run_automatic_cleanup(updated)
+    # Landing publishes the integration cell and stops there. Reclamation belongs to
+    # ``lifecycle_finalize_task``, which runs the same terminal cleanup procedure and then
+    # reconciles the leaf document and its master row; doing it here would complete the
+    # enclosure before the edge that is supposed to finalize it could ever be reached.
     observed = load_contract(contract.contract_path)
     payload: dict[str, object] = {
         "state": "integrated",
         **status_payload(observed),
-        "summary": f"Integration completed. {cleanup['summary']}",
+        "summary": (
+            "Integration completed; the refs are landed and the code and memory worktrees "
+            "are reclaimed when the task edge is finalized."
+        ),
         "strategy": args.strategy,
         "integrated_code_commit": commits.code,
         "integrated_memory_content_commit": commits.memory_content,
         "integrated_ledger_commit": commits.ledger,
-        "cleanup": cleanup,
     }
     if handover_warning is not None:
         payload["handover_gate_warning"] = handover_warning
@@ -679,9 +683,10 @@ def _checkpoint_result(
     """Record a non-final landing and reclaim nothing.
 
     The difference from :func:`_integrated_result` is the whole feature: this writes
-    ``checkpointed`` rather than ``completed`` and does **not** run the automatic cleanup, so the
-    master keeps its worktrees, its branches and its enclosure, and the integration cell never
-    claims a completion that has not happened.
+    ``checkpointed`` rather than ``completed``, so the integration cell never claims a
+    completion that has not happened and the master keeps its worktrees, its branches and its
+    enclosure. Reclamation is not part of either landing route -- ``lifecycle_finalize_task``
+    owns it, and a paused master is never finalized.
     """
 
     updated = record_landed_integration(

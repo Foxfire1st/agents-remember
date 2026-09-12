@@ -1,9 +1,12 @@
-"""Cleanup after integration is automatic, and the published projection says so.
+"""Reclamation is automatic and unprompted, and the published projection names its owner.
 
-Integration used to end by asking the developer whether to remove the worktrees. The
-projection must not keep describing that decision once the procedure runs itself: a contract
-whose cleanup did not complete is a recovery, and the move it offers is the retry, addressed
-to the same tool the automatic path already calls.
+Integration used to end by asking the developer whether to remove the worktrees, and the
+projection used to describe the procedure that replaced that prompt. It now describes the
+procedure that owns it: a contract whose landing completed but whose enclosures still stand is
+the moment before the terminal edge, so the move it offers is ``lifecycle_finalize_task`` --
+the route that reclaims the code and memory worktrees and reconciles the leaf document and its
+master row. Reclamation is still automatic and never a question; what changed is which
+procedure reaches it.
 """
 
 from __future__ import annotations
@@ -42,23 +45,38 @@ def _integrated_contract(root: Path) -> WorktreeContract:
     )
 
 
-def test_a_pending_cleanup_offers_a_retry_and_never_a_cleanup_decision(tmp_path: Path) -> None:
+def test_a_pending_cleanup_offers_finalization_and_never_a_cleanup_decision(
+    tmp_path: Path,
+) -> None:
     contract = replace(_integrated_contract(tmp_path))
 
     guidance = lifecycle_guidance(contract)
 
     assert guidance["phase"] == "cleanup-pending"
-    assert guidance["nextOperation"] == "retry_cleanup"
-    assert guidance.get("nextTool") == "worktree_cleanup"
+    assert guidance["nextOperation"] == "finalize"
+    assert guidance.get("nextTool") == "lifecycle_finalize_task"
     assert guidance.get("nextArgs", {})["contract_path"] == contract.contract_path.as_posix()
-    assert "automatic" in guidance["summary"]
-    assert "retry worktree_cleanup" in guidance["summary"]
+    # ``lifecycle_finalize_task`` is addressed by contract, so the projection must say so or an
+    # operator is told to call a tool without the one argument that names the edge.
+    assert guidance.get("nextRequiredArgs") == ["contract_path"]
+    assert "finalizing the task edge" in guidance["summary"]
+    assert "reclaims the code and memory worktrees" in guidance["summary"]
+    assert "worktree_cleanup" not in guidance["summary"]
 
 
 def test_the_cleanup_decision_is_no_longer_in_the_next_operation_vocabulary() -> None:
-    """The vocabulary outgrew its writer when the prompt was removed; the member is gone."""
+    """Both cleanup moves are gone from the vocabulary, not parked beside their replacement.
 
-    assert "retry_cleanup" in get_args(NextOperation)
+    ``request_cleanup_decision`` was the prompt this lane deleted. ``retry_cleanup`` was only
+    ever written by the pending-cleanup phase, and that phase now offers ``finalize`` -- so the
+    member has no writer left and is removed rather than kept as a nameable operation no
+    procedure can produce.
+    """
+
+    assert "retry_cleanup" not in get_args(NextOperation)
+    # The move that replaced the retry as the normal path has to be nameable, or the phase
+    # above could not describe it at all.
+    assert "finalize" in get_args(NextOperation)
     assert "request_cleanup_decision" not in get_args(NextOperation)
 
 
