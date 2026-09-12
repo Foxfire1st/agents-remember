@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from agents_remember.kernel.coordination_context.models import MemoryMode
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
@@ -24,6 +24,7 @@ from agents_remember.models.structural.atomic_series_activation import (
     AtomicSeriesSourcePair,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 
 # Worktree wire vocabulary (moved from worktrees.worktree_contract / modules.guidance).
 WorkflowKind = Literal["chat-task", "light-task"]
@@ -322,6 +323,50 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     admission: AtomicSeriesAdmission | None = None
     retryPrecondition: str | None = Field(default=None, max_length=8192)
     statusAction: AtomicSeriesAdmissionStatusAction | None = None
+
+    # The next-move triple, declared here so the worktree surface's guidance is part of
+    # its own contract instead of an unchecked extra. `WorktreeStatusResponse` inherits
+    # these; `WorktreeSyncResponse` and `WorktreeOperationControlResponse` narrow
+    # `nextTool` further, exactly as they did before.
+    nextAction: str | None = None
+    nextTool: str | None = None
+    nextArgs: dict[str, Any] | None = None
+
+    # The worktree surface's rule: a next move names a *registered public* tool, because
+    # these values are advertised guidance an agent is meant to act on and the roster is
+    # the already-enforced authority for what the agent can actually call. The rule is
+    # deliberately per surface, not global: the `task_doc` surface may name a non-public
+    # tool (see the boundary note below), so this is not an inconsistency to flatten.
+    #
+    # Complete producer survey behind the invariant (union of 20 values, each traced to
+    # its producer): NextTool and RecoveryTool literals (models/worktree.py,
+    # worktrees/modules/guidance.py); SourceLineageRecovery.tool; TerminalCleanupOperation;
+    # route_review.inspection_tool; the narrowed `nextTool` on WorktreeSyncResponse and
+    # WorktreeOperationControlResponse; the `legal_operation_controls` row `tool` values
+    # (lifecycle_operation_control_projection.py); the terminal_enclosure_archive refusals;
+    # the task_unstarted_evidence `RecoveryRoute` tools; and the remaining direct literals
+    # in worktrees/modules/{integrate,start}.py, worktrees/task_leaf_binding.py,
+    # application/worktree_tools.py, application/next_step.py and models/base.py.
+    # Every one is in PUBLIC_TOOLS except `session_retire`, which cannot reach this field.
+    #
+    # BOUNDARY -- `session_retire` is a registered but deliberately NON-PUBLIC tool
+    # (models/tools/tool_registry.py registers it with SessionRetireResponse; it is absent
+    # from mcp/tools/base.PUBLIC_TOOLS by design). It is reachable only as the `task_doc`
+    # payload's top-level `nextTool` and inside its nested `discardEvidence`, and
+    # `TaskDocResponse` is not a `WorktreeCommandResponse`, so this invariant does not
+    # apply to it. Do not "fix" that by widening PUBLIC_TOOLS to cover a non-public tool.
+    @field_validator("nextTool")
+    @classmethod
+    def _require_registered_public_next_tool(cls, value: str | None) -> str | None:
+        """Refuse a next move that names a tool the public roster does not advertise."""
+
+        if value is None:
+            return value
+        if value not in PUBLIC_TOOLS:
+            raise ValueError(
+                f"nextTool must name a registered public tool; {value!r} is not in PUBLIC_TOOLS"
+            )
+        return value
 
 
 class WorktreeStartResponse(WorktreeCommandResponse):

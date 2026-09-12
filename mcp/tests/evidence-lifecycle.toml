@@ -326,6 +326,7 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
+  "mcp/tests/test_worktree_status_terminal_next_tool.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
 ]
@@ -377,6 +378,7 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
+  "mcp/tests/test_worktree_status_terminal_next_tool.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
 ]
@@ -452,6 +454,7 @@ replacement_contract = "node:mcp/tests/test_task_reopen.py::ReopenResetTests::te
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_worktree_status_terminal_next_tool.py",
 ]
 
 [[artifact]]
