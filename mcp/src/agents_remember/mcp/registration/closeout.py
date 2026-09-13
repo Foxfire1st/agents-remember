@@ -187,12 +187,14 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
     ) -> dict[str, Any]:
         """Land an UNFINISHED atomic master's accumulated line into its super branch and keep the
         master open. Use this to pause a master: worktree_integrate refuses a partial master because
-        it proves a finished unit (task document Completed, one landed enclosure per canonical leaf),
-        and a paused master has neither, so this route shares that route's whole preflight and ref
-        move and drops only those two completion assumptions. It records the integration cell as
-        'checkpointed' rather than 'completed', retires nothing, and runs no cleanup, so the master's
-        worktrees, branches and enclosure survive for the work that continues. MUTATING: moves branch
-        refs; preview with dry_run=true."""
+        it proves a finished unit (task document Completed, one landed enclosure per canonical leaf,
+        and a completed closeout), and a paused master has none of those. This captures the master's
+        own committed refs instead -- the live series code work branch tip and the live memory work
+        branch tip -- proves the existing ledger maps the code ref, and lands exactly those. It
+        shares the final route's whole preflight and ref move, requires the same explicit developer
+        approval, records the integration cell as 'checkpointed' rather than 'completed', retires
+        nothing and runs no cleanup, so the master's worktrees, branches and enclosure survive for
+        the work that continues. MUTATING: moves branch refs; preview with dry_run=true."""
         return worktree_checkpoint_landing_payload(
             config,
             contract_path,

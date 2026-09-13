@@ -36,6 +36,8 @@ from agents_remember.worktrees.modules.landing_record import (
 )
 from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
 from agents_remember.worktrees.series_closeout import (
+    SeriesCheckpointRefs,
+    capture_series_checkpoint_refs,
     publish_series_checkpoint_under_authority,
     publish_series_integration_under_authority,
 )
@@ -239,13 +241,20 @@ class CheckpointResultTests(unittest.TestCase):
 class SeriesCheckpointAuthorityTests(unittest.TestCase):
     def test_checkpoint_refuses_a_completed_master(self) -> None:
         # A finished integration must never be downgraded to the weaker ``checkpointed`` claim.
+        # The captured candidate is supplied honestly (``capture_series_checkpoint_refs`` is the
+        # route's own live capture) because publication now requires it: the master-complete
+        # refusal must be the reason this refuses, not a missing argument.
         with tempfile.TemporaryDirectory() as tmp:
             contract = _fixture(Path(tmp))
             _set_master(contract, status="Completed", row_status="Completed")
             published: list[bool] = []
 
             with self.assertRaises(CloseoutQueueError) as raised:
-                publish_series_checkpoint_under_authority(contract, lambda: published.append(True))
+                publish_series_checkpoint_under_authority(
+                    contract,
+                    lambda: published.append(True),
+                    capture_series_checkpoint_refs(contract),
+                )
 
             self.assertEqual(raised.exception.status, "atomic-series-checkpoint-master-complete")
             self.assertEqual(published, [])
@@ -255,6 +264,9 @@ class SeriesCheckpointAuthorityTests(unittest.TestCase):
         # ``task_root/enclosures`` directory at all, so this also proves the checkpoint route
         # consults neither completion blockers nor the leaf-enclosure census: the final route
         # refuses this very contract for exactly those reasons.
+
+        # The candidate is the route's own live capture, which is what makes this a real
+        # publication rather than a call that skipped revalidation.
         with tempfile.TemporaryDirectory() as tmp:
             contract = _fixture(Path(tmp))
             self.assertFalse((contract.task_root / "enclosures").exists())
@@ -268,10 +280,29 @@ class SeriesCheckpointAuthorityTests(unittest.TestCase):
                 published.append("called")
                 return "published"
 
-            result = publish_series_checkpoint_under_authority(contract, publish)
+            result = publish_series_checkpoint_under_authority(
+                contract, publish, capture_series_checkpoint_refs(contract)
+            )
 
             self.assertEqual(published, ["called"])
             self.assertEqual(result, "published")
+
+    def test_publication_refuses_a_candidate_that_moved_after_its_capture(self) -> None:
+        # The preflight captures the live refs once; publication re-reads them and refuses when
+        # they are no longer the ones it admitted. Without this the route would land a pair the
+        # preview never showed, which is the one thing a preview/apply pair must never do.
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = _fixture(Path(tmp))
+            stale = SeriesCheckpointRefs(code_commit=_ANY_COMMIT)
+            published: list[str] = []
+
+            with self.assertRaises(CloseoutQueueError) as raised:
+                publish_series_checkpoint_under_authority(
+                    contract, lambda: published.append("called"), stale
+                )
+
+            self.assertEqual(raised.exception.status, "atomic-series-checkpoint-candidate-moved")
+            self.assertEqual(published, [])
 
 
 class SeriesAbandonGuardTests(unittest.TestCase):

@@ -435,12 +435,16 @@ def worktree_checkpoint_landing_tool(
     """Land an unfinished atomic master's accumulated line into its super branch.
 
     ``worktree_integrate`` closes a finished master: it proves the master's task document is
-    ``Completed`` and that every canonical leaf owns a landed enclosure. A master being paused has
-    neither, so before this route a partial master could not land at all. This shares that route's
-    entire preflight and ref move -- the series contract binding, the atomic landing authority, the
-    replay/ff source-state gate, the lineage proof and the master-handover gate -- and drops only the
-    two assumptions that the master is finished. It records ``checkpointed`` rather than
-    ``completed`` and retires nothing.
+    ``Completed``, that every canonical leaf owns a landed enclosure, and that the master has
+    closed out. A master being paused has none of those, so before this route a partial master
+    could not land at all. This captures the master's own committed refs instead -- the live series
+    code work branch tip and the live memory work branch tip -- proves the existing ledger maps the
+    code ref, and lands exactly those. It shares the final route's entire preflight and ref move --
+    the series contract binding, the atomic landing authority, the replay/ff source-state gate, the
+    lineage proof, the master-handover gate and the compare-and-swap -- and requires the same
+    explicit developer approval (``dry_run=False``). It records ``checkpointed`` rather than
+    ``completed`` and retires nothing, so the master keeps its worktrees, its branches and its
+    enclosure for the work that continues.
     """
 
     configured = admit_configured_contract(config, contract_path)

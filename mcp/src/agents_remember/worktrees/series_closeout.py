@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.memory_ledger import LedgerRow, find_mapping, parse_ledger_text
@@ -30,23 +31,43 @@ from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 
-def publish_closeout_under_authority[T](
-    contract: WorktreeContract, publication: Callable[[], T]
-) -> T:
-    """Re-prove atomic completion before closeout publication.
+def require_closeout_publication_authority(contract: WorktreeContract) -> None:
+    """Prove the atomic-completion facts a closeout publication owes, before anything is committed.
 
-    Closeout does not move a protected integration ref, so it must not acquire
-    the landing-only integration authority lock.
+    ONE evaluation, read by BOTH surfaces: the dry run calls it from
+    :func:`~agents_remember.worktrees.modules.closeout.closeout_preview_payload` and the apply from
+    :func:`publish_closeout_under_authority`, so a preview cannot answer ``would-closeout`` for a
+    series the apply will refuse. That gate used to exist only behind the apply, which is why a
+    partial master's preview promised a closeout that then refused on every completion blocker --
+    the misleading plan that started this repair.
+
+    A leaf owes nothing here: :func:`publish_closeout_under_authority` returns straight to its
+    publication for a leaf, and this keeps exactly that shape, so no leaf closeout preview changes.
+
+    Closeout does not move a protected integration ref, so it must not acquire the landing-only
+    integration authority lock.
     """
 
     if contract.kind == "leaf":
-        return publication()
+        return
     if contract.kind != "series":
         raise RuntimeError("atomic series closeout authority requires a series contract")
     topology = TaskDocumentTopology(contract.coordination_root)
     master_ref = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
     _require_atomic_master_complete(topology, master_ref)
     _require_every_atomic_leaf_landed(contract)
+
+
+def publish_closeout_under_authority[T](
+    contract: WorktreeContract, publication: Callable[[], T]
+) -> T:
+    """Re-prove atomic completion before closeout publication.
+
+    The same evaluation the dry run reads, so the preview and the apply cannot disagree about
+    whether this contract may be closed out at all.
+    """
+
+    require_closeout_publication_authority(contract)
     return publication()
 
 
@@ -69,9 +90,78 @@ def publish_series_integration_under_authority[T](
     return publication()
 
 
+@dataclass(frozen=True)
+class SeriesCheckpointRefs:
+    """One live capture of the exact refs an unfinished master's checkpoint would land.
+
+    The checkpoint owns its candidate: nothing here is read from the contract's closeout cells,
+    because a master being paused may never have been closed out at all.
+    """
+
+    code_commit: str
+    memory_content_commit: str = ""
+    ledger_commit: str = ""
+
+
+def capture_series_checkpoint_refs(contract: WorktreeContract) -> SeriesCheckpointRefs:
+    """Read the live series refs and prove the existing ledger maps the code ref.
+
+    The code ref is the live ``code_work_branch`` tip and the memory ref is the live
+    ``memory_work_branch`` tip -- captured, never inherited from a stale contract cell. The
+    code-to-memory mapping is proved by :func:`exact_series_memory_closeout`, the same reader the
+    final series closeout uses, so the two routes cannot drift into two definitions of "the ledger
+    maps this code".
+
+    A capture that cannot prove the mapping raises, which is what makes "the refs are recorded only
+    once their ledger mapping holds" a property of the value rather than a separate check a caller
+    could skip.
+    """
+
+    if contract.kind != "series":
+        raise RuntimeError("atomic series checkpoint capture requires a series contract")
+    code_commit = branch_commit(contract.code_repo_path, contract.code_work_branch)
+    if not code_commit:
+        raise CloseoutQueueError(
+            "atomic-series-checkpoint-no-code-ref",
+            f"the atomic series code work branch {contract.code_work_branch!r} does not resolve, so "
+            "there is no accumulated line to checkpoint",
+        )
+    if contract.memory_mode != "external":
+        return SeriesCheckpointRefs(code_commit=code_commit)
+    memory = exact_series_memory_closeout(contract, code_commit)
+    return SeriesCheckpointRefs(
+        code_commit=code_commit,
+        memory_content_commit=memory.memory_commit,
+        ledger_commit=memory.ledger_commit,
+    )
+
+
+def require_series_checkpoint_authority(contract: WorktreeContract) -> None:
+    """Refuse a checkpoint whose master is already a finished unit.
+
+    One definition, two callers, and both are needed: the checkpoint's preflight evaluates it so
+    the dry-run preview and the apply refuse identically and for the same named reason, and
+    publication re-evaluates it so a master that completes *between* preflight and the ref move
+    is refused there too. A checkpoint may never downgrade a finished integration to a weaker
+    claim.
+    """
+
+    if contract.kind != "series":
+        raise RuntimeError("atomic series checkpoint authority requires a series contract")
+    topology = TaskDocumentTopology(contract.coordination_root)
+    master_ref = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
+    if topology.resolve(master_ref).document.status == "Completed":
+        raise CloseoutQueueError(
+            "atomic-series-checkpoint-master-complete",
+            "this atomic master is already Completed; land it with worktree_integrate, whose route "
+            "records a completed integration, rather than with the checkpoint route",
+        )
+
+
 def publish_series_checkpoint_under_authority[T](
     contract: WorktreeContract,
     publication: Callable[[], T],
+    expected: SeriesCheckpointRefs,
 ) -> T:
     """Hold the exact task/ref authority through one non-final master exit.
 
@@ -86,24 +176,37 @@ def publish_series_checkpoint_under_authority[T](
     that the master is finished. It retires nothing: no cleanup runs, and the recorded state is
     ``checkpointed`` rather than ``completed``.
 
-    A genuinely complete master is refused here and pointed at the final route, so a checkpoint can
-    never downgrade a finished integration to a weaker claim.
+    ``expected`` is **required, never defaulted**, and it is the refs the checkpoint captured at
+    preflight. Revalidating that candidate is the entire reason this route exists, so a default
+    would be a fail-open hole in exactly the repair it was written for: an omitted argument would
+    silently admit whatever the live refs happened to be, i.e. a pair the preview never showed.
+    Revalidation re-reads the live refs and re-proves their ledger mapping here, immediately before
+    the irreversible ref move, so a candidate that moved in between refuses instead of landing.
     """
 
-    if contract.kind != "series":
-        raise RuntimeError("atomic series checkpoint authority requires a series contract")
-    topology = TaskDocumentTopology(contract.coordination_root)
-    master_ref = topology.canonical_ref(contract.repo_name, contract.task_root / "task.json")
-    if topology.resolve(master_ref).document.status == "Completed":
-        raise CloseoutQueueError(
-            "atomic-series-checkpoint-master-complete",
-            "this atomic master is already Completed; land it with worktree_integrate, whose route "
-            "records a completed integration, rather than with the checkpoint route",
-        )
+    require_series_checkpoint_authority(contract)
     current = load_contract(contract.contract_path)
     if current != contract:
         raise RuntimeError("atomic series contract changed before protected landing")
+    _require_checkpoint_candidate_unchanged(current, expected)
     return publication()
+
+
+def _require_checkpoint_candidate_unchanged(
+    contract: WorktreeContract, expected: SeriesCheckpointRefs
+) -> None:
+    """Re-prove the captured candidate against the live refs at the protected boundary."""
+
+    live = capture_series_checkpoint_refs(contract)
+    if live != expected:
+        raise CloseoutQueueError(
+            "atomic-series-checkpoint-candidate-moved",
+            "the atomic series candidate refs moved after this checkpoint captured them: captured "
+            f"code={expected.code_commit} ledger={expected.ledger_commit}, live "
+            f"code={live.code_commit} ledger={live.ledger_commit}. Re-run "
+            "worktree_checkpoint_landing so the new refs are captured and their ledger mapping "
+            "proved before they land",
+        )
 
 
 def _require_every_atomic_leaf_landed(series: WorktreeContract) -> None:

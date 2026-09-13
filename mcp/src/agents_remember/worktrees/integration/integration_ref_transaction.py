@@ -90,6 +90,23 @@ class IntegrationRefSnapshot:
 
 
 @dataclass(frozen=True)
+class LandingAdmission:
+    """The route-specific facts one landing admits before it moves a protected ref.
+
+    The final series route admits a *finished* master: its output must equal the closeout candidate
+    the contract records, and its ledger must carry the exact ordered leaf landing prefix. The
+    checkpoint route admits a *paused* master, which has neither a closeout cell nor a completed
+    leaf chain: its output must equal the candidate its own live capture proved, and its ledger is
+    proven as the projection of its own source and its own true mappings. Every other refusing read
+    on this path is identical for both routes, so the difference lives here as data rather than as
+    a second copy of the transaction.
+    """
+
+    expected_series_ledger_prefix: tuple[LedgerRow, ...] = ()
+    checkpoint_candidate: IntegratedCommits | None = None
+
+
+@dataclass(frozen=True)
 class CheckoutRefresh:
     """One exact landed checkout transition recovered under immutable authority."""
 
@@ -104,17 +121,12 @@ def prepare_integration_ref_move(
     args: WorktreeArgs,
     sources: IntegrationSources,
     *,
-    expected_series_ledger_prefix: tuple[LedgerRow, ...] = (),
+    admission: LandingAdmission | None = None,
 ) -> IntegrationRefSnapshot:
     """Perform every refusing read before the lifecycle marks the move irreversible."""
 
-    require_authorized_integration_commits(
-        contract,
-        args,
-        code_commit=commits.code,
-        memory_content_commit=commits.memory_content,
-        ledger_commit=commits.ledger,
-    )
+    admitted = admission or LandingAdmission()
+    _require_landing_output_authority(contract, args, commits, admitted)
     targets = {target.side: target for target in integration_targets(contract)}
     code_target = targets["code"]
     external = contract.memory_mode == "external"
@@ -143,7 +155,8 @@ def prepare_integration_ref_move(
             contract,
             commits,
             memory_source_commit=memory_head_before,
-            expected_series_prefix=expected_series_ledger_prefix,
+            expected_series_prefix=admitted.expected_series_ledger_prefix,
+            checkpoint=admitted.checkpoint_candidate is not None,
         )
 
     _require_clean_branch_checkout(contract.code_repo_path, code_target.branch, code_head_before)
@@ -272,6 +285,7 @@ def require_integrated_ledger_mapping(
     *,
     memory_source_commit: str,
     expected_series_prefix: tuple[LedgerRow, ...] = (),
+    checkpoint: bool = False,
 ) -> None:
     if contract.kind not in {"leaf", "series"}:
         raise RuntimeError("integrated memory ledger requires a leaf or series contract")
@@ -296,7 +310,7 @@ def require_integrated_ledger_mapping(
         ledger,
         source_ledger,
         expected_series_prefix,
-        _LedgerLanding(commits.ledger, memory_source_commit),
+        _LedgerLanding(commits.ledger, memory_source_commit, checkpoint),
     )
     if not is_ancestor(contract.memory_repo_path, commits.memory_content, commits.ledger):
         raise RuntimeError(
@@ -314,10 +328,17 @@ def require_integrated_ledger_mapping(
 
 @dataclass(frozen=True)
 class _LedgerLanding:
-    """The landed ledger commit and the exact memory source it must be based on."""
+    """The landed ledger commit, the exact memory source it must be based on, and its shape.
+
+    ``checkpoint`` names which history proof this landing owes: the leaf-chain prefix a *finished*
+    series must carry, or the projection a paused master must be. It travels with the landing
+    facts rather than beside them, because it is a property of the landing, not a flag on the
+    ledger.
+    """
 
     ledger_commit: str
     memory_source_commit: str
+    checkpoint: bool = False
 
 
 def _require_preserved_ledger_history(
@@ -342,9 +363,16 @@ def _require_preserved_ledger_history(
 
     The check is not redundant with closeout computing the ledger, so it is not deleted: it is
     the only thing standing between a post-closeout hand edit and a protected-ref landing.
+
+    A *series* landing takes the leaf-chain-prefix form, because a finished master's ledger is
+    exactly its ordered leaf landing prefix ahead of the source rows. A checkpoint of a master
+    that is still open has no complete leaf chain to prefix against -- that census is one of the
+    completion facts its route deliberately does not require -- so it takes the same projection
+    form a leaf uses. That is a smaller promise, not a dropped one: the rows are still recomputed
+    from the world and a hand-edited table is still refused.
     """
 
-    if contract.kind == "series":
+    if contract.kind == "series" and not landing.checkpoint:
         if expected_series_prefix and ledger.rows == [
             *expected_series_prefix,
             *source_ledger.rows,
@@ -367,6 +395,40 @@ def _require_preserved_ledger_history(
     if projection.is_fixed_point:
         return
     raise RuntimeError(_ledger_projection_refusal(projection, landing.memory_source_commit))
+
+
+def _require_landing_output_authority(
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    commits: IntegratedCommits,
+    admission: LandingAdmission,
+) -> None:
+    """Prove the commits about to land are the ones this route is entitled to land.
+
+    The final routes land the closeout candidate recorded on the contract: that cell is a
+    completion fact, and :func:`require_authorized_integration_commits` refuses a replay whose
+    output is not it.
+
+    The checkpoint route has no such cell -- an unfinished master was never closed out -- so its
+    output is authorized by its own capture instead, which is re-proved against the live refs by
+    :func:`~agents_remember.worktrees.series_closeout.publish_series_checkpoint_under_authority`
+    immediately before this call. This function only refuses a landing whose output is not the
+    candidate that was admitted, so the two halves cannot drift apart.
+    """
+
+    if admission.checkpoint_candidate is None:
+        require_authorized_integration_commits(
+            contract,
+            args,
+            code_commit=commits.code,
+            memory_content_commit=commits.memory_content,
+            ledger_commit=commits.ledger,
+        )
+        return
+    if commits != admission.checkpoint_candidate:
+        raise RuntimeError(
+            "checkpoint landing output is not the exact candidate its live capture proved"
+        )
 
 
 def _ledger_projection_refusal(projection, memory_source_commit: str) -> str:

@@ -61,6 +61,13 @@ NextTool = Literal[
     "worktree_status",
     "worktree_closeout_apply",
     "worktree_integrate",
+    # The checkpoint's apply call. It is a registered public worktree tool and an approval-gated
+    # protected-ref landing, so the same `request_integration_decision` intent that carries a
+    # finished master to `worktree_integrate` carries a paused one here. The operation vocabulary
+    # is deliberately NOT widened for it: pausing a master is an integration decision, and adding
+    # a member to `NextOperation` would put a non-phase value into the set `WorktreeSummary` and
+    # the context packet claim.
+    "worktree_checkpoint_landing",
     "memory_carryover_plan",
     "worktree_cleanup",
     "lifecycle_finalize_task",
