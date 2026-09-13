@@ -95,7 +95,7 @@ class SeriesCheckpointRefs:
     """One live capture of the exact refs an unfinished master's checkpoint would land.
 
     The checkpoint owns its candidate: nothing here is read from the contract's closeout cells,
-    because a master being paused may never have been closed out at all.
+    because a master landed before completion may never have been closed out at all.
     """
 
     code_commit: str
@@ -167,7 +167,7 @@ def publish_series_checkpoint_under_authority[T](
 
     :func:`publish_series_integration_under_authority` proves the atomic master is a **finished
     unit**: its task document is ``Completed`` and every canonical leaf has its own landed
-    enclosure. A master being paused has neither, so before this route existed a partial master had
+    enclosure. A master landed before completion has neither, so before this route existed a partial master had
     no way to land its accumulated line at all.
 
     This route keeps every authority that protects *other* owners' refs -- the series contract

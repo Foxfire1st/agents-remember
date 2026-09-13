@@ -42,7 +42,7 @@ def record_landed_integration(
 ) -> WorktreeContract:
     """Publish that this contract's code landed, and return the updated contract.
 
-    ``checkpoint`` selects *how much* landed, and it is the only difference between a paused master
+    ``checkpoint`` selects *how much* landed, and it is the only difference between an unfinished master
     and a finished one. A checkpoint records ``checkpointed`` and deliberately leaves ``cleanup``
     alone, because nothing is being reclaimed; the final landing records ``completed`` and marks
     cleanup pending. Keeping both behind this one function is what stops the two routes drifting

@@ -129,6 +129,7 @@ class LedgerProjection:
     removals: tuple[LedgerRowRemoval, ...]
     missing_source_rows: tuple[LedgerRow, ...]
     reordered_rows: tuple[LedgerRow, ...]
+    observed_source_rows: tuple[LedgerRow, ...]
     header_before: tuple[str, str]
     header_after: tuple[str, str]
 
@@ -142,6 +143,39 @@ class LedgerProjection:
         """
 
         return not self.rows_differ and not self.header_changed
+
+    @property
+    def is_interleaved_projection(self) -> bool:
+        """Whether the observed table is this projection with its own rows placed elsewhere.
+
+        A master's ledger does not arrive the way a leaf's does. A leaf's closeout *writes* the
+        table, so its own mappings stand above the source rows by construction. A master's line
+        instead accumulates one closeout per leaf and can absorb its own source through a merge:
+        LOCR's took the IAS line in three times, and because both sides had prepended a row to
+        the same table the merge conflicted, so the union that resolved it holds the two sides'
+        rows interleaved rather than stacked.
+
+        The content promise is untouched by that placement, and this is the weaker question a
+        caller asks when it lands the ledger it captured instead of rewriting it: the rows are
+        exactly the projection's -- none added, dropped, replaced, duplicated or untrue -- and
+        the source rows still stand in source order, with only where the branch's own rows sit
+        left to the merge.
+
+        Order is not otherwise free, because a reader resolves a code commit to the FIRST row that
+        names it. Two rows for one code commit are normal -- a later closeout supersedes an earlier
+        mapping without deleting it -- so a merge that moved the older one up would republish it as
+        current, and nothing downstream would say so. The accepted table therefore resolves every
+        code commit to the same memory commit the projection does; the header check is that same
+        promise for the one row it names.
+        """
+
+        return (
+            not self.added_rows
+            and not self.removed_rows
+            and not self.header_changed
+            and self.observed_source_rows == self.source_rows
+            and _current_mappings(self.observed_rows) == _current_mappings(self.projected_rows)
+        )
 
     @property
     def rows_differ(self) -> bool:
@@ -417,6 +451,7 @@ def project_ledger(
         removals=tuple(removals),
         missing_source_rows=tuple(row for row in source_rows if row not in observed_set),
         reordered_rows=tuple(_reordered_rows(observed.rows, projected_rows)),
+        observed_source_rows=tuple(row for row in observed.rows if row in source_set),
         header_before=(
             observed.last_verified_code_commit,
             observed.last_memory_content_commit,
@@ -489,6 +524,21 @@ def _newest_first(world: LedgerWorld, rows: Sequence[LedgerRow]) -> list[LedgerR
                 break
         ordered.insert(position, row)
     return ordered
+
+
+def _current_mappings(rows: Sequence[LedgerRow]) -> dict[str, str]:
+    """What each code commit actually resolves to, for every code commit the table names.
+
+    ``find_mapping`` returns the FIRST row naming a code commit, so the table's order decides which
+    memory commit that code commit is current for. Two rows for one code commit are legitimate -- a
+    later closeout supersedes an earlier mapping without deleting it -- which is exactly why the
+    relative order of such a pair is a content promise rather than a cosmetic one.
+    """
+
+    current: dict[str, str] = {}
+    for row in rows:
+        current.setdefault(row.code_commit, row.memory_commit)
+    return current
 
 
 def _multiset_difference(left: Sequence[LedgerRow], right: Sequence[LedgerRow]) -> list[LedgerRow]:

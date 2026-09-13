@@ -90,6 +90,11 @@ def test_a_checkpointed_series_keeps_working_instead_of_being_told_to_integrate(
     ``integration-pending`` with ``worktree_integrate``, the tool that refuses while the
     series is open. The move out of a checkpoint is the single one the checkpoint lands into,
     because the next thing that happens is the remaining work.
+
+    This is a LANDING and not a pause, and the assertion on ``continue_work`` is what keeps
+    that true: pausing is a separate operation that releases the master's atomic-series
+    selection and moves no ref, so it must never be what a landed checkpoint reports. Reading
+    this branch as the pause's next move is the hidden side effect the split exists to prevent.
     """
 
     contract = replace(_integrated_contract(tmp_path), integration_status="checkpointed")

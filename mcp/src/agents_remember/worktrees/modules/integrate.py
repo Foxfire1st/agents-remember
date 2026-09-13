@@ -149,9 +149,28 @@ def unmatched_handover_gate_warning(
     }
 
 
+def _unclosed_integration_refusal(contract: WorktreeContract) -> str:
+    """The refusal an unclosed task meets, and the route an unfinished master can take instead.
+
+    A leaf has exactly one way to be integrated and this is its prerequisite, so naming an
+    alternative would repeat the defect this leaf fixed in the ledger refusal's remedy: a message
+    that points at something the caller cannot run. A SERIES has a second verb --
+    ``worktree_checkpoint_landing`` lands the accumulated line and leaves the master open -- so the
+    operator who reaches for the obvious one is told about the one that works.
+    """
+
+    refusal = "integration requires closeout.status completed"
+    if contract.kind == "series":
+        return (
+            f"{refusal}; a master that is still open can instead be landed with "
+            "worktree_checkpoint_landing, which checkpoints it without closing it out"
+        )
+    return refusal
+
+
 def validate_integrate_contract(contract: WorktreeContract) -> None:
     if contract.closeout_status != "completed":
-        raise RuntimeError("integration requires closeout.status completed")
+        raise RuntimeError(_unclosed_integration_refusal(contract))
     if not contract.approved_for_commit:
         raise RuntimeError("integration requires approved closeout")
     if not contract.code_commit:
@@ -273,7 +292,7 @@ def _replay_requirements(
 
     The candidate is a parameter, not a contract read: the routes differ in *where* their
     candidate comes from (the closeout cell for a finished task, the checkpoint's own live
-    capture for a paused one) and not in how its ancestry is judged.
+    capture for an unfinished one) and not in how its ancestry is judged.
     """
 
     current_code_source = branch_commit(contract.code_repo_path, contract.code_source_branch)
@@ -372,7 +391,7 @@ class CheckpointLanding:
     """Everything one checkpoint preflight proved: the captured refs and the source state.
 
     This value is the checkpoint's eligibility record, computed once and shared by the preview and
-    the apply, so the two surfaces cannot disagree about *why* a pause is allowed. The ledger
+    the apply, so the two surfaces cannot disagree about *why* a partial landing is allowed. The ledger
     projection proof is not part of it: that one proof is owed by both routes and is evaluated at
     the preview/apply seam for both of them. What this value does own is the candidate the
     publication gate revalidates against the live tips before any ref moves.
@@ -463,7 +482,7 @@ def _landing_admission(
 
     return LandingAdmission(
         # The leaf-chain ledger prefix is a completion census, so it is read only for the route
-        # that requires completion. A paused master has no finished chain to prefix against; its
+        # that requires completion. An unfinished master has no finished chain to prefix against; its
         # ledger is proven as the projection of its own source instead.
         expected_series_ledger_prefix=(
             atomic_series_ledger_prefix(contract)
@@ -665,14 +684,14 @@ def checkpoint_landing_result(
 ) -> WorktreeCommandResult:
     """Land an unfinished atomic master's accumulated line into its super branch.
 
-    :func:`integrate_result` closes a finished master; this pauses an unfinished one. It shares the
+    :func:`integrate_result` closes a finished master; this lands an unfinished one without closing it. It shares the
     entire preflight and the ref move with that route -- the series contract binding, the atomic
     landing authority, the integration targets, the replay/ff source-state gate, the source-lineage
     proof and the master-handover gate all still run -- and differs in exactly two ways: it captures
     its own committed refs instead of reading a closeout cell it cannot have, and it records
     ``checkpointed`` instead of ``completed``.
 
-    The closeout exemption is *only* the closeout cells. A master being paused by definition has
+    The closeout exemption is *only* the closeout cells. A master being landed before completion by definition has
     never closed out -- on LOCR that is the state the previous route made unreachable -- so
     demanding ``closeout_status == "completed"`` was demanding the outcome of an operation this one
     exists to make possible. The developer approval channel (``args.approved``), the ancestry proof
@@ -930,7 +949,7 @@ def _checkpoint_result(
     ``checkpointed`` rather than ``completed``, so the integration cell never claims a
     completion that has not happened and the master keeps its worktrees, its branches and its
     enclosure. Reclamation is not part of either landing route -- ``lifecycle_finalize_task``
-    owns it, and a paused master is never finalized.
+    owns it, and an unfinished master is never finalized.
     """
 
     updated = record_landed_integration(

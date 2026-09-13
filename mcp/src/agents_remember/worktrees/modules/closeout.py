@@ -237,7 +237,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
 
     It refuses on the SAME eligibility the apply refuses on, read from
     :func:`require_closeout_publication_authority`: the dry run used to plan a closeout the apply
-    then rejected on every completion blocker, which is exactly how a partial master's pause came to
+    then rejected on every completion blocker, which is exactly how a partial master's landing came to
     look available when it was not. A leaf owes nothing there, so no leaf preview changes.
     """
 

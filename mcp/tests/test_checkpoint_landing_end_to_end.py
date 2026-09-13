@@ -21,6 +21,7 @@ operation.
 from __future__ import annotations
 
 import contextlib
+import subprocess
 import tempfile
 import unittest
 from collections.abc import Iterator, Mapping
@@ -32,6 +33,7 @@ from unittest import mock
 from agents_remember.application import worktree_tools
 from agents_remember.kernel.memory_ledger import (
     LedgerRow,
+    MemoryLedger,
     find_mapping,
     load_ledger,
     parse_ledger_text,
@@ -40,6 +42,11 @@ from agents_remember.kernel.memory_ledger import (
 )
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.worktrees.integration import integration_ref_transaction
+from agents_remember.worktrees.ledger_projection import (
+    LedgerWorld,
+    project_ledger,
+    read_ledger_source,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.integrate import (
     checkpoint_landing_result,
@@ -174,6 +181,137 @@ def _commit_ledger_mapping(
         return git(tree, "rev-parse", "HEAD")
 
 
+def _git_that_conflicts(repository: Path, *args: str) -> str:
+    """Run a git step whose failure is the expected outcome, and return what it said.
+
+    The union merge below starts from the conflict a plain merge of two prepended ledger rows
+    produces, so the shared helper -- which raises on any non-zero status -- cannot express it.
+    """
+
+    result = subprocess.run(
+        ["git", *args], cwd=repository, text=True, capture_output=True, check=False
+    )
+    assert result.returncode != 0, f"git {' '.join(args)} was expected to conflict"
+    return result.stdout + result.stderr
+
+
+def _advance_source_line(series: WorktreeContract, scratch: Path, *, label: str) -> LedgerRow:
+    """Commit one new mapping on the master's memory SOURCE branch, the line it lands into."""
+
+    memory = _memory_repository(series)
+    code_commit = _commit_code(series, scratch, label=label)
+    with _branch_checkout(memory, series.memory_source_branch, scratch / f"source-{label}") as tree:
+        (tree / f"{label}.md").write_text(f"# {label}\n", encoding="utf-8")
+        git(tree, "add", "-A")
+        git(tree, "commit", "-m", f"Land {label} source content")
+        memory_content = git(tree, "rev-parse", "HEAD")
+        row = LedgerRow(code_commit, memory_content)
+        write_ledger(
+            tree / "memory.md",
+            prepend_mapping(load_ledger(tree / "memory.md"), row.code_commit, row.memory_commit),
+        )
+        git(tree, "add", "memory.md")
+        git(tree, "commit", "-m", f"Record {label} source pair")
+    return row
+
+
+def _absorb_source_into_master_line(series: WorktreeContract, scratch: Path, *, label: str) -> None:
+    """Merge the master's memory SOURCE into its work branch, resolving by unioning both sides.
+
+    This is the shape a paused master's ledger really reaches, and the one L34's boundary proof
+    never built. LOCR's memory line absorbed the IAS line three times -- 666196d5 ("unioning both
+    curation lines"), then 4aab7e7f, then 9b045bb5 -- and because both sides had prepended a row to
+    the same table the merge CONFLICTS, so the union that resolved it holds the two sides' own rows
+    in an order the projection does not write. The resolution here is that union: every row from
+    both sides, each side's additions ahead of the rows they share. It is computed from the three
+    ledgers rather than written out, so the fixture cannot drift from the shape it claims.
+    """
+
+    memory = _memory_repository(series)
+    source = series.memory_source_branch
+    with _branch_checkout(memory, series.memory_work_branch, scratch / f"absorb-{label}") as tree:
+        ours = load_ledger(tree / "memory.md")
+        merge_base = git(tree, "merge-base", "HEAD", source)
+        shared = parse_ledger_text(git(memory, "show", f"{merge_base}:memory.md"))
+        _git_that_conflicts(tree, "merge", "--no-commit", "--no-ff", source)
+        theirs = parse_ledger_text(git(memory, "show", f"{source}:memory.md"))
+        shared_rows = set(shared.rows)
+        union = [
+            *[row for row in theirs.rows if row not in shared_rows],
+            *[row for row in ours.rows if row not in shared_rows],
+            *shared.rows,
+        ]
+        write_ledger(
+            tree / "memory.md",
+            replace(
+                ours,
+                rows=union,
+                last_verified_code_commit=union[0].code_commit,
+                last_memory_content_commit=union[0].memory_commit,
+            ),
+        )
+        git(tree, "add", "memory.md")
+        git(tree, "commit", "-m", f"Merge {label}: absorb the source line, unioning both")
+
+
+def _rewrite_master_ledger(
+    series: WorktreeContract, scratch: Path, *, label: str, rows: list[LedgerRow]
+) -> str:
+    """Commit an exactly specified master ledger table, so one content class can be isolated."""
+
+    with _branch_checkout(
+        _memory_repository(series), series.memory_work_branch, scratch / f"rewrite-{label}"
+    ) as tree:
+        write_ledger(
+            tree / "memory.md",
+            replace(
+                load_ledger(tree / "memory.md"),
+                rows=rows,
+                last_verified_code_commit=rows[0].code_commit,
+                last_memory_content_commit=rows[0].memory_commit,
+            ),
+        )
+        git(tree, "add", "memory.md")
+        git(tree, "commit", "-m", f"Rewrite {label}")
+        return git(tree, "rev-parse", "HEAD")
+
+
+def _interleave_leaf_ledger(contract: WorktreeContract, *, label: str) -> str:
+    """Place a leaf's own rows among its source rows, keeping every row and the newest on top.
+
+    A leaf cannot reach the checkpoint's relaxed form through its own closeout: closeout writes the
+    table, so its own mapping is a prefix by construction. A merge of the source into the leaf's
+    memory branch can still produce the placement, so this builds it deliberately -- the case that
+    uses it measures the ROUTE, not whether the shape is reachable -- and it leaves the newest row
+    first so the header is not what refuses.
+    """
+
+    worktree = contract.memory_worktree
+    assert worktree is not None
+    assert contract.memory_content_commit, "a closed-out leaf records its memory content"
+    ledger = load_ledger(worktree / "memory.md")
+    own, *source = ledger.rows
+    # A second own mapping, so a source row can sit BETWEEN the leaf's two rows: with only one own
+    # row every interleaving would put a source row first and the header check would refuse it.
+    # Its memory commit is the ledger commit rather than the memory content, because two rows
+    # sharing one memory commit have no ancestry order between them -- ``_newest_first`` would put
+    # this one second, and the header check rather than the guard would be what refused.
+    extra = LedgerRow(source[0].code_commit, contract.ledger_commit)
+    rows = [extra, source[0], own, *source[1:]]
+    write_ledger(
+        worktree / "memory.md",
+        replace(
+            ledger,
+            rows=rows,
+            last_verified_code_commit=rows[0].code_commit,
+            last_memory_content_commit=rows[0].memory_commit,
+        ),
+    )
+    git(worktree, "add", "memory.md")
+    git(worktree, "commit", "-m", f"Interleave {label}")
+    return git(worktree, "rev-parse", "HEAD")
+
+
 def _write_divergent_ledger(checkout: Path, *, base_commit: str) -> None:
     """Rewrite a checkout's ``memory.md`` into a table the projection rejects, in place.
 
@@ -243,6 +381,12 @@ def _checkpoint(
         strategy="ff-only",
         dry_run=dry_run,
     )
+
+
+def _ledger_at(repository: Path, commit: str) -> MemoryLedger:
+    """The ledger table one exact commit carries, read the way a landing reads it."""
+
+    return parse_ledger_text(git(repository, "show", f"{commit}:memory.md"))
 
 
 def _ledger_mapping(series: WorktreeContract, ledger_commit: str, code_commit: str) -> LedgerRow:
@@ -353,6 +497,119 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         mapping = _ledger_mapping(self.series, live_ledger, live_code)
         self.assertEqual(mapping, row)
         self.assertEqual(result["integrated_memory_content_commit"], mapping.memory_commit)
+
+    def test_a_master_line_that_unioned_its_source_still_checkpoints(self) -> None:
+        """The merge a master's own memory line carries is accepted; L34's proof never built one.
+
+        A union merge leaves the branch's own rows among the source rows instead of above them, so
+        the fixed point the strict rule demands is refused. This is the real LOCR pause's shape, and
+        it is asserted next to every content promise that survives it.
+        """
+
+        self._unclosed_contract()
+        memory = _memory_repository(self.series)
+        # The master lands a pair of its own, the line it lands INTO advances, a real merge unions
+        # the two, and the master lands one more: the placement the projection never writes.
+        _accumulate_master_line(self.fixture, self.series, self.scratch, label="leaf-one")
+        _advance_source_line(self.series, self.scratch, label="source-one")
+        _absorb_source_into_master_line(self.series, self.scratch, label="absorb")
+        row = _accumulate_master_line(self.fixture, self.series, self.scratch, label="leaf-two")
+
+        live_code = _rev(self.series.code_repo_path, self.series.code_work_branch)
+        live_ledger = _rev(memory, self.series.memory_work_branch)
+        projection = project_ledger(
+            source=read_ledger_source(memory, _rev(memory, self.series.memory_source_branch)),
+            observed=parse_ledger_text(git(memory, "show", f"{live_ledger}:memory.md")),
+            world=LedgerWorld(
+                memory_repository=memory,
+                memory_reachable_from=live_ledger,
+                code_repository=self.series.code_repo_path,
+            ),
+        )
+
+        # The table really is the shape this leaf exists for: exactly the projection's rows, the
+        # source rows still in source order, the master's own rows among them -- so the fixed point
+        # is refused while every content promise holds.
+        self.assertFalse(projection.is_fixed_point)
+        self.assertTrue(projection.is_interleaved_projection)
+        self.assertEqual(projection.added_rows, ())
+        self.assertEqual(projection.removed_rows, ())
+        self.assertEqual(projection.observed_source_rows, projection.source_rows)
+        self.assertTrue(projection.reordered_rows)
+
+        preview = _checkpoint(self.fixture, self.series, dry_run=True)
+        self.assertTrue(preview["ok"], preview)
+        self.assertEqual(preview["state"], "would-checkpoint")
+
+        result = _checkpoint(self.fixture, self.series, dry_run=False)
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["state"], "checkpointed")
+        self.assertEqual(
+            _rev(self.series.code_repo_path, self.series.code_source_branch), live_code
+        )
+        self.assertEqual(_rev(memory, self.series.memory_source_branch), live_ledger)
+        mapping = _ledger_mapping(self.series, live_ledger, live_code)
+        self.assertEqual(mapping, row)
+        self.assertEqual(result["integrated_memory_content_commit"], mapping.memory_commit)
+
+    def test_a_unioned_master_line_still_refuses_a_content_difference(self) -> None:
+        """Interleaved placement is accepted; a different table is not.
+
+        The relaxation is one condition wide, and this keeps it there. Each class below changes the
+        rows while leaving the mapping the capture needs on top, so what refuses is the projection
+        proof and not an earlier gate -- and the remedy it prints is one this route can act on.
+        """
+
+        _accumulate_master_line(self.fixture, self.series, self.scratch, label="leaf-one")
+        _advance_source_line(self.series, self.scratch, label="source-one")
+        _advance_source_line(self.series, self.scratch, label="source-two")
+        _absorb_source_into_master_line(self.series, self.scratch, label="absorb")
+        _accumulate_master_line(self.fixture, self.series, self.scratch, label="leaf-two")
+        memory = _memory_repository(self.series)
+        live_ledger = _rev(memory, self.series.memory_work_branch)
+        source_rows = set(
+            read_ledger_source(memory, _rev(memory, self.series.memory_source_branch)).ledger.rows
+        )
+        rows = parse_ledger_text(git(memory, "show", f"{live_ledger}:memory.md")).rows
+        source_positions = [index for index, row in enumerate(rows) if row in source_rows]
+        self.assertGreaterEqual(len(source_positions), 2, "the fixture needs two source rows")
+        oldest, second_oldest = source_positions[-1], source_positions[-2]
+        reordered = list(rows)
+        reordered[oldest], reordered[second_oldest] = reordered[second_oldest], reordered[oldest]
+        # One own row is present but untrue. That is the only class below which leaves every source
+        # row in place, so it is what keeps the removed-rows clause honest rather than redundant.
+        own_positions = [index for index, row in enumerate(rows) if row not in source_rows]
+        self.assertGreaterEqual(len(own_positions), 2, "the fixture needs two own rows")
+        untrue = list(rows)
+        untrue[own_positions[-1]] = LedgerRow(rows[own_positions[-1]].code_commit, "0" * 40)
+        corruptions = {
+            "dropped": [row for index, row in enumerate(rows) if index != oldest],
+            "reordered": reordered,
+            "duplicated": [*rows, rows[oldest]],
+            "untrue": untrue,
+        }
+        code_before = _rev(self.series.code_repo_path, self.series.code_source_branch)
+        memory_before = _rev(memory, self.series.memory_source_branch)
+
+        for label, corrupted in corruptions.items():
+            _rewrite_master_ledger(self.series, self.scratch, label=label, rows=corrupted)
+            for dry_run in (True, False):
+                with self.assertRaises(RuntimeError, msg=f"{label} dry_run={dry_run}") as refused:
+                    _checkpoint(self.fixture, self.series, dry_run=dry_run)
+
+                refusal = str(refused.exception)
+                self.assertIn("is not the projection of its source", refusal, label)
+                # The remedy names what this route can do; the closeout re-run it CANNOT run is no
+                # longer advertised to a master that is still open.
+                self.assertIn("this route has none", refusal, label)
+                self.assertNotIn("re-run worktree_closeout_apply", refusal, label)
+
+        self.assertEqual(_rev(memory, self.series.memory_source_branch), memory_before)
+        self.assertEqual(
+            _rev(self.series.code_repo_path, self.series.code_source_branch), code_before
+        )
+        self.assertEqual(load_contract(self.series.contract_path).integration_status, "not-started")
 
     def test_retry_is_idempotent_and_continued_work_checkpoints_again(self) -> None:
         _accumulate_master_line(self.fixture, self.series, self.scratch, label="leaf-one")
@@ -515,9 +772,253 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         self.assertEqual(_rev(memory, parent.memory_work_branch), memory_destination)
         self.assertEqual(load_contract(re_recorded.contract_path), re_recorded)
 
+    def test_a_reversed_repeated_code_mapping_is_refused_at_preview_and_apply(self) -> None:
+        """Interleaving may not republish an older memory commit as a code commit's current one.
+
+        ``find_mapping`` returns the FIRST row naming a code commit, and a later closeout supersedes
+        an earlier mapping without deleting it, so two rows for one code commit are normal. Accepting
+        the interleaved PLACEMENT must not also accept REVERSING that pair: an external review
+        reproduced the checkpoint succeeding while the older memory commit became current, which
+        silently rewrites what a code commit resolves to and nothing downstream would report.
+        """
+
+        old = _accumulate_master_line(self.fixture, self.series, self.scratch, label="first")
+        updated_memory = _commit_memory_content(self.series, self.scratch, label="first-update")
+        new = LedgerRow(old.code_commit, updated_memory)
+        _commit_ledger_mapping(self.series, self.scratch, new, label="first-update")
+        _accumulate_master_line(self.fixture, self.series, self.scratch, label="second")
+        memory = _memory_repository(self.series)
+        live_ledger = _rev(memory, self.series.memory_work_branch)
+        rows = parse_ledger_text(git(memory, "show", f"{live_ledger}:memory.md")).rows
+        self.assertEqual(find_mapping(_ledger_at(memory, live_ledger), old.code_commit), new)
+
+        reversed_rows = list(rows)
+        older, newer = reversed_rows.index(old), reversed_rows.index(new)
+        reversed_rows[older], reversed_rows[newer] = reversed_rows[newer], reversed_rows[older]
+        candidate = _rewrite_master_ledger(
+            self.series, self.scratch, label="reverse-history", rows=reversed_rows
+        )
+        projection = project_ledger(
+            source=read_ledger_source(memory, _rev(memory, self.series.memory_source_branch)),
+            observed=_ledger_at(memory, candidate),
+            world=LedgerWorld(
+                memory_repository=memory,
+                memory_reachable_from=candidate,
+                code_repository=self.series.code_repo_path,
+            ),
+        )
+        # Every OTHER condition the relaxation allows still holds, so the refusal below is
+        # attributed to the reversed mapping and the case cannot pass for an unrelated reason.
+        self.assertEqual(projection.added_rows, ())
+        self.assertEqual(projection.removed_rows, ())
+        self.assertEqual(projection.observed_source_rows, projection.source_rows)
+        self.assertFalse(projection.header_changed)
+        self.assertFalse(projection.is_fixed_point)
+        self.assertFalse(projection.is_interleaved_projection)
+
+        code_before = _rev(self.series.code_repo_path, self.series.code_source_branch)
+        memory_before = _rev(memory, self.series.memory_source_branch)
+
+        for dry_run in (True, False):
+            surface = "preview" if dry_run else "apply"
+            with self.assertRaises(RuntimeError, msg=f"the {surface} must refuse") as refused:
+                _checkpoint(self.fixture, self.series, dry_run=dry_run)
+
+            self.assertIn("is not the projection of its source", str(refused.exception))
+
+        # Nothing landed, so the reversed table is still only a candidate on the work branch: the
+        # destination carries no mapping for that code commit at all, which is what it carried
+        # before the attempt.
+        self.assertEqual(
+            _rev(self.series.code_repo_path, self.series.code_source_branch), code_before
+        )
+        self.assertEqual(_rev(memory, self.series.memory_source_branch), memory_before)
+        self.assertIsNone(find_mapping(_ledger_at(memory, memory_before), old.code_commit))
+
+    def test_an_untrue_historical_row_below_a_current_one_is_refused(self) -> None:
+        """A table may not carry a row the world contradicts, even where no lookup reaches it.
+
+        The mapping clause cannot catch this one on its own: the current row for that code commit
+        stays on top, so every lookup still resolves to it. It is refused because the ledger is the
+        durable record of what landed, and a row naming memory content that never reached the branch
+        is a false entry whether or not a reader would ever reach it. This is the class that keeps
+        the removed-rows clause load-bearing after the mapping clause was added.
+        """
+
+        old = _accumulate_master_line(self.fixture, self.series, self.scratch, label="first")
+        updated_memory = _commit_memory_content(self.series, self.scratch, label="first-update")
+        new = LedgerRow(old.code_commit, updated_memory)
+        _commit_ledger_mapping(self.series, self.scratch, new, label="first-update")
+        _accumulate_master_line(self.fixture, self.series, self.scratch, label="second")
+        memory = _memory_repository(self.series)
+        live_ledger = _rev(memory, self.series.memory_work_branch)
+        untrue_rows = list(_ledger_at(memory, live_ledger).rows)
+        untrue_rows[untrue_rows.index(old)] = LedgerRow(old.code_commit, "0" * 40)
+        candidate = _rewrite_master_ledger(
+            self.series, self.scratch, label="untrue-history", rows=untrue_rows
+        )
+        projection = project_ledger(
+            source=read_ledger_source(memory, _rev(memory, self.series.memory_source_branch)),
+            observed=_ledger_at(memory, candidate),
+            world=LedgerWorld(
+                memory_repository=memory,
+                memory_reachable_from=candidate,
+                code_repository=self.series.code_repo_path,
+            ),
+        )
+        # The current mapping is untouched and every other acceptance condition still holds, so the
+        # untrue row is the ONLY thing refusing this table -- which is the point of the case.
+        self.assertEqual(find_mapping(_ledger_at(memory, candidate), old.code_commit), new)
+        self.assertEqual(projection.added_rows, ())
+        self.assertEqual(projection.observed_source_rows, projection.source_rows)
+        self.assertFalse(projection.header_changed)
+        self.assertTrue(projection.removed_rows)
+        self.assertFalse(projection.is_interleaved_projection)
+
+        code_before = _rev(self.series.code_repo_path, self.series.code_source_branch)
+        memory_before = _rev(memory, self.series.memory_source_branch)
+
+        for dry_run in (True, False):
+            surface = "preview" if dry_run else "apply"
+            with self.assertRaises(RuntimeError, msg=f"the {surface} must refuse") as refused:
+                _checkpoint(self.fixture, self.series, dry_run=dry_run)
+
+            self.assertIn("is not the projection of its source", str(refused.exception))
+
+        self.assertEqual(
+            _rev(self.series.code_repo_path, self.series.code_source_branch), code_before
+        )
+        self.assertEqual(_rev(memory, self.series.memory_source_branch), memory_before)
+
+    def test_a_changed_ledger_is_refused_even_when_the_mapping_already_exists(self) -> None:
+        """An already-landed pair does not license republishing a damaged table.
+
+        The landing returned early when the source ledger already named the landed code and memory
+        commits, on the grounds that there was no new row to verify. That was true and irrelevant: a
+        table with a source row deleted adds no row either, so the shortcut was the one way a
+        damaged ledger could still reach a protected ref. An external review reproduced it on a
+        second checkpoint. A genuinely unchanged retry must keep converging.
+        """
+
+        _accumulate_master_line(self.fixture, self.series, self.scratch, label="first")
+        first = _checkpoint(self.fixture, self.series, dry_run=False)
+        self.assertEqual(first["state"], "checkpointed")
+
+        # The unchanged retry is the case the shortcut existed to serve, and it still converges.
+        again = _checkpoint(self.fixture, self.series, dry_run=False)
+        self.assertEqual(again["state"], "checkpointed")
+        self.assertEqual(again["integrated_code_commit"], first["integrated_code_commit"])
+        self.assertEqual(again["integrated_ledger_commit"], first["integrated_ledger_commit"])
+
+        memory = _memory_repository(self.series)
+        source_before = _rev(memory, self.series.memory_source_branch)
+        before = _ledger_at(memory, source_before)
+        self.assertGreaterEqual(len(before.rows), 2)
+        _rewrite_master_ledger(
+            self.series, self.scratch, label="drop-source-row", rows=before.rows[:-1]
+        )
+
+        for dry_run in (True, False):
+            surface = "preview" if dry_run else "apply"
+            with self.assertRaises(RuntimeError, msg=f"the {surface} must refuse") as refused:
+                _checkpoint(self.fixture, self.series, dry_run=dry_run)
+
+            self.assertIn("is not the projection of its source", str(refused.exception))
+
+        self.assertEqual(_rev(memory, self.series.memory_source_branch), source_before)
+        self.assertEqual(_ledger_at(memory, source_before).rows, before.rows)
+
+    def test_the_landing_does_not_pose_as_a_pause(self) -> None:
+        """Landing a partial master and pausing one are two operations, and this verb only lands.
+
+        The checkpoint moves the series' accumulated line into its source branch and leaves the
+        master open, so the remaining work continues and the result says so. Folding the pause into
+        this verb -- reporting the master as PAUSED and handing control back -- is the hidden side
+        effect the split exists to prevent: pausing is its own operation, it releases the master's
+        atomic-series selection, and it moves no ref at all.
+        """
+
+        _accumulate_master_line(self.fixture, self.series, self.scratch, label="leaf-one")
+        result = _checkpoint(self.fixture, self.series, dry_run=False)
+
+        self.assertEqual(result["state"], "checkpointed")
+        self.assertEqual(result["nextOperation"], "continue_work")
+        summary = _payload_text(result, "summary")
+        self.assertNotIn("PAUSED", summary)
+        self.assertNotIn("Control returns to the developer", summary)
+        self.assertIn("the master stays open", summary)
+        # It landed, and it neither closed the master out nor reclaimed anything.
+        stored = load_contract(self.series.contract_path)
+        self.assertEqual(stored.integration_status, "checkpointed")
+        self.assertEqual(stored.closeout_status, "not-started")
+        self.assertEqual(stored.cleanup, self.series.cleanup)
+        self.assertEqual(_master_status(self.series), "inProgress")
+        self.assertTrue(self.series.code_worktree.exists())
+
+    def test_the_leaf_route_still_refuses_the_ledger_the_checkpoint_accepts(self) -> None:
+        """The relaxation is the checkpoint's alone, and a leaf keeps the remedy it can run.
+
+        The table below is exactly the interleaved projection the checkpoint accepts -- every row
+        present once, the source rows in source order, the newest mapping first -- replayed on a
+        LEAF, where closeout can still rewrite it. It must still refuse, and the remedy it prints
+        must be the closeout re-run a leaf really has. Dropping the checkpoint-only guard is what
+        this case is for.
+        """
+
+        closed = _close_out_leaf(load_contract(self.leaf.contract_path))
+        edited = _interleave_leaf_ledger(closed, label="leaf-interleave")
+        re_recorded = replace(closed, ledger_commit=edited)
+        write_contract(re_recorded.contract_path, re_recorded)
+        parent_path = re_recorded.parent_contract_path
+        assert parent_path is not None
+        parent = load_contract(parent_path)
+        memory = _memory_repository(re_recorded)
+        code_destination = _rev(re_recorded.code_repo_path, parent.code_work_branch)
+        memory_destination = _rev(memory, parent.memory_work_branch)
+        projection = project_ledger(
+            source=read_ledger_source(memory, _rev(memory, closed.memory_source_branch)),
+            observed=parse_ledger_text(git(memory, "show", f"{edited}:memory.md")),
+            world=LedgerWorld(
+                memory_repository=memory,
+                memory_reachable_from=edited,
+                code_repository=closed.code_repo_path,
+            ),
+        )
+        # The table IS the form the checkpoint accepts. Asserted rather than assumed: without it the
+        # leaf route would be refusing a table the checkpoint also refuses, and this case would pass
+        # for a reason that has nothing to do with the guard it exists to witness.
+        self.assertFalse(projection.is_fixed_point)
+        self.assertTrue(projection.is_interleaved_projection)
+
+        for dry_run in (True, False):
+            surface = "preview" if dry_run else "apply"
+            with self.assertRaises(RuntimeError, msg=f"the {surface} must refuse") as refused:
+                integrate_result(
+                    WorktreeArgs(
+                        contract_path=re_recorded.contract_path,
+                        strategy="ff-only",
+                        approved=not dry_run,
+                        dry_run=dry_run,
+                    ),
+                    load_contract(re_recorded.contract_path),
+                )
+
+            refusal = str(refused.exception)
+            self.assertIn("is not the projection of its source", refusal)
+            # A leaf's repair IS reachable, so it is named. The checkpoint's is not, and says so.
+            self.assertIn("re-run worktree_closeout_apply", refusal)
+            self.assertNotIn("this route has none", refusal)
+
+        self.assertEqual(
+            _rev(re_recorded.code_repo_path, parent.code_work_branch), code_destination
+        )
+        self.assertEqual(_rev(memory, parent.memory_work_branch), memory_destination)
+        self.assertEqual(load_contract(re_recorded.contract_path), re_recorded)
+
     def test_a_leaf_that_has_not_closed_out_is_still_refused_by_integrate(self) -> None:
-        # The leaf arm of the same gate. ``validate_integrate_contract`` is untouched for both
-        # ordinary routes; the exemption lives in the checkpoint's own preflight.
+        # The leaf arm of the same gate. The gate itself is untouched for both ordinary routes --
+        # the checkpoint exemption lives in the checkpoint's own preflight -- and only the SERIES
+        # message carries the alternative verb, which the case below pins in both directions.
         leaf = load_contract(self.leaf.contract_path)
         self.assertEqual(leaf.closeout_status, "not-started")
         code_before = _rev(leaf.code_repo_path, leaf.code_source_branch)
@@ -530,6 +1031,41 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
 
         self.assertIn("integration requires closeout.status completed", str(raised.exception))
         self.assertEqual(_rev(leaf.code_repo_path, leaf.code_source_branch), code_before)
+
+    def test_the_open_master_refusal_names_the_route_that_can_land_it(self) -> None:
+        """An open master's integrate refusal is not a dead end: it names the checkpoint.
+
+        A refusal that names a prerequisite the caller cannot satisfy is the defect this leaf fixed
+        in the ledger refusal's remedy, and the ordinary verb for an open master carried the same
+        shape: it demanded a closeout that an unfinished master cannot produce. The series message
+        now carries the alternative. A leaf has none, so its message must not invent one.
+        """
+
+        self._unclosed_contract()
+        _accumulate_master_line(self.fixture, self.series, self.scratch, label="leaf-one")
+
+        with self.assertRaises(RuntimeError) as raised:
+            integrate_result(
+                WorktreeArgs(
+                    contract_path=self.series.contract_path, strategy="ff-only", approved=True
+                ),
+                self._unclosed_contract(),
+            )
+
+        refusal = str(raised.exception)
+        self.assertIn("integration requires closeout.status completed", refusal)
+        self.assertIn("worktree_checkpoint_landing", refusal)
+
+        leaf = load_contract(self.leaf.contract_path)
+        with self.assertRaises(RuntimeError) as leaf_raised:
+            integrate_result(
+                WorktreeArgs(contract_path=leaf.contract_path, strategy="ff-only", approved=True),
+                leaf,
+            )
+
+        leaf_refusal = str(leaf_raised.exception)
+        self.assertIn("integration requires closeout.status completed", leaf_refusal)
+        self.assertNotIn("worktree_checkpoint_landing", leaf_refusal)
 
     def test_a_completed_master_is_still_refused_by_the_checkpoint(self) -> None:
         # The other surviving refusal, driven through the PUBLIC operation. It fires at preflight,

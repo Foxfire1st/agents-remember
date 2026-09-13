@@ -95,7 +95,7 @@ class LandingAdmission:
 
     The final series route admits a *finished* master: its output must equal the closeout candidate
     the contract records, and its ledger must carry the exact ordered leaf landing prefix. The
-    checkpoint route admits a *paused* master, which has neither a closeout cell nor a completed
+    checkpoint route admits an *unfinished* master, which has neither a closeout cell nor a completed
     leaf chain: its output must equal the candidate its own live capture proved, and its ledger is
     proven as the projection of its own source and its own true mappings. Every other refusing read
     on this path is identical for both routes, so the difference lives here as data rather than as
@@ -301,9 +301,19 @@ def require_integrated_ledger_mapping(
             "integrated memory ledger does not map landed code commit to landed memory content"
         )
     source_mapping = find_mapping(source_ledger, commits.code)
-    if source_mapping is not None and source_mapping.memory_commit == commits.memory_content:
-        # No-change leaf: the source ledger's current mapping already names the landed memory
-        # content, so there is no new ledger row to verify.
+    if (
+        source_mapping is not None
+        and source_mapping.memory_commit == commits.memory_content
+        and ledger == source_ledger
+    ):
+        # Genuinely unchanged, and only then: the source ledger already names this exact pair AND
+        # the ledger being landed is literally that same table, so there is no new row to verify and
+        # nothing that could have been edited. Returning on the mapping alone was the defect -- a
+        # landing that republishes a table with a source row deleted never adds a row either, so the
+        # mapping alone could not tell the two apart, and an external review reproduced a second
+        # checkpoint publishing that damaged ledger. Comparing the whole table is what separates
+        # them, and it keeps the idempotent retry converging: a retry lands the very commit the
+        # source already points at.
         return
     _require_preserved_ledger_history(
         contract,
@@ -331,7 +341,7 @@ class _LedgerLanding:
     """The landed ledger commit, the exact memory source it must be based on, and its shape.
 
     ``checkpoint`` names which history proof this landing owes: the leaf-chain prefix a *finished*
-    series must carry, or the projection a paused master must be. It travels with the landing
+    series must carry, or the projection an unfinished master must be. It travels with the landing
     facts rather than beside them, because it is a property of the landing, not a flag on the
     ledger.
     """
@@ -367,9 +377,13 @@ def _require_preserved_ledger_history(
     A *series* landing takes the leaf-chain-prefix form, because a finished master's ledger is
     exactly its ordered leaf landing prefix ahead of the source rows. A checkpoint of a master
     that is still open has no complete leaf chain to prefix against -- that census is one of the
-    completion facts its route deliberately does not require -- so it takes the same projection
-    form a leaf uses. That is a smaller promise, not a dropped one: the rows are still recomputed
-    from the world and a hand-edited table is still refused.
+    completion facts its route deliberately does not require -- so it takes the projection form a
+    leaf uses, relaxed in exactly one respect. A leaf's closeout writes its own table; a master's
+    line instead accumulates one closeout per leaf and can absorb its own source through a union
+    merge, which leaves the two sides' rows interleaved rather than stacked. That placement is not
+    a content difference, so the checkpoint accepts the projection's interleaved form as well as
+    its fixed point. Every row is still recomputed from the world, so a hand-edited table is still
+    refused and only where the branch's own rows sit among the source rows is left to the merge.
     """
 
     if contract.kind == "series" and not landing.checkpoint:
@@ -394,7 +408,15 @@ def _require_preserved_ledger_history(
     )
     if projection.is_fixed_point:
         return
-    raise RuntimeError(_ledger_projection_refusal(projection, landing.memory_source_commit))
+    if landing.checkpoint and projection.is_interleaved_projection:
+        return
+    raise RuntimeError(
+        _ledger_projection_refusal(
+            projection,
+            landing.memory_source_commit,
+            checkpoint=landing.checkpoint,
+        )
+    )
 
 
 def _require_landing_output_authority(
@@ -431,11 +453,19 @@ def _require_landing_output_authority(
         )
 
 
-def _ledger_projection_refusal(projection, memory_source_commit: str) -> str:
+def _ledger_projection_refusal(
+    projection,
+    memory_source_commit: str,
+    *,
+    checkpoint: bool = False,
+) -> str:
     """Operator-legible evidence for a ledger that is not its own projection.
 
     Each sentence names the offending row in the vocabulary the row's own rule uses, so the
-    operator can tell a superseded row from a dropped source row without reading the diff.
+    operator can tell a superseded row from a dropped source row without reading the diff. The
+    rule and the remedy belong to the landing, because advertising a repair the route cannot run
+    is worse than advertising none: the closeout re-run that repairs a leaf is refused outright by
+    a master that is not yet complete, so a checkpoint says that instead of naming it.
     """
 
     details = _projection_divergence_evidence(projection)
@@ -443,13 +473,31 @@ def _ledger_projection_refusal(projection, memory_source_commit: str) -> str:
         "integrated memory ledger is not the projection of its source and its own true "
         f"mappings: {details}. Ledger rows newest-first: "
         f"{_ledger_row_list(list(projection.observed_rows))}. Source rows newest-first: "
-        f"{_ledger_row_list(list(projection.source_rows))}. A leaf may prepend any number of its "
-        "own mappings ahead of the source rows; no source row may be dropped, reordered, or "
-        "replaced, no superseded row may be kept, and the header must name the first row. "
-        "Remedy: re-run worktree_closeout_apply for this contract -- closeout recomputes "
-        "memory.md from the source ledger plus the branch's own true mappings, so the repair "
-        "needs no hand edit -- and if the file was hand-edited, restore it from memory source "
-        f"commit {memory_source_commit} first."
+        f"{_ledger_row_list(list(projection.source_rows))}. "
+        f"{_landing_ledger_rule(checkpoint, memory_source_commit)}"
+    )
+
+
+def _landing_ledger_rule(checkpoint: bool, memory_source_commit: str) -> str:
+    """The rule this landing owes, and the repair it can actually reach."""
+
+    if checkpoint:
+        return (
+            "An unfinished master's checkpoint accepts its own mappings wherever the merge that "
+            "absorbed the source left them, so only content is refused here: a source row "
+            "dropped, replaced, reordered or duplicated, an untrue own row, a code commit left "
+            "resolving to an older memory commit than the projection maps it to, or a header "
+            "that does not name the newest mapping. Remedy: this route has none -- memory.md is "
+            "written by worktree_closeout_apply, which refuses a master that is not complete -- "
+            "so repair the master's memory work-branch ledger before checkpointing it."
+        )
+    return (
+        "A leaf may prepend any number of its own mappings ahead of the source rows; no source "
+        "row may be dropped, reordered, or replaced, no superseded row may be kept, and the "
+        "header must name the first row. Remedy: re-run worktree_closeout_apply for this "
+        "contract -- closeout recomputes memory.md from the source ledger plus the branch's own "
+        "true mappings, so the repair needs no hand edit -- and if the file was hand-edited, "
+        f"restore it from memory source commit {memory_source_commit} first."
     )
 
 

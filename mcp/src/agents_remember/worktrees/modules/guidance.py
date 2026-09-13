@@ -314,6 +314,13 @@ def _post_integration_phase(contract: WorktreeContract) -> LifecycleGuidance | N
         # checkpoint truth. Without this branch the phase falls through to the pre-integration
         # ``integration-pending``, which points at ``worktree_integrate`` -- a tool that refuses
         # while the series is open.
+        #
+        # This is a LANDING, not a pause, and the two are separate operations on purpose. A
+        # checkpoint moves the series' accumulated line into its source branch and leaves the master
+        # open; the work therefore continues, which is what ``continue_work`` says. Pausing is its
+        # own verb: it releases the master's atomic-series selection and moves no ref at all. Folding
+        # the pause into this landing is the hidden side effect the split exists to prevent, so this
+        # branch must not be re-read as the pause's next move.
         return {
             "phase": "worktree-started",
             "summary": (
