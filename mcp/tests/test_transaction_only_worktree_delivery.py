@@ -169,6 +169,53 @@ def _install_failing_pre_commit_hooks(contract, root: Path) -> tuple[Path, Path]
     return logs
 
 
+def _assert_memory_attribution(
+    memory_worktree: Path,
+    *,
+    code_commit: str,
+    content_commit: str,
+    ledger_commit: str,
+    scratch: Path,
+) -> None:
+    """The memory-content commit carries exactly one Code-Commit trailer; the ledger none.
+
+    The trailer is read back out of the committed object by both documented git readers, so
+    this is the attribution being bound by the hash rather than recorded beside it.
+    """
+
+    body = _git(memory_worktree, "log", "-1", "--format=%B", content_commit)
+    assert body == f"{MESSAGES.memory}\n\nCode-Commit: {code_commit}"
+    assert body.count("Code-Commit:") == 1
+    message_file = scratch / "memory-content-message.txt"
+    message_file.write_text(f"{body}\n", encoding="utf-8")
+    assert (
+        _git(memory_worktree, "interpret-trailers", "--parse", message_file.as_posix())
+        == f"Code-Commit: {code_commit}"
+    )
+    assert (
+        _git(
+            memory_worktree,
+            "log",
+            "-1",
+            "--format=%(trailers:key=Code-Commit)",
+            content_commit,
+        )
+        == f"Code-Commit: {code_commit}"
+    )
+    # The ledger commit names no code commit: it is the mandatory memory.md-only commit, the
+    # class that has no counterpart to attribute and is therefore left without a trailer.
+    assert (
+        _git(
+            memory_worktree,
+            "log",
+            "-1",
+            "--format=%(trailers:key=Code-Commit)",
+            ledger_commit,
+        )
+        == ""
+    )
+
+
 def test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools(
     tmp_path, worktree_services
 ):
@@ -252,6 +299,16 @@ def test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools
     assert (
         _git(contract.memory_worktree, "log", "-1", "--format=%s", closed.memory_content_commit)
         == MESSAGES.memory
+    )
+    # The memory-content commit carries the attribution, inside the object: the closeout's
+    # own body verbatim plus exactly one Code-Commit trailer naming the code commit this
+    # same closeout landed. Both documented readers have to see it as data.
+    _assert_memory_attribution(
+        contract.memory_worktree,
+        code_commit=closed.code_commit,
+        content_commit=closed.memory_content_commit,
+        ledger_commit=closed.ledger_commit,
+        scratch=tmp_path,
     )
     assert not code_hook_log.exists()
     assert not memory_hook_log.exists()
@@ -408,6 +465,7 @@ def test_recloseout_after_a_sync_records_the_memory_head_as_content_commit(tmp_p
         closed,
         WorktreeArgs(contract_path=closed.contract_path),
         _effective_closeout_input(),
+        code_commit=recorded,
         existing_mapping=None,
     )
 

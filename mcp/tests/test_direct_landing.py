@@ -235,6 +235,28 @@ class DirectLandingTests(unittest.TestCase):
             git(memory, "show", "-s", "--format=%s", str(landed["memoryContentCommit"])),
             "direct memory",
         )
+        # Direct landing is the branch-addressed closeout route, so its memory-content
+        # commit is the memory side of the same pairing: the message body verbatim plus
+        # exactly one Code-Commit trailer naming the code commit this landing verified.
+        # The memory.md-only ledger commit has no counterpart to name and carries none.
+        memory_body = git(memory, "show", "-s", "--format=%B", str(landed["memoryContentCommit"]))
+        self.assertEqual(memory_body, f"direct memory\n\nCode-Commit: {fixture['code_head']}")
+        message_file = root / "direct-memory-message.txt"
+        message_file.write_text(f"{memory_body}\n", encoding="utf-8")
+        self.assertEqual(
+            git(memory, "interpret-trailers", "--parse", message_file.as_posix()),
+            f"Code-Commit: {fixture['code_head']}",
+        )
+        self.assertEqual(
+            git(
+                memory,
+                "show",
+                "-s",
+                "--format=%(trailers:key=Code-Commit)",
+                str(landed["ledgerCommit"]),
+            ),
+            "",
+        )
         ledger_text = git(memory, "show", f"{after}:memory.md")
         self.assertIn(fixture["code_head"], ledger_text)
         self.assertIn(landed["memoryContentCommit"], ledger_text)

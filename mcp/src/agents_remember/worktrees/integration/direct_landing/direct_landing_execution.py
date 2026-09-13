@@ -89,7 +89,12 @@ def execute_direct_landing(
         operation_progress=runtime.progress,
         recovery_commits=record.recoveryCommits,
     )
-    memory_commit = _direct_memory_commit(runtime, args, memory_repo)
+    memory_commit = _direct_memory_commit(
+        runtime,
+        args,
+        memory_repo,
+        code_commit=operation_input.codeCommit,
+    )
     ledger_commit = _direct_ledger_commit(
         runtime,
         args,
@@ -211,7 +216,18 @@ def _direct_memory_commit(
     runtime: DirectLandingRuntime,
     args: WorktreeArgs,
     memory_repo: Path,
+    *,
+    code_commit: str,
 ) -> str:
+    """Create the memory-content commit, attributed to the verified code commit.
+
+    Direct landing is the branch-addressed closeout route, so its memory content is the
+    memory side of the same pairing and carries the same one ``Code-Commit:`` trailer. The
+    trailer is written into the object at creation for the reason it is everywhere else:
+    ``prove_git_commit`` below journals this exact commit, and a later append would have to
+    rewrite it.
+    """
+
     evidence = runtime.record.mutationEvidence["memory"]
     if evidence.state == "commit-proven":
         assert evidence.commit is not None
@@ -253,7 +269,7 @@ def _direct_memory_commit(
         )
     committed = commit_if_dirty(
         memory_repo,
-        direct_landing_input(runtime.record).effectiveInput.message_for("memory"),
+        direct_landing_input(runtime.record).effectiveInput.memory_content_message(code_commit),
     )
     prove_git_commit(args, intent, repository=memory_repo, commit=committed)
     return _required_recovery_commit(runtime.store.read(), "memoryContentCommit")

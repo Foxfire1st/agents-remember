@@ -66,6 +66,7 @@ def external_closeout_commits(
         contract,
         args,
         effective_input,
+        code_commit=code_commit,
         existing_mapping=existing_mapping,
     )
     if not memory_created:
@@ -137,8 +138,17 @@ def _commit_memory_content(
     args: WorktreeArgs,
     effective_input: EffectiveCloseoutInput,
     *,
+    code_commit: str,
     existing_mapping,
 ) -> tuple[str, bool]:
+    """Create the memory-content commit, attributed to the code commit it describes.
+
+    ``code_commit`` is the commit this same closeout accepted, and it is hashed into the
+    committed message as a ``Code-Commit:`` trailer. That is the whole reason the message is
+    rendered here: the trailer has to be inside the object when the object is created, and
+    the object is proved and journalled by the statements immediately below.
+    """
+
     assert contract.memory_worktree is not None
     report_operation_progress(
         args, "memory-commit", current_command="commit verified external memory"
@@ -154,7 +164,7 @@ def _commit_memory_content(
         require_git(contract.memory_worktree, ["add", "-A"])
         committed = commit_verified_staged(
             contract.memory_worktree,
-            effective_input.message_for("memory"),
+            effective_input.memory_content_message(code_commit),
         )
         prove_git_commit(
             args,
