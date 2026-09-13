@@ -141,7 +141,6 @@ export interface CloseoutProjectionProblemNode {
 }
 
 export interface CloseoutQueueNode {
-  /** JSON Schema refinements: {"maxItems":256} */
   members: CloseoutCandidateNode[];
   revision: number;
   serviceCondition: string;

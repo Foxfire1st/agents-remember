@@ -635,7 +635,6 @@
           "items": {
             "$ref": "#/$defs/CloseoutCandidateNode"
           },
-          "maxItems": 256,
           "title": "Members",
           "type": "array"
         },

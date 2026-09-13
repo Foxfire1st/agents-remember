@@ -9,10 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from agents_remember.models.closeout.projection import (
-    MAX_CLOSEOUT_CANDIDATES,
-    CloseoutProjectionMember,
-)
+from agents_remember.models.closeout.projection import CloseoutProjectionMember
 from agents_remember.models.queue.closeout_queue import (
     MAX_CLOSEOUT_GRAPH_EDGES,
     MAX_CLOSEOUT_MASTERS,
@@ -183,14 +180,6 @@ def _validated_graph_documents(
             ),
         ) from exc
     master_map = {master.ref: master for master in masters}
-    if (
-        sum(len(master_map[ref].document.subTasks) for ref in graph.master_refs())
-        > MAX_CLOSEOUT_CANDIDATES
-    ):
-        raise CloseoutQueueError(
-            "closeout-queue-capacity-exceeded",
-            f"sprint has more than {MAX_CLOSEOUT_CANDIDATES} leaf candidates; split it before queue admission",
-        )
     return sprint, graph, master_map
 
 

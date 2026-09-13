@@ -14,7 +14,6 @@ from typing import Literal, cast
 from agents_remember.controlplane.closeout_queue_store import ProjectionSourceIdentity
 from agents_remember.errors import TaskIntentError
 from agents_remember.models.closeout.projection import (
-    MAX_CLOSEOUT_CANDIDATES,
     MAX_CLOSEOUT_SOURCE_PROBLEMS,
     CloseoutProjectionMember,
     ProjectionSourceClassification,
@@ -444,15 +443,6 @@ def _require_waiting_door_identities(
 ) -> None:
     generation_ids = [row[0].door.generationId for row in waiting if row[0].door is not None]
     task_refs = [row[1].ref.key for row in waiting]
-    if len(waiting) > MAX_CLOSEOUT_CANDIDATES:
-        problems.append(
-            _problem(
-                "door",
-                sprint_ref.key,
-                "waiting-door-cap-exceeded",
-                "withdraw excess door generations before rebuilding",
-            )
-        )
     if len(generation_ids) != len(set(generation_ids)) or len(task_refs) != len(set(task_refs)):
         problems.append(
             _problem(
