@@ -730,7 +730,7 @@ export interface TaskExecutionNode {
 
 export interface TaskExecutionNodeView {
   executionNature?: string;
-  frontierState: "landed" | "ready" | "waiting" | "in-flight";
+  frontierState: "landed" | "ready" | "waiting" | "in-flight" | "abandoned";
   kind: "lump" | "segment";
   leafIds: string[];
   leafTitles: string[];

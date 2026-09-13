@@ -4017,7 +4017,8 @@
             "landed",
             "ready",
             "waiting",
-            "in-flight"
+            "in-flight",
+            "abandoned"
           ],
           "title": "Frontierstate",
           "type": "string"

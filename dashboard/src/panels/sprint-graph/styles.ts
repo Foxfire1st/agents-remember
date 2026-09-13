@@ -59,6 +59,9 @@ export const frontier = cva({
       ready: { color: "cyan", borderColor: "cyan" },
       waiting: { color: "amber", borderColor: "amber" },
       "in-flight": { color: "alarm", borderColor: "alarm" },
+      // The projection carries a fifth frontier state. An abandoned node is over without
+      // finishing, which is the dormant tone everywhere else in the dashboard.
+      abandoned: { color: "dormant", borderColor: "dormant" },
     },
   },
 });
