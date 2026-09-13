@@ -46,7 +46,7 @@ from agents_remember.tasks.store import (
     write_task_docs,
 )
 
-from .integration.integration_branch_authority import require_parent_series_accepting_leaves
+from .integration.integration_branch_authority import require_parent_series
 from .integration.integration_ref_transaction import (
     IntegratedCommits,
     require_integrated_ledger_mapping,
@@ -329,7 +329,7 @@ def _reopen_preflight_refusal(contract: WorktreeContract) -> WorktreeCommandResu
         )
 
     try:
-        require_parent_series_accepting_leaves(contract, operation="task_reopen")
+        require_parent_series(contract, operation="task_reopen")
     except RuntimeError as exc:
         return WorktreeCommandResult(
             2,

@@ -15,7 +15,7 @@ from agents_remember.worktrees.activation.atomic_series_activation_transaction i
 )
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
-    require_parent_series_accepting_leaves,
+    require_parent_series,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocationError,
@@ -173,7 +173,7 @@ def attach_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if contract.kind == "series":
         return _attach_series_result(contract)
     require_ordinary_worktree(contract, operation="worktree_attach")
-    parent_series = require_parent_series_accepting_leaves(
+    parent_series = require_parent_series(
         contract,
         operation="worktree_attach",
     )
@@ -754,7 +754,7 @@ def _plan_start_enclosure(
     lineage_block = _parent_lineage_start_block(context, contract, args)
     if lineage_block is not None:
         return lineage_block
-    require_parent_series_accepting_leaves(contract, operation="worktree_start")
+    require_parent_series(contract, operation="worktree_start")
     require_ordinary_worktree(contract, operation="worktree_start")
     memory_preview = prepare_memory_for_start(contract, replace(args, dry_run=True))
     if memory_preview["state"] == "blocked":

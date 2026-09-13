@@ -13,7 +13,6 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentTopology,
     repository_master_documents,
 )
-from agents_remember.worktrees.atomic_series_seal import require_series_accepting_leaves
 from agents_remember.worktrees.integration.integration_branch_repository import (
     branch_worktree_owners,
     canonical_local_branch,
@@ -307,12 +306,12 @@ def require_series_contract_authority(
     return authority
 
 
-def require_parent_series_accepting_leaves(
+def require_parent_series(
     contract: WorktreeContract,
     *,
     operation: str,
 ) -> WorktreeContract | None:
-    """Return an atomic leaf's open parent, or None for organizational direct-super work."""
+    """Return an atomic leaf's parent series, or None for organizational direct-super work."""
 
     authority = _master_authority(_scope(contract))
     if authority.sprint_ref is not None and authority.execution_nature == "organizational":
@@ -328,12 +327,11 @@ def require_parent_series_accepting_leaves(
         contract.task_root,
         authority.sprint_branch,
     )
-    require_series_accepting_leaves(series, operation=operation)
     return series
 
 
 def atomic_leaf_parent(contract: WorktreeContract, *, operation: str) -> WorktreeContract | None:
-    """Resolve the exact open atomic owner before deferring leaf-wide acceptance."""
+    """Resolve the exact atomic owner before deferring leaf-wide acceptance."""
     if contract.kind != "leaf":
         return None
     topology = TaskDocumentTopology(contract.coordination_root)
@@ -341,7 +339,7 @@ def atomic_leaf_parent(contract: WorktreeContract, *, operation: str) -> Worktre
     if topology.resolve(owner).document.kind != "master":
         return None
     require_ordinary_worktree(contract, operation=operation)
-    parent = require_parent_series_accepting_leaves(contract, operation=operation)
+    parent = require_parent_series(contract, operation=operation)
     if parent is not None:
         require_current_source_lineage(contract, operation=operation)
     return parent
@@ -828,7 +826,7 @@ def _leaf_target(
             assert authority.sprint_branch is not None
             return "sprint-super", authority.sprint_branch, _ref_key(authority.sprint_ref)
         _require_atomic_master(authority)
-    series = require_parent_series_accepting_leaves(
+    series = require_parent_series(
         contract,
         operation="atomic leaf integration",
     )

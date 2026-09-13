@@ -260,18 +260,26 @@ class PauseStopsAnAtomicMasterTests(unittest.TestCase):
         assert isinstance(released, dict)
         self.assertEqual(released["state"], "vacant")
 
-    def test_pausing_a_master_that_was_never_selected_is_refused_and_writes_nothing(self) -> None:
-        """No selection means nothing to release, and the refusal must not create a record."""
+    def test_pausing_a_master_that_was_never_selected_succeeds_and_writes_nothing(self) -> None:
+        """No selection means the master is already stopped, and the pause says so.
+
+        A master between landings holds no selection, so this is the ordinary state of a master
+        the developer wants parked rather than an error: the intent is already satisfied, and
+        the pause reports it in its own state instead of failing. The success must still be
+        inert -- no activation record, no coordination write, no ref move.
+        """
 
         self.assertEqual(self._activation_bytes(), {})
         before = self._world()
 
-        refused = self._pause(self.series_b)
+        stopped = self._pause(self.series_b)
 
-        self.assertFalse(refused["ok"], refused)
-        self.assertEqual(refused["state"], "atomic-series-activation-selection-missing")
-        self.assertIs(refused["paused"], False)
-        # A refused pause is inert: no activation record, no coordination write, no ref move.
+        self.assertTrue(stopped["ok"], stopped)
+        self.assertEqual(stopped["state"], "atomic-series-already-vacant")
+        self.assertIs(stopped["paused"], True)
+        self.assertEqual(stopped["atomicSeriesActivation"]["state"], "vacant")
+        self.assertNotIn("nextTool", stopped)
+        # An already-stopped master is not a written one: nothing was created to say so.
         self.assertEqual(self._activation_bytes(), {})
         self.assertEqual(self._world(), before)
 

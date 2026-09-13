@@ -150,6 +150,7 @@ integration = [
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_lifecycle_finalize.py",
   "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
   "mcp/tests/test_mcp_stdio_transport.py",
   "mcp/tests/test_memory_citation_fix.py",
   "mcp/tests/test_observer_projection.py",

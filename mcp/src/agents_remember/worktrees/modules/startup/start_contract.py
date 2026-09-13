@@ -21,7 +21,6 @@ from agents_remember.worktrees.activation.atomic_series_activation_transaction i
     atomic_series_activation_input_refusal,
     reconcile_selected_series_under_authority,
 )
-from agents_remember.worktrees.atomic_series_seal import require_series_accepting_leaves
 from agents_remember.worktrees.integration.integration_branch_authority import (
     ProposedWorkBranches,
     integration_surfaces,
@@ -243,8 +242,6 @@ def ensure_master_series_contract(
                 error,
                 operation=leaf_admission_operation or "worktree_start",
             )
-        if leaf_admission_operation is not None:
-            require_series_accepting_leaves(candidate, operation=leaf_admission_operation)
         return candidate
 
     # Observe the journal -> task-bound-contract handoff under the same per-master
@@ -298,8 +295,6 @@ def ensure_master_series_contract(
                 contract = _new_master_series_contract(spec)
                 integration_surfaces(contract)
                 _publish_master_series_contract(spec, contract)
-    if leaf_admission_operation is not None:
-        require_series_accepting_leaves(contract, operation=leaf_admission_operation)
     return reconcile_selected_series_under_authority(
         contract,
         activation_args=activation_args,
@@ -798,9 +793,6 @@ def _parent_series_contract(
         activation_args=args,
         leaf_admission_operation="atomic leaf start",
     )
-    if isinstance(series, WorktreeCommandResult):
-        return series
-    require_series_accepting_leaves(series, operation="atomic leaf start")
     return series
 
 
