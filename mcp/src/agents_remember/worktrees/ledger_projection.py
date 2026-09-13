@@ -32,6 +32,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.memory_attribution import (
+    MemoryAttributionError,
+    attributed_commits,
+    ledger_rows_from_attribution,
+)
+from agents_remember.kernel.memory_attribution import (
+    code_commit_exists as memory_code_commit_exists,
+)
 from agents_remember.kernel.memory_ledger import (
     LEDGER_SCHEMA,
     LedgerError,
@@ -273,30 +281,85 @@ def read_ledger_source(
     commit: str,
     relative: str = LEDGER_RELATIVE_PATH,
 ) -> LedgerSource:
-    """Read the complete source ledger at one exact commit, or refuse with its remedy.
+    """The complete source ledger at one exact commit, projected from its own attribution.
 
-    A source that resolves but simply does not carry a ledger yet -- the bootstrap state the
-    ledger-creation paths start from -- contributes no rows instead of refusing. There is
-    nothing unreadable about it, and an empty tail is exactly what the projection needs. A
-    ledger that exists and cannot be parsed is a different thing, and it does refuse.
+    The ledger is derived state: it is the memory commits' ``Code-Commit:`` trailers, read back
+    from the history that hashes them. This is where every reader of the source ledger now goes,
+    so ``memory.md`` is no longer the authority for what the source says -- it is not read at
+    all once the history carries the attribution.
+
+    A commit written before the trailer rule carries no trailer, and its attribution is still
+    whatever the ledger it carried said, so *that commit alone* is read from its own blob. The
+    fallback is per commit rather than a mode, which is what keeps it from becoming the
+    compatibility layer this change removes: backfilling the history writes the trailer onto
+    those commits, and then there is nothing left for the fallback to read and nothing to turn
+    off. A source that resolves and carries neither -- no trailer anywhere, no ledger blob --
+    contributes no rows instead of refusing, because that is the bootstrap state the
+    ledger-creation paths start from and an empty tail is exactly what they need.
+
+    Two inputs still refuse: a history that cannot be walked, and a ledger blob that exists and
+    cannot be parsed. Both name their remedy, and neither is repaired by editing a table.
+    """
+
+    try:
+        commits = attributed_commits(repository, tip=commit)
+    except MemoryAttributionError as error:
+        raise LedgerProjectionRefusal(f"{error}. " + _SOURCE_REMEDY) from error
+    attributed = ledger_rows_from_attribution(commits)
+    if attributed:
+        return LedgerSource(commit, _source_ledger_with_rows(attributed))
+    return LedgerSource(commit, _source_ledger_from_blob(repository, commit, relative))
+
+
+def _source_ledger_from_blob(
+    repository: Path,
+    commit: str,
+    relative: str,
+) -> MemoryLedger:
+    """Read an unattributed commit's own ledger blob, which is all that commit ever said.
+
+    Only reached when no commit at or below ``commit`` carries the trailer, which is the
+    pre-backfill history. The blob is that history's own record of its mappings, so reading it
+    is reading the same truth rather than reviving a competing one.
     """
 
     shown = run_git(repository, ["show", f"{commit}:{relative}"])
     if shown.returncode != 0:
         if _commit_carries_no_ledger(repository, commit, relative):
-            return LedgerSource(commit, _empty_source_ledger())
+            return _empty_source_ledger()
         raise LedgerProjectionRefusal(
             f"memory ledger source {commit}:{relative} is not readable in "
             f"{repository.as_posix()}: {shown.stderr.strip() or 'git show failed'}. "
             + _SOURCE_REMEDY
         )
     try:
-        return LedgerSource(commit, parse_ledger_text(shown.stdout))
+        return parse_ledger_text(shown.stdout)
     except LedgerError as error:
         raise LedgerProjectionRefusal(
             f"memory ledger source {commit}:{relative} is not a parseable ledger: {error}. "
             + _SOURCE_REMEDY
         ) from error
+
+
+def _source_ledger_with_rows(rows: Sequence[LedgerRow]) -> MemoryLedger:
+    """The ledger the attributed history projects, carrying only what git told us.
+
+    The metadata fields name the source's own provenance and are not facts any trailer records,
+    so they are left empty here rather than invented: the projection reads ``rows`` and nothing
+    else, and the header of the ledger it *writes* is recomputed from row one, which is the one
+    promise ``validate_ledger`` makes about it.
+    """
+
+    return MemoryLedger(
+        schema=LEDGER_SCHEMA,
+        repo_name="",
+        base_code_commit="",
+        base_memory_commit="",
+        last_verified_code_commit="",
+        last_memory_content_commit="",
+        sort_order="newest-first",
+        rows=list(rows),
+    )
 
 
 def _commit_carries_no_ledger(repository: Path, commit: str, relative: str) -> bool:
@@ -341,7 +404,7 @@ def read_ledger_text(text: str, *, label: str) -> MemoryLedger:
 def code_commit_exists(repository: Path, commit: str) -> bool:
     """Whether the code repository really holds ``commit`` as a commit object."""
 
-    return run_git(repository, ["cat-file", "-e", f"{commit}^{{commit}}"]).returncode == 0
+    return memory_code_commit_exists(repository, commit)
 
 
 def inspect_ledger_projection(contract: WorktreeContract) -> dict[str, object]:

@@ -6,14 +6,24 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# The attribution trailer every memory-content commit carries. It names the code commit
-# the same closeout landed, and it is written into the commit object's message at the one
-# point that knows both, because that is what binds it: ``git interpret-trailers --parse``
-# and ``git log --format='%(trailers:key=Code-Commit)'`` both read it as data, and no later
-# step can add or change it without rewriting the object (``git notes`` is not bound by the
-# hash). A memory commit with no code counterpart to name -- the ledger commit, settings, a
-# README -- carries none: absence is the detection, not a gap to paper over.
-CODE_COMMIT_TRAILER_KEY = "Code-Commit"
+from agents_remember.kernel.memory_attribution import CODE_COMMIT_TRAILER_KEY
+
+# The attribution trailer every memory-content commit carries is declared in the kernel module
+# that READS it back (``kernel/memory_attribution.py``), and imported here by the model that
+# RENDERS it. One literal, two directions of use: a writer that changed its own copy would emit
+# trailers the reader silently ignores, which is the worst failure this system can have because
+# it looks like "no attribution exists" rather than like a bug. The direction is kernel -> models
+# because ``layers.toml`` ranks ``kernel`` below ``models`` and permits an import only from a
+# lower rank; importing the other way would put the reader above the writer and break that
+# contract, and it would also be a real cycle risk rather than a theoretical one.
+#
+# What the key means, and what it does not: it names the code commit the same closeout landed,
+# and it is written into the commit object's message at the one point that knows both, because
+# that is what binds it -- ``git interpret-trailers --parse`` and
+# ``git log --format='%(trailers:key=Code-Commit)'`` both read it as data, and no later step can
+# add or change it without rewriting the object (``git notes`` is not bound by the hash). A
+# memory commit with no code counterpart to name -- the ledger commit, settings, a README --
+# carries none: absence is the detection, not a gap to paper over.
 
 CloseoutInputRoute = Literal["worktree", "direct-landing"]
 CloseoutCommitLegName = Literal["code", "memory", "ledger"]

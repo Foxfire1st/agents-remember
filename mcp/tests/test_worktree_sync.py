@@ -173,6 +173,36 @@ class WorktreeSyncTests(unittest.TestCase):
                 [pre_sync, code_tip],
             )
 
+    def test_a_code_tip_with_no_attributing_memory_commit_refuses_by_name(self) -> None:
+        """The mid-cycle detection is preserved and still names the condition it found.
+
+        The official code line advances and the official memory line does not map it. That is not
+        a bookkeeping complaint: memory does not know the code state, so the projection has no row
+        for the admitted tip and the sync must say so rather than silently pull a half-pair.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = SyncFixture(Path(tmp))
+            code_tip = fixture.move_official_code()
+
+            result = fixture.sync()
+
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.payload["state"], "blocked")
+            self.assertIn("official line is mid-cycle", str(result.payload["summary"]))
+            self.assertNotEqual(
+                git(fixture.contract.code_worktree, "rev-parse", "HEAD"),
+                code_tip,
+            )
+
+            # The pair completes, and the same call now pulls it through: the refusal named a
+            # real condition rather than a permanent one.
+            fixture.map_official_memory(code_tip)
+            synced = fixture.sync()
+
+            self.assertEqual(synced.payload["state"], "synced")
+            self.assertEqual(git(fixture.contract.code_worktree, "rev-parse", "HEAD"), code_tip)
+
     def test_nonregular_journal_is_renamed_without_following_and_quarantined(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = SyncFixture(Path(tmp))
