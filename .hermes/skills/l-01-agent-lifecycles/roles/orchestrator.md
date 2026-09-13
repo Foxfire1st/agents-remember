@@ -261,9 +261,10 @@ the design: run the bulwark check against the portfolio and the past before disp
   one previewed `task_doc.attach_master` call (row + membership + nature assertion, plus a graph
   node only when a graph already exists, in a single atomic batch that refuses partial attaches;
   `detach_master` is its symmetric inverse and never deletes files). A sprint without an
-  `executionGraph` runs the source-pair-selected atomic-sequential default: canonical commanded
-  order is the stable tie-break, while selecting another master may logically pause the former
-  without retiring its durable work or inventing a dependency. If the ruled topology instead
+  `executionGraph` runs the graph-less atomic-sequential default: canonical commanded order is the
+  stable tie-break, and nothing serializes its masters — a graph-less sprint declares no
+  dependencies, so independent masters proceed concurrently, no master is held because another is
+  selected, and none is retired. If the ruled topology instead
   adopts an explicit graph from that state, attach every
   commanded master first, then use one complete `task_doc.author_execution_graph` batch containing
   every node and evidence-backed edge; edit the graph incrementally only after that bootstrap
@@ -318,10 +319,10 @@ tombstone, replan, or drain an old projection row.
 Dispatch independent ready organizational masters and their build work in parallel up to
 `orchestration.concurrency.maxParallelMasters`. An atomic master waits for its explicit graph
 predecessors, when any. Before its manager or worker receives implementation exposure, the
-control plane selects its exact code/memory source pair as `reconciling`, logically pausing the
-former selected master, source-syncs it, and publishes `active`. This never suspends a chat,
-process, worktree, contract, or already-claimed lifecycle journal; selecting another atomic master
-may later pause and preserve this one. Reviewer and curator inspection does not switch selection.
+control plane publishes that contract's own activation as `reconciling`, source-syncs it, and
+publishes `active`. The record is per contract, so selecting another atomic master neither pauses
+nor preserves this one, and this never suspends a chat, process, worktree, contract, or
+already-claimed lifecycle journal. Reviewer and curator inspection does not switch selection.
 For each admitted master, run the
 three-state hosted-role dispatch for `dispatch_agent` on the canonical master document with role
 `manager`, compiling its complete brief from `../templates/manager-brief.md`; the manager occupies
@@ -341,12 +342,13 @@ silently re-run a governed review, reset its baseline, or create a new finding l
   review counts the next round. This spawned backend seat does not run flat hat-collapse (see
 the Hat-Collapse Rule).
 
-Source-pair activation serializes new atomic implementation exposure; the landing lane separately
-serializes conflicting protected-ref movement. Neither authority can
+Per-contract activation records each master's own `reconciling -> active` transition and
+serializes nothing across masters; the landing lane separately serializes conflicting
+protected-ref movement. Neither authority can
 veto task creation, replacement, progress/checkmarks, requirements/decisions/sections, route review,
 graph/linkage, attach/detach/reparent/removal, or sprint completion. Process those writes normally,
-then consume their per-scope projection effects. Queue rows only project active/reconciling/paused
-waiting facts. A present-unreadable activation or landing owner fails closed at that exact
+then consume their per-scope projection effects. Queue rows only project each contract's own
+active/reconciling waiting facts. A present-unreadable activation or landing owner fails closed at that exact
 projection/admission or conflicting landing boundary, not for planning elsewhere.
 
 **Delegated series authority:** after the developer accepts the orchestration plan, this seat owns
@@ -404,11 +406,12 @@ handover you cannot honestly decide escalates to the architect as a decision ite
 3. **Organizational:** release one prepared leaf transaction against the current super source and
    land its code/memory/ledger legs directly. No full acceptance is launched at the final leaf. No
    master branch is merged because none exists.
-4. **Atomic:** require the master to be the active source-pair selection while its manager exposes
-   implementation, integrate every prepared leaf into the isolated atomic branch, then acquire the
-   narrow landing authority and land that one code/memory/ledger block on super. Full quality or
-   memory suites run only when the developer explicitly requests them.
-   Expose no intermediate atomic leaf to super; a paused master retains its branch and journals.
+4. **Atomic:** require the master's own contract activation to be `active` while its manager
+   exposes implementation, integrate every prepared leaf into the isolated atomic branch, then
+   acquire the narrow landing authority and land that one code/memory/ledger block on super. Full
+   quality or memory suites run only when the developer explicitly requests them.
+   Expose no intermediate atomic leaf to super; an unfinished master retains its branch and
+   journals.
 5. Map the external-memory edge with the code edge. Prefer an ancestry-preserving fast-forward, and
    reserve `replay` for the case where carryover is genuinely the only choice; carry-over is an
    explicit recovery for unavoidable divergence, not a routine consequence of parallel
@@ -448,7 +451,7 @@ main
         ├── organizational master A (logical owner only)
         │     ├── leaf A1 (off current super) ──→ super
         │     └── leaf A2 (off refreshed super) ── prepared transaction ─→ super
-        ├── atomic master B branch (off current super; source-pair-selected; one landing)
+        ├── atomic master B branch (off current super; selected; one landing)
         │     ├── leaf B1 ─→ B
         │     └── leaf B2 ─→ B ── prepared transaction ─→ super
         └── … final: super → main PR (remote merge) + memory carry-over to main + push

@@ -1,8 +1,12 @@
-"""Source-pair-scoped activation authority for durable atomic master work.
+"""Contract-scoped activation authority for durable atomic master work.
 
 Series contracts prove that work exists.  This replace-in-place control-plane
-snapshot separately selects which one may expose new implementation work.  The
-queue only observes the snapshot; task-document mutation never reads it.
+snapshot separately records which of them is currently reconciling or active.
+The record is keyed by the canonical series contract, so two atomic masters
+that share one protected source pair never share this state: each tracks only
+its own ``reconciling -> active`` transition.  Real wave dependencies remain
+the sprint execution graph's job, and the queue only observes the snapshot;
+task-document mutation never reads it.
 """
 
 from __future__ import annotations
@@ -29,14 +33,8 @@ from agents_remember.models.structural.atomic_series_activation import (
     AtomicSeriesActivationRecord,
     AtomicSeriesObservedState,
     AtomicSeriesSelectionState,
-    AtomicSeriesSourcePair,
-    AtomicSeriesSourceRef,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.worktrees.integration.integration_branch_repository import (
-    canonical_local_branch,
-)
-from agents_remember.worktrees.modules.git import repository_identity
 from agents_remember.worktrees.scheduling_mode import TERMINAL_SERIES_CLEANUP
 from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import (
@@ -50,8 +48,9 @@ ACTIVATION_OWNERSHIP = StoreOwnership(
     writers=("mcp",),
     compaction_owner=None,
     rationale=(
-        "atomic start/attach/dispatch selects one master per protected source pair; "
-        "task truth and the disposable closeout projection are read-only consumers"
+        "atomic start/attach/dispatch records one reconciling -> active transition per "
+        "canonical series contract; task truth and the disposable closeout projection "
+        "are read-only consumers"
     ),
 )
 
@@ -70,7 +69,7 @@ def bounded_activation_detail(detail: str | None) -> str | None:
 
 
 class AtomicSeriesActivationError(RuntimeError):
-    """The selected source-pair authority is absent, malformed, or inconsistent."""
+    """The addressed contract's activation authority is absent, malformed, or inconsistent."""
 
     def __init__(
         self,
@@ -91,10 +90,10 @@ class AtomicSeriesActivationError(RuntimeError):
 
 @dataclass(frozen=True)
 class AtomicSeriesActivationObservation:
-    """Strict read of one source-pair selection without creating store artifacts."""
+    """Strict read of one contract's activation record without creating store artifacts."""
 
-    source_pair: AtomicSeriesSourcePair
-    source_pair_fingerprint: str
+    contract_path: Path
+    contract_fingerprint: str
     activation_path: Path
     state: AtomicSeriesObservedState
     record: AtomicSeriesActivationRecord | None = None
@@ -116,7 +115,7 @@ class AtomicSeriesActivationObservation:
     def source_fact(self) -> dict[str, object]:
         fact: dict[str, object] = {
             "address": self.activation_path.as_posix(),
-            "sourcePairFingerprint": self.source_pair_fingerprint,
+            "contractFingerprint": self.contract_fingerprint,
             "state": self.state,
         }
         if self.record is not None:
@@ -128,89 +127,29 @@ class AtomicSeriesActivationObservation:
         return fact
 
 
-def atomic_series_source_pair(contract: WorktreeContract) -> AtomicSeriesSourcePair:
-    """Derive the exact normalized protected source pair from a canonical series contract."""
+def contract_fingerprint(contract: WorktreeContract) -> str:
+    """The stable per-contract identity that names exactly one activation record."""
 
-    _require_canonical_series_contract(contract)
-    code = _atomic_series_source_ref(
-        contract.code_repo_path,
-        contract.code_source_branch,
-        side="code",
-    )
-    memory: AtomicSeriesSourceRef | None = None
-    if contract.memory_mode == "external":
-        memory_repo = contract.memory_repo_path
-        if memory_repo is None:
-            raise AtomicSeriesActivationError(
-                "atomic-series-memory-repository-missing",
-                "external-memory atomic-series authority has no memory repository",
-            )
-        memory = _atomic_series_source_ref(
-            memory_repo,
-            contract.memory_source_branch,
-            side="memory",
-        )
-    return AtomicSeriesSourcePair(code=code, memory=memory)
-
-
-def _atomic_series_source_ref(
-    repository: Path,
-    branch: str,
-    *,
-    side: str,
-) -> AtomicSeriesSourceRef:
-    try:
-        identity = repository_identity(repository)
-        if identity is None:
-            raise RuntimeError("repository identity is unavailable")
-        canonical_branch = canonical_local_branch(repository, branch)
-        return AtomicSeriesSourceRef(
-            repositoryIdentity=identity.as_posix(),
-            sourceBranch=canonical_branch,
-        )
-    except (OSError, RuntimeError, UnicodeError, ValidationError, ValueError) as error:
-        raise AtomicSeriesActivationError(
-            f"atomic-series-{side}-source-identity-unreadable",
-            f"atomic-series {side} repository/source identity is unavailable: {error}",
-        ) from error
-
-
-def source_pair_fingerprint(source_pair: AtomicSeriesSourcePair) -> str:
-    payload = json.dumps(
-        source_pair.model_dump(mode="json"),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-    )
+    payload = contract.contract_path.resolve(strict=False).as_posix()
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def activation_path(
     coordination_root: Path,
-    source_pair: AtomicSeriesSourcePair,
+    contract: WorktreeContract,
 ) -> Path:
-    digest = source_pair_fingerprint(source_pair)
+    digest = contract_fingerprint(contract)
     return coordination_root / "controlplane" / "atomic-series-activation" / f"{digest}.json"
 
 
 def observe_atomic_series(
-    contract_or_pair: WorktreeContract | AtomicSeriesSourcePair,
-    *,
-    coordination_root: Path | None = None,
+    contract: WorktreeContract,
 ) -> AtomicSeriesActivationObservation:
-    """Read one exact activation snapshot strictly; missing means vacant, never inferred."""
+    """Read this contract's own activation snapshot strictly; missing means vacant."""
 
-    if isinstance(contract_or_pair, WorktreeContract):
-        contract = contract_or_pair
-        source_pair = atomic_series_source_pair(contract)
-        root = contract.coordination_root
-    else:
-        source_pair = contract_or_pair
-        if coordination_root is None:
-            raise ValueError("coordination_root is required when observing a source pair")
-        root = coordination_root
-    path = activation_path(root, source_pair)
-    return observe_atomic_series_path(root, source_pair, path)
+    _require_canonical_series_contract(contract)
+    path = activation_path(contract.coordination_root, contract)
+    return observe_atomic_series_path(contract, path)
 
 
 def publish_atomic_series_selection(
@@ -219,7 +158,7 @@ def publish_atomic_series_selection(
     *,
     timestamp: str | None = None,
 ) -> AtomicSeriesActivationObservation:
-    """Replace the exact pair selection, recovering corrupt bytes only through selection.
+    """Replace this contract's own selection, recovering corrupt bytes only through selection.
 
     The caller holds repository integration authority across the larger
     reconciling -> source-sync -> active transaction.  This store lock only
@@ -232,13 +171,12 @@ def publish_atomic_series_selection(
             "a terminal atomic-series contract cannot be selected",
         )
     ACTIVATION_OWNERSHIP.check_declared_writer()
-    source_pair = atomic_series_source_pair(contract)
-    pair_fingerprint = source_pair_fingerprint(source_pair)
-    path = activation_path(contract.coordination_root, source_pair)
+    fingerprint = contract_fingerprint(contract)
+    path = activation_path(contract.coordination_root, contract)
     selected_at = timestamp or _now_iso()
     selected_master = series_master_ref(contract)
     with exclusive_access(path, ACTIVATION_OWNERSHIP):
-        previous = observe_atomic_series_path(contract.coordination_root, source_pair, path)
+        previous = observe_atomic_series_path(contract, path)
         if previous.state == "unreadable":
             _archive_unreadable_selection(
                 path,
@@ -257,8 +195,7 @@ def publish_atomic_series_selection(
             return previous
         revision = previous_record.revision + 1 if previous_record is not None else 1
         record = AtomicSeriesActivationRecord(
-            sourcePairFingerprint=pair_fingerprint,
-            sourcePair=source_pair,
+            contractFingerprint=fingerprint,
             selectedMaster=selected_master,
             contractPath=contract.contract_path.resolve().as_posix(),
             state=state,
@@ -267,8 +204,8 @@ def publish_atomic_series_selection(
         )
         atomic_write_text(path, record.model_dump_json(indent=2) + "\n")
         return AtomicSeriesActivationObservation(
-            source_pair,
-            pair_fingerprint,
+            contract.contract_path,
+            fingerprint,
             path,
             state,
             record,
@@ -280,7 +217,7 @@ def require_selected_atomic_series(
     *,
     required_state: AtomicSeriesSelectionState = "reconciling",
 ) -> AtomicSeriesActivationObservation:
-    """Prove continuation/cancellation addresses the already-selected exact contract."""
+    """Prove continuation/cancellation addresses this contract's own selected state."""
 
     observation = observe_atomic_series(contract)
     expected_master = series_master_ref(contract)
@@ -309,7 +246,7 @@ def require_selected_atomic_series(
 def require_atomic_series_cancellation_owner(
     contract: WorktreeContract,
 ) -> AtomicSeriesActivationObservation:
-    """Prove cancel/replay addresses the selected or exactly last-released series."""
+    """Prove cancel/replay addresses this contract's selected or last-released state."""
 
     observation = observe_atomic_series(contract)
     expected_master = series_master_ref(contract)
@@ -337,40 +274,38 @@ def require_atomic_series_cancellation_owner(
 
 def activation_waiting_reason(
     observation: AtomicSeriesActivationObservation,
-    master_ref: TaskDocumentRef,
 ) -> str | None:
-    """Project logical pause/reconciliation as waiting, never lifecycle ownership."""
+    """Project this contract's own in-flight reconciliation as waiting.
 
-    selected = observation.selected_master
-    if observation.state == "vacant" or selected is None:
-        return "atomic-series-not-selected"
-    if selected != master_ref:
-        return f"atomic-series-paused-by: {selected.key}"
+    Selection is per contract, so another master's state is never this
+    contract's reason to wait; genuine wave dependencies stay with the sprint
+    execution graph's own ``predecessor-incomplete:`` waiting reasons.
+    """
+
     if observation.state == "reconciling":
         return "atomic-series-reconciling"
     return None
 
 
 def observe_atomic_series_path(
-    coordination_root: Path,
-    source_pair: AtomicSeriesSourcePair,
+    contract: WorktreeContract,
     path: Path,
 ) -> AtomicSeriesActivationObservation:
-    fingerprint = source_pair_fingerprint(source_pair)
+    fingerprint = contract_fingerprint(contract)
     try:
         mode = path.lstat().st_mode
     except FileNotFoundError:
         return AtomicSeriesActivationObservation(
-            source_pair,
+            contract.contract_path,
             fingerprint,
             path,
             "vacant",
         )
     except OSError as exc:
-        return _unreadable(source_pair, fingerprint, path, type(exc).__name__, str(exc))
+        return _unreadable(contract, fingerprint, path, type(exc).__name__, str(exc))
     if not stat.S_ISREG(mode):
         return _unreadable(
-            source_pair,
+            contract,
             fingerprint,
             path,
             "atomic-series-activation-nonregular",
@@ -378,10 +313,10 @@ def observe_atomic_series_path(
         )
     try:
         record = AtomicSeriesActivationRecord.model_validate_json(_read_regular_entry(path))
-        _require_record_identity(record, source_pair, fingerprint, path)
+        _require_record_identity(record, contract, fingerprint, path)
         return _observation_from_record(
-            coordination_root,
-            source_pair,
+            contract.coordination_root,
+            contract,
             fingerprint,
             path,
             record,
@@ -397,12 +332,12 @@ def observe_atomic_series_path(
     ) as exc:
         status = getattr(exc, "status", type(exc).__name__)
         detail = getattr(exc, "detail", str(exc))
-        return _unreadable(source_pair, fingerprint, path, str(status), str(detail))
+        return _unreadable(contract, fingerprint, path, str(status), str(detail))
 
 
 def _observation_from_record(
     coordination_root: Path,
-    source_pair: AtomicSeriesSourcePair,
+    contract: WorktreeContract,
     fingerprint: str,
     path: Path,
     record: AtomicSeriesActivationRecord,
@@ -414,7 +349,7 @@ def _observation_from_record(
     else:
         state = record.state
     return AtomicSeriesActivationObservation(
-        source_pair,
+        contract.contract_path,
         fingerprint,
         path,
         state,
@@ -424,14 +359,16 @@ def _observation_from_record(
 
 def _require_record_identity(
     record: AtomicSeriesActivationRecord,
-    source_pair: AtomicSeriesSourcePair,
+    contract: WorktreeContract,
     fingerprint: str,
     path: Path,
 ) -> None:
-    if record.sourcePair != source_pair or record.sourcePairFingerprint != fingerprint:
+    if record.contractFingerprint != fingerprint or Path(record.contractPath).resolve(
+        strict=False
+    ) != contract.contract_path.resolve(strict=False):
         raise AtomicSeriesActivationError(
-            "atomic-series-activation-source-pair-mismatch",
-            f"activation snapshot does not match its source-pair path: {path}",
+            "atomic-series-activation-contract-mismatch",
+            f"activation snapshot does not match its contract path: {path}",
         )
 
 
@@ -456,11 +393,6 @@ def _load_selected_contract(
         )
     contract = load_contract(path)
     _require_canonical_series_contract(contract)
-    if atomic_series_source_pair(contract) != record.sourcePair:
-        raise AtomicSeriesActivationError(
-            "atomic-series-activation-contract-source-pair-mismatch",
-            "selected contract no longer belongs to the recorded source pair",
-        )
     if series_master_ref(contract) != record.selectedMaster:
         raise AtomicSeriesActivationError(
             "atomic-series-activation-master-mismatch",
@@ -525,7 +457,7 @@ def _archive_unreadable_selection(
     *,
     archived_at: str,
 ) -> None:
-    archive_root = path.parent / "archive" / observation.source_pair_fingerprint
+    archive_root = path.parent / "archive" / observation.contract_fingerprint
     stamp = archived_at.replace(":", "-").replace("+", "_")
     archive_kind: Literal["raw-bytes", "opaque-entry", "absence"]
     try:
@@ -578,7 +510,7 @@ def _archive_unreadable_selection(
             archive_kind = "opaque-entry"
     evidence_path = archive_root / f"{stamp}-{digest}.json"
     evidence = AtomicSeriesActivationArchiveEvidence(
-        sourcePairFingerprint=observation.source_pair_fingerprint,
+        contractFingerprint=observation.contract_fingerprint,
         activationPath=path.as_posix(),
         archiveKind=archive_kind,
         snapshotPath=snapshot.as_posix() if snapshot is not None else None,
@@ -614,14 +546,14 @@ def _opaque_archive_descriptor(
 
 
 def _unreadable(
-    source_pair: AtomicSeriesSourcePair,
+    contract: WorktreeContract,
     fingerprint: str,
     path: Path,
     error_type: str,
     detail: str,
 ) -> AtomicSeriesActivationObservation:
     return AtomicSeriesActivationObservation(
-        source_pair,
+        contract.contract_path,
         fingerprint,
         path,
         "unreadable",

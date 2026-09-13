@@ -41,7 +41,12 @@ from agents_remember.kernel.memory_ledger import (
     parse_ledger_text,
     parse_ledger_text_unvalidated,
 )
-from agents_remember.worktrees.modules.git import branch_commit, head_commit, is_ancestor
+from agents_remember.worktrees.modules.git import (
+    branch_commit,
+    head_commit,
+    is_ancestor,
+    require_git,
+)
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 LEDGER_RELATIVE_PATH = "memory.md"
@@ -380,21 +385,52 @@ def contract_ledger_projection(
             "external-memory ledger projection requires a memory repository and a ledger. "
             + _REPAIR_REMEDY
         )
-    assert contract.memory_worktree is not None
-    live_text = contract.ledger_path.read_text(encoding="utf-8")
+    observed_text, memory_reachable_from = observed_ledger_state(contract)
     return project_ledger(
         source=read_ledger_source(
             contract.memory_repo_path,
             resolve_memory_source_commit(contract),
         ),
-        observed=read_ledger_text(live_text, label="the live memory.md"),
-        observed_text=live_text,
+        observed=read_ledger_text(observed_text, label="the live memory.md"),
+        observed_text=observed_text,
         world=LedgerWorld(
             memory_repository=contract.memory_repo_path,
-            memory_reachable_from=head_commit(contract.memory_worktree),
+            memory_reachable_from=memory_reachable_from,
             code_repository=contract.code_repo_path,
         ),
         additions=additions,
+    )
+
+
+def observed_ledger_state(contract: WorktreeContract) -> tuple[str, str]:
+    """The ledger bytes this contract's closeout owed, and the state its rows must be true against.
+
+    A leaf writes its ledger inside its own memory worktree, so the file on disk is the observed
+    table and the worktree HEAD is the memory state its rows are proved reachable from. A series
+    owns no memory worktree at all: its ledger is the blob at the exact memory work branch tip,
+    which is the artifact its closeout records and its integration lands, so that tip is both the
+    observed table and the reachable state. Reading the live file for a series is not an option --
+    there is none -- and reading a *stale* one would be worse: the evidence would describe a table
+    the contract no longer names.
+    """
+
+    if contract.memory_repo_path is None or contract.ledger_path is None:
+        raise LedgerProjectionRefusal(
+            "external-memory ledger projection requires a memory repository and a ledger. "
+            + _REPAIR_REMEDY
+        )
+    if contract.memory_worktree is not None:
+        return (
+            contract.ledger_path.read_text(encoding="utf-8"),
+            head_commit(contract.memory_worktree),
+        )
+    tip = branch_commit(contract.memory_repo_path, contract.memory_work_branch)
+    return (
+        require_git(
+            contract.memory_repo_path,
+            ["show", f"{tip}:{LEDGER_RELATIVE_PATH}"],
+        ),
+        tip,
     )
 
 

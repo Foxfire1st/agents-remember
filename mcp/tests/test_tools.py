@@ -279,6 +279,30 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         )
         self.assertEqual(envelope["operation"], "worktree_checkpoint_landing")
 
+    def test_the_checkpoint_description_publishes_rather_than_pausing(self) -> None:
+        """The agent-facing text must not route an ordinary stop into a publication.
+
+        ``worktree_checkpoint_landing`` moves the master's committed refs onto its super branch,
+        where every other master sees them. Describing it as the way to pause a master invites an
+        agent to publish unfinished work for an ordinary stop request -- changes the developer never
+        asked to publish. A pause publishes nothing and moves no ref, so the description has to
+        present a partial publication and say the pause is a separate matter.
+        """
+
+        server = FastMCP("description-probe")
+        for register_tools in TOOL_REGISTRARS:
+            register_tools(server, _permissive_registration_config())
+        descriptions = {
+            tool.name: (tool.description or "") for tool in asyncio.run(server.list_tools())
+        }
+
+        description = descriptions["worktree_checkpoint_landing"]
+
+        self.assertNotIn("Use this to pause", description)
+        self.assertIn("PUBLISH", description)
+        self.assertIn("not a pause", description)
+        self.assertIn("separate matter and is NOT this call", description)
+
 
 def _permissive_registration_config() -> McpRuntimeConfig:
     """A registration-time config stub.

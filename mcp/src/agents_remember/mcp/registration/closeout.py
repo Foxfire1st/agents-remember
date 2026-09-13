@@ -185,16 +185,21 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         ledger_commit_message: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Land an UNFINISHED atomic master's accumulated line into its super branch and keep the
-        master open. Use this to pause a master: worktree_integrate refuses a partial master because
-        it proves a finished unit (task document Completed, one landed enclosure per canonical leaf,
-        and a completed closeout), and a paused master has none of those. This captures the master's
-        own committed refs instead -- the live series code work branch tip and the live memory work
+        """Partially PUBLISH an UNFINISHED atomic master: land its accumulated line into its super
+        branch and keep the master open. This is a publication, not a pause -- the master's
+        committed code and memory refs move onto the protected source branch, where every other
+        master sees them, and an explicitly requested developer approval is required. It exists
+        because worktree_integrate refuses a partial master: that route proves a finished unit
+        (task document Completed, one landed enclosure per canonical leaf, and a completed
+        closeout), which an open master does not have. This route captures the master's own
+        committed refs instead -- the live series code work branch tip and the live memory work
         branch tip -- proves the existing ledger maps the code ref, and lands exactly those. It
-        shares the final route's whole preflight and ref move, requires the same explicit developer
-        approval, records the integration cell as 'checkpointed' rather than 'completed', retires
-        nothing and runs no cleanup, so the master's worktrees, branches and enclosure survive for
-        the work that continues. MUTATING: moves branch refs; preview with dry_run=true."""
+        shares the final route's whole preflight and ref move, records the integration cell as
+        'checkpointed' rather than 'completed', retires nothing and runs no cleanup, so the
+        master's worktrees, branches and enclosure survive for the work that continues. Pausing a
+        master is a separate matter and is NOT this call: stopping its work publishes nothing,
+        moves no ref, and leaves its branch, worktrees and enclosure private. MUTATING: moves
+        branch refs; preview with dry_run=true."""
         return worktree_checkpoint_landing_payload(
             config,
             contract_path,

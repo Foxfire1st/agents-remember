@@ -17,6 +17,12 @@ from agents_remember.tasks.document_refs import (
 from agents_remember.worktrees.integration.integration_branch_authority import (
     branch_worktree_owners,
 )
+from agents_remember.worktrees.ledger_projection import (
+    LEDGER_RELATIVE_PATH,
+    LedgerProjectionRefusal,
+    contract_ledger_projection,
+    observed_ledger_state,
+)
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     is_ancestor,
@@ -242,64 +248,375 @@ def _require_exact_atomic_landing_chain(
     series: WorktreeContract,
     contracts: dict[str, WorktreeContract],
 ) -> list[WorktreeContract]:
-    current_code = series.code_base_commit
-    current_memory = series.memory_base_commit if series.memory_mode == "external" else ""
+    """Prove every canonical leaf landed on the series ref, in one order, over one spine.
+
+    Base-to-tip equality cannot order this chain once a master reconciles with a sibling: a sync
+    advances the recorded base pair to the official line the master absorbed, while a leaf landed
+    before that reconciliation keeps the base it really started from, so the old walk from
+    ``code_base_commit`` could not even find its first leaf. The order is read from the landings
+    themselves instead -- the leaf tips are totally ordered by ancestry -- and every step between
+    two consecutive landings is then proved to be either the exact previous landing or that landing
+    merged with an official position this contract itself synced with. Every leaf is still proved
+    landed, no leaf may start off the master's own line, and nothing but leaf landings and the
+    reconciled source line may reach the ref.
+    """
+
+    ordered = _ordered_atomic_landing_chain(series, contracts)
+    _require_chain_origin(series, ordered)
+    _require_landing_spine_side(series, ordered, side="code")
+    if series.memory_mode == "external":
+        _require_landing_spine_side(series, ordered, side="memory")
+    return ordered
+
+
+def _ordered_atomic_landing_chain(
+    series: WorktreeContract,
+    contracts: dict[str, WorktreeContract],
+) -> list[WorktreeContract]:
+    """The canonical leaves, oldest landing first, each one proved against its enclosure.
+
+    The order is the leaves' own landed ancestry, on both sides of the pair, so it survives a
+    reconciliation that moved the recorded base and any leaf created afterwards.
+    """
+
     remaining = dict(contracts)
+    for leaf in remaining.values():
+        _require_atomic_leaf_landed(series, leaf)
     ordered: list[WorktreeContract] = []
     while remaining:
         next_ids = [
             leaf_id
             for leaf_id, leaf in remaining.items()
-            if leaf.code_base_commit == current_code
-            and (series.memory_mode != "external" or leaf.memory_base_commit == current_memory)
+            if all(
+                _leaf_landing_precedes(series, leaf, other)
+                for other_id, other in remaining.items()
+                if other_id != leaf_id
+            )
         ]
         if len(next_ids) != 1:
             raise CloseoutQueueError(
                 "atomic-series-leaf-chain-invalid",
                 "atomic series leaves do not form one exact code-and-memory landing chain",
             )
-        leaf_id = next_ids[0]
-        leaf = remaining.pop(leaf_id)
-        _require_atomic_leaf_landed(series, leaf)
-        ordered.append(leaf)
-        current_code = leaf.integrated_code_commit
-        if series.memory_mode == "external":
-            current_memory = leaf.integrated_ledger_commit
-    _require_atomic_chain_tips(series, current_code, current_memory)
+        ordered.append(remaining.pop(next_ids[0]))
     return ordered
 
 
+def _leaf_landing_precedes(
+    series: WorktreeContract,
+    earlier: WorktreeContract,
+    later: WorktreeContract,
+) -> bool:
+    """Whether one leaf's landing is on the way to another's, on both sides of the pair."""
+
+    if earlier.integrated_code_commit == later.integrated_code_commit:
+        return False
+    if not is_ancestor(
+        series.code_repo_path,
+        earlier.integrated_code_commit,
+        later.integrated_code_commit,
+    ):
+        return False
+    if series.memory_mode != "external":
+        return True
+    assert series.memory_repo_path is not None
+    return is_ancestor(
+        series.memory_repo_path,
+        earlier.integrated_ledger_commit,
+        later.integrated_ledger_commit,
+    )
+
+
+def _require_chain_origin(
+    series: WorktreeContract,
+    ordered: list[WorktreeContract],
+) -> None:
+    """Prove the chain starts where the master's own line starts, on both sides of the pair.
+
+    With no reconciliation the oldest leaf still has to start at the recorded base exactly, which is
+    the rule the chain walk used to enforce for every step. Once a sync has advanced that base, the
+    oldest leaf's base and the position the first sync advanced from must lie on one line -- either
+    direction, because a leaf may have landed before or after the sync -- and every other leaf has
+    to start at or after the chain's own origin.
+    """
+
+    root = ordered[0]
+    if series.sync_log:
+        origin_code, origin_memory = _series_pre_sync_base(series)
+        _require_same_line(series.code_repo_path, root.code_base_commit, origin_code, side="code")
+        if series.memory_mode == "external":
+            assert series.memory_repo_path is not None
+            _require_same_line(
+                series.memory_repo_path, root.memory_base_commit, origin_memory, side="memory"
+            )
+    elif root.code_base_commit != series.code_base_commit or (
+        series.memory_mode == "external" and root.memory_base_commit != series.memory_base_commit
+    ):
+        raise CloseoutQueueError(
+            "atomic-series-leaf-chain-invalid",
+            "atomic series leaves do not form one exact code-and-memory landing chain: the oldest "
+            "leaf does not start at the recorded base",
+        )
+    for leaf in ordered:
+        _require_leaf_starts_on_the_chain(series, root, leaf)
+
+
+def _series_pre_sync_base(series: WorktreeContract) -> tuple[str, str]:
+    """The pair the first recorded sync advanced from: the master's line before it reconciled."""
+
+    first = series.sync_log[0]
+    return (
+        first.get("codeBaseFrom", "") or series.code_base_commit,
+        first.get("memoryBaseFrom", "") or series.memory_base_commit,
+    )
+
+
+def _require_same_line(repository: Path, left: str, right: str, *, side: str) -> None:
+    """Refuse two positions that are not on one line, in either direction."""
+
+    if (
+        bool(left)
+        and bool(right)
+        and (is_ancestor(repository, left, right) or is_ancestor(repository, right, left))
+    ):
+        return
+    raise CloseoutQueueError(
+        "atomic-series-leaf-chain-invalid",
+        f"atomic series {side} position {left} is not on the master's own line at {right}",
+    )
+
+
+def _require_leaf_starts_on_the_chain(
+    series: WorktreeContract,
+    root: WorktreeContract,
+    leaf: WorktreeContract,
+) -> None:
+    """Refuse a leaf whose recorded base is off the master's own line."""
+
+    if not is_ancestor(series.code_repo_path, root.code_base_commit, leaf.code_base_commit):
+        raise CloseoutQueueError(
+            "atomic-series-leaf-chain-invalid",
+            f"atomic leaf {leaf.leaf_id!r} does not start on the series code line: its recorded "
+            f"base {leaf.code_base_commit} is not descended from the chain origin "
+            f"{root.code_base_commit}",
+        )
+    if series.memory_mode != "external":
+        return
+    assert series.memory_repo_path is not None
+    if not is_ancestor(series.memory_repo_path, root.memory_base_commit, leaf.memory_base_commit):
+        raise CloseoutQueueError(
+            "atomic-series-leaf-chain-invalid",
+            f"atomic leaf {leaf.leaf_id!r} does not start on the series memory line: its recorded "
+            f"base {leaf.memory_base_commit} is not descended from the chain origin "
+            f"{root.memory_base_commit}",
+        )
+
+
+def _require_landing_spine_side(
+    series: WorktreeContract,
+    ordered: list[WorktreeContract],
+    *,
+    side: str,
+) -> None:
+    """Prove one series ref is exactly the leaf landings, joined by the reconciled source line.
+
+    Each leaf's landing must be an ancestor of the ref, each step from one landing to the next must
+    add nothing but an official position this contract synced with, and the same holds for the step
+    from the last landing to the ref. A ref that simply *is* the last landing -- every master that
+    reconciled before its final leaf landed -- needs no step at all.
+    """
+
+    landings, bases, recorded_base, repository, branch = _spine_facts(series, ordered, side=side)
+    positions = _landing_source_positions(series, side=side)
+    tip = branch_commit(repository, branch)
+    previous = landings[0]
+    for index, leaf in enumerate(ordered):
+        if not is_ancestor(repository, landings[index], tip):
+            raise CloseoutQueueError(
+                "atomic-series-leaf-not-landed",
+                f"atomic leaf {leaf.leaf_id!r} has not landed on the exact series {side} ref",
+            )
+        if index:
+            _require_admitted_step(
+                repository,
+                previous,
+                bases[index],
+                positions,
+                _SpineStep(side, f"atomic leaf {leaf.leaf_id!r}"),
+            )
+        previous = landings[index]
+    if tip != landings[-1]:
+        if not recorded_base or not is_ancestor(repository, recorded_base, tip):
+            raise CloseoutQueueError(
+                "atomic-series-leaf-chain-invalid",
+                f"atomic series {side} ref does not descend from the recorded base {recorded_base}",
+            )
+        _require_admitted_step(
+            repository, landings[-1], tip, positions, _SpineStep(side, "the series ref")
+        )
+
+
+def _spine_facts(
+    series: WorktreeContract,
+    ordered: list[WorktreeContract],
+    *,
+    side: str,
+) -> tuple[list[str], list[str], str, Path, str]:
+    """The landings, the leaf bases, the recorded base, the repository, and the ref name."""
+
+    if side == "code":
+        return (
+            [leaf.integrated_code_commit for leaf in ordered],
+            [leaf.code_base_commit for leaf in ordered],
+            series.code_base_commit,
+            series.code_repo_path,
+            series.code_work_branch,
+        )
+    assert series.memory_repo_path is not None
+    return (
+        [leaf.integrated_ledger_commit for leaf in ordered],
+        [leaf.memory_base_commit for leaf in ordered],
+        series.memory_base_commit,
+        series.memory_repo_path,
+        series.memory_work_branch,
+    )
+
+
+@dataclass(frozen=True)
+class _SpineStep:
+    """One step on a series spine: the side it is proved on, and what lands after it."""
+
+    side: str
+    step: str
+
+
+def _require_admitted_step(
+    repository: Path,
+    earlier: str,
+    later: str,
+    positions: tuple[str, ...],
+    step: _SpineStep,
+) -> None:
+    """Refuse a step that adds history beyond the earlier landing and the official positions.
+
+    ``--no-merges`` is what makes a merge the reconciliation device rather than a loophole: a merge
+    introduces no commit of its own, so only genuinely new non-merge history is refused.
+    """
+
+    if earlier == later:
+        return
+    if not is_ancestor(repository, earlier, later):
+        raise CloseoutQueueError(
+            "atomic-series-leaf-chain-invalid",
+            f"atomic series {step.side} ref does not carry {step.step} in the leaf landing order",
+        )
+    foreign = require_git(
+        repository,
+        ["rev-list", "--no-merges", later, "--not", earlier, *positions],
+    ).split()
+    if step.side == "memory":
+        # A reconciled master also records its own ledger bookkeeping on its memory line, and the
+        # evidence for it is the ledger itself: integration proves the landed table is the exact
+        # projection of its source plus the master's own true rows, with the whole source tail. What
+        # is admitted here is only a commit that rewrites the ledger and nothing else.
+        foreign = [commit for commit in foreign if not _is_ledger_recording(repository, commit)]
+    if foreign:
+        raise CloseoutQueueError(
+            "atomic-series-leaf-chain-invalid",
+            f"atomic series {step.side} ref adds history beyond the exact leaf landing chain and the "
+            f"reconciled source line at {step.step}: {', '.join(foreign[:5])}",
+        )
+
+
+def _is_ledger_recording(repository: Path, commit: str) -> bool:
+    """Whether one commit rewrites the memory ledger and nothing else."""
+
+    changed = require_git(
+        repository, ["diff-tree", "--no-commit-id", "--name-only", "-r", commit]
+    ).split()
+    return bool(changed) and set(changed) <= {LEDGER_RELATIVE_PATH}
+
+
+def _landing_source_positions(series: WorktreeContract, *, side: str) -> tuple[str, ...]:
+    """Every official position this contract's own syncs reconciled with, and its recorded base."""
+
+    key = "codeBaseTo" if side == "code" else "memoryBaseTo"
+    base = series.code_base_commit if side == "code" else series.memory_base_commit
+    positions = {base}
+    positions.update(entry.get(key, "") for entry in series.sync_log)
+    return tuple(sorted(position for position in positions if position))
+
+
 def atomic_series_ledger_prefix(series: WorktreeContract) -> tuple[LedgerRow, ...]:
-    """Return the exact newest-first rows contributed by the atomic leaf chain."""
+    """Return the exact newest-first rows the master's own line contributes to the landed ledger.
+
+    The leaf chain is always there, newest landing first. A master that reconciled with its source
+    contributes one row per reconciliation ahead of it: the sync creates the code merge *after* the
+    retained memory conflict was resolved, so no leaf landing can name it, and the row is the
+    master's own record of the pair it validated. Those rows are read back from the landed table and
+    each is proved to be a merge of the master's own first-parent line with an official position
+    this contract synced with -- never taken on trust and never guessed from the closeout cells.
+    """
 
     if series.kind != "series" or series.memory_mode != "external":
         raise RuntimeError("atomic series ledger prefix requires an external-memory series")
     ordered = _exact_atomic_landing_chain(series)
-    return tuple(
+    leaves = tuple(
         LedgerRow(leaf.integrated_code_commit, leaf.integrated_memory_content_commit)
         for leaf in reversed(ordered)
     )
+    if not series.sync_log:
+        return leaves
+    return _reconciled_ledger_prefix(series, leaves)
 
 
-def _require_atomic_chain_tips(
-    series: WorktreeContract,
-    code_commit: str,
-    memory_commit: str,
-) -> None:
-    if branch_commit(series.code_repo_path, series.code_work_branch) != code_commit:
+def _reconciled_ledger_prefix(
+    series: WorktreeContract, leaves: tuple[LedgerRow, ...]
+) -> tuple[LedgerRow, ...]:
+    """The master's own rows as its reconciled line really carries them."""
+
+    ledger_text, _tip = observed_ledger_state(series)
+    own = tuple(
+        row
+        for row in parse_ledger_text(ledger_text).rows
+        if row in leaves or _is_reconciliation_row(series, row.code_commit)
+    )
+    if not own:
         raise CloseoutQueueError(
             "atomic-series-leaf-chain-invalid",
-            "atomic series code ref contains history outside the exact leaf landing chain",
+            "the reconciled series ledger carries none of the master's own rows",
         )
-    if series.memory_mode != "external":
-        return
-    if series.memory_repo_path is None or (
-        branch_commit(series.memory_repo_path, series.memory_work_branch) != memory_commit
+    return own
+
+
+def _is_reconciliation_row(series: WorktreeContract, code_commit: str) -> bool:
+    """Whether one row names a reconciliation merge of this master's own line.
+
+    A reconciliation merge's first parent is the master's own line and every other parent is
+    reachable from an official position this contract itself synced with. A leaf landing's merge
+    fails that test -- its other parent is the leaf's own branch -- which is what keeps this a
+    census of the master's own recorded rows rather than a licence for any merge at all.
+    """
+
+    if not code_commit:
+        return False
+    try:
+        parents = require_git(
+            series.code_repo_path, ["rev-list", "--parents", "-n", "1", code_commit]
+        ).split()
+    except RuntimeError:
+        return False
+    if len(parents) < 3 or not is_ancestor(
+        series.code_repo_path,
+        code_commit,
+        branch_commit(series.code_repo_path, series.code_work_branch),
     ):
-        raise CloseoutQueueError(
-            "atomic-series-leaf-chain-invalid",
-            "atomic series memory ref contains history outside the exact leaf landing chain",
-        )
+        return False
+    positions = _landing_source_positions(series, side="code")
+    return all(
+        any(is_ancestor(series.code_repo_path, position, parent) for position in positions)
+        for parent in parents[2:]
+    )
 
 
 def _atomic_leaf_documents(
@@ -510,31 +827,104 @@ def exact_series_memory_closeout(
 ) -> MemoryCloseoutOutcome:
     """Read the exact atomic memory ref and prove its ledger maps the code ref."""
 
-    if contract.memory_repo_path is None:
-        raise RuntimeError("external-memory series closeout requires a memory repository")
-    ledger_commit = branch_commit(contract.memory_repo_path, contract.memory_work_branch)
-    ledger = parse_ledger_text(
-        require_git(
-            contract.memory_repo_path,
-            ["show", f"{ledger_commit}:memory.md"],
-        )
-    )
-    mapping = find_mapping(ledger, code_commit)
+    ledger_commit, mapping = _series_ledger_mapping(contract, code_commit)
     if mapping is None:
         raise RuntimeError(
             "series/master closeout requires its existing ledger head to map the exact "
             "series code commit; integration branches are not closeout workbenches"
         )
-    if not is_ancestor(
-        contract.memory_repo_path,
-        mapping.memory_commit,
-        ledger_commit,
-    ):
-        raise RuntimeError(
-            "series/master closeout ledger maps memory content that is not reachable "
-            "from the exact series memory head"
-        )
+    _require_series_memory_reachable(contract, mapping.memory_commit, ledger_commit)
     return MemoryCloseoutOutcome(
         memory_commit=mapping.memory_commit,
         ledger_commit=ledger_commit,
     )
+
+
+def series_memory_closeout(contract: WorktreeContract, code_commit: str) -> MemoryCloseoutOutcome:
+    """Read the exact atomic memory ref and prove the code/memory pair this closeout records.
+
+    A master that reconciled with a sibling through ``worktree_sync`` cannot name its final code
+    tip in the ledger, and no closeout could have: the sync creates the code merge commit *after*
+    the retained memory conflict is resolved, so the row naming it cannot exist when the table is
+    written. The pair is still provable, from the same two facts integration later recomputes:
+
+    * the master's own line stays mapped -- the chain tip the reconciliation carries is still a row
+      of the landed table, with memory content reachable from the ledger commit; and
+    * the landed table is the exact projection of its source plus this branch's own true rows, so
+      no source row was dropped, reordered, replaced or superseded and no untrue row survived.
+
+    The recorded pair is then the reconciled tip against the memory ref the same sync landed. The
+    ordinary shape -- the ledger already maps the exact code tip -- is unchanged and is still read
+    exactly as before.
+    """
+
+    ledger_commit, mapping = _series_ledger_mapping(contract, code_commit)
+    if mapping is not None:
+        _require_series_memory_reachable(contract, mapping.memory_commit, ledger_commit)
+        return MemoryCloseoutOutcome(
+            memory_commit=mapping.memory_commit,
+            ledger_commit=ledger_commit,
+        )
+    chain_tip = _exact_atomic_landing_chain(contract)[-1].integrated_code_commit
+    if code_commit == chain_tip:
+        raise RuntimeError(
+            "series/master closeout requires its existing ledger head to map the exact "
+            "series code commit; integration branches are not closeout workbenches"
+        )
+    chain_mapping = find_mapping(_series_ledger(contract, ledger_commit), chain_tip)
+    if chain_mapping is None:
+        raise RuntimeError(
+            f"reconciled series closeout requires the ledger to still map the master's own chain "
+            f"tip {chain_tip}; the reconciliation dropped the master's own landing"
+        )
+    _require_series_memory_reachable(contract, chain_mapping.memory_commit, ledger_commit)
+    _require_series_ledger_projection(contract)
+    return MemoryCloseoutOutcome(memory_commit=ledger_commit, ledger_commit=ledger_commit)
+
+
+def _series_ledger_mapping(
+    contract: WorktreeContract, code_commit: str
+) -> tuple[str, LedgerRow | None]:
+    """The exact memory ref and the row (if any) the landed ledger gives this code commit."""
+
+    if contract.memory_repo_path is None:
+        raise RuntimeError("external-memory series closeout requires a memory repository")
+    ledger_commit = branch_commit(contract.memory_repo_path, contract.memory_work_branch)
+    return ledger_commit, find_mapping(_series_ledger(contract, ledger_commit), code_commit)
+
+
+def _series_ledger(contract: WorktreeContract, ledger_commit: str):
+    assert contract.memory_repo_path is not None
+    return parse_ledger_text(
+        require_git(contract.memory_repo_path, ["show", f"{ledger_commit}:memory.md"])
+    )
+
+
+def _require_series_memory_reachable(
+    contract: WorktreeContract, memory_commit: str, ledger_commit: str
+) -> None:
+    assert contract.memory_repo_path is not None
+    if not is_ancestor(contract.memory_repo_path, memory_commit, ledger_commit):
+        raise RuntimeError(
+            "series/master closeout ledger maps memory content that is not reachable "
+            "from the exact series memory head"
+        )
+
+
+def _require_series_ledger_projection(contract: WorktreeContract) -> None:
+    """Require the landed table to be the projection of its source plus this line's own rows."""
+
+    try:
+        projection = contract_ledger_projection(contract)
+    except LedgerProjectionRefusal as error:
+        raise RuntimeError(
+            "reconciled series closeout requires the exact atomic memory ref to be the projection "
+            f"of its own source: {error}"
+        ) from error
+    if not projection.is_fixed_point:
+        raise RuntimeError(
+            "reconciled series closeout requires the landed memory table to be the projection of "
+            "its source plus this master's own true rows; the landed table diverges from it, so a "
+            "source row was dropped, reordered or replaced. Reconcile memory.md on the memory work "
+            "branch from its source and retry."
+        )

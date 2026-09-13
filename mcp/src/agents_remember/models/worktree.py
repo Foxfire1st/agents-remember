@@ -21,7 +21,6 @@ from agents_remember.models.quality import QualityGateResult
 from agents_remember.models.structural.atomic_series_activation import (
     AtomicSeriesActivationRecord,
     AtomicSeriesObservedState,
-    AtomicSeriesSourcePair,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
@@ -63,10 +62,11 @@ NextTool = Literal[
     "worktree_integrate",
     # The checkpoint's apply call. It is a registered public worktree tool and an approval-gated
     # protected-ref landing, so the same `request_integration_decision` intent that carries a
-    # finished master to `worktree_integrate` carries a paused one here. The operation vocabulary
-    # is deliberately NOT widened for it: pausing a master is an integration decision, and adding
-    # a member to `NextOperation` would put a non-phase value into the set `WorktreeSummary` and
-    # the context packet claim.
+    # finished master to `worktree_integrate` carries an unfinished one here. It is a partial
+    # PUBLICATION, not the pause: pausing a master moves no ref and is no integration decision at
+    # all. The operation vocabulary is deliberately NOT widened for it either -- adding a member to
+    # `NextOperation` would put a non-phase value into the set `WorktreeSummary` and the context
+    # packet claim.
     "worktree_checkpoint_landing",
     "memory_carryover_plan",
     "worktree_cleanup",
@@ -168,10 +168,10 @@ class SyncResolutionProjection(StrictResponseModel):
 
 
 class AtomicSeriesActivationFact(StrictResponseModel):
-    """Read-only source-pair activation evidence carried by status/refusals."""
+    """Read-only per-contract activation evidence carried by status/refusals."""
 
     address: str | None = Field(default=None, max_length=4096)
-    sourcePairFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    contractFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     state: AtomicSeriesObservedState
     record: AtomicSeriesActivationRecord | None = None
     errorType: str | None = Field(default=None, max_length=256)
@@ -184,7 +184,7 @@ class AtomicSeriesAdmissionActivation(StrictResponseModel):
     path: str = Field(min_length=1, max_length=4096)
     observedState: AtomicSeriesObservedState
     recordPresent: bool
-    sourcePairFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    contractFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     revision: int | None = Field(default=None, ge=1)
     selectedAt: str | None = Field(default=None, max_length=128)
     selectedMaster: TaskDocumentRef | None = None
@@ -198,14 +198,6 @@ class AtomicSeriesAdmissionRequested(StrictResponseModel):
     contractPath: str | None = Field(default=None, max_length=4096)
 
 
-class AtomicSeriesAdmissionBlocking(StrictResponseModel):
-    master: TaskDocumentRef
-    contractPath: str = Field(min_length=1, max_length=4096)
-    state: AtomicSeriesObservedState
-    revision: int = Field(ge=1)
-    selectedAt: str = Field(min_length=1, max_length=128)
-
-
 class AtomicSeriesAdmissionStatusAction(StrictResponseModel):
     tool: Literal["worktree_status"] = "worktree_status"
     args: dict[str, object]
@@ -214,13 +206,10 @@ class AtomicSeriesAdmissionStatusAction(StrictResponseModel):
 class AtomicSeriesAdmission(StrictResponseModel):
     """Bounded explanation of why an activation boundary admitted or refused work."""
 
-    classification: Literal["wait", "corrective-action"]
     operation: str = Field(min_length=1, max_length=256)
     requested: AtomicSeriesAdmissionRequested
-    sourcePair: AtomicSeriesSourcePair | None = None
-    sourcePairFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    contractFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     activation: AtomicSeriesAdmissionActivation | None = None
-    blocking: AtomicSeriesAdmissionBlocking | None = None
     retryPrecondition: str = Field(min_length=1, max_length=8192)
     statusAction: AtomicSeriesAdmissionStatusAction | None = None
     status: str = Field(min_length=1, max_length=256)

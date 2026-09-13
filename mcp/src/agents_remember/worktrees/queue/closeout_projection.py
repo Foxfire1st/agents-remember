@@ -642,7 +642,7 @@ def _observe_series_activation(
 ) -> None:
     contract = observed.live_contract
     assert contract is not None
-    activation = project_series_activation(contract, master.ref)
+    activation = project_series_activation(contract)
     observed.row["activation"] = activation.source_fact
     activation_waiting[master.ref] = activation.waiting
     if activation.problem is not None:

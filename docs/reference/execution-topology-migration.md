@@ -4,10 +4,11 @@ This is the operator-facing procedure for the explicit execution topology
 (`executionNature` on commanded masters, `executionGraph` on orchestration sprints).
 A sprint without an `executionGraph` is not an error: it runs the atomic-sequential
 default — every commanded master executes atomically regardless of any declared
-nature, and exact source-pair activation exposes one selected master at a time.
-Selecting another master automatically and logically pauses the former; it does not
-require the former to integrate, retire its contract, or terminate its agent/worktree.
-Canonical commanded-master order is only the stable tie-break where priority is equal.
+nature. That default describes the sprint's shape and serializes nothing: a graph-less
+sprint declares no dependencies, so independent masters proceed concurrently, and
+selecting one never pauses another or requires it to integrate, retire its contract,
+or terminate its agent/worktree. Canonical commanded-master order is only the stable
+tie-break where priority is equal.
 Authoring a graph is the explicit opt-in to dependency-aware scheduling; there is no
 separate migration operation.
 
@@ -58,11 +59,13 @@ Classification rule (preserves current behavior):
 
 ## 3. Defaults and fail-closed seams
 
-- No `executionGraph`: the atomic-sequential default schedules the sprint; the
-  closeout queue reports `mode: "atomic-sequential"` plus waiting reasons derived
-  from the strict source-pair activation snapshot (`active`, `reconciling`, paused by
-  the selected master, or vacant). Contract presence never elects a master, and the
-  queue owns no activation transition or lifecycle operation.
+- No `executionGraph`: the atomic-sequential default schedules the sprint, and
+  nothing serializes its masters — a graph-less sprint declares no dependencies, so
+  independent masters proceed concurrently. The closeout queue reports
+  `mode: "atomic-sequential"` plus waiting reasons derived from each contract's own
+  strict activation snapshot (`active`, `reconciling`, or vacant). Contract presence
+  never elects a master, and the queue owns no activation transition or lifecycle
+  operation.
 - Manager/worker dispatch and atomic `worktree_start`/`worktree_attach` are selecting
   operations. They publish `reconciling` before source sync and `active` only after
   both exact recorded bases are current. Reviewer/curator inspection does not switch
@@ -116,7 +119,8 @@ strategist/orchestrator ruling, never by the authoring mechanism itself.
   and graph-joined (`executionGraph`).
 - Graph authoring/migration writes run a served-build preflight and refuse with
   upgrade guidance when the serving runtime predates the topology schema.
-- A missing graph selects the source-pair-selected atomic-sequential default, not a
-  refusal or a full-integration-before-switch rule; a missing nature under an
-  authored graph remains a hard refusal.
+- A missing graph selects the atomic-sequential default — a sprint shape, not a
+  serialization mechanism (nothing serializes a graph-less sprint), not a refusal or
+  a full-integration-before-switch rule; a missing nature under an authored graph
+  remains a hard refusal.
 - Rollback is snapshot-based; no dual-reader or feature-switch fallback remains.

@@ -234,20 +234,21 @@ reports archive-ready separately from cleanup-completed or abandoned, including 
 `cleanupArguments` and `nextArgs` for the required `worktree_cleanup` / `worktree_abandon` retry.
 Queue presence is neither required nor consulted on either route.
 
-Atomic-series implementation admission is a separate, source-pair-scoped authority. Exactly one
-atomic master for an exact code/memory source pair is selected at a time. Manager dispatch, worker
-dispatch, atomic `worktree_start`, and `worktree_attach` are selecting operations; reviewer and
-curator inspection is not. Once the requested canonical contract exists, selection first publishes
-`reconciling`, which logically pauses the former master without suspending its chat, process,
-worktree, contract, or already-claimed lifecycle journal. The selected master is source-synced and
-becomes `active` only when both protected source tips are current. A completed sync pass whose
+Atomic-series implementation admission is a separate, contract-scoped authority. Each canonical
+series contract owns its own activation record, so masters that share one exact code/memory source
+pair never share this state and one master's selection never pauses or excludes another. Manager
+dispatch, worker dispatch, atomic `worktree_start`, and `worktree_attach` are selecting operations;
+reviewer and curator inspection is not. Once the requested canonical contract exists, selection
+first publishes `reconciling` for that contract, which suspends nothing — not its chat, process,
+worktree, contract, or already-claimed lifecycle journal. The selected contract is source-synced
+and becomes `active` only when both protected source tips are current. A completed sync pass whose
 source moved again remains reconciling. Explicit sync cancellation publishes durable `vacant`;
 terminal cleanup releases an exact selected contract before its authority can disappear. Contract
-presence never elects an owner, and multiple paused/nonterminal contracts remain valid.
+presence never elects an owner, and multiple nonterminal contracts remain valid.
 
 Task authoring never reads this activation authority and is never blocked by it. A task mutation
 publishes first and invalidates/rebuilds affected queue projections. The closeout queue merely
-projects active, reconciling, paused, or vacant waiting candidates; it owns none of those lifecycle
+projects active, reconciling, or vacant waiting candidates; it owns none of those lifecycle
 facts. A malformed selection makes only the affected projection invalid-empty. An exact selecting
 operation archives the malformed bytes with evidence and replaces them; there is no tolerant reader
 or contract-presence fallback.

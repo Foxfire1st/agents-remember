@@ -140,6 +140,7 @@ integration = [
   "mcp/tests/test_controlplane_store_durability.py",
   "mcp/tests/test_conversation_control_api.py",
   "mcp/tests/test_conversation_library_api.py",
+  "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_cross_store_lock_order.py",
   "mcp/tests/test_dagger_registry_lock.py",
   "mcp/tests/test_dagger_runtime_authority.py",

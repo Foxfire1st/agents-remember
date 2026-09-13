@@ -38,7 +38,7 @@ from agents_remember.worktrees.queue.closeout_recovery import (
     MemoryCloseoutOutcome,
     resume_external_commits,
 )
-from agents_remember.worktrees.series_closeout import exact_series_memory_closeout
+from agents_remember.worktrees.series_closeout import series_memory_closeout
 
 
 def external_closeout_commits(
@@ -51,7 +51,7 @@ def external_closeout_commits(
         raise RuntimeError("external-memory closeout requires a ledger path")
     code_commit = change.commit
     if contract.kind == "series":
-        return exact_series_memory_closeout(contract, code_commit)
+        return series_memory_closeout(contract, code_commit)
     if contract.memory_worktree is None:
         raise RuntimeError("external-memory leaf closeout requires a memory worktree")
     recovered = _resumed_external_outcome(contract, args, effective_input, code_commit)

@@ -318,9 +318,10 @@ def _post_integration_phase(contract: WorktreeContract) -> LifecycleGuidance | N
         # This is a LANDING, not a pause, and the two are separate operations on purpose. A
         # checkpoint moves the series' accumulated line into its source branch and leaves the master
         # open; the work therefore continues, which is what ``continue_work`` says. Pausing is its
-        # own verb: it releases the master's atomic-series selection and moves no ref at all. Folding
-        # the pause into this landing is the hidden side effect the split exists to prevent, so this
-        # branch must not be re-read as the pause's next move.
+        # own, separate matter: it stops the master's work and returns control while publishing
+        # nothing, keeping the branch, worktrees and enclosure private. Folding the pause into this
+        # landing is the hidden side effect the split exists to prevent, so this branch must not be
+        # re-read as the pause's next move.
         return {
             "phase": "worktree-started",
             "summary": (

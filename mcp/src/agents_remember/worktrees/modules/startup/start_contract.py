@@ -227,10 +227,10 @@ def ensure_master_series_contract(
     entry points remain one operation rather than competing bootstrap implementations.
 
     Contract presence proves durable work exists; it does not own scheduling.  Once
-    this operation has recovered or created the requested contract, it selects that
-    master for the exact protected source pair, marks it reconciling (logically
-    pausing the previous selection), syncs its pinned source pair, and publishes it
-    active before returning implementation authority.
+    this operation has recovered or created the requested contract, it publishes that
+    contract's own activation as reconciling (no other master's record is touched),
+    syncs its pinned source pair, and publishes it active before returning
+    implementation authority.
     """
 
     _require_commanded_atomic_master(spec)
@@ -276,7 +276,7 @@ def ensure_master_series_contract(
     # it can never enter rollback and delete the winner's contract.
     _require_commanded_atomic_master(spec)
     # Store locks never nest: finish the per-master bootstrap journal transaction
-    # before reading or writing the source-pair activation store.
+    # before reading or writing the per-contract activation store.
     with exclusive_access(
         _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
     ):

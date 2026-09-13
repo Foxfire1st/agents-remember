@@ -14,7 +14,6 @@ from agents_remember.worktrees.activation.atomic_series_activation import (
     AtomicSeriesActivationError,
     AtomicSeriesActivationObservation,
     activation_path,
-    atomic_series_source_pair,
     observe_atomic_series_path,
     series_master_ref,
 )
@@ -29,12 +28,11 @@ def release_atomic_series_selection(
     """Release only the exact currently selected contract to durable vacancy."""
 
     ACTIVATION_OWNERSHIP.check_declared_writer()
-    source_pair = atomic_series_source_pair(contract)
-    path = activation_path(contract.coordination_root, source_pair)
+    path = activation_path(contract.coordination_root, contract)
     selected_master = series_master_ref(contract)
     selected_at = timestamp or _now_iso()
     with exclusive_access(path, ACTIVATION_OWNERSHIP):
-        previous = observe_atomic_series_path(contract.coordination_root, source_pair, path)
+        previous = observe_atomic_series_path(contract, path)
         if previous.state == "unreadable":
             raise AtomicSeriesActivationError(
                 "atomic-series-activation-release-unreadable",
@@ -63,12 +61,11 @@ def release_terminal_atomic_series_selection_if_exact(
     """Release terminal selection only when strict evidence proves this exact owner."""
 
     ACTIVATION_OWNERSHIP.check_declared_writer()
-    source_pair = atomic_series_source_pair(contract)
-    path = activation_path(contract.coordination_root, source_pair)
+    path = activation_path(contract.coordination_root, contract)
     selected_master = series_master_ref(contract)
     selected_at = timestamp or _now_iso()
     with exclusive_access(path, ACTIVATION_OWNERSHIP):
-        previous = observe_atomic_series_path(contract.coordination_root, source_pair, path)
+        previous = observe_atomic_series_path(contract, path)
         record = previous.record
         if (
             previous.state == "unreadable"
@@ -104,8 +101,7 @@ def _release_record(
     if record.state == "vacant":
         return previous
     released = AtomicSeriesActivationRecord(
-        sourcePairFingerprint=previous.source_pair_fingerprint,
-        sourcePair=previous.source_pair,
+        contractFingerprint=previous.contract_fingerprint,
         selectedMaster=selected_master,
         contractPath=contract.contract_path.resolve().as_posix(),
         state="vacant",
@@ -114,8 +110,8 @@ def _release_record(
     )
     atomic_write_text(previous.activation_path, released.model_dump_json(indent=2) + "\n")
     return AtomicSeriesActivationObservation(
-        previous.source_pair,
-        previous.source_pair_fingerprint,
+        previous.contract_path,
+        previous.contract_fingerprint,
         previous.activation_path,
         "vacant",
         released,

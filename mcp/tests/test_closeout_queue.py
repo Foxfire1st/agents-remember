@@ -198,6 +198,7 @@ class QueueFixture:
         self.memory_mode = memory_mode
         self.atomic_a = atomic_a
         self.atomic_b = atomic_b
+        self.unstarted_leaf_a: str | None = None
         init_repo(self.code, "main")
         install_fixture_profile(self.code, REPO)
         git(self.code, "add", "-A")
@@ -313,6 +314,130 @@ class QueueFixture:
             MASTER_B: self._contract("master-b", "LEAF-B", code_base, memory_base),
         }
         self.cfg = load_config(self.config_path)
+
+    def author_unstarted_leaf(self, master: str, leaf_id: str) -> None:
+        """Command one more canonical leaf without starting any of its work.
+
+        The subtask row and its task document are authored -- an atomic master's review scope has to
+        resolve every commanded leaf's document -- but no enclosure contract, branch or worktree
+        exists until the master resumes and the leaf is started on the line it then has.
+        """
+
+        series = load_contract(self.tasks / master / "series-contract.md")
+        assert series.kind == "series"
+        master_path = series.task_root / "task.json"
+        document = read_task_doc(master_path)
+        slug = leaf_id.lower()
+        row = {
+            "number": leaf_id,
+            "name": leaf_id,
+            "file": f"{slug}.md",
+            "status": "inProgress",
+        }
+        authored = document.model_dump(mode="json")
+        write_task_doc(
+            master_path.parent,
+            TaskDocument.model_validate({**authored, "subTasks": [*authored["subTasks"], row]}),
+        )
+        write_task_doc(
+            series.task_root,
+            TaskDocument.model_validate(
+                {
+                    "id": leaf_id,
+                    "slug": slug,
+                    "title": slug,
+                    "kind": "subTask",
+                    "status": "inProgress",
+                    "repo": REPO,
+                    "createdAt": NOW,
+                    "steps": [{"id": "S1", "title": "Not started", "status": "pending"}],
+                }
+            ),
+        )
+        leaf_ref = TaskDocumentRef(repository=REPO, path=f"{master}/{slug}.json")
+        sprint_path = self.tasks / "sprint" / "task.json"
+        sprint = read_task_doc(sprint_path)
+        register = next(
+            section.body for section in sprint.sections if section.heading == JUDGMENT_HEADING
+        )
+        self.replace_section_body(
+            JUDGMENT_HEADING, f"{register.rstrip()}\n{_judgment_row(leaf_ref, 'normal')}"
+        )
+        self.priorities[leaf_ref] = "normal"
+        self.set_priority(leaf_ref, "normal")
+        self.unstarted_leaf_a = leaf_id
+
+    def start_leaf(self, leaf_id: str, master: str = "master-a") -> WorktreeContract:
+        """Start one authored canonical leaf from its master's branches as they now stand.
+
+        This is what ``worktree_start`` records: the enclosure, the leaf document, the worktrees and
+        the branches, based on the master's current tips rather than on the base the master had when
+        the leaf was first commanded.
+        """
+
+        series = load_contract(self.tasks / master / "series-contract.md")
+        assert series.kind == "series"
+        task = ContractTask(
+            name=master,
+            repo_name=REPO,
+            coordination_root=self.coord,
+            workflow_kind="light-task",
+            memory_mode=self.memory_mode,
+            parent_task_name=master,
+            parent_contract_path=series.contract_path,
+        )
+        contract = default_contract(
+            task,
+            leaf=LeafIdentity(worktree_name=leaf_id.lower(), leaf_id=leaf_id),
+            code=RepoBranchPlan(
+                repo_path=self.code,
+                source_branch=series.code_work_branch,
+                work_branch=f"ar/{leaf_id.lower()}",
+                base_commit=git(self.code, "rev-parse", series.code_work_branch),
+            ),
+            memory=(
+                RepoBranchPlan(
+                    repo_path=self.memory,
+                    source_branch=series.memory_work_branch,
+                    work_branch=f"ar/{leaf_id.lower()}",
+                    base_commit=git(self.memory, "rev-parse", series.memory_work_branch),
+                )
+                if self.memory_mode == "external"
+                else None
+            ),
+        )
+        git(
+            self.code,
+            "worktree",
+            "add",
+            "-b",
+            contract.code_work_branch,
+            str(contract.code_worktree),
+            series.code_work_branch,
+        )
+        (contract.code_worktree / "feature.txt").write_text(f"{leaf_id}\n", encoding="utf-8")
+        if contract.memory_worktree is not None:
+            git(
+                self.memory,
+                "worktree",
+                "add",
+                "-b",
+                contract.memory_work_branch,
+                str(contract.memory_worktree),
+                series.memory_work_branch,
+            )
+            (contract.memory_worktree / f"{leaf_id.lower()}.md").write_text(
+                f"# {leaf_id}\n", encoding="utf-8"
+            )
+        write_task_doc(contract.task_root, _leaf(contract, leaf_id.lower()))
+        write_contract(contract.contract_path, contract)
+        publish_new_lifecycle_operation_location(
+            contract,
+            contract_text=contract_publication_text(contract.contract_path, contract),
+        )
+        if contract.memory_worktree is not None:
+            write_curator_evidence(contract, caller_ref=SPRINT)
+        return contract
 
     def enable_direct_execution(self) -> None:
         """Opt this fixture into the explicit direct-series policy boundary."""
@@ -495,6 +620,37 @@ class QueueFixture:
         # Door publication captures the current curator authority. Publishing a successor
         # coherence generation after that boundary would immediately make the door's immutable
         # memory provenance stale, so rebuild from the exact generation just declared.
+        return self.rebuild()
+
+    def declare_leaf(
+        self,
+        contract: WorktreeContract,
+        leaf: TaskDocumentRef,
+        master: TaskDocumentRef,
+    ) -> dict[str, Any]:
+        """Declare the closeout door for a leaf that is not yet the master's current one.
+
+        Its own canonical grade is read from the priority register the leaf was authored with, and
+        the declaration names the master whose command it executes.
+        """
+
+        if contract.memory_worktree is not None:
+            write_curator_evidence(contract, caller_ref=SPRINT)
+        request = CloseoutDoorRequest.model_validate(
+            {
+                "action": "declare",
+                "contract_path": contract.contract_path.as_posix(),
+                "grade": _grade(self.priorities.get(leaf, "normal"), leaf),
+                "admission": {},
+            }
+        )
+        closeout_door_tool(
+            self.cfg,
+            request,
+            actor=DoorActor(role="manager", task_document_ref=master),
+            admitted_contract=contract,
+        )
+        self.contracts[master] = load_contract(contract.contract_path)
         return self.rebuild()
 
     def rebuild(self) -> dict[str, Any]:

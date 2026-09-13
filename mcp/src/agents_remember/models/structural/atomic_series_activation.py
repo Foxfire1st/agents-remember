@@ -1,10 +1,10 @@
-"""Strict durable vocabulary for source-pair-scoped atomic-series activation."""
+"""Strict durable vocabulary for contract-scoped atomic-series activation."""
 
 from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
@@ -13,40 +13,13 @@ AtomicSeriesSelectionState = Literal["reconciling", "active"]
 AtomicSeriesObservedState = Literal["vacant", "unreadable", "reconciling", "active"]
 
 
-class AtomicSeriesSourceRef(BaseModel):
-    """One exact normalized repository/source-branch identity."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    repositoryIdentity: str = Field(min_length=1, max_length=4096)
-    sourceBranch: str = Field(min_length=1, max_length=4096)
-
-    @field_validator("repositoryIdentity", "sourceBranch")
-    @classmethod
-    def _non_blank(cls, value: str) -> str:
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("atomic-series source identity must not be blank")
-        return cleaned
-
-
-class AtomicSeriesSourcePair(BaseModel):
-    """The protected source pair whose atomic work admits one selected master."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    code: AtomicSeriesSourceRef
-    memory: AtomicSeriesSourceRef | None = None
-
-
 class AtomicSeriesActivationRecord(BaseModel):
-    """The one replace-in-place selection snapshot for a source pair."""
+    """The one replace-in-place activation snapshot for a canonical series contract."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schemaVersion: Literal["1.0"] = "1.0"
-    sourcePairFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    sourcePair: AtomicSeriesSourcePair
+    schemaVersion: Literal["2.0"] = "2.0"
+    contractFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     selectedMaster: TaskDocumentRef
     contractPath: str = Field(min_length=1, max_length=4096)
     state: AtomicSeriesActivationState
@@ -59,8 +32,8 @@ class AtomicSeriesActivationArchiveEvidence(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schemaVersion: Literal["1.0"] = "1.0"
-    sourcePairFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    schemaVersion: Literal["2.0"] = "2.0"
+    contractFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     activationPath: str = Field(min_length=1, max_length=4096)
     archiveKind: Literal["raw-bytes", "opaque-entry", "absence"]
     snapshotPath: str | None = Field(default=None, max_length=4096)

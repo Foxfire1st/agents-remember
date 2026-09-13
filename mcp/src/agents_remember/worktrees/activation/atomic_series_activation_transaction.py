@@ -254,26 +254,11 @@ def _admission_refusal(request: _AdmissionRefusalRequest) -> WorktreeCommandResu
             observed=getattr(request.error, "observed", None),
         )
     )
-    if admission["classification"] == "wait" and admission.get("blocking") is not None:
-        blocking = admission["blocking"]
-        assert isinstance(blocking, dict)
-        blocker = blocking.get("master")
-        blocker_key = (
-            f"{blocker.get('repository')}:{blocker.get('path')}"
-            if isinstance(blocker, dict)
-            else "the named selected master"
-        )
-        summary = (
-            f"Atomic-series admission is waiting: {blocker_key} currently owns the "
-            f"source-pair selection in {blocking.get('state')} state. "
-            "Inspect the supplied worktree_status address before retrying."
-        )
-    else:
-        summary = (
-            f"Atomic-series admission refused ({request.status}): {request.detail} "
-            "Apply the reported corrective action and inspect the supplied worktree_status "
-            "address before retrying."
-        )
+    summary = (
+        f"Atomic-series admission refused ({request.status}): {request.detail} "
+        "Apply the reported corrective action and inspect the supplied worktree_status "
+        "address before retrying."
+    )
     return WorktreeCommandResult(
         2,
         {
