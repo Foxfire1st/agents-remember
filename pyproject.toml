@@ -131,8 +131,23 @@ minversion = "9.0"
 # case, which is what the ceiling is for. Cost measured on this checkout the same day:
 # integration 150 cases + 31 subtests in 31.8s; unit 795 cases + 145 subtests in 56.0s; combined
 # 945 cases in 64.5s. The ceiling is headroom, not a target -- do not fill it.
+#
+# 2026-09-13 -- integration 200 -> 250, developer-authorized (explicitly raised by 50 so dropped
+# coverage could be written back). The population was at 200 on this base -- 198 from the
+# per-contract activation keying, plus 2 that had been CONSOLIDATED from 4 in the pause work
+# because the old ceiling forced a merged case, and a merged case that can only fail as a unit is
+# weaker evidence than two that fail independently. The eight pause cases below buy, one each: the
+# no-publication measurement (refs, object databases, coordination tree, worktrees, destination
+# branch); the hand-back payload (paused state, no next call, stop hint); the selection-missing
+# refusal; pause idempotence; the leaf refusal; per-contract record isolation; the tampered-record
+# refusal; and resume. Support cost is the existing QueueFixture plus five measurement helpers
+# inside the one new module (tree digest, per-repository ref+object state, branch tips, task
+# document statuses, assembled world snapshot) -- no new support module, no new shared artifact.
+# Measured cost on this checkout at the raise:
+# integration 206 cases + 31 subtests in 63.9s; unit 833 cases + 155 subtests in 53.9s; combined
+# 1039 cases + 186 subtests in 105.6s, exit 0.
 unit_case_budget = 1000
-integration_case_budget = 200
+integration_case_budget = 250
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this
 # key to build its pytest step, so the wrapper no longer carries a second copy that can

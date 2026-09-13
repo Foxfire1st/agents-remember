@@ -303,6 +303,31 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         self.assertIn("not a pause", description)
         self.assertIn("separate matter and is NOT this call", description)
 
+    def test_the_pause_advertises_a_stop_that_publishes_nothing(self) -> None:
+        """The stop's own advertisement, which is the call an ordinary pause reaches for.
+
+        The checkpoint case above pins the publication's side of the split; this pins the
+        stop's. The two are separate registered tools, not one verb with two names, and the
+        pause's text has to say both things an agent needs: that it publishes nothing, and that
+        the publication it must not reach for is named and separate.
+        """
+
+        server = FastMCP("pause-surface-probe")
+        for register_tools in TOOL_REGISTRARS:
+            register_tools(server, _permissive_registration_config())
+        advertised = {
+            tool.name: " ".join((tool.description or "").split())
+            for tool in asyncio.run(server.list_tools())
+        }
+
+        self.assertIn("worktree_pause", PUBLIC_TOOLS)
+        self.assertIn("worktree_checkpoint_landing", PUBLIC_TOOLS)
+        pause = advertised["worktree_pause"]
+        self.assertIn("PAUSE an atomic master", pause)
+        self.assertIn("Publishes NOTHING", pause)
+        self.assertIn("separate, explicitly requested PUBLICATION", pause)
+        self.assertIn("worktree_checkpoint_landing", pause)
+
 
 def _permissive_registration_config() -> McpRuntimeConfig:
     """A registration-time config stub.

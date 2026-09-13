@@ -1,4 +1,4 @@
-"""Worktree tools for the working half of a task: create, re-attach, observe, sync."""
+"""Worktree tools for the working half of a task: create, re-attach, observe, sync, stop."""
 
 from typing import Any
 
@@ -16,6 +16,7 @@ from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionActi
 
 from ..tools import (
     worktree_attach_payload,
+    worktree_pause_payload,
     worktree_start_payload,
     worktree_status_payload,
     worktree_sync_payload,
@@ -27,6 +28,7 @@ def register_worktree_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     _register_worktree_start_tools(server, config)
     _register_worktree_address_tools(server, config)
     _register_worktree_observation_tools(server, config)
+    _register_worktree_stop_tools(server, config)
 
 
 def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -191,4 +193,27 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
             memory_sync_choice=memory_sync_choice,
             resolution_action=resolution_action,
             dry_run=dry_run,
+        )
+
+
+def _register_worktree_stop_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
+    """Stop a master. The pause and the publication are two different verbs."""
+
+    @server.tool()
+    def worktree_pause(
+        contract_path: str,
+    ) -> dict[str, Any]:
+        """PAUSE an atomic master: stop it and hand control back to the developer. Publishes
+        NOTHING — it moves no ref, creates no commit, lands nothing and writes no ledger row. It
+        releases the master's atomic-series activation selection, so the master really does stop
+        being the one exposing implementation work, and the master keeps its code and memory work
+        branches, its worktrees, its enclosure and every unstarted leaf exactly as they were. The
+        result proposes no next step: control is the developer's until they ask for the master
+        again, at which point resuming is the normal attach/start route. Use
+        worktree_checkpoint_landing for the separate, explicitly requested PUBLICATION that lands
+        an unfinished master's accumulated line into its source branch; pausing never does that.
+        MUTATING (releases the atomic-series selection only)."""
+        return worktree_pause_payload(
+            config,
+            contract_path,
         )

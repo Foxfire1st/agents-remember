@@ -24,6 +24,7 @@ from agents_remember.application.worktree_tools import (
     worktree_closeout_preview_tool,
     worktree_integrate_tool,
     worktree_operation_control_tool,
+    worktree_pause_tool,
     worktree_record_landing_tool,
     worktree_status_tool,
     worktree_sync_tool,
@@ -81,6 +82,16 @@ def worktree_attach_payload(
     return _tool_payload(
         "worktree_attach",
         worktree_attach_tool(config, task, on_unsaved=on_unsaved),
+    )
+
+
+def worktree_pause_payload(
+    config: McpRuntimeConfig,
+    contract_path: str,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "worktree_pause",
+        worktree_pause_tool(config, contract_path=contract_path),
     )
 
 

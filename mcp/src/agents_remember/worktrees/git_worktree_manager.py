@@ -83,6 +83,7 @@ from agents_remember.worktrees.modules.onboarding import (
     validate_onboarding_refresh_plan,
     validate_onboarding_refresh_plan_for_context,
 )
+from agents_remember.worktrees.modules.pause import pause_result
 from agents_remember.worktrees.modules.record_landing import record_landing_result
 from agents_remember.worktrees.modules.start import (
     attach_result,
@@ -150,6 +151,7 @@ __all__ = [
     "onboarding_refresh_plan_for_context",
     "parse_entity_fingerprint_rows",
     "parse_json_stdout",
+    "pause_result",
     "prepare_memory_for_start",
     "prepare_providers_for_start",
     "record_landing_result",

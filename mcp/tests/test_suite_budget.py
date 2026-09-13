@@ -18,11 +18,11 @@ class _Item:
 
 @pytest.mark.parametrize(
     ("units", "integrations", "exceeded"),
-    [(1000, 200, None), (1001, 0, "unit"), (0, 201, "integration")],
+    [(1000, 250, None), (1001, 0, "unit"), (0, 251, "integration")],
 )
 def test_selected_case_budgets(units: int, integrations: int, exceeded: str | None) -> None:
     config = SimpleNamespace(
-        getini={"unit_case_budget": 1000, "integration_case_budget": 200}.__getitem__
+        getini={"unit_case_budget": 1000, "integration_case_budget": 250}.__getitem__
     )
     session = cast(
         pytest.Session,

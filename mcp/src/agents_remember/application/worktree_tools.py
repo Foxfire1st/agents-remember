@@ -467,6 +467,38 @@ def worktree_checkpoint_landing_tool(
     )
 
 
+def worktree_pause_tool(
+    config: McpRuntimeConfig,
+    *,
+    contract_path: str,
+) -> dict[str, Any]:
+    """Stop an atomic master without publishing anything.
+
+    This is the stop the developer asked for and the split exists to make possible. It
+    releases the master's atomic-series activation selection -- so the master really does stop
+    being the one exposing implementation work, rather than being marked as stopped -- and
+    returns control to the developer with no continued-execution step. It moves no ref, creates
+    no commit, lands nothing and writes no ledger row, and the master keeps its work branches,
+    its worktrees, its enclosure and every unstarted leaf exactly as they were.
+
+    ``worktree_checkpoint_landing`` is the separate, explicitly requested PUBLICATION that
+    lands a partial master's accumulated line. It is not reachable from here: pausing a master
+    and publishing one are two operations, and reaching for the stop must never publish.
+    """
+
+    configured = admit_configured_contract(config, contract_path)
+    if isinstance(configured, ConfiguredContractRefused):
+        return project_configured_contract_refusal(configured, operation="worktree_pause")
+    args = git_worktree_manager.WorktreeArgs(
+        contract_path=configured.contract_path,
+        gate_policy=config.orchestration.gate_policy,
+    )
+    return _worktree_result(
+        "worktree_pause",
+        git_worktree_manager.pause_result(args, configured.contract),
+    )
+
+
 def worktree_record_landing_tool(
     config: McpRuntimeConfig,
     *,

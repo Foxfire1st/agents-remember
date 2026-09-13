@@ -464,6 +464,18 @@ class WorktreeCheckpointLandingResponse(WorktreeCommandResponse):
     integratedLedgerCommit: str = ""
 
 
+class WorktreePauseResponse(WorktreeCommandResponse):
+    """The stop-only pause: it releases the master's selection and publishes nothing.
+
+    ``paused`` is the whole state this response claims, and it is claimed only by the route
+    that releases the selection. A publication that moved refs has no business setting it --
+    the two operations answer different questions and only one of them stops anything.
+    """
+
+    operation: Literal["worktree_pause"] = "worktree_pause"
+    paused: bool = False
+
+
 class WorktreeRecordLandingResponse(WorktreeCommandResponse):
     operation: Literal["worktree_record_landing"] = "worktree_record_landing"
     integrationStrategy: str = ""
