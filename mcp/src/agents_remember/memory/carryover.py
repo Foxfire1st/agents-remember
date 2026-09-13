@@ -15,6 +15,7 @@ from pathlib import Path
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.coordination_context.models import StorageSettings
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     MemoryLedger,
@@ -837,7 +838,15 @@ def _apply_carryover_for_request(
             ),
             "route_index_refresh": route_index_refresh,
         }
-    memory_content_commit = commit_if_dirty(target_memory, options.memory_commit_message)
+    # The caller's message is committed verbatim, with the attribution appended at the commit
+    # site by the one renderer rather than by editing the string the caller supplied: carryover's
+    # commit message is a public argument, so its body may be several paragraphs and its own last
+    # paragraph may itself be ``Key: value`` lines. ``official_head`` is the code commit this
+    # mapping already names, so the trailer and the ledger row cannot disagree.
+    memory_content_commit = commit_if_dirty(
+        target_memory,
+        render_memory_content_message(options.memory_commit_message, official_head),
+    )
     write_ledger(ledger_path, prepend_mapping(ledger, official_head, memory_content_commit))
     require_git(target_memory, ["add", "memory.md"])
     ledger_commit = commit_if_dirty(target_memory, options.ledger_commit_message)

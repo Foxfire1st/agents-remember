@@ -1,11 +1,12 @@
-"""Read the ledger's attribution out of the memory commits that carry it.
+"""Read the ledger's attribution out of the memory commits that carry it, and write it.
 
 The ledger is a lookup from a code commit to the memory commit landed beside it. That fact
 used to live only in a tracked ``memory.md`` table, which is why the table had to be merged
 by hand on every sync and why three hand-authored tables in one day carried a superseded row,
 a wrong order, and a header disagreeing with its own first row. The attribution now lives in
 the memory commit itself, as a ``Code-Commit: <sha>`` trailer inside the hashed object, and
-this module is the one place that reads it back.
+this module is the one place that reads it back -- and, since the key is one literal that both
+directions must agree on, the one place that renders it too.
 
 What the commits tell us is exactly the table, and nothing has to be guessed to get it:
 
@@ -66,6 +67,34 @@ _TRAILER_LINE = re.compile(
     rf"^{CODE_COMMIT_TRAILER_KEY}:[ \t]*(?P<value>[0-9a-fA-F]{{4,64}})[ \t]*$",
     re.IGNORECASE,
 )
+
+
+def render_memory_content_message(body: str, code_commit: str) -> str:
+    """The memory-content commit body: the caller's message verbatim, then the attribution.
+
+    This is the ONE writer of the trailer, and it sits in the module that reads it back,
+    beside the one literal both directions use: a copy of the format in a producer would
+    emit something ``parse_code_commit_trailer`` silently ignores, and that failure looks
+    like "no attribution exists" rather than like a bug.
+
+    The caller's body is kept byte for byte and the trailer is appended as its own final
+    paragraph -- never substituted for the body and never merged into it. That is the whole
+    reason this lives apart from any one caller's message: a producer's commit message can
+    be a public argument of another tool, so the body may be several paragraphs and its own
+    last paragraph may itself be ``Key: value`` lines. Git reads a trailer only from the
+    final block, so a body line can never be mistaken for this attribution, and the blank
+    line is what keeps the caller's last paragraph out of that block instead of folded into
+    it. A producer therefore never edits the message string it was given; it renders the
+    commit message with this function at the commit site.
+
+    Called by every memory-content producer: ``EffectiveCloseoutInput.memory_content_message``
+    (worktree closeout and, through it, the closeout recovery route when it still owes its
+    memory commit), the direct-landing memory leg, the prepared memory-content leg, and the
+    memory carryover and baseline-adoption routes. A producer that has no code commit to
+    name writes no trailer at all rather than a fabricated one.
+    """
+
+    return f"{body}\n\n{CODE_COMMIT_TRAILER_KEY}: {code_commit}"
 
 
 class MemoryAttributionError(RuntimeError):

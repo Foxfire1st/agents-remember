@@ -16,6 +16,7 @@ from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import CoordinationHints
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
     create_initial_ledger,
@@ -200,14 +201,22 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
             "Run c-00-initialize-memory-repo first, then add onboarding before adopting."
         )
 
+    # The code commit this baseline names is resolved once, here, and used twice: the commit
+    # that carries the memory content is attributed to it, and the initial ledger row it writes
+    # maps the same commit. Two resolutions of "the code source-branch commit" is exactly how a
+    # trailer and its ledger row come to disagree.
+    code_source_commit = branch_commit(context.code_repository_root, source_branch)
     require_git(context.memory_root, ["add", *existing_paths])
     memory_content_commit = commit_if_dirty(
         context.memory_root,
-        f"[adopt-{context.code_repository_name}-memory-baseline] Adopt external memory content",
+        render_memory_content_message(
+            f"[adopt-{context.code_repository_name}-memory-baseline] Adopt external memory content",
+            code_source_commit,
+        ),
     )
     ledger = create_initial_ledger(
         context.code_repository_name,
-        branch_commit(context.code_repository_root, source_branch),
+        code_source_commit,
         memory_content_commit,
     )
     write_ledger(context.ledger_path, ledger)

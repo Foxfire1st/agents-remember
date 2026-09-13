@@ -14,6 +14,7 @@ from agents_remember.kernel.git_command import (
     run_git,
     run_git_with_index,
 )
+from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_ledger import (
     find_mapping,
     ledger_to_text,
@@ -83,6 +84,17 @@ def _intent(
     input_leg = "memory" if selection.leg == "memory-content" else "ledger"
     if selection.enabled and not effective.enabled(input_leg):
         refuse("prepared-memory-write-disabled", input_leg, effective)
+    # This intent's message is hashed into the commit object the private preparation mints, and
+    # finalization publishes that exact object to the live memory ref. So the memory-content leg
+    # renders through the one shared renderer, against the code commit this candidate was
+    # certified on; the ledger leg names no code commit and keeps its plain message by rule.
+    message = (
+        render_memory_content_message(
+            effective.message_for("memory"), result.candidate.codeView.codeCommit
+        )
+        if selection.leg == "memory-content"
+        else effective.message_for("ledger")
+    )
     policy = observe_git_preparation_policy(root)
     private = (
         contract.worktree_group
@@ -108,7 +120,7 @@ def _intent(
         "parentCommit": selection.parent,
         "admittedTree": selection.tree,
         "privateRoot": private.as_posix() if selection.enabled else None,
-        "normalizedMessage": effective.message_for(input_leg) if selection.enabled else None,
+        "normalizedMessage": message if selection.enabled else None,
         "hookPolicy": "ordinary",
         "gitConfigSha256": policy.git_config_sha256,
         "hooksSha256": policy.hooks_sha256,

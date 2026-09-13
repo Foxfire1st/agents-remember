@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from agents_remember.application import worktree_tools
 from agents_remember.application.worktree_tool_requests import (
     CloseoutApproval,
@@ -28,10 +29,13 @@ from agents_remember.models.closeout.input import (
     EffectiveCloseoutInput,
     EnabledCloseoutLeg,
 )
+from agents_remember.models.lifecycles.operation import LifecycleOperationRecoveryCommits
 from agents_remember.tasks import TaskEnclosureRef, read_task_doc, write_task_doc
+from agents_remember.worktrees import git_worktree_manager
 from agents_remember.worktrees.integration.closeout import curator_coherence as coherence
 from agents_remember.worktrees.integration.closeout.certification import execution as selected
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
+from agents_remember.worktrees.modules import closeout_external
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.closeout_external import (
     _commit_ledger_mapping,
@@ -312,6 +316,133 @@ def test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools
     )
     assert not code_hook_log.exists()
     assert not memory_hook_log.exists()
+
+
+def test_closeout_recovery_attributes_the_memory_commit_it_still_owed(tmp_path, worktree_services):
+    """An interrupted closeout, resumed from its journal, attributes the code commit it resumed on.
+
+    Recovery is a third closeout route and an ordinary one -- it is what runs when a closeout was
+    interrupted -- and it holds no memory-content commit site of its own: it re-proves the code
+    commit the journal recorded and writes only the ledger leg. A resumed closeout that has not yet
+    created its memory commit creates it through the producer the first attempt uses, so what this
+    protects is that the resumed path reaches that producer at all and names the recorded code
+    commit rather than nothing, which a projected ledger cannot tell apart from a producer that kept
+    the old shape.
+    """
+
+    fixture = _fixture(tmp_path, external_memory=True, selected_profile=False)
+    contract = fixture.leaf_contract
+    assert contract.memory_repo_path is not None and contract.memory_worktree is not None
+    contract.code_worktree.parent.mkdir(parents=True, exist_ok=True)
+    contract.memory_worktree.parent.mkdir(parents=True, exist_ok=True)
+    _git(
+        fixture.code_repo,
+        "worktree",
+        "add",
+        contract.code_worktree.as_posix(),
+        contract.code_work_branch,
+    )
+    _git(
+        contract.memory_repo_path,
+        "worktree",
+        "add",
+        contract.memory_worktree.as_posix(),
+        contract.memory_work_branch,
+    )
+    memory_seed = _git(contract.memory_worktree, "rev-parse", "HEAD")
+    write_ledger(
+        contract.memory_worktree / "memory.md",
+        create_initial_ledger("repo", contract.code_base_commit, memory_seed),
+    )
+    _git(contract.memory_worktree, "add", "memory.md")
+    _git(contract.memory_worktree, "commit", "-m", "Seed transaction ledger")
+    (contract.code_worktree / "feature.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (contract.memory_worktree / "onboarding").mkdir()
+    (contract.memory_worktree / "feature.md").write_text("# Feature\n", encoding="utf-8")
+    ensure_fixture_waiting_door(contract, force_synthetic=True)
+    contract = load_contract(contract.contract_path)
+    _bind_task_without_review(contract)
+    config = _public_config(tmp_path, contract)
+    _assert_no_profile_or_review(config, contract)
+
+    # First attempt: interrupt after the code commit, which is the point the recovery route's
+    # journal records. The exception propagates out of the real public apply.
+    with ExitStack() as stack:
+        for patcher in _forbid_acceptance_tools():
+            stack.enter_context(patcher)
+        stack.enter_context(
+            mock.patch.object(lifecycle_operations, "require_first_ready_generation")
+        )
+        stack.enter_context(
+            mock.patch.object(
+                closeout_external,
+                "_refresh_external_memory",
+                side_effect=InterruptedError("closeout interrupted after the code commit"),
+            )
+        )
+        with pytest.raises(InterruptedError):
+            worktree_tools.worktree_closeout_apply_tool(
+                config,
+                contract.contract_path.as_posix(),
+                MESSAGES,
+                CloseoutApproval(intent_note="developer approved transaction"),
+            )
+    code_commit = _git(contract.code_worktree, "rev-parse", "HEAD")
+    assert not load_contract(contract.contract_path).memory_content_commit
+
+    # Resume exactly as the recovery route does: the journalled code commit, and an empty
+    # memory-content cell because the memory commit is the one still owed.
+    with ExitStack() as stack:
+        for patcher in _forbid_acceptance_tools():
+            stack.enter_context(patcher)
+        stack.enter_context(
+            mock.patch.object(lifecycle_operations, "require_first_ready_generation")
+        )
+        resume_args = WorktreeArgs(
+            contract_path=contract.contract_path,
+            closeout_input=worktree_tools._normalize_worktree_closeout(
+                contract,
+                MESSAGES,
+                tool_name="worktree_closeout_apply",
+                corrected_arguments={},
+            ),
+            approval_note="developer approved transaction",
+            approved=True,
+            recovery_commits=LifecycleOperationRecoveryCommits(
+                codeCommit=code_commit,
+                memoryContentCommit="",
+                ledgerCommit="",
+            ),
+        )
+        # The recovery cell is load-bearing rather than decoration: a cell naming another code
+        # commit refuses before any mutation, which is what makes the resume below the recovery
+        # route rather than a fresh closeout that happens to agree with it.
+        with pytest.raises(RuntimeError, match="does not match task HEAD"):
+            git_worktree_manager.closeout_result(
+                replace(
+                    resume_args,
+                    recovery_commits=LifecycleOperationRecoveryCommits(codeCommit="0" * 40),
+                ),
+                load_contract(contract.contract_path),
+            )
+        resumed = git_worktree_manager.closeout_result(
+            resume_args,
+            load_contract(contract.contract_path),
+        )
+
+    assert resumed.returncode == 0, resumed.payload
+    assert resumed.payload["state"] == "closed", resumed.payload
+    closed = load_contract(contract.contract_path)
+    assert closed.code_commit == code_commit
+    # Reloading above rebinds `contract`, so the optional memory worktree must be narrowed again.
+    assert contract.memory_worktree is not None
+    _assert_memory_attribution(
+        contract.memory_worktree,
+        code_commit=code_commit,
+        content_commit=closed.memory_content_commit,
+        ledger_commit=closed.ledger_commit,
+        scratch=tmp_path,
+    )
 
 
 def test_public_integration_merges_prepared_pair_without_acceptance_tools(

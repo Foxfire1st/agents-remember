@@ -8,6 +8,7 @@ of the ledger module's world, not of any one caller.
 from pathlib import Path
 
 from agents_remember.kernel.memory_attribution import (
+    CODE_COMMIT_TRAILER_KEY,
     AttributedCommit,
     attributed_commits,
     ledger_rows_from_attribution,
@@ -26,7 +27,6 @@ from agents_remember.kernel.memory_ledger import (
     write_ledger,
 )
 from agents_remember.models.closeout.input import (
-    CODE_COMMIT_TRAILER_KEY,
     EffectiveCloseoutInput,
     EnabledCloseoutLeg,
 )
