@@ -115,6 +115,10 @@ class Step(_Doc):
     # ``None``-defaulted so ``exclude_none`` keeps existing step JSON byte-identical.
     outcome: str | None = None
     status: StepStatus = "pending"
+    # Free prose about this unit, exactly as ``SubStep`` carries it. Optional so ``exclude_none``
+    # keeps existing step JSON byte-identical; before this field existed, ``set_step`` accepted a
+    # top-level ``note`` and silently discarded it, because the schema had nowhere to put it.
+    note: str | None = None
     substeps: list[SubStep] = Field(default_factory=list)
     disposition: StepDisposition | None = None
 

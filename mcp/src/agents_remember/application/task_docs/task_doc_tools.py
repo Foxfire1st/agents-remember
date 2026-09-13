@@ -12,7 +12,6 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +54,7 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
 )
 
-from . import task_sprint_linkage
+from . import task_doc_steps, task_sprint_linkage
 from .task_doc_discard import DiscardUnstartedRequest, discard_unstarted_subtask
 from .task_doc_publication import (
     TaskDocPublication,
@@ -94,8 +93,13 @@ VALID_OPERATIONS = (
     "create",
     "replace",
     "set_status",
+    # The step plane is split by intent, mirroring skip_step's exact addressing:
+    # set_step updates one existing unit, add_step creates one, remove_step deletes one.
     "set_step",
+    "add_step",
+    "remove_step",
     "skip_step",
+    "read_steps",
     "set_subtask",
     "remove_subtask",
     "set_section",
@@ -111,7 +115,7 @@ VALID_OPERATIONS = (
 )
 
 # set_field may only touch these (scalars + flat string lists); structural edits
-# go through create / replace / set_step / append_decision.
+# go through create / replace / the step plane / append_decision.
 _MUTABLE_FIELDS = frozenset(
     {
         "title",
@@ -283,7 +287,7 @@ def _validate_task_doc_candidate(context: _TaskDocCandidateContext) -> None:
     _enforce_route_review_authority(operation, original, doc)
     _enforce_replace_preserves_unresolved_units(operation, original, doc)
     _enforce_preserves_unresolved_master_rows(operation, original, doc)
-    _enforce_terminal_status(doc)
+    _enforce_terminal_status(operation, doc, context.edit)
     _enforce_register_section_shapes(doc)
     try:
         enforce_execution_topology_edit(
@@ -398,6 +402,25 @@ def _prepare_task_doc_edit(
     return _PreparedTaskDocEdit(original, doc, selected_snapshot)
 
 
+def _read_steps(context: _TaskDocSpecialContext) -> dict[str, Any]:
+    """The focused checklist read: steps and substeps, never the whole authored document.
+
+    ``get`` returns the document identity and none of its checklist, so an agent otherwise
+    read the raw JSON or the rendered markdown by hand to find out what a unit is called
+    and whether it is resolved. Read-only, like ``get``: it publishes nothing.
+    """
+    json_path = _existing_json(context.task_root, context.target.slug)
+    doc = read_task_doc(json_path)
+    result = task_doc_result(
+        context.operation,
+        doc,
+        json_path,
+        markdown_path_for(context.task_root, doc),
+    )
+    result["steps"] = task_doc_steps.step_payloads(doc.steps)
+    return result
+
+
 def _sprint_doc_identity(context: _TaskDocSpecialContext) -> dict[str, Any]:
     """The sprint document's identity surface, merged into special-op results.
 
@@ -440,6 +463,8 @@ def _special_task_doc_operation(context: _TaskDocSpecialContext) -> dict[str, An
         if facts is not None:
             result["linkageFacts"] = facts
         return result
+    if context.operation == "read_steps":
+        return _read_steps(context)
     if context.operation in task_sprint_linkage.SPRINT_LINKAGE_OPERATIONS:
         try:
             result = task_sprint_linkage.sprint_linkage_operation(
@@ -627,42 +652,23 @@ def _apply_set_field(data: dict[str, Any], edit: _Edit) -> None:
 
 
 def _apply_set_step(data: dict[str, Any], edit: _Edit) -> None:
-    if edit.kind == "master":
-        raise TaskDocError("set_step is not valid for a master; use set_subtask")
-    if not edit.step:
-        raise TaskDocError("set_step requires a step object")
-    _upsert_step(data, edit.step)
+    task_doc_steps.set_step(data, kind=edit.kind, step=edit.step)
+
+
+def _apply_add_step(data: dict[str, Any], edit: _Edit) -> None:
+    task_doc_steps.add_step(data, kind=edit.kind, step=edit.step)
+
+
+def _apply_remove_step(data: dict[str, Any], edit: _Edit) -> None:
+    task_doc_steps.remove_step(data, kind=edit.kind, step=edit.step)
 
 
 def _apply_skip_step(data: dict[str, Any], edit: _Edit) -> None:
-    if edit.kind == "master":
-        raise TaskDocError("skip_step is not valid for a master; use set_subtask")
-    if not edit.step:
-        raise TaskDocError("skip_step requires step={id, reason, parent?}")
-    reason = edit.step.get("reason")
-    if not isinstance(reason, str) or not reason.strip():
-        raise TaskDocError("skip_step requires a nonblank step.reason")
-    target, qualified_id = _exact_step_target(data, edit.step)
-    if target.get("status") == "done":
-        raise TaskDocError(
-            f"skip_step requires an unresolved target; {qualified_id} is already done"
-        )
-    recorded_at = datetime.now(UTC).isoformat(timespec="seconds")
-    target["status"] = "done"
-    target["disposition"] = {
-        "kind": "intentionalSkip",
-        "reason": reason.strip(),
-        "recordedAt": recorded_at,
-        "recordedVia": "task_doc.skip_step",
-        "lifecycleId": edit.lifecycle_id,
-    }
-    decisions: list[dict[str, Any]] = data.setdefault("decisions", [])
-    decisions.append(
-        {
-            "at": recorded_at,
-            "decision": f"Intentionally skip step {qualified_id}.",
-            "rationale": reason.strip(),
-        }
+    task_doc_steps.skip_step(
+        data,
+        kind=edit.kind,
+        step=edit.step,
+        lifecycle_id=edit.lifecycle_id,
     )
 
 
@@ -695,6 +701,8 @@ _MUTATIONS: dict[str, Callable[[dict[str, Any], _Edit], None]] = {
     "set_status": _apply_set_status,
     "set_field": _apply_set_field,
     "set_step": _apply_set_step,
+    "add_step": _apply_add_step,
+    "remove_step": _apply_remove_step,
     "skip_step": _apply_skip_step,
     "set_subtask": _apply_set_subtask,
     "set_section": _apply_set_section,
@@ -730,67 +738,6 @@ def _apply(
             ),
         )
     return _validate(data)
-
-
-def _upsert_step(data: dict[str, Any], step: dict[str, Any]) -> None:
-    if not step.get("id"):
-        raise TaskDocError("set_step requires step.id")
-    steps: list[dict[str, Any]] = data.setdefault("steps", [])
-    parent_id = step.get("parent")
-    if parent_id:
-        parent = _find(steps, str(parent_id))
-        if parent is None:
-            raise TaskDocError(f"set_step: parent step {parent_id!r} not found")
-        substeps: list[dict[str, Any]] = parent.setdefault("substeps", [])
-        updated = _upsert(substeps, step, keys=("title", "status", "note"))
-    else:
-        updated = _upsert(steps, step, keys=("title", "status"))
-    if "status" in step:
-        # An explicit status edit records executed/reworked state, not the old skip decision.
-        updated.pop("disposition", None)
-
-
-def _upsert(
-    items: list[dict[str, Any]],
-    payload: dict[str, Any],
-    *,
-    keys: tuple[str, ...],
-) -> dict[str, Any]:
-    item_id = str(payload["id"])
-    updates = {key: payload[key] for key in keys if key in payload}
-    existing = _find(items, item_id)
-    if existing is None:
-        new_item: dict[str, Any] = {"id": item_id, "title": payload.get("title", item_id)}
-        new_item.update(updates)
-        items.append(new_item)
-        return new_item
-    else:
-        existing.update(updates)
-        return existing
-
-
-def _exact_step_target(data: dict[str, Any], payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
-    step_id = str(payload.get("id") or "").strip()
-    if not step_id:
-        raise TaskDocError("skip_step requires step.id")
-    steps: list[dict[str, Any]] = data.setdefault("steps", [])
-    parent_id = str(payload.get("parent") or "").strip()
-    if not parent_id:
-        matches = [step for step in steps if str(step.get("id")) == step_id]
-        return _one_exact_match(matches, f"top-level step {step_id!r}"), step_id
-    parents = [step for step in steps if str(step.get("id")) == parent_id]
-    parent = _one_exact_match(parents, f"parent step {parent_id!r}")
-    children = [sub for sub in parent.get("substeps", []) if str(sub.get("id")) == step_id]
-    child = _one_exact_match(children, f"substep {parent_id!r}/{step_id!r}")
-    return child, f"{parent_id}/{step_id}"
-
-
-def _one_exact_match(matches: list[dict[str, Any]], label: str) -> dict[str, Any]:
-    if not matches:
-        raise TaskDocError(f"skip_step: {label} not found")
-    if len(matches) > 1:
-        raise TaskDocError(f"skip_step: {label} is ambiguous")
-    return matches[0]
 
 
 def _disposition_entries(doc: TaskDocument) -> list[tuple[str, str]]:
@@ -889,9 +836,24 @@ def _enforce_preserves_unresolved_master_rows(
         )
 
 
-def _enforce_terminal_status(candidate: TaskDocument) -> None:
-    if candidate.status == "Completed":
-        _raise_for_completion_blockers(candidate)
+def _enforce_terminal_status(
+    operation: str,
+    candidate: TaskDocument,
+    edit: TaskDocEdit = NO_EDIT,
+) -> None:
+    """A Completed document admits no new unresolved work -- except a reasoned removal.
+
+    ``remove_step`` is the deliberate exception (developer ruling). Its motivating case
+    repaired spurious units on an already-``Completed`` leaf document, and a status gate
+    would have forced a full-document ``replace`` that was correctly refused as too
+    destructive. The removal's nonblank reason and its appended decision are the audited
+    substitute for that gate; ``_apply_remove_step`` refuses a blank reason first.
+    """
+    if candidate.status != "Completed":
+        return
+    if operation == "remove_step" and task_doc_steps.step_reason(edit.step) is not None:
+        return
+    _raise_for_completion_blockers(candidate)
 
 
 def _raise_for_completion_blockers(doc: TaskDocument) -> None:
@@ -900,13 +862,6 @@ def _raise_for_completion_blockers(doc: TaskDocument) -> None:
         return
     exact = [blocker.model_dump() for blocker in blockers]
     raise TaskDocError(f"task completion refused; unresolved work units: {exact!r}")
-
-
-def _find(items: list[dict[str, Any]], item_id: str) -> dict[str, Any] | None:
-    for item in items:
-        if item.get("id") == item_id:
-            return item
-    return None
 
 
 def _upsert_subtask(data: dict[str, Any], subtask: dict[str, Any]) -> None:
@@ -972,7 +927,7 @@ def _remove_subtask(
     data["subTasks"] = [ref for ref in refs if ref.get("number") != number]
     updated = _validate(data)
     _enforce_preserves_unresolved_master_rows("remove_subtask", doc, updated)
-    _enforce_terminal_status(updated)
+    _enforce_terminal_status("remove_subtask", updated)
     leaf_files = _leaf_doc_files(context.task_root, match)
     source_snapshots = [selected_snapshot]
     if leaf_files:

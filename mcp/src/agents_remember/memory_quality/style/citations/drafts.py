@@ -51,6 +51,26 @@ ACTIONS = {
         "Read the CLAIM, not the pointer. The anchor exists nowhere in the code tree, which "
         "usually means the behaviour changed rather than a number going stale."
     ),
+    repair.ANCHOR_LEFT_LIVE_FILE: (
+        "Read the CLAIM and cite where its fact now lives. A cited file still exists and no "
+        "longer holds the anchor, so the pointer is stale: a declaration elsewhere in the "
+        "tree is a different fact, not this claim's location."
+    ),
+    repair.ANCHOR_CONTINUITY_UNPROVEN: (
+        "Read the CLAIM and cite where its fact now lives. `--fix` retargets across the tree "
+        "only when continuity is PROVED -- the anchor must have existed in a cited file at "
+        "the document's lastVerifiedCommitHash and carried the same extent kind there -- and "
+        "that proof is missing here (see the message below for which part). Establish the "
+        "claim's original evidence first; a declaration elsewhere does not evidence a claim "
+        "about a mention here."
+    ),
+    repair.ANCHOR_KIND_CHANGED: (
+        "Read the CLAIM and cite where its fact now lives. The anchor was a mention where the "
+        "claim was verified and the only tree-wide match DECLARES the same name, so the "
+        "regenerated range would point at the declaration instead of the mention the claim is "
+        "about. If the claim really is about the declaration, re-word it and cite the "
+        "declaration deliberately."
+    ),
     CITATIONS_NOTE_DROPPED: (
         "The Citations cell holds a note rather than a range and the new format has no "
         "column for it. Fold what it says into the Finding sentence or drop it, then give "

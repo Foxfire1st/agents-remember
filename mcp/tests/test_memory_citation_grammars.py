@@ -31,9 +31,19 @@ class TypeScriptPureMoveTests(TreeCase):
     a candidate, so the declaration resolves uniquely and ``--fix`` repoints the claim; with
     the grammar withdrawn both files are mentions, nothing resolves uniquely, and the claim
     is handed to the curator with both locations named.
+
+    The cited file is deleted by the move and the card is stamped at the commit that still
+    held the declaration there, so a relocation has to prove continuity as well: the anchor
+    was a DEFINITION in the cited file, and the tree-wide match must be a DEFINITION too.
     """
 
     def moved(self) -> None:
+        self.tree.history()
+        self.tree.source(
+            "dashboard/src/rail.tsx",
+            "export class RailRow {\n  render() {\n    return null;\n  }\n}\n",
+        )
+        stamp = self.tree.stamp()
         self.tree.source(
             "dashboard/src/rail/RailRow.tsx",
             'import { useState } from "react";\n\n'
@@ -44,9 +54,11 @@ class TypeScriptPureMoveTests(TreeCase):
             'import { RailRow } from "../rail/RailRow";\n\n'
             "export const FlowTab = () => new RailRow();\n",
         )
+        self.tree.remove_source("dashboard/src/rail.tsx")
         self.tree.card(
             "dashboard/src/panels/FlowTab.tsx",
             "| The rail row owns its own render. | `RailRow` | dashboard/src/rail.tsx:1-4 |",
+            stamp=stamp,
         )
 
     def withdrawn(self) -> AbstractContextManager[Any]:
@@ -187,10 +199,25 @@ class TypeScriptAnchorGrammarTests(unittest.TestCase):
 
 
 class TypeScriptInterfacePoolRepairTests(TreeCase):
-    """R32 mode 4: pooled members repair to their defining interface file."""
+    """R32 mode 4: pooled members repair to their defining interface file.
+
+    The card is stamped at the commit where the same interface still declared every pooled
+    member, so the relocation proves the members were DEFINITIONS there and are DEFINITIONS
+    at their new file.
+    """
 
     def test_three_interface_members_in_another_file_repair_as_one_claim(self) -> None:
+        self.tree.history()
         self.tree.source("dashboard/src/panels/old.ts", "export const keep = true;\n")
+        self.tree.source(
+            "dashboard/src/panels/gone.ts",
+            "export interface PanelProps {\n"
+            "  title: string;\n"
+            "  onSelect(): void;\n"
+            "  disabled?: boolean;\n"
+            "}\n",
+        )
+        stamp = self.tree.stamp()
         self.tree.source(
             "dashboard/src/types/panel.ts",
             "export interface PanelProps {\n"
@@ -199,10 +226,12 @@ class TypeScriptInterfacePoolRepairTests(TreeCase):
             "  disabled?: boolean;\n"
             "}\n",
         )
+        self.tree.remove_source("dashboard/src/panels/gone.ts")
         self.tree.card(
             "dashboard/src/panels/view.tsx",
             "| Panel inputs are shared. | `title`; `onSelect`; `disabled` "
             "| dashboard/src/panels/gone.ts:1-4 |",
+            stamp=stamp,
         )
 
         result = self.tree.fix()

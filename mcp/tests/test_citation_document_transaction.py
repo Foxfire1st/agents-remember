@@ -1,7 +1,13 @@
-"""Actual fixer publication: accepted batches, refusal isolation, and observed conflicts."""
+"""Actual citation publication: fixer batches, migration conversion, and observed conflicts.
 
-from __future__ import annotations
+Both document-rewriting transactions live here. The fixer section covers accepted batches,
+refusal isolation, and observed conflicts. The migration section covers the other production
+caller, ``migration.migrate_onboarding_root``, which rewrites superseded-format tables and
+consults the SAME continuity authority the fixer does: an anchor that left a live cited file
+is refused, and a relocation across the tree needs the document's own verification provenance.
+"""
 
+import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -16,6 +22,8 @@ from agents_remember.memory_quality.style.citations import (
 )
 from agents_remember.memory_quality.style.citations import (
     fixer,
+    migration,
+    old_form,
     source_index,
 )
 from agents_remember.memory_quality.style.citations.documents import (
@@ -34,14 +42,26 @@ SECOND = "| Second. | `another` | src/missing.py:1-2 |"
 class Scenario:
     code: Path
     onboarding: Path
+    stamp: str
+
+    @staticmethod
+    def git(root: Path, *args: str) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=root, text=True, capture_output=True, check=False
+        )
+        if result.returncode != 0:
+            raise AssertionError(result.stderr or result.stdout)
+        return result.stdout.strip()
 
     def card(self, name: str, *rows: str) -> Path:
         path = self.onboarding / name
         path.write_text(
-            "# Citation card\n\n| Finding | Anchor | Source |\n| --- | --- | --- |\n"
-            + "\n".join(rows)
-            + "\n"
-            + HISTORY,
+            "# Citation card\n\n"
+            "| Field | Value |\n"
+            "| --- | --- |\n"
+            f"| lastVerifiedCommitHash | `{self.stamp}` |\n\n"
+            "| Finding | Anchor | Source |\n"
+            "| --- | --- | --- |\n" + "\n".join(rows) + "\n" + HISTORY,
             encoding="utf-8",
         )
         return path
@@ -70,7 +90,23 @@ def scenario(tmp_path: Path) -> Scenario:
         ("src/second.py", "another"),
     ):
         (code / name).write_text(f"def {symbol}():\n    return 1\n", encoding="utf-8")
-    return Scenario(code, onboarding)
+    # The two citations under test name files this move removes, so the VERIFIED tree has to
+    # hold them first: a relocation follows an exact name only when the extent the claim was
+    # verified against is readable at the card's stamp, with the same extent kind.
+    for name, symbol in (("src/gone.py", "unique"), ("src/missing.py", "another")):
+        (code / name).write_text(f"def {symbol}():\n    return 0\n", encoding="utf-8")
+    for args in (
+        ("init", "--quiet"),
+        ("config", "user.email", "fixture@example.invalid"),
+        ("config", "user.name", "Fixture"),
+        ("add", "--all"),
+        ("commit", "--quiet", "-m", "verified"),
+    ):
+        Scenario.git(code, *args)
+    stamp = Scenario.git(code, "rev-parse", "HEAD")
+    (code / "src/gone.py").unlink()
+    (code / "src/missing.py").unlink()
+    return Scenario(code, onboarding, stamp)
 
 
 def test_mixed_claims_publish_only_the_accepted_edit_and_history(scenario: Scenario) -> None:
@@ -222,3 +258,205 @@ def test_stale_explicit_snapshot_refuses_the_actual_scoped_fixer(scenario: Scena
     with pytest.raises(source_index.SourceIndexError):
         scenario.fix(only=card.name, expected_snapshot=expected)
     assert card.read_bytes() == original
+
+
+# --------------------------------------------------------------------------------------
+# MIGRATION. The other document-rewriting transaction, over the same continuity authority.
+# --------------------------------------------------------------------------------------
+
+OLD_CITATION_HEADER = "| Finding | Citations | Source Path |"
+NEW_CITATION_HEADER = "| Finding | Anchor | Source |"
+MIGRATION_CARD = "caller.md"
+MIGRATION_FINDING = "The registration entry point."
+MIGRATION_ANCHOR = "`register_tool`"
+CALLER = "src/caller.py"
+CITED = "src/live.py"
+DECLARED = "src/declared.py"
+
+
+@dataclass(frozen=True)
+class Migration:
+    """A code tree and the superseded-format card the migration transaction rewrites."""
+
+    code: Path
+    onboarding: Path
+
+    def source(self, name: str, body: str) -> Path:
+        path = self.code / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def stamp(self) -> str:
+        """Commit the verified tree and return it; evidence a move removes must exist here."""
+        Scenario.git(self.code, "add", "--all")
+        Scenario.git(self.code, "commit", "--quiet", "--allow-empty", "-m", "verified")
+        return Scenario.git(self.code, "rev-parse", "HEAD")
+
+    def card(self, *, stamp: str | None, cited: str = CITED) -> Path:
+        """The superseded three-column card: Finding, Citations, Source Path."""
+        metadata = [
+            "# Citation card",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            "| repository | agents-remember |",
+            f"| path | `{CALLER}` |",
+        ]
+        if stamp is not None:
+            metadata.append(f"| lastVerifiedCommitHash | `{stamp}` |")
+        card = self.onboarding / MIGRATION_CARD
+        card.write_text(
+            "\n".join(metadata) + "\n\n## Repo-Internal References\n\n"
+            f"{OLD_CITATION_HEADER}\n| --- | --- | --- |\n"
+            f"| {MIGRATION_FINDING} | {MIGRATION_ANCHOR} (L1-L2) | [{Path(cited).name}]({cited}) |\n",
+            encoding="utf-8",
+        )
+        return card
+
+    def migrate(self, **options: Any) -> dict[str, Any]:
+        return migration.migrate_onboarding_root(self.onboarding, self.code, **options)
+
+    def row(self) -> str:
+        """The one citation row, located by whichever header the transaction left behind."""
+        lines = (self.onboarding / MIGRATION_CARD).read_text(encoding="utf-8").splitlines()
+        header = NEW_CITATION_HEADER if NEW_CITATION_HEADER in lines else OLD_CITATION_HEADER
+        return lines[lines.index(header) + 2]
+
+
+def build_migration(root: Path) -> Migration:
+    """A migration fixture: a real code tree and the memory tree the card lives in."""
+    code = root / "code"
+    (code / "src").mkdir(parents=True)
+    onboarding = root / "memory" / "onboarding"
+    onboarding.mkdir(parents=True)
+    for args in (
+        ("init", "--quiet"),
+        ("config", "user.email", "fixture@example.invalid"),
+        ("config", "user.name", "Fixture"),
+    ):
+        Scenario.git(code, *args)
+    return Migration(code=code, onboarding=onboarding)
+
+
+@pytest.fixture
+def migration_tree(tmp_path: Path) -> Migration:
+    return build_migration(tmp_path)
+
+
+def test_migration_declines_a_claim_whose_anchor_left_a_live_cited_file(
+    migration_tree: Migration,
+) -> None:
+    """``anchor_left_live_file`` is the continuity refusal the migration caller can reach.
+
+    The cited file still exists and no longer holds the anchor, so a tree-wide exact-name match
+    is a different fact rather than this claim's location. The row is NOT migrated: it keeps
+    the evidence its author wrote and the pointer is not moved to the declaration.
+    """
+    migration_tree.source(CITED, "OTHER_TOOLS = ('a', 'b')\n")
+    stamp = migration_tree.stamp()
+    migration_tree.source(DECLARED, "def register_tool():\n    return 1\n")
+    migration_tree.card(stamp=stamp)
+
+    result = migration_tree.migrate()
+
+    assert result["declinedByReason"] == {"anchor_left_live_file": 1}
+    assert result["rowsConverted"] == 0
+    item = result["workOrders"][0]["items"][0]
+    assert item["code"] == "anchor_left_live_file"
+    assert CITED in item["message"]
+    assert "still exists in the tree" in item["message"]
+    assert f"{DECLARED}:1-2" in item["message"]
+    row = migration_tree.row()
+    assert CITED in row
+    assert DECLARED not in row
+
+
+@pytest.mark.parametrize("stamped", [True, False])
+def test_migration_refuses_a_gone_cited_file_before_the_continuity_authority(
+    tmp_path: Path, stamped: bool
+) -> None:
+    """A cited file that names no file in either tree is refused while the ROW is read.
+
+    This is the migration caller's real answer for both origin shapes -- a card that carries a
+    verification stamp and one that cannot prove an origin at all -- and it is strictly
+    fail-closed: ``migration.row_paths`` declines the row before ``place`` runs, so the row
+    keeps its old evidence and no pointer is moved. It also means the continuity refusal
+    ``anchor_continuity_unproven`` is not reachable THROUGH this entry point; the case below
+    pins that authority itself through the one gate standing in front of it.
+    """
+    migration_tree = build_migration(tmp_path)
+    migration_tree.source(CITED, "def register_tool():\n    return 0\n")
+    stamp = migration_tree.stamp() if stamped else None
+    migration_tree.source(DECLARED, "def register_tool():\n    return 1\n")
+    migration_tree.card(stamp=stamp)
+    (migration_tree.code / CITED).unlink()
+
+    result = migration_tree.migrate()
+
+    assert result["declinedByReason"] == {"source_unresolvable": 1}
+    assert result["rowsConverted"] == 0
+    assert f"{DECLARED}:1-2" not in migration_tree.row()
+    assert CITED in migration_tree.row()
+
+
+def test_the_continuity_authority_decides_once_an_absent_source_reaches_placement(
+    tmp_path: Path,
+) -> None:
+    """A SEAM TEST: it monkeypatches the gate in front of ``place``; it is not end-to-end.
+
+    ``migration.place`` hands the document's verification provenance to the same resolver the
+    fixer uses, so a tree-wide relocation is admitted only when the extent the claim was
+    verified against can be read at its stamp and carries the same KIND as the extent found
+    now. PRODUCTION CANNOT CURRENTLY REACH THOSE BRANCHES: ``migration.row_paths`` resolves the
+    Source Path against both trees and ``plan_row`` refuses a source that names no existing
+    file with ``source_unresolvable``, so every ``draft.paths`` entry handed to ``place`` is a
+    path that still resolves and ``repair.plan`` can only ever answer ``anchor_left_live_file``
+    (the case above pins that). The two branches below are therefore covered by REGRESSION
+    PROTECTION ONLY -- they go live the moment anything upstream loosens ``row_paths``, which
+    is why the wiring must not be deleted as dead code.
+
+    Do not read a green run here as end-to-end migration coverage of a relocated file. To keep
+    the seam honest it wraps ``row_paths`` with the real reader plus one rule: an expressable
+    (non-URL) spelling that resolves to no file is carried through unchanged. Nothing else
+    about row reading, placement, or the entry point differs, and both trees are driven through
+    the real ``migrate_onboarding_root``.
+    """
+    unproven = build_migration(tmp_path / "unproven")
+    unproven.source(CITED, "def register_tool():\n    return 0\n")
+    unproven.source(DECLARED, "def register_tool():\n    return 1\n")
+    unproven.card(stamp=None)
+    (unproven.code / CITED).unlink()
+
+    proven = build_migration(tmp_path / "proven")
+    proven.source(CITED, "def register_tool():\n    return 0\n")
+    stamp = proven.stamp()
+    proven.source(DECLARED, "def register_tool():\n    return 1\n")
+    proven.card(stamp=stamp)
+    (proven.code / CITED).unlink()
+
+    real = migration.row_paths
+
+    def carry_absent_source(
+        cell: str, subject: migration.Subject, run: migration.Pass
+    ) -> tuple[tuple[str, ...], str]:
+        paths, code = real(cell, subject, run)
+        if paths:
+            return paths, code
+        absent = tuple(one for one in old_form.link_targets(cell) if old_form.URL_MARK not in one)
+        return (absent, "") if absent else (paths, code)
+
+    with mock.patch.object(migration, "row_paths", carry_absent_source):
+        refused = unproven.migrate()
+        relocated = proven.migrate()
+
+    assert refused["declinedByReason"] == {"anchor_continuity_unproven": 1}
+    assert refused["rowsConverted"] == 0
+    assert CITED in unproven.row()
+    assert DECLARED not in unproven.row()
+
+    assert relocated["declinedByReason"] == {}
+    assert relocated["rowsConverted"] == 1
+    assert relocated["ok"] is True
+    assert f"{DECLARED}:1-2" in proven.row()
+    assert CITED not in proven.row()

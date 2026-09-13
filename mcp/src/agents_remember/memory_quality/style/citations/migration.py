@@ -30,6 +30,7 @@ from agents_remember.memory_quality.style.citations import (
     model,
     old_form,
     prose,
+    provenance,
     range_resolution,
     repair,
     source_index,
@@ -72,6 +73,17 @@ class Pass:
     index: source_index.RepositoryIndex
     sources: Sources
     result: Result
+    origins: dict[Path, repair.Continuity] = field(default_factory=dict, init=False)
+    histories: provenance.Histories = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.histories = provenance.Histories(self.trees.code_root, self.trees.memory_root)
+
+    def continuity(self, document: Path) -> repair.Continuity:
+        """This document's verification provenance, resolved at most once per pass."""
+        if document not in self.origins:
+            self.origins[document] = repair.continuity_for(document, self.trees, self.histories)
+        return self.origins[document]
 
 
 def subject_of(document: Path, onboarding_root: Path) -> Subject:
@@ -420,7 +432,22 @@ def place(draft: Draft, seen: Sightings, run: Pass) -> str | None:
         malformed=(),
         unchecked_spans=0,
     )
-    outcome = repair.plan(claim, run.trees, run.sources, _Sightings(seen))
+    # The continuity authority is passed, but it is UNREACHABLE from this entry point BY
+    # CONSTRUCTION, and that is deliberate on both sides. ``row_paths`` resolves every Source
+    # Path against both trees and ``plan_row`` refuses one that names no existing file with
+    # ``source_unresolvable`` before placement is ever considered -- an earlier, simpler,
+    # fail-closed refusal. So every ``draft.paths`` entry here is a path that still resolves,
+    # ``repair.plan``'s ``live`` set is therefore never empty, and the resolver can only ever
+    # answer ``anchor_left_live_file``: its continuity branches (``anchor_continuity_unproven``
+    # and the successful relocation) cannot fire on this path. Do not delete this argument as
+    # dead code and do not loosen ``row_paths`` to make those branches fire: the wiring becomes
+    # live the moment anything upstream loosens, and admitting unresolvable rows into placement
+    # only so a later branch can refuse them again is strictly worse. The seam test in
+    # ``test_citation_document_transaction.py`` pins both branches through the gate for exactly
+    # that future.
+    outcome = repair.plan(
+        claim, run.trees, run.sources, _Sightings(seen), run.continuity(draft.subject.document)
+    )
     if isinstance(outcome, repair.Decline):
         draft.refuse(
             outcome.code,
