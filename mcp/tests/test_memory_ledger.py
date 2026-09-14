@@ -36,8 +36,9 @@ from agents_remember.worktrees.ledger_projection import (
     LedgerWorld,
     project_ledger,
     read_ledger_source,
+    read_ledger_text,
 )
-from agents_remember.worktrees.modules.git import head_commit, require_git
+from agents_remember.worktrees.modules.git import head_commit, is_ancestor, require_git
 
 
 def test_roundtrip_preserves_newest_same_code_history() -> None:
@@ -127,6 +128,27 @@ class _World:
                 memory_reachable_from=head_commit(self.repo),
                 code_repository=self.repo,
             ),
+        )
+
+    def observe_at(
+        self,
+        reachable_from: str,
+        *,
+        additions: list[LedgerRow] | None = None,
+    ):
+        """The projection of the live table against the source, reaching from one exact commit."""
+
+        text = (self.repo / "memory.md").read_text(encoding="utf-8")
+        return project_ledger(
+            source=read_ledger_source(self.repo, self.source_commit),
+            observed=read_ledger_text(text, label="live"),
+            observed_text=text,
+            world=LedgerWorld(
+                memory_repository=self.repo,
+                memory_reachable_from=reachable_from,
+                code_repository=self.repo,
+            ),
+            additions=additions or [],
         )
 
 
@@ -437,11 +459,15 @@ def test_projection_reads_an_unattributed_commit_from_its_own_ledger(tmp_path: P
     With no trailer anywhere above it, a commit's own table is the only record there is, and
     returning nothing instead would make a repository that predates the rule look empty. A reader
     with no fallback loses every row here.
+
+    The memory cells name real commits of this repository rather than placeholders, because a row
+    is what its two cells resolve to: a cell no ancestry test can resolve is a row the read cannot
+    say the source carries, and the read reports it instead of keeping it.
     """
 
     empty = _init_repo(tmp_path / "unattributed")
-    historical = LedgerRow("b" * 40, "c" * 40)
-    latest = LedgerRow("d" * 40, "e" * 40)
+    historical = LedgerRow("b" * 40, _content_commit(empty, "historical content"))
+    latest = LedgerRow("d" * 40, _content_commit(empty, "latest content"))
     (empty / "memory.md").write_text(
         ledger_to_text(_ledger([historical, latest])), encoding="utf-8"
     )
@@ -451,10 +477,120 @@ def test_projection_reads_an_unattributed_commit_from_its_own_ledger(tmp_path: P
     source = read_ledger_source(empty, head)
 
     assert source.ledger.rows == [historical, latest]
+    assert source.excluded_rows == ()
     assert find_mapping(source.ledger, "b" * 40) == historical
     assert attributed_commits(empty, tip=head) == [
-        AttributedCommit(head, None),
-        AttributedCommit(require_git(empty, ["rev-parse", "HEAD~1"]).strip(), None),
+        AttributedCommit(commit, None)
+        for commit in require_git(empty, ["rev-list", "HEAD"]).split()
+    ]
+
+
+def _content_commit(repo: Path, label: str) -> str:
+    """One real memory commit, so a row's memory cell names a commit the repository holds."""
+
+    (repo / f"{label.replace(' ', '-')}.md").write_text(f"{label}\n", encoding="utf-8")
+    return _commit(repo, label)
+
+
+def test_a_source_row_the_source_cannot_carry_is_reported_not_kept(tmp_path: Path) -> None:
+    """A row naming memory content the source does not carry is excluded, with its reason.
+
+    This is the class that made a real leaf's ledger read as damaged: the table on the line
+    carried 13 rows whose memory commits are not in the source's ancestry, every read dropped
+    them again, and the integration-side rule that forbade dropping them refused the landing.
+    The projection is the authority now, so the drop has to be the projection's own decision,
+    stated in the payload rather than performed in silence.
+    """
+
+    world = _World(tmp_path)
+    unreachable = LedgerRow(world.code_two, world.unreachable_memory)
+    recorded = [
+        LedgerRow(world.code_one, world.memory_one),
+        unreachable,
+        LedgerRow(world.code_two, world.memory_two),
+    ]
+    (world.repo / "memory.md").write_text(ledger_to_text(_ledger(recorded)), encoding="utf-8")
+    head = _commit(world.repo, "a table carrying one row the source cannot prove")
+
+    source = read_ledger_source(world.repo, head)
+
+    assert source.ledger.rows == [
+        LedgerRow(world.code_one, world.memory_one),
+        LedgerRow(world.code_two, world.memory_two),
+    ]
+    assert [removal.row for removal in source.excluded_rows] == [unreachable]
+    assert [removal.reason for removal in source.excluded_rows] == ["memory-commit-unreachable"]
+
+
+def test_a_partially_trailered_source_still_reads_its_pre_rule_rows(tmp_path: Path) -> None:
+    """One trailer must not hide the history the trailer rule never reached.
+
+    The reader used to return the trailers ALONE as soon as the history carried a single one, so a
+    source whose table records hundreds of rows and whose history carries one trailer read as a
+    one-row source: every pre-rule row vanished from the tail it was supposed to supply. This is
+    the real shape of the master line, where a backfill put a trailer on the newest commit only,
+    so the case is the difference between a rebuild that finds the line's history and one that
+    loses it -- the "looks like no attribution exists" failure in its most expensive form.
+    """
+
+    world = _init_repo(tmp_path / "partial")
+    pre_rule = LedgerRow("b" * 40, _content_commit(world, "pre-rule content"))
+    (world / "memory.md").write_text(ledger_to_text(_ledger([pre_rule])), encoding="utf-8")
+    _commit(world, "the pre-rule table, which carries no trailer")
+    attributed = _attributed_commit(
+        world, "memory after the rule", code_commit="d" * 40, path="onboarding/after.md"
+    )
+    (world / "memory.md").write_text(
+        ledger_to_text(_ledger([LedgerRow("d" * 40, attributed), pre_rule])), encoding="utf-8"
+    )
+    head = _commit(world, "the ledger commit that pinned both")
+
+    source = read_ledger_source(world, head)
+
+    assert source.trailered_commits == 1
+    assert source.ledger.rows == [LedgerRow("d" * 40, attributed), pre_rule]
+    assert source.excluded_rows == ()
+
+
+def test_the_projection_orders_a_superseding_pair_newest_first(tmp_path: Path) -> None:
+    """Every row the projection computes is ordered newest-first, so it cannot emit a reversal.
+
+    ``find_mapping`` returns the FIRST row naming a code commit, and a later closeout supersedes
+    an earlier mapping without deleting it, so two rows for one code commit are normal and their
+    relative order decides what that code commit resolves to. This is the fact that keeps a
+    REORDERING hazard from arising out of anything this system produces: the projection sorts its
+    own rows by memory-commit ancestry rather than keeping the order a hand-edited or merged table
+    happened to carry, so a table it writes always resolves a code commit to the newest mapping.
+
+    Both paths are asserted, because closeout adds a mapping as well as keeping the table it
+    found: the observed reversed pair, and an ``addition`` that supersedes an older row.
+    """
+
+    world = _World(tmp_path)
+    code, older, newer = world.code_one, world.memory_one, world.memory_two
+    assert is_ancestor(world.repo, older, newer), "the fixture needs a real superseding pair"
+
+    # Path one: the branch's own observed rows carry the pair REVERSED.
+    (world.repo / "memory.md").write_text(
+        ledger_to_text(_ledger([LedgerRow(code, older), LedgerRow(code, newer)])),
+        encoding="utf-8",
+    )
+    observed_commit = _commit(world.repo, "the table carries the pair reversed")
+    projection = world.observe_at(observed_commit)
+    assert [row.memory_commit for row in projection.projected_rows if row.code_commit == code] == [
+        newer,
+        older,
+    ]
+
+    # Path two: closeout PROVES the newer mapping over a table that still names the older one.
+    (world.repo / "memory.md").write_text(
+        ledger_to_text(_ledger([LedgerRow(code, older)])), encoding="utf-8"
+    )
+    addition_commit = _commit(world.repo, "the table names only the older mapping")
+    projection = world.observe_at(addition_commit, additions=[LedgerRow(code, newer)])
+    assert [row.memory_commit for row in projection.projected_rows if row.code_commit == code] == [
+        newer,
+        older,
     ]
 
 

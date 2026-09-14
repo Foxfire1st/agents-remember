@@ -554,11 +554,15 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         self.assertEqual(result["integrated_memory_content_commit"], mapping.memory_commit)
 
     def test_a_unioned_master_line_still_refuses_a_content_difference(self) -> None:
-        """Interleaved placement is accepted; a different table is not.
+        """A unioned line lands at any placement, and a row the world contradicts does not.
 
-        The relaxation is one condition wide, and this keeps it there. Each class below changes the
-        rows while leaving the mapping the capture needs on top, so what refuses is the projection
-        proof and not an earlier gate -- and the remedy it prints is one this route can act on.
+        The file-preservation rule that used to refuse a dropped, reordered or duplicated source
+        row is gone, so this case now measures what is left: the content classes that are a FALSE
+        ENTRY rather than a different arrangement. The untrue row is the one that refuses, under
+        the row-level rule that replaced the file rule, and the reorderings land.
+
+        The corruptions that remain are asserted as accepted directly below the refusal, because a
+        case that only asserted the refusal would read as if the file rule were still in force.
         """
 
         _accumulate_master_line(self.fixture, self.series, self.scratch, label="leaf-one")
@@ -583,33 +587,39 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         self.assertGreaterEqual(len(own_positions), 2, "the fixture needs two own rows")
         untrue = list(rows)
         untrue[own_positions[-1]] = LedgerRow(rows[own_positions[-1]].code_commit, "0" * 40)
+        # ``dropped`` and ``duplicated`` used to be here; both are shapes a rebuild produces and
+        # the ruling makes them legal, so what remains is the class that is still a false entry.
         corruptions = {
-            "dropped": [row for index, row in enumerate(rows) if index != oldest],
             "reordered": reordered,
-            "duplicated": [*rows, rows[oldest]],
             "untrue": untrue,
         }
         code_before = _rev(self.series.code_repo_path, self.series.code_source_branch)
         memory_before = _rev(memory, self.series.memory_source_branch)
 
-        for label, corrupted in corruptions.items():
-            _rewrite_master_ledger(self.series, self.scratch, label=label, rows=corrupted)
-            for dry_run in (True, False):
-                with self.assertRaises(RuntimeError, msg=f"{label} dry_run={dry_run}") as refused:
-                    _checkpoint(self.fixture, self.series, dry_run=dry_run)
+        # Only the false entry refuses: it names memory content that exists nowhere, so no rebuild
+        # could have produced it. The reordering beside it is an arrangement and lands below.
+        _rewrite_master_ledger(
+            self.series, self.scratch, label="untrue", rows=corruptions["untrue"]
+        )
+        for dry_run in (True, False):
+            with self.assertRaises(RuntimeError, msg=f"untrue dry_run={dry_run}") as refused:
+                _checkpoint(self.fixture, self.series, dry_run=dry_run)
 
-                refusal = str(refused.exception)
-                self.assertIn("is not the projection of its source", refusal, label)
-                # The remedy names what this route can do; the closeout re-run it CANNOT run is no
-                # longer advertised to a master that is still open.
-                self.assertIn("this route has none", refusal, label)
-                self.assertNotIn("re-run worktree_closeout_apply", refusal, label)
+            refusal = str(refused.exception)
+            self.assertIn("must be a mapping the repositories really hold", refusal)
+            self.assertIn(corruptions["untrue"][own_positions[-1]].code_commit, refusal)
 
         self.assertEqual(_rev(memory, self.series.memory_source_branch), memory_before)
         self.assertEqual(
             _rev(self.series.code_repo_path, self.series.code_source_branch), code_before
         )
         self.assertEqual(load_contract(self.series.contract_path).integration_status, "not-started")
+
+        # The reordered source region lands, which is the removal working as ruled: the rows are
+        # the same true rows in a different arrangement.
+        _rewrite_master_ledger(self.series, self.scratch, label="reordered", rows=reordered)
+        landed = _checkpoint(self.fixture, self.series, dry_run=False)
+        self.assertEqual(landed["state"], "checkpointed")
 
     def test_retry_is_idempotent_and_continued_work_checkpoints_again(self) -> None:
         _accumulate_master_line(self.fixture, self.series, self.scratch, label="leaf-one")
@@ -758,12 +768,14 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
                 )
 
             refusal = str(refused.exception)
+            # The fabricated row is what refuses, under the rule that replaced the file rule: a
+            # landed table may not carry a row the world contradicts.
             self.assertIn(
-                "is not the projection of its source and its own true mappings",
+                "does not name memory content the landed ledger commit carries",
                 refusal,
                 f"dry_run={dry_run}",
             )
-            self.assertIn("is not an ancestor of the landed ledger commit", refusal)
+            self.assertIn("must be a mapping the repositories really hold", refusal)
 
         # Nothing landed and the contract did not move: both destination refs are where they were.
         self.assertEqual(
@@ -772,14 +784,19 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         self.assertEqual(_rev(memory, parent.memory_work_branch), memory_destination)
         self.assertEqual(load_contract(re_recorded.contract_path), re_recorded)
 
-    def test_a_reversed_repeated_code_mapping_is_refused_at_preview_and_apply(self) -> None:
-        """Interleaving may not republish an older memory commit as a code commit's current one.
+    def test_a_reversed_repeated_code_mapping_now_lands_and_the_hazard_is_recorded(self) -> None:
+        """A reordered superseding pair lands, because row ORDER left the landing's rule set.
 
         ``find_mapping`` returns the FIRST row naming a code commit, and a later closeout supersedes
-        an earlier mapping without deleting it, so two rows for one code commit are normal. Accepting
-        the interleaved PLACEMENT must not also accept REVERSING that pair: an external review
-        reproduced the checkpoint succeeding while the older memory commit became current, which
-        silently rewrites what a code commit resolves to and nothing downstream would report.
+        an earlier mapping without deleting it, so two rows for one code commit are normal. Reversing
+        such a pair changes what that code commit resolves to, and this case used to refuse it.
+
+        It lands now, and the reason is the ruling's own content: order is a property of the tracked
+        table rather than of the commits, the table is derived state, and no rule here may keep the
+        file's arrangement authoritative. Both rows of the pair are TRUE -- each names a code commit
+        the repository holds and memory content the landed ledger carries -- and every other promise
+        still holds, so nothing in the landing's rules refuses it. Read together with the L11 report,
+        which records this as the price of removing the file rule rather than as a feature.
         """
 
         old = _accumulate_master_line(self.fixture, self.series, self.scratch, label="first")
@@ -807,33 +824,20 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
                 code_repository=self.series.code_repo_path,
             ),
         )
-        # Every OTHER condition the relaxation allows still holds, so the refusal below is
-        # attributed to the reversed mapping and the case cannot pass for an unrelated reason.
+        # The reversed pair is a reordering and nothing else: the same rows, both true, each code
+        # commit still resolving to a memory commit the landed ledger really carries.
         self.assertEqual(projection.added_rows, ())
         self.assertEqual(projection.removed_rows, ())
         self.assertEqual(projection.observed_source_rows, projection.source_rows)
         self.assertFalse(projection.header_changed)
-        self.assertFalse(projection.is_fixed_point)
-        self.assertFalse(projection.is_interleaved_projection)
 
-        code_before = _rev(self.series.code_repo_path, self.series.code_source_branch)
-        memory_before = _rev(memory, self.series.memory_source_branch)
-
-        for dry_run in (True, False):
-            surface = "preview" if dry_run else "apply"
-            with self.assertRaises(RuntimeError, msg=f"the {surface} must refuse") as refused:
-                _checkpoint(self.fixture, self.series, dry_run=dry_run)
-
-            self.assertIn("is not the projection of its source", str(refused.exception))
-
-        # Nothing landed, so the reversed table is still only a candidate on the work branch: the
-        # destination carries no mapping for that code commit at all, which is what it carried
-        # before the attempt.
-        self.assertEqual(
-            _rev(self.series.code_repo_path, self.series.code_source_branch), code_before
-        )
-        self.assertEqual(_rev(memory, self.series.memory_source_branch), memory_before)
-        self.assertIsNone(find_mapping(_ledger_at(memory, memory_before), old.code_commit))
+        result = _checkpoint(self.fixture, self.series, dry_run=False)
+        self.assertEqual(result["state"], "checkpointed")
+        landed = _ledger_at(memory, _rev(memory, self.series.memory_source_branch))
+        # Both rows of the pair survive the landing, so the reversal republished an older mapping
+        # rather than losing one -- which is exactly the trade the removal makes.
+        self.assertIn(old, landed.rows)
+        self.assertIn(new, landed.rows)
 
     def test_an_untrue_historical_row_below_a_current_one_is_refused(self) -> None:
         """A table may not carry a row the world contradicts, even where no lookup reaches it.
@@ -883,21 +887,29 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
             with self.assertRaises(RuntimeError, msg=f"the {surface} must refuse") as refused:
                 _checkpoint(self.fixture, self.series, dry_run=dry_run)
 
-            self.assertIn("is not the projection of its source", str(refused.exception))
+            self.assertIn(
+                "does not name memory content the landed ledger commit carries",
+                str(refused.exception),
+            )
 
         self.assertEqual(
             _rev(self.series.code_repo_path, self.series.code_source_branch), code_before
         )
         self.assertEqual(_rev(memory, self.series.memory_source_branch), memory_before)
 
-    def test_a_changed_ledger_is_refused_even_when_the_mapping_already_exists(self) -> None:
-        """An already-landed pair does not license republishing a damaged table.
+    def test_a_rebuilt_table_still_checkpoints_and_an_untrue_row_still_refuses(self) -> None:
+        """The retry converges, and a false row is what refuses a changed table.
 
-        The landing returned early when the source ledger already named the landed code and memory
-        commits, on the grounds that there was no new row to verify. That was true and irrelevant: a
-        table with a source row deleted adds no row either, so the shortcut was the one way a
-        damaged ledger could still reach a protected ref. An external review reproduced it on a
-        second checkpoint. A genuinely unchanged retry must keep converging.
+        The landing used to return early when the source ledger already named the landed pair,
+        which made a republished table with a source row deleted indistinguishable from a genuine
+        retry. The projection proof closed that; the projection proof is gone, and what replaces it
+        is narrower: the table is judged row by row against the repositories rather than against
+        the file it replaced.
+
+        Both halves are asserted here because the replacement must not be weaker where it counts.
+        The unchanged retry keeps converging -- the shape the old shortcut existed to serve -- and
+        a table carrying a row the world contradicts is refused, which is the class the file rule
+        was never needed for.
         """
 
         _accumulate_master_line(self.fixture, self.series, self.scratch, label="first")
@@ -914,19 +926,18 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         source_before = _rev(memory, self.series.memory_source_branch)
         before = _ledger_at(memory, source_before)
         self.assertGreaterEqual(len(before.rows), 2)
-        _rewrite_master_ledger(
-            self.series, self.scratch, label="drop-source-row", rows=before.rows[:-1]
-        )
 
+        # A row the world contradicts refuses, and it is the new rule that says so rather than the
+        # file comparison: the fabricated memory commit exists nowhere, so no rebuild could have
+        # produced it and no landing may publish it.
+        untrue = [*before.rows]
+        untrue[-1] = LedgerRow(untrue[-1].code_commit, "0" * 40)
+        _rewrite_master_ledger(self.series, self.scratch, label="untrue-row", rows=untrue)
         for dry_run in (True, False):
             surface = "preview" if dry_run else "apply"
             with self.assertRaises(RuntimeError, msg=f"the {surface} must refuse") as refused:
                 _checkpoint(self.fixture, self.series, dry_run=dry_run)
-
-            self.assertIn("is not the projection of its source", str(refused.exception))
-
-        self.assertEqual(_rev(memory, self.series.memory_source_branch), source_before)
-        self.assertEqual(_ledger_at(memory, source_before).rows, before.rows)
+            self.assertIn("must be a mapping the repositories really hold", str(refused.exception))
 
     def test_the_landing_does_not_pose_as_a_pause(self) -> None:
         """Landing a partial master and pausing one are two operations, and this verb only lands.
@@ -955,14 +966,17 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         self.assertEqual(_master_status(self.series), "inProgress")
         self.assertTrue(self.series.code_worktree.exists())
 
-    def test_the_leaf_route_still_refuses_the_ledger_the_checkpoint_accepts(self) -> None:
-        """The relaxation is the checkpoint's alone, and a leaf keeps the remedy it can run.
+    def test_the_leaf_route_lands_the_ledger_the_checkpoint_accepts(self) -> None:
+        """The placement the checkpoint accepts is accepted on the leaf route too, by one rule.
 
-        The table below is exactly the interleaved projection the checkpoint accepts -- every row
-        present once, the source rows in source order, the newest mapping first -- replayed on a
-        LEAF, where closeout can still rewrite it. It must still refuse, and the remedy it prints
-        must be the closeout re-run a leaf really has. Dropping the checkpoint-only guard is what
-        this case is for.
+        The table below is the interleaved projection: every row present once, the source rows in
+        source order, the newest mapping first, with the leaf's own rows among the source rows. A
+        LEAF used to refuse it while a checkpoint accepted it -- the asymmetry the ruling names --
+        because the leaf route carried the file-preservation rule and the checkpoint route did not.
+
+        Both routes are one rule now, so this case witnesses the parity instead of the difference:
+        the leaf lands a placement it used to refuse. What it is still refused for is a row the
+        world contradicts, which the untrue-row cases cover.
         """
 
         closed = _close_out_leaf(load_contract(self.leaf.contract_path))
@@ -990,30 +1004,33 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
         self.assertFalse(projection.is_fixed_point)
         self.assertTrue(projection.is_interleaved_projection)
 
-        for dry_run in (True, False):
-            surface = "preview" if dry_run else "apply"
-            with self.assertRaises(RuntimeError, msg=f"the {surface} must refuse") as refused:
-                integrate_result(
-                    WorktreeArgs(
-                        contract_path=re_recorded.contract_path,
-                        strategy="ff-only",
-                        approved=not dry_run,
-                        dry_run=dry_run,
-                    ),
-                    load_contract(re_recorded.contract_path),
-                )
-
-            refusal = str(refused.exception)
-            self.assertIn("is not the projection of its source", refusal)
-            # A leaf's repair IS reachable, so it is named. The checkpoint's is not, and says so.
-            self.assertIn("re-run worktree_closeout_apply", refusal)
-            self.assertNotIn("this route has none", refusal)
-
-        self.assertEqual(
+        # The preview and the apply agree, and they agree on the table LANDING now rather than on
+        # the table refusing -- which is the parity the ruling restores. The preview is asserted on
+        # the apply's own terms: both are driven through the registered tool, and the apply is the
+        # one that moves a ref.
+        preview = worktree_tools.worktree_integrate_tool(
+            self.fixture.cfg,
+            contract_path=re_recorded.contract_path.as_posix(),
+            strategy="ff-only",
+            dry_run=True,
+        )
+        self.assertTrue(preview["ok"], preview)
+        landed = integrate_result(
+            WorktreeArgs(
+                contract_path=re_recorded.contract_path,
+                strategy="ff-only",
+                approved=True,
+                dry_run=False,
+            ),
+            load_contract(re_recorded.contract_path),
+        )
+        self.assertEqual(landed.payload["state"], "integrated", landed.payload)
+        # The refs really moved -- the interleaved table was LANDED rather than merely tolerated,
+        # which is the difference between a relaxed rule and a rule that stopped running.
+        self.assertNotEqual(
             _rev(re_recorded.code_repo_path, parent.code_work_branch), code_destination
         )
-        self.assertEqual(_rev(memory, parent.memory_work_branch), memory_destination)
-        self.assertEqual(load_contract(re_recorded.contract_path), re_recorded)
+        self.assertNotEqual(_rev(memory, parent.memory_work_branch), memory_destination)
 
     def test_a_leaf_that_has_not_closed_out_is_still_refused_by_integrate(self) -> None:
         # The leaf arm of the same gate. The gate itself is untouched for both ordinary routes --
@@ -1117,12 +1134,14 @@ class CheckpointPausesAnUnfinishedMasterTests(unittest.TestCase):
                 _checkpoint(self.fixture, self.series, dry_run=dry_run)
 
             refusal = str(refused.exception)
+            # The fabricated row is what refuses, under the rule that replaced the file rule: a
+            # landed table may not carry a row the world contradicts.
             self.assertIn(
-                "is not the projection of its source and its own true mappings",
+                "does not name memory content the landed ledger commit carries",
                 refusal,
                 f"dry_run={dry_run}",
             )
-            self.assertIn("is not an ancestor of the landed ledger commit", refusal)
+            self.assertIn("must be a mapping the repositories really hold", refusal)
 
         # Nothing landed: both destination refs are where they were and no cell was written.
         self.assertEqual(
