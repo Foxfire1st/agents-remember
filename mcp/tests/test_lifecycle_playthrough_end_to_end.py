@@ -41,7 +41,7 @@ import pytest
 from agents_remember.application import worktree_tools
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
-from test_checkpoint_landing_end_to_end import _close_out_leaf
+from checkpoint_landing_test_support import close_out_leaf
 from test_closeout_queue import REPO, QueueFixture
 from test_worktree_support import git
 
@@ -129,7 +129,7 @@ class LifecyclePlaythroughTests(unittest.TestCase):
         self.assertTrue(leaf.code_worktree.exists())
 
         # 4. The leaf is worked and closed out, then lands through the PUBLIC integrate.
-        closed = _close_out_leaf(leaf)
+        closed = close_out_leaf(leaf)
         self.assertEqual(closed.closeout_status, "completed")
         landed = self._integrate(closed, dry_run=False)
         self.assertTrue(landed["ok"], landed.get("summary"))

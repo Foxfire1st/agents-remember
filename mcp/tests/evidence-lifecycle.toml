@@ -340,6 +340,26 @@ consumers = [
 ]
 
 [[artifact]]
+path = "mcp/tests/checkpoint_landing_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "checkpoint-landing-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "real temporary Git master/leaf series world: contracts, branches, memory commits, and ledger rows"
+introduced_by = "260913-LCA-L12"
+lifetime = "permanent"
+permanence_rationale = "The world builder composes the one real-repository master/leaf series topology that the checkpoint-landing boundary proof drives through the public operations; the cases keep the whole claim."
+replacement_contract = "node:mcp/tests/test_checkpoint_landing_end_to_end.py::CheckpointPausesAnUnfinishedMasterTests::test_an_unfinished_master_checkpoints_its_own_refs_end_to_end"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_checkpoint_landing_end_to_end.py",
+  "mcp/tests/test_cross_master_concurrency.py",
+  "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
+]
+
+[[artifact]]
 path = "mcp/tests/curator_coherence_test_support.py"
 kind = "shared-support"
 authority = "internal-canonical"

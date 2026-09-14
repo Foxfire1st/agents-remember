@@ -65,18 +65,18 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+from checkpoint_landing_test_support import (
+    accumulate_master_line,
+    checkpoint,
+    memory_repository,
+    rev,
+)
 from closeout_input_test_support import (
     closeout_operation_input,
     finish_operation_record,
     publish_closeout_finalization,
     start_closeout_operation,
     start_operation_record,
-)
-from test_checkpoint_landing_end_to_end import (
-    _accumulate_master_line,
-    _checkpoint,
-    _memory_repository,
-    _rev,
 )
 from test_closeout_queue import MASTER_A, MASTER_B, NOW, REPO, QueueFixture
 from test_worktree_support import git
@@ -168,7 +168,7 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         leaf_a = self.fixture.contracts[MASTER_A]
         assert leaf_a.memory_worktree is not None
         self._select_both()
-        memory = _memory_repository(series_a)
+        memory = memory_repository(series_a)
 
         (leaf_a.code_worktree / "a-experiment.txt").write_text("A only\n", encoding="utf-8")
         git(leaf_a.code_worktree, "add", "a-experiment.txt")
@@ -197,12 +197,12 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         candidate = self._close_out_and_land_leaf(MASTER_B)
 
         # B's line moved onto its own master branch while A stayed exactly where it was.
-        self.assertEqual(_rev(series_b.code_repo_path, series_b.code_work_branch), candidate)
+        self.assertEqual(rev(series_b.code_repo_path, series_b.code_work_branch), candidate)
         self.assertEqual(observe_atomic_series(self.series[MASTER_A]).state, "active")
         self.assertEqual(observe_atomic_series(self.series[MASTER_A]).selected_master, MASTER_A)
         self.assertEqual(
-            _rev(self.series[MASTER_A].code_repo_path, self.series[MASTER_A].code_work_branch),
-            _rev(series_b.code_repo_path, "ar/master-a"),
+            rev(self.series[MASTER_A].code_repo_path, self.series[MASTER_A].code_work_branch),
+            rev(series_b.code_repo_path, "ar/master-a"),
         )
         # B's leaf landed, and B's master itself is still open.
         self.assertEqual(
@@ -392,7 +392,7 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         """
 
         assert contract.memory_repo_path is not None
-        memory_tip = _rev(contract.memory_repo_path, contract.memory_work_branch)
+        memory_tip = rev(contract.memory_repo_path, contract.memory_work_branch)
         worktree = self.scratch / "record-pair"
         git(
             contract.memory_repo_path,
@@ -409,13 +409,13 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         git(worktree, "add", "memory.md")
         git(worktree, "commit", "-m", "record the reconciled code/memory pair")
         git(contract.memory_repo_path, "worktree", "remove", "--force", str(worktree))
-        return _rev(contract.memory_repo_path, contract.memory_work_branch)
+        return rev(contract.memory_repo_path, contract.memory_work_branch)
 
     def _private_master_a_facts(self) -> tuple[Any, ...]:
         """Everything a pause must leave exactly as it was for an unfinished private master."""
 
         series_a = self.series[MASTER_A]
-        memory = _memory_repository(series_a)
+        memory = memory_repository(series_a)
         series = load_contract(series_a.contract_path)
         leaf_id = self.fixture.unstarted_leaf_a
         assert leaf_id is not None
@@ -430,10 +430,10 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
             / (f"{leaf_id.lower()}-ar")
         )
         return (
-            _rev(series_a.code_repo_path, "super"),
-            _rev(memory, "super"),
-            _rev(series_a.code_repo_path, series_a.code_work_branch),
-            _rev(memory, series_a.memory_work_branch),
+            rev(series_a.code_repo_path, "super"),
+            rev(memory, "super"),
+            rev(series_a.code_repo_path, series_a.code_work_branch),
+            rev(memory, series_a.memory_work_branch),
             series.closeout_status,
             series.integration_status,
             (
@@ -479,13 +479,13 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         leaf_a = self.fixture.contracts[MASTER_A]
         assert leaf_a.memory_worktree is not None
         self._select_both()
-        memory = _memory_repository(series_a)
+        memory = memory_repository(series_a)
         (leaf_a.code_worktree / "a-paused.txt").write_text("A only\n", encoding="utf-8")
         git(leaf_a.code_worktree, "add", "a-paused.txt")
         git(leaf_a.code_worktree, "commit", "-m", "A work in progress")
-        code_source_before = _rev(series_a.code_repo_path, "super")
-        memory_source_before = _rev(memory, "super")
-        a_line = _rev(series_a.code_repo_path, series_a.code_work_branch)
+        code_source_before = rev(series_a.code_repo_path, "super")
+        memory_source_before = rev(memory, "super")
+        a_line = rev(series_a.code_repo_path, series_a.code_work_branch)
         # Both masters are eligible BEFORE the release, so the release is the only change below.
         self.assertEqual(self.fixture.declare(MASTER_A)["state"], "valid-built")
         self.assertEqual(self.fixture.declare(MASTER_B)["state"], "valid-built")
@@ -495,9 +495,9 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         self.assertEqual(released.state, "vacant")
         self.assertEqual(observe_atomic_series(series_a).state, "vacant")
         # The release publishes nothing and preserves the released master's own work.
-        self.assertEqual(_rev(series_a.code_repo_path, "super"), code_source_before)
-        self.assertEqual(_rev(memory, "super"), memory_source_before)
-        self.assertEqual(_rev(series_a.code_repo_path, series_a.code_work_branch), a_line)
+        self.assertEqual(rev(series_a.code_repo_path, "super"), code_source_before)
+        self.assertEqual(rev(memory, "super"), memory_source_before)
+        self.assertEqual(rev(series_a.code_repo_path, series_a.code_work_branch), a_line)
         self.assertIn("a-paused.txt", _tree(series_a.code_repo_path, "ar/leaf-a"))
         # The sibling master is untouched, and its own closeout member stays ready.
         self.assertEqual(observe_atomic_series(self.series[MASTER_B]).state, "active")
@@ -514,14 +514,14 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
     # -- 5 + 8: a conflicting publication is refused; resume reconciles ---------
 
     def _land_master_b_line(self) -> dict[str, Any]:
-        row = _accumulate_master_line(
+        row = accumulate_master_line(
             self.fixture, self.series[MASTER_B], self.scratch, label="b-one"
         )
-        landed = _checkpoint(self.fixture, self.series[MASTER_B], dry_run=False)
+        landed = checkpoint(self.fixture, self.series[MASTER_B], dry_run=False)
         self.assertTrue(landed["ok"], landed)
         self.assertEqual(landed["state"], "checkpointed")
         self.assertEqual(
-            _rev(_memory_repository(self.series[MASTER_B]), "super"),
+            rev(memory_repository(self.series[MASTER_B]), "super"),
             landed["integrated_ledger_commit"],
         )
         return {"row": row, "landed": landed}
@@ -529,22 +529,22 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
     def test_a_conflicting_publication_cannot_overwrite_master_b(self) -> None:
         series_a = self.series[MASTER_A]
         self._select_both()
-        _accumulate_master_line(self.fixture, series_a, self.scratch, label="a-one")
+        accumulate_master_line(self.fixture, series_a, self.scratch, label="a-one")
         landed = self._land_master_b_line()
-        memory = _memory_repository(series_a)
-        code_after_b = _rev(series_a.code_repo_path, "super")
-        memory_after_b = _rev(memory, "super")
+        memory = memory_repository(series_a)
+        code_after_b = rev(series_a.code_repo_path, "super")
+        memory_after_b = rev(memory, "super")
         self.assertEqual(code_after_b, landed["landed"]["integrated_code_commit"])
         self.assertEqual(memory_after_b, landed["landed"]["integrated_ledger_commit"])
 
         # A's line does not contain B's landed source, so it is not a fast-forwardable
         # candidate and it must not overwrite the pair B already landed.
-        conflicted = _checkpoint(self.fixture, series_a, dry_run=False)
+        conflicted = checkpoint(self.fixture, series_a, dry_run=False)
 
         self.assertFalse(conflicted.get("ok"))
         self.assertEqual(conflicted["state"], "blocked-non-ff", conflicted)
-        self.assertEqual(_rev(series_a.code_repo_path, "super"), code_after_b)
-        self.assertEqual(_rev(memory, "super"), memory_after_b)
+        self.assertEqual(rev(series_a.code_repo_path, "super"), code_after_b)
+        self.assertEqual(rev(memory, "super"), memory_after_b)
         # B's ledger mapping is intact: the landed source still maps B's code ref.
         self.assertIsNotNone(
             find_mapping(
@@ -559,8 +559,8 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         )
         self.assertFalse(stale.get("ok"))
         self.assertEqual(stale["state"], "atomic-series-checkpoint-candidate-moved", stale)
-        self.assertEqual(_rev(series_a.code_repo_path, "super"), code_after_b)
-        self.assertEqual(_rev(memory, "super"), memory_after_b)
+        self.assertEqual(rev(series_a.code_repo_path, "super"), code_after_b)
+        self.assertEqual(rev(memory, "super"), memory_after_b)
 
     def test_master_a_resumes_reconciles_and_completes_after_master_b_landed(self) -> None:
         """A paused master finishes through ORDINARY closeout and final integration (LOCR-L36).
@@ -590,13 +590,11 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         first_a_candidate = self._close_out_and_land_leaf(MASTER_A, declare=False)
         self._close_out_and_land_leaf(MASTER_B, declare=False)
         b_landed = self._closeout_and_land_master(MASTER_B)
-        self.assertEqual(_rev(series_a.code_repo_path, "super"), b_landed["integrated_code_commit"])
+        self.assertEqual(rev(series_a.code_repo_path, "super"), b_landed["integrated_code_commit"])
         unfinished_a = load_contract(series_a.contract_path)
         self.assertEqual(unfinished_a.closeout_status, "not-started")
         self.assertEqual(unfinished_a.integration_status, "not-started")
-        self.assertEqual(
-            _rev(series_a.code_repo_path, series_a.code_work_branch), first_a_candidate
-        )
+        self.assertEqual(rev(series_a.code_repo_path, series_a.code_work_branch), first_a_candidate)
         # A's own work is private: it is on A's line and not on the sprint's.
         self.assertIn(
             "leaf-a-feature.txt", _tree(series_a.code_repo_path, series_a.code_work_branch)
@@ -637,7 +635,7 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         self.assertEqual(after_pause[6], ("inProgress", "inProgress", (("S1", "pending"),)))
         self.assertEqual(after_pause[7], (False, False))
         # The sibling master is untouched by A's stop, and its landing stands.
-        self.assertEqual(_rev(series_a.code_repo_path, "super"), b_landed["integrated_code_commit"])
+        self.assertEqual(rev(series_a.code_repo_path, "super"), b_landed["integrated_code_commit"])
 
     def _reconcile_master_a(
         self,
@@ -652,7 +650,7 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         resumed_a = load_contract(series_a.contract_path)
         self.assertEqual(resumed_a.code_base_commit, b_landed["integrated_code_commit"])
         self.assertEqual(resumed_a.sync_log[-1]["codeBaseTo"], b_landed["integrated_code_commit"])
-        reconciled_code = _rev(series_a.code_repo_path, series_a.code_work_branch)
+        reconciled_code = rev(series_a.code_repo_path, series_a.code_work_branch)
         self.assertNotEqual(reconciled_code, first_a_candidate)
         self._require_ledger_maps(series_a, first_a_candidate, b_landed["integrated_code_commit"])
         # The reconciled pair is validated and recorded on A's own memory line: the exact code
@@ -673,7 +671,7 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
             self.fixture.declare_leaf(leaf_a2, leaf_ref, MASTER_A)["state"], "valid-built"
         )
         candidate = self._land_leaf_contract(load_contract(leaf_a2.contract_path))
-        self.assertEqual(_rev(series_a.code_repo_path, series_a.code_work_branch), candidate)
+        self.assertEqual(rev(series_a.code_repo_path, series_a.code_work_branch), candidate)
         self.assertNotEqual(load_contract(series_a.contract_path).closeout_status, "completed")
         return candidate
 
@@ -685,7 +683,7 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
             git(
                 series.memory_repo_path,
                 "show",
-                f"{_rev(series.memory_repo_path, series.memory_work_branch)}:memory.md",
+                f"{rev(series.memory_repo_path, series.memory_work_branch)}:memory.md",
             )
         )
         for code_commit in code_commits:
@@ -701,9 +699,9 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
     ) -> None:
         """The landed pair maps A's final code ref, and every history it absorbed survives."""
 
-        self.assertEqual(_rev(series_a.code_repo_path, "super"), a_landed["integrated_code_commit"])
-        memory = _memory_repository(series_a)
-        ledger = parse_ledger_text(git(memory, "show", f"{_rev(memory, 'super')}:memory.md"))
+        self.assertEqual(rev(series_a.code_repo_path, "super"), a_landed["integrated_code_commit"])
+        memory = memory_repository(series_a)
+        ledger = parse_ledger_text(git(memory, "show", f"{rev(memory, 'super')}:memory.md"))
         self.assertIsNotNone(find_mapping(ledger, b_landed["integrated_code_commit"]))
         self.assertIsNotNone(find_mapping(ledger, first_a_candidate))
         self.assertIsNotNone(find_mapping(ledger, second_a_candidate))
@@ -720,28 +718,28 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
     def test_explicit_checkpoint_landing_remains_available_when_requested(self) -> None:
         series_b = self.series[MASTER_B]
         self._select_both()
-        _accumulate_master_line(self.fixture, series_b, self.scratch, label="b-two")
-        memory = _memory_repository(series_b)
-        code_before = _rev(series_b.code_repo_path, "super")
-        memory_before = _rev(memory, "super")
+        accumulate_master_line(self.fixture, series_b, self.scratch, label="b-two")
+        memory = memory_repository(series_b)
+        code_before = rev(series_b.code_repo_path, "super")
+        memory_before = rev(memory, "super")
 
-        preview = _checkpoint(self.fixture, series_b, dry_run=True)
+        preview = checkpoint(self.fixture, series_b, dry_run=True)
 
         self.assertTrue(preview["ok"], preview)
         self.assertEqual(preview["state"], "would-checkpoint")
         # A preview moves nothing and the route is explicitly reachable for an open master.
-        self.assertEqual(_rev(series_b.code_repo_path, "super"), code_before)
-        self.assertEqual(_rev(memory, "super"), memory_before)
+        self.assertEqual(rev(series_b.code_repo_path, "super"), code_before)
+        self.assertEqual(rev(memory, "super"), memory_before)
         self.assertFalse(preview["eligibility"]["closeoutRequired"])
         self.assertTrue(preview["eligibility"]["approvalRequired"])
         self.assertTrue(preview["eligibility"]["ledgerMappingVerified"])
 
-        applied = _checkpoint(self.fixture, series_b, dry_run=False)
+        applied = checkpoint(self.fixture, series_b, dry_run=False)
 
         self.assertTrue(applied["ok"], applied)
         self.assertEqual(applied["state"], "checkpointed")
-        self.assertEqual(_rev(series_b.code_repo_path, "super"), applied["integrated_code_commit"])
-        self.assertEqual(_rev(memory, "super"), applied["integrated_ledger_commit"])
+        self.assertEqual(rev(series_b.code_repo_path, "super"), applied["integrated_code_commit"])
+        self.assertEqual(rev(memory, "super"), applied["integrated_ledger_commit"])
         stored = load_contract(series_b.contract_path)
         self.assertEqual(stored.integration_status, "checkpointed")
         self.assertEqual(stored.closeout_status, "not-started")
