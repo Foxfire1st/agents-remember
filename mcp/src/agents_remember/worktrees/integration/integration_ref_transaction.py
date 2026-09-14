@@ -6,13 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.memory_attribution import (
+    code_commit_exists,
+)
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
-    LedgerRow,
     MemoryLedger,
     find_mapping,
     parse_ledger_text,
-    parse_ledger_text_unvalidated,
 )
 from agents_remember.worktrees.integration.integration_branch_authority import (
     branch_worktree_owners,
@@ -20,11 +21,6 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
 )
 from agents_remember.worktrees.integration.integration_operation_authority import (
     require_authorized_integration_commits,
-)
-from agents_remember.worktrees.ledger_projection import (
-    LedgerSource,
-    LedgerWorld,
-    project_ledger,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
@@ -93,16 +89,12 @@ class IntegrationRefSnapshot:
 class LandingAdmission:
     """The route-specific facts one landing admits before it moves a protected ref.
 
-    The final series route admits a *finished* master: its output must equal the closeout candidate
-    the contract records, and its ledger must carry the exact ordered leaf landing prefix. The
-    checkpoint route admits an *unfinished* master, which has neither a closeout cell nor a completed
-    leaf chain: its output must equal the candidate its own live capture proved, and its ledger is
-    proven as the projection of its own source and its own true mappings. Every other refusing read
-    on this path is identical for both routes, so the difference lives here as data rather than as
-    a second copy of the transaction.
+    The final routes land the closeout candidate the contract records. The checkpoint route admits
+    an *unfinished* master, which has no closeout cell: its output must equal the candidate its own
+    live capture proved. Every other refusing read on this path is identical for both routes, so
+    the difference lives here as data rather than as a second copy of the transaction.
     """
 
-    expected_series_ledger_prefix: tuple[LedgerRow, ...] = ()
     checkpoint_candidate: IntegratedCommits | None = None
 
 
@@ -155,8 +147,6 @@ def prepare_integration_ref_move(
             contract,
             commits,
             memory_source_commit=memory_head_before,
-            expected_series_prefix=admitted.expected_series_ledger_prefix,
-            checkpoint=admitted.checkpoint_candidate is not None,
         )
 
     _require_clean_branch_checkout(contract.code_repo_path, code_target.branch, code_head_before)
@@ -252,31 +242,33 @@ def merge_integrated_commits(
     )
 
 
-def _integrated_ledger_pair(
+def _integrated_ledger(
     repository: Path,
     ledger_commit: str,
-    source_commit: str,
-) -> tuple[MemoryLedger, MemoryLedger]:
+) -> MemoryLedger:
+    """The landed ledger at its exact commit, header included, or a legible refusal.
+
+    This is a *validated* read, and it is deliberately the validated one: the header's promise
+    that it names the first row is a real protection and it is not about the tracked file, so it
+    outlives the file-preservation rule that used to reach it through the projection check. The
+    header is not compared against a second table here -- there is no longer a second table in
+    this function's world -- it is checked against the row beneath it, which is the one claim the
+    format makes about itself.
+    """
+
     blob = run_git(repository, ["show", f"{ledger_commit}:memory.md"])
     if blob.returncode != 0:
         raise RuntimeError("integrated ledger commit has no readable memory.md")
-    source_blob = run_git(
-        repository,
-        ["show", f"{source_commit}:memory.md"],
-    )
-    if source_blob.returncode != 0:
-        raise RuntimeError("exact memory source commit has no readable memory.md")
     try:
-        # The integrated ledger is read structurally. A header that disagrees with its own first
-        # row is one of the shapes the projection check refuses *with its remedy*, and refusing
-        # it here as unparseable would replace that remedy with an opaque "invalid". The source
-        # ledger stays authoritative: a malformed official source is a different failure.
-        return (
-            parse_ledger_text_unvalidated(blob.stdout),
-            parse_ledger_text(source_blob.stdout),
-        )
+        return parse_ledger_text(blob.stdout)
     except LedgerError as error:
-        raise RuntimeError(f"memory ledger is invalid: {error}") from error
+        raise RuntimeError(
+            "the ledger header disagrees with its own first row: "
+            f"{error}. Remedy: re-run "
+            "worktree_closeout_apply for this contract -- closeout recomputes memory.md from "
+            "its source ledger plus the branch's own true mappings, so a malformed or "
+            "partially-merged table needs no hand edit."
+        ) from error
 
 
 def require_integrated_ledger_mapping(
@@ -284,50 +276,81 @@ def require_integrated_ledger_mapping(
     commits: IntegratedCommits,
     *,
     memory_source_commit: str,
-    expected_series_prefix: tuple[LedgerRow, ...] = (),
-    checkpoint: bool = False,
 ) -> None:
+    """Prove the exact landed commits are a landing this route is entitled to publish.
+
+    FIVE promises are checked, and every one of them is about the *commits* rather than about the
+    tracked ``memory.md`` table. Each is stated with the clause that enforces it, so the list can
+    be read against the body:
+
+    1. the landed ledger maps the landed code commit to the landed memory content, so the pair a
+       reader resolves for the landing is the pair this landing created (``find_mapping``);
+    2. every row of the landed table is true -- its code commit is one the code repository holds
+       and its memory commit is content the landed ledger commit carries -- so a fabricated or
+       stale row cannot ride along on a landing whose own pair happens to be correct
+       (``_require_true_rows``, which is stricter than promise 1: it judges every row, not the
+       landing's own);
+    3. the landed memory content is itself reachable from the landed ledger commit, so the ledger
+       commit really contains the content it maps;
+    4. the landed memory content descends from the exact memory source, so the branch built on the
+       source it says it built on;
+    5. the ledger's header names its own first row, which the validated read of the landed table
+       is what enforces.
+
+    WHAT THIS DELIBERATELY DOES NOT ENFORCE, and the exposure, named rather than implied. The
+    landed table is not compared against the tracked source's table -- not its rows, not its
+    count, and not its ORDER. That rule protected ``memory.md``, and ``memory.md`` is derived
+    state: the projection recomputes it from the memory commits' own ``Code-Commit:``
+    attribution, so a table that differs from the file it replaced is the *normal* result of a
+    rebuild rather than damage. Holding a landing to the file's row list and row order refused a
+    real leaf's ledger repair (13 rows dropped, 455 reordered) that was correct on its own terms,
+    and the asymmetry settled it: the checkpoint route already tolerated merge-produced
+    interleaving while the leaf route did not, so one table was accepted on one road and refused
+    on the other.
+
+    So a KNOWN, DELIBERATE GAP is recorded here instead of a guarantee this function does not
+    provide. ``find_mapping`` returns the FIRST row naming a code commit, and two rows for one
+    code commit are normal -- a later closeout supersedes an earlier mapping without deleting it.
+    A landing that moves the OLDER of such a pair above the newer one therefore changes what that
+    code commit resolves to, and nothing here refuses it. Promise 1 still protects the pair this
+    landing is about, because that row must resolve to the landed memory content; every OTHER
+    code commit the table names is exposed.
+
+    Two facts bound the gap, and both are measured rather than hoped for. The rebuild cannot
+    produce such a table: ``_newest_first`` orders every row the projection computes --
+    ``test_the_projection_orders_a_superseding_pair_newest_first`` -- so a reversal can only
+    arrive from outside it. And where the source's own table already carries one, the projection
+    preserves it with the rest of the source's order, because ordering the source's rows is the
+    one thing that would make the rebuild, rather than the memory commits, the authority the
+    ruling removed.
+
+    The source-ancestry promise is *conditional on the landing not having happened yet*, and that
+    condition is what the file rule used to carry without saying so. Once the refs have moved, the
+    memory source branch IS the landed ledger commit, so asking whether the memory content descends
+    from it asks whether the content descends from the ledger that already contains it -- true, but
+    only by the ancestry of promise 4, and unprovable in the other direction when a checked-out
+    retry compares the two. A retry that lands the very same pair is the one shape that must
+    converge rather than refuse, so the promise is asked exactly while the source is still behind
+    the landing it is about to publish.
+    """
+
     if contract.kind not in {"leaf", "series"}:
         raise RuntimeError("integrated memory ledger requires a leaf or series contract")
     assert contract.memory_repo_path is not None
-    ledger, source_ledger = _integrated_ledger_pair(
-        contract.memory_repo_path,
-        commits.ledger,
-        memory_source_commit,
-    )
+    repository = contract.memory_repo_path
+    ledger = _integrated_ledger(repository, commits.ledger)
     mapping = find_mapping(ledger, commits.code)
     if mapping is None or mapping.memory_commit != commits.memory_content:
         raise RuntimeError(
             "integrated memory ledger does not map landed code commit to landed memory content"
         )
-    source_mapping = find_mapping(source_ledger, commits.code)
-    if (
-        source_mapping is not None
-        and source_mapping.memory_commit == commits.memory_content
-        and ledger == source_ledger
-    ):
-        # Genuinely unchanged, and only then: the source ledger already names this exact pair AND
-        # the ledger being landed is literally that same table, so there is no new row to verify and
-        # nothing that could have been edited. Returning on the mapping alone was the defect -- a
-        # landing that republishes a table with a source row deleted never adds a row either, so the
-        # mapping alone could not tell the two apart, and an external review reproduced a second
-        # checkpoint publishing that damaged ledger. Comparing the whole table is what separates
-        # them, and it keeps the idempotent retry converging: a retry lands the very commit the
-        # source already points at.
-        return
-    _require_preserved_ledger_history(
-        contract,
-        ledger,
-        source_ledger,
-        expected_series_prefix,
-        _LedgerLanding(commits.ledger, memory_source_commit, checkpoint),
-    )
-    if not is_ancestor(contract.memory_repo_path, commits.memory_content, commits.ledger):
+    _require_true_rows(contract, ledger, commits.ledger)
+    if not is_ancestor(repository, commits.memory_content, commits.ledger):
         raise RuntimeError(
             "integrated memory content commit is not reachable from the landed ledger commit"
         )
-    if not is_ancestor(
-        contract.memory_repo_path,
+    if not is_ancestor(repository, commits.ledger, memory_source_commit) and not is_ancestor(
+        repository,
         memory_source_commit,
         commits.memory_content,
     ):
@@ -336,87 +359,40 @@ def require_integrated_ledger_mapping(
         )
 
 
-@dataclass(frozen=True)
-class _LedgerLanding:
-    """The landed ledger commit, the exact memory source it must be based on, and its shape.
-
-    ``checkpoint`` names which history proof this landing owes: the leaf-chain prefix a *finished*
-    series must carry, or the projection an unfinished master must be. It travels with the landing
-    facts rather than beside them, because it is a property of the landing, not a flag on the
-    ledger.
-    """
-
-    ledger_commit: str
-    memory_source_commit: str
-    checkpoint: bool = False
-
-
-def _require_preserved_ledger_history(
+def _require_true_rows(
     contract: WorktreeContract,
     ledger: MemoryLedger,
-    source_ledger: MemoryLedger,
-    expected_series_prefix: tuple[LedgerRow, ...],
-    landing: _LedgerLanding,
+    ledger_commit: str,
 ) -> None:
-    """The landed ledger equals the projection of its source and its own true mappings.
+    """Refuse a landed table carrying a row the world contradicts.
 
-    This used to compare paperwork: the last ``len(source_rows)`` rows had to be the source
-    ledger, and everything ahead of that tail was taken on trust as "the leaf's own" and then
-    proven row by row. Closeout now *computes* the ledger from exactly that projection, so the
-    question worth asking has changed. A malformed ledger reaching here means someone
-    hand-edited ``memory.md`` after closeout, and the way to catch that is to recompute the
-    projection from the world -- the source ledger, the code repository, and this landing's
-    memory ancestry -- and require the landed ledger to be the fixed point. It refuses a
-    dropped or reordered source row, a superseded row kept, a duplicated row, and a header
-    that disagrees with its own first row, and it advertises the closeout re-run that repairs
-    all four.
+    This is not a comparison against the source file: the table is never read for what it
+    *should* have said. Each row is checked against the two repositories, which is the same truth
+    test the projection applies to every row it keeps. A row naming a code commit the code
+    repository does not hold, or memory content the landed ledger commit does not carry, is a
+    false entry whether or not a reader ever resolves it -- and the offending row is named, so the
+    operator does not have to diff the table to find it. The source row the old file rule would
+    have *kept* is refused here only when the world contradicts it, which is exactly the class the
+    ruling left standing.
 
-    The check is not redundant with closeout computing the ledger, so it is not deleted: it is
-    the only thing standing between a post-closeout hand edit and a protected-ref landing.
-
-    A *series* landing takes the leaf-chain-prefix form, because a finished master's ledger is
-    exactly its ordered leaf landing prefix ahead of the source rows. A checkpoint of a master
-    that is still open has no complete leaf chain to prefix against -- that census is one of the
-    completion facts its route deliberately does not require -- so it takes the projection form a
-    leaf uses, relaxed in exactly one respect. A leaf's closeout writes its own table; a master's
-    line instead accumulates one closeout per leaf and can absorb its own source through a union
-    merge, which leaves the two sides' rows interleaved rather than stacked. That placement is not
-    a content difference, so the checkpoint accepts the projection's interleaved form as well as
-    its fixed point. Every row is still recomputed from the world, so a hand-edited table is still
-    refused and only where the branch's own rows sit among the source rows is left to the merge.
+    A memory cell written as an abbreviated object name is read by ancestry rather than compared
+    as a string, so a short cell is a fact about the world rather than a malformed row.
     """
 
-    if contract.kind == "series" and not landing.checkpoint:
-        if expected_series_prefix and ledger.rows == [
-            *expected_series_prefix,
-            *source_ledger.rows,
-        ]:
-            return
-        raise RuntimeError(
-            "integrated atomic series ledger does not preserve the exact ordered leaf "
-            "landing prefix and complete source ledger history"
-        )
     assert contract.memory_repo_path is not None
-    projection = project_ledger(
-        source=LedgerSource(landing.memory_source_commit, source_ledger),
-        observed=ledger,
-        world=LedgerWorld(
-            memory_repository=contract.memory_repo_path,
-            memory_reachable_from=landing.ledger_commit,
-            code_repository=contract.code_repo_path,
-        ),
-    )
-    if projection.is_fixed_point:
-        return
-    if landing.checkpoint and projection.is_interleaved_projection:
-        return
-    raise RuntimeError(
-        _ledger_projection_refusal(
-            projection,
-            landing.memory_source_commit,
-            checkpoint=landing.checkpoint,
-        )
-    )
+    for row in ledger.rows:
+        if not code_commit_exists(contract.code_repo_path, row.code_commit):
+            raise RuntimeError(
+                f"the integrated memory ledger row {row.code_commit} -> {row.memory_commit} "
+                f"names code commit {row.code_commit}, which the code repository does not hold: "
+                "every row of a landed table must be a mapping the repositories really hold"
+            )
+        if not is_ancestor(contract.memory_repo_path, row.memory_commit, ledger_commit):
+            raise RuntimeError(
+                f"the integrated memory ledger row {row.code_commit} -> {row.memory_commit} "
+                "does not name memory content the landed ledger commit carries: every row of a "
+                "landed table must be a mapping the repositories really hold"
+            )
 
 
 def _require_landing_output_authority(
@@ -451,102 +427,6 @@ def _require_landing_output_authority(
         raise RuntimeError(
             "checkpoint landing output is not the exact candidate its live capture proved"
         )
-
-
-def _ledger_projection_refusal(
-    projection,
-    memory_source_commit: str,
-    *,
-    checkpoint: bool = False,
-) -> str:
-    """Operator-legible evidence for a ledger that is not its own projection.
-
-    Each sentence names the offending row in the vocabulary the row's own rule uses, so the
-    operator can tell a superseded row from a dropped source row without reading the diff. The
-    rule and the remedy belong to the landing, because advertising a repair the route cannot run
-    is worse than advertising none: the closeout re-run that repairs a leaf is refused outright by
-    a master that is not yet complete, so a checkpoint says that instead of naming it.
-    """
-
-    details = _projection_divergence_evidence(projection)
-    return (
-        "integrated memory ledger is not the projection of its source and its own true "
-        f"mappings: {details}. Ledger rows newest-first: "
-        f"{_ledger_row_list(list(projection.observed_rows))}. Source rows newest-first: "
-        f"{_ledger_row_list(list(projection.source_rows))}. "
-        f"{_landing_ledger_rule(checkpoint, memory_source_commit)}"
-    )
-
-
-def _landing_ledger_rule(checkpoint: bool, memory_source_commit: str) -> str:
-    """The rule this landing owes, and the repair it can actually reach."""
-
-    if checkpoint:
-        return (
-            "An unfinished master's checkpoint accepts its own mappings wherever the merge that "
-            "absorbed the source left them, so only content is refused here: a source row "
-            "dropped, replaced, reordered or duplicated, an untrue own row, a code commit left "
-            "resolving to an older memory commit than the projection maps it to, or a header "
-            "that does not name the newest mapping. Remedy: this route has none -- memory.md is "
-            "written by worktree_closeout_apply, which refuses a master that is not complete -- "
-            "so repair the master's memory work-branch ledger before checkpointing it."
-        )
-    return (
-        "A leaf may prepend any number of its own mappings ahead of the source rows; no source "
-        "row may be dropped, reordered, or replaced, no superseded row may be kept, and the "
-        "header must name the first row. Remedy: re-run worktree_closeout_apply for this "
-        "contract -- closeout recomputes memory.md from the source ledger plus the branch's own "
-        "true mappings, so the repair needs no hand edit -- and if the file was hand-edited, "
-        f"restore it from memory source commit {memory_source_commit} first."
-    )
-
-
-def _projection_divergence_evidence(projection) -> str:
-    """One bounded sentence per class of difference, empty classes omitted."""
-
-    evidence = [removal.evidence() for removal in projection.removals]
-    if projection.missing_source_rows:
-        evidence.append(
-            "does not preserve the complete source ledger history: missing "
-            f"{len(projection.missing_source_rows)} source row(s): "
-            f"{_ledger_row_list(list(projection.missing_source_rows))}"
-        )
-    if projection.reordered_rows:
-        evidence.append(
-            "does not preserve the complete source ledger history: the rows "
-            f"{_ledger_row_list(list(projection.reordered_rows))} are present but not as its "
-            "trailing rows in source order"
-        )
-    unattributed = [
-        row
-        for row in projection.removed_rows
-        if row not in {removal.row for removal in projection.removals}
-    ]
-    if unattributed:
-        evidence.append(
-            "does not preserve the complete source ledger history: "
-            f"{_ledger_row_list(unattributed)} appear more than once and no source row may be "
-            "duplicated"
-        )
-    if projection.header_changed:
-        evidence.append(
-            "the ledger header disagrees with its own first row: lastVerifiedCodeCommit is "
-            f"{projection.header_before[0]!r} and the first row's code commit is "
-            f"{projection.header_after[0]!r}"
-        )
-    if not evidence:
-        evidence.append(
-            "its mapping table carries rows the projection does not, or misses rows it does"
-        )
-    return "; ".join(evidence)
-
-
-def _ledger_row_list(rows: list[LedgerRow]) -> str:
-    return "; ".join(_ledger_row_text(row) for row in rows)
-
-
-def _ledger_row_text(row: LedgerRow) -> str:
-    return f"{row.code_commit} -> {row.memory_commit}"
 
 
 def _compare_and_swap_ref(

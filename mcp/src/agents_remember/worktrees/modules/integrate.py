@@ -64,7 +64,6 @@ from agents_remember.worktrees.modules.landing_record import (
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.series_closeout import (
     SeriesCheckpointRefs,
-    atomic_series_ledger_prefix,
     capture_series_checkpoint_refs,
     publish_series_checkpoint_under_authority,
     publish_series_integration_under_authority,
@@ -470,27 +469,14 @@ def checkpoint_landing_eligibility(contract: WorktreeContract) -> CheckpointLand
     )
 
 
-def _landing_admission(
-    contract: WorktreeContract, *, checkpoint: CheckpointLanding | None
-) -> LandingAdmission:
-    """The ledger-admission facts for one route, derived in exactly one place.
+def _landing_admission(*, checkpoint: CheckpointLanding | None) -> LandingAdmission:
+    """The admission facts for one route, derived in exactly one place.
 
     Both the earlier preview-side proof and the protected-boundary proof read this, so the two
-    cannot disagree about which history form the route owes -- including which route may read the
-    completion-census leaf-chain prefix at all.
+    cannot disagree about which landing output the route is entitled to publish.
     """
 
     return LandingAdmission(
-        # The leaf-chain ledger prefix is a completion census, so it is read only for the route
-        # that requires completion. An unfinished master has no finished chain to prefix against; its
-        # ledger is proven as the projection of its own source instead.
-        expected_series_ledger_prefix=(
-            atomic_series_ledger_prefix(contract)
-            if contract.kind == "series"
-            and contract.memory_mode == "external"
-            and checkpoint is None
-            else ()
-        ),
         checkpoint_candidate=None if checkpoint is None else checkpoint.commits,
     )
 
@@ -499,9 +485,8 @@ def _require_ledger_projection(
     contract: WorktreeContract,
     commits: IntegratedCommits,
     sources: IntegrationSources,
-    admission: LandingAdmission,
 ) -> None:
-    """Prove the ledger these commits land is its own projection, before any surface promises.
+    """Prove the landed commits are a landing this route may publish, before any promise.
 
     This is the same proof the protected-ref transaction runs, on the same arguments, evaluated
     earlier so a dry run cannot promise a landing the apply will refuse. The external-memory guard
@@ -519,8 +504,6 @@ def _require_ledger_projection(
         contract,
         commits,
         memory_source_commit=sources.current_memory_source,
-        expected_series_prefix=admission.expected_series_ledger_prefix,
-        checkpoint=admission.checkpoint_candidate is not None,
     )
 
 
@@ -795,7 +778,6 @@ def _handover_or_apply_integration(
         contract,
         _route_commits(contract, checkpoint),
         sources,
-        _landing_admission(contract, checkpoint=checkpoint),
     )
 
     if args.dry_run:
@@ -892,7 +874,7 @@ def _publish_integration_edge(
         publication.commits,
         publication.locked_args,
         publication.sources,
-        admission=_landing_admission(current, checkpoint=checkpoint),
+        admission=_landing_admission(checkpoint=checkpoint),
     )
     report_operation_progress(
         publication.args,

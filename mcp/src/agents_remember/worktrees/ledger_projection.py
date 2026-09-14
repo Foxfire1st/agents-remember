@@ -46,7 +46,6 @@ from agents_remember.kernel.memory_ledger import (
     LedgerRow,
     MemoryLedger,
     ledger_to_text,
-    parse_ledger_text,
     parse_ledger_text_unvalidated,
 )
 from agents_remember.worktrees.modules.git import (
@@ -90,10 +89,24 @@ class LedgerProjectionRefusal(RuntimeError):
 
 @dataclass(frozen=True)
 class LedgerSource:
-    """The complete source ledger and the exact commit it was read from."""
+    """The complete source ledger and the exact commit it was read from.
+
+    ``excluded_rows`` are the rows the source's own table records that the exact source commit
+    cannot prove: their memory content is not reachable from it, so no projection of that source
+    can carry them and every read would drop them as untrue. They travel with the read rather
+    than disappearing inside it, because a row that vanishes without a word is the "looks like no
+    attribution exists" failure the trailer rule exists to prevent.
+
+    ``trailered_commits`` is how many commits on the source line carry the ``Code-Commit:``
+    attribution. It travels with the read because a partially backfilled line and a line the
+    trailer rule never reached look identical in the rows alone, and only the count tells them
+    apart -- which is what a caller needs to say whether a source is mid-transition.
+    """
 
     commit: str
     ledger: MemoryLedger
+    excluded_rows: tuple[LedgerRowRemoval, ...] = ()
+    trailered_commits: int = 0
 
 
 @dataclass(frozen=True)
@@ -145,6 +158,9 @@ class LedgerProjection:
     observed_source_rows: tuple[LedgerRow, ...]
     header_before: tuple[str, str]
     header_after: tuple[str, str]
+    source_excluded_rows: tuple[LedgerRow, ...] = ()
+    source_excluded_reasons: tuple[LedgerRowRemoval, ...] = ()
+    source_trailered_commits: int = 0
 
     @property
     def is_fixed_point(self) -> bool:
@@ -232,6 +248,10 @@ class LedgerProjection:
             "headerAfter": _header_payload(self.header_after),
             "rowsBefore": len(self.observed_rows),
             "rowsAfter": len(self.projected_rows),
+            "sourceRowsExcluded": len(self.source_excluded_rows),
+            "sourceExcludedRows": _bounded_rows(self.source_excluded_rows),
+            "sourceExcludedReasons": _bounded_removal_reasons(self.source_excluded_reasons),
+            "sourceTraileredCommits": self.source_trailered_commits,
         }
 
     def _summary(self) -> str:
@@ -285,8 +305,7 @@ def read_ledger_source(
 
     The ledger is derived state: it is the memory commits' ``Code-Commit:`` trailers, read back
     from the history that hashes them. This is where every reader of the source ledger now goes,
-    so ``memory.md`` is no longer the authority for what the source says -- it is not read at
-    all once the history carries the attribution.
+    so ``memory.md`` is no longer the *authority* for what the source says.
 
     A commit written before the trailer rule carries no trailer, and its attribution is still
     whatever the ledger it carried said, so *that commit alone* is read from its own blob. The
@@ -297,6 +316,18 @@ def read_ledger_source(
     contributes no rows instead of refusing, because that is the bootstrap state the
     ledger-creation paths start from and an empty tail is exactly what they need.
 
+    The blob read is the COMMON case and not a fallback *mode*, which is the one thing this
+    reader got wrong before: it returned the trailers alone as soon as the history carried a
+    single one, so a line with 479 recorded rows and one trailered commit read as a one-row
+    source and every pre-rule row vanished from its tail. The trailers are merged INTO the blob's
+    rows now, so a partially backfilled history reads as the union its own table records.
+
+    The read is faithful and does not adjudicate: every row the source's own table records and
+    every row its trailered commits name are returned, in the order the table records them. What
+    the projection can prove is the projection's question, and it asks it of the tail by the same
+    rule it asks of the branch's own rows -- a tail row whose memory content the landing does not
+    carry is dropped there, with its reason and its count in the payload, never here in silence.
+
     Two inputs still refuse: a history that cannot be walked, and a ledger blob that exists and
     cannot be parsed. Both name their remedy, and neither is repaired by editing a table.
     """
@@ -305,35 +336,80 @@ def read_ledger_source(
         commits = attributed_commits(repository, tip=commit)
     except MemoryAttributionError as error:
         raise LedgerProjectionRefusal(f"{error}. " + _SOURCE_REMEDY) from error
-    attributed = ledger_rows_from_attribution(commits)
-    if attributed:
-        return LedgerSource(commit, _source_ledger_with_rows(attributed))
-    return LedgerSource(commit, _source_ledger_from_blob(repository, commit, relative))
+    rows = _rows_the_source_records(repository, commit, relative)
+    trailered = ledger_rows_from_attribution(commits)
+    kept, excluded = _tail_rows(rows, trailered, repository, commit)
+    return LedgerSource(
+        commit,
+        _source_ledger_with_rows(kept),
+        excluded_rows=tuple(excluded),
+        trailered_commits=len(trailered),
+    )
 
 
-def _source_ledger_from_blob(
+def _tail_rows(
+    recorded: Sequence[LedgerRow],
+    trailered: Sequence[LedgerRow],
     repository: Path,
     commit: str,
-    relative: str,
-) -> MemoryLedger:
-    """Read an unattributed commit's own ledger blob, which is all that commit ever said.
+) -> tuple[list[LedgerRow], list[LedgerRowRemoval]]:
+    """The tail the exact source commit can prove, and the rows it cannot.
 
-    Only reached when no commit at or below ``commit`` carries the trailer, which is the
-    pre-backfill history. The blob is that history's own record of its mappings, so reading it
-    is reading the same truth rather than reviving a competing one.
+    The source's own table is offered first because its order is the order the tail must keep,
+    and a trailered mapping is normally a row that table already records. When it is not -- a
+    partially backfilled line, where the trailer names a commit whose row never reached the file
+    -- it joins the tail rather than displacing the recorded order.
+
+    A row is kept when the exact source commit carries the memory content it names. One class is
+    therefore not kept, and it is the class that made a real leaf's ledger read as damaged: a row
+    whose memory commit the source does not carry describes content the source never had, so the
+    projection would drop it from the tail as untrue on every read. Removing it here makes the
+    tail equal to what the source can prove -- which is what makes an already-correct ledger a
+    fixed point -- and the removals travel back to the caller, so the class is counted and
+    reported instead of vanishing. An abbreviated object name is resolved by git's ancestry test
+    rather than compared as a string, so a short cell is not mistaken for a dead one.
+    """
+
+    kept: list[LedgerRow] = []
+    excluded: list[LedgerRowRemoval] = []
+    for row in _distinct([*recorded, *trailered]):
+        if is_ancestor(repository, row.memory_commit, commit):
+            kept.append(row)
+        else:
+            excluded.append(LedgerRowRemoval(row, MEMORY_COMMIT_UNREACHABLE))
+    return kept, excluded
+
+
+def _distinct(rows: Sequence[LedgerRow]) -> list[LedgerRow]:
+    """The rows in the order given, first occurrence kept, no copy counted twice."""
+
+    seen: set[LedgerRow] = set()
+    return [row for row in rows if not (row in seen or seen.add(row))]
+
+
+def _rows_the_source_records(repository: Path, commit: str, relative: str) -> list[LedgerRow]:
+    """The rows the source's own table records, read whether or not its history carries trailers.
+
+    The blob is the *record* the pre-trailer history left, and it is read even when the history
+    carries trailers, because a partially backfilled line records almost every row there and a
+    reader that skipped it would report a complete line as a nearly empty one.
+
+    Deliberately the unvalidated parse: the header is recomputed from row one by the projection
+    that writes the ledger, and one of the shapes that recomputation repairs is a header that
+    disagrees with its own first row. Refusing the read instead would hide the repair.
     """
 
     shown = run_git(repository, ["show", f"{commit}:{relative}"])
     if shown.returncode != 0:
         if _commit_carries_no_ledger(repository, commit, relative):
-            return _empty_source_ledger()
+            return []
         raise LedgerProjectionRefusal(
             f"memory ledger source {commit}:{relative} is not readable in "
             f"{repository.as_posix()}: {shown.stderr.strip() or 'git show failed'}. "
             + _SOURCE_REMEDY
         )
     try:
-        return parse_ledger_text(shown.stdout)
+        return list(parse_ledger_text_unvalidated(shown.stdout).rows)
     except LedgerError as error:
         raise LedgerProjectionRefusal(
             f"memory ledger source {commit}:{relative} is not a parseable ledger: {error}. "
@@ -556,6 +632,9 @@ def project_ledger(
             observed.last_memory_content_commit,
         ),
         header_after=header_after,
+        source_excluded_rows=tuple(removal.row for removal in source.excluded_rows),
+        source_excluded_reasons=tuple(source.excluded_rows),
+        source_trailered_commits=source.trailered_commits,
     )
 
 

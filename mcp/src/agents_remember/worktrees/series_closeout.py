@@ -21,7 +21,6 @@ from agents_remember.worktrees.ledger_projection import (
     LEDGER_RELATIVE_PATH,
     LedgerProjectionRefusal,
     contract_ledger_projection,
-    observed_ledger_state,
 )
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -545,78 +544,6 @@ def _landing_source_positions(series: WorktreeContract, *, side: str) -> tuple[s
     positions = {base}
     positions.update(entry.get(key, "") for entry in series.sync_log)
     return tuple(sorted(position for position in positions if position))
-
-
-def atomic_series_ledger_prefix(series: WorktreeContract) -> tuple[LedgerRow, ...]:
-    """Return the exact newest-first rows the master's own line contributes to the landed ledger.
-
-    The leaf chain is always there, newest landing first. A master that reconciled with its source
-    contributes one row per reconciliation ahead of it: the sync creates the code merge *after* the
-    retained memory conflict was resolved, so no leaf landing can name it, and the row is the
-    master's own record of the pair it validated. Those rows are read back from the landed table and
-    each is proved to be a merge of the master's own first-parent line with an official position
-    this contract synced with -- never taken on trust and never guessed from the closeout cells.
-    """
-
-    if series.kind != "series" or series.memory_mode != "external":
-        raise RuntimeError("atomic series ledger prefix requires an external-memory series")
-    ordered = _exact_atomic_landing_chain(series)
-    leaves = tuple(
-        LedgerRow(leaf.integrated_code_commit, leaf.integrated_memory_content_commit)
-        for leaf in reversed(ordered)
-    )
-    if not series.sync_log:
-        return leaves
-    return _reconciled_ledger_prefix(series, leaves)
-
-
-def _reconciled_ledger_prefix(
-    series: WorktreeContract, leaves: tuple[LedgerRow, ...]
-) -> tuple[LedgerRow, ...]:
-    """The master's own rows as its reconciled line really carries them."""
-
-    ledger_text, _tip = observed_ledger_state(series)
-    own = tuple(
-        row
-        for row in parse_ledger_text(ledger_text).rows
-        if row in leaves or _is_reconciliation_row(series, row.code_commit)
-    )
-    if not own:
-        raise CloseoutQueueError(
-            "atomic-series-leaf-chain-invalid",
-            "the reconciled series ledger carries none of the master's own rows",
-        )
-    return own
-
-
-def _is_reconciliation_row(series: WorktreeContract, code_commit: str) -> bool:
-    """Whether one row names a reconciliation merge of this master's own line.
-
-    A reconciliation merge's first parent is the master's own line and every other parent is
-    reachable from an official position this contract itself synced with. A leaf landing's merge
-    fails that test -- its other parent is the leaf's own branch -- which is what keeps this a
-    census of the master's own recorded rows rather than a licence for any merge at all.
-    """
-
-    if not code_commit:
-        return False
-    try:
-        parents = require_git(
-            series.code_repo_path, ["rev-list", "--parents", "-n", "1", code_commit]
-        ).split()
-    except RuntimeError:
-        return False
-    if len(parents) < 3 or not is_ancestor(
-        series.code_repo_path,
-        code_commit,
-        branch_commit(series.code_repo_path, series.code_work_branch),
-    ):
-        return False
-    positions = _landing_source_positions(series, side="code")
-    return all(
-        any(is_ancestor(series.code_repo_path, position, parent) for position in positions)
-        for parent in parents[2:]
-    )
 
 
 def _atomic_leaf_documents(

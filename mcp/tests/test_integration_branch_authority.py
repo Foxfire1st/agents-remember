@@ -9,9 +9,12 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.memory_attribution import code_commit_exists
 from agents_remember.kernel.memory_ledger import (
     LedgerRow,
     MemoryLedger,
@@ -33,6 +36,7 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
 from agents_remember.worktrees.integration.integration_ref_transaction import (
     IntegratedCommits,
     IntegrationRefRace,
+    _require_true_rows,
     merge_integrated_commits,
     prepare_integration_ref_move,
     require_integrated_ledger_mapping,
@@ -43,8 +47,12 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
     operation_record_path,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.integrate import (
     IntegrationSources,
+)
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
 )
 from integration_branch_authority_test_support import (
     _authority_fixture,
@@ -284,8 +292,108 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                 ],
             )
 
-    def test_ledger_refuses_unpreserved_source_rows_and_untrue_added_mappings(self) -> None:
-        """Every added mapping is proven, and the source history is never traded away."""
+    def test_ledger_refuses_a_ledger_that_does_not_map_the_landed_code_commit(self) -> None:
+        """The landed code commit must be mapped to the landed memory content, or nothing lands.
+
+        This is the first promise the landing owes and the one the file rule never carried: a
+        ledger whose table does not name the pair this landing created leaves a reader resolving
+        that code commit to nothing at all. It is checked against the landed table's own first
+        row for that code commit, so a table that names the commit with DIFFERENT memory content
+        is refused too -- the entry exists but it is not this landing's.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            closed, source, _source_rows, second_memory, ledger_commit, _accumulated = (
+                _reclosed_leaf_memory_history(Path(tmp))
+            )
+            memory_repo = closed.memory_repo_path
+            assert memory_repo is not None
+            for label, code_commit, memory_content in (
+                ("code commit the table never names", "f" * 40, second_memory),
+                ("memory content the table maps elsewhere", closed.code_commit, "e" * 40),
+            ):
+                with self.subTest(case=label):
+                    with self.assertRaises(RuntimeError) as raised:
+                        require_integrated_ledger_mapping(
+                            closed,
+                            IntegratedCommits(
+                                code=code_commit,
+                                memory_content=memory_content,
+                                ledger=ledger_commit,
+                            ),
+                            memory_source_commit=source,
+                        )
+                    self.assertIn(
+                        "does not map landed code commit to landed memory content",
+                        str(raised.exception),
+                    )
+
+    def test_ledger_refuses_memory_content_that_does_not_descend_from_the_source(self) -> None:
+        """Landed memory content that is not built on the exact source is refused.
+
+        The promise is CONDITIONAL, and the condition is the interesting half: while the landing is
+        still to happen the source is behind the ledger and the question is real; once a ref has
+        moved the source branch IS the landed ledger and the same question answers itself, which is
+        what keeps a retry converging. So the case builds the state the promise exists for -- a
+        source line the landed memory content does not descend from -- and asserts the divergence
+        as well as the refusal, so it cannot pass because the fixture drifted into the trivial
+        case.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            closed, source, _source_rows, second_memory, ledger_commit, accumulated = (
+                _reclosed_leaf_memory_history(Path(tmp))
+            )
+            memory_repo = closed.memory_repo_path
+            memory_worktree = closed.memory_worktree
+            assert memory_repo is not None and memory_worktree is not None
+            assert closed.ledger_path is not None
+            # A source line of its own, carrying a commit the ledger's line does not have.
+            _git(memory_repo, "branch", "other-source", source)
+            _commit_on(memory_repo, "other-source", "other-source-only.md")
+            other_source = _git(memory_repo, "rev-parse", "other-source")
+            _git(memory_repo, "switch", "super")
+            self.assertFalse(
+                is_ancestor(memory_repo, other_source, ledger_commit),
+                "the fixture must keep the source OUT of the landed line for this clause to bite",
+            )
+            # The pair itself is exactly right, so the refusal below is the ancestry clause's.
+            candidate = _commit_ledger(
+                memory_worktree,
+                closed.ledger_path,
+                replace(
+                    accumulated,
+                    rows=[LedgerRow(closed.code_commit, second_memory), *accumulated.rows],
+                    last_verified_code_commit=closed.code_commit,
+                    last_memory_content_commit=second_memory,
+                ),
+                "Land the exact pair against a divergent source",
+            )
+            with self.assertRaises(RuntimeError) as raised:
+                require_integrated_ledger_mapping(
+                    closed,
+                    IntegratedCommits(
+                        code=closed.code_commit,
+                        memory_content=second_memory,
+                        ledger=candidate,
+                    ),
+                    memory_source_commit=other_source,
+                )
+            self.assertIn("is not based on the exact memory source", str(raised.exception))
+
+    def test_ledger_refuses_untrue_rows_and_accepts_a_rebuilt_source_region(self) -> None:
+        """The landed table is judged on what the world says, not on what the file said.
+
+        The rule this case used to witness -- "no source row may be dropped, reordered or
+        replaced" -- protected the tracked ``memory.md``, and that file is derived state now: a
+        rebuild drops a row whose memory commit the line cannot prove and normalises the rest.
+        What the landing still owes is that every row it publishes is TRUE, and every row below
+        is refused for exactly that, so the case keeps its teeth while the file rule goes.
+
+        The two cases that are now ACCEPTED are asserted as accepted rather than deleted: a
+        dropped source row and a duplicated one are precisely the shapes the removed rule refused
+        and a rebuild produces, so leaving them untested would hide the change this leaf makes.
+        """
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -304,14 +412,6 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             _git(memory_repo, "switch", "super")
             cases = (
                 (
-                    "dropped source row",
-                    _ledger_with_rows(accumulated, accumulated.rows[:-1]),
-                    closed.code_commit,
-                    second_memory,
-                    "does not preserve the complete source ledger history",
-                    (f"missing 1 source row(s): {source_rows[0].code_commit}",),
-                ),
-                (
                     "memory commit that never landed",
                     _ledger_with_rows(
                         accumulated,
@@ -319,7 +419,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                     ),
                     code_source,
                     orphan,
-                    "is not an ancestor of the landed ledger commit",
+                    "does not name memory content the landed ledger commit carries",
                     (orphan,),
                 ),
                 (
@@ -330,19 +430,8 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                     ),
                     source,
                     second_memory,
-                    "does not exist in the code repository",
+                    "which the code repository does not hold",
                     (source,),
-                ),
-                (
-                    "duplicated source row",
-                    _ledger_with_rows(
-                        accumulated,
-                        [*accumulated.rows, accumulated.rows[-1]],
-                    ),
-                    closed.code_commit,
-                    second_memory,
-                    "does not preserve the complete source ledger history",
-                    (source_rows[-1].code_commit,),
                 ),
             )
             for name, ledger, code_commit, memory_content, refusal, evidence in cases:
@@ -367,8 +456,40 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                     self.assertIn(refusal, message)
                     for fragment in evidence:
                         self.assertIn(fragment, message)
-                    self.assertIn("Remedy:", message)
-                    self.assertIn("worktree_closeout_apply", message)
+
+            # ACCEPTED, and deliberately asserted as accepted: the two shapes the removed rule
+            # refused and a rebuild produces. Each candidate keeps the landed pair true, so what
+            # the acceptance measures is the file rule's absence rather than a weakened check.
+            accepted = (
+                (
+                    "dropped source row",
+                    _ledger_with_rows(accumulated, accumulated.rows[:-1]),
+                ),
+                (
+                    "duplicated source row",
+                    _ledger_with_rows(
+                        accumulated,
+                        [*accumulated.rows, accumulated.rows[-1]],
+                    ),
+                ),
+            )
+            for name, ledger in accepted:
+                with self.subTest(accepted=name):
+                    candidate = _commit_ledger(
+                        memory_worktree,
+                        closed.ledger_path,
+                        ledger,
+                        f"Ledger variant accepted: {name}",
+                    )
+                    require_integrated_ledger_mapping(
+                        closed,
+                        IntegratedCommits(
+                            code=closed.code_commit,
+                            memory_content=second_memory,
+                            ledger=candidate,
+                        ),
+                        memory_source_commit=source,
+                    )
             # A hand edit that leaves every row alone and moves only the header is still a
             # malformed ledger, and it is the shape this check newly carries a remedy for: the
             # integrated reader rejected it as an opaque "invalid" before the projection check.
@@ -404,3 +525,118 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                     *source_rows,
                 ],
             )
+
+
+def _init_repo(root: Path) -> Path:
+    """One real repository, because every clause here is asked of Git rather than of a stub."""
+
+    root.mkdir(parents=True, exist_ok=True)
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "landing@example.invalid")
+    _git(root, "config", "user.name", "Landing Clauses")
+    return root
+
+
+def _commit_text(repo: Path, name: str, body: str) -> str:
+    """One real commit of this repository, so a cell names something git can resolve."""
+
+    (repo / name).write_text(body + "\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", name)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _integration_contract(repo: Path) -> WorktreeContract:
+    """A leaf contract over one repository, which is all the row-truth clauses read.
+
+    Built directly rather than through ``worktree_start``: these clauses read exactly three cells
+    -- the two repositories and the kind -- and standing up a whole enclosure to ask a question
+    about a row would make the case measure the fixture instead of the rule.
+    """
+
+    return WorktreeContract(
+        task_id="TASK",
+        task_name="task",
+        repo_name="repo-a",
+        workflow_kind="light-task",
+        memory_mode="external",
+        coordination_root=repo,
+        task_root=repo,
+        contract_path=repo / "series-contract.md",
+        task_artifact=repo / "task.md",
+        worktree_group=repo,
+        code_repo_path=repo,
+        code_source_branch="main",
+        code_work_branch="work",
+        code_base_commit="",
+        code_worktree=repo,
+        memory_repo_path=repo,
+        memory_source_branch="main",
+        memory_work_branch="memory-work",
+        memory_base_commit="",
+        ledger_path=repo / "memory.md",
+    )
+
+
+def test_the_landed_ledger_commit_must_carry_the_memory_content_it_maps(tmp_path: Path) -> None:
+    """A row naming memory content the landed ledger commit does not carry is refused.
+
+    This is the promise the file rule never carried: a landed table may resolve nothing to memory
+    that never reached the branch, because such a row is a false entry whether or not a reader
+    ever looks it up -- ``find_mapping`` returns the FIRST row naming a code commit, and a stale
+    duplicate below a current one is exactly how a false entry hides. The case writes the table
+    onto a commit that does not descend from the content it names, so the mapping clause is
+    satisfied and this one refuses.
+    """
+
+    repo = _init_repo(tmp_path / "reachability")
+    early = _commit_text(repo, "early.md", "a commit the ledger will sit on")
+    code_commit = _commit_text(repo, "code.md", "the code commit the row names")
+    content = "b" * 40
+    ledger = MemoryLedger(
+        schema="ar-memory-ledger/v1",
+        repo_name="repo-a",
+        base_code_commit=code_commit,
+        base_memory_commit=content,
+        last_verified_code_commit=code_commit,
+        last_memory_content_commit=content,
+        sort_order="newest-first",
+        rows=[LedgerRow(code_commit, content)],
+    )
+    contract = replace(
+        _integration_contract(repo),
+        memory_base_commit=early,
+    )
+    assert not is_ancestor(repo, content, early)
+
+    with pytest.raises(RuntimeError) as raised:
+        _require_true_rows(contract, ledger, early)
+    assert "does not name memory content the landed ledger commit carries" in str(raised.value)
+
+
+def test_the_landed_ledger_must_name_a_code_commit_the_repository_holds(tmp_path: Path) -> None:
+    """A row naming a code commit the code repository does not hold is refused.
+
+    The other half of the same promise, and the shape a hand edit takes: the memory side resolves
+    and the row parses, but no such code commit exists, so the mapping it claims is not a mapping
+    anything can use.
+    """
+
+    repo = _init_repo(tmp_path / "code-side")
+    head = _commit_text(repo, "content.md", "content the ledger may name")
+    ledger = MemoryLedger(
+        schema="ar-memory-ledger/v1",
+        repo_name="repo-a",
+        base_code_commit="c" * 40,
+        base_memory_commit=head,
+        last_verified_code_commit="c" * 40,
+        last_memory_content_commit=head,
+        sort_order="newest-first",
+        rows=[LedgerRow("c" * 40, head)],
+    )
+    contract = _integration_contract(repo)
+    assert not code_commit_exists(contract.code_repo_path, "c" * 40)
+
+    with pytest.raises(RuntimeError) as raised:
+        _require_true_rows(contract, ledger, head)
+    assert "which the code repository does not hold" in str(raised.value)
