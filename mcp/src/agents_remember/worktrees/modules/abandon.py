@@ -52,6 +52,7 @@ from agents_remember.worktrees.modules.guidance import status_payload
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
+    TerminalResult,
     legacy_series_reports_is_child_enclosure,
     terminal_preflight,
     terminal_result_blockers,
@@ -295,10 +296,12 @@ def _abandon_outputs_result(
 ) -> WorktreeCommandResult:
     providers, removed_worktrees, branches, directories = outputs
     blockers = terminal_result_blockers(
-        providers=providers,
-        worktrees=removed_worktrees,
-        branches=branches,
-        directories=directories,
+        TerminalResult(
+            providers=providers,
+            worktrees=removed_worktrees,
+            branches=branches,
+            directories=directories,
+        )
     )
     if blockers and not args.dry_run:
         return WorktreeCommandResult(
@@ -393,10 +396,7 @@ def _abandon_terminal_outputs(
         contract, dry_run=args.dry_run
     )
     if not args.dry_run and terminal_result_blockers(
-        providers=providers,
-        worktrees={},
-        branches={},
-        directories={},
+        TerminalResult(providers=providers, worktrees={}, branches={}, directories={})
     ):
         return providers, {}, {}, {}
     removed_worktrees = (
@@ -415,10 +415,9 @@ def _abandon_terminal_outputs(
         )
     )
     if not args.dry_run and terminal_result_blockers(
-        providers=providers,
-        worktrees=removed_worktrees,
-        branches={},
-        directories={},
+        TerminalResult(
+            providers=providers, worktrees=removed_worktrees, branches={}, directories={}
+        )
     ):
         return providers, removed_worktrees, {}, {}
     branches = (
@@ -432,10 +431,9 @@ def _abandon_terminal_outputs(
         )
     )
     if not args.dry_run and terminal_result_blockers(
-        providers=providers,
-        worktrees=removed_worktrees,
-        branches=branches,
-        directories={},
+        TerminalResult(
+            providers=providers, worktrees=removed_worktrees, branches=branches, directories={}
+        )
     ):
         return providers, removed_worktrees, branches, {}
     directories = _abandon_directories(

@@ -34,6 +34,7 @@ from agents_remember.worktrees.modules.guidance import carryover_done, status_pa
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
+    TerminalResult,
     legacy_series_reports_is_child_enclosure,
     terminal_preflight,
     terminal_result_blockers,
@@ -871,11 +872,14 @@ def _cleanup_outputs_result(
 ) -> WorktreeCommandResult:
     providers, removed_worktrees, branches, drift_snapshots, directories = outputs
     blockers = terminal_result_blockers(
-        providers=providers,
-        worktrees=removed_worktrees,
-        branches=branches,
-        directories=directories,
-        drift_snapshots=drift_snapshots,
+        TerminalResult(
+            providers=providers,
+            worktrees=removed_worktrees,
+            branches=branches,
+            directories=directories,
+            drift_snapshots=drift_snapshots,
+            preview=args.dry_run,
+        )
     )
     if blockers and not args.dry_run:
         return WorktreeCommandResult(
@@ -978,10 +982,7 @@ def _cleanup_terminal_outputs(
         else {"state": "skipped", "reason": "teardown_providers disabled"}
     )
     if not args.dry_run and terminal_result_blockers(
-        providers=providers,
-        worktrees={},
-        branches={},
-        directories={},
+        TerminalResult(providers=providers, worktrees={}, branches={}, directories={})
     ):
         return providers, {}, {}, {}, {}
     removed_worktrees = (
@@ -990,10 +991,9 @@ def _cleanup_terminal_outputs(
         else _removed_worktrees(contract, dry_run=False, authority=authority)
     )
     if not args.dry_run and terminal_result_blockers(
-        providers=providers,
-        worktrees=removed_worktrees,
-        branches={},
-        directories={},
+        TerminalResult(
+            providers=providers, worktrees=removed_worktrees, branches={}, directories={}
+        )
     ):
         return providers, removed_worktrees, {}, {}, {}
     branches = (
@@ -1002,10 +1002,9 @@ def _cleanup_terminal_outputs(
         else _deleted_branches(contract, dry_run=False, authority=authority)
     )
     if not args.dry_run and terminal_result_blockers(
-        providers=providers,
-        worktrees=removed_worktrees,
-        branches=branches,
-        directories={},
+        TerminalResult(
+            providers=providers, worktrees=removed_worktrees, branches=branches, directories={}
+        )
     ):
         return providers, removed_worktrees, branches, {}, {}
     drift_snapshots = {
@@ -1017,11 +1016,13 @@ def _cleanup_terminal_outputs(
         )
     }
     if not args.dry_run and terminal_result_blockers(
-        providers=providers,
-        worktrees=removed_worktrees,
-        branches=branches,
-        directories={},
-        drift_snapshots=drift_snapshots,
+        TerminalResult(
+            providers=providers,
+            worktrees=removed_worktrees,
+            branches=branches,
+            directories={},
+            drift_snapshots=drift_snapshots,
+        )
     ):
         return providers, removed_worktrees, branches, drift_snapshots, {}
     planned_removed = (

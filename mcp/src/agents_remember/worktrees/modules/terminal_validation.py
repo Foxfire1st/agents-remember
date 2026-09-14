@@ -211,31 +211,79 @@ def terminal_preflight(
     )
 
 
-def terminal_result_blockers(
-    *,
-    providers: Mapping[str, object],
-    worktrees: dict[str, dict[str, object]],
-    branches: dict[str, dict[str, object]],
-    directories: dict[str, dict[str, object]],
-    drift_snapshots: dict[str, dict[str, object]] | None = None,
-) -> list[dict[str, object]]:
+@dataclass(frozen=True)
+class TerminalExpectation:
+    """What one collection of a terminal result must show, and how a preview differs.
+
+    ``done_key`` is the field that proves an entry was reclaimed, and a preview answers
+    ``would_remove`` where a real result answers nothing until it acts. An entry that reclaimed
+    nothing and is not benign is a blockage, and every blockage names itself and its reason.
+    """
+
+    done_key: str
+    preview: bool = False
+    benign: Mapping[str, frozenset[str]] | None = None
+
+
+@dataclass(frozen=True)
+class TerminalResult:
+    """One terminal operation's outputs, and whether they are a preview or what happened.
+
+    A preview reports what the operation *would* reclaim, so its entries carry ``would_remove``
+    instead of a result and cannot be read as blockages. Bundling the outputs with that fact keeps
+    the two interpretations one call apart rather than one keyword apart at every call site.
+    """
+
+    providers: Mapping[str, object]
+    worktrees: dict[str, dict[str, object]]
+    branches: dict[str, dict[str, object]]
+    directories: dict[str, dict[str, object]]
+    drift_snapshots: dict[str, dict[str, object]] | None = None
+    preview: bool = False
+
+
+def terminal_result_blockers(result: TerminalResult) -> list[dict[str, object]]:
+    """Every reason this terminal operation did not finish reclaiming what it set out to."""
+
     blockers: list[dict[str, object]] = []
-    blockers.extend(_provider_blockers(providers))
-    blockers.extend(_result_blockers("worktree", worktrees, done_key="removed"))
-    blockers.extend(_result_blockers("branch", branches, done_key="deleted", nested="remote"))
+    blockers.extend(_provider_blockers(result.providers))
+    blockers.extend(
+        _result_blockers(
+            "worktree",
+            result.worktrees,
+            expect=TerminalExpectation(done_key="removed", preview=result.preview),
+        )
+    )
+    blockers.extend(
+        _result_blockers(
+            "branch",
+            result.branches,
+            expect=TerminalExpectation(done_key="deleted"),
+            nested="remote",
+        )
+    )
     blockers.extend(
         _result_blockers(
             "directory",
-            directories,
-            done_key="removed",
-            benign={
-                "repo_worktree_group": frozenset({"not-empty"}),
-                "reports": frozenset({"child-enclosure"}),
-            },
+            result.directories,
+            expect=TerminalExpectation(
+                done_key="removed",
+                preview=result.preview,
+                benign={
+                    "repo_worktree_group": frozenset({"not-empty"}),
+                    "reports": frozenset({"child-enclosure"}),
+                },
+            ),
         )
     )
-    if drift_snapshots is not None:
-        blockers.extend(_result_blockers("driftSnapshot", drift_snapshots, done_key="removed"))
+    if result.drift_snapshots is not None:
+        blockers.extend(
+            _result_blockers(
+                "driftSnapshot",
+                result.drift_snapshots,
+                expect=TerminalExpectation(done_key="removed"),
+            )
+        )
     return blockers
 
 
@@ -508,18 +556,18 @@ def _provider_blockers(providers: Mapping[str, object]) -> list[dict[str, object
     for collection in ("containers", "networks"):
         values = providers.get(collection, [])
         if not isinstance(values, list):
-            blockers.append({"provider": collection, "reason": "invalid-result"})
+            blockers.append(_blocker({"provider": collection}, "invalid-result"))
             continue
         for index, item in enumerate(values):
             if not isinstance(item, dict) or _blocked(item, pending_key="would_remove"):
-                reason = item.get("reason") if isinstance(item, dict) else "invalid-result"
-                blockers.append({"provider": f"{collection}[{index}]", "reason": reason})
+                blockers.append(
+                    _blocker({"provider": f"{collection}[{index}]"}, _blocked_reason(item))
+                )
     runtime = providers.get("providerRuntime")
     if runtime is not None and (
         not isinstance(runtime, dict) or _blocked(runtime, pending_key="would_remove")
     ):
-        reason = runtime.get("reason") if isinstance(runtime, dict) else "invalid-result"
-        blockers.append({"provider": "providerRuntime", "reason": reason})
+        blockers.append(_blocker({"provider": "providerRuntime"}, _blocked_reason(runtime)))
     return blockers
 
 
@@ -527,19 +575,84 @@ def _result_blockers(
     kind: str,
     values: dict[str, dict[str, object]],
     *,
-    done_key: str,
+    expect: TerminalExpectation,
     nested: str | None = None,
-    benign: Mapping[str, frozenset[str]] | None = None,
 ) -> list[dict[str, object]]:
+    """Every entry in ``values`` this operation did not reclaim, and why not."""
+
+    return [
+        *_done_blockers(kind, values, expect=expect),
+        *_nested_blockers(kind, values, nested=nested),
+    ]
+
+
+def _done_blockers(
+    kind: str,
+    values: dict[str, dict[str, object]],
+    *,
+    expect: TerminalExpectation,
+) -> list[dict[str, object]]:
+    """Every entry ``expect`` says must have been reclaimed and was not."""
+
+    pending_key = "would_remove" if expect.preview else "would_delete"
     blockers: list[dict[str, object]] = []
     for key, item in values.items():
-        allowed = benign.get(key, frozenset()) if benign is not None else frozenset()
-        if _blocked(item, done_key=done_key) and item.get("reason") not in allowed:
-            blockers.append({kind: key, "reason": item.get("reason")})
-        child = item.get(nested) if nested is not None else None
-        if isinstance(child, dict) and _blocked(child, done_key="remote_deleted"):
-            blockers.append({kind: f"{key}.{nested}", "reason": child.get("reason")})
+        allowed = expect.benign.get(key, frozenset()) if expect.benign is not None else frozenset()
+        if item.get("reason") in allowed:
+            continue
+        if _blocked(item, done_key=expect.done_key, pending_key=pending_key):
+            blockers.append(_blocker({kind: key}, item.get("reason")))
     return blockers
+
+
+def _nested_blockers(
+    kind: str,
+    values: dict[str, dict[str, object]],
+    *,
+    nested: str | None,
+) -> list[dict[str, object]]:
+    if nested is None:
+        return []
+    blockers: list[dict[str, object]] = []
+    for key, item in values.items():
+        child = item.get(nested)
+        if isinstance(child, dict) and _blocked(child, done_key="remote_deleted"):
+            blockers.append(_blocker({kind: f"{key}.{nested}"}, child.get("reason")))
+    return blockers
+
+
+def _blocked_reason(item: object) -> str:
+    """The reason a result item carries, or why it carries none.
+
+    A malformed item and an item that reports nothing at all are both defects in the
+    producer, and both are named rather than silently becoming an anonymous blockage.
+    """
+
+    if not isinstance(item, dict):
+        return "invalid-result"
+    reason = item.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        return reason
+    return "no reason reported by the terminal result"
+
+
+def _blocker(component: dict[str, str], reason: object) -> dict[str, object]:
+    """One operator-readable blockage: a named component and a non-empty reason.
+
+    This is the only way a terminal result reports a blockage, and it refuses rather than
+    emit one an operator cannot act on. A blockage that names no reason cannot be told
+    apart from a spurious one, so a producer that supplies neither is a defect that is
+    raised at the moment it is detected -- the cleanup keeps the state it had, and no
+    anonymous blocker ever reaches an operator.
+    """
+
+    name = ", ".join(f"{key}={value}" for key, value in component.items())
+    if not isinstance(reason, str) or not reason.strip():
+        raise RuntimeError(
+            f"terminal result blocker {name or '<unnamed>'} carries no reason; "
+            "a blockage must name the component it stopped on and why"
+        )
+    return {**component, "reason": reason}
 
 
 def _blocked(
