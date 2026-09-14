@@ -223,6 +223,20 @@ def require_current_leaf_enclosure_binding(  # noqa: PLR0913
     )
     if plan.candidate is not None:
         task_facts = _enclosure_binding_facts(plan, task_name=task_name)
+        if plan.state == "master-link-missing":
+            # The enclosure binding is exact and current; only the derived master link is
+            # absent, and that field is written by the start/attach binding publisher, never
+            # by a task-document authoring operation. Name the route that actually binds it.
+            recovery = (
+                "re-run worktree_start/worktree_attach so the start binding publisher writes "
+                "this leaf document's seriesContractPath, then retry closeout"
+            )
+            raise TaskLeafBindingError(
+                f"leaf document master link is {plan.state}: leaf {plan.leaf_id!r}, task "
+                f"document {plan.doc_path}; recovery: {recovery}",
+                status="task-enclosure-binding-master-link-missing",
+                facts={**task_facts, "recoveryOperation": recovery},
+            )
         recovery = (
             "run task_doc.replace against this exact leaf contract, then re-run "
             "worktree_start/worktree_attach before closeout"

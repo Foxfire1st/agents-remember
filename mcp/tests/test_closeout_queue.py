@@ -33,6 +33,7 @@ from agents_remember.worktrees.queue.closeout_queue import (
     closeout_queue_tool,
 )
 from agents_remember.worktrees.route_review import build_route_review
+from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
     LeafIdentity,
@@ -115,6 +116,10 @@ def _leaf(contract: WorktreeContract, slug: str) -> TaskDocument:
         "status": "inProgress",
         "repo": REPO,
         "createdAt": NOW,
+        # Both derived fields, exactly as task_doc stamps them against a leaf contract: a
+        # leaf document missing its seriesContractPath is the damage start repairs, so a
+        # fixture that withheld it would model an unstarted-against document, not this one.
+        "seriesContractPath": series_contract_path(contract.task_root).as_posix(),
         "enclosures": [
             {
                 "leafId": contract.leaf_id,

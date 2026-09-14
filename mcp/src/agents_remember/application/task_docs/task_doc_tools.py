@@ -611,7 +611,42 @@ def _build_doc(
                     "enclosurePath": contract.contract_path.as_posix(),
                 }
             ]
+    elif data.get("kind") != "master":
+        _require_bindable_leaf_authoring(task_root)
     return _validate(data)
+
+
+def _require_bindable_leaf_authoring(task_root: Path) -> None:
+    """Refuse a leaf document whose derived master link nothing would ever bind.
+
+    With no contract resolved there is no ``seriesContractPath`` and no
+    ``enclosures[]`` to stamp, and this document is not the master that will own
+    the series. Two cases reach here and only one of them is repairable:
+
+    * The task root already holds a master document. Authoring a master and its
+      leaves before any start is the normal planning flow, and it is allowed
+      precisely because the leaf's first ``worktree_start``/``worktree_attach``
+      runs the start binding publisher
+      (``plan_leaf_doc_lifecycle_restamp`` / ``plan_leaf_doc_enclosure_registration``),
+      which writes both derived fields once the series contract exists. This
+      allowance is a guarantee, so it is asserted rather than implied.
+    * The task root holds no master document at all. Nothing owns the series, no
+      operation binds the fields, and the document would silently persist without
+      its master link — so it is refused here, with the remedy, instead.
+    """
+
+    master_path = task_root / "task.json"
+    if master_path.exists():
+        return
+    raise TaskDocError(
+        "refused: this leaf task document would carry no master link "
+        f"(seriesContractPath and enclosures) and nothing would ever bind it — task root "
+        f"{task_root} has no series contract and no master document ({master_path}). "
+        "Author the master document first (task_doc.create with kind 'master' in this same "
+        "task root, which owns the series), then author its leaf documents; each leaf's "
+        "first worktree_start then binds the link. Alternatively pass the leaf's "
+        "contract_path once its enclosure exists, or the master's series contract path."
+    )
 
 
 def _enforce_register_section_shapes(doc: TaskDocument) -> None:

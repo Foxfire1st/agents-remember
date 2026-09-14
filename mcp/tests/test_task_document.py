@@ -474,6 +474,10 @@ class ApplicationTests(unittest.TestCase):
         self.cfg = _config(self.coord)
 
     def _create(self, **fields: Any) -> dict[str, Any]:
+        # These leaf operations are authored under a master, which is the flow the task_doc
+        # authoring plane allows: a leaf in a task root with no master document at all is
+        # refused (nothing would ever bind its derived seriesContractPath/enclosures).
+        self._ensure_parent_master()
         payload: dict[str, Any] = {
             "id": "3C",
             "slug": "03c_x",
@@ -490,6 +494,11 @@ class ApplicationTests(unittest.TestCase):
             operation="create",
             edit=TaskDocEdit(fields=payload),
         )
+
+    def _ensure_parent_master(self) -> None:
+        master_path = self.coord / "tasks" / "agents-remember" / "3c-x" / "task.json"
+        if not master_path.exists():
+            self._create_parent_master()
 
     def _create_parent_master(self, **fields: Any) -> dict[str, Any]:
         payload: dict[str, Any] = {

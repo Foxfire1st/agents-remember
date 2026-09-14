@@ -11,18 +11,12 @@ from agents_remember.application.task_docs.task_doc_tools import (
     task_doc_tool,
 )
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
+from agents_remember.tasks.leaf_doc import plan_leaf_doc_lifecycle_restamp
+from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path
 from test_task_document import ApplicationTests
 
 
 class ApplicationTests1(ApplicationTests):
-    def test_create_writes_both_files(self) -> None:
-        result = self._create(steps=[{"id": "S1", "title": "One", "status": "inProgress"}])
-        self.assertEqual(result["operation"], "task_doc.create")
-        self.assertEqual((result["stepsDone"], result["stepsTotal"]), (0, 1))
-        self.assertTrue(Path(str(result["docPath"])).exists())
-        self.assertTrue(Path(str(result["renderedPath"])).exists())
-        self.assertNotIn("masterSync", result)
-
     def test_leaf_create_syncs_parent_master_row(self) -> None:
         self._create_parent_master()
         result = self._create(master="task.md")
@@ -578,3 +572,92 @@ class ApplicationTests1(ApplicationTests):
             child_doc.decisions[-1].decision,
             "Intentionally skip step S1/C1.",
         )
+
+
+class LeafDocMasterLinkBindingTests(ApplicationTests):
+    """The restamp half of the start binding, on the unit population.
+
+    A leaf authored before its master's series contract exists carries neither
+    ``seriesContractPath`` nor ``enclosures[]``. The restamp used to write only
+    ``lifecycleId`` and return no candidate whenever that id already matched, so a
+    document missing only its master link was silently skipped and nothing repaired it.
+    The end-to-end proof that start binds it lives in
+    ``test_leaf_doc_master_link_binding.py`` (integration lane); this is the focused
+    decision-table check.
+    """
+
+    def _leaf_doc_path(self) -> Path:
+        return self.coord / "tasks" / "agents-remember" / "3c-x" / "03c_x.json"
+
+    def _rewrite_leaf_doc(self, **fields: Any) -> None:
+        task_root = self.coord / "tasks" / "agents-remember" / "3c-x"
+        document = read_task_doc(self._leaf_doc_path()).model_dump(by_alias=True)
+        document.update(fields)
+        write_task_doc(task_root, TaskDocument.model_validate(document))
+
+    def _plan(self, lifecycle_id: str = "LC-SAME"):
+        task_root = self.coord / "tasks" / "agents-remember" / "3c-x"
+        return plan_leaf_doc_lifecycle_restamp(task_root, "3C", lifecycle_id)
+
+    def test_binds_only_the_derived_fields_that_are_absent(self) -> None:
+        self._create()
+        task_root = self.coord / "tasks" / "agents-remember" / "3c-x"
+        expected_path = series_contract_path(task_root).as_posix()
+        expected_enclosure = leaf_enclosure_path(task_root, "3C").as_posix()
+        already_bound = [{"leafId": "3C", "enclosurePath": expected_enclosure}]
+
+        # The reachable pre-contract states, and what a restamp must do with each. A
+        # document missing *only* its enclosure binding is not among them: the identity
+        # lookup finds a leaf through its own enclosures[] refs, so the series contract
+        # path is what survives from a partial write.
+        cases = (
+            (
+                "both derived fields absent",
+                {"lifecycleId": "LC-SAME", "seriesContractPath": None, "enclosures": []},
+                expected_path,
+                already_bound,
+            ),
+            (
+                "only the series contract path absent",
+                {"lifecycleId": "LC-SAME", "seriesContractPath": None, "enclosures": already_bound},
+                expected_path,
+                already_bound,
+            ),
+        )
+
+        for name, written, expected_series_path, expected_enclosures in cases:
+            with self.subTest(case=name):
+                self._rewrite_leaf_doc(**written)
+
+                plan = self._plan()
+
+                candidate = plan.candidate
+                if candidate is None:
+                    self.fail(f"{name}: restamp produced no candidate, so nothing would be written")
+                self.assertTrue(plan.changed)
+                # Existing bindings are never rewired; only the absent one is filled in.
+                self.assertEqual(candidate.seriesContractPath, expected_series_path)
+                self.assertEqual(
+                    [ref.model_dump() for ref in candidate.enclosures], expected_enclosures
+                )
+
+        # A fresh lifecycle still overwrites a stale binding even when both derived fields
+        # are already present (a reopened leaf follows the fresh lifecycle).
+        self._rewrite_leaf_doc(
+            lifecycleId="LC-OLD",
+            seriesContractPath=expected_path,
+            enclosures=already_bound,
+        )
+        reopened = self._plan("LC-FRESH")
+        assert reopened.candidate is not None
+        self.assertEqual(reopened.candidate.lifecycleId, "LC-FRESH")
+
+        # The one exact no-op: everything bound and current.
+        self._rewrite_leaf_doc(
+            lifecycleId="LC-FRESH",
+            seriesContractPath=expected_path,
+            enclosures=already_bound,
+        )
+        untouched = self._plan("LC-FRESH")
+        self.assertFalse(untouched.changed)
+        self.assertIsNone(untouched.candidate)

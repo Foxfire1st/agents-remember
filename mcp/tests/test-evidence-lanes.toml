@@ -149,6 +149,7 @@ integration = [
   "mcp/tests/test_git_command.py",
   "mcp/tests/test_harness_control_ipc.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_leaf_doc_master_link_binding.py",
   "mcp/tests/test_lifecycle_finalize.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_lifecycle_playthrough_end_to_end.py",

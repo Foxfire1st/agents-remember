@@ -45,6 +45,7 @@ from agents_remember.worktrees.modules.closeout_external import (
 from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.quality import closeout_memory as memory_quality
 from agents_remember.worktrees.modules.quality import gate as quality_gate
+from agents_remember.worktrees.task_resolver import series_contract_path
 from agents_remember.worktrees.worktree_contract import load_contract
 from closeout_input_test_support import (
     ensure_fixture_waiting_door,
@@ -90,7 +91,12 @@ def _public_config(root: Path, contract) -> McpRuntimeConfig:
 
 
 def _bind_task_without_review(contract) -> None:
-    """Add only the canonical enclosure binding; leave review evidence absent."""
+    """Add only the canonical enclosure binding; leave review evidence absent.
+
+    Both derived fields are bound, exactly as ``task_doc`` stamps them against a leaf
+    contract: a leaf document missing its ``seriesContractPath`` is the damage a later
+    start repairs, so it would model an unstarted-against document rather than this one.
+    """
 
     task_path = contract.task_root / f"{contract.leaf_id.lower()}.json"
     document = read_task_doc(task_path)
@@ -98,6 +104,7 @@ def _bind_task_without_review(contract) -> None:
         task_path.parent,
         document.model_copy(
             update={
+                "seriesContractPath": series_contract_path(contract.task_root).as_posix(),
                 "enclosures": [
                     TaskEnclosureRef(
                         leafId=contract.leaf_id,
