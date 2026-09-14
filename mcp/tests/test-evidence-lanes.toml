@@ -134,6 +134,7 @@ integration = [
   "mcp/tests/test_citation_document_transaction.py",
   "mcp/tests/test_clean_quality_executor.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
+  "mcp/tests/test_closeout_projection_source_classification.py",
   "mcp/tests/test_closeout_queue.py",
   "mcp/tests/test_code_quality_check.py",
   "mcp/tests/test_cold_start.py",

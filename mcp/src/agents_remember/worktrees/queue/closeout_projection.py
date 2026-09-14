@@ -57,7 +57,11 @@ from .closeout_projection_source_facts import (
     semantic_topology_source_fact,
     task_source_fact,
 )
-from .closeout_queue_errors import CloseoutQueueError
+from .closeout_queue_errors import (
+    CAPACITY_REFUSAL_CODES,
+    SOURCE_PROBLEM_CAP_EXCEEDED,
+    CloseoutQueueError,
+)
 from .closeout_queue_evidence import GradeAuthority, planning_authorities
 from .closeout_queue_graph import QueueGraphContext, graph_context
 
@@ -834,9 +838,20 @@ def _problem(
     error_type: str,
     repair: str,
 ) -> ProjectionSourceProblem:
+    """Classify one source problem from the code its own raiser published.
+
+    A capacity refusal is named by the declaration that owns its code, not by a substring of
+    its spelling: the two surviving capacity codes spell the bound "capacity-exceeded" while
+    this classifier tested "cap-exceeded", so a sprint past its graph bound was reported as a
+    source that could not be read. The remaining markers are shared vocabulary of the codes
+    that carry them, and the two states stay distinct in both directions -- an unreadable
+    source is still reported unreadable.
+    """
+
     missing = any(marker in error_type for marker in ("missing", "not-found"))
     invalid = (
-        any(marker in error_type for marker in ("invalid", "mismatch", "conflict", "cap-exceeded"))
+        error_type in CAPACITY_REFUSAL_CODES
+        or any(marker in error_type for marker in ("invalid", "mismatch", "conflict"))
         or error_type == "sprint-required"
     )
     return ProjectionSourceProblem(
@@ -864,7 +879,7 @@ def _bounded_problems(
     overflow = _problem(
         "projection",
         sprint_ref.key,
-        "source-problem-cap-exceeded",
+        SOURCE_PROBLEM_CAP_EXCEEDED,
         "repair the reported canonical sources, then rebuild",
     )
     return [*unique[: MAX_CLOSEOUT_SOURCE_PROBLEMS - 1], overflow]

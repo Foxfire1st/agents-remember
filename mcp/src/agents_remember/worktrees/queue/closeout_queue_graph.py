@@ -34,7 +34,12 @@ from agents_remember.tasks.semantic_topology_graph import (
     build_semantic_topology_graph_index,
 )
 
-from .closeout_queue_errors import CloseoutQueueError, bounded_queue_failure_detail
+from .closeout_queue_errors import (
+    EDGE_CAPACITY_EXCEEDED,
+    MASTER_CAPACITY_EXCEEDED,
+    CloseoutQueueError,
+    bounded_queue_failure_detail,
+)
 from .closeout_queue_evidence import PRIORITY_RANK, GradeAuthority, planning_authorities
 
 
@@ -159,12 +164,12 @@ def _validated_graph_documents(
         )
     if len(graph.nodes) > MAX_CLOSEOUT_MASTERS:
         raise CloseoutQueueError(
-            "closeout-queue-master-capacity-exceeded",
+            MASTER_CAPACITY_EXCEEDED,
             f"sprint has more than {MAX_CLOSEOUT_MASTERS} graph masters; split it before queue admission",
         )
     if len(graph.edges) > MAX_CLOSEOUT_GRAPH_EDGES:
         raise CloseoutQueueError(
-            "closeout-queue-edge-capacity-exceeded",
+            EDGE_CAPACITY_EXCEEDED,
             f"sprint has more than {MAX_CLOSEOUT_GRAPH_EDGES} dependency edges; split it before queue admission",
         )
     try:
