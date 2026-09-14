@@ -34,7 +34,6 @@ from agents_remember.worktrees.sync_transaction_git import (
     side_merge_completed,
     start_side_merge,
     unmerged_paths,
-    validate_current_memory_side,
     worktree_dirty_paths,
 )
 from agents_remember.worktrees.sync_transaction_recovery import (
@@ -340,6 +339,13 @@ def _already_current_result(
     memory: SyncSideRecord | None,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult | None:
+    """Report a pair whose recorded base and work branches already carry the source.
+
+    A memory branch that already descends from its source is current whatever its
+    ``memory.md`` says: the ledger is derived state, its rebuild reports the rows it
+    cannot resolve, and this surface does not keep a second copy of that judgement.
+    """
+
     bases_current = code.sourceCommit == contract.code_base_commit and (
         memory is None or memory.sourceCommit == contract.memory_base_commit
     )
@@ -348,11 +354,6 @@ def _already_current_result(
     )
     if not (bases_current and branches_current):
         return None
-    try:
-        if memory is not None:
-            validate_current_memory_side(memory)
-    except SyncGitProofError as error:
-        return command_result(2, "sync-work-branch-invalid", str(error), fetch)
     return command_result(
         0,
         "already-current",

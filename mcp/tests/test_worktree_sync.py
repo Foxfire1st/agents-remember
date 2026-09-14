@@ -203,6 +203,45 @@ class WorktreeSyncTests(unittest.TestCase):
             self.assertEqual(synced.payload["state"], "synced")
             self.assertEqual(git(fixture.contract.code_worktree, "rev-parse", "HEAD"), code_tip)
 
+    def test_a_descendant_memory_ledger_that_dropped_a_source_row_is_current(self) -> None:
+        """The projection is the ledger's authority, so a dropped row is not a sync refusal.
+
+        Measured on the real master: thirteen rows the rebuild could not resolve (eleven
+        stale duplicates whose code commits map to a different memory commit, two naming
+        memory commits that exist nowhere) were dropped from the ledger by its own
+        closeouts. This transaction required every row its source carried, so the master
+        whose closeouts had been correct became permanently unsyncable, and the same rows
+        refused the integration gate as well. The exclusion is the projection's to report
+        (``read_ledger_source().excluded_rows`` -- pinned in ``test_memory_ledger``), and
+        the sync is not a second place to restate that judgement.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = SyncFixture(Path(tmp))
+            assert fixture.contract.memory_worktree is not None
+            worktree = fixture.contract.memory_worktree
+            # The work branch descends from its source and carries its own mapping for the
+            # same code commit -- exactly the stale-duplicate shape, dropped from the table.
+            commit_file(worktree, "onboarding/repo-a/README.md.md", "# README onboarding")
+            content_commit = git(worktree, "rev-parse", "HEAD")
+            write_ledger(
+                worktree / "memory.md",
+                create_initial_ledger("repo-a", fixture.code_base, content_commit),
+            )
+            git(worktree, "add", "memory.md")
+            git(worktree, "commit", "-m", "Recompute the ledger from the commits")
+            projected_head = git(worktree, "rev-parse", "HEAD")
+
+            result = fixture.sync()
+
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.payload["state"], "already-current")
+            self.assertNotIn("dropped parent mapping", str(result.payload))
+            # Nothing moved: the branch already carried the source, so the sync is a read.
+            self.assertEqual(git(worktree, "rev-parse", "HEAD"), projected_head)
+            reloaded = load_contract(fixture.contract.contract_path)
+            self.assertEqual(reloaded.memory_base_commit, fixture.memory_base)
+
     def test_nonregular_journal_is_renamed_without_following_and_quarantined(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fixture = SyncFixture(Path(tmp))

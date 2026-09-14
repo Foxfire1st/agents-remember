@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from typing import ClassVar
 
 from agents_remember.models.structural.atomic_series_activation import (
     AtomicSeriesActivationRecord,
@@ -23,6 +24,10 @@ from agents_remember.worktrees.activation.atomic_series_activation import (
 from agents_remember.worktrees.activation.atomic_series_activation_release import (
     release_atomic_series_selection,
 )
+from agents_remember.worktrees.activation.atomic_series_activation_transaction import (
+    _reconciling_result,
+)
+from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.startup.start_contract import (
     MasterSeriesContractSpec,
     ensure_master_series_contract,
@@ -220,6 +225,75 @@ class AtomicSeriesActivationTests(unittest.TestCase):
         self.assertEqual(
             getattr(raised.exception, "status", None),
             "atomic-series-terminal",
+        )
+
+
+class ReconcilingResultTests(unittest.TestCase):
+    """A selection left mid-flight is never reported as this call's own success.
+
+    Measured: a selecting operation published the master's record as ``reconciling`` and
+    never completed or released it, and the only thing said about it was the refused
+    pass's own branch complaint. Everything after that ran into the same wall with no
+    message anywhere pointing at the stuck contract.
+    """
+
+    ACTIVATION: ClassVar[dict[str, object]] = {
+        "address": "/coordination/controlplane/atomic-series-activation/deadbeef.json",
+        "contractFingerprint": "deadbeef",
+        "state": "reconciling",
+        "record": {
+            "schemaVersion": "2.0",
+            "contractFingerprint": "deadbeef",
+            "selectedMaster": {"repository": REPO, "path": "master-a/task.json"},
+            "contractPath": "/coordination/tasks/repo-a/master-a/series-contract.md",
+            "state": "reconciling",
+            "revision": 15,
+            "selectedAt": "2026-09-14T10:38:25+00:00",
+        },
+    }
+
+    def test_a_completed_pass_beside_a_mid_flight_selection_is_not_success(self) -> None:
+        result = _reconciling_result(
+            WorktreeCommandResult(0, {"state": "synced", "summary": "The sync pass completed."}),
+            dict(self.ACTIVATION),
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.payload["state"], "atomic-series-reconciling")
+        self.assertEqual(result.payload["atomicSeriesActivation"], self.ACTIVATION)
+        summary = str(result.payload["summary"])
+        # The stuck contract, when it was published, and both ways out -- not a branch
+        # complaint on an unrelated operation.
+        self.assertIn("master-a/task.json", summary)
+        self.assertIn("/coordination/tasks/repo-a/master-a/series-contract.md", summary)
+        self.assertIn("2026-09-14T10:38:25+00:00", summary)
+        self.assertIn("revision 15", summary)
+        self.assertIn("worktree_sync(contract_path=..., dry_run=false)", summary)
+        self.assertIn("memory_sync_choice='merge-memory'", summary)
+        self.assertIn("resolution_action='cancel'", summary)
+        self.assertIn("The sync pass completed.", summary)
+
+    def test_a_refusal_that_left_a_record_mid_flight_leads_with_that_state(self) -> None:
+        result = _reconciling_result(
+            WorktreeCommandResult(
+                2,
+                {
+                    "state": "blocked",
+                    "summary": "The official line is mid-cycle: its memory ledger does not "
+                    "map the admitted code tip.",
+                },
+            ),
+            dict(self.ACTIVATION),
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.payload["state"], "blocked")
+        summary = str(result.payload["summary"])
+        self.assertTrue(summary.startswith("The master master-a/task.json"))
+        self.assertIn("is mid-flight", summary)
+        self.assertLess(
+            summary.index("is mid-flight"),
+            summary.index("official line is mid-cycle"),
         )
 
 

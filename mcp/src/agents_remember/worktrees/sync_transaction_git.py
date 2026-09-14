@@ -1,11 +1,25 @@
-"""Exact Git mutations and proofs for resumable worktree sync."""
+"""Exact Git mutations and proofs for resumable worktree sync.
+
+The proofs here are about Git state: which head a merge may create, which refs the
+operation pinned, and whether a resolution is staged. They are deliberately not about
+what the ledger file says.
+
+Developer ruling on the 260913 ledger line: the ledger is derived state, and the
+rebuilder is its authority, so a row the rebuild cannot resolve is a *reported
+exclusion* (``ledger_projection`` publishes ``sourceRowsExcluded`` and
+``sourceExcludedReasons``) and never a sync refusal. This module used to require a
+descendant or merged ``memory.md`` to keep every row its source carried, which made a
+master whose own closeouts had correctly dropped stale rows permanently unsyncable: the
+same thirteen rows refused both the integration gate and this one. Both gates now answer
+the same way, and neither restates the projection's judgement in a second place where it
+could drift from the codes and reasons it classifies.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
-from agents_remember.kernel.memory_ledger import LedgerError, LedgerRow, parse_ledger_text
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     current_branch,
@@ -244,10 +258,7 @@ def side_merge_completed(side: SyncSideRecord) -> bool:
     if merge_head(worktree) is not None:
         return False
     current = head_commit(worktree)
-    if not exact_created_head(side, current):
-        return False
-    validate_completed_side(side, current)
-    return True
+    return exact_created_head(side, current)
 
 
 def start_side_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str]:
@@ -280,7 +291,6 @@ def start_side_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str]:
         result_head = head_commit(worktree)
         if not exact_created_head(side, result_head):
             raise SyncGitProofError(f"{side.side} merge did not create the exact admitted head")
-        validate_completed_side(side, result_head)
         return "completed", (), result_head
     current_merge = merge_head(worktree)
     conflicts = unmerged_paths(worktree)
@@ -294,13 +304,15 @@ def start_side_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str]:
 def _finish_staged_memory_merge(
     side: SyncSideRecord,
 ) -> tuple[str, tuple[str, ...], str]:
-    """Validate an automatic ledger merge before creating its commit."""
+    """Commit the pinned memory merge; the ledger it carries is derived state.
+
+    The staged merge is Git's own resolution of the two parents. It is not re-judged
+    here against either parent's row list: the projection recomputes the table from the
+    commits at the next closeout, and a row the rebuild cannot resolve is reported
+    there rather than refused here.
+    """
 
     worktree = Path(side.worktree)
-    try:
-        _validate_parent_ledgers(side, ":memory.md")
-    except SyncGitProofError as error:
-        return "resolution-required", ("memory.md",), str(error)
     committed = run_git(worktree, ["commit", "--no-edit"])
     if committed.returncode != 0:
         raise SyncGitProofError(
@@ -311,7 +323,6 @@ def _finish_staged_memory_merge(
     result_head = head_commit(worktree)
     if not exact_created_head(side, result_head):
         raise SyncGitProofError("memory merge commit does not have the pinned parents")
-    validate_completed_side(side, result_head)
     return "completed", (), result_head
 
 
@@ -326,9 +337,7 @@ def continue_side_merge(side: SyncSideRecord) -> str:
             raise SyncGitProofError(
                 f"{side.side} merge state disappeared without an operation-owned commit"
             )
-        result_head = head_commit(worktree)
-        validate_completed_side(side, result_head)
-        return result_head
+        return head_commit(worktree)
     validate_staged_resolution(side)
     committed = run_git(worktree, ["commit", "--no-edit"])
     if committed.returncode != 0:
@@ -338,7 +347,6 @@ def continue_side_merge(side: SyncSideRecord) -> str:
     result_head = head_commit(worktree)
     if not exact_created_head(side, result_head):
         raise SyncGitProofError(f"{side.side} merge commit does not have the pinned parents")
-    validate_completed_side(side, result_head)
     return result_head
 
 
@@ -362,8 +370,6 @@ def validate_staged_resolution(side: SyncSideRecord) -> None:
         raise SyncGitProofError(
             checked.stdout.strip() or checked.stderr.strip() or "staged resolution is invalid"
         )
-    if side.side == "memory" and side.plan == "merge":
-        _validate_parent_ledgers(side, ":memory.md")
 
 
 def rollback_side(side: SyncSideRecord) -> None:
@@ -406,59 +412,6 @@ def exact_created_head(side: SyncSideRecord, current: str) -> bool:
     parents = run_git(Path(side.repository), ["rev-list", "--parents", "-n", "1", current])
     cells = parents.stdout.split()
     return parents.returncode == 0 and cells[1:] == [side.preSyncHead, side.sourceCommit]
-
-
-def validate_completed_side(side: SyncSideRecord, current: str) -> None:
-    """Apply side-specific proof to an exact operation-created result head."""
-
-    if side.side == "memory" and side.plan == "merge":
-        _validate_parent_ledgers(side, f"{current}:memory.md")
-
-
-def validate_current_memory_side(side: SyncSideRecord) -> None:
-    """Prove an already-descendant memory branch retained its source ledger authority."""
-
-    source_rows = _ledger_rows(Path(side.repository), f"{side.sourceCommit}:memory.md")
-    _validate_required_ledger_rows(
-        source_rows,
-        _ledger_rows(Path(side.repository), f"{side.preSyncHead}:memory.md"),
-    )
-
-
-def _validate_parent_ledgers(side: SyncSideRecord, resolved_spec: str) -> None:
-    repository = Path(side.repository)
-    parent_rows = [
-        *_ledger_rows(repository, f"{side.preSyncHead}:memory.md"),
-        *_ledger_rows(repository, f"{side.sourceCommit}:memory.md"),
-    ]
-    _validate_required_ledger_rows(
-        parent_rows,
-        _ledger_rows(Path(side.worktree), resolved_spec),
-    )
-
-
-def _validate_required_ledger_rows(
-    required_rows: list[LedgerRow],
-    resolved_rows: list[LedgerRow],
-) -> None:
-    resolved = set(resolved_rows)
-    missing = sorted(
-        set(required_rows) - resolved,
-        key=lambda row: (row.code_commit, row.memory_commit),
-    )
-    if missing:
-        sample = ", ".join(f"{row.code_commit}->{row.memory_commit}" for row in missing[:10])
-        raise SyncGitProofError(f"resolved memory ledger dropped parent mapping(s): {sample}")
-
-
-def _ledger_rows(repository: Path, spec: str) -> list[LedgerRow]:
-    shown = run_git(repository, ["show", spec])
-    if shown.returncode != 0:
-        raise SyncGitProofError(shown.stderr.strip() or f"could not read ledger at {spec}")
-    try:
-        return parse_ledger_text(shown.stdout).rows
-    except LedgerError as error:
-        raise SyncGitProofError(f"memory ledger at {spec} is invalid: {error}") from error
 
 
 def side_branch_head(side: SyncSideRecord) -> str:
