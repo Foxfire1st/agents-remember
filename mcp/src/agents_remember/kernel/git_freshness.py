@@ -17,6 +17,7 @@ from typing import Any, Literal, get_args
 from agents_remember.kernel.git_command import (
     GIT_LOCAL_TIMEOUT_SECONDS,
     GIT_METADATA_TIMEOUT_SECONDS,
+    GitRunnerOptions,
     run_git,
 )
 
@@ -59,7 +60,7 @@ def upstream_ref(repo_root: Path, branch: str) -> str | None:
     result = run_git(
         repo_root,
         ["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"],
-        timeout=GIT_METADATA_TIMEOUT_SECONDS,
+        GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
     )
     return result.stdout.strip() if result.returncode == 0 else None
 
@@ -69,7 +70,11 @@ def fetch_remote(repo_root: Path, remote: str, timeout: int = DEFAULT_FETCH_TIME
     try:
         # Its own bound, not the runner's: a fetch is the one network call here and
         # 30s is the point past which "still fetching" means "not coming back".
-        result = run_git(repo_root, ["fetch", remote], timeout=timeout)
+        result = run_git(
+            repo_root,
+            ["fetch", remote],
+            GitRunnerOptions(timeout=timeout),
+        )
     except (OSError, subprocess.SubprocessError) as error:
         return f"git fetch {remote} failed: {error}"
     if result.returncode != 0:
@@ -85,7 +90,7 @@ def ahead_behind(repo_root: Path, local: str, other: str) -> tuple[int, int] | N
     result = run_git(
         repo_root,
         ["rev-list", "--left-right", "--count", f"{local}...{other}"],
-        timeout=GIT_LOCAL_TIMEOUT_SECONDS,
+        GitRunnerOptions(timeout=GIT_LOCAL_TIMEOUT_SECONDS),
     )
     if result.returncode != 0:
         return None
@@ -116,7 +121,11 @@ def _read_branch_freshness(
     root: Path, branch: str | None, *, fetch: bool, fetch_timeout: int
 ) -> BranchFreshness:
     if branch is None:
-        current = run_git(root, ["branch", "--show-current"], timeout=GIT_METADATA_TIMEOUT_SECONDS)
+        current = run_git(
+            root,
+            ["branch", "--show-current"],
+            GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+        )
         if current.returncode != 0:
             return BranchFreshness(
                 "",

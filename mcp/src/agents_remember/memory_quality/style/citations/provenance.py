@@ -21,7 +21,11 @@ from pathlib import Path, PurePosixPath
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import InvalidVersion, Version
 
-from agents_remember.kernel.git_command import GIT_METADATA_TIMEOUT_SECONDS, run_git
+from agents_remember.kernel.git_command import (
+    GIT_METADATA_TIMEOUT_SECONDS,
+    GitRunnerOptions,
+    run_git,
+)
 from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load_ledger
 
 REQUIREMENTS_PATH = "mcp/requirements.txt"
@@ -59,7 +63,7 @@ class GitHistory:
             resolved = run_git(
                 self.root,
                 ["rev-parse", "--verify", f"{stamp}^{{commit}}"],
-                timeout=GIT_METADATA_TIMEOUT_SECONDS,
+                GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
             )
             if resolved.returncode != 0:
                 self._commits[stamp] = Read(
@@ -75,7 +79,7 @@ class GitHistory:
                 run_git(
                     self.root,
                     ["merge-base", "--is-ancestor", commit, head],
-                    timeout=GIT_METADATA_TIMEOUT_SECONDS,
+                    GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
                 ).returncode
                 == 0
                 for head in ("HEAD", *self.reachable_heads)
@@ -97,7 +101,7 @@ class GitHistory:
             completed = run_git(
                 self.root,
                 ["show", f"{commit}:{path}"],
-                timeout=GIT_METADATA_TIMEOUT_SECONDS,
+                GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
             )
             self._files[key] = (
                 Read(completed.stdout)

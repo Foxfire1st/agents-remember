@@ -113,6 +113,22 @@ class _GitRun:
 
 
 @dataclass(frozen=True)
+class GitRunnerOptions:
+    """How one observed command is aimed: where it runs, what it reads, and who it is.
+
+    These are the ways a caller tells a git command something its argv cannot say, and they
+    arrived one at a time -- ``work_dir`` for ``git clone``, ``input_text`` for ``git patch-id``,
+    ``identity`` for ``git commit-tree``. They are one object because they are one concept, and
+    because the runner's own signature should stay at the two facts every call shares.
+    """
+
+    work_dir: Path | None = None
+    input_text: str | None = None
+    timeout: float = GIT_LOCAL_TIMEOUT_SECONDS
+    identity: dict[str, str] | None = None
+
+
+@dataclass(frozen=True)
 class IsolatedGitState:
     """Disposable Git state with the repository object database as read-only input."""
 
@@ -133,19 +149,19 @@ def git_environment() -> dict[str, str]:
 def run_git(
     repo_root: Path,
     args: list[str],
-    *,
-    work_dir: Path | None = None,
-    input_text: str | None = None,
-    timeout: float = GIT_LOCAL_TIMEOUT_SECONDS,
+    options: GitRunnerOptions | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run ``git args`` against ``repo_root``, never against an inherited selector.
 
-    ``input_text`` feeds git's stdin (``git patch-id`` is the only caller that needs
+    ``options`` carries the three ways a caller can tell a git command something its argv
+    cannot; the two positional facts are what every call has in common.
+
+    ``options.input_text`` feeds git's stdin (``git patch-id`` is the only caller that needs
     it). Without it stdin is ``DEVNULL``: under the stdio MCP transport the parent's
     stdin IS the JSON-RPC request pipe, and a child holding or reading it wedges the
     tool call (GitHub #49).
 
-    ``work_dir`` separates *where git runs* from *which repository the command is about*,
+    ``options.work_dir`` separates *where git runs* from *which repository the command is about*,
     which are the same directory for every caller but one. ``git clone <url> <dest>``
     cannot run inside ``<dest>``, because ``<dest>`` is what it is about to create, and
     ``cwd=`` a directory that does not exist raises before git is ever reached. The
@@ -166,20 +182,33 @@ def run_git(
     every caller. It is what lets git check out a path past Windows' MAX_PATH; git
     ignores it everywhere else, so the cost off Windows is two argv words.
 
+    ``options.identity`` adds environment names on top of the sanitized environment, and it
+    exists for exactly one command: ``git commit-tree`` reads the author and committer and their
+    timestamps from ``GIT_AUTHOR_*``/``GIT_COMMITTER_*`` and from nowhere else, so a history
+    rewrite that must reproduce an existing commit byte for byte has no argv spelling for it. It
+    is additive and never subtractive: the selector stripping runs first and this cannot put a
+    selector back, because the names it accepts are checked against that same list.
+
     ``safe.directory`` names ``repo_root`` and not the ``*`` the benchmark runner used.
     That is narrower, not weaker: it is the exact tree every one of these commands
     operates on, and a wildcard additionally disarms the ownership check for any *other*
     repository the command happens to reach.
     """
 
+    settings = options or GitRunnerOptions()
+    environment = git_environment()
+    for name, value in (settings.identity or {}).items():
+        if name in GIT_REPOSITORY_SELECTOR_ENV:
+            raise ValueError(f"{name} is a Git repository selector and cannot be set as identity")
+        environment[name] = value
     return _run_git(
         repo_root,
         args,
         _GitRun(
-            work_dir=repo_root if work_dir is None else work_dir,
-            input_text=input_text,
-            timeout=timeout,
-            environment=git_environment(),
+            work_dir=repo_root if settings.work_dir is None else settings.work_dir,
+            input_text=settings.input_text,
+            timeout=settings.timeout,
+            environment=environment,
         ),
     )
 

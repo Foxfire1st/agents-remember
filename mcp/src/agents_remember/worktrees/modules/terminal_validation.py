@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, run_git
+from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, GitRunnerOptions, run_git
 from agents_remember.worktrees.modules.git import local_branch_ref, repository_identity
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -535,7 +535,7 @@ def _remote_branch_preflight(repo: Path, branch: str) -> dict[str, object]:
         result = run_git(
             repo,
             ["ls-remote", "--heads", "origin", branch],
-            timeout=GIT_REMOTE_TIMEOUT_SECONDS,
+            GitRunnerOptions(timeout=GIT_REMOTE_TIMEOUT_SECONDS),
         )
     except subprocess.TimeoutExpired:
         return {"remote_deleted": False, "reason": "remote-unreachable"}

@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.git_command import GitRunnerOptions
 from agents_remember.tasks import TaskDocument, read_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import (
@@ -637,15 +638,17 @@ def _require_bootstrap_ref(
     result = run_git(
         ref.repository,
         ["update-ref", "--stdin"],
-        input_text="\n".join(
-            [
-                "start",
-                f"verify refs/heads/{ref.source_branch} {ref.source_commit}",
-                f"create refs/heads/{ref.branch} {ref.commit}",
-                "prepare",
-                "commit",
-                "",
-            ]
+        GitRunnerOptions(
+            input_text="\n".join(
+                [
+                    "start",
+                    f"verify refs/heads/{ref.source_branch} {ref.source_commit}",
+                    f"create refs/heads/{ref.branch} {ref.commit}",
+                    "prepare",
+                    "commit",
+                    "",
+                ]
+            )
         ),
     )
     if result.returncode != 0:

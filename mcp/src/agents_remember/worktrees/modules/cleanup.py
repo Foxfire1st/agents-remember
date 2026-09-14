@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.errors import CitationCacheError
-from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, run_git
+from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, GitRunnerOptions, run_git
 from agents_remember.kernel.primitives.drift_snapshot import remove_drift_snapshot
 from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
@@ -318,7 +318,11 @@ def _remote_git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]
     already-handled unreachable-remote case rather than escaping as an exception.
     """
     try:
-        return run_git(repo, args, timeout=GIT_REMOTE_TIMEOUT_SECONDS)
+        return run_git(
+            repo,
+            args,
+            GitRunnerOptions(timeout=GIT_REMOTE_TIMEOUT_SECONDS),
+        )
     except subprocess.TimeoutExpired:
         return None
 

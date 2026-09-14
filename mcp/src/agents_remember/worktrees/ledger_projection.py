@@ -41,6 +41,7 @@ from agents_remember.kernel.memory_attribution import (
     code_commit_exists as memory_code_commit_exists,
 )
 from agents_remember.kernel.memory_ledger import (
+    LEDGER_RELATIVE_PATH,
     LEDGER_SCHEMA,
     LedgerError,
     LedgerRow,
@@ -56,7 +57,9 @@ from agents_remember.worktrees.modules.git import (
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-LEDGER_RELATIVE_PATH = "memory.md"
+# ``LEDGER_RELATIVE_PATH`` arrives on the import above and is re-exported by that import alone.
+# It is declared in the kernel because the ledger's path is a property of the ledger format, not
+# of this projection; the callers that already import it from here keep working.
 
 # Rows rendered into an operator payload are capped and counted: the lists are bounded so a
 # pathological ledger cannot inflate a tool response, and the count says what was elided.

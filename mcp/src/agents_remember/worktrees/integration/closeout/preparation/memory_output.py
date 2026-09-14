@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from typing import Literal
 
 from agents_remember.kernel.git_command import (
+    GitRunnerOptions,
     read_git_blob_bytes,
     read_git_commit_bytes,
     run_git,
@@ -225,7 +226,11 @@ def _prepare(
 
 
 def _ledger_tree(root: Path, group: Path, parent: str, content: bytes) -> str:
-    blob = run_git(root, ["hash-object", "-w", "--stdin"], input_text=content.decode("utf-8"))
+    blob = run_git(
+        root,
+        ["hash-object", "-w", "--stdin"],
+        GitRunnerOptions(input_text=content.decode("utf-8")),
+    )
     if blob.returncode != 0:
         refuse("prepared-ledger-blob-failed", "written exact ledger blob", blob.returncode)
     with TemporaryDirectory(prefix="prepared-ledger-index-", dir=group) as directory:

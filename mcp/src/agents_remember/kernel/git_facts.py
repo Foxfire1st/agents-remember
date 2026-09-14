@@ -10,6 +10,7 @@ from typing import Any, Literal, get_args
 from agents_remember.kernel.git_command import (
     GIT_LOCAL_TIMEOUT_SECONDS,
     GIT_METADATA_TIMEOUT_SECONDS,
+    GitRunnerOptions,
     run_git,
 )
 
@@ -76,7 +77,9 @@ def _read_git_facts(repo_id: str, root: Path) -> GitFacts:
     # already runs two of these three at the metadata bound, and one command must not mean
     # two different things inside `kernel/`.
     inside = run_git(
-        root, ["rev-parse", "--is-inside-work-tree"], timeout=GIT_METADATA_TIMEOUT_SECONDS
+        root,
+        ["rev-parse", "--is-inside-work-tree"],
+        GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
     )
     if inside.returncode != 0 or inside.stdout.strip() != "true":
         return GitFacts(
@@ -118,7 +121,11 @@ def git_facts_to_packet(facts: GitFacts) -> dict[str, Any]:
 def _git_stdout(repo_root: Path, args: list[str], *, timeout: float) -> str:
     """Trimmed stdout, empty on failure. ``timeout`` is required -- see :func:`_read_git_facts`."""
 
-    result = run_git(repo_root, args, timeout=timeout)
+    result = run_git(
+        repo_root,
+        args,
+        GitRunnerOptions(timeout=timeout),
+    )
     if result.returncode != 0:
         return ""
     return result.stdout.strip()

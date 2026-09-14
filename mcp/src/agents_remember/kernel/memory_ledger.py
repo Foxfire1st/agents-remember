@@ -18,6 +18,12 @@ LEDGER_SCHEMA = "ar-memory-ledger/v1"
 LEGACY_LEDGER_SCHEMA = "ar-memory-branch-ledger/v1"
 LEDGER_FENCE_RE = re.compile(r"```json\s+ar-memory-ledger\s*\n(.*?)\n```", re.DOTALL)
 
+# Where a repository's ledger lives, relative to its root. Declared beside the format it belongs
+# to rather than beside any one reader: the path is a property of the ledger, and a kernel-level
+# migration that reads the same table must not import a feature package to learn a filename.
+# ``worktrees.ledger_projection`` re-exports it for the callers that already name it from there.
+LEDGER_RELATIVE_PATH = "memory.md"
+
 
 @dataclass(frozen=True)
 class LedgerRow:

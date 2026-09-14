@@ -25,7 +25,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from agents_remember.kernel.git_command import git_environment, run_git
+from agents_remember.kernel.git_command import GitRunnerOptions, git_environment, run_git
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 _PROBE_TIMEOUT_SECONDS = 8
@@ -54,7 +54,9 @@ def _remote_branch(repo: Path, branch: str) -> tuple[str, str | None]:
         return ("missing", None)
     try:
         result = run_git(
-            repo, ["ls-remote", "--heads", "origin", branch], timeout=_PROBE_TIMEOUT_SECONDS
+            repo,
+            ["ls-remote", "--heads", "origin", branch],
+            GitRunnerOptions(timeout=_PROBE_TIMEOUT_SECONDS),
         )
     except (OSError, subprocess.SubprocessError):
         return ("missing", None)
@@ -77,7 +79,9 @@ def _default_branch(repo: Path) -> str:
         return "main"
     try:
         result = run_git(
-            repo, ["ls-remote", "--symref", "origin", "HEAD"], timeout=_PROBE_TIMEOUT_SECONDS
+            repo,
+            ["ls-remote", "--symref", "origin", "HEAD"],
+            GitRunnerOptions(timeout=_PROBE_TIMEOUT_SECONDS),
         )
     except (OSError, subprocess.SubprocessError):
         return "main"

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.coordination_context.models import StorageSettings
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import GitRunnerOptions, run_git
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_ledger import (
     LedgerError,
@@ -112,7 +112,11 @@ def request_from_args(args: argparse.Namespace) -> CarryoverRequest:
 
 
 def require_git(repo: Path, args: list[str], *, input_text: str | None = None) -> str:
-    result = run_git(repo, args, input_text=input_text)
+    result = run_git(
+        repo,
+        args,
+        GitRunnerOptions(input_text=input_text),
+    )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
     return result.stdout.strip()
@@ -183,7 +187,11 @@ def patch_id(repo: Path, base_ref: str, head_ref: str, source_path: str) -> str 
     diff_text = require_git(repo, ["diff", base_ref, head_ref, "--", source_path])
     if not diff_text.strip():
         return None
-    result = run_git(repo, ["patch-id", "--stable"], input_text=diff_text)
+    result = run_git(
+        repo,
+        ["patch-id", "--stable"],
+        GitRunnerOptions(input_text=diff_text),
+    )
     if result.returncode != 0 or not result.stdout.strip():
         return None
     return result.stdout.split()[0]
