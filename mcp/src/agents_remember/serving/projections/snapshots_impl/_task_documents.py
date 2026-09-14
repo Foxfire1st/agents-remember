@@ -10,9 +10,11 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from agents_remember.models.task_intent import (
     AcceptanceObligationQuestion,
@@ -64,6 +66,61 @@ from agents_remember.tasks import (
     step_done,
     step_total,
 )
+from pydantic import ValidationError
+
+# A small fixed bound, not one pass per nesting level: pydantic reports ``extra_forbidden`` at
+# every nesting level in a single error report, so one pruning pass clears a document carrying
+# unknown keys simultaneously at document, step, substep, section, decision and sub-task level.
+# The bound is what stops a loc this reader cannot address from looping -- a loc step that is not
+# a key of the raw payload (the ``ref`` ``SprintExecutionNode._lift_legacy_ref`` invents for a
+# legacy bare node, or a union branch label in an edge endpoint) prunes nothing, so such a
+# document is withheld after the bound exactly as it was before this helper.
+_UNKNOWN_FIELD_PASSES = 4
+
+
+def _projected_document(payload: dict[str, object]) -> TaskDocument | None:
+    """Parse one durable task document for projection, ignoring keys this reader cannot know.
+
+    ``payload`` is durable truth written by *another* process -- the MCP server, a worktree
+    seat, a build older or newer than this reader -- so it may carry a field this reader's
+    ``TaskDocument`` version has never heard of. The authoring model is deliberately strict
+    (``extra="forbid"``) so ``task_doc`` refuses a typo, but re-applying that strictness here
+    deleted the whole document instead: a master's sub-task row then rendered "not authored as
+    a task document yet" instead of drilling in, and the on-demand body endpoint 404'd, with no
+    diagnostic anywhere. A reader must not let one unknown field erase a document.
+
+    Keys pydantic rejects as ``extra_forbidden`` are dropped and the document is validated
+    again; every other failure (missing required field, bad enum, malformed nested value) still
+    yields ``None`` exactly as before.
+    """
+    candidate: Any = payload
+    for _ in range(_UNKNOWN_FIELD_PASSES):
+        try:
+            return TaskDocument.model_validate(candidate)
+        except ValidationError as error:
+            unknown = [item["loc"] for item in error.errors() if item["type"] == "extra_forbidden"]
+            if not unknown:
+                return None
+            candidate = _without_paths(candidate, unknown)
+    return None
+
+
+def _without_paths(payload: Any, paths: list[tuple[Any, ...]]) -> Any:
+    """A deep copy of ``payload`` with every addressed key removed."""
+    pruned = deepcopy(payload)
+    for loc in paths:
+        target = pruned
+        for key in loc[:-1]:
+            try:
+                target = target[key]
+            except (KeyError, IndexError, TypeError):
+                break
+        else:
+            if isinstance(target, dict):
+                target.pop(loc[-1], None)
+            elif isinstance(target, list) and isinstance(loc[-1], int):
+                target.pop(loc[-1])
+    return pruned
 
 
 def read_task_documents(
@@ -91,9 +148,8 @@ def read_task_documents(
     master_docs = _master_docs_by_ref(docs)
     nodes: list[TaskDocNode] = []
     for path, payload in docs:
-        try:
-            doc = TaskDocument.model_validate(payload)
-        except ValueError:
+        doc = _projected_document(payload)
+        if doc is None:
             continue
         nodes.append(
             _task_doc_node(
@@ -132,9 +188,8 @@ def read_task_document_body(  # pragma: no cover
     payload = _read_json(resolved)
     if payload is None or payload.get("schema") != TASK_DOCUMENT_SCHEMA:
         return None
-    try:
-        doc = TaskDocument.model_validate(payload)
-    except ValueError:
+    doc = _projected_document(payload)
+    if doc is None:
         return None
     lifecycle_maps = _task_document_lifecycle_maps(enclosures)
     docs = _bounded_task_document_payloads(
@@ -231,9 +286,8 @@ def read_series_documents(
     ):
         if payload.get("kind") != "master":
             continue
-        try:
-            doc = TaskDocument.model_validate(payload)
-        except ValueError:
+        doc = _projected_document(payload)
+        if doc is None:
             continue
         nodes.append(
             SeriesNode(
@@ -302,9 +356,8 @@ def _series_subtask_created_at(base_dir: Path, ref_file: str) -> str | None:  # 
         return None
     if payload.get("kind") == "master":
         return None
-    try:
-        doc = TaskDocument.model_validate(payload)
-    except ValueError:
+    doc = _projected_document(payload)
+    if doc is None:
         return None
     return doc.createdAt
 
@@ -406,9 +459,8 @@ def _master_docs_by_ref(
     for path, payload in docs:
         if payload.get("kind") != "master":
             continue
-        try:
-            doc = TaskDocument.model_validate(payload)
-        except ValueError:
+        doc = _projected_document(payload)
+        if doc is None:
             continue
         repository = doc.repo
         # Task payloads are always depth-3 under the tasks root (``_iter_task_json``), so the

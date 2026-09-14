@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
+from agents_remember.observer.projection import TaskDocNode
 from agents_remember.serving.projections.snapshots_impl._task_documents import (
     read_task_documents,
 )
@@ -217,3 +219,125 @@ class TaskDocumentsGraphViewProjectionTests(unittest.TestCase):
         assert view is not None
         segment = next(node for node in view.nodes if node.kind == "segment")
         self.assertEqual(segment.leafTitles, ["Title from A"])
+
+
+def _index_doc(nodes: list[TaskDocNode], master_doc_path: str, file: str) -> TaskDocNode | None:
+    """The dashboard's own index rule (``sliceForRef``): the master's folder, the row's file stem.
+
+    A row drills in only when the projected pool holds a document in the master's own directory
+    whose file stem is the row's ``file``; a document withheld from the pool leaves the row as
+    dead text, so this is the exact property the projection owes every authored row.
+    """
+    directory = Path(master_doc_path).parent
+    stem = Path(file).stem
+    return next(
+        (
+            node
+            for node in nodes
+            if Path(node.docPath).parent == directory and Path(node.docPath).stem == stem
+        ),
+        None,
+    )
+
+
+class SubTaskIndexReachabilityTests(unittest.TestCase):
+    """A master's sub-task row stays reachable whatever build wrote the leaf document.
+
+    The projection reads durable documents written by other, independently versioned processes,
+    so one of them may carry a field this reader's schema has never heard of. Strict-only parsing
+    deleted that whole document, and the master's row then rendered as "not authored as a task
+    document yet" instead of drilling in -- completed leaves first, because a step is where a
+    newer writer records what actually happened.
+    """
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.coord = Path(self._dir.name)
+        self.root = self.coord / "tasks" / REPO / "series"
+
+    def _leaf(self, slug: str, *, status: str, step_status: str) -> TaskDocument:
+        return _doc(
+            id=slug.upper(),
+            slug=slug,
+            kind="subTask",
+            title=f"Leaf {slug}",
+            status=status,
+            seriesContractPath="enclosures/leaf/contract.md",
+            steps=[{"id": "S1", "title": "One", "status": step_status}],
+        )
+
+    def _write_master(self) -> None:
+        write_task_doc(
+            self.root,
+            TaskDocument.model_validate(
+                {
+                    "id": "SERIES",
+                    "slug": "series",
+                    "title": "Series",
+                    "kind": "master",
+                    "status": "inProgress",
+                    "repo": REPO,
+                    "createdAt": "2026-08-15T00:00:00+00:00",
+                    "executionNature": "atomic",
+                    "subTasks": [
+                        {
+                            "number": "D-L1",
+                            "name": "Done leaf",
+                            "file": "01_done.md",
+                            "status": "Completed",
+                        },
+                        {
+                            "number": "D-L2",
+                            "name": "Planned leaf",
+                            "file": "02_planned.md",
+                            "status": "planning",
+                        },
+                        {
+                            "number": "D-L3",
+                            "name": "Broken leaf",
+                            "file": "03_broken.md",
+                            "status": "planning",
+                        },
+                    ],
+                }
+            ),
+        )
+
+    def test_completed_leaf_written_by_another_build_stays_reachable_from_the_index(self) -> None:
+        write_task_doc(self.root, self._leaf("01_done", status="Completed", step_status="done"))
+        write_task_doc(
+            self.root, self._leaf("02_planned", status="planning", step_status="pending")
+        )
+        # Republish the completed leaf as a build that knows MORE than this reader: the field sits
+        # on the step, which is where the live skew landed. ``write_task_doc`` refuses it (the
+        # authoring model is strict on purpose), so the durable file is written directly.
+        payload = json.loads((self.root / "01_done.json").read_text(encoding="utf-8"))
+        payload["steps"][0]["checkpoint"] = "recorded by a newer build"
+        (self.root / "01_done.json").write_text(
+            json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+        )
+        # A genuinely broken document (a required field never reached the file) is still withheld:
+        # tolerating an unknown key must not become projecting anything.
+        broken = json.loads((self.root / "02_planned.json").read_text(encoding="utf-8"))
+        broken["slug"] = "03_broken"
+        del broken["title"]
+        (self.root / "03_broken.json").write_text(
+            json.dumps(broken, indent=2) + "\n", encoding="utf-8"
+        )
+        self._write_master()
+
+        nodes = read_task_documents(self.coord, enclosures=[], now=FRESH)
+        master = next(node for node in nodes if node.kind == "master")
+        resolved = {
+            row.number: _index_doc(nodes, master.docPath, row.file) for row in master.subTasks
+        }
+        self.assertIsNotNone(resolved["D-L1"])  # completed, written by a newer build
+        self.assertIsNotNone(resolved["D-L2"])  # unstarted, written by this build
+        self.assertIsNone(resolved["D-L3"])  # broken: withheld exactly as before
+        completed = resolved["D-L1"]
+        assert completed is not None
+        self.assertEqual(
+            (completed.id, completed.status, completed.stepsDone, completed.stepsTotal),
+            ("01_DONE", "Completed", 1, 1),
+        )
