@@ -13,9 +13,11 @@ repository, and the byte digests of everything the pause could have touched. A r
 new commit object, a landing, a ledger row or a leaf advance all show up as a difference.
 
 Each case below fails independently: the no-publication measurement, the hand-back payload,
-each refusal, leave-idempotence, per-contract record isolation, and resume are separate
-operations, and merging any two of them would make a failure ambiguous. They share this
-module's one fixture and its measurement helpers and nothing else.
+the already-vacant success, each refusal shape (a leaf contract, a record this contract does
+not own, an unreadable record, and a record naming another master), the released
+idempotence, per-contract record isolation, and resume are separate operations, and merging
+any two of them would make a failure ambiguous. They share this module's one fixture and its
+measurement helpers and nothing else.
 
 ``worktree_checkpoint_landing`` is the SEPARATE, explicitly requested publication. No case
 here reaches it, and none may: a test that paused a master by landing it would be proving the
@@ -265,23 +267,54 @@ class PauseStopsAnAtomicMasterTests(unittest.TestCase):
 
         A master between landings holds no selection, so this is the ordinary state of a master
         the developer wants parked rather than an error: the intent is already satisfied, and
-        the pause reports it in its own state instead of failing. The success must still be
-        inert -- no activation record, no coordination write, no ref move.
+        the pause reports it in its own state instead of failing. The success has to be
+        EXPLICIT -- a caller must be able to tell "nothing was held" from a real release, in the
+        state it reports and in the words it uses -- and it must still be inert: no activation
+        record, no coordination write, no ref move, no commit and no ledger row.
         """
 
         self.assertEqual(self._activation_bytes(), {})
         before = self._world()
+        tips_before = self._tips()
+        documents_before = self._documents()
+        ledger_path = self.series_b.ledger_path
+        assert ledger_path is not None
+        ledger_before = ledger_path.read_bytes()
 
         stopped = self._pause(self.series_b)
 
         self.assertTrue(stopped["ok"], stopped)
+        # Named, not silent: the pause reports the already-vacant state, and that state is not
+        # the one a real release reports, so the two outcomes cannot be confused.
         self.assertEqual(stopped["state"], "atomic-series-already-vacant")
+        self.assertEqual(stopped["status"], "atomic-series-already-vacant")
+        self.assertNotEqual(stopped["state"], "paused")
         self.assertIs(stopped["paused"], True)
-        self.assertEqual(stopped["atomicSeriesActivation"]["state"], "vacant")
-        self.assertNotIn("nextTool", stopped)
-        # An already-stopped master is not a written one: nothing was created to say so.
+        summary = stopped["summary"]
+        assert isinstance(summary, str)
+        self.assertIn("already stopped", summary)
+        self.assertIn("held no atomic-series selection", summary)
+        self.assertIn("nothing was published", summary)
+        # Nothing was released, and the payload shows it in the one place a release would: an
+        # observed vacancy with no record behind it, where a released pause carries the record
+        # its own release wrote.
+        observed = stopped["atomicSeriesActivation"]
+        assert isinstance(observed, dict)
+        self.assertEqual(observed["state"], "vacant")
+        self.assertNotIn("record", observed)
+        # The hand-back is the released pause's own: a summary, and no proposed call anywhere.
+        next_step = stopped["nextStep"]
+        assert isinstance(next_step, dict)
+        self.assertEqual(list(next_step), ["summary"])
+        for proposed in ("nextTool", "nextArgs", "nextOperation"):
+            self.assertNotIn(proposed, stopped)
+            self.assertNotIn(proposed, next_step)
+        # Inert: nothing was created to say so, and nothing else moved either.
         self.assertEqual(self._activation_bytes(), {})
         self.assertEqual(self._world(), before)
+        self.assertEqual(self._tips(), tips_before)
+        self.assertEqual(self._documents(), documents_before)
+        self.assertEqual(ledger_path.read_bytes(), ledger_before)
 
     def test_pausing_an_already_released_master_is_idempotent(self) -> None:
         """A second pause reports the same stopped master and releases nothing new."""
@@ -408,6 +441,89 @@ class PauseStopsAnAtomicMasterTests(unittest.TestCase):
         self.assertEqual(foreign_path.read_bytes(), tampered)
         self.assertEqual(self._world(), before)
         self.assertEqual(observe_atomic_series(self.series_b).state, "active")
+
+    def test_an_unreadable_record_is_refused_not_reported_stopped(self) -> None:
+        """Bytes that cannot be read are not evidence of vacancy, so they refuse.
+
+        The already-vacant success is answered only from an OBSERVED vacancy, and a record that
+        exists but cannot be parsed proves nothing about whether this master is working. The
+        pause therefore refuses with the release's own status -- it does not report a stop it
+        cannot justify, and it neither repairs nor releases the bytes it could not read.
+        """
+
+        unreadable_path = activation_path(self.series_b.coordination_root, self.series_b)
+        unreadable_path.parent.mkdir(parents=True, exist_ok=True)
+        unreadable_path.write_bytes(b"{ this is not an activation record")
+        unreadable = unreadable_path.read_bytes()
+        before = self._world()
+
+        refused = self._pause(self.series_b)
+
+        self.assertFalse(refused["ok"], refused)
+        self.assertEqual(refused["state"], "atomic-series-activation-release-unreadable")
+        self.assertNotEqual(refused["state"], "atomic-series-already-vacant")
+        self.assertIs(refused["paused"], False)
+        detail = refused["detail"]
+        assert isinstance(detail, str)
+        self.assertIn("unreadable", detail)
+        # Refused, not repaired and not released: the bytes and everything else are untouched.
+        self.assertEqual(unreadable_path.read_bytes(), unreadable)
+        self.assertEqual(self._world(), before)
+
+    def test_a_record_naming_another_master_is_refused_not_released(self) -> None:
+        """A record of someone else's selection is refused, never released and never a stop.
+
+        This record reads as ``vacant`` -- the same state a release leaves behind, and the state
+        the already-vacant success is answered from -- so it is the one shape that could be
+        mistaken for it. It is not this contract's record: its ``selectedMaster`` names the other
+        atomic master. The already-stopped answer is taken from this contract's own vacancy plus
+        the release's exact-owner proof, so an impostor refuses instead: the release refuses to
+        release a selection this master does not hold, and the pause carries that refusal rather
+        than reporting a stop. The record is neither released nor repaired, and the master it
+        names keeps working.
+        """
+
+        self._select(self.series_b)
+        other_record = self._record_bytes(self.series_b)
+        foreign_path = activation_path(self.series_a.coordination_root, self.series_a)
+        foreign_path.parent.mkdir(parents=True, exist_ok=True)
+        foreign_path.write_text(
+            json.dumps(
+                AtomicSeriesActivationRecord(
+                    contractFingerprint=contract_fingerprint(self.series_a),
+                    selectedMaster=series_master_ref(self.series_b),
+                    contractPath=self.series_a.contract_path.resolve().as_posix(),
+                    state="vacant",
+                    revision=7,
+                    selectedAt=TAMPERED_AT,
+                ).model_dump(mode="json")
+            ),
+            encoding="utf-8",
+        )
+        tampered = foreign_path.read_bytes()
+        # The premise that makes this case worth its own: the tampered record reads vacant, so a
+        # pause that answered vacancy alone would report this master stopped.
+        self.assertEqual(observe_atomic_series(self.series_a).state, "vacant")
+        before = self._world()
+
+        refused = self._pause(self.series_a)
+
+        self.assertFalse(refused["ok"], refused)
+        self.assertEqual(refused["state"], "atomic-series-activation-selected-contract-mismatch")
+        self.assertNotEqual(refused["state"], "atomic-series-already-vacant")
+        self.assertIs(refused["paused"], False)
+        detail = refused["detail"]
+        assert isinstance(detail, str)
+        self.assertIn("names another atomic master", detail)
+        # Refused, not released and not repaired: the foreign record is byte-identical, the
+        # master it names keeps working, and nothing else moved.
+        self.assertEqual(foreign_path.read_bytes(), tampered)
+        self.assertEqual(self._record_bytes(self.series_b), other_record)
+        self.assertEqual(observe_atomic_series(self.series_b).state, "active")
+        self.assertEqual(self._world(), before)
+        self.assertEqual(self._record_bytes(self.series_b), other_record)
+        self.assertEqual(observe_atomic_series(self.series_b).state, "active")
+        self.assertEqual(self._world(), before)
 
     def test_resuming_a_paused_master_restores_work_with_nothing_published(self) -> None:
         """The pause is reversible, and the interval between stop and resume publishes nothing."""
