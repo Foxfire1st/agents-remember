@@ -171,6 +171,7 @@ integration = [
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_serving.py",
   "mcp/tests/test_serving_files.py",
+  "mcp/tests/test_serving_terminal_catalog_read.py",
   "mcp/tests/test_spawn_agent_session.py",
   "mcp/tests/test_task_doc_structural_publication_l2.py",
   "mcp/tests/test_task_document_master.py",
