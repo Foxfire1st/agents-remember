@@ -97,6 +97,7 @@ unit-regression = [
   "mcp/tests/test_semantic_topology_refusals.py",
   "mcp/tests/test_serving_notifier_handoff.py",
   "mcp/tests/test_serving_observation_loop.py",
+  "mcp/tests/test_serving_shutdown_drain.py",
   "mcp/tests/test_serving_startup_prime.py",
   "mcp/tests/test_signal_routing.py",
   "mcp/tests/test_sprint_role_seats.py",
