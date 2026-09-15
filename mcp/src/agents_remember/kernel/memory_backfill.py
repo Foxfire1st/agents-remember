@@ -761,8 +761,8 @@ def _rewrite_history(memory_repo: Path, plan: MemoryBackfillPlan) -> dict[str, s
     "the identity map is the idempotence proof" literally true: on an already-migrated history
     every entry is its own key.
 
-    ``git rev-list --reverse --all`` is topological and oldest-first, so each commit's parents
-    are already decided when it is reached and no second pass is needed. The whole reachable
+    ``git rev-list --reverse --topo-order --all`` visits parents first even when timestamps
+    are tied or skewed, so every parent is decided before its child. The whole reachable
     history is walked rather than one branch, because a trailer written on a commit reached only
     through a side branch still changes that commit's id, so its descendants move with it
     whether or not this run names their ref.
@@ -782,7 +782,7 @@ def _rewrite_history(memory_repo: Path, plan: MemoryBackfillPlan) -> dict[str, s
 
 
 def _walk(memory_repo: Path) -> list[str]:
-    result = run_git(memory_repo, ["rev-list", "--reverse", "--all"])
+    result = run_git(memory_repo, ["rev-list", "--reverse", "--topo-order", "--all"])
     if result.returncode != 0:
         raise MemoryBackfillRefusal(
             f"the history in {memory_repo.as_posix()} cannot be walked: "

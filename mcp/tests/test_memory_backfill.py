@@ -435,6 +435,7 @@ class MemoryBackfillApplyTests(unittest.TestCase):
     def test_every_commit_keeps_its_tree_identity_and_dates(self) -> None:
         code = self.fixture.build_code(1)
         memory = self.fixture.build_memory(3)
+        run_git(self.fixture.memory, ["branch", "a-source", memory[2]]).check_returncode()
         self.fixture.table([(code[0], memory[2])])
         tip = self.fixture.tip()
         shape = "%T|%an|%ae|%aI|%cn|%ce|%cI|%s"
@@ -443,6 +444,14 @@ class MemoryBackfillApplyTests(unittest.TestCase):
         after = run_git(self.fixture.memory, ["log", f"--format={shape}", result.new_tip]).stdout
 
         self.assertEqual(before, after, "a rewrite may add a trailer and change nothing else")
+        for original, rewritten in result.rewritten_ids.items():
+            parents = run_git(
+                self.fixture.memory, ["show", "-s", "--format=%P", original]
+            ).stdout.split()
+            actual = run_git(
+                self.fixture.memory, ["show", "-s", "--format=%P", rewritten]
+            ).stdout.split()
+            self.assertEqual(actual, [result.rewritten_ids[parent] for parent in parents])
 
     def test_the_identity_map_is_total_so_every_original_id_has_a_replacement(self) -> None:
         code = self.fixture.build_code(1)
