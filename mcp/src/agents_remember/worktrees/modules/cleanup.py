@@ -8,6 +8,7 @@ from typing import Literal
 
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, GitRunnerOptions, run_git
+from agents_remember.kernel.memory_cache import discard_memory_cache_changes
 from agents_remember.kernel.primitives.drift_snapshot import remove_drift_snapshot
 from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
@@ -66,6 +67,7 @@ class _TerminalMutationAuthority:
 
     operation: Literal["worktree_cleanup", "worktree_abandon"]
     worktrees: frozenset[tuple[Path, Path]]
+    memory_worktree: Path | None
     branches: frozenset[tuple[Path, str, str]]
     remote_branches: frozenset[tuple[Path, str]]
     _capability: object
@@ -87,6 +89,7 @@ def _terminal_mutation_authority(
     worktrees: set[tuple[Path, Path]] = set()
     branches: set[tuple[Path, str, str]] = set()
     remote_branches: set[tuple[Path, str]] = set()
+    memory_worktree = None
 
     code_repository = _required_repository_identity(contract.code_repo_path, "code")
     if contract.kind == "leaf":
@@ -99,7 +102,8 @@ def _terminal_mutation_authority(
     if contract.memory_mode == "external" and contract.memory_repo_path is not None:
         memory_repository = _required_repository_identity(contract.memory_repo_path, "memory")
         if contract.kind == "leaf" and contract.memory_worktree is not None:
-            worktrees.add((memory_repository, contract.memory_worktree.resolve()))
+            memory_worktree = contract.memory_worktree.resolve()
+            worktrees.add((memory_repository, memory_worktree))
         branches.add(
             (
                 memory_repository,
@@ -110,6 +114,7 @@ def _terminal_mutation_authority(
     return _TerminalMutationAuthority(
         operation=operation,
         worktrees=frozenset(worktrees),
+        memory_worktree=memory_worktree,
         branches=frozenset(branches),
         remote_branches=frozenset(remote_branches),
         _capability=_TERMINAL_MUTATION_CAPABILITY,
@@ -188,6 +193,9 @@ def remove_registered_worktree(
         return {"path": worktree.as_posix(), "removed": False, "reason": "already-absent"}
     if dry_run:
         return {"path": worktree.as_posix(), "removed": False, "would_remove": True}
+    assert authority is not None
+    if worktree.resolve() == authority.memory_worktree:
+        discard_memory_cache_changes(worktree)
     command = ["worktree", "remove", *(["--force"] if force else []), str(worktree)]
     result = run_git(repo, command)
     if result.returncode != 0:

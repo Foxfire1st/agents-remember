@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, GitRunnerOptions, run_git
+from agents_remember.kernel.memory_ledger import MEMORY_CACHE_EXCLUDE
 from agents_remember.worktrees.modules.git import local_branch_ref, repository_identity
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -307,10 +308,10 @@ def _worktree_preflight(
                 "reason": "already-absent",
             }
             continue
-        status = run_git(
-            worktree,
-            ["status", "--porcelain=v1", "--untracked-files=all"],
-        )
+        status_args = ["status", "--porcelain=v1", "--untracked-files=all"]
+        if key == "memory":
+            status_args.extend(["--", ".", MEMORY_CACHE_EXCLUDE])
+        status = run_git(worktree, status_args)
         if status.returncode != 0:
             reason = status.stderr.strip() or "git status failed"
             previews[key] = {"path": worktree.as_posix(), "reason": reason}

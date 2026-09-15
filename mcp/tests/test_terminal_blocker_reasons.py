@@ -125,6 +125,15 @@ def test_a_torn_down_provider_runtime_finalizes_on_the_first_call(
     """
 
     closed = _landed_leaf(tmp_path)
+    preview = worktree_tools.worktree_abandon_tool(
+        _public_config(tmp_path, closed),
+        contract_path=closed.contract_path.as_posix(),
+        dry_run=True,
+        force=True,
+    )
+    assert preview["state"] == "would-abandon", preview
+    assert preview["blockers"] == []
+    assert closed.code_worktree.exists()
     config = _landed_leaf_config(tmp_path, closed)
     provider_runtime = closed.worktree_group / "provider-runtime"
     if provider_runtime.exists():

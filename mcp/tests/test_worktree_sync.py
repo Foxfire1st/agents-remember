@@ -21,8 +21,13 @@ from agents_remember.kernel.memory_ledger import create_initial_ledger, write_le
 from agents_remember.worktrees import sync_transaction_git
 from agents_remember.worktrees.integration.closeout.door_evidence import memory_candidate_tree
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.cleanup import (
+    _terminal_mutation_authority,
+    remove_registered_worktree,
+)
 from agents_remember.worktrees.modules.startup.start_memory import prepare_memory_for_start
 from agents_remember.worktrees.modules.sync import sync_result
+from agents_remember.worktrees.modules.terminal_validation import terminal_preflight
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationStore,
 )
@@ -238,6 +243,50 @@ class WorktreeSyncTests(unittest.TestCase):
                 "new memory\n", encoding="utf-8"
             )
             self.assertNotEqual(memory_candidate_tree(contract), tree)
+
+    def test_terminal_removal_discards_only_the_memory_cache(self) -> None:
+        for state in ("tracked", "missing", "staged", "untracked"):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as tmp:
+                fixture = SyncFixture(Path(tmp))
+                contract = fixture.contract
+                memory = contract.memory_worktree
+                assert memory is not None
+                cache = memory / "memory.md"
+                if state == "untracked":
+                    git(memory, "rm", "--cached", "memory.md")
+                    git(memory, "commit", "-m", "Fixture without a tracked cache")
+                if state == "missing":
+                    cache.unlink()
+                else:
+                    cache.write_text("<<<<<<< disposable cache\n", encoding="utf-8")
+                if state == "staged":
+                    git(memory, "add", "-f", "memory.md")
+                plan = terminal_preflight(contract, mode="abandon", force=False)
+                self.assertFalse([row for row in plan.blockers if "worktree" in row])
+
+                real = memory / "memory.md.other"
+                real.write_text("keep real memory\n", encoding="utf-8")
+                plan = terminal_preflight(contract, mode="abandon", force=False)
+                self.assertIn({"worktree": "memory", "reason": "dirty"}, plan.blockers)
+                authority = _terminal_mutation_authority(contract, operation="worktree_abandon")
+                refused = remove_registered_worktree(
+                    fixture.memory_repo, memory, False, authority=authority
+                )
+                self.assertFalse(refused["removed"], refused)
+                self.assertEqual(real.read_text(encoding="utf-8"), "keep real memory\n")
+                real.unlink()
+
+                code_file = contract.code_worktree / "memory.md"
+                code_file.write_text("keep code content\n", encoding="utf-8")
+                refused = remove_registered_worktree(
+                    fixture.code_repo, contract.code_worktree, False, authority=authority
+                )
+                self.assertFalse(refused["removed"], refused)
+                removed = remove_registered_worktree(
+                    fixture.memory_repo, memory, False, authority=authority
+                )
+                self.assertTrue(removed["removed"], removed)
+                self.assertEqual(code_file.read_text(encoding="utf-8"), "keep code content\n")
 
     def test_a_descendant_memory_ledger_that_dropped_a_source_row_is_current(self) -> None:
         """The projection is the ledger's authority, so a dropped row is not a sync refusal.

@@ -89,3 +89,23 @@ def refresh_memory_cache(
         }
     except (OSError, UnicodeError, LedgerError, MemoryAttributionError) as error:
         return {"state": "unavailable", "path": target.as_posix(), "reason": str(error)}
+
+
+def discard_memory_cache_changes(repository: Path) -> None:
+    """Discard only the cache before an authorized memory-worktree removal.
+
+    Git still checks every other path during ordinary, non-forced worktree removal.
+    A tracked cache is restored from HEAD; an untracked cache is removed.
+    """
+    tracked = run_git(repository, ["ls-tree", "--name-only", "HEAD", "--", LEDGER_RELATIVE_PATH])
+    if tracked.returncode:
+        raise RuntimeError(tracked.stderr.strip() or "could not inspect memory cache tracking")
+    command = (
+        ["restore", "--source=HEAD", "--staged", "--worktree", "--", LEDGER_RELATIVE_PATH]
+        if tracked.stdout.strip()
+        else ["rm", "--cached", "--force", "--ignore-unmatch", "--", LEDGER_RELATIVE_PATH]
+    )
+    for args in (command, ["clean", "--force", "--", LEDGER_RELATIVE_PATH]):
+        result = run_git(repository, args)
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or "could not discard memory cache changes")

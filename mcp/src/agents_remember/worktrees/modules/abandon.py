@@ -301,6 +301,7 @@ def _abandon_outputs_result(
             worktrees=removed_worktrees,
             branches=branches,
             directories=directories,
+            preview=args.dry_run,
         )
     )
     if blockers and not args.dry_run:
