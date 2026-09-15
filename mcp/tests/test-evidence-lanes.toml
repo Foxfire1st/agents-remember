@@ -65,6 +65,7 @@ unit-regression = [
   "mcp/tests/test_install_runtime.py",
   "mcp/tests/test_kernel_pure_regressions.py",
   "mcp/tests/test_lifecycle_operation_model_helpers.py",
+  "mcp/tests/test_lifecycle_owned_completion_relay_reviewer.py",
   "mcp/tests/test_memory_attribution_producers.py",
   "mcp/tests/test_memory_backfill.py",
   "mcp/tests/test_memory_citation_fix_scopes.py",
