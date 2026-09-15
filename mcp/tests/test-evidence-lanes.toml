@@ -32,6 +32,7 @@ unit-regression = [
   "mcp/tests/test_code_quality_targeted.py",
   "mcp/tests/test_codex_native_history.py",
   "mcp/tests/test_compact_content.py",
+  "mcp/tests/test_completion_relay_single_owner.py",
   "mcp/tests/test_config.py",
   "mcp/tests/test_context_providers.py",
   "mcp/tests/test_controlplane_gates.py",
