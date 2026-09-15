@@ -47,6 +47,9 @@ from agents_remember.serving.heap_diag import (
     trim_malloc,
 )
 from agents_remember.serving.relay_death_watch import relay_death_watch_loop
+from agents_remember.serving.terminal_liveness import (
+    DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS,
+)
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
@@ -68,6 +71,26 @@ async def _to_thread_drained_on_cancel[**Args, Result](
         with contextlib.suppress(Exception):
             await worker
         raise
+
+
+async def _terminal_observation_loop(runtime: _ServingRuntime) -> None:
+    """The serving lifetime's steady-state owner of terminal catalog observation.
+
+    Adapter terminal evidence is produced outside the dashboard, so the recurring refresh must
+    not depend on an HTTP request, an open dashboard, or the agent notifier being enabled: the
+    catalog is shared truth for both the routes and the notifier. The sleep is taken AFTER each
+    attempt returns, which is what makes the cadence completion-relative -- a slow sweep delays
+    the next attempt instead of queueing nominal ticks, and two attempts can never overlap. Both
+    the one-second starting-row and the full-sweep rate limits stay inside
+    ``TerminalCatalogLivenessSweeper.refresh``; this loop owns only the attempt cadence.
+    """
+
+    while True:
+        try:
+            await _to_thread_drained_on_cancel(runtime.liveness_sweeper.refresh)
+        except Exception:
+            logger.exception("terminal catalog observation failed; retrying next interval")
+        await asyncio.sleep(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS)
 
 
 async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetricsStore) -> None:
@@ -227,6 +250,7 @@ def _serving_lifespan(
         await runtime.projector.prime()
         projection_task = asyncio.create_task(runtime.projector.run())
         metrics_task = asyncio.create_task(_metrics_loop(runtime.config, metrics_store))
+        terminal_observation_task = asyncio.create_task(_terminal_observation_loop(runtime))
         agent_notifier_task = asyncio.create_task(_agent_notifier_loop(runtime))
         relay_death_watch_task = asyncio.create_task(relay_death_watch_loop(runtime))
         river_compaction_task = asyncio.create_task(_workspace_river_compaction_loop(runtime))
@@ -239,6 +263,7 @@ def _serving_lifespan(
         if malloc_trim_enabled():
             optional.append(asyncio.create_task(_malloc_trim_loop()))
         background = [
+            terminal_observation_task,
             river_compaction_task,
             agent_notifier_task,
             relay_death_watch_task,
