@@ -427,6 +427,30 @@ const VOCABULARIES: Record<
     'unreadable',
     'invalid',
   ],
+  // The observer-health row rides the SAME served body as the notifier heartbeat and is sampled
+  // here in its DEGRADED reading. That reading is not a convenience: three of these five unions are
+  // nullable (`activeFailureCategory`/`Type`/`Summary`), and a payload carrying the nulls of the
+  // healthy case could not satisfy a string vocabulary check at all — the drop to null is legal but
+  // unsampleable, so the fixture carries the served shape an operator actually needs to see.
+  'projection.terminalObserverHealth.status': ['initializing', 'degraded', 'healthy', 'stale'],
+  'projection.terminalObserverHealth.schemaVersion': ['ar-terminal-observer-health/v1'],
+  'projection.terminalObserverHealth.activeFailureCategory': [
+    'startup-refresh-failed',
+    'steady-state-refresh-failed',
+  ],
+  'projection.terminalObserverHealth.activeFailureSummary': [
+    'startup terminal observation failed',
+    'steady-state terminal observation failed',
+  ],
+  'projection.terminalObserverHealth.activeFailureType': [
+    'HarnessControlError',
+    'TimeoutError',
+    'ConnectionError',
+    'OSError',
+    'RuntimeError',
+    'ValueError',
+    'Exception',
+  ],
 };
 
 // Reads every value the payload carries at one of the registry's dotted paths. `[]` fans out over

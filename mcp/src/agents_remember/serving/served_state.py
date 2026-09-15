@@ -44,13 +44,17 @@ from agents_remember.models.core import ServingBuildPayload
 from agents_remember.observer.projection import WorkspaceProjection
 from agents_remember.serving.agent_notifier_heartbeat import AgentNotifierHeartbeatPayload
 from agents_remember.serving.build_info import ServingBuild
+from agents_remember.serving.terminal_observer_health import TerminalObserverHealthPayload
 
 
 class ServedWorkspaceProjection(WorkspaceProjection):
     """A ``WorkspaceProjection`` as ``/api/state`` and the SSE ``snapshot`` emit it.
 
-    Both fields are optional: ``stream_events`` serves a snapshot with neither when it is
-    driven without a build stamp or a heartbeat reader, and that is a valid served body.
+    The tail fields are optional: ``stream_events`` serves a snapshot without them when it is
+    driven without a build stamp, a heartbeat reader, or an observer-health source, and that is a
+    valid served body. ``terminalObserverHealth`` is additionally absent whenever no valid record
+    for the CURRENT serving lifetime exists -- absence is the declared answer there, never a
+    fabricated status and never another lifetime's bytes.
     """
 
     servingBuild: ServingBuildPayload | None = None
@@ -58,19 +62,24 @@ class ServedWorkspaceProjection(WorkspaceProjection):
     # Legacy alias emitted alongside the current key during the rename window; the consumer
     # fallback in ``dashboard/src/data/store.ts`` reads either. Removed with the window.
     supervisorHeartbeat: AgentNotifierHeartbeatPayload | None = None
+    terminalObserverHealth: TerminalObserverHealthPayload | None = None
 
 
 SERVED_TAIL_FIELDS: tuple[str, ...] = (
     "servingBuild",
     "agentNotifierHeartbeat",
     "supervisorHeartbeat",
+    "terminalObserverHealth",
 )
 """The keys :func:`served_state_tail` may add -- exactly this model's extension over the
 projection it wraps. Named so the assembly and the contract cannot drift apart silently."""
 
 
 def served_state_tail(
-    *, build: ServingBuild | None, heartbeat: AgentNotifierHeartbeatPayload | None
+    *,
+    build: ServingBuild | None,
+    heartbeat: AgentNotifierHeartbeatPayload | None,
+    observer_health: TerminalObserverHealthPayload | None = None,
 ) -> dict[str, Any]:
     """The serve-time tail, JSON-ready, to be merged onto a copy of the memoized dump.
 
@@ -80,6 +89,13 @@ def served_state_tail(
     state, not a missing key). The heartbeat payload is emitted under BOTH the current
     ``agentNotifierHeartbeat`` key and the legacy ``supervisorHeartbeat`` alias for the
     rename window. ``exclude_none`` is recursive, so one shared dump could not do both.
+
+    ``terminalObserverHealth`` is ADDITIVE and omissive, and it follows the ``servingBuild`` rule
+    rather than the heartbeat rule for a reason the packet makes load-bearing: a caller with no
+    valid record for the current serving lifetime has nothing honest to report, so the key is
+    absent rather than null, and every pre-existing served field keeps exactly its old value and
+    meaning. Once it IS present the payload carries its own explicit nulls, because there
+    ``lastAttemptAt: null`` is a reported fact about this lifetime.
     """
     tail: dict[str, Any] = {}
     if build is not None:
@@ -88,4 +104,6 @@ def served_state_tail(
         payload = heartbeat.model_dump(mode="json")
         tail["agentNotifierHeartbeat"] = payload
         tail["supervisorHeartbeat"] = payload
+    if observer_health is not None:
+        tail["terminalObserverHealth"] = observer_health.model_dump(mode="json")
     return tail

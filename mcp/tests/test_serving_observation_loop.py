@@ -8,11 +8,19 @@ no browser, no real second -- so the completion-relative attempt cadence, attemp
 the sweeper's own full-sweep rate limit are observed deterministically.
 
 The second half of the module pins ``LOCR-R11@v1``: an exception escaping one pass neither ends the
-recurring owner nor touches a sibling serving task, publishes nothing durable (a failed pass records
-no success fact and no diagnostic row, event, or payload -- ``LOCR-R17@v1`` owns the only structured
-observer-failure publication), leaves already-committed catalog rows, workspace cursors, terminal
-evidence, and emitted-signal markers exactly as they were, retries on the next cadence from that
-persisted state with no request, restart, or catalog edit, and never swallows cancellation.
+recurring owner nor touches a sibling serving task, publishes nothing durable of its own (a failed
+pass records no success fact and no diagnostic row, event, or payload -- ``LOCR-R17@v1`` owns the
+only structured observer-failure publication), leaves already-committed catalog rows, workspace
+cursors, terminal evidence, and emitted-signal markers exactly as they were, retries on the next
+cadence from that persisted state with no request, restart, or catalog edit, and never swallows
+cancellation.
+
+``LOCR-R17@v1`` has since landed the one observer-health row those identities must account for:
+every completed observer call -- successful or failed -- atomically rewrites
+``observer_root/workspace/terminal-observer-health.json``, so a failed pass legitimately changes
+that ONE path and nothing else. ``_durable_tree_without_observer_health`` is how these cases keep
+the strong claim ("every other durable artifact is byte-identical") without either weakening it to
+"almost nothing changed" or pretending the packet's own diagnostic is not durable.
 """
 
 from __future__ import annotations
@@ -53,6 +61,11 @@ from agents_remember.serving.terminal_catalog import TerminalCatalog
 from agents_remember.serving.terminal_liveness import (
     LivenessProbe,
     TerminalCatalogLivenessSweeper,
+)
+from agents_remember.serving.terminal_observer_health import (
+    TerminalObserverHealthPublisher,
+    TerminalObserverHealthStore,
+    terminal_observer_health_path,
 )
 from agents_remember.serving.terminal_tmux import TmuxProbeResult
 from fastapi import FastAPI
@@ -280,6 +293,9 @@ class _ServingFixture:
                 host=SimpleNamespace(shutdown=self.shutdown),
                 liveness_clock=self.clock.now,
                 liveness_sweeper=sweeper,
+                # The real publisher on the fixture's own root and virtual clock, so a case reads
+                # exactly the bytes the lifespan published under the same clock it drove.
+                observer_health=TerminalObserverHealthPublisher(root, self.clock.now),
             ),
         )
 
@@ -408,6 +424,20 @@ def _durable_tree(root: Path) -> dict[str, str]:
         for path in sorted(root.rglob("*"))
         if path.is_file()
     }
+
+
+def _durable_tree_without_observer_health(root: Path) -> dict[str, str]:
+    """Every durable artifact under ``root`` except this lifetime's observer-health row.
+
+    ``LOCR-R17@v1`` publishes the one structured observer diagnostic on EVERY completed observer
+    call, so a failed pass must rewrite that single row. Excluding exactly that path keeps these
+    R11 identities a claim about every other durable artifact -- no catalog row, no cursor, no
+    terminal evidence, and no emitted-signal marker moves -- while the case that owns the failure
+    still proves positively that the diagnostic itself was published.
+    """
+
+    excluded = terminal_observer_health_path(root).relative_to(root).as_posix()
+    return {key: value for key, value in _durable_tree(root).items() if key != excluded}
 
 
 _SIGNAL_MARKER_LINE = (
@@ -743,11 +773,16 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         _seed_workspace_cursor(self.tmp)
         probe = _RefreshProbe(clock.timeline, inner=sweeper.refresh, fail_on=3)
         fixture = _ServingFixture(self.tmp, probe, clock=clock)
-        seeded = _durable_tree(self.tmp)
+        health_key = terminal_observer_health_path(self.tmp).relative_to(self.tmp).as_posix()
+        seeded = _durable_tree_without_observer_health(self.tmp)
 
         async with fixture.running():
             await _wait_until(lambda: probe.calls == 2 and clock.requested.count(1.0) == 1)
-            after_success = _durable_tree(self.tmp)
+            after_success = _durable_tree_without_observer_health(self.tmp)
+            # The health row exactly as the two SUCCESSFUL passes left it, read from the same
+            # full-tree map the post-failure reading comes from. Held as one map KEY so the two
+            # sides of the assertion below are like-scoped.
+            row_after_success = _durable_tree(self.tmp)[health_key]
             # Control: the successful passes DID commit durable catalog truth, so the identity
             # below is a result about the failure path, not about a tree nothing ever writes.
             self.assertNotEqual(after_success, seeded)
@@ -757,8 +792,18 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
             await _wait_until(lambda: probe.calls == 3 and clock.requested.count(1.0) == 2)
 
             self.assertEqual(probe.outcomes, ["ok", "ok", "failed"])
-            # No success fact, no diagnostic row, no event, no payload: the pass changed nothing.
-            self.assertEqual(_durable_tree(self.tmp), after_success)
+            # No success fact, no diagnostic row, no event, no payload of the observer's OWN. The
+            # claim is exact, so it is asserted in two LIKE-SCOPED halves: the filtered map against
+            # the filtered map (nothing OUTSIDE the health row moved) and the same map KEY before
+            # against after (the health row itself DID move). The earlier formulation compared the
+            # FULL map against the FILTERED one, so its extra key made the inequality hold in every
+            # reachable state -- including the state where the row never moved at all.
+            after_failure = _durable_tree(self.tmp)
+            self.assertEqual(_durable_tree_without_observer_health(self.tmp), after_success)
+            self.assertNotEqual(after_failure[health_key], row_after_success)
+            health = TerminalObserverHealthStore(self.tmp).read()
+            assert health is not None
+            self.assertEqual(health.activeFailureCategory, "steady-state-refresh-failed")
             self.assertFalse(_observer_tasks(fixture.created)[0].done())
             self.assertEqual([row.id for row in catalog.list()], ["seat-1"])
 
@@ -770,22 +815,23 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         TerminalCatalog(self.tmp / "terminal-sessions.json").upsert(_entry("seat-1"))
         _seed_emitted_signal_marker(self.tmp)
         _seed_workspace_cursor(self.tmp)
-        frozen = _durable_tree(self.tmp)
+        frozen = _durable_tree_without_observer_health(self.tmp)
 
         async with fixture.running():
             await _wait_until(lambda: probe.calls == 2 and fixture.clock.requested.count(1.0) == 1)
             observer = _observer_tasks(fixture.created)[0]
-            self.assertEqual(_durable_tree(self.tmp), frozen)
+            self.assertEqual(_durable_tree_without_observer_health(self.tmp), frozen)
 
             fixture.clock.release()  # the cadence is the only trigger released here
 
             await _wait_until(lambda: probe.calls == 3 and fixture.clock.requested.count(1.0) == 2)
             # Same task object: the retry is the same owner's next attempt, not a restart.
             self.assertIs(_observer_tasks(fixture.created)[0], observer)
-            # And the durable tree is still byte-identical: no catalog edit was needed either.
+            # And every durable artifact except the R17 diagnostic row is still byte-identical:
+            # no catalog edit was needed either.
             # No HTTP request can be involved structurally: this case enters the ASGI lifespan
             # directly, with no server and no HTTP client used anywhere in it.
-            self.assertEqual(_durable_tree(self.tmp), frozen)
+            self.assertEqual(_durable_tree_without_observer_health(self.tmp), frozen)
 
         self.assertEqual(probe.calls, 3)
         self.assertEqual(probe.outcomes, ["ok", "failed", "ok"])
@@ -802,7 +848,7 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
             [row.id for row in AgentNotifierSignalCooldownStore(self.tmp).read()], ["sig-l11-1"]
         )
         self.assertEqual(workspace_base_offset(self.tmp), 4096)
-        seeded = _durable_tree(self.tmp)
+        seeded = _durable_tree_without_observer_health(self.tmp)
         marker_key = marker.relative_to(self.tmp).as_posix()
         cursor_key = cursor.relative_to(self.tmp).as_posix()
         probe = _RefreshProbe(clock.timeline, inner=sweeper.refresh, fail_on=3)
@@ -814,14 +860,15 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
             # A later independent durable commit: a second row lands after the first pass.
             clock.elapse(10.0)
             catalog.upsert(_entry("seat-2"))
-            before_failure = _durable_tree(self.tmp)
+            before_failure = _durable_tree_without_observer_health(self.tmp)
 
             clock.release()
             await _wait_until(lambda: probe.calls == 3 and clock.requested.count(1.0) == 2)
 
             self.assertEqual(probe.outcomes, ["ok", "ok", "failed"])
-            # The failed pass cleared no row, cursor, terminal evidence, or emitted-signal marker.
-            self.assertEqual(_durable_tree(self.tmp), before_failure)
+            # The failed pass cleared no row, cursor, terminal evidence, or emitted-signal marker
+            # (the R17 diagnostic row is the one artifact it must move, by contract).
+            self.assertEqual(_durable_tree_without_observer_health(self.tmp), before_failure)
             self.assertEqual([row.id for row in catalog.list()], ["seat-1", "seat-2"])
             self.assertFalse(_observer_tasks(fixture.created)[0].done())
 
@@ -839,7 +886,10 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
             [(row.id, row.last_attached_at) for row in catalog.list()],
             [("seat-1", "2026-08-31T00:00:00+00:00"), ("seat-2", "2026-08-31T00:00:00+00:00")],
         )
-        final = _durable_tree(self.tmp)
+        # Same scope on both sides as well: the two keys read below are non-health keys, so the
+        # filtered map carries them identically -- but keeping the variable scoped like ``seeded``
+        # means no future edit can read a key only one of the two maps has.
+        final = _durable_tree_without_observer_health(self.tmp)
         self.assertEqual(final[marker_key], seeded[marker_key])
         self.assertEqual(final[cursor_key], seeded[cursor_key])
 

@@ -1,21 +1,22 @@
 """Generate the dashboard projection contract from the Python wire schemas.
 
 ``WorkspaceProjection.model_json_schema()`` owns the persisted projection. The HTTP/SSE
-snapshot adds two serve-time fields declared by ``ServedWorkspaceProjection``; their
+snapshot adds the serve-time fields declared by ``ServedWorkspaceProjection``; their
 Pydantic definitions are folded into the TypeScript output so the existing public
 dashboard contract remains complete without a second field list.
 
 The schema describes accepted model input, while the dashboard reads serialized output.
 Core projection and serving-build models use ``exclude_none=True``, so nullable fields are
-omitted and become optional TypeScript properties. AgentNotifier heartbeat deliberately dumps
-nulls, so its nullable properties remain required ``T | null`` values. Non-null defaults
+omitted and become optional TypeScript properties. AgentNotifier heartbeat and terminal
+observer health deliberately dump nulls, so their nullable properties remain required
+``T | null`` values. Non-null defaults
 are always serialized and therefore remain required on the output contract.
 
 The renderer rejects schema forms it does not understand.  JSON Schema owns runtime
 refinements that TypeScript cannot enforce structurally (for example a numeric minimum or
-string length); those refinements remain exact in the schema artifact and are emitted beside
-the affected TypeScript property as deterministic documentation.  Unknown keywords still
-fail closed instead of disappearing from either generated contract.
+maximum, or a string length); those refinements remain exact in the schema artifact and are
+emitted beside the affected TypeScript property as deterministic documentation.  Unknown
+keywords still fail closed instead of disappearing from either generated contract.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ TYPESCRIPT_OUTPUT = Path("dashboard/src/types/projection.ts")
 DEFINITION_RENAMES = {
     "ServingBuildPayload": "ServingBuild",
     "AgentNotifierHeartbeatPayload": "AgentNotifierHeartbeat",
+    "TerminalObserverHealthPayload": "TerminalObserverHealth",
 }
 NAMED_VOCABULARIES = (
     ("LifecycleProjection", "state", "State"),
@@ -43,9 +45,19 @@ NAMED_VOCABULARIES = (
     ("CommitRefNode", "factState", "ProcessFactState"),
     ("EngineProcessNode", "health", "ProcessHealth"),
 )
-NULL_PRESERVING_MODELS = frozenset({"AgentNotifierHeartbeatPayload"})
+NULL_PRESERVING_MODELS = frozenset(
+    {"AgentNotifierHeartbeatPayload", "TerminalObserverHealthPayload"}
+)
 SCHEMA_ANNOTATION_KEYWORDS = frozenset({"default", "description", "title"})
-SCHEMA_REFINEMENT_KEYWORDS = frozenset({"maxItems", "maxLength", "minLength", "minimum", "pattern"})
+SCHEMA_REFINEMENT_KEYWORDS = frozenset(
+    {"maxItems", "maxLength", "minLength", "maximum", "minimum", "pattern"}
+)
+"""The runtime refinements emitted beside a TypeScript property instead of being enforced.
+
+``maximum`` is here because a bounded counter is a contract the schema must state: the served
+observer-health row declares both serving-lifetime counts as unsigned 32-bit values, and a mirror
+that documents only ``minimum`` would understate the field it mirrors.
+"""
 SCHEMA_KEYWORDS = (
     SCHEMA_ANNOTATION_KEYWORDS
     | SCHEMA_REFINEMENT_KEYWORDS
@@ -217,7 +229,7 @@ def _schema_allowed_keywords(
     else:
         allowed = allowed | {"type"}
     if node.get("type") in {"integer", "number"}:
-        allowed = allowed | {"minimum"}
+        allowed = allowed | {"maximum", "minimum"}
     elif node.get("type") == "string":
         allowed = allowed | {"maxLength", "minLength", "pattern"}
     return allowed

@@ -119,6 +119,7 @@ unit-regression = [
   "mcp/tests/test_terminal_evidence_mapping.py",
   "mcp/tests/test_terminal_liveness_deferred_work.py",
   "mcp/tests/test_terminal_liveness_registration_order.py",
+  "mcp/tests/test_terminal_observer_health.py",
   "mcp/tests/test_terminal_paste.py",
   "mcp/tests/test_tool_response_budgets.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
