@@ -180,6 +180,7 @@ integration = [
   "mcp/tests/test_terminal.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_liveness.py",
+  "mcp/tests/test_terminal_liveness_pane_authority.py",
   "mcp/tests/test_tools.py",
   "mcp/tests/test_worker_child_processes.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
