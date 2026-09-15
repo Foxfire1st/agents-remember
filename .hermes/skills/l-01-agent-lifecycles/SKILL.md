@@ -200,6 +200,32 @@ escalation ladder is retired — there is no renudge/skip-level/respawn machiner
 (uniform-mechanism ruling 2026-07-07).** Every role's own liveness duty inverts to *passive*: you
 will be woken with your pending signals; process and ack every item before ending your turn again.
 
+## Completion Truth And Handoff Acceptance (one home — this section owns the truth boundary)
+
+**Terminal truth is mechanical; acceptance is the owner's.** A canonical terminal/finalizer outcome
+of `completed` means only that the provider turn ended normally. It does **not** attest that the
+required artifact exists, is current, or satisfies its requirement — a subordinate can violate its
+artifact obligation and still produce mechanical `completed` truth. A terminal `interrupted` outcome
+remains an interruption, not a completed handoff. Role files state their own seat's side of this
+boundary; they do not restate the whole of it.
+
+- **The relay derives and delivers the state signal.** The lifecycle-owned relay reads turn truth,
+  derives that mechanical seat-state fact, and delivers it to the structurally current owner. It
+  never opens, parses, or evaluates a report, verdict, coherence record, expectation row, or
+  acceptance envelope, and it never nudges a seat on its own judgment about an artifact.
+- **The owner alone validates.** On wake, the current owner opens the required artifact, candidate
+  identity, evidence, and acceptance envelope and validates them **before advancing lifecycle
+  state**. For a leaf handoff that owner is the manager.
+- **An artifact defect is owner-detected.** A missing, malformed, or stale artifact is a handoff
+  defect the owner finds after wake; it nudges, rejects, replaces, or escalates under existing
+  doctrine instead of waiting for an imaginary notifier artifact check. If terminal truth is
+  unavailable, observer health identifies that runtime failure.
+- **The artifact obligation is unchanged.** Worker, reviewer, and curator still write their durable
+  handoff artifact before intentionally ending a successful handoff turn. Once that artifact exists
+  and the turn ends, the subordinate needs no second model-authored completion post.
+- **Nothing here moves authority.** This section states the boundary that already holds; it changes
+  no approval of requirements, plans, commits, or integration.
+
 ## Shared Invariants (every role can count on these)
 
 - **Continuity lives in the `task_doc` + durable artifacts, never in transcripts** — which is why

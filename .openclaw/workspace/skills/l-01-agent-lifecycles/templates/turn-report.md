@@ -2,8 +2,9 @@
 
 The **mandatory** artifact a worker writes at **every** hand-off (`roles/worker.md`). It is how the
 leaf's work survives the session's death and how a respawned successor onboards from **state, not the
-transcript**. A missing turn report is nudged by the HFX2-L2 agent-notifier sweep, never by a
-manager watching for it (uniform-mechanism ruling 2026-07-07).
+transcript**. The relay never inspects it: it derives and delivers the worker's turn-ended state
+signal, and the manager — never a seat-local watcher — detects a missing report after that wake and
+nudges (uniform-mechanism ruling 2026-07-07).
 
 ## Rules
 

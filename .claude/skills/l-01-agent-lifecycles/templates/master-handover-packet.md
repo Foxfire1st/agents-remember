@@ -1,8 +1,10 @@
 # Master-Handover-Packet Template
 
 The artifact a **manager** hands to the **orchestrator** at master exit (`roles/manager.md`), after
-the leaf handoffs and any explicitly requested master-exit review. The artifact is durable and terminal/finalizer truth wakes the current
-orchestrator. It tells the orchestrator which completion boundary is ready: the final accumulated
+the leaf handoffs and any explicitly requested master-exit review. The artifact is durable, and
+terminal/finalizer truth — which attests only that the manager's turn ended — wakes the current
+orchestrator, who validates the packet. It
+tells the orchestrator which completion boundary is ready: the final accumulated
 organizational candidate containing prior landed contributions plus the proposed final leaf, or
 one isolated atomic branch ready to land.
 
@@ -28,7 +30,8 @@ one isolated atomic branch ready to land.
    candidate-mismatched Git/operation ref blocks; summaries never substitute for this evidence.
    Cache availability and attribution gaps for unchanged memory do not block a proven pair.
 5. Do not address an orchestrator occupant. `message_parent` is available for clarification or a
-   blocking issue; ordinary completion comes from the packet plus terminal/finalizer truth.
+   blocking issue; ordinary completion comes from the packet plus terminal/finalizer truth, and that
+   terminal outcome attests only that the turn ended — rule 4's validation is what accepts it.
 
 ## Shape
 

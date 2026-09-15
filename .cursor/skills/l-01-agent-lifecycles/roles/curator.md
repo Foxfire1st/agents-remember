@@ -201,8 +201,9 @@ changing the closeout/integration transaction.
   evidence without knowing which runtime occupant currently fills that seat.
 - **Report artifact** — the structured record and generated projection are the durable output; do
   not rely on transcript or a parallel hand-authored report.
-- **Completion truth** — terminal/finalizer evidence after the report exists wakes the owner; do
-  not write a parallel model completion post.
+- **Completion truth** — write the report before ending; terminal/finalizer evidence then attests
+  only that this turn ended and wakes the owner, who validates the report. Do not write a parallel
+  model completion post.
 - **Escalation** — one rung up to the owning seat. The curator never escalates directly to the
   developer and never decides whether a leaf lands.
 

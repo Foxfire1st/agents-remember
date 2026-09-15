@@ -201,9 +201,11 @@ an explicit Checks section with exact commands/results · retrieval evidence · 
 durable-evidence promotion disposition · escalations · respawn state. The journal, not a copied
 block in the report, is the detailed attempt authority and how a
 respawned successor onboards — write it even when blocked (with the Escalations section filled),
-then end your turn. **A missing report gets nudged by the agent-notifier sweep (HFX2-L2), never by a
-seat-local watcher** — no owning seat, and no worker, hand-rolls its own polling loop over this
-artifact; ending your turn once the report is written is safe, not a risk you have to cover for.
+then end your turn. **Ending your turn once the report is written is safe, not a risk you have to
+cover for** — no owning seat, and no worker, hand-rolls its own polling loop over this artifact
+(watcher ban, uniform-mechanism ruling 2026-07-07). A report you never wrote is a handoff defect the
+owning seat detects after your turn-ended state signal wakes it; the relay itself never inspects the
+artifact (`../SKILL.md`, Completion Truth And Handoff Acceptance).
 
 ## Tool Surface (positive statement — this is all of it)
 
@@ -213,8 +215,10 @@ artifact; ending your turn once the report is written is safe, not a risk you ha
 - **Shell** for the prescribed checks (use the interpreter paths the brief names — do not assume a
   `python` shim exists).
 - **Structural parent message** (`message_parent`) for a clarification or escalation. Initial
-  context arrives through the plane-owned dispatch brief; completion is relayed from terminal/
-  finalizer truth after the durable turn report exists, never from a model-authored completion post.
+  context arrives through the plane-owned dispatch brief; terminal/finalizer truth attests only that
+  this turn ended — never that the report exists, is current, or satisfies its requirement. Write
+  the report before ending; that mechanical signal then wakes the owning seat, which validates it.
+  Never author a second model-authored completion post after the report exists.
 
 Everything else — `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*`, `memory_*`,
 `route_index_refresh` — is the owning seat's machinery, not yours. A worker that never touches

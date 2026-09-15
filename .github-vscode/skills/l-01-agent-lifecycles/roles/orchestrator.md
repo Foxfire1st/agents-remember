@@ -330,8 +330,8 @@ three-state hosted-role dispatch for `dispatch_agent` on the canonical master do
 `(master document, manager)` and the brief carries the load-bearing execution nature and source
 rule: organizational leaves are direct children of the current super line; an atomic master owns
 the one isolated branch off that line;
-process and ack the pending signals the L2 agent-notifier sweep wakes you with — turn-report
-artifacts, nudges, escalation intake — before ending your turn; you never watch for these yourself
+process and ack the pending signals the L2 agent-notifier sweep wakes you with — seat-turn
+state-signals, nudges, escalation intake — before ending your turn; you never watch for these yourself
 (**watcher ban, uniform-mechanism ruling 2026-07-07:** the agent-notifier sweep is the one mechanism,
 no seat-local polling/monitoring, own duty inverts to processing what lands, not hunting for it).
 Then apply the **spirit test** — a model-judgment duty, not a watching one — to escalated
