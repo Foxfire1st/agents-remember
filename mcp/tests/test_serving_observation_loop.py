@@ -6,12 +6,20 @@ process, or a disabled agent notifier must not stop catalog turn truth from adva
 enter the real ``_serving_lifespan`` finalizer under a virtual event-loop clock -- no HTTP request,
 no browser, no real second -- so the completion-relative attempt cadence, attempt non-overlap, and
 the sweeper's own full-sweep rate limit are observed deterministically.
+
+The second half of the module pins ``LOCR-R11@v1``: an exception escaping one pass neither ends the
+recurring owner nor touches a sibling serving task, publishes nothing durable (a failed pass records
+no success fact and no diagnostic row, event, or payload -- ``LOCR-R17@v1`` owns the only structured
+observer-failure publication), leaves already-committed catalog rows, workspace cursors, terminal
+evidence, and emitted-signal markers exactly as they were, retries on the next cadence from that
+persisted state with no request, restart, or catalog edit, and never swallows cancellation.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import sys
 import tempfile
 import threading
@@ -29,8 +37,15 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 import agents_remember.serving._app_lifespan as lifespan_module
+import httpx
+from agents_remember.controlplane.agent_notifier_signals import AgentNotifierSignalCooldownStore
 from agents_remember.kernel.agentic_settings import AgenticSettings, AgentNotifierSettings
 from agents_remember.models.terminal_catalog import TerminalCatalogEntry
+from agents_remember.observer.store import (
+    WORKSPACE_CURSOR_FILE,
+    WORKSPACE_SOURCE,
+    workspace_base_offset,
+)
 from agents_remember.providers.metrics import ProviderMetricsStore
 from agents_remember.serving._app_common import _ServingRuntime
 from agents_remember.serving._app_lifespan import _serving_lifespan
@@ -135,7 +150,11 @@ class _RefreshProbe:
     """Records the attempt timeline of the ``refresh`` the observation owner calls.
 
     ``inner`` optionally delegates to a real sweeper, so one probe serves both the isolated-cadence
-    cases and the real ``TerminalCatalog`` rate-limit case without a second harness.
+    cases and the real ``TerminalCatalog`` rate-limit case without a second harness. ``failures``
+    fails the leading attempts; ``fail_on`` fails exactly one later attempt, which is what makes
+    "a durable commit, then an independent failure, then a retry" expressible on one probe.
+    ``outcomes`` records each attempt's own verdict for the assertions that the failure was the
+    second pass and the retry the third.
     """
 
     def __init__(
@@ -145,14 +164,17 @@ class _RefreshProbe:
         inner: Callable[[], object] | None = None,
         block_first: bool = False,
         failures: int = 0,
+        fail_on: int | None = None,
     ) -> None:
         self.timeline = [] if timeline is None else timeline
         self.inner = inner
         self.block_first = block_first
         self.failures = failures
+        self.fail_on = fail_on
         self.calls = 0
         self.active = 0
         self.max_active = 0
+        self.outcomes: list[str] = []
         self.threads: list[threading.Thread] = []
         self.first_call_entered = threading.Event()
         self.release_first_call = threading.Event()
@@ -167,20 +189,24 @@ class _RefreshProbe:
             if self.block_first and self.calls == 1:
                 self.first_call_entered.set()
                 self.release_first_call.wait(timeout=10)
-            if self.failures > 0:
-                self.failures -= 1
+            if self.failures > 0 or self.fail_on == self.calls:
+                self.failures = max(self.failures - 1, 0)
+                self.outcomes.append("failed")
                 raise RuntimeError("terminal observation pass failed")
-            return [] if self.inner is None else self.inner()
+            result = [] if self.inner is None else self.inner()
+            self.outcomes.append("ok")
+            return result
         finally:
             self.active -= 1
             self.timeline.append(f"call {self.calls} ended")
 
 
 class _LiveHost:
-    """A tmux host whose single catalog row is alive, so one full sweep probes it once."""
+    """A tmux host whose catalog rows are alive, so one full sweep probes each row once."""
 
     def __init__(self) -> None:
         self.probes = 0
+        self.probed: list[str] = []
 
     def get(self, _session_id: str) -> None:
         return None
@@ -188,8 +214,9 @@ class _LiveHost:
     def has_session(self, tmux_name: str) -> bool:
         return self.probe_session(tmux_name).exists
 
-    def probe_session(self, _tmux_name: str) -> TmuxProbeResult:
+    def probe_session(self, tmux_name: str) -> TmuxProbeResult:
         self.probes += 1
+        self.probed.append(tmux_name)
         return TmuxProbeResult(exists=True, evidence="alive")
 
 
@@ -313,6 +340,60 @@ def _entry(session_id: str) -> TerminalCatalogEntry:
         control_activity="idle",
         control_acceptance="immediate",
     )
+
+
+async def _serving_probe_route() -> dict[str, str]:
+    """One trivially answering route: the HTTP surface the observer must not take down with it."""
+
+    return {"status": "serving"}
+
+
+def _background_tasks(tasks: list[asyncio.Task[object]]) -> list[asyncio.Task[object]]:
+    """The lifespan's own background loops, excluding the off-loop worker tasks they spawn."""
+
+    return [task for task in tasks if getattr(task.get_coro(), "__qualname__", "") != "to_thread"]
+
+
+def _durable_tree(root: Path) -> dict[str, str]:
+    """Every durable artifact under ``root`` as relative path -> sha256 of its bytes.
+
+    A pass that publishes anything -- a success fact, a diagnostic row, a fresh event -- changes
+    this map, so byte-identity across a failed pass is the "published nothing" assertion. The
+    control cases below prove a *successful* pass does change it, so the identity is a result about
+    the failure path rather than about a tree nothing ever writes.
+    """
+
+    return {
+        path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+_SIGNAL_MARKER_LINE = (
+    '{"schemaVersion":"1.0","schema":"ar-agent-notifier-signal/v2","id":"sig-l11-1",'
+    '"ts":"2026-08-31T11:59:00+00:00","state":"sent","findingKind":"owner-wake",'
+    '"detail":"turn-report","deliveryState":"delivered"}\n'
+)
+_WORKSPACE_CURSOR_BYTES = '{"baseOffset":4096}\n'
+
+
+def _seed_emitted_signal_marker(root: Path) -> Path:
+    """Leave one already-emitted signal marker on disk, as the notifier's cooldown store writes it."""
+
+    path = AgentNotifierSignalCooldownStore(root).log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_SIGNAL_MARKER_LINE, encoding="utf-8")
+    return path
+
+
+def _seed_workspace_cursor(root: Path) -> Path:
+    """Leave the workspace river's already-committed virtual base offset on disk."""
+
+    path = root / WORKSPACE_SOURCE / WORKSPACE_CURSOR_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_WORKSPACE_CURSOR_BYTES, encoding="utf-8")
+    return path
 
 
 class ServingObservationLoopTests(unittest.IsolatedAsyncioTestCase):
@@ -508,3 +589,213 @@ class ServingObservationLoopTests(unittest.IsolatedAsyncioTestCase):
                 "sleep(1.0)",
             ],
         )
+
+
+class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
+    """``LOCR-R11@v1``: one unexpected pass failure is isolated, retried, and preserves truth.
+
+    Every case drives the real ``_serving_lifespan`` and the real task collection, and the sweeper
+    cases run the real ``TerminalCatalogLivenessSweeper`` over a real ``TerminalCatalog``, so the
+    durable state under assertion is the production store's own committed bytes.
+    """
+
+    def setUp(self) -> None:
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+
+    def tearDown(self) -> None:
+        self._dir.cleanup()
+
+    def _live_stack(
+        self, clock: _VirtualClock, session_ids: tuple[str, ...]
+    ) -> tuple[TerminalCatalog, _LiveHost, TerminalCatalogLivenessSweeper]:
+        """A real catalog and sweeper in this case's root, seeded with live rows."""
+
+        catalog = TerminalCatalog(self.tmp / "terminal-sessions.json")
+        for session_id in session_ids:
+            catalog.upsert(_entry(session_id))
+        host = _LiveHost()
+        sweeper = TerminalCatalogLivenessSweeper(
+            catalog,
+            host,
+            now=clock.now,
+            probe=LivenessProbe(pane_capturer=lambda _tmux_name: ""),
+        )
+        return catalog, host, sweeper
+
+    async def test_a_failed_pass_leaves_every_sibling_loop_and_the_shutdown_intact(self) -> None:
+        probe = _RefreshProbe(failures=1)
+        fixture = _ServingFixture(self.tmp, probe)
+        fixture.app.get("/l11-serving-probe")(_serving_probe_route)
+        sweep = mock.Mock()
+        settings = AgenticSettings(
+            agent_notifier=AgentNotifierSettings(enabled=False, interval_seconds=4.0)
+        )
+
+        async with fixture.running(notifier=True, settings=settings, notifier_sweep=sweep):
+            await _wait_until(lambda: probe.calls == 1 and fixture.clock.requested.count(1.0) == 1)
+            observers = _observer_tasks(fixture.created)
+            siblings = [
+                task for task in _background_tasks(fixture.created) if task not in observers
+            ]
+            self.assertEqual(len(observers), 1)
+            self.assertFalse(observers[0].done())
+            # projector.run, metrics, notifier, death-watch, river compaction.
+            self.assertEqual(len(siblings), 5)
+            self.assertTrue(all(not task.done() for task in siblings))
+
+            # The retry completes and parks again, so the sibling assertions below are made with
+            # the owner between attempts rather than mid-pass.
+            await _advance(
+                fixture.clock, lambda: probe.calls >= 2 and fixture.clock.requested.count(1.0) >= 2
+            )
+
+            self.assertFalse(observers[0].done())
+            self.assertTrue(all(not task.done() for task in siblings))
+            # The real notifier loop kept reaching its own cadence; its sweep stayed off.
+            self.assertGreaterEqual(fixture.clock.requested.count(4.0), 1)
+            sweep.assert_not_called()
+
+            # And the HTTP surface still answers: this request is served while the observer is in
+            # its failed-then-retried state, through the real app object.
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=fixture.app), base_url="http://serving"
+            ) as client:
+                response = await client.get("/l11-serving-probe")
+            self.assertEqual((response.status_code, response.json()), (200, {"status": "serving"}))
+
+        self.assertTrue(observers[0].cancelled())
+        self.assertTrue(all(task.cancelled() for task in siblings))
+        fixture.shutdown.assert_called_once_with()
+
+    async def test_a_failed_pass_publishes_no_durable_fact_at_all(self) -> None:
+        clock = _VirtualClock([])
+        catalog, _host, sweeper = self._live_stack(clock, ("seat-1",))
+        _seed_emitted_signal_marker(self.tmp)
+        _seed_workspace_cursor(self.tmp)
+        probe = _RefreshProbe(clock.timeline, inner=sweeper.refresh, fail_on=2)
+        fixture = _ServingFixture(self.tmp, probe, clock=clock)
+        seeded = _durable_tree(self.tmp)
+
+        async with fixture.running():
+            await _wait_until(lambda: probe.calls == 1 and clock.requested.count(1.0) == 1)
+            after_success = _durable_tree(self.tmp)
+            # Control: the successful pass DID commit durable catalog truth, so the identity below
+            # is a result about the failure path, not about a tree nothing ever writes.
+            self.assertNotEqual(after_success, seeded)
+            self.assertEqual(probe.outcomes, ["ok"])
+
+            clock.release()
+            await _wait_until(lambda: probe.calls == 2 and clock.requested.count(1.0) == 2)
+
+            self.assertEqual(probe.outcomes, ["ok", "failed"])
+            # No success fact, no diagnostic row, no event, no payload: the pass changed nothing.
+            self.assertEqual(_durable_tree(self.tmp), after_success)
+            self.assertFalse(_observer_tasks(fixture.created)[0].done())
+            self.assertEqual([row.id for row in catalog.list()], ["seat-1"])
+
+    async def test_the_retry_needs_no_request_restart_or_catalog_edit(self) -> None:
+        probe = _RefreshProbe(failures=1)
+        fixture = _ServingFixture(self.tmp, probe)
+        TerminalCatalog(self.tmp / "terminal-sessions.json").upsert(_entry("seat-1"))
+        _seed_emitted_signal_marker(self.tmp)
+        _seed_workspace_cursor(self.tmp)
+        frozen = _durable_tree(self.tmp)
+
+        async with fixture.running():
+            await _wait_until(lambda: probe.calls == 1 and fixture.clock.requested.count(1.0) == 1)
+            observer = _observer_tasks(fixture.created)[0]
+            self.assertEqual(_durable_tree(self.tmp), frozen)
+
+            fixture.clock.release()  # the cadence is the only trigger released here
+
+            await _wait_until(lambda: probe.calls == 2 and fixture.clock.requested.count(1.0) == 2)
+            # Same task object: the retry is the same owner's next attempt, not a restart.
+            self.assertIs(_observer_tasks(fixture.created)[0], observer)
+            # And the durable tree is still byte-identical: no catalog edit was needed either.
+            # No HTTP request can be involved structurally: this case enters the ASGI lifespan
+            # directly, with no server and no HTTP client used anywhere in it.
+            self.assertEqual(_durable_tree(self.tmp), frozen)
+
+        self.assertEqual(probe.calls, 2)
+        self.assertEqual(probe.outcomes, ["failed", "ok"])
+
+    async def test_retry_resumes_from_the_persisted_catalog_and_preserves_committed_truth(
+        self,
+    ) -> None:
+        clock = _VirtualClock([])
+        catalog, host, sweeper = self._live_stack(clock, ("seat-1",))
+        marker = _seed_emitted_signal_marker(self.tmp)
+        cursor = _seed_workspace_cursor(self.tmp)
+        # Controls: the seeded artifacts are what the real stores' own readers accept.
+        self.assertEqual(
+            [row.id for row in AgentNotifierSignalCooldownStore(self.tmp).read()], ["sig-l11-1"]
+        )
+        self.assertEqual(workspace_base_offset(self.tmp), 4096)
+        seeded = _durable_tree(self.tmp)
+        marker_key = marker.relative_to(self.tmp).as_posix()
+        cursor_key = cursor.relative_to(self.tmp).as_posix()
+        probe = _RefreshProbe(clock.timeline, inner=sweeper.refresh, fail_on=2)
+        fixture = _ServingFixture(self.tmp, probe, clock=clock)
+
+        async with fixture.running():
+            await _wait_until(lambda: probe.calls == 1 and clock.requested.count(1.0) == 1)
+
+            # A later independent durable commit: a second row lands after the first pass.
+            clock.elapse(10.0)
+            catalog.upsert(_entry("seat-2"))
+            before_failure = _durable_tree(self.tmp)
+
+            clock.release()
+            await _wait_until(lambda: probe.calls == 2 and clock.requested.count(1.0) == 2)
+
+            self.assertEqual(probe.outcomes, ["ok", "failed"])
+            # The failed pass cleared no row, cursor, terminal evidence, or emitted-signal marker.
+            self.assertEqual(_durable_tree(self.tmp), before_failure)
+            self.assertEqual([row.id for row in catalog.list()], ["seat-1", "seat-2"])
+            self.assertFalse(_observer_tasks(fixture.created)[0].done())
+
+            clock.elapse(10.0)
+            clock.release()
+            await _wait_until(lambda: probe.calls == 3 and clock.requested.count(1.0) == 3)
+
+            self.assertEqual(probe.outcomes, ["ok", "failed", "ok"])
+            # The retry began from the CURRENT persisted catalog: the row committed ahead of the
+            # failed pass is observed only after it, and the pre-existing row is probed again.
+            self.assertEqual(host.probed, ["ar-seat-1", "ar-seat-1", "ar-seat-2"])
+
+        self.assertEqual([row.id for row in catalog.list()], ["seat-1", "seat-2"])
+        self.assertEqual(
+            [(row.id, row.last_attached_at) for row in catalog.list()],
+            [("seat-1", "2026-08-31T00:00:00+00:00"), ("seat-2", "2026-08-31T00:00:00+00:00")],
+        )
+        final = _durable_tree(self.tmp)
+        self.assertEqual(final[marker_key], seeded[marker_key])
+        self.assertEqual(final[cursor_key], seeded[cursor_key])
+
+    async def test_cancellation_still_passes_through_the_failure_boundary(self) -> None:
+        # The boundary is ``except Exception``; cancellation is not an ``Exception`` subclass, which
+        # is the whole reason one boundary can isolate failures without swallowing shutdown.
+        self.assertFalse(issubclass(asyncio.CancelledError, Exception))
+        probe = _RefreshProbe(block_first=True)
+        fixture = _ServingFixture(self.tmp, probe)
+
+        async with fixture.running():
+            await _wait_until(probe.first_call_entered.is_set)
+            observer = _observer_tasks(fixture.created)[0]
+
+            observer.cancel()
+            probe.release_first_call.set()
+
+            # Not ``await observer``: a boundary that swallowed the cancellation would park the loop
+            # in its next cadence and never finish, so this bounded wait is the falsifiable form.
+            await _wait_until(observer.done)
+
+            self.assertTrue(observer.cancelled())
+            self.assertEqual(probe.calls, 1)
+            # The in-flight pass drained instead of being abandoned mid-write.
+            self.assertEqual(probe.active, 0)
+            await _REAL_SLEEP(0.05)
+            self.assertEqual(probe.calls, 1)  # the loop did not resume after the boundary
+
+        fixture.shutdown.assert_called_once_with()
