@@ -1027,3 +1027,26 @@ consumers = [
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
 ]
+
+[[contract]]
+id = "knowledge-identity-branching-fixture"
+owner = "mcp/tests/knowledge_fixture_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
+
+[[artifact]]
+path = "mcp/tests/knowledge_fixture_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "knowledge-identity-branching-fixture"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the public knowledge-store operations: repository, invariant and revision creation through create_revision"
+introduced_by = "260915-KS-L1"
+lifetime = "permanent"
+permanence_rationale = "Every fixture built outside the public operation would prove only that a hand-written row decodes; the branching identity scenario needs one shared builder so later leaves extend it instead of copying it."
+replacement_contract = "contract:knowledge-identity-branching-fixture"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_store.py",
+]

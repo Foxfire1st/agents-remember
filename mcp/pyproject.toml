@@ -18,6 +18,12 @@ classifiers = [
   "Operating System :: MacOS",
 ]
 dependencies = [
+  # The knowledge store's SQLite binding. APSW is the only declared binding that exposes
+  # SQLite's session/changeset machinery, which a future merge needs; the standard library's
+  # sqlite3 module exposes neither. The release is pinned exactly because session support is a
+  # build-time SQLite option (ENABLE_SESSION) and has to be proven on each platform the
+  # package claims, rather than assumed from the upstream project.
+  "apsw==3.53.4.0",
   "mcp>=1.12.4,<2",
   "pydantic>=2,<3",
   "tiktoken>=0.12,<1",
