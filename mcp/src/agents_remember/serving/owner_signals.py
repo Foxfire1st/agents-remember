@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -39,8 +40,10 @@ class OwnerSignal:
     """One owner-addressed signal: what is being said, and about which seat.
 
     The message and its subject are inseparable here -- coalescing looks up an existing row by
-    (ask, kind, task document, role), and renewal rewrites the subject from the same value, so a message
-    carrying someone else's subject silently renews the wrong row.
+    (ask, kind, subject), and renewal rewrites the subject from the same value, so a message
+    carrying someone else's subject silently renews the wrong row. What the subject means
+    differs by kind: a state signal is identified by the exact seat it reports on, every other
+    kind by the task document and role it names.
     """
 
     message_kind: InboxMessageKind
@@ -55,20 +58,41 @@ class OwnerSignal:
 class OwnerSignalOptions:
     """The delivery context for one owner signal: when, against which sweep fold, and under
     which admission policy. The three travel together because one signal attempt is one
-    sweep action against one store snapshot."""
+    sweep action against one store snapshot.
+
+    ``after_persist`` is the optional step that must be durable before anything reaches the
+    wire. It runs once the row itself is durable -- appended or renewed, and remembered in the
+    sweep -- and strictly before the first delivery attempt, so a failure inside it leaves that
+    one pending row undelivered for the next sweep to retry. Owner signals whose marker is
+    written after delivery pass nothing.
+    """
 
     now: datetime
     sweep: _SweepState | None = None
     admission: DeliveryAdmission = DEFAULT_DELIVERY_ADMISSION
+    after_persist: Callable[[], None] | None = None
+
+
+def _coalesces_on_source(row: OperatorInboxEntry, *, signal: OwnerSignal) -> bool:
+    """Whether one pending row is the same logical signal as the one being posted.
+
+    A state signal is identified by the exact subject seat it reports on: R08 may rewrite that
+    seat's task document, role, and owner address for the same evidence before a retry, while a
+    different replacement seat that ends the same turn can never renew this seat's row. Every
+    other kind keeps the structural key -- which occupant a row concerns is correlation there.
+    """
+
+    if signal.message_kind == "state-signal":
+        return row.subjectAgentId == signal.subject_agent_id
+    return (
+        row.subjectTaskDocumentRef == signal.task_document_ref and row.seatRole == signal.seat_role
+    )
 
 
 def _find_coalescible(
     entries: dict[str, OperatorInboxEntry],
     *,
-    ask: str,
-    message_kind: InboxMessageKind,
-    task_document_ref: TaskDocumentRef | None,
-    seat_role: str | None,
+    signal: OwnerSignal,
 ) -> OperatorInboxEntry | None:
     """The ruled coalescing lookup (developer, 2026-07-09): an agent-notifier-authored condition that
     is still pending under the SAME ask identity is the row to renew -- matched on content, not
@@ -80,12 +104,11 @@ def _find_coalescible(
             # Legacy rows created before the rename window carry "supervisor"; both are the
             # same relay-authored condition and must coalesce until the window closes.
             and row.createdBy in {"supervisor", "agent-notifier"}
-            and row.messageKind == message_kind
+            and row.messageKind == signal.message_kind
             # The ask prefix was renamed too; both prefixes are one signal identity, so a
             # new-format re-fire renews a legacy-format pending row (one row per root cause).
-            and _seat_liveness_ask_identity(row.ask) == _seat_liveness_ask_identity(ask)
-            and row.subjectTaskDocumentRef == task_document_ref
-            and row.seatRole == seat_role
+            and _seat_liveness_ask_identity(row.ask) == _seat_liveness_ask_identity(signal.ask)
+            and _coalesces_on_source(row, signal=signal)
         ):
             return row
     return None
@@ -112,13 +135,7 @@ def _post_owner_signal(
         seat_role=signal.seat_role,
         agent_id=signal.subject_agent_id,
     )
-    existing = _find_coalescible(
-        entries,
-        ask=signal.ask,
-        message_kind=signal.message_kind,
-        task_document_ref=signal.task_document_ref,
-        seat_role=signal.seat_role,
-    )
+    existing = _find_coalescible(entries, signal=signal)
     if existing is not None:
         entry = inbox_transitions.renew(
             ctx.inbox_store,
@@ -167,6 +184,12 @@ def _post_owner_signal(
         ctx.inbox_store.append(entry)
     if sweep is not None:
         sweep.remember(entry)
+    # The row is durable and visible to this sweep before the marker callback runs, and delivery
+    # starts only after that callback returns: a crash or a failed marker write here cannot leave
+    # a landed row without its marker, and cannot lose the wake -- the pending row is the
+    # recovery authority the next sweep renews.
+    if options.after_persist is not None:
+        options.after_persist()
     delivered = deliver_inbox_entry(
         InboxDeliveryLog(
             store=ctx.inbox_store,

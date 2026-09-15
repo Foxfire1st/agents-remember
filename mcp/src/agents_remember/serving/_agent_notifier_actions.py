@@ -26,6 +26,7 @@ from agents_remember.observer.events import Event, now_iso
 from agents_remember.observer.ulid import new_ulid
 from agents_remember.serving._agent_notifier_evaluation import (
     PERSISTENT_FAILURE_ATTEMPTS,
+    _seat_liveness_ask_identity,
 )
 from agents_remember.serving.agent_notifier_models import (
     AgentNotifierActionResult,
@@ -49,6 +50,7 @@ from agents_remember.serving.owner_signals import (
     OwnerSignalOptions,
     _post_owner_signal,
 )
+from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.seat_turn_truth import (
     record_compound_idle_emitted,
     record_non_reaction_emitted,
@@ -62,6 +64,7 @@ from agents_remember.serving.state_signals import (
     current_non_reaction_finding,
     current_state_signal_finding,
     non_reaction_response,
+    state_signal_ask,
     state_signal_response,
 )
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
@@ -92,6 +95,33 @@ def _log_event(ctx: AgentNotifierContext, kind: str, data: dict[str, object]) ->
         )
 
 
+def _state_signal_awaits_marker(
+    catalog: TerminalCatalogPort,
+    entry: OperatorInboxEntry,
+) -> bool:
+    """Whether one pending state-signal row is the exact unmarked source of its own seat.
+
+    Delivery eligibility is settled here, at the shared delivery action, instead of trusting
+    which predicate produced the finding: while the row's seat still reports the very evidence
+    the row carries and has not stamped its emitted marker, the row is the durable half of an
+    interrupted post, and only state-signal recovery may renew it, stamp that marker, and then
+    deliver. A marked row, a row naming an older evidence identity, and every other message
+    kind keep the ordinary redelivery path. The source identity is read with the same normalized
+    ask and subject seat the coalescing lookup uses -- never a second identity or a parse.
+    """
+
+    if entry.messageKind != "state-signal" or entry.subjectAgentId is None:
+        return False
+    source = catalog.get(entry.subjectAgentId)
+    if source is None or source.terminal_evidence_id is None:
+        return False
+    if source.state_signal_emitted_for == source.terminal_evidence_id:
+        return False
+    return _seat_liveness_ask_identity(entry.ask) == _seat_liveness_ask_identity(
+        state_signal_ask(source, source.terminal_evidence_id)
+    )
+
+
 # 260731-EFA-L7 R10: verbatim L7 split (L7-OQ1 Option A serving scope); unchanged edge branch, out of this leaf's behavior scope (mcp/src/agents_remember/serving/_agent_notifier_actions.py:71).
 def _redeliver(  # pragma: no cover
     ctx: AgentNotifierContext,
@@ -105,6 +135,10 @@ def _redeliver(  # pragma: no cover
     entry = sweep.inbox_current.get(finding.source_id)
     if entry is None or entry.state != "pending":
         return AgentNotifierActionResult("redeliver", finding, "skipped", "entry not pending")
+    if _state_signal_awaits_marker(ctx.catalog, entry):
+        return AgentNotifierActionResult(
+            "redeliver", finding, "skipped", "state-signal source marker not stamped"
+        )
     admission = (
         DeliveryAdmission(boundary=True)
         if entry.messageKind == "state-signal"
@@ -462,7 +496,9 @@ def _emit_state_signal(  # pragma: no cover
     """Emit exactly one durable state-signal for a completed/interrupted seat turn.
 
     The row is persisted before the marker is set, so a crash between the two leaves a
-    pending row that the next sweep coalesces/renews rather than a duplicate. Delivery
+    pending row that the next sweep coalesces/renews rather than a duplicate. The marker is
+    stamped by the post-persistence callback, which runs before any adapter submission: a
+    failed marker write leaves that one pending row unmarked and undelivered, and delivery
     rides the availability gate: a working manager holds the row on its durable schedule.
     """
     if finding.session_id is None or finding.source_id is None:
@@ -476,6 +512,8 @@ def _emit_state_signal(  # pragma: no cover
     entry, current_finding = current
     if current_finding.task_document_ref is None:
         return AgentNotifierActionResult("state-signal", finding, "skipped", "no task document")
+    evidence_id = entry.terminal_evidence_id
+    assert evidence_id is not None
     owner = derive_signal_owner(
         ctx.catalog,
         topology,
@@ -492,19 +530,19 @@ def _emit_state_signal(  # pragma: no cover
         owner,
         OwnerSignal(
             message_kind="state-signal",
-            ask=(
-                f"Agent notifier observed state-signal: {entry.terminal_outcome or 'unknown'} "
-                f"({entry.terminal_evidence_id})"
-            ),
+            ask=state_signal_ask(entry, evidence_id),
             response=state_signal_response(entry),
             task_document_ref=current_finding.task_document_ref,
             seat_role=current_finding.seat_role,
             subject_agent_id=current_finding.session_id,
         ),
-        OwnerSignalOptions(now=now, sweep=sweep, admission=DeliveryAdmission(boundary=True)),
+        OwnerSignalOptions(
+            now=now,
+            sweep=sweep,
+            admission=DeliveryAdmission(boundary=True),
+            after_persist=lambda: record_state_signal_emitted(ctx.catalog, entry.id, evidence_id),
+        ),
     )
-    assert entry.terminal_evidence_id is not None
-    record_state_signal_emitted(ctx.catalog, finding.session_id, entry.terminal_evidence_id)
     _log_event(
         ctx,
         "orchestration.agent-notifier.state-signal",
@@ -512,7 +550,7 @@ def _emit_state_signal(  # pragma: no cover
             "sessionId": current_finding.session_id,
             "taskDocumentRef": current_finding.task_document_ref.model_dump(),
             "terminalOutcome": entry.terminal_outcome,
-            "terminalEvidenceId": entry.terminal_evidence_id,
+            "terminalEvidenceId": evidence_id,
             "ownerRole": owner.role,
             "ownerAgentId": owner.agent_id,
             "deliveryState": delivery_state,

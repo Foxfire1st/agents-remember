@@ -503,6 +503,21 @@ def _seat_label(entry: TerminalCatalogEntry) -> str:
     return f"{document.key if document is not None else '-'} as {entry.binding_role}"
 
 
+def state_signal_ask(entry: TerminalCatalogEntry, evidence_id: str) -> str:
+    """The canonical ask of one seat's current terminal-evidence state signal.
+
+    One identity, three readers: the emitter that mints the row, the coalescing lookup that
+    finds it again, and the action-time marker guard that decides whether a pending row is the
+    unmarked half of an interrupted post. Deriving the text in one place is what keeps them
+    agreeing on which evidence a row carries.
+    """
+
+    return (
+        f"Agent notifier observed state-signal: {entry.terminal_outcome or 'unknown'} "
+        f"({evidence_id})"
+    )
+
+
 def state_signal_response(entry: TerminalCatalogEntry) -> str:
     origin = entry.interrupted_by or "-"
     return (
