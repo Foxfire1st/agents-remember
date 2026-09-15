@@ -93,6 +93,29 @@ async def _terminal_observation_loop(runtime: _ServingRuntime) -> None:
         await asyncio.sleep(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS)
 
 
+async def _prime_terminal_observation(runtime: _ServingRuntime) -> None:
+    """Observe the terminal catalog once BEFORE the projection prime and the recurring loops.
+
+    The catalog is shared truth for the projection, the HTTP routes, and the agent notifier, and
+    the recurring owner is only created later in startup, so without this prime the initial
+    projection could be built from a catalog no sweep has refreshed yet and initial truth would
+    depend on the first scheduled tick. The prime is the same canonical pass that owner runs --
+    same evidence readers, cursor rules, full-sweep rate limit, batch, and lock order, and a fresh
+    sweeper's prime is a due full sweep -- so no startup-only reader or direct catalog mutation
+    exists.
+
+    A raise is contained here because observation degradation must not become a serving outage:
+    the projection prime and every recurring loop still start, and the level-triggered owner
+    retries from the unchanged durable evidence on its first cadence. Cancellation is not
+    contained, so the surrounding drain still owns thread teardown before lifespan exit.
+    """
+
+    try:
+        await _to_thread_drained_on_cancel(runtime.liveness_sweeper.refresh)
+    except Exception:
+        logger.exception("terminal catalog observation prime failed; serving startup continues")
+
+
 async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetricsStore) -> None:
     degradation_alerts = DegradationAlertDelivery(config.coordination_root)
     while True:
@@ -247,6 +270,9 @@ def _serving_lifespan(
         await asyncio.to_thread(
             compact_workspace_river, runtime.observer_root, now=runtime.liveness_clock()
         )
+        # One pre-serve observation prime: it completes (or its recoverable failure is contained)
+        # before the projection is built and before any recurring loop exists.
+        await _prime_terminal_observation(runtime)
         await runtime.projector.prime()
         projection_task = asyncio.create_task(runtime.projector.run())
         metrics_task = asyncio.create_task(_metrics_loop(runtime.config, metrics_store))

@@ -220,12 +220,40 @@ class _LiveHost:
         return TmuxProbeResult(exists=True, evidence="alive")
 
 
+class _Gate:
+    """An ``inner`` callable that parks one chosen ``refresh`` invocation in its worker thread.
+
+    The probe's ``inner`` runs inside the attempt, so gating here parks exactly the invocation the
+    case names without teaching the probe a second blocking mode. Invocation 1 is always the
+    pre-serve startup prime, so a case that wants the recurring owner's own first pass to be the
+    slow one gates invocation 2.
+    """
+
+    def __init__(self, *, block_at: int) -> None:
+        self.block_at = block_at
+        self.calls = 0
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def __call__(self) -> list[object]:
+        self.calls += 1
+        if self.calls == self.block_at:
+            self.entered.set()
+            self.release.wait(timeout=10)
+        return []
+
+
 class _ServingFixture:
     """One disposable serving runtime whose background loops run under a virtual clock.
 
     Only the observation owner is real: the projector, metrics, notifier, death-watch and
     compaction loops are replaced by parked coroutines, and the two blocking startup calls are
     inert, so a case cannot start containers, read live settings, or write stores.
+
+    ``startup`` is the ordered account of the lifespan's pre-serve startup, one ``(step,
+    sweeps_completed)`` entry per step. The sweep count is the ordering witness: the one
+    pre-serve observation prime is the only sweep that may already have completed when the
+    projection prime and the first background tasks are created.
     """
 
     def __init__(
@@ -236,9 +264,11 @@ class _ServingFixture:
         clock: _VirtualClock | None = None,
     ) -> None:
         self.timeline: list[str] = getattr(sweeper, "timeline", [])
+        self.sweeper = sweeper
+        self.startup: list[tuple[str, int]] = []
         self.clock = _VirtualClock(self.timeline) if clock is None else clock
         self.created: list[asyncio.Task[object]] = []
-        self.prime = mock.AsyncMock()
+        self.prime = mock.AsyncMock(side_effect=self._record_projection_prime)
         self.shutdown = mock.Mock()
         self.app = FastAPI()
         self.runtime = cast(
@@ -253,6 +283,12 @@ class _ServingFixture:
             ),
         )
 
+    def _record_startup(self, step: str) -> None:
+        self.startup.append((step, getattr(self.sweeper, "calls", 0)))
+
+    async def _record_projection_prime(self) -> None:
+        self._record_startup("projection-prime")
+
     def _record_task(
         self,
         coro: Coroutine[Any, Any, object],
@@ -260,6 +296,7 @@ class _ServingFixture:
         name: str | None = None,
         context: Context | None = None,
     ) -> asyncio.Task[object]:
+        self._record_startup(f"task:{getattr(coro, '__qualname__', '?')}")
         task = asyncio.get_running_loop().create_task(coro, name=name, context=context)
         self.created.append(task)
         return task
@@ -311,6 +348,9 @@ class _ServingFixture:
                 )
             lifespan = _serving_lifespan(self.runtime, cast(ProviderMetricsStore, mock.Mock()))
             async with lifespan(self.app):
+                # Startup is complete here: the prime has returned (or raised) and no created
+                # task has run yet, so this step is the boundary the startup-order cases read.
+                self._record_startup("lifespan-yield")
                 yield
 
 
@@ -418,7 +458,14 @@ class ServingObservationLoopTests(unittest.IsolatedAsyncioTestCase):
                 await _wait_until(lambda: len(fixture.clock.requested) == 1)
                 self.assertEqual(
                     fixture.timeline,
-                    ["call 1 started", "call 1 ended", "sleep(2.5)"],
+                    [
+                        # Call 1 is the pre-serve prime, taken before this owner existed at all.
+                        "call 1 started",
+                        "call 1 ended",
+                        "call 2 started",
+                        "call 2 ended",
+                        "sleep(2.5)",
+                    ],
                 )
 
                 fixture.clock.release()
@@ -429,30 +476,35 @@ class ServingObservationLoopTests(unittest.IsolatedAsyncioTestCase):
             [
                 "call 1 started",
                 "call 1 ended",
-                "sleep(2.5)",
                 "call 2 started",
                 "call 2 ended",
+                "sleep(2.5)",
+                "call 3 started",
+                "call 3 ended",
                 "sleep(2.5)",
             ],
         )
         self.assertEqual(fixture.clock.requested, [2.5, 2.5])
 
     async def test_a_slow_attempt_delays_the_next_pass_instead_of_queueing_ticks(self) -> None:
-        probe = _RefreshProbe(block_first=True)
+        gate = _Gate(block_at=2)
+        probe = _RefreshProbe(inner=gate)
         fixture = _ServingFixture(self.tmp, probe)
 
         async with fixture.running():
-            await _wait_until(probe.first_call_entered.is_set)
+            # The pre-serve prime (invocation 1) already returned; the gate parks the recurring
+            # owner's own first pass, which is the attempt whose lateness must not queue ticks.
+            await _wait_until(gate.entered.is_set)
             fixture.clock.elapse(3.5)  # the pass outran three nominal one-second ticks
             await _REAL_SLEEP(0.01)
 
             self.assertEqual(probe.max_active, 1)
-            self.assertEqual(probe.calls, 1)
+            self.assertEqual(probe.calls, 2)
             self.assertEqual(fixture.clock.timeline.count("sleep(1.0)"), 0)
 
-            probe.release_first_call.set()
+            gate.release.set()
             await _wait_until(lambda: len(fixture.clock.requested) == 1)
-            self.assertEqual(probe.calls, 1)  # a queued tick would already be a second attempt
+            self.assertEqual(probe.calls, 2)  # a queued tick would already be a third attempt
 
             fixture.clock.release()
             await _wait_until(lambda: len(fixture.clock.requested) == 2)
@@ -462,9 +514,11 @@ class ServingObservationLoopTests(unittest.IsolatedAsyncioTestCase):
             [
                 "call 1 started",
                 "call 1 ended",
-                "sleep(1.0)",
                 "call 2 started",
                 "call 2 ended",
+                "sleep(1.0)",
+                "call 3 started",
+                "call 3 ended",
                 "sleep(1.0)",
             ],
         )
@@ -485,11 +539,12 @@ class ServingObservationLoopTests(unittest.IsolatedAsyncioTestCase):
         fixture = _ServingFixture(self.tmp, probe, clock=clock)
 
         async with fixture.running():
-            await _advance(clock, lambda: probe.calls == 25)
+            await _advance(clock, lambda: probe.calls == 26)
 
-        # Twenty-five one-second attempts, three full sweeps: the ten-second clock stayed inside
-        # the sweeper instead of being re-implemented (or bypassed) by the loop.
-        self.assertEqual(probe.calls, 25)
+        # The pre-serve prime plus twenty-five one-second attempts, three full sweeps: the
+        # ten-second clock stayed inside the sweeper instead of being re-implemented (or
+        # bypassed) by the loop, and the prime's extra attempt did not buy an extra sweep.
+        self.assertEqual(probe.calls, 26)
         self.assertEqual(clock.seconds, 24.0)
         self.assertEqual(host.probes, 3)
         self.assertEqual(len(catalog.list()), 1)
@@ -553,7 +608,8 @@ class ServingObservationLoopTests(unittest.IsolatedAsyncioTestCase):
         async with fixture.running():
             observers = _observer_tasks(fixture.created)
             self.assertEqual(len(observers), 1)
-            await _wait_until(lambda: probe.calls >= 1)
+            # Call 1 is the already-returned startup prime; call 2 is the owner's own first pass.
+            await _wait_until(lambda: probe.calls >= 2)
 
         self.assertTrue(observers[0].cancelled())
         self.assertEqual(fixture.clock.pending, 0)
@@ -563,29 +619,39 @@ class ServingObservationLoopTests(unittest.IsolatedAsyncioTestCase):
         fixture.shutdown.assert_called_once_with()
 
     async def test_a_failed_pass_keeps_the_owner_alive_on_the_same_cadence(self) -> None:
-        probe = _RefreshProbe(failures=1)
+        # Two leading failures: the contained pre-serve prime (call 1) and the recurring owner's
+        # own first pass (call 2). Neither may end the owner or move its cadence.
+        probe = _RefreshProbe(failures=2)
         fixture = _ServingFixture(self.tmp, probe)
 
         async with fixture.running():
             await _wait_until(lambda: len(fixture.clock.requested) == 1)
             self.assertEqual(
                 fixture.timeline,
-                ["call 1 started", "call 1 ended", "sleep(1.0)"],
+                [
+                    "call 1 started",
+                    "call 1 ended",
+                    "call 2 started",
+                    "call 2 ended",
+                    "sleep(1.0)",
+                ],
             )
 
             fixture.clock.release()
             await _wait_until(lambda: len(fixture.clock.requested) == 2)
 
-        self.assertEqual(probe.calls, 2)
+        self.assertEqual(probe.calls, 3)
         self.assertEqual(fixture.clock.requested, [1.0, 1.0])
         self.assertEqual(
             fixture.timeline,
             [
                 "call 1 started",
                 "call 1 ended",
-                "sleep(1.0)",
                 "call 2 started",
                 "call 2 ended",
+                "sleep(1.0)",
+                "call 3 started",
+                "call 3 ended",
                 "sleep(1.0)",
             ],
         )
@@ -624,7 +690,9 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         return catalog, host, sweeper
 
     async def test_a_failed_pass_leaves_every_sibling_loop_and_the_shutdown_intact(self) -> None:
-        probe = _RefreshProbe(failures=1)
+        # ``fail_on=2``: call 1 is the pre-serve startup prime, so the injected failure lands on
+        # the recurring owner's own first pass -- the pass this case isolates.
+        probe = _RefreshProbe(fail_on=2)
         fixture = _ServingFixture(self.tmp, probe)
         fixture.app.get("/l11-serving-probe")(_serving_probe_route)
         sweep = mock.Mock()
@@ -633,7 +701,7 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         )
 
         async with fixture.running(notifier=True, settings=settings, notifier_sweep=sweep):
-            await _wait_until(lambda: probe.calls == 1 and fixture.clock.requested.count(1.0) == 1)
+            await _wait_until(lambda: probe.calls == 2 and fixture.clock.requested.count(1.0) == 1)
             observers = _observer_tasks(fixture.created)
             siblings = [
                 task for task in _background_tasks(fixture.created) if task not in observers
@@ -647,7 +715,7 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
             # The retry completes and parks again, so the sibling assertions below are made with
             # the owner between attempts rather than mid-pass.
             await _advance(
-                fixture.clock, lambda: probe.calls >= 2 and fixture.clock.requested.count(1.0) >= 2
+                fixture.clock, lambda: probe.calls >= 3 and fixture.clock.requested.count(1.0) >= 2
             )
 
             self.assertFalse(observers[0].done())
@@ -673,29 +741,31 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         catalog, _host, sweeper = self._live_stack(clock, ("seat-1",))
         _seed_emitted_signal_marker(self.tmp)
         _seed_workspace_cursor(self.tmp)
-        probe = _RefreshProbe(clock.timeline, inner=sweeper.refresh, fail_on=2)
+        probe = _RefreshProbe(clock.timeline, inner=sweeper.refresh, fail_on=3)
         fixture = _ServingFixture(self.tmp, probe, clock=clock)
         seeded = _durable_tree(self.tmp)
 
         async with fixture.running():
-            await _wait_until(lambda: probe.calls == 1 and clock.requested.count(1.0) == 1)
+            await _wait_until(lambda: probe.calls == 2 and clock.requested.count(1.0) == 1)
             after_success = _durable_tree(self.tmp)
-            # Control: the successful pass DID commit durable catalog truth, so the identity below
-            # is a result about the failure path, not about a tree nothing ever writes.
+            # Control: the successful passes DID commit durable catalog truth, so the identity
+            # below is a result about the failure path, not about a tree nothing ever writes.
             self.assertNotEqual(after_success, seeded)
-            self.assertEqual(probe.outcomes, ["ok"])
+            self.assertEqual(probe.outcomes, ["ok", "ok"])
 
             clock.release()
-            await _wait_until(lambda: probe.calls == 2 and clock.requested.count(1.0) == 2)
+            await _wait_until(lambda: probe.calls == 3 and clock.requested.count(1.0) == 2)
 
-            self.assertEqual(probe.outcomes, ["ok", "failed"])
+            self.assertEqual(probe.outcomes, ["ok", "ok", "failed"])
             # No success fact, no diagnostic row, no event, no payload: the pass changed nothing.
             self.assertEqual(_durable_tree(self.tmp), after_success)
             self.assertFalse(_observer_tasks(fixture.created)[0].done())
             self.assertEqual([row.id for row in catalog.list()], ["seat-1"])
 
     async def test_the_retry_needs_no_request_restart_or_catalog_edit(self) -> None:
-        probe = _RefreshProbe(failures=1)
+        # ``fail_on=2``: call 1 is the pre-serve startup prime, so the owner's own first pass is
+        # the failed one this case retries from.
+        probe = _RefreshProbe(fail_on=2)
         fixture = _ServingFixture(self.tmp, probe)
         TerminalCatalog(self.tmp / "terminal-sessions.json").upsert(_entry("seat-1"))
         _seed_emitted_signal_marker(self.tmp)
@@ -703,13 +773,13 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         frozen = _durable_tree(self.tmp)
 
         async with fixture.running():
-            await _wait_until(lambda: probe.calls == 1 and fixture.clock.requested.count(1.0) == 1)
+            await _wait_until(lambda: probe.calls == 2 and fixture.clock.requested.count(1.0) == 1)
             observer = _observer_tasks(fixture.created)[0]
             self.assertEqual(_durable_tree(self.tmp), frozen)
 
             fixture.clock.release()  # the cadence is the only trigger released here
 
-            await _wait_until(lambda: probe.calls == 2 and fixture.clock.requested.count(1.0) == 2)
+            await _wait_until(lambda: probe.calls == 3 and fixture.clock.requested.count(1.0) == 2)
             # Same task object: the retry is the same owner's next attempt, not a restart.
             self.assertIs(_observer_tasks(fixture.created)[0], observer)
             # And the durable tree is still byte-identical: no catalog edit was needed either.
@@ -717,8 +787,8 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
             # directly, with no server and no HTTP client used anywhere in it.
             self.assertEqual(_durable_tree(self.tmp), frozen)
 
-        self.assertEqual(probe.calls, 2)
-        self.assertEqual(probe.outcomes, ["failed", "ok"])
+        self.assertEqual(probe.calls, 3)
+        self.assertEqual(probe.outcomes, ["ok", "failed", "ok"])
 
     async def test_retry_resumes_from_the_persisted_catalog_and_preserves_committed_truth(
         self,
@@ -735,11 +805,11 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         seeded = _durable_tree(self.tmp)
         marker_key = marker.relative_to(self.tmp).as_posix()
         cursor_key = cursor.relative_to(self.tmp).as_posix()
-        probe = _RefreshProbe(clock.timeline, inner=sweeper.refresh, fail_on=2)
+        probe = _RefreshProbe(clock.timeline, inner=sweeper.refresh, fail_on=3)
         fixture = _ServingFixture(self.tmp, probe, clock=clock)
 
         async with fixture.running():
-            await _wait_until(lambda: probe.calls == 1 and clock.requested.count(1.0) == 1)
+            await _wait_until(lambda: probe.calls == 2 and clock.requested.count(1.0) == 1)
 
             # A later independent durable commit: a second row lands after the first pass.
             clock.elapse(10.0)
@@ -747,9 +817,9 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
             before_failure = _durable_tree(self.tmp)
 
             clock.release()
-            await _wait_until(lambda: probe.calls == 2 and clock.requested.count(1.0) == 2)
+            await _wait_until(lambda: probe.calls == 3 and clock.requested.count(1.0) == 2)
 
-            self.assertEqual(probe.outcomes, ["ok", "failed"])
+            self.assertEqual(probe.outcomes, ["ok", "ok", "failed"])
             # The failed pass cleared no row, cursor, terminal evidence, or emitted-signal marker.
             self.assertEqual(_durable_tree(self.tmp), before_failure)
             self.assertEqual([row.id for row in catalog.list()], ["seat-1", "seat-2"])
@@ -757,9 +827,9 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
 
             clock.elapse(10.0)
             clock.release()
-            await _wait_until(lambda: probe.calls == 3 and clock.requested.count(1.0) == 3)
+            await _wait_until(lambda: probe.calls == 4 and clock.requested.count(1.0) == 3)
 
-            self.assertEqual(probe.outcomes, ["ok", "failed", "ok"])
+            self.assertEqual(probe.outcomes, ["ok", "ok", "failed", "ok"])
             # The retry began from the CURRENT persisted catalog: the row committed ahead of the
             # failed pass is observed only after it, and the pre-existing row is probed again.
             self.assertEqual(host.probed, ["ar-seat-1", "ar-seat-1", "ar-seat-2"])
@@ -777,25 +847,28 @@ class ServingObservationFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         # The boundary is ``except Exception``; cancellation is not an ``Exception`` subclass, which
         # is the whole reason one boundary can isolate failures without swallowing shutdown.
         self.assertFalse(issubclass(asyncio.CancelledError, Exception))
-        probe = _RefreshProbe(block_first=True)
+        # ``block_at=2``: the pre-serve startup prime is invocation 1, so the parked pass is the
+        # recurring owner's own in-flight attempt -- the one this case cancels mid-write.
+        gate = _Gate(block_at=2)
+        probe = _RefreshProbe(inner=gate)
         fixture = _ServingFixture(self.tmp, probe)
 
         async with fixture.running():
-            await _wait_until(probe.first_call_entered.is_set)
+            await _wait_until(gate.entered.is_set)
             observer = _observer_tasks(fixture.created)[0]
 
             observer.cancel()
-            probe.release_first_call.set()
+            gate.release.set()
 
             # Not ``await observer``: a boundary that swallowed the cancellation would park the loop
             # in its next cadence and never finish, so this bounded wait is the falsifiable form.
             await _wait_until(observer.done)
 
             self.assertTrue(observer.cancelled())
-            self.assertEqual(probe.calls, 1)
+            self.assertEqual(probe.calls, 2)
             # The in-flight pass drained instead of being abandoned mid-write.
             self.assertEqual(probe.active, 0)
             await _REAL_SLEEP(0.05)
-            self.assertEqual(probe.calls, 1)  # the loop did not resume after the boundary
+            self.assertEqual(probe.calls, 2)  # the loop did not resume after the boundary
 
         fixture.shutdown.assert_called_once_with()
