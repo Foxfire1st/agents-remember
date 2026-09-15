@@ -27,7 +27,7 @@ optional review → curator scoped onboarding/check handoff → closeout transac
 by hand** (the tool does not reconcile checkboxes). The worker's terminal state is targeted checks
 reported truthfully plus a turn report; failed or not-run checks never become a claim of full green.
 Closeout and integration consume the prepared reports and perform only the authorized Git
-code/memory/ledger transaction.
+code/memory transaction.
 
 **Flat-run note:** in a flat series (no managers spawned) the **architect may wear this hat** —
 same duties, same artifacts, one owner chair. A spawned orchestrator does not absorb the manager
@@ -254,7 +254,7 @@ stops belong to the orchestrator via the system-specialist protocol.
   passed/failed/blocked/not-run check report.
 - **Publish closeout-door truth; do not rank the portfolio.** Once the leaf has builder completion,
   the worker targeted-check report, affected curator onboarding/scoped-check handoff when memory
-  changed, current task/source/memory/ledger provenance, and current lineage, call the
+  changed, current task/source/memory provenance, and current lineage, call the
   `closeout_door` MCP tool with a
   `request={action:"declare", contract_path:...}` for the configured leaf contract. Publish the
   canonical leaf/master/sprint refs, `executionNature`,
@@ -280,7 +280,7 @@ stops belong to the orchestrator via the system-specialist protocol.
   manager. (Enforced as-built by the gate policy: `orchestration.gateDelegation` in settings,
   `controlplane/gate_policy.py` — human-pinned kinds stay human, decisions attributed.)
   Under the accepted series authority, leaf closeout preview/apply is this seat's responsibility:
-  preview the exact code/memory/ledger legs, record the accepted planner/series authority in the
+  preview the exact code/memory legs, record the accepted planner/series authority in the
   closeout intent note, and continue only after the orchestrator released the in-scope transaction.
   Worker and curator check results remain attached as truthful evidence; they do not become a full
   green claim. Your own
@@ -304,7 +304,7 @@ stops belong to the orchestrator via the system-specialist protocol.
   integration and direct-landing retain their own advertised recovery actions. Queue absence,
   invalid-empty state, or later task edits never erase or strand that operation.
 - **Transaction boundary.** Closeout and integration publish only the explicitly authorized Git
-  code, prepared memory, and ledger commits/merges, with source/destination refs, conflict checks,
+  code and prepared memory commits/merges, with source/destination refs, conflict checks,
   and recovery evidence. They do not automatically run code-quality checks, full test suites,
   memory-quality suites, curator certification, or independent review. Full code quality, full
   tests, and full memory quality run only after an explicit developer request. Worker targeted
@@ -332,7 +332,7 @@ stops belong to the orchestrator via the system-specialist protocol.
 When the developer or approved task brief requests a master-exit review, spawn the adversarial
 reviewer on this canonical master document with role `reviewer`. Scope the accumulated
 organizational candidate or isolated atomic branch, pass the worker reports, curator scoped
-handoff, task/ledger refs, and exact requested review mode, and preserve the three-round monotonic
+handoff, task/Git/operation refs, and exact requested review mode, and preserve the three-round monotonic
 review rule in `../SKILL.md`: review 1 seals the complete fixed finding list; reviews 2 and 3 verify
 only that list, with remaining count shrinking to zero; ask the developer directly after round 3.
 The verdict is evidence, not a gate decision. Record it with `task_doc` and attach it only to the
@@ -343,9 +343,11 @@ integration.
 
 Write the **master-handover packet** (`../templates/master-handover-packet.md`) — execution nature ·
 scope refs · change-set summary · worker targeted-check report · curator scoped onboarding/check
-report when memory changed · optional requested verdict · canonical master document · ledger state.
-The packet records the exact prepared code/memory/ledger transaction and any concrete conflict or
+report when memory changed · optional requested verdict · canonical master document · accepted Git pair.
+The packet records the exact prepared code/memory transaction and any concrete conflict or
 failed/not-run check; it does not request an automatic full gate.
+Memory commit trailers supply attribution. The computed ledger cache is diagnostic and never
+supplies landing authority or an additional commit leg.
 Terminal/finalizer truth wakes the structurally current orchestrator. The `(master document,
 manager)` seat **stays reachable** until the series retires; `gate_list` shows the structural gate
 state without exposing its private correlation.

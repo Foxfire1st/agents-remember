@@ -24,13 +24,8 @@ walk, so a row exists only for a commit that really carries the trailer. And the
 name a commit the code repository really holds before the row can mean anything, which is the
 same truth test the projection already applies to every row it keeps.
 
-One reading rule is transitional by construction and says so: a commit written before the
-trailer rule carries no trailer, and its attribution is still whatever the ledger it carried
-said. That commit is read from its own blob, *per commit*, because the alternative -- a mode
-that decides once whether to trust trailers or the file -- is the compatibility layer this
-change exists to remove. Backfilling the history writes the trailer onto those commits, the
-per-commit fallback then finds nothing left to read, and it can be deleted without touching
-any caller.
+Historical-table readers below are only migration inputs. Runtime readers derive mappings
+from commit trailers; missing attribution never activates a cached-table fallback.
 """
 
 from __future__ import annotations

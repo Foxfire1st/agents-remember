@@ -49,7 +49,6 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         code_commit: str,
         *,
         memory_commit_message: str | None = None,
-        ledger_commit_message: str | None = None,
         intent_note: str = "",
         candidate_tree: str | None = None,
         dry_run: bool = False,
@@ -72,18 +71,17 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         authority settings. The code commit is verified, never created. Pass
         candidate_tree (the exact candidate tree admitted by the closeout journal) to keep
         a moved branch from being committed after admission.
-        Each of memory_commit_message and ledger_commit_message must be explicit and
+        The memory_commit_message must be explicit and
         nonblank only when its contract-derived leg is enabled; typed not-applicable
         legs may omit the corresponding message. The verified-existing code commit has
         no code-message input.
-        MUTATING (memory + ledger commits); preview with dry_run=true."""
+        MUTATING (attributed memory content commit); preview with dry_run=true."""
         return direct_landing_payload(
             config,
             DirectLandingRequest(
                 contract_path=contract_path,
                 code_commit=code_commit,
                 memory_commit_message=memory_commit_message,
-                ledger_commit_message=ledger_commit_message,
                 intent_note=intent_note,
                 candidate_tree=candidate_tree,
                 dry_run=dry_run,
@@ -98,7 +96,6 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         contract_path: str,
         code_commit_message: str | None = None,
         memory_commit_message: str | None = None,
-        ledger_commit_message: str | None = None,
     ) -> dict[str, Any]:
         """Non-mutating preview of the bounded closeout Git transaction.
 
@@ -112,7 +109,6 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
             CloseoutCommitMessages(
                 code=code_commit_message,
                 memory=memory_commit_message,
-                ledger=ledger_commit_message,
             ),
         )
 
@@ -123,7 +119,6 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         intent_note: str,
         code_commit_message: str | None = None,
         memory_commit_message: str | None = None,
-        ledger_commit_message: str | None = None,
         dry_run: bool = False,
         corrective_dispositions: list[RedCatalogDisposition] | None = None,
     ) -> dict[str, Any]:
@@ -145,7 +140,6 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
             CloseoutCommitMessages(
                 code=code_commit_message,
                 memory=memory_commit_message,
-                ledger=ledger_commit_message,
             ),
             CloseoutApproval(intent_note=intent_note, dry_run=dry_run),
             corrective_dispositions=tuple(corrective_dispositions or ()),
@@ -158,7 +152,6 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         *,
         contract_path: str,
         strategy: IntegrateStrategy = "ff-only",
-        ledger_commit_message: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Start or observe task-bound landing onto its source branch (strategy 'ff-only'
@@ -173,7 +166,6 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
             config,
             contract_path,
             strategy=strategy,
-            ledger_commit_message=ledger_commit_message,
             dry_run=dry_run,
         )
 
@@ -182,7 +174,6 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         *,
         contract_path: str,
         strategy: IntegrateStrategy = "ff-only",
-        ledger_commit_message: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Partially PUBLISH an UNFINISHED atomic master: land its accumulated line into its super
@@ -204,7 +195,6 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
             config,
             contract_path,
             strategy=strategy,
-            ledger_commit_message=ledger_commit_message,
             dry_run=dry_run,
         )
 
@@ -214,7 +204,6 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         contract_path: str,
         landed_code_commit: str,
         landed_memory_content_commit: str = "",
-        landed_ledger_commit: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Record that this task's code landed through a pull request, so its contract stops
@@ -230,7 +219,6 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
             landed=LandedCommits(
                 code=landed_code_commit,
                 memory_content=landed_memory_content_commit,
-                ledger=landed_ledger_commit,
             ),
             dry_run=dry_run,
         )
@@ -245,7 +233,6 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         intent_note: str,
         code_commit_message: str | None = None,
         memory_commit_message: str | None = None,
-        ledger_commit_message: str | None = None,
         grade: SchedulingGradeInput | None = None,
         admission: CandidateAdmissionFacts | None = None,
         corrective_dispositions: list[RedCatalogDisposition] | None = None,
@@ -269,7 +256,6 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
                 intent_note=intent_note,
                 code_commit_message=code_commit_message,
                 memory_commit_message=memory_commit_message,
-                ledger_commit_message=ledger_commit_message,
                 grade=grade,
                 admission=admission,
                 corrective_dispositions=tuple(corrective_dispositions or ()),

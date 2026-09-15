@@ -99,8 +99,9 @@ task doc (approved)  →  branch (intent)  →  worktree (only where something i
    include_freshness=true)`.
 2. Report the packet facts before relying on memory or providers: repository/branch/dirty state;
    memory + onboarding roots; provider state; drift status and actionable count; branch freshness
-   (`behind`/`diverged` → fast-forward the local official line first;
-   `ledgerMapsCodeHead=false` → carryover or the right memory branch first).
+   (`behind`/`diverged` → fast-forward the local official line first). Reconcile actual memory
+   content or ancestry conflicts; missing cache rows or attribution for unchanged memory do not
+   block an otherwise valid code/memory pair.
 3. Drifted/missing/orphaned onboarding on committed, non-dirty source: **emit a decision item to
    the architect** before refreshing via `c-05-create-or-update-onboarding-files` — drift handling
    is approval-gated.
@@ -356,7 +357,7 @@ subordinate execution without repeated developer formality. Managers may close o
 their leaves; this seat may decide manager handovers, close out direct work when it wears the
 manager/worker hat, finalize/cleanup subordinate edges, release organizational leaf candidates,
 and land completed atomic masters under the accepted-series authority. Preview the exact
-code/memory/ledger legs and record the authority source in the intent note or decision log;
+code/memory legs and record the authority source in the intent note or decision log;
 worker targeted and curator scoped check results travel with the edge, while closeout does not
 launch automatic quality or test suites. Do not stop merely because the next operation creates a
 commit, advances a lifecycle, cleans up a spent worktree, or fast-forwards a subordinate branch.
@@ -396,7 +397,7 @@ handover you cannot honestly decide escalates to the architect as a decision ite
 
 1. Consume the manager's readiness or handover packet: execution nature, canonical refs,
    waiting door generation, change-set summary, worker targeted-check report, curator scoped
-   onboarding/check report, optional requested verdict, lineage, ledger state, blockers, risks, and
+   onboarding/check report, optional requested verdict, lineage, accepted Git pair, blockers, risks, and
    dependent nodes.
 2. Recompute the graph frontier and current valid-built closeout projection, then release only its
    exact first-ready generation. A manager publishes door facts; it never selects against another
@@ -404,11 +405,11 @@ handover you cannot honestly decide escalates to the architect as a decision ite
    attempt/worker/commit/recovery evidence belongs to the operation journal even if the projection
    is later invalidated or absent.
 3. **Organizational:** release one prepared leaf transaction against the current super source and
-   land its code/memory/ledger legs directly. No full acceptance is launched at the final leaf. No
+   land its code/memory legs directly. No full acceptance is launched at the final leaf. No
    master branch is merged because none exists.
 4. **Atomic:** require the master's own contract activation to be `active` while its manager
    exposes implementation, integrate every prepared leaf into the isolated atomic branch, then
-   acquire the narrow landing authority and land that one code/memory/ledger block on super. Full
+   acquire the narrow landing authority and land that one code/memory block on super. Full
    quality or memory suites run only when the developer explicitly requests them.
    Expose no intermediate atomic leaf to super; an unfinished master retains its branch and
    journals.
@@ -417,7 +418,7 @@ handover you cannot honestly decide escalates to the architect as a decision ite
    explicit recovery for unavoidable divergence, not a routine consequence of parallel
    organizational work. A candidate that no longer sits on the current source produces a new
    targeted closeout after the moved source is propagated downstream into its worktrees.
-6. Record the new super tips in their owning Git/ledger/operation evidence, publish any resulting
+6. Record the new super tips in their owning Git/operation evidence, publish any resulting
    task or door disposition change, rebuild affected projections, release or retain the exact
    landing blocker, and recompute. Do not retain a terminal or certified queue row for audit.
 7. **Close completed subordinate seats; retain the manager owner** —
@@ -435,8 +436,8 @@ handover you cannot honestly decide escalates to the architect as a decision ite
    Setting `retirement.autoCloseCompletedSeats=false` restores landed/archive behavior for the
    three automatic leaf-altitude roles; it never makes manager/orchestrator automatic targets.
 
-**Transaction boundary.** Closeout and integration publish only the explicitly authorized Git code,
-prepared memory, and ledger commits/merges, with source/destination refs, conflict checks, and
+**Transaction boundary.** Closeout and integration publish only the explicitly authorized Git code
+and prepared memory commits/merges, with source/destination refs, conflict checks, and
 recovery evidence. They do not automatically run code-quality checks, full test suites,
 memory-quality suites, curator certification, or independent review. Full code quality, full tests,
 and full memory quality run only after an explicit developer request. Worker targeted checks and
@@ -461,9 +462,10 @@ Strict stack: super off main. An organizational master is a task/manager boundar
 its leaves branch from the current super. Only an atomic master owns an intermediate integration
 branch, and its leaves branch from that block. Every later candidate refreshes from the moved super
 before closeout so code and memory remain ancestry-compatible. The final super → main landing
-follows `system/git-workflow.md`: PR to gated main, remote merge, memory carry-over so the ledger
-maps the actual merge commit, then push — **push only after the architect returns the developer's
-approval**.
+follows `system/git-workflow.md`: PR to gated main, remote merge, any needed onboarding carryover,
+then push — **push only after the architect returns the developer's approval**. Unchanged memory
+keeps its actual commit; do not create a mapping-only commit for the merge SHA. The ignored ledger
+cache derives from memory commit trailers and never grants or blocks landing authority.
 
 **Conflict resolution — integration branches are not workbenches.** *Up-front (preferred):* an
 overlap found during planning becomes a cited predecessor edge or an atomic foundation master

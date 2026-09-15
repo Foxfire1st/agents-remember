@@ -31,7 +31,6 @@ class LandedIntegration:
     strategy: str
     code_commit: str
     memory_content_commit: str = ""
-    ledger_commit: str = ""
 
 
 def record_landed_integration(
@@ -60,7 +59,6 @@ def record_landed_integration(
             integration_strategy=landed.strategy,
             integrated_code_commit=landed.code_commit,
             integrated_memory_content_commit=landed.memory_content_commit,
-            integrated_ledger_commit=landed.ledger_commit,
         ),
         cells,
     )

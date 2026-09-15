@@ -12,6 +12,8 @@ from pathlib import Path
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.memory_attribution import render_memory_content_message
+from agents_remember.kernel.memory_cache import refresh_memory_cache
 from agents_remember.memory_quality.check import (
     run_memory_quality_check,
 )
@@ -347,6 +349,36 @@ class RetainedPreparedProvenanceTests(TreeCase):
 
         ordinary = self.check(current)
         self.assertTrue(ordinary["ok"], ordinary["findings"])
+
+    def test_memory_citation_provenance_uses_git_when_the_cache_is_missing_or_malformed(
+        self,
+    ) -> None:
+        self.tree.source("src.py", "VALUE = 1\n")
+        self.git(self.tree.code, "add", "src.py")
+        self.git(self.tree.code, "commit", "-qm", "code")
+        code = self.git(self.tree.code, "rev-parse", "HEAD")
+        self.tree.memory_file("system/policy.py", "VALUE = 1\n")
+        self.git(self.tree.memory, "add", "system/policy.py")
+        self.git(self.tree.memory, "commit", "-qm", render_memory_content_message("memory", code))
+        memory = self.git(self.tree.memory, "rev-parse", "HEAD")
+        self.card(code)
+        card = self.tree.onboarding / "current.md"
+        card.write_text(card.read_text().replace("src.py:1-1", "system/policy.py:1-1"))
+        refresh_memory_cache(self.tree.memory)
+        cache = self.tree.memory / "memory.md"
+        for contents in (cache.read_text(), None, "malformed consumer cache\n"):
+            with self.subTest(cache=contents):
+                if contents is None:
+                    cache.unlink()
+                else:
+                    cache.write_text(contents)
+                result = claim_reopen.check_onboarding_root(self.tree.onboarding, self.tree.code)
+                self.assert_clean(result)
+                self.assertEqual(self.git(self.tree.code, "rev-parse", "HEAD"), code)
+                self.assertEqual(self.git(self.tree.memory, "rev-parse", "HEAD"), memory)
+        self.tree.memory_file("system/policy.py", "VALUE = 2\n")
+        result = claim_reopen.check_onboarding_root(self.tree.onboarding, self.tree.code)
+        self.assertEqual(result["surfacedFindings"][0]["code"], "citation_claim_reopened")
 
 
 class MechanicallyProjectedRangeTests(TreeCase):

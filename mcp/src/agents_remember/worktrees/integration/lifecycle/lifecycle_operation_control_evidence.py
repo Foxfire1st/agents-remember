@@ -94,7 +94,7 @@ def _reconciled_closeout_record(
             observed={"legacyDigest": record.legacyMigration.originalSha256},
             next_action="recover",
         )
-    reconciled = reconcile_closeout_mutations(record, purpose="cancellation")
+    reconciled = reconcile_closeout_mutations(record)
     recovery = derive_closeout_recovery_commits(record, mutations=reconciled)
     if reconciled != record.mutationEvidence or recovery != record.recoveryCommits:
         resolved = record.model_copy(
@@ -159,6 +159,7 @@ def _cancellable_closeout_facts(
             snapshot = git_mutation_snapshot(
                 Path(evidence.repository),
                 report_root / f".{leg}-cancellation-evidence.index",
+                memory_cache=leg == "memory",
             )
         else:
             with tempfile.TemporaryDirectory(
@@ -167,6 +168,7 @@ def _cancellable_closeout_facts(
                 snapshot = git_mutation_snapshot(
                     Path(evidence.repository),
                     Path(temporary) / "index",
+                    memory_cache=leg == "memory",
                 )
         accepted_output = _protected_output_facts(accepted)
         observed_output = _protected_output_facts(snapshot)

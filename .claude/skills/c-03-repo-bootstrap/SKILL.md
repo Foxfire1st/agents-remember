@@ -5,7 +5,7 @@ description: "Bootstrap onboarding for undocumented repos or existing memory sli
 
 # Repo Bootstrap
 
-Bootstrap durable onboarding for a repository that has little or no memory coverage, or for an already-ledgered memory repo whose source slices need targeted creation, refresh, move handling, or cleanup.
+Bootstrap durable onboarding for a repository that has little or no memory coverage, or for an already-adopted memory repo whose source slices need targeted creation, refresh, move handling, or cleanup.
 
 The minimum successful bootstrap is one root repo overview under the `c-08-ar-coordination-context-resolver` skill resolved `onboarding_root`:
 
@@ -485,7 +485,7 @@ Bootstrap modes:
 | `safe-starter-memory`                 | default for most repos                                                                   | root overview + first route-local overview wave + first high-risk file wave                                                  |
 | `cross-repo-focused`                  | repo participates in multi-repo flows                                                    | root overview + boundary packs + boundary route/file coverage                                                                |
 | `domain-doc-focused`                  | behavior depends on domain docs                                                          | root overview + docs packs + docs-sensitive coverage                                                                         |
-| `existing-memory-slice-maintenance`   | already-ledgered memory needs coverage or cleanup for an added, moved, deleted, or newly important route | source inventory delta + route overview/card or cleanup plan + evidence packs as needed + targeted file wave or removal list + curator review + handoff |
+| `existing-memory-slice-maintenance`   | already-adopted memory needs coverage or cleanup for an added, moved, deleted, or newly important route | source inventory delta + route overview/card or cleanup plan + evidence packs as needed + targeted file wave or removal list + curator review + handoff |
 | `full-bootstrap`                      | mature/critical repo needs broad coverage                                                | full pass model in waves                                                                                                     |
 
 ### Existing-memory slice maintenance
@@ -1223,7 +1223,7 @@ The orchestrator remains thin throughout.
 | Repo has placeholder overview and needs real content             | yes                                        |
 | Task will touch an un-bootstrapped area                          | yes, `existing-memory-slice-maintenance` when repo memory already exists |
 | Repo root overview exists but agents still get lost in a subtree | yes, route-local overview wave             |
-| New package/module/source route appears in an already-ledgered repo | yes, `existing-memory-slice-maintenance` |
+| New package/module/source route appears in an already-adopted repo | yes, `existing-memory-slice-maintenance` |
 | Package/module/source route disappears or moves                  | yes, `existing-memory-slice-maintenance` cleanup or move handling |
 | Cross-repo boundary is poorly understood                         | yes, cross-repo-focused mode               |
 | Domain docs influence code behavior                              | yes, domain-doc-focused mode               |

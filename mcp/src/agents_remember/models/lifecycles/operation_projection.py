@@ -67,7 +67,6 @@ _RUNNING_PHASES: frozenset[LifecycleOperationPhase] = frozenset(
         "code-commit",
         "memory-refresh",
         "memory-commit",
-        "ledger-commit",
         "integration-replay",
         "integration-quality",
         "source-merge",
@@ -75,7 +74,6 @@ _RUNNING_PHASES: frozenset[LifecycleOperationPhase] = frozenset(
         "door-publication",
         "direct-preflight",
         "direct-memory-commit",
-        "direct-ledger-commit",
         "direct-terminal-publication",
     }
 )
@@ -83,14 +81,13 @@ _DIRECT_PHASES: frozenset[LifecycleOperationPhase] = frozenset(
     {
         "direct-preflight",
         "direct-memory-commit",
-        "direct-ledger-commit",
         "direct-terminal-publication",
     }
 )
 # input-required parks the operation where the interruption left it: the
 # contract-finalization/developer-decision cells, the direct-landing decision
 # cells, plus the running phases the shared evidence reporters legitimately park
-# under (memory-commit / ledger-commit after a proven Git mutation, and
+# under (memory-commit after a proven Git mutation, and
 # recovering-after-claim for migrated legacy generations, or private preparation
 # before any consumed claim).  require_input never
 # rewrites the phase, so every one of these cells is a canonical input-required
@@ -100,7 +97,6 @@ _INPUT_REQUIRED_PHASES: frozenset[LifecycleOperationPhase] = frozenset(
         "contract-finalization",
         "failed",
         "memory-commit",
-        "ledger-commit",
         "recovering-after-claim",
         "recovering-private-preparation",
         *_DIRECT_PHASES,

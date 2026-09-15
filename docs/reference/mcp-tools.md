@@ -135,10 +135,10 @@ application operation, not an agent-facing route around MCP.
 
 | Tool | Purpose | Key args |
 | --- | --- | --- |
-| `memory_baseline_status` | Report drift + ledger state for adopting an external-memory baseline. | `repo_id` |
-| `memory_baseline_adopt` | Create the first ledgered memory baseline (gated on clean/accepted drift). | `repo_id`, accept-drift / dry-run options |
-| `memory_carryover_plan` | Plan carrying richer onboarding from a source branch into official memory. | repo/branch scope |
-| `memory_carryover_apply` | Apply an approved carryover plan once the code has landed officially. | plan + intent |
+| `memory_baseline_status` | Report drift and Git attribution/cache observations for adopting an external-memory baseline. | `repo_id` |
+| `memory_baseline_adopt` | Adopt an external-memory baseline and refresh its computed ledger cache (gated on clean/accepted drift). | `repo_id`, accept-drift / dry-run options |
+| `memory_carryover_plan` | Plan carrying richer onboarding from a source branch into an open recovery leaf after code lands. | `repo_id`, `contract_path`, repo/branch scope |
+| `memory_carryover_apply` | Apply an approved carryover plan in that recovery leaf once the code has landed officially. | `repo_id`, `contract_path`, plan + intent |
 
 ## Worktree lifecycle & closeout
 
@@ -148,15 +148,19 @@ application operation, not an agent-facing route around MCP.
 | `worktree_enclosure_adopt` | Explicitly adopt one exact readable pre-locator enclosure. Validates the configured contract/root pair and writes an audited locator receipt; normal readers never invoke it. Dry-run by default. | `contract_path`, `expected_worktree_group`, nonblank `rationale`, `dry_run=true`, `approved=false`, optional `expected_publication_request_id` |
 | `worktree_attach` | Re-attach to an existing task contract without mutating Git. | `repo_id`, `task_name` / `contract_path` |
 | `worktree_status` | Report strict task-addressed lifecycle status without queue input. A live locator resolves to the root manifest/journal and its executable controls; a terminal locator resolves to the exact external archive/receipt plus surviving contract truth, distinguishes archive-ready from cleanup-completed, and returns the archived `cleanupArguments` with exact retry `nextArgs`. | `repo_id`, `task_name` / `contract_path` |
-| `worktree_closeout_preview` | Non-mutating preview of a worktree-backed closeout. | `contract_path`, code/memory/ledger commit messages |
+| `worktree_closeout_preview` | Non-mutating preview of a worktree-backed closeout. | `contract_path`, code/memory commit messages |
 | `worktree_closeout_apply` | Validate every enabled explicit nonblank input, claim the exact first-ready door generation through a short CAS, then start or observe its durable task-bound closeout and return promptly. Poll `worktree_status`; no operation ID is exposed. Agents Remember source commits run the leaf change-set-scoped quality contract (`--targeted`) before Git commit — the full wrapper runs once per master at the master integration gate. | `contract_path`, `intent_note`, explicit message for each enabled commit leg |
 | `worktree_integrate` | Start or observe durable task-bound landing (`ff-only` or `replay`) and return promptly. Poll `worktree_status`; retries with conflicting input refuse. | `contract_path`, `strategy`, `dry_run=false` |
 | `worktree_operation_control` | Execute one currently advertised task-addressed control for an exact closeout/integrate/direct-landing generation. Retry/recover preserve accepted input; cancellation proves worker exit and Git safety; revise/retire/supersede are evidence-aware. | `contract_path`, `operation_kind`, `action`, `expected_generation`, nonblank `intent_note`, action-specific inputs, `dry_run=false` |
 | `worktree_legacy_operation` | Explicitly inspect, migrate, or archive one exact schema-1 operation. Migration is limited to the proven blank-message incident; normal readers remain current-schema-only. | `contract_path`, `operation_kind`, `action`, inspect-bound `expected_digest`, action-specific messages/reason, `dry_run=false` |
-| `direct_landing` | Policy-gated branch-addressed memory/ledger landing for an already verified series code commit. Persists a durable direct-landing generation before Git mutation and recovers it through `worktree_operation_control`. | `contract_path`, `code_commit`, explicit enabled-leg messages, `intent_note`, optional gated `candidate_tree`, `dry_run=false` |
+| `direct_landing` | Policy-gated branch-addressed memory-content landing for an already verified series code commit. Persists a durable direct-landing generation before Git mutation and recovers it through `worktree_operation_control`. | `contract_path`, `code_commit`, explicit enabled-leg messages, `intent_note`, optional gated `candidate_tree`, `dry_run=false` |
 | `worktree_cleanup` | After integration, archive/read back canonical lifecycle evidence, publish an external terminal receipt, then remove worktrees, merged task branches, reports, and the enclosure root. Archive-ready is not cleanup-completed; retry this exact public call with its archived `teardown_providers` value until surviving contract truth records completion. This is non-terminal for task documents. | `contract_path`, `dry_run=false`, `teardown_providers=true` |
 | `worktree_abandon` | Abandon an unintegrated generation through exact contract/journal/Git authority and preserve terminal archive proof before deletion. Archive-ready but incomplete abandon retries this exact public call with its archived `force` value until surviving contract truth records abandonment. | `contract_path`, `dry_run=false`, `force=false` |
 | `lifecycle_finalize_task` | Prove the landed edge, resolve the exact contract-bound leaf, refuse before cleanup unless every parent/nested step is done, then complete that leaf and, when it declares an existing immediate parent, automatically derive and reconcile that exact row. Standalone/no-parent tasks remain supported; the parent document's own task status and higher ancestors are not completed. | `contract_path`; optional `task_doc_path`, `master_doc_path`, and `subtask_number` are independent identity assertions; `dry_run=false` |
+
+Closeout and landing record the actual code/memory Git pair. New memory-content commits carry
+`Code-Commit` attribution; `memory.md` remains an ignored computed cache, never an additional commit
+leg or admission/recovery authority. Missing or damaged cache data does not block those operations.
 
 Receipt-file existence alone does not select the terminal route. While the locator is still live,
 an identical accepted `worktree_cleanup` or `worktree_abandon` retry reuses the exact published

@@ -1,4 +1,4 @@
-"""Bounded private Git preparation capabilities and physical tree observations.
+"""Bounded Git preparation bindings, capabilities and physical tree observations.
 
 The caller supplies live journal authorization. This module owns no lifecycle decision,
 Git argv, subprocess, retry, or publication authority.
@@ -28,6 +28,20 @@ def require_git_object_id(value: str) -> None:
     """Require one complete object ID, never a ref, abbreviation, option or expression."""
     if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value) is None:
         raise GitPreparationError("Git observation requires a complete object identity")
+
+
+@dataclass(frozen=True)
+class ExistingGitPreparationBinding:
+    """One exact logical output and its explicitly admitted memory-cache domain."""
+
+    root: Path
+    common_directory: Path
+    logical_ref: str
+    commit: str
+    tree: str
+    allow_memory_cache: bool = False
+    # Required in the memory domain and proved separately from the immutable raw tree.
+    memory_content_tree: str | None = None
 
 
 @dataclass(frozen=True)
@@ -145,12 +159,19 @@ def _physical_blob(directory: int, name: str, mode: str, object_id: str) -> None
         raise GitPreparationError(f"private source bytes differ from admitted tree: {name}")
 
 
-def require_physical_tree(root: Path, entries: Mapping[str, tuple[str, str]]) -> None:
+def require_physical_tree(
+    root: Path,
+    entries: Mapping[str, tuple[str, str]],
+    *,
+    allow_memory_cache: bool = False,
+) -> None:
     """Read no-follow bytes, modes and membership; never trust index stat caches.
 
     Submodules and checkout transformations that change admitted blob bytes are refused.
     Neither ignored files nor hidden index flags can serve as private candidate evidence.
     """
+    if allow_memory_cache:
+        entries = {path: value for path, value in entries.items() if path != "memory.md"}
     remaining = set(entries)
     directories = {
         str(parent) for path in entries for parent in Path(path).parents if str(parent) != "."
@@ -162,6 +183,8 @@ def require_physical_tree(root: Path, entries: Mapping[str, tuple[str, str]]) ->
             if not prefix and name == ".git":
                 continue
             relative = f"{prefix}/{name}" if prefix else name
+            if allow_memory_cache and relative == "memory.md":
+                continue
             value = os.stat(name, dir_fd=directory, follow_symlinks=False)
             if stat.S_ISDIR(value.st_mode) and relative in directories:
                 child = os.open(

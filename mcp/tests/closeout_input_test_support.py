@@ -124,7 +124,6 @@ def start_closeout_operation(
                 messages=raw_closeout_messages(
                     code=_enabled_message(effective, "code"),
                     memory=_enabled_message(effective, "memory"),
-                    ledger=_enabled_message(effective, "ledger"),
                 ),
                 approval_note=operation_input.approvalNote,
                 gate_policy=operation_input.gatePolicy,
@@ -197,7 +196,6 @@ def _fixture_waiting_door(
             task_intent=intent,
             review=not_applicable,
             memory=not_applicable,
-            ledger=not_applicable,
             admission=admission,
             scheduling=scheduling,
             predecessor="",
@@ -216,12 +214,10 @@ def _fixture_waiting_door(
         memoryCandidateTree=contract.memory_base_commit,
         codeBaseCommit=contract.code_base_commit,
         memoryBaseCommit=contract.memory_base_commit,
-        ledgerMemoryCommit=contract.memory_base_commit,
         taskTopologyFingerprint=topology,
         taskIntent=intent,
         reviewProvenance=not_applicable,
         memoryProvenance=not_applicable,
-        ledgerProvenance=not_applicable,
         admissionProvenance=admission,
         schedulingProvenance=scheduling,
         dependencies=dependencies,
@@ -360,7 +356,6 @@ def publish_closeout_finalization(store, contract) -> None:
     recovery = LifecycleOperationRecoveryCommits(
         codeCommit=contract.code_commit,
         memoryContentCommit=contract.memory_content_commit,
-        ledgerCommit=contract.ledger_commit,
     )
 
     def advance(record):
@@ -399,12 +394,11 @@ def closeout_operation_input(
     config_path = values.pop("config_path", None)
     code = values.pop("code", "close code candidate")
     memory = values.pop("memory", "close external memory")
-    ledger = values.pop("ledger", "record code-to-memory mapping")
     approval_note = values.pop("approval_note", "developer approved this exact candidate")
     assert not values, f"unknown closeout operation fixture fields: {sorted(values)}"
     effective = normalize_closeout_input(
         contract,
-        raw_closeout_messages(code=code, memory=memory, ledger=ledger),
+        raw_closeout_messages(code=code, memory=memory),
         route="worktree",
         corrected_call=CloseoutCorrectedCall(
             tool="worktree_closeout_apply",
@@ -425,13 +419,12 @@ def closeout_worktree_args(
     *,
     code: str | None = "close code candidate",
     memory: str | None = "close external memory",
-    ledger: str | None = "record code-to-memory mapping",
     **values,
 ) -> WorktreeArgs:
     values.setdefault("certification_profile", Path("mcp/certification-profile-v1.json"))
     effective = normalize_closeout_input(
         contract,
-        raw_closeout_messages(code=code, memory=memory, ledger=ledger),
+        raw_closeout_messages(code=code, memory=memory),
         route="worktree",
         corrected_call=CloseoutCorrectedCall(
             tool="worktree_closeout_apply",

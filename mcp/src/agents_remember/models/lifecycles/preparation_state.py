@@ -16,7 +16,7 @@ _GitObject = Annotated[str, Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")]
 PreparationCommandKind = Literal["create", "materialize", "commit"]
 PreparationWorker = tuple[int | None, str | None, str | None]
 _COMMAND_ORDER: tuple[PreparationCommandKind, ...] = ("create", "materialize", "commit")
-_LEG_ORDER: tuple[PreparationLeg, ...] = ("code", "memory-content", "ledger")
+_LEG_ORDER: tuple[PreparationLeg, ...] = ("code", "memory-content")
 
 
 class PreparationCommandTerminal(FrozenContractModel):
@@ -117,14 +117,12 @@ class OperationPreparationState(FrozenContractModel):
     )
     operationKey: _Digest
     generation: int = Field(strict=True, ge=1)
-    legs: tuple[SelectedPreparation, ...] = Field(min_length=1, max_length=3)
+    legs: tuple[SelectedPreparation, ...] = Field(min_length=1, max_length=2)
 
     @model_validator(mode="after")
     def _require_ordered_legs(self) -> Self:
         if tuple(item.leg for item in self.legs) != _LEG_ORDER[: len(self.legs)]:
-            raise ValueError(
-                "private preparation must retain the ordered code/content/ledger prefix"
-            )
+            raise ValueError("private preparation must retain the ordered code/content prefix")
         if any(item.output is None for item in self.legs[:-1]):
             raise ValueError("a later private leg requires the prior selected output")
         return self
@@ -136,7 +134,7 @@ class PreparedCodeRetention(FrozenContractModel):
     The old preparation intent/output remain immutable certificate objects.  This
     record binds the successor's re-bound objects to that exact predecessor and
     records the Git identity that the owner re-observed before replacement.  It
-    is deliberately specific to the code leg; memory and ledger outputs still
+    is deliberately specific to the code leg; memory outputs still
     have to be prepared by their normal successor owner.
     """
 

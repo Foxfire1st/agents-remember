@@ -134,7 +134,6 @@ def _assert_early_closeout_binding_refusals(
         memoryMode=leaf_contract.memory_mode,
         code=leg,
         memory=leg,
-        ledger=leg,
     )
     args = worktree_manager.WorktreeArgs(
         contract_path=leaf_contract.contract_path,

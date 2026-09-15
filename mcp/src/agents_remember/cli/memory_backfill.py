@@ -108,8 +108,8 @@ def _apply(request: MemoryBackfillRequest, args: argparse.Namespace) -> int:
     print(f"moved refs: {', '.join(result.updated_refs) or 'none'}")
     print(f"rescue refs: {', '.join(result.rescue_refs) or 'none'}")
     print(
-        "next: carry memory.md's memory cells onto the new ids with the returned total identity "
-        "map, then re-read the projection at the new tip"
+        "next: reconcile the selected worktrees and contract bases with the rewritten refs, "
+        "then rebuild the consumer ledger cache from commit trailers; do not commit the cache"
     )
     return EXIT_NOTHING_TO_DO
 

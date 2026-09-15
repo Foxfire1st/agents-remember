@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import get_args
 
 from agents_remember.models.worktree import NextOperation
-from agents_remember.worktrees.modules.guidance import lifecycle_guidance
+from agents_remember.worktrees.modules.guidance import carryover_done, lifecycle_guidance
 from agents_remember.worktrees.worktree_contract import WorktreeContract
+from test_worktree_support import git, init_repo
 
 
 def _integrated_contract(root: Path) -> WorktreeContract:
@@ -78,6 +79,44 @@ def test_the_cleanup_decision_is_no_longer_in_the_next_operation_vocabulary() ->
     # above could not describe it at all.
     assert "finalize" in get_args(NextOperation)
     assert "request_cleanup_decision" not in get_args(NextOperation)
+
+
+def test_external_completion_proves_landed_commits_without_reading_the_cache(
+    tmp_path: Path,
+) -> None:
+    code_repo = tmp_path / "code"
+    memory_repo = tmp_path / "memory"
+    code = init_repo(code_repo)
+    memory = init_repo(memory_repo)
+    cache = memory_repo / "memory.md"
+    contract = replace(
+        _integrated_contract(tmp_path),
+        memory_mode="external",
+        code_repo_path=code_repo,
+        code_commit=code,
+        integrated_code_commit=code,
+        memory_repo_path=memory_repo,
+        memory_source_branch="main",
+        memory_content_commit=memory,
+        integrated_memory_content_commit=memory,
+        ledger_path=cache,
+    )
+    for contents in (None, "<<<<<<< broken cache\n", "a stale row with no accepted pair\n"):
+        if contents is not None:
+            cache.write_text(contents, encoding="utf-8")
+        done, date = carryover_done(contract)
+        assert done and date
+        guidance = lifecycle_guidance(contract)
+        assert guidance["phase"] == "cleanup-pending"
+        assert guidance["nextOperation"] == "finalize"
+
+    git(memory_repo, "checkout", "-b", "unlanded")
+    git(memory_repo, "commit", "--allow-empty", "-m", "Unlanded memory")
+    unlanded = git(memory_repo, "rev-parse", "HEAD")
+    git(memory_repo, "checkout", "main")
+    assert not carryover_done(replace(contract, integrated_memory_content_commit=unlanded))[0]
+    assert not carryover_done(replace(contract, integrated_code_commit="f" * 40))[0]
+    assert not carryover_done(replace(contract, memory_repo_path=None))[0]
 
 
 def test_a_checkpointed_series_keeps_working_instead_of_being_told_to_integrate(

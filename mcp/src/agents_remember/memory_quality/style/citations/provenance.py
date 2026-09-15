@@ -1,7 +1,7 @@
 """Historical source and exact dependency-version provenance for citation claims.
 
 Code and memory are separate Git repositories, so a code verification stamp cannot be used
-to read a memory source. The external-memory ledger supplies that mapping, and each mapped
+to read a memory source. Memory commit attribution supplies that mapping, and each mapped
 commit must be reachable from its repository's current history rather than merely present in
 the object database; a selected prepared code proof may additionally retain the verified code
 history anchors from its explicit predecessor chain while current bytes are checked separately. Dependency source is not in either
@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path, PurePosixPath
 
 from packaging.requirements import InvalidRequirement, Requirement
@@ -26,7 +27,9 @@ from agents_remember.kernel.git_command import (
     GitRunnerOptions,
     run_git,
 )
-from agents_remember.kernel.memory_ledger import LedgerError, find_mapping, load_ledger
+from agents_remember.kernel.memory_attribution import MemoryAttributionError
+from agents_remember.kernel.memory_cache import derive_memory_ledger
+from agents_remember.kernel.memory_ledger import LedgerRow
 
 REQUIREMENTS_PATH = "mcp/requirements.txt"
 PACKAGE_LOCK_PATH = "dashboard/package-lock.json"
@@ -127,14 +130,20 @@ class Histories:
         )
         self.memory = GitHistory(self.memory_root, "memory")
 
+    @cached_property
+    def memory_mappings(self) -> tuple[LedgerRow, ...]:
+        """Resolve this observation's mappings once from reachable Git attribution."""
+        return tuple(derive_memory_ledger(self.memory_root).rows)
+
     def memory_commit(self, code_commit: str) -> Read:
         try:
-            ledger = load_ledger(self.memory_root / "memory.md")
-        except (LedgerError, OSError, UnicodeError) as error:
-            return Read(None, f"memory ledger is unavailable or invalid: {error}")
-        mapped = find_mapping(ledger, code_commit)
+            mapped = next(
+                (row for row in self.memory_mappings if row.code_commit == code_commit), None
+            )
+        except MemoryAttributionError as error:
+            return Read(None, f"memory Git attribution is unavailable: {error}")
         if mapped is None:
-            return Read(None, f"memory.md has no ledger mapping for code commit {code_commit}")
+            return Read(None, f"memory history has no attribution for code commit {code_commit}")
         return self.memory.commit(mapped.memory_commit)
 
     def dependency_versions(

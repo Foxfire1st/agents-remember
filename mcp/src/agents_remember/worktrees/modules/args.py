@@ -72,17 +72,14 @@ class WorktreeArgs:
     force: bool = False
     teardown_providers: bool = True
 
-    # Closeout owns one normalized effective input. Integration's ledger message
-    # remains a separate operation input because it is not a closeout commit leg.
+    # Closeout owns one normalized input for its code and memory-content outputs.
     closeout_input: EffectiveCloseoutInput | None = None
-    ledger_commit_message: str = ""
 
     # PR-route landing facts. The remote already moved the refs, so a landing that happened
     # through a pull request supplies these instead of AR deriving them from a local ref move
     # (see ``modules.landing_record`` for the one writer they feed).
     landed_code_commit: str = ""
     landed_memory_content_commit: str = ""
-    landed_ledger_commit: str = ""
 
     # Gate enforcement policy
     gate_policy: GatePolicy = DEFAULT_GATE_POLICY

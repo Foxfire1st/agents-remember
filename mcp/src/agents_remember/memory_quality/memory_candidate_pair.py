@@ -67,19 +67,6 @@ def resolve_memory_candidate_pair(
     _require_path(code_root, "codeRoot", kind="directory", contract_path=contract_path)
     _require_path(memory_root, "memoryRoot", kind="directory", contract_path=contract_path)
     _require_path(onboarding_root, "onboardingRoot", kind="directory", contract_path=contract_path)
-    _require_path(ledger_path, "ledgerPath", kind="file", contract_path=contract_path)
-    expected_ledger = (memory_root / "memory.md").resolve()
-    if ledger_path != expected_ledger:
-        _refuse(
-            "memory-candidate-pair-path-mismatch",
-            "ledgerPath",
-            "the contract ledger path does not belong to its exact memory worktree",
-            contract_path,
-            _FailureEvidence(
-                expected={"ledgerPath": expected_ledger.as_posix()},
-                observed={"ledgerPath": ledger_path.as_posix()},
-            ),
-        )
     _require_repository_pair(current, code_root, memory_root, contract_path)
     _require_branch_plan(
         _BranchPlan(
@@ -108,7 +95,7 @@ def resolve_memory_candidate_pair(
             base_commit=current.memory_base_commit,
             accepted_source_heads=_accepted_source_heads(
                 current.memory_base_commit,
-                current.integrated_ledger_commit,
+                current.integrated_memory_content_commit,
                 integration_completed=current.integration_status == "completed",
             ),
         ),
@@ -130,7 +117,7 @@ def resolve_memory_candidate_pair(
     }
     canonical_projection = {
         "schemaVersion": "ar-memory-candidate-pair/v1",
-        **projection,
+        **{key: value for key, value in projection.items() if key != "ledgerPath"},
     }
     digest = hashlib.sha256(
         json.dumps(canonical_projection, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -229,10 +216,8 @@ def _require_candidate_shape(
     """Validate admitted object shape before relying on a second filesystem read."""
 
     _require_external_leaf(contract, contract_path)
-    return (
-        _required_path(contract.memory_worktree, "memoryRoot", contract_path),
-        _required_path(contract.ledger_path, "ledgerPath", contract_path),
-    )
+    memory_root = _required_path(contract.memory_worktree, "memoryRoot", contract_path)
+    return memory_root, memory_root / "memory.md"
 
 
 def _required_path(value: Path | None, field: str, contract_path: Path) -> Path:

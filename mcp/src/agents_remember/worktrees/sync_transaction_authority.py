@@ -5,26 +5,21 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, cast
 
-from agents_remember.kernel.git_command import run_git
-from agents_remember.kernel.memory_ledger import (
-    LedgerError,
-    find_mapping,
-    parse_ledger_text,
-)
 from agents_remember.models.worktree import SyncPhase, SyncSide
 from agents_remember.worktrees.modules.git import branch_commit, head_commit, is_ancestor
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.sync_transaction_git import (
     SyncGitProofError,
     apply_parked_wip,
+    content_conflicts,
     create_pinned_ref,
     delete_pinned_ref,
+    discard_memory_cache_changes,
     drop_parked_wip,
     prove_parked_wip_restored,
     read_ref,
     remove_temporary_worktree,
     side_branch_head,
-    unmerged_paths,
 )
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationRecord,
@@ -121,41 +116,6 @@ def source_pair(contract: WorktreeContract) -> tuple[str, str, bool]:
         else ""
     )
     return code_tip, memory_tip, external
-
-
-def preflight_official_pair(
-    contract: WorktreeContract,
-    code_tip: str,
-    memory_tip: str,
-    external: bool,
-    fetch: dict[str, object],
-) -> WorktreeCommandResult | None:
-    if not external:
-        return None
-    assert contract.memory_repo_path is not None
-    ledger_blob = run_git(contract.memory_repo_path, ["show", f"{memory_tip}:memory.md"])
-    if ledger_blob.returncode != 0:
-        return command_result(
-            2,
-            "blocked",
-            "The admitted official memory source has no readable memory.md ledger.",
-            fetch,
-        )
-    try:
-        ledger = parse_ledger_text(ledger_blob.stdout)
-    except LedgerError as error:
-        return command_result(
-            2, "blocked", f"The official memory ledger is invalid: {error}", fetch
-        )
-    mapping = find_mapping(ledger, code_tip)
-    if mapping is None:
-        return command_result(
-            2,
-            "blocked",
-            "The official line is mid-cycle: its memory ledger does not map the admitted code tip.",
-            fetch,
-        )
-    return None
 
 
 def pin_authority(record: SyncOperationRecord) -> None:
@@ -429,12 +389,13 @@ def settle_resolved_parked_wip(
     owner of that worktree; only the stash entry is retired once no unmerged path remains.
     """
 
-    conflicts = unmerged_paths(Path(side.worktree))
+    conflicts = content_conflicts(side)
     if conflicts:
         raise SyncGitProofError(
             f"{side.side} parked candidate reapply still has unmerged paths: "
             f"{', '.join(conflicts[:30])}"
         )
+    discard_memory_cache_changes(side)
     drop_parked_wip(side)
     updated = side.model_copy(update={"wipState": "restored", "conflictFiles": ()})
     return update_record(store, record, phase=record.phase, side=updated, side_name=side_name)

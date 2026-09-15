@@ -461,7 +461,6 @@ class WorktreeCheckpointLandingResponse(WorktreeCommandResponse):
     integrationStrategy: str = ""
     integratedCodeCommit: str = ""
     integratedMemoryContentCommit: str = ""
-    integratedLedgerCommit: str = ""
 
 
 class WorktreePauseResponse(WorktreeCommandResponse):

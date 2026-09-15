@@ -59,6 +59,8 @@ class ParkedCandidateTests(unittest.TestCase):
             memory_worktree = fixture.contract.memory_worktree
             assert memory_worktree is not None
             (memory_worktree / "onboarding-draft.md").write_text("# draft\n", encoding="utf-8")
+            (memory_worktree / "memory.md").write_text("staged cache data\n", encoding="utf-8")
+            git(memory_worktree, "add", "memory.md")
             code_tip = fixture.move_official_code()
             fixture.map_official_memory(code_tip)
 
@@ -66,6 +68,9 @@ class ParkedCandidateTests(unittest.TestCase):
 
             self.assertEqual(result.payload["state"], "synced")
             self.assertEqual(section(result.payload, "memory")["wip"]["state"], "restored")
+            self.assertEqual(
+                section(result.payload, "memory")["wip"]["paths"], ["onboarding-draft.md"]
+            )
             self.assertEqual(
                 (memory_worktree / "onboarding-draft.md").read_text(encoding="utf-8"),
                 "# draft\n",

@@ -41,9 +41,6 @@ from agents_remember.worktrees.integration.closeout.door_source import (
     superseding_door_generation,
     updated_door_generation,
 )
-from agents_remember.worktrees.integration.closeout.ledger_recovery import (
-    classify_closeout_ledger_recovery,
-)
 from agents_remember.worktrees.integration.closeout.operation_admission import (
     CloseoutOperationAdmission,
     ValidatedCloseoutAdmission,
@@ -338,16 +335,6 @@ def _resume(
     action: Literal["retry", "recover", "resume"],
     dry_run: bool,
 ) -> LifecycleOperationProjection:
-    if action == "recover" and record.operationKind == "closeout":
-        ledger_recovery = classify_closeout_ledger_recovery(contract, record)
-        if ledger_recovery.state == "developer-decision":
-            raise LifecycleControlError(
-                ledger_recovery.status,
-                ledger_recovery.detail,
-                expected=ledger_recovery.expected,
-                observed=ledger_recovery.observed,
-                next_action="developer-decision",
-            )
     _require_resumable(record, action)
     if dry_run:
         return operation_projection(record, contract=contract)
@@ -942,7 +929,6 @@ def _resume_arguments(
     for leg, field in (
         ("code", "code_commit_message"),
         ("memory", "memory_commit_message"),
-        ("ledger", "ledger_commit_message"),
     ):
         accepted = getattr(operation_input.effectiveInput, leg)
         if accepted.state == "enabled":
@@ -970,10 +956,6 @@ def _closeout_resume_admission(
         memory=(
             messages.memory
             or (accepted.message_for("memory") if accepted.enabled("memory") else None)
-        ),
-        ledger=(
-            messages.ledger
-            or (accepted.message_for("ledger") if accepted.enabled("ledger") else None)
         ),
     )
     return CloseoutOperationAdmission(

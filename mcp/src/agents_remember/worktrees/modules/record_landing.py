@@ -124,7 +124,6 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
             strategy=PR_STRATEGY,
             code_commit=commit,
             memory_content_commit=args.landed_memory_content_commit.strip(),
-            ledger_commit=args.landed_ledger_commit.strip(),
         ),
     )
     return WorktreeCommandResult(

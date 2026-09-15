@@ -6,13 +6,14 @@ import hashlib
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Literal, cast
+from typing import cast
 
 from agents_remember.kernel.git_command import (
     IsolatedGitState,
     run_git,
     run_git_with_isolated_index_and_objects,
 )
+from agents_remember.kernel.memory_ledger import MEMORY_CACHE_EXCLUDE
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.models.lifecycles.mutation_evidence import (
     CloseoutMutationLeg,
@@ -20,7 +21,6 @@ from agents_remember.models.lifecycles.mutation_evidence import (
     GitMutationSnapshot,
 )
 from agents_remember.models.lifecycles.operation import (
-    CloseoutOperationInput,
     LifecycleOperationRecord,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
@@ -51,8 +51,8 @@ def snapshot_is_clean_at_head(
         snapshot.statusFingerprint,
     ) == (
         expected_head,
-        snapshot.headTree,
-        snapshot.headTree,
+        snapshot.contentHeadTree or snapshot.headTree,
+        snapshot.contentHeadTree or snapshot.headTree,
         CLEAN_STATUS_FINGERPRINT,
     )
 
@@ -64,13 +64,14 @@ def initial_closeout_mutation_evidence(
     """Create pre-mutation cells for exactly the enabled repository legs."""
     repositories = _contract_repositories(contract)
     evidence: dict[CloseoutMutationLeg, GitMutationEvidence] = {}
-    for leg in ("code", "memory", "ledger"):
+    for leg in ("code", "memory"):
         if not effective_input.enabled(leg):
             continue
         repository = cast(Path, repositories[leg])
         accepted = git_mutation_snapshot(
             repository,
             contract.worktree_group / "reports" / f".{leg}-admission.index",
+            memory_cache=leg == "memory",
         )
         evidence[leg] = GitMutationEvidence(
             leg=leg,
@@ -90,7 +91,9 @@ def begin_git_mutation(
 ) -> GitMutationEvidence:
     """Persist exact pre-command facts before a commit command can launch."""
     _require_mutation_leg_authority(args, leg, repository)
-    before = git_mutation_snapshot(repository, _evidence_index_path(args, leg))
+    before = git_mutation_snapshot(
+        repository, _evidence_index_path(args, leg), memory_cache=leg == "memory"
+    )
     return _publish_mutation_intent(
         args,
         leg=leg,
@@ -113,7 +116,9 @@ def begin_exact_file_git_mutation(
     """Persist an exact file-output tree before touching the real worktree/index."""
 
     _require_mutation_leg_authority(args, leg, repository)
-    before = git_mutation_snapshot(repository, _evidence_index_path(args, leg))
+    before = git_mutation_snapshot(
+        repository, _evidence_index_path(args, leg), memory_cache=leg == "memory"
+    )
     expected_output_tree = _isolated_file_candidate_tree(
         repository,
         before=before,
@@ -252,7 +257,9 @@ def bind_expected_output_tree(
     updated = evidence.model_copy(
         update={
             "expectedOutputTree": worktree_candidate_tree(
-                repository, _evidence_index_path(args, evidence.leg)
+                repository,
+                _evidence_index_path(args, evidence.leg),
+                exclude_paths=("memory.md",) if evidence.leg == "memory" else (),
             )
         }
     )
@@ -272,7 +279,9 @@ def prove_git_commit(
     _require_evidence_repository(evidence, repository)
     if evidence.before is None:
         raise RuntimeError("closeout mutation proof requires pre-command Git evidence")
-    actual = git_mutation_snapshot(repository, _evidence_index_path(args, evidence.leg))
+    actual = git_mutation_snapshot(
+        repository, _evidence_index_path(args, evidence.leg), memory_cache=evidence.leg == "memory"
+    )
     expected_tree = evidence.expectedOutputTree
     if expected_tree is None or not commit_matches_intent(
         repository,
@@ -296,7 +305,6 @@ def reconcile_closeout_mutations(
     record: LifecycleOperationRecord,
     *,
     temporary_indices: bool = False,
-    purpose: Literal["recovery", "cancellation"] = "recovery",
 ) -> dict[CloseoutMutationLeg, GitMutationEvidence]:
     """Resolve launched-without-hash attempts without guessing from HEAD alone."""
     _require_record_repositories(record)
@@ -317,18 +325,6 @@ def reconcile_closeout_mutations(
                 temporary_index=temporary_indices,
             )
             if actual == evidence.before:
-                if _preserve_pending_external_ledger_intent(
-                    record,
-                    leg,
-                    evidence,
-                    purpose=purpose,
-                ):
-                    # Code and memory are already durable output.  The exact
-                    # journal-before-ledger-write cut therefore remains recovery
-                    # authority until that same generation writes or commits the
-                    # deterministic ledger output.  A status read must not turn it
-                    # back into a cancellable pre-output attempt.
-                    continue
                 reconciled[leg] = evidence.model_copy(
                     update={"state": "reconciled-unchanged", "observed": actual}
                 )
@@ -364,42 +360,6 @@ def reconcile_closeout_mutations(
     return reconciled
 
 
-def _preserve_pending_external_ledger_intent(
-    record: LifecycleOperationRecord,
-    leg: CloseoutMutationLeg,
-    evidence: GitMutationEvidence,
-    *,
-    purpose: Literal["recovery", "cancellation"],
-) -> bool:
-    """Keep the one post-output ordinary-ledger intent visible to recovery."""
-
-    commits = record.recoveryCommits
-    operation_input = record.input
-    code_evidence = record.mutationEvidence.get("code")
-    memory_evidence = record.mutationEvidence.get("memory")
-    return bool(
-        purpose == "recovery"
-        and record.operationKind == "closeout"
-        and isinstance(operation_input, CloseoutOperationInput)
-        and operation_input.effectiveInput.memoryMode == "external"
-        and operation_input.effectiveInput.enabled("ledger")
-        and leg == "ledger"
-        and evidence.state == "mutation-intent"
-        and evidence.before is not None
-        and evidence.observed is None
-        and evidence.expectedOutputTree
-        and record.irreversibleBoundaryEntered
-        and commits is not None
-        and code_evidence is not None
-        and code_evidence.state == "commit-proven"
-        and code_evidence.commit == commits.codeCommit
-        and memory_evidence is not None
-        and memory_evidence.state == "commit-proven"
-        and memory_evidence.commit == commits.memoryContentCommit
-        and not commits.ledgerCommit
-    )
-
-
 def _reconciliation_snapshot(
     record: LifecycleOperationRecord,
     leg: CloseoutMutationLeg,
@@ -408,8 +368,10 @@ def _reconciliation_snapshot(
     temporary_index: bool,
 ) -> GitMutationSnapshot:
     if not temporary_index:
-        return git_mutation_snapshot(repository, _record_index_path(record, leg))
-    return ephemeral_git_mutation_snapshot(repository)
+        return git_mutation_snapshot(
+            repository, _record_index_path(record, leg), memory_cache=leg == "memory"
+        )
+    return ephemeral_git_mutation_snapshot(repository, memory_cache=leg == "memory")
 
 
 def closeout_requires_recovery(record: LifecycleOperationRecord) -> bool:
@@ -424,7 +386,11 @@ def closeout_cancellable(record: LifecycleOperationRecord) -> bool:
     return not closeout_requires_recovery(record)
 
 
-def git_mutation_snapshot(repository: Path, index_path: Path) -> GitMutationSnapshot:
+def git_mutation_snapshot(
+    repository: Path, index_path: Path, *, memory_cache: bool = False
+) -> GitMutationSnapshot:
+    if memory_cache:
+        return ephemeral_git_mutation_snapshot(repository, memory_cache=True)
     status_result = run_git(repository, ["status", "--porcelain=v1", "-z"])
     if status_result.returncode != 0:
         raise RuntimeError("Git status mutation evidence is unreadable")
@@ -441,10 +407,15 @@ def git_mutation_snapshot(repository: Path, index_path: Path) -> GitMutationSnap
     )
 
 
-def ephemeral_git_mutation_snapshot(repository: Path) -> GitMutationSnapshot:
+def ephemeral_git_mutation_snapshot(
+    repository: Path, *, memory_cache: bool = False
+) -> GitMutationSnapshot:
     """Read the exact snapshot through disposable index and object storage."""
 
-    status_result = run_git(repository, ["status", "--porcelain=v1", "-z"])
+    status_args = ["status", "--porcelain=v1", "-z"]
+    if memory_cache:
+        status_args.extend(["--", ".", ":(top,exclude)memory.md"])
+    status_result = run_git(repository, status_args)
     if status_result.returncode != 0:
         raise RuntimeError("Git status mutation evidence is unreadable")
     head_ref = require_git(repository, ["symbolic-ref", "--quiet", "HEAD"])
@@ -468,19 +439,43 @@ def ephemeral_git_mutation_snapshot(repository: Path) -> GitMutationSnapshot:
         if source_index.exists():
             shutil.copyfile(source_index, index_path)
         execution = IsolatedGitState(index_path, root / "objects", common_dir / "objects")
+        content_head_tree = None
+        if memory_cache:
+            head_execution = IsolatedGitState(
+                root / "head-index", root / "objects", common_dir / "objects"
+            )
+            _require_isolated_git(repository, ["read-tree", head_tree], state=head_execution)
+            _exclude_cache_from_index(repository, head_execution)
+            content_head_tree = _require_isolated_git(
+                repository, ["write-tree"], state=head_execution
+            )
         if not source_index.exists():
             _require_isolated_git(repository, ["read-tree", head_tree], state=execution)
+        if memory_cache:
+            _exclude_cache_from_index(repository, execution)
         index_tree = _require_isolated_git(repository, ["write-tree"], state=execution)
-        _require_isolated_git(repository, ["add", "-A"], state=execution)
+        add_args = ["add", "-A"]
+        if memory_cache:
+            add_args.extend(["--", ".", MEMORY_CACHE_EXCLUDE])
+        _require_isolated_git(repository, add_args, state=execution)
+        if memory_cache:
+            _exclude_cache_from_index(repository, execution)
         candidate_tree = _require_isolated_git(repository, ["write-tree"], state=execution)
     return GitMutationSnapshot(
         headRef=head_ref,
         head=head,
         headTree=head_tree,
+        contentHeadTree=content_head_tree,
         refLogFingerprint=_ref_log_fingerprint(repository, head_ref),
         indexTree=index_tree,
         candidateTree=candidate_tree,
         statusFingerprint=hashlib.sha256(status_result.stdout.encode("utf-8")).hexdigest(),
+    )
+
+
+def _exclude_cache_from_index(repository: Path, execution: IsolatedGitState) -> None:
+    _require_isolated_git(
+        repository, ["update-index", "--force-remove", "--", "memory.md"], state=execution
     )
 
 
@@ -581,5 +576,4 @@ def _contract_repositories(
     return {
         "code": contract.code_worktree if contract.kind == "leaf" else None,
         "memory": contract.memory_worktree or contract.memory_repo_path,
-        "ledger": contract.memory_worktree or contract.memory_repo_path,
     }

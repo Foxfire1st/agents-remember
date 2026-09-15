@@ -861,14 +861,14 @@ def _move_targets(
         replacement = identity.get(current)
         if replacement is None or replacement == current:
             continue
-        commands.extend([f"update {full_name} {replacement} {current}", ""])
+        commands.append(f"update {full_name} {replacement} {current}")
         moved.append(name)
     if not commands:
         return ()
     result = run_git(
         memory_repo,
         ["update-ref", "--stdin"],
-        GitRunnerOptions(input_text="\n".join(commands)),
+        GitRunnerOptions(input_text="\n".join(commands) + "\n"),
     )
     if result.returncode != 0:
         raise MemoryBackfillRefusal(
@@ -931,21 +931,17 @@ def carry_ledger_cells(
 ) -> str:
     """The ledger's table rewritten to name the commits that exist after a rewrite.
 
-    A message rewrite changes the id of every commit it touches, and the tracked table that
-    RECORDS those commits still names the old ids. A source read straight after a rewrite
-    therefore reports every recorded row as excluded, because not one of its memory commits is
-    reachable from the new tip any more. This is the second half of the migration: it moves each
-    recorded memory cell onto the id its commit now has, which is what takes that count back to
-    zero. ``apply_memory_backfill`` returns the total map this needs -- total so that a cell whose
-    commit did not move is carried through as itself rather than looked up and missed.
+    This helper rewrites an explicitly requested historical table artifact after message
+    migration. It is not used by runtime source readers: they read commit trailers without
+    consulting the table. ``apply_memory_backfill`` returns the complete old-to-new identity
+    map needed to carry each memory cell, including unchanged commits.
 
     Cells are resolved through git BEFORE they are mapped, and that is not tidiness. The tracked
     table really does carry an abbreviated cell beside full ones, and a textual find-and-replace
     over the file cannot tell an eight-character prefix from the first eight characters of some
     other full id -- it silently leaves the abbreviation behind, which is exactly one excluded row
     surviving a migration that otherwise reads clean. Resolving first and rendering full names
-    also keeps a table row equal to the row the same commit derives, so the two copies of one
-    mapping deduplicate instead of counting twice.
+    also keeps the migration artifact consistent with its rewritten commit identities.
 
     The header is not recomputed from scratch. ``baseCodeCommit`` and every code cell are carried
     through untouched, because this migration rewrites memory commits and never code ones;

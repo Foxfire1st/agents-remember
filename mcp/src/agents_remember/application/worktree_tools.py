@@ -373,7 +373,6 @@ def worktree_integrate_tool(
     *,
     contract_path: str,
     strategy: IntegrateStrategy = "ff-only",
-    ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Land the task branches onto their source branches in this process.
@@ -401,7 +400,6 @@ def worktree_integrate_tool(
         contract_path=confined_contract,
         strategy=strategy,
         approved=not dry_run,
-        ledger_commit_message=ledger_commit_message,
         dry_run=dry_run,
         # The configured policy MUST reach the seam guard (mirror of the closeout
         # path below): the dataclass default is all-human, which would refuse the
@@ -429,7 +427,6 @@ def worktree_checkpoint_landing_tool(
     *,
     contract_path: str,
     strategy: IntegrateStrategy = "ff-only",
-    ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Land an unfinished atomic master's accumulated line into its super branch.
@@ -438,8 +435,8 @@ def worktree_checkpoint_landing_tool(
     ``Completed``, that every canonical leaf owns a landed enclosure, and that the master has
     closed out. A master being paused has none of those, so before this route a partial master
     could not land at all. This captures the master's own committed refs instead -- the live series
-    code work branch tip and the live memory work branch tip -- proves the existing ledger maps the
-    code ref, and lands exactly those. It shares the final route's entire preflight and ref move --
+    code work branch tip and the live memory work branch tip -- proves the source ancestry,
+    and lands exactly those. It shares the final route's entire preflight and ref move --
     the series contract binding, the atomic landing authority, the replay/ff source-state gate, the
     lineage proof, the master-handover gate and the compare-and-swap -- and requires the same
     explicit developer approval (``dry_run=False``). It records ``checkpointed`` rather than
@@ -457,7 +454,6 @@ def worktree_checkpoint_landing_tool(
         contract_path=configured.contract_path,
         strategy=strategy,
         approved=not dry_run,
-        ledger_commit_message=ledger_commit_message,
         dry_run=dry_run,
         gate_policy=config.orchestration.gate_policy,
     )
@@ -527,7 +523,6 @@ def worktree_record_landing_tool(
         dry_run=dry_run,
         landed_code_commit=landed.code,
         landed_memory_content_commit=landed.memory_content,
-        landed_ledger_commit=landed.ledger,
         gate_policy=config.orchestration.gate_policy,
     )
     return _worktree_result(
@@ -571,7 +566,6 @@ def _operation_control_request_refusal(
                 commit_messages={
                     "code_commit_message": request.code_commit_message,
                     "memory_commit_message": request.memory_commit_message,
-                    "ledger_commit_message": request.ledger_commit_message,
                 },
                 has_grade=request.grade is not None,
                 has_admission=request.admission is not None,
@@ -656,7 +650,6 @@ def _execute_operation_control(
         raw_closeout_messages(
             code=request.code_commit_message,
             memory=request.memory_commit_message,
-            ledger=request.ledger_commit_message,
         )
         if request.action == "resume"
         else None
@@ -977,7 +970,7 @@ def _normalize_worktree_closeout(
     )
     return normalize_closeout_input(
         contract,
-        raw_closeout_messages(code=messages.code, memory=messages.memory, ledger=messages.ledger),
+        raw_closeout_messages(code=messages.code, memory=messages.memory),
         route="worktree",
         corrected_call=CloseoutCorrectedCall(
             tool=tool_name,

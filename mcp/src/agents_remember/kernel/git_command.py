@@ -43,6 +43,7 @@ from agents_remember.kernel.git_closeout_publication import (
 )
 from agents_remember.kernel.git_preparation import (
     _PREPARATION_AUTHORITY,
+    ExistingGitPreparationBinding,
     GitPreparationError,
     PreparationAction,
     PrivateGitPreparationBinding,
@@ -386,7 +387,14 @@ def _preparation_tree_entries(root: Path, tree: str) -> dict[str, tuple[str, str
     return entries
 
 
-def _require_preparation_index(root: Path, entries: dict[str, tuple[str, str]]) -> None:
+def _require_preparation_index(
+    root: Path,
+    entries: dict[str, tuple[str, str]],
+    *,
+    allow_memory_cache: bool = False,
+) -> None:
+    if allow_memory_cache:
+        entries = {path: value for path, value in entries.items() if path != "memory.md"}
     index = Path(
         _preparation_output(
             root, ["rev-parse", "--path-format=absolute", "--git-path", "index"]
@@ -401,17 +409,22 @@ def _require_preparation_index(root: Path, entries: dict[str, tuple[str, str]]) 
         if not row:
             continue
         metadata, path_bytes = row.split(b"\t", 1)
-        mode, object_id, stage = metadata.decode("ascii").split(" ")
         path = os.fsdecode(path_bytes)
+        if allow_memory_cache and path == "memory.md":
+            continue
+        mode, object_id, stage = metadata.decode("ascii").split(" ")
         if stage != "0" or path in actual:
             raise GitPreparationError("preparation index contains unmerged entries")
         actual[path] = (mode, object_id)
     if actual != entries:
         raise GitPreparationError("preparation index differs from admitted tree")
     flags = _read_git_bytes(root, ["ls-files", "-v", "-z"])
-    if any(row and not row.startswith(b"H ") for row in flags.split(b"\0")):
+    if any(
+        row and not row.startswith(b"H ") and not (allow_memory_cache and row[2:] == b"memory.md")
+        for row in flags.split(b"\0")
+    ):
         raise GitPreparationError("preparation index contains hidden source flags")
-    require_physical_tree(root, entries)
+    require_physical_tree(root, entries, allow_memory_cache=allow_memory_cache)
 
 
 def _require_logical_git_root(
@@ -435,27 +448,53 @@ def _require_logical_git_root(
             raise GitPreparationError("existing logical preparation binding changed")
 
 
-def _require_existing_preparation(
-    root: Path, common_directory: Path, logical_ref: str, commit: str, tree: str
-) -> None:
-    _require_logical_git_root(root, common_directory, logical_ref, commit)
-    require_git_object_id(tree)
-    if _preparation_output(root, ["rev-parse", "--verify", "HEAD^{tree}"]).strip() != tree:
+def _require_existing_preparation(binding: ExistingGitPreparationBinding) -> None:
+    _require_logical_git_root(
+        binding.root, binding.common_directory, binding.logical_ref, binding.commit
+    )
+    require_git_object_id(binding.tree)
+    if (
+        _preparation_output(binding.root, ["rev-parse", "--verify", "HEAD^{tree}"]).strip()
+        != binding.tree
+    ):
         raise GitPreparationError("existing logical preparation tree changed")
-    _require_preparation_index(root, _preparation_tree_entries(root, tree))
+    _require_preparation_index(
+        binding.root,
+        _existing_preparation_entries(binding),
+        allow_memory_cache=binding.allow_memory_cache,
+    )
 
 
-def inspect_existing_git_preparation(
-    root: Path, *, common_directory: Path, logical_ref: str, commit: str, tree: str
-) -> bytes:
+def _existing_preparation_entries(
+    binding: ExistingGitPreparationBinding,
+) -> dict[str, tuple[str, str]]:
+    entries = _preparation_tree_entries(binding.root, binding.tree)
+    content_tree = binding.memory_content_tree
+    if not binding.allow_memory_cache:
+        if content_tree is not None:
+            raise GitPreparationError("code preparation cannot carry a memory content tree")
+        return entries
+    if content_tree is None:
+        raise GitPreparationError("memory preparation requires its certified content tree")
+    require_git_object_id(content_tree)
+    certified = _preparation_tree_entries(binding.root, content_tree)
+    if "memory.md" in certified:
+        raise GitPreparationError("certified memory content tree includes the derived cache")
+    entries.pop("memory.md", None)
+    if entries != certified:
+        raise GitPreparationError("existing memory content differs from its certified tree")
+    return entries
+
+
+def inspect_existing_git_preparation(binding: ExistingGitPreparationBinding) -> bytes:
     """Prove one existing logical output and return original bytes without private authority.
 
     The caller owns live journal/config authorization around this read-only observation.
     Both censuses prove the exact original logical ref, HEAD, index and physical tree.
     """
-    _require_existing_preparation(root, common_directory, logical_ref, commit, tree)
-    raw = read_git_commit_bytes(root, commit)
-    _require_existing_preparation(root, common_directory, logical_ref, commit, tree)
+    _require_existing_preparation(binding)
+    raw = read_git_commit_bytes(binding.root, binding.commit)
+    _require_existing_preparation(binding)
     return raw
 
 
@@ -658,8 +697,17 @@ def _observe_closeout_publication(
         )
     _require_logical_git_root(binding.root, binding.common_directory, binding.logical_ref, current)
     binding.require_prepared_bytes(read_git_commit_bytes(binding.root, binding.prepared_commit))
+    entries = _preparation_tree_entries(binding.root, binding.prepared_tree)
+    if (
+        binding.allow_memory_cache
+        and binding.prepared_commit != binding.expected_old_commit
+        and "memory.md" in entries
+    ):
+        raise GitCloseoutPublicationError("new memory publication includes the derived cache")
     _require_preparation_index(
-        binding.root, _preparation_tree_entries(binding.root, binding.prepared_tree)
+        binding.root,
+        entries,
+        allow_memory_cache=binding.allow_memory_cache,
     )
     _require_logical_git_root(binding.root, binding.common_directory, binding.logical_ref, current)
     state = (

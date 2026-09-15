@@ -135,7 +135,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
 
 
 def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
-    """Stand a memory root up and give it its first ledgered baseline."""
+    """Stand a memory root up and give it its first attributed baseline."""
 
     @server.tool()
     def memory_init(
@@ -155,7 +155,7 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
 
     @server.tool()
     def memory_baseline_status(repo_id: str) -> dict[str, Any]:
-        """Report drift and ledger state to decide whether an external-memory baseline can be
+        """Report drift and Git attribution state to decide whether an external-memory baseline can be
         adopted. Read-only."""
         return memory_baseline_status_payload(config, repo_id)
 
@@ -167,8 +167,8 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
         work_branch: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
-        """Create the first ledgered memory baseline for an external memory repo. Mutating: writes
-        the ledger and commits memory. Gated on clean drift unless accept_drift=true. Preview with
+        """Create the first attributed memory baseline for an external memory repo. Mutating: commits
+        memory content and refreshes its disposable ledger cache. Gated on clean drift unless accept_drift=true. Preview with
         dry_run=true. Usually driven by the c-10-adopt-memory-baseline skill."""
         return memory_baseline_adopt_payload(
             config,
@@ -221,10 +221,9 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
         replace_existing: bool = False,
         include_review_required: list[str] | None = None,
         memory_commit_message: str = "Carry over landed branch memory",
-        ledger_commit_message: str = "Record branch memory carryover",
     ) -> dict[str, Any]:
-        """Apply an approved plan inside the exact ordinary recovery leaf, committing its memory and
-        ledger work branches. Mutating and approval-gated; requires intent_note. Close and integrate
+        """Apply an approved plan inside the exact ordinary recovery leaf, committing attributed memory
+        content and refreshing the ledger cache. Mutating and approval-gated; requires intent_note. Close and integrate
         the leaf normally afterward."""
         return memory_carryover_apply_payload(
             config,
@@ -239,7 +238,5 @@ def _register_memory_carryover_tools(server: FastMCP, config: McpRuntimeConfig) 
             ),
             intent_note=intent_note,
             include_review_required=include_review_required,
-            messages=CarryoverCommitMessages(
-                memory=memory_commit_message, ledger=ledger_commit_message
-            ),
+            messages=CarryoverCommitMessages(memory=memory_commit_message),
         )

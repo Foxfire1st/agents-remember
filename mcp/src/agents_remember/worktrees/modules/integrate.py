@@ -29,7 +29,7 @@ from agents_remember.worktrees.integration.integration_ref_transaction import (
     LandingAdmission,
     merge_integrated_commits,
     prepare_integration_ref_move,
-    require_integrated_ledger_mapping,
+    require_integrated_memory_ancestry,
 )
 from agents_remember.worktrees.integration.integration_resolution_handoff import (
     integration_resolution_required,
@@ -151,9 +151,7 @@ def unmatched_handover_gate_warning(
 def _unclosed_integration_refusal(contract: WorktreeContract) -> str:
     """The refusal an unclosed task meets, and the route an unfinished master can take instead.
 
-    A leaf has exactly one way to be integrated and this is its prerequisite, so naming an
-    alternative would repeat the defect this leaf fixed in the ledger refusal's remedy: a message
-    that points at something the caller cannot run. A SERIES has a second verb --
+    A leaf requires a completed closeout. A SERIES has a second verb --
     ``worktree_checkpoint_landing`` lands the accumulated line and leaves the master open -- so the
     operator who reaches for the obvious one is told about the one that works.
     """
@@ -193,26 +191,26 @@ def validate_integrate_contract(contract: WorktreeContract) -> None:
 
 
 def validate_integrate_memory_contract(contract: WorktreeContract) -> None:
-    if contract.memory_repo_path is None or contract.ledger_path is None:
-        raise RuntimeError("external-memory integration requires memory repo and ledger path")
-    if not contract.memory_content_commit or not contract.ledger_commit:
+    if contract.memory_repo_path is None:
+        raise RuntimeError("external-memory integration requires a memory repository")
+    if not contract.memory_content_commit:
         raise RuntimeError(
-            "external-memory integration requires closeout memory_content_commit and ledger_commit"
+            "external-memory integration requires the accepted memory_content_commit"
         )
     if contract.kind == "series":
         if (
             branch_commit(contract.memory_repo_path, contract.memory_work_branch)
-            != contract.ledger_commit
+            != contract.memory_content_commit
         ):
-            raise RuntimeError("atomic memory ref does not match closeout ledger_commit")
+            raise RuntimeError("atomic memory ref does not match closeout memory_content_commit")
         return
     if contract.memory_worktree is None:
         raise RuntimeError("external-memory leaf integration requires a memory worktree")
     if current_branch(contract.memory_worktree) != contract.memory_work_branch:
         raise RuntimeError(f"memory worktree must have {contract.memory_work_branch} checked out")
-    require_clean(contract.memory_worktree, "memory worktree")
-    if head_commit(contract.memory_worktree) != contract.ledger_commit:
-        raise RuntimeError("memory worktree HEAD does not match closeout ledger_commit")
+    require_clean(contract.memory_worktree, "memory worktree", exclude_paths=("memory.md",))
+    if head_commit(contract.memory_worktree) != contract.memory_content_commit:
+        raise RuntimeError("memory worktree HEAD does not match closeout memory_content_commit")
 
 
 def _integration_lineage_block(
@@ -279,13 +277,13 @@ def _integration_source_state_block(
 def _integration_replay_requirements(contract: WorktreeContract) -> IntegrationSources:
     """The source state for the routes whose candidate is the contract's closeout cell."""
 
-    return _replay_requirements(contract, contract.code_commit, contract.ledger_commit)
+    return _replay_requirements(contract, contract.code_commit, contract.memory_content_commit)
 
 
 def _replay_requirements(
     contract: WorktreeContract,
     code_commit: str,
-    ledger_commit: str,
+    memory_content_commit: str,
 ) -> IntegrationSources:
     """One exact reading of both sources and their replay verdicts for one candidate.
 
@@ -306,7 +304,7 @@ def _replay_requirements(
             contract.memory_repo_path, contract.memory_source_branch
         )
         memory_replay_required = not is_ancestor(
-            contract.memory_repo_path, current_memory_source, ledger_commit
+            contract.memory_repo_path, current_memory_source, memory_content_commit
         )
     return IntegrationSources(
         current_code_source=current_code_source,
@@ -363,7 +361,6 @@ def _dry_run_result(
             args=contract_next_args(
                 contract,
                 strategy=args.strategy,
-                ledger_commit_message=args.ledger_commit_message,
                 dry_run=False,
             ),
         ),
@@ -387,14 +384,7 @@ def _dry_run_result(
 
 @dataclass(frozen=True)
 class CheckpointLanding:
-    """Everything one checkpoint preflight proved: the captured refs and the source state.
-
-    This value is the checkpoint's eligibility record, computed once and shared by the preview and
-    the apply, so the two surfaces cannot disagree about *why* a partial landing is allowed. The ledger
-    projection proof is not part of it: that one proof is owed by both routes and is evaluated at
-    the preview/apply seam for both of them. What this value does own is the candidate the
-    publication gate revalidates against the live tips before any ref moves.
-    """
+    """The live candidate refs and source state shared by checkpoint preview and apply."""
 
     refs: SeriesCheckpointRefs
     commits: IntegratedCommits
@@ -406,8 +396,6 @@ class CheckpointLanding:
         return {
             "codeCandidate": self.refs.code_commit,
             "memoryContentCandidate": self.refs.memory_content_commit,
-            "ledgerCandidate": self.refs.ledger_commit,
-            "ledgerMappingVerified": True,
             "codeWorkBranch": contract.code_work_branch,
             "codeSourceBranch": contract.code_source_branch,
             "codeSourceCommit": self.sources.current_code_source,
@@ -426,7 +414,7 @@ def checkpoint_landing_eligibility(contract: WorktreeContract) -> CheckpointLand
 
     This is the ONLY eligibility decision the checkpoint route makes, and the preview above and
     the apply below both read it from here. It replaces the ordinary route's closeout cells
-    (``closeout_status``, ``approved_for_commit``, the recorded commit triple) -- the state this
+    (``closeout_status``, ``approved_for_commit``, the recorded commit pair) -- the state this
     route exists to make reachable is exactly their absence -- with the checkpoint's own live
     capture. Every other condition is unchanged and is proven either here or on the shared path
     the two routes still walk: the series contract binding, the integration targets, the atomic
@@ -446,16 +434,18 @@ def checkpoint_landing_eligibility(contract: WorktreeContract) -> CheckpointLand
     require_series_checkpoint_authority(contract)
     refs = capture_series_checkpoint_refs(contract)
     if contract.memory_mode == "external":
-        if not refs.memory_content_commit or not refs.ledger_commit:
+        if not refs.memory_content_commit:
             raise RuntimeError(
-                "external-memory checkpoint landing requires the captured memory and ledger refs"
+                "external-memory checkpoint landing requires the captured memory ref"
             )
         assert contract.memory_repo_path is not None
         if (
             branch_commit(contract.memory_repo_path, contract.memory_work_branch)
-            != refs.ledger_commit
+            != refs.memory_content_commit
         ):
-            raise RuntimeError("atomic memory ref does not match the captured checkpoint ledger")
+            raise RuntimeError(
+                "atomic memory ref does not match the captured checkpoint memory commit"
+            )
     if branch_commit(contract.code_repo_path, contract.code_work_branch) != refs.code_commit:
         raise RuntimeError("atomic code ref does not match the captured checkpoint candidate")
     return CheckpointLanding(
@@ -463,9 +453,8 @@ def checkpoint_landing_eligibility(contract: WorktreeContract) -> CheckpointLand
         commits=IntegratedCommits(
             code=refs.code_commit,
             memory_content=refs.memory_content_commit,
-            ledger=refs.ledger_commit,
         ),
-        sources=_replay_requirements(contract, refs.code_commit, refs.ledger_commit),
+        sources=_replay_requirements(contract, refs.code_commit, refs.memory_content_commit),
     )
 
 
@@ -481,26 +470,16 @@ def _landing_admission(*, checkpoint: CheckpointLanding | None) -> LandingAdmiss
     )
 
 
-def _require_ledger_projection(
+def _require_memory_ancestry(
     contract: WorktreeContract,
     commits: IntegratedCommits,
     sources: IntegrationSources,
 ) -> None:
-    """Prove the landed commits are a landing this route may publish, before any promise.
-
-    This is the same proof the protected-ref transaction runs, on the same arguments, evaluated
-    earlier so a dry run cannot promise a landing the apply will refuse. The external-memory guard
-    is the transaction's: an internal-memory contract has no ledger to prove.
-
-    COST: on the apply path the proof now runs twice -- here, and again at the protected boundary
-    inside :func:`prepare_integration_ref_move`. The second read stays authoritative because it is
-    re-taken under the transaction, immediately before the irreversible ref move; this one exists
-    only so the preview refuses exactly what the apply refuses.
-    """
+    """Apply the same real-memory ancestry proof at preview and protected ref movement."""
 
     if contract.memory_mode != "external":
         return
-    require_integrated_ledger_mapping(
+    require_integrated_memory_ancestry(
         contract,
         commits,
         memory_source_commit=sources.current_memory_source,
@@ -517,7 +496,6 @@ def _route_commits(
     return IntegratedCommits(
         code=contract.code_commit,
         memory_content=contract.memory_content_commit,
-        ledger=contract.ledger_commit,
     )
 
 
@@ -547,7 +525,6 @@ def _checkpoint_dry_run_result(
             args=contract_next_args(
                 contract,
                 strategy=args.strategy,
-                ledger_commit_message=args.ledger_commit_message,
                 dry_run=False,
             ),
         ),
@@ -580,21 +557,18 @@ def _integrated_code_commit(
     return integrated_code_commit, None
 
 
-def _integrated_memory_commits(
+def _integrated_memory_commit(
     contract: WorktreeContract,
     current_memory_source: str,
-) -> tuple[str, str, dict[str, object] | None]:
-    integrated_memory_content_commit = contract.memory_content_commit
-    integrated_ledger_commit = contract.ledger_commit
+) -> str:
+    memory_commit = contract.memory_content_commit
     if contract.memory_mode == "external":
         assert contract.memory_repo_path is not None
-        if not is_ancestor(
-            contract.memory_repo_path, current_memory_source, integrated_ledger_commit
-        ):
+        if not is_ancestor(contract.memory_repo_path, current_memory_source, memory_commit):
             raise RuntimeError(
-                "integrated memory ledger commit is not a fast-forward from the current memory source branch"
+                "integrated memory commit is not a fast-forward from the current memory source branch"
             )
-    return integrated_memory_content_commit, integrated_ledger_commit, None
+    return memory_commit
 
 
 def _integrated_result(
@@ -610,7 +584,6 @@ def _integrated_result(
             strategy=args.strategy,
             code_commit=commits.code,
             memory_content_commit=commits.memory_content,
-            ledger_commit=commits.ledger,
         ),
     )
     # Landing publishes the integration cell and stops there. Reclamation belongs to
@@ -628,7 +601,6 @@ def _integrated_result(
         "strategy": args.strategy,
         "integrated_code_commit": commits.code,
         "integrated_memory_content_commit": commits.memory_content,
-        "integrated_ledger_commit": commits.ledger,
     }
     if handover_warning is not None:
         payload["handover_gate_warning"] = handover_warning
@@ -769,12 +741,8 @@ def _handover_or_apply_integration(
             },
         )
 
-    # BOTH routes prove the ledger they are about to land before either surface promises a result,
-    # so a dry run cannot say "would-integrate"/"would-checkpoint" and have the apply refuse on a
-    # gate the preview never surfaced. It runs here -- after the replay/ff gate and the lineage
-    # block -- so those keep returning their own payload and remedy rather than being replaced by a
-    # ledger refusal, and the preflight source tip it reads is the one the preview promised.
-    _require_ledger_projection(
+    # Preview and apply prove the same accepted memory ancestry before promising a landing.
+    _require_memory_ancestry(
         contract,
         _route_commits(contract, checkpoint),
         sources,
@@ -806,7 +774,7 @@ def _apply_integration(
     handover_warning: dict[str, object] | None,
     checkpoint: CheckpointLanding | None = None,
 ) -> WorktreeCommandResult:
-    """Land the code commit, then the memory commits, then merge both into their sources."""
+    """Land the accepted code and memory commits into their named sources."""
     prepared = _prepare_integration_commits(contract, args, sources, checkpoint=checkpoint)
     if isinstance(prepared, WorktreeCommandResult):
         return prepared
@@ -884,7 +852,6 @@ def _publish_integration_edge(
         recovery_commits={
             "codeCommit": publication.commits.code,
             "memoryContentCommit": publication.commits.memory_content,
-            "ledgerCommit": publication.commits.ledger,
         },
     )
     try:
@@ -940,7 +907,6 @@ def _checkpoint_result(
             strategy=args.strategy,
             code_commit=commits.code,
             memory_content_commit=commits.memory_content,
-            ledger_commit=commits.ledger,
         ),
         checkpoint=True,
     )
@@ -957,7 +923,6 @@ def _checkpoint_result(
             "strategy": args.strategy,
             "integrated_code_commit": commits.code,
             "integrated_memory_content_commit": commits.memory_content,
-            "integrated_ledger_commit": commits.ledger,
         },
     )
 
@@ -987,14 +952,11 @@ def _prepare_fresh_integration_commits(
     blocked = _integration_source_state_block(contract, sources)
     if blocked is not None:
         return blocked
-    integrated_memory_content_commit, integrated_ledger_commit, blocked = (
-        _integrated_memory_commits(contract, sources.current_memory_source)
+    integrated_memory_content_commit = _integrated_memory_commit(
+        contract, sources.current_memory_source
     )
-    if blocked is not None:
-        return WorktreeCommandResult(2, blocked)
     commits = IntegratedCommits(
         code=integrated_code_commit,
         memory_content=integrated_memory_content_commit,
-        ledger=integrated_ledger_commit,
     )
     return commits

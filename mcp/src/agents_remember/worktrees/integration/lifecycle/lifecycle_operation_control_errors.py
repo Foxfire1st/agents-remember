@@ -92,7 +92,6 @@ class LifecycleControlError(RuntimeError):
                 {
                     "code_commit_message": "<fresh message when enabled>",
                     "memory_commit_message": "<fresh message when enabled>",
-                    "ledger_commit_message": "<fresh message when enabled>",
                 }
             )
         fields.update({"nextTool": "worktree_operation_control", "nextArgs": arguments})

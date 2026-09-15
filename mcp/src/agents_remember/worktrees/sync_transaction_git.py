@@ -1,18 +1,7 @@
-"""Exact Git mutations and proofs for resumable worktree sync.
+"""Exact Git mutations and proofs for resumable code and memory-content sync.
 
-The proofs here are about Git state: which head a merge may create, which refs the
-operation pinned, and whether a resolution is staged. They are deliberately not about
-what the ledger file says.
-
-Developer ruling on the 260913 ledger line: the ledger is derived state, and the
-rebuilder is its authority, so a row the rebuild cannot resolve is a *reported
-exclusion* (``ledger_projection`` publishes ``sourceRowsExcluded`` and
-``sourceExcludedReasons``) and never a sync refusal. This module used to require a
-descendant or merged ``memory.md`` to keep every row its source carried, which made a
-master whose own closeouts had correctly dropped stale rows permanently unsyncable: the
-same thirteen rows refused both the integration gate and this one. Both gates now answer
-the same way, and neither restates the projection's judgement in a second place where it
-could drift from the codes and reasons it classifies.
+The memory side excludes its root memory.md cache from candidate, conflict, and merge-tree
+identity. Code-side files keep ordinary Git semantics, including a file named memory.md.
 """
 
 from __future__ import annotations
@@ -20,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     current_branch,
@@ -107,8 +97,9 @@ def remove_temporary_worktree(side: SyncSideRecord) -> None:
     if not worktree.exists():
         return
     require_side_checkout(side)
-    if git_status(worktree):
+    if git_status(side):
         raise SyncGitProofError(f"temporary {side.side} sync worktree is not clean")
+    discard_memory_cache_changes(side)
     result = run_git(repository, ["worktree", "remove", str(worktree)])
     if result.returncode != 0:
         raise SyncGitProofError(
@@ -116,21 +107,23 @@ def remove_temporary_worktree(side: SyncSideRecord) -> None:
         )
 
 
-def git_status(worktree: Path) -> str:
-    result = run_git(worktree, ["status", "--porcelain"])
+def git_status(side: SyncSideRecord) -> str:
+    result = run_git(Path(side.worktree), ["status", "--porcelain", *_content_pathspec(side)])
     if result.returncode != 0:
         raise SyncGitProofError(result.stderr.strip() or "could not read sync worktree status")
     return result.stdout.strip()
 
 
-def worktree_dirty_paths(worktree: Path) -> tuple[str, ...]:
+def worktree_dirty_paths(side: SyncSideRecord) -> tuple[str, ...]:
     """Every dirty path the worktree holds, untracked included.
 
     NUL separation is the only porcelain form that never quotes a path, so the reported
     paths are exactly the paths git reported.
     """
 
-    result = run_git(worktree, ["status", "--porcelain", "-z", "-uall"])
+    result = run_git(
+        Path(side.worktree), ["status", "--porcelain", "-z", "-uall", *_content_pathspec(side)]
+    )
     if result.returncode != 0:
         raise SyncGitProofError(result.stderr.strip() or "could not read sync worktree status")
     entries = result.stdout.split("\0")
@@ -148,15 +141,21 @@ def worktree_dirty_paths(worktree: Path) -> tuple[str, ...]:
     return tuple(paths)
 
 
-def park_worktree_wip(worktree: Path, *, message: str) -> str:
+def park_worktree_wip(side: SyncSideRecord, *, message: str) -> str:
     """Stash the exact worktree candidate with its untracked files; return its identity."""
 
-    result = run_git(worktree, ["stash", "push", "--include-untracked", "--message", message])
+    worktree = Path(side.worktree)
+    require_side_checkout(side)
+    discard_memory_cache_changes(side)
+    result = run_git(
+        worktree,
+        ["stash", "push", "--include-untracked", "--message", message, *_content_pathspec(side)],
+    )
     if result.returncode != 0:
         raise SyncGitProofError(
             result.stderr.strip() or result.stdout.strip() or "git stash push failed"
         )
-    if git_status(worktree):
+    if git_status(side):
         raise SyncGitProofError("git stash push left the sync worktree dirty")
     parked = run_git(worktree, ["rev-parse", "--verify", "refs/stash^{commit}"])
     if parked.returncode != 0:
@@ -165,16 +164,32 @@ def park_worktree_wip(worktree: Path, *, message: str) -> str:
 
 
 def apply_parked_wip(side: SyncSideRecord) -> tuple[str, tuple[str, ...]]:
-    """Reapply one side's parked WIP onto its carried result, retaining a real conflict."""
+    """Reapply the parked content and retain every genuine content conflict."""
 
     worktree = Path(side.worktree)
     require_side_checkout(side)
+    clean_before = not git_status(side)
+    discard_memory_cache_changes(side)
     result = run_git(worktree, ["stash", "apply", "--quiet", side.wipStash])
-    conflicts = unmerged_paths(worktree)
+    raw_conflicts = unmerged_paths(worktree)
+    cache_conflict = side.side == "memory" and raw_conflicts == ("memory.md",)
+    if side.side == "memory" and "memory.md" in raw_conflicts:
+        _remove_memory_cache_from_index(side)
+    conflicts = content_conflicts(side)
     if result.returncode == 0 and not conflicts:
+        _refresh_memory_cache(side)
         return "applied", ()
     if conflicts:
         return "conflict", conflicts
+    if (
+        result.returncode == 1
+        and cache_conflict
+        and clean_before
+        and prove_parked_wip_restored(side, head_commit(worktree))
+    ):
+        discard_memory_cache_changes(side)
+        _refresh_memory_cache(side)
+        return "applied", ()
     raise SyncGitProofError(
         result.stderr.strip() or result.stdout.strip() or "the parked worktree WIP did not reapply"
     )
@@ -188,8 +203,10 @@ def prove_parked_wip_restored(side: SyncSideRecord, carried_head: str) -> bool:
     moved source made identical). Anything else fails the proof.
     """
 
-    dirty = set(worktree_dirty_paths(Path(side.worktree)))
+    dirty = set(worktree_dirty_paths(side))
     for path in side.wipPaths:
+        if side.side == "memory" and path == "memory.md":
+            continue
         if path in dirty:
             continue
         parked = _revision_blob(side, (f"{side.wipStash}^3:{path}", f"{side.wipStash}:{path}"))
@@ -261,68 +278,136 @@ def side_merge_completed(side: SyncSideRecord) -> bool:
     return exact_created_head(side, current)
 
 
+def _content_pathspec(side: SyncSideRecord) -> list[str]:
+    return ["--", ".", ":(top,exclude)memory.md"] if side.side == "memory" else []
+
+
+def content_conflicts(side: SyncSideRecord) -> tuple[str, ...]:
+    """Read unresolved content without assigning authority to a memory-side cache."""
+
+    return tuple(
+        path
+        for path in unmerged_paths(Path(side.worktree))
+        if side.side != "memory" or path != "memory.md"
+    )
+
+
+def discard_memory_cache_changes(side: SyncSideRecord) -> None:
+    """Restore only the derived path to Git's pre-operation state; discard no content."""
+
+    if side.side != "memory":
+        return
+    worktree = Path(side.worktree)
+    tracked = _require_sync_git(worktree, ["ls-tree", "--name-only", "HEAD", "--", "memory.md"])
+    _require_sync_git(worktree, ["clean", "-fdx", "--", "memory.md"])
+    if tracked:
+        _require_sync_git(
+            worktree, ["restore", "--source=HEAD", "--staged", "--worktree", "--", "memory.md"]
+        )
+    else:
+        _remove_memory_cache_from_index(side)
+
+
+def _remove_memory_cache_from_index(side: SyncSideRecord) -> None:
+    _require_sync_git(
+        Path(side.worktree), ["rm", "--cached", "--force", "--ignore-unmatch", "--", "memory.md"]
+    )
+
+
+def _require_sync_git(worktree: Path, args: list[str]) -> str:
+    result = run_git(worktree, args)
+    if result.returncode != 0:
+        raise SyncGitProofError(
+            result.stderr.strip() or result.stdout.strip() or "sync Git operation failed"
+        )
+    return result.stdout.strip()
+
+
+def _refresh_memory_cache(side: SyncSideRecord) -> None:
+    if side.side != "memory":
+        return
+    worktree = Path(side.worktree)
+    if not _require_sync_git(worktree, ["ls-tree", "--name-only", "HEAD", "--", "memory.md"]):
+        refresh_memory_cache(worktree)
+
+
+def _require_active_merge(side: SyncSideRecord) -> None:
+    worktree = Path(side.worktree)
+    if head_commit(worktree) != side.preSyncHead or merge_head(worktree) != side.sourceCommit:
+        raise SyncGitProofError(f"{side.side} active merge is not the pinned sync merge")
+
+
+def _continue_memory_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str]:
+    _require_active_merge(side)
+    _remove_memory_cache_from_index(side)
+    conflicts = content_conflicts(side)
+    if conflicts:
+        return "resolution-required", conflicts, ""
+    validate_staged_resolution(side)
+    return _finish_staged_memory_merge(side)
+
+
+def _existing_side_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str] | None:
+    """Resume only the admitted merge or its exact completed output."""
+    worktree = Path(side.worktree)
+    if merge_head(worktree) is not None:
+        _require_active_merge(side)
+        if side.side == "memory" and side.plan == "merge":
+            return _continue_memory_merge(side)
+        return "resolution-required", unmerged_paths(worktree), ""
+    if side_merge_completed(side):
+        return "completed", (), head_commit(worktree)
+    return None
+
+
 def start_side_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str]:
-    """Attempt the pinned merge, retaining a genuine conflict in place."""
+    """Attempt the pinned merge; only genuine content conflicts require resolution."""
 
     worktree = Path(side.worktree)
     require_side_checkout(side)
-    if merge_head(worktree) is not None:
-        conflicts = unmerged_paths(worktree)
-        if side.side == "memory" and side.plan == "merge" and not conflicts:
-            return _finish_staged_memory_merge(side)
-        return "resolution-required", conflicts, ""
-    if side_merge_completed(side):
-        return "completed", (), head_commit(worktree)
-    if git_status(worktree):
+    existing = _existing_side_merge(side)
+    if existing is not None:
+        return existing
+    if head_commit(worktree) != side.preSyncHead:
+        raise SyncGitProofError(f"{side.side} work branch moved after sync admission")
+    if git_status(side):
         raise SyncGitProofError(f"{side.side} sync requires a clean worktree before merging")
-    merge_args = (
-        ["merge", "--no-commit", "--no-edit", side.sourceCommit]
-        if side.side == "memory" and side.plan == "merge"
-        else ["merge", "--no-edit", side.sourceCommit]
-    )
+    discard_memory_cache_changes(side)
+    memory_merge = side.side == "memory" and side.plan == "merge"
+    merge_args = ["merge", "--no-edit", side.sourceCommit]
+    if memory_merge:
+        merge_args.insert(1, "--no-commit")
     result = run_git(worktree, merge_args)
     if result.returncode == 0:
-        if side.side == "memory" and side.plan == "merge":
-            if merge_head(worktree) != side.sourceCommit:
-                raise SyncGitProofError(
-                    "divergent memory merge did not retain its pinned MERGE_HEAD"
-                )
-            return _finish_staged_memory_merge(side)
+        if memory_merge:
+            return _continue_memory_merge(side)
         result_head = head_commit(worktree)
         if not exact_created_head(side, result_head):
             raise SyncGitProofError(f"{side.side} merge did not create the exact admitted head")
+        _refresh_memory_cache(side)
         return "completed", (), result_head
-    current_merge = merge_head(worktree)
     conflicts = unmerged_paths(worktree)
-    if current_merge == side.sourceCommit and conflicts:
+    if result.returncode == 1 and merge_head(worktree) == side.sourceCommit and conflicts:
+        if memory_merge:
+            return _continue_memory_merge(side)
         return "resolution-required", conflicts, (result.stderr or result.stdout).strip()
     raise SyncGitProofError(
         (result.stderr or result.stdout).strip() or f"{side.side} source merge failed"
     )
 
 
-def _finish_staged_memory_merge(
-    side: SyncSideRecord,
-) -> tuple[str, tuple[str, ...], str]:
-    """Commit the pinned memory merge; the ledger it carries is derived state.
-
-    The staged merge is Git's own resolution of the two parents. It is not re-judged
-    here against either parent's row list: the projection recomputes the table from the
-    commits at the next closeout, and a row the rebuild cannot resolve is reported
-    there rather than refused here.
-    """
+def _finish_staged_memory_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str]:
+    """Publish one ordinary memory merge with exact parents and no cache in its tree."""
 
     worktree = Path(side.worktree)
-    committed = run_git(worktree, ["commit", "--no-edit"])
-    if committed.returncode != 0:
-        raise SyncGitProofError(
-            committed.stderr.strip()
-            or committed.stdout.strip()
-            or "automatic memory merge commit failed"
-        )
+    _require_active_merge(side)
+    prepare_memory_cache(worktree)
+    _require_sync_git(worktree, ["add", "--", ".gitignore"])
+    _require_sync_git(worktree, ["commit", "--no-edit"])
     result_head = head_commit(worktree)
     if not exact_created_head(side, result_head):
         raise SyncGitProofError("memory merge commit does not have the pinned parents")
+    _refresh_memory_cache(side)
     return "completed", (), result_head
 
 
@@ -331,19 +416,19 @@ def continue_side_merge(side: SyncSideRecord) -> str:
 
     worktree = Path(side.worktree)
     require_side_checkout(side)
-    current_merge = merge_head(worktree)
-    if current_merge is None:
+    if merge_head(worktree) is None:
         if not exact_created_head(side, head_commit(worktree)):
             raise SyncGitProofError(
                 f"{side.side} merge state disappeared without an operation-owned commit"
             )
+        _refresh_memory_cache(side)
         return head_commit(worktree)
+    _require_active_merge(side)
     validate_staged_resolution(side)
-    committed = run_git(worktree, ["commit", "--no-edit"])
-    if committed.returncode != 0:
-        raise SyncGitProofError(
-            committed.stderr.strip() or committed.stdout.strip() or "merge commit failed"
-        )
+    if side.side == "memory":
+        _remove_memory_cache_from_index(side)
+        return _finish_staged_memory_merge(side)[2]
+    _require_sync_git(worktree, ["commit", "--no-edit"])
     result_head = head_commit(worktree)
     if not exact_created_head(side, result_head):
         raise SyncGitProofError(f"{side.side} merge commit does not have the pinned parents")
@@ -351,21 +436,20 @@ def continue_side_merge(side: SyncSideRecord) -> str:
 
 
 def validate_staged_resolution(side: SyncSideRecord) -> None:
-    """Read-only proof that the exact retained merge is ready for its commit."""
+    """Read-only proof of the exact retained content merge, excluding the memory cache."""
 
     worktree = Path(side.worktree)
     require_side_checkout(side)
-    if merge_head(worktree) != side.sourceCommit:
-        raise SyncGitProofError(f"{side.side} MERGE_HEAD is not the pinned sync source")
-    conflicts = unmerged_paths(worktree)
+    _require_active_merge(side)
+    conflicts = content_conflicts(side)
     if conflicts:
         raise SyncGitProofError(
             f"{side.side} resolution still has unmerged paths: {', '.join(conflicts[:30])}"
         )
-    unstaged = run_git(worktree, ["diff", "--quiet"])
+    unstaged = run_git(worktree, ["diff", "--quiet", *_content_pathspec(side)])
     if unstaged.returncode != 0:
         raise SyncGitProofError(f"{side.side} resolution has unstaged changes")
-    checked = run_git(worktree, ["diff", "--cached", "--check"])
+    checked = run_git(worktree, ["diff", "--cached", "--check", *_content_pathspec(side)])
     if checked.returncode != 0:
         raise SyncGitProofError(
             checked.stdout.strip() or checked.stderr.strip() or "staged resolution is invalid"
@@ -390,14 +474,15 @@ def rollback_side(side: SyncSideRecord) -> None:
             raise SyncGitProofError(
                 f"{side.side} has later or unrelated commits; automatic rollback is unsafe"
             )
-        if git_status(worktree):
+        if git_status(side):
             raise SyncGitProofError(f"{side.side} has post-sync work; automatic rollback is unsafe")
+        discard_memory_cache_changes(side)
         reset = run_git(worktree, ["reset", "--hard", side.preSyncHead])
         if reset.returncode != 0:
             raise SyncGitProofError(reset.stderr.strip() or f"could not restore {side.side} head")
     if head_commit(worktree) != side.preSyncHead:
         raise SyncGitProofError(f"{side.side} rollback did not reach its pinned pre-sync head")
-    if git_status(worktree):
+    if git_status(side):
         raise SyncGitProofError(
             f"{side.side} branch is restored but post-sync work remains for manual repair"
         )

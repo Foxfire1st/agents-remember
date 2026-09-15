@@ -12,7 +12,6 @@ def require_authorized_integration_commits(
     *,
     code_commit: str,
     memory_content_commit: str,
-    ledger_commit: str,
 ) -> None:
     """Prove the landing output is the exact closeout candidate recorded on the contract.
 
@@ -22,8 +21,8 @@ def require_authorized_integration_commits(
     """
 
     del args
-    found = (code_commit, memory_content_commit, ledger_commit)
-    expected = (contract.code_commit, contract.memory_content_commit, contract.ledger_commit)
+    found = (code_commit, memory_content_commit)
+    expected = (contract.code_commit, contract.memory_content_commit)
     if found != expected:
         raise RuntimeError(
             "integration output is not the exact recorded closeout candidate; conflict "

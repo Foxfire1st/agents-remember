@@ -273,7 +273,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "approval_question": (
             "Approve recording the exact existing series commits in the closeout contract?"
             if contract.kind == "series"
-            else "Approve creating the code, memory, and ledger commits with these messages?"
+            else "Approve creating the code and memory commits with these messages?"
         ),
         "closeout_order": closeout_order(contract),
         "changed_code_paths": _bounded_paths(changed_paths),
@@ -312,7 +312,7 @@ def _validate_closeout_source_heads(contract) -> None:
             contract.memory_repo_path, contract.memory_source_branch
         )
         expected_memory_heads = _landed_source_heads(
-            contract, contract.memory_base_commit, contract.integrated_ledger_commit
+            contract, contract.memory_base_commit, contract.integrated_memory_content_commit
         )
         if current_memory_source not in expected_memory_heads:
             raise RuntimeError(
@@ -476,13 +476,11 @@ def _amended_closeout_contract(
             commit_approval_note=approval_note,
             code_commit=code_commit,
             memory_content_commit=memory.memory_commit,
-            ledger_commit=memory.ledger_commit,
             integration_strategy="" if reopened else contract.integration_strategy,
             integrated_code_commit="" if reopened else contract.integrated_code_commit,
             integrated_memory_content_commit=""
             if reopened
             else contract.integrated_memory_content_commit,
-            integrated_ledger_commit="" if reopened else contract.integrated_ledger_commit,
         ),
         # The vocabulary cells go through the typed record; `replace` above carries only the
         # free-text commits and notes, which have no vocabulary to check them against.
@@ -506,16 +504,12 @@ class _CloseoutResultFacts:
 def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeCommandResult | None:
     """Finalize an already-committed detached closeout exactly once."""
     commits = args.recovery_commits
-    if commits is None or (
-        contract.memory_mode == "external"
-        and (not commits.memoryContentCommit or not commits.ledgerCommit)
-    ):
+    if commits is None or (contract.memory_mode == "external" and not commits.memoryContentCommit):
         return None
     if contract.closeout_status == "completed":
         if (
             contract.code_commit != commits.codeCommit
             or contract.memory_content_commit != commits.memoryContentCommit
-            or contract.ledger_commit != commits.ledgerCommit
         ):
             raise RuntimeError(
                 "completed closeout contract does not match its recorded recovery commits"
@@ -544,7 +538,6 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
             current,
             code_commit=commits.codeCommit,
             memory_content_commit=commits.memoryContentCommit,
-            ledger_commit=commits.ledgerCommit,
         )
         updated = _amended_closeout_contract(
             current,
@@ -586,7 +579,6 @@ def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, An
         "summary": "Closeout completed; integrate the task branches back into their source branches.",
         "code_commit": facts.code_commit,
         "memory_content_commit": memory.memory_commit,
-        "ledger_commit": memory.ledger_commit,
         "refreshed_onboarding": _bounded_paths(
             [item["source_path"] for item in memory.refreshed_onboarding]
         ),
@@ -686,7 +678,6 @@ def _closeout_commit_phase(
         contract,
         code_commit=code_commit,
         memory_content_commit=memory.memory_commit,
-        ledger_commit=memory.ledger_commit,
     )
     return _CloseoutCommitPhase(code_commit, memory, integration_reopen, gate_guard)
 
@@ -809,7 +800,6 @@ def _publish_closeout_candidate(
             recovery_commits={
                 "codeCommit": committed.code_commit,
                 "memoryContentCommit": committed.memory.memory_commit,
-                "ledgerCommit": committed.memory.ledger_commit,
             },
             closeout_finalized_contract_sha256=closeout_contract_sha256(updated),
         )

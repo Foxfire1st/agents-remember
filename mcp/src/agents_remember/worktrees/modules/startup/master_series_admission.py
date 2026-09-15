@@ -253,7 +253,6 @@ def _same_master_repository_edge(
             existing.memory_mode == expected_memory_mode,
             _same_optional_repository_root(existing.memory_repo_path, expected_memory_repo),
             _same_series_memory_edge(
-                existing.ledger_path,
                 existing.memory_repo_path,
                 existing.memory_worktree,
             ),
@@ -400,19 +399,16 @@ def _same_optional_repository_root(left: Path | None, right: Path | None) -> boo
 
 
 def _same_series_memory_edge(
-    ledger: Path | None,
     memory_repo: Path | None,
     memory_worktree: Path | None,
 ) -> bool:
-    if ledger is None or memory_repo is None:
-        return ledger is None and memory_repo is None and memory_worktree is None
+    if memory_repo is None:
+        return memory_worktree is None
     repository_root = _repository_root(memory_repo)
     if repository_root is None:
         return False
-    authority_root = repository_root
     if memory_worktree is not None:
         worktree_root = _repository_root(memory_worktree)
         if worktree_root is None or not _same_repository_root(memory_worktree, memory_repo):
             return False
-        authority_root = worktree_root
-    return ledger.resolve() == (authority_root / "memory.md").resolve()
+    return True

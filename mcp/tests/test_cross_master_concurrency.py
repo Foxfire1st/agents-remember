@@ -21,13 +21,13 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application import worktree_tools
-from agents_remember.kernel.memory_ledger import (
-    find_mapping,
-    load_ledger,
-    parse_ledger_text,
-    prepend_mapping,
-    write_ledger,
+from agents_remember.kernel.memory_attribution import render_memory_content_message
+from agents_remember.kernel.memory_cache import (
+    derive_memory_ledger,
+    prepare_memory_cache,
+    refresh_memory_cache,
 )
+from agents_remember.kernel.memory_ledger import find_mapping
 from agents_remember.kernel.primitives.checkout_coordination import declare_test_process
 from agents_remember.models.lifecycles.operation import IntegrateOperationInput
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -225,19 +225,19 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         """Close one atomic leaf out and land it on its master's branches, as the fixture does."""
 
         assert contract.memory_worktree is not None
-        assert contract.ledger_path is not None
         git(contract.code_worktree, "add", "-A")
         git(contract.code_worktree, "commit", "-m", "atomic child candidate")
         candidate_commit = git(contract.code_worktree, "rev-parse", "HEAD")
+        prepare_memory_cache(contract.memory_worktree)
         git(contract.memory_worktree, "add", "-A")
-        git(contract.memory_worktree, "commit", "-m", "atomic child memory content")
-        memory_content = git(contract.memory_worktree, "rev-parse", "HEAD")
-        write_ledger(
-            contract.ledger_path,
-            prepend_mapping(load_ledger(contract.ledger_path), candidate_commit, memory_content),
+        git(
+            contract.memory_worktree,
+            "commit",
+            "-m",
+            render_memory_content_message("atomic child memory content", candidate_commit),
         )
-        git(contract.memory_worktree, "add", "memory.md")
-        git(contract.memory_worktree, "commit", "-m", "record atomic child mapping")
+        memory_content = git(contract.memory_worktree, "rev-parse", "HEAD")
+        refresh_memory_cache(contract.memory_worktree, repo_name=contract.repo_name)
         start_closeout_operation(
             closeout_operation_input(
                 contract,
@@ -255,7 +255,6 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
             closeout_status="completed",
             code_commit=candidate_commit,
             memory_content_commit=memory_content,
-            ledger_commit=git(contract.memory_worktree, "rev-parse", "HEAD"),
         )
         write_contract(finalized.contract_path, finalized)
         publish_closeout_finalization(store, finalized)
@@ -318,7 +317,6 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         messages = worktree_tools.CloseoutCommitMessages(
             code="atomic master code",
             memory="atomic master memory",
-            ledger="atomic master ledger",
         )
         closed = worktree_tools.worktree_closeout_apply_tool(
             self.fixture.cfg,
@@ -338,78 +336,24 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         return landed
 
     def _public_sync(self, contract: WorktreeContract) -> dict[str, Any]:
-        """Reconcile one contract with the moved sprint through the public sync operation.
-
-        A retained memory conflict is resolved the way the workflow requires: keep every mapping
-        from both sides, stage it, and continue the same contract-addressed sync through the tool.
-        """
+        """Reconcile independent code and memory content through the public sync operation."""
 
         result = worktree_tools.worktree_sync_tool(
             self.fixture.cfg,
             contract_path=contract.contract_path.as_posix(),
             memory_sync_choice="merge-memory",
         )
-        if result.get("state") != "sync-resolution-required":
-            self.assertTrue(result.get("ok"), result)
-            return result
-        resolution = result["resolution"]
-        self.assertEqual(resolution["side"], "memory", result)
-        worktree = Path(resolution["worktree"])
-        ours = parse_ledger_text(git(worktree, "show", ":2:memory.md"))
-        theirs = parse_ledger_text(git(worktree, "show", ":3:memory.md"))
-        combined = theirs
-        for row in reversed(ours.rows):
-            if row not in combined.rows:
-                combined = prepend_mapping(combined, row.code_commit, row.memory_commit)
-        self.assertEqual(set(ours.rows).union(theirs.rows), set(combined.rows))
-        write_ledger(worktree / "memory.md", combined)
-        git(worktree, "add", "memory.md")
-        continued = worktree_tools.worktree_sync_tool(
-            self.fixture.cfg,
-            contract_path=contract.contract_path.as_posix(),
-            resolution_action="continue",
-        )
-        self.assertTrue(continued.get("ok"), continued)
-        self.assertEqual(continued["state"], "synced", continued)
-        return continued
+        self.assertTrue(result.get("ok"), result)
+        self.assertEqual(result["state"], "synced", result)
+        return result
 
     def _rename_leaf_features(self, *contracts: WorktreeContract) -> None:
-        """Give each leaf its own feature file so a merge reconciles ledgers, not content."""
+        """Give each leaf its own feature file so independent content merges cleanly."""
 
         for contract in contracts:
             feature = contract.code_worktree / "feature.txt"
             if feature.exists():
                 feature.rename(contract.code_worktree / f"{contract.leaf_id.lower()}-feature.txt")
-
-    def _record_reconciled_pair(self, contract: WorktreeContract, code_tip: str) -> str:
-        """Record the reconciled code tip against the memory ref the same sync landed.
-
-        The workflow owes this before the master lands: the sync creates the code merge *after* the
-        retained memory conflict was resolved, so no closeout or resolution could ever have written
-        a row naming it, and the master's own line stays mid-cycle for its leaves until the pair it
-        validated is recorded. This is the same agent-owned memory.md write the conflict resolution
-        itself is: one own row ahead of the reconciled ledger, committed on the memory work branch.
-        """
-
-        assert contract.memory_repo_path is not None
-        memory_tip = rev(contract.memory_repo_path, contract.memory_work_branch)
-        worktree = self.scratch / "record-pair"
-        git(
-            contract.memory_repo_path,
-            "worktree",
-            "add",
-            "--force",
-            str(worktree),
-            contract.memory_work_branch,
-        )
-        write_ledger(
-            worktree / "memory.md",
-            prepend_mapping(load_ledger(worktree / "memory.md"), code_tip, memory_tip),
-        )
-        git(worktree, "add", "memory.md")
-        git(worktree, "commit", "-m", "record the reconciled code/memory pair")
-        git(contract.memory_repo_path, "worktree", "remove", "--force", str(worktree))
-        return rev(contract.memory_repo_path, contract.memory_work_branch)
 
     def _private_master_a_facts(self) -> tuple[Any, ...]:
         """Everything a pause must leave exactly as it was for an unfinished private master."""
@@ -522,7 +466,7 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         self.assertEqual(landed["state"], "checkpointed")
         self.assertEqual(
             rev(memory_repository(self.series[MASTER_B]), "super"),
-            landed["integrated_ledger_commit"],
+            landed["integrated_memory_content_commit"],
         )
         return {"row": row, "landed": landed}
 
@@ -535,7 +479,7 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         code_after_b = rev(series_a.code_repo_path, "super")
         memory_after_b = rev(memory, "super")
         self.assertEqual(code_after_b, landed["landed"]["integrated_code_commit"])
-        self.assertEqual(memory_after_b, landed["landed"]["integrated_ledger_commit"])
+        self.assertEqual(memory_after_b, landed["landed"]["integrated_memory_content_commit"])
 
         # A's line does not contain B's landed source, so it is not a fast-forwardable
         # candidate and it must not overwrite the pair B already landed.
@@ -545,10 +489,10 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         self.assertEqual(conflicted["state"], "blocked-non-ff", conflicted)
         self.assertEqual(rev(series_a.code_repo_path, "super"), code_after_b)
         self.assertEqual(rev(memory, "super"), memory_after_b)
-        # B's ledger mapping is intact: the landed source still maps B's code ref.
+        # B's committed attribution survives: the landed source still carries its memory commit.
         self.assertIsNotNone(
             find_mapping(
-                parse_ledger_text(git(memory, "show", f"{memory_after_b}:memory.md")),
+                derive_memory_ledger(memory, memory_after_b),
                 landed["landed"]["integrated_code_commit"],
             )
         )
@@ -608,14 +552,18 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
 
         # 4 -- resume A and reconcile B's landing through the PUBLIC sync path, validating the
         # resulting code/memory pair before any further work lands on A's line.
-        first_a_candidate = self._reconcile_master_a(series_a, b_landed, first_a_candidate)
+        reconciled_code = self._reconcile_master_a(series_a, b_landed, first_a_candidate)
 
         # 5 -- A's remaining, unstarted leaf is started on the reconciled line and lands there.
         second_a_candidate = self._land_remaining_master_a_leaf(series_a)
+        self.assertEqual(
+            git(series_a.code_repo_path, "merge-base", reconciled_code, second_a_candidate),
+            reconciled_code,
+        )
 
         # 6 -- A completes and integrates normally.
         a_landed = self._closeout_and_land_master(MASTER_A)
-        self._require_both_ledger_histories(
+        self._require_both_committed_histories(
             series_a, a_landed, first_a_candidate, second_a_candidate, b_landed
         )
 
@@ -643,7 +591,7 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         b_landed: dict[str, Any],
         first_a_candidate: str,
     ) -> str:
-        """Resume A, reconcile B through the public sync, and record the validated pair."""
+        """Resume A and reconcile B through the public sync without manufacturing attribution."""
 
         synced = self._public_sync(load_contract(series_a.contract_path))
         self.assertEqual(synced["state"], "synced", synced)
@@ -652,11 +600,13 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         self.assertEqual(resumed_a.sync_log[-1]["codeBaseTo"], b_landed["integrated_code_commit"])
         reconciled_code = rev(series_a.code_repo_path, series_a.code_work_branch)
         self.assertNotEqual(reconciled_code, first_a_candidate)
-        self._require_ledger_maps(series_a, first_a_candidate, b_landed["integrated_code_commit"])
-        # The reconciled pair is validated and recorded on A's own memory line: the exact code
-        # merge against the memory ref the same sync landed.
-        self._record_reconciled_pair(resumed_a, reconciled_code)
-        self._require_ledger_maps(series_a, reconciled_code)
+        self._require_committed_attribution(
+            series_a, first_a_candidate, b_landed["integrated_code_commit"]
+        )
+        self.assertEqual(
+            git(series_a.code_repo_path, "merge-base", first_a_candidate, reconciled_code),
+            first_a_candidate,
+        )
         return reconciled_code
 
     def _land_remaining_master_a_leaf(self, series_a: WorktreeContract) -> str:
@@ -675,21 +625,17 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         self.assertNotEqual(load_contract(series_a.contract_path).closeout_status, "completed")
         return candidate
 
-    def _require_ledger_maps(self, series: WorktreeContract, *code_commits: str) -> None:
-        """Every named code commit is still mapped on the series memory work branch."""
+    def _require_committed_attribution(self, series: WorktreeContract, *code_commits: str) -> None:
+        """Each already-attributed memory commit remains reachable on the series work branch."""
 
         assert series.memory_repo_path is not None
-        ledger = parse_ledger_text(
-            git(
-                series.memory_repo_path,
-                "show",
-                f"{rev(series.memory_repo_path, series.memory_work_branch)}:memory.md",
-            )
+        derived = derive_memory_ledger(
+            series.memory_repo_path, rev(series.memory_repo_path, series.memory_work_branch)
         )
         for code_commit in code_commits:
-            self.assertIsNotNone(find_mapping(ledger, code_commit))
+            self.assertIsNotNone(find_mapping(derived, code_commit))
 
-    def _require_both_ledger_histories(
+    def _require_both_committed_histories(
         self,
         series_a: WorktreeContract,
         a_landed: dict[str, Any],
@@ -697,11 +643,33 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         second_a_candidate: str,
         b_landed: dict[str, Any],
     ) -> None:
-        """The landed pair maps A's final code ref, and every history it absorbed survives."""
+        """The actual landed refs retain the code and memory histories of both masters."""
 
         self.assertEqual(rev(series_a.code_repo_path, "super"), a_landed["integrated_code_commit"])
         memory = memory_repository(series_a)
-        ledger = parse_ledger_text(git(memory, "show", f"{rev(memory, 'super')}:memory.md"))
+        final_memory = a_landed["integrated_memory_content_commit"]
+        self.assertEqual(rev(memory, "super"), final_memory)
+        first_a = load_contract(self.fixture.contracts[MASTER_A].contract_path)
+        for memory_commit in (
+            b_landed["integrated_memory_content_commit"],
+            first_a.integrated_memory_content_commit,
+        ):
+            self.assertEqual(git(memory, "merge-base", memory_commit, final_memory), memory_commit)
+        for code_commit in (
+            b_landed["integrated_code_commit"],
+            first_a_candidate,
+            second_a_candidate,
+        ):
+            self.assertEqual(
+                git(
+                    series_a.code_repo_path,
+                    "merge-base",
+                    code_commit,
+                    a_landed["integrated_code_commit"],
+                ),
+                code_commit,
+            )
+        ledger = derive_memory_ledger(memory, rev(memory, "super"))
         self.assertIsNotNone(find_mapping(ledger, b_landed["integrated_code_commit"]))
         self.assertIsNotNone(find_mapping(ledger, first_a_candidate))
         self.assertIsNotNone(find_mapping(ledger, second_a_candidate))
@@ -709,7 +677,6 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         self.assertIsNotNone(final)
         assert final is not None
         self.assertEqual(final.memory_commit, a_landed["integrated_memory_content_commit"])
-        self.assertEqual(ledger.rows[0].code_commit, a_landed["integrated_code_commit"])
         self.assertEqual(load_contract(series_a.contract_path).integration_status, "completed")
         self.assertEqual(load_contract(series_a.contract_path).cleanup, "pending")
 
@@ -732,14 +699,17 @@ class CrossMasterConcurrencyTests(unittest.TestCase):
         self.assertEqual(rev(memory, "super"), memory_before)
         self.assertFalse(preview["eligibility"]["closeoutRequired"])
         self.assertTrue(preview["eligibility"]["approvalRequired"])
-        self.assertTrue(preview["eligibility"]["ledgerMappingVerified"])
+        self.assertEqual(
+            preview["eligibility"]["memoryContentCandidate"],
+            rev(memory, series_b.memory_work_branch),
+        )
 
         applied = checkpoint(self.fixture, series_b, dry_run=False)
 
         self.assertTrue(applied["ok"], applied)
         self.assertEqual(applied["state"], "checkpointed")
         self.assertEqual(rev(series_b.code_repo_path, "super"), applied["integrated_code_commit"])
-        self.assertEqual(rev(memory, "super"), applied["integrated_ledger_commit"])
+        self.assertEqual(rev(memory, "super"), applied["integrated_memory_content_commit"])
         stored = load_contract(series_b.contract_path)
         self.assertEqual(stored.integration_status, "checkpointed")
         self.assertEqual(stored.closeout_status, "not-started")

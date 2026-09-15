@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-CloseoutMutationLeg = Literal["code", "memory", "ledger"]
+CloseoutMutationLeg = Literal["code", "memory"]
 MutationEvidenceState = Literal[
     "pre-mutation",
     "mutation-intent",
@@ -23,6 +23,7 @@ class GitMutationSnapshot(BaseModel):
     headRef: str = Field(pattern=r"^refs/heads/[^\s]+$")
     head: str = Field(pattern=r"^[0-9a-f]{40,64}$")
     headTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    contentHeadTree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
     refLogFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     indexTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")
     candidateTree: str = Field(pattern=r"^[0-9a-f]{40,64}$")

@@ -103,12 +103,10 @@ class CloseoutDoorGeneration(_StrictModel):
     memoryCandidateTree: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     codeBaseCommit: str = Field(pattern=r"^[0-9a-f]{40,64}$")
     memoryBaseCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
-    ledgerMemoryCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     taskTopologyFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     taskIntent: TaskIntentState
     reviewProvenance: DoorProvenance
     memoryProvenance: DoorProvenance
-    ledgerProvenance: DoorProvenance
     admissionProvenance: DoorAdmissionProvenance
     schedulingProvenance: DoorSchedulingProvenance
     dependencies: EvidenceDependencies | None = None
@@ -152,7 +150,6 @@ class DoorDependencyInputs:
     task_intent: TaskIntentState
     review: DoorProvenance
     memory: DoorProvenance
-    ledger: DoorProvenance
     admission: DoorAdmissionProvenance
     scheduling: DoorSchedulingProvenance
     predecessor: str
@@ -183,7 +180,6 @@ def closeout_door_dependencies(inputs: DoorDependencyInputs) -> EvidenceDependen
             dependency("task-intent", "leaf", inputs.task_intent.digest),
             dependency("review-record", "route-review", inputs.review.fingerprint),
             dependency("coherence-record", "curator-coherence", inputs.memory.fingerprint),
-            dependency("ledger-provenance", "ledger", inputs.ledger.fingerprint),
             dependency("admission", "candidate-admission", inputs.admission.fingerprint),
             dependency("scheduling", "grade", inputs.scheduling.fingerprint),
             dependency(
@@ -213,7 +209,6 @@ def require_closeout_door_dependencies(
             task_intent=generation.taskIntent,
             review=generation.reviewProvenance,
             memory=generation.memoryProvenance,
-            ledger=generation.ledgerProvenance,
             admission=generation.admissionProvenance,
             scheduling=generation.schedulingProvenance,
             predecessor=generation.predecessorGenerationId,

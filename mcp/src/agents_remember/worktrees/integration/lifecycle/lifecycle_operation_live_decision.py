@@ -6,9 +6,6 @@ from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
 from agents_remember.worktrees.integration.closeout.initial_door_recovery import (
     classify_initial_closeout_door_recovery,
 )
-from agents_remember.worktrees.integration.closeout.ledger_recovery import (
-    classify_closeout_ledger_recovery,
-)
 from agents_remember.worktrees.integration.direct_landing.direct_landing_recovery_state import (
     classify_direct_landing_recovery,
 )
@@ -47,15 +44,6 @@ def raise_live_evidence_decision(
             "the closeout record cannot prove the sole pre-intent publication cut",
             expected=initial_door.expected,
             observed=initial_door.observed,
-            next_action="developer-decision",
-        )
-    ledger_recovery = classify_closeout_ledger_recovery(contract, record)
-    if ledger_recovery.state == "developer-decision":
-        raise LifecycleControlError(
-            ledger_recovery.status,
-            ledger_recovery.detail,
-            expected=ledger_recovery.expected,
-            observed=ledger_recovery.observed,
             next_action="developer-decision",
         )
     direct_recovery = classify_direct_landing_recovery(contract, record)

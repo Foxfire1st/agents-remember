@@ -14,16 +14,6 @@ import pytest
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.kernel.memory_attribution import code_commit_exists
-from agents_remember.kernel.memory_ledger import (
-    LedgerRow,
-    MemoryLedger,
-    ledger_to_text,
-    load_ledger,
-    parse_ledger_text,
-    prepend_mapping,
-    write_ledger,
-)
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
 )
@@ -36,10 +26,9 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
 from agents_remember.worktrees.integration.integration_ref_transaction import (
     IntegratedCommits,
     IntegrationRefRace,
-    _require_true_rows,
     merge_integrated_commits,
     prepare_integration_ref_move,
-    require_integrated_ledger_mapping,
+    require_integrated_memory_ancestry,
 )
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
@@ -59,81 +48,6 @@ from integration_branch_authority_test_support import (
     _closed_external_leaf_worktrees,
 )
 from test_source_lineage import _commit_on, _git
-
-
-def _ledger_with_rows(ledger: MemoryLedger, rows: list[LedgerRow]) -> MemoryLedger:
-    """A ledger whose exact rows are rewritten; the metadata follows the newest row."""
-
-    return replace(
-        ledger,
-        rows=rows,
-        last_verified_code_commit=rows[0].code_commit,
-        last_memory_content_commit=rows[0].memory_commit,
-    )
-
-
-def _commit_ledger(
-    memory_worktree: Path, ledger_path: Path, ledger: MemoryLedger, message: str
-) -> str:
-    write_ledger(ledger_path, ledger)
-    _git(memory_worktree, "add", "memory.md")
-    _git(memory_worktree, "commit", "-m", message)
-    return _git(memory_worktree, "rev-parse", "HEAD")
-
-
-def _ledger_text_with_header(ledger: MemoryLedger, header: tuple[str, str]) -> str:
-    """The canonical rendering with a header that deliberately disagrees with its own first row.
-
-    The metadata block precedes the table, so the first occurrence of row 1's two values is the
-    header, and patching exactly those two leaves every table cell as rendered. This reproduces
-    the third real closeout-merge error on demand.
-    """
-
-    text = ledger_to_text(ledger)
-    return text.replace(f'"{ledger.rows[0].code_commit}"', f'"{header[0]}"', 1).replace(
-        f'"{ledger.rows[0].memory_commit}"', f'"{header[1]}"', 1
-    )
-
-
-def _commit_ledger_text(memory_worktree: Path, ledger_path: Path, text: str, message: str) -> str:
-    ledger_path.write_text(text, encoding="utf-8")
-    _git(memory_worktree, "add", "memory.md")
-    _git(memory_worktree, "commit", "-m", message)
-    return _git(memory_worktree, "rev-parse", "HEAD")
-
-
-def _reclosed_leaf_memory_history(root: Path):
-    """One closed leaf whose memory work branch then re-closed out after its parent moved.
-
-    Returns ``(closed, memory_source, source_rows, second_memory, ledger_commit, ledger)``:
-    the contract as the second closeout left it, the exact memory source commit it must stay
-    based on, that source's ledger rows, and the ledger whose two added rows are both true.
-    """
-
-    fixture = _authority_fixture(root, external_memory=True)
-    closed = _closed_external_leaf_worktrees(fixture, root, publish_closeout_evidence=False)
-    memory_repo = closed.memory_repo_path
-    memory_worktree = closed.memory_worktree
-    assert memory_repo is not None and memory_worktree is not None
-    assert closed.ledger_path is not None
-    source = _git(memory_repo, "rev-parse", closed.memory_source_branch)
-    source_rows = parse_ledger_text(_git(memory_repo, "show", f"{source}:memory.md")).rows
-    # The second closeout's own memory content, on top of the first one's ledger.
-    work_branch = _git(memory_worktree, "rev-parse", "--abbrev-ref", "HEAD")
-    _commit_on(memory_worktree, work_branch, "second-content.md")
-    second_memory = _git(memory_worktree, "rev-parse", "HEAD")
-    accumulated = prepend_mapping(
-        load_ledger(closed.ledger_path),
-        closed.code_commit,
-        second_memory,
-    )
-    ledger_commit = _commit_ledger(
-        memory_worktree,
-        closed.ledger_path,
-        accumulated,
-        "Record the re-closeout mapping",
-    )
-    return closed, source, source_rows, second_memory, ledger_commit, accumulated
 
 
 class IntegrationBranchAuthorityTests(unittest.TestCase):
@@ -226,7 +140,6 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                 commits = IntegratedCommits(
                     code=closed.code_commit,
                     memory_content=closed.memory_content_commit,
-                    ledger=closed.ledger_commit,
                 )
                 snapshot = prepare_integration_ref_move(
                     closed,
@@ -247,7 +160,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             )
             self.assertEqual(
                 expected["intended"],
-                {"codeRef": closed.code_commit, "memoryRef": closed.ledger_commit},
+                {"codeRef": closed.code_commit, "memoryRef": closed.memory_content_commit},
             )
             self.assertEqual(raised.exception.observed, {})
             self.assertEqual(
@@ -256,275 +169,48 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             )
             self.assertEqual(_git(memory_repo, "rev-parse", "ar/master"), raced_memory)
 
-    def test_ledger_keeps_every_true_mapping_a_reclosed_leaf_accumulated(self) -> None:
-        """A leaf that closed out, synced, and closed out again lands both real mappings.
-
-        Both closeouts really happened and both commits exist in their repositories, so the
-        landed ledger carries two rows ahead of the source history. The row count is not the
-        safeguard; each added row is verified instead.
-        """
-
-        with tempfile.TemporaryDirectory() as tmp:
-            closed, source, source_rows, second_memory, ledger_commit, _ = (
-                _reclosed_leaf_memory_history(Path(tmp))
-            )
-            assert closed.memory_repo_path is not None
-
-            require_integrated_ledger_mapping(
-                closed,
-                IntegratedCommits(
-                    code=closed.code_commit,
-                    memory_content=second_memory,
-                    ledger=ledger_commit,
-                ),
-                memory_source_commit=source,
-            )
-
-            landed = parse_ledger_text(
-                _git(closed.memory_repo_path, "show", f"{ledger_commit}:memory.md")
-            )
-            self.assertEqual(
-                landed.rows,
-                [
-                    LedgerRow(closed.code_commit, second_memory),
-                    LedgerRow(closed.code_commit, closed.memory_content_commit),
-                    *source_rows,
-                ],
-            )
-
-    def test_ledger_refuses_a_ledger_that_does_not_map_the_landed_code_commit(self) -> None:
-        """The landed code commit must be mapped to the landed memory content, or nothing lands.
-
-        This is the first promise the landing owes and the one the file rule never carried: a
-        ledger whose table does not name the pair this landing created leaves a reader resolving
-        that code commit to nothing at all. It is checked against the landed table's own first
-        row for that code commit, so a table that names the commit with DIFFERENT memory content
-        is refused too -- the entry exists but it is not this landing's.
-        """
-
-        with tempfile.TemporaryDirectory() as tmp:
-            closed, source, _source_rows, second_memory, ledger_commit, _accumulated = (
-                _reclosed_leaf_memory_history(Path(tmp))
-            )
-            memory_repo = closed.memory_repo_path
-            assert memory_repo is not None
-            for label, code_commit, memory_content in (
-                ("code commit the table never names", "f" * 40, second_memory),
-                ("memory content the table maps elsewhere", closed.code_commit, "e" * 40),
-            ):
-                with self.subTest(case=label):
-                    with self.assertRaises(RuntimeError) as raised:
-                        require_integrated_ledger_mapping(
-                            closed,
-                            IntegratedCommits(
-                                code=code_commit,
-                                memory_content=memory_content,
-                                ledger=ledger_commit,
-                            ),
-                            memory_source_commit=source,
-                        )
-                    self.assertIn(
-                        "does not map landed code commit to landed memory content",
-                        str(raised.exception),
-                    )
-
-    def test_ledger_refuses_memory_content_that_does_not_descend_from_the_source(self) -> None:
-        """Landed memory content that is not built on the exact source is refused.
-
-        The promise is CONDITIONAL, and the condition is the interesting half: while the landing is
-        still to happen the source is behind the ledger and the question is real; once a ref has
-        moved the source branch IS the landed ledger and the same question answers itself, which is
-        what keeps a retry converging. So the case builds the state the promise exists for -- a
-        source line the landed memory content does not descend from -- and asserts the divergence
-        as well as the refusal, so it cannot pass because the fixture drifted into the trivial
-        case.
-        """
-
-        with tempfile.TemporaryDirectory() as tmp:
-            closed, source, _source_rows, second_memory, ledger_commit, accumulated = (
-                _reclosed_leaf_memory_history(Path(tmp))
-            )
-            memory_repo = closed.memory_repo_path
-            memory_worktree = closed.memory_worktree
-            assert memory_repo is not None and memory_worktree is not None
-            assert closed.ledger_path is not None
-            # A source line of its own, carrying a commit the ledger's line does not have.
-            _git(memory_repo, "branch", "other-source", source)
-            _commit_on(memory_repo, "other-source", "other-source-only.md")
-            other_source = _git(memory_repo, "rev-parse", "other-source")
-            _git(memory_repo, "switch", "super")
-            self.assertFalse(
-                is_ancestor(memory_repo, other_source, ledger_commit),
-                "the fixture must keep the source OUT of the landed line for this clause to bite",
-            )
-            # The pair itself is exactly right, so the refusal below is the ancestry clause's.
-            candidate = _commit_ledger(
-                memory_worktree,
-                closed.ledger_path,
-                replace(
-                    accumulated,
-                    rows=[LedgerRow(closed.code_commit, second_memory), *accumulated.rows],
-                    last_verified_code_commit=closed.code_commit,
-                    last_memory_content_commit=second_memory,
-                ),
-                "Land the exact pair against a divergent source",
-            )
-            with self.assertRaises(RuntimeError) as raised:
-                require_integrated_ledger_mapping(
-                    closed,
-                    IntegratedCommits(
-                        code=closed.code_commit,
-                        memory_content=second_memory,
-                        ledger=candidate,
-                    ),
-                    memory_source_commit=other_source,
+    def test_cache_damage_cannot_change_the_accepted_pair_or_block_its_ref_move(self) -> None:
+        for cache_text in (None, "<<<<<<< malformed cache\n", "stale cache row\n"):
+            with self.subTest(cache_text=cache_text), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                fixture = _authority_fixture(root, external_memory=True)
+                closed = _closed_external_leaf_worktrees(
+                    fixture, root, publish_closeout_evidence=False
                 )
-            self.assertIn("is not based on the exact memory source", str(raised.exception))
-
-    def test_ledger_refuses_untrue_rows_and_accepts_a_rebuilt_source_region(self) -> None:
-        """The landed table is judged on what the world says, not on what the file said.
-
-        The rule this case used to witness -- "no source row may be dropped, reordered or
-        replaced" -- protected the tracked ``memory.md``, and that file is derived state now: a
-        rebuild drops a row whose memory commit the line cannot prove and normalises the rest.
-        What the landing still owes is that every row it publishes is TRUE, and every row below
-        is refused for exactly that, so the case keeps its teeth while the file rule goes.
-
-        The two cases that are now ACCEPTED are asserted as accepted rather than deleted: a
-        dropped source row and a duplicated one are precisely the shapes the removed rule refused
-        and a rebuild produces, so leaving them untested would hide the change this leaf makes.
-        """
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            closed, source, source_rows, second_memory, ledger_commit, accumulated = (
-                _reclosed_leaf_memory_history(root)
-            )
-            memory_repo = closed.memory_repo_path
-            memory_worktree = closed.memory_worktree
-            assert memory_repo is not None and memory_worktree is not None
-            assert closed.ledger_path is not None
-            code_source = _git(closed.code_repo_path, "rev-parse", closed.code_source_branch)
-            # A memory commit on a sibling branch: real, but never part of this leaf's history.
-            _git(memory_repo, "branch", "orphan-content", source)
-            _commit_on(memory_repo, "orphan-content", "orphan-content.md")
-            orphan = _git(memory_repo, "rev-parse", "orphan-content")
-            _git(memory_repo, "switch", "super")
-            cases = (
-                (
-                    "memory commit that never landed",
-                    _ledger_with_rows(
-                        accumulated,
-                        [LedgerRow(code_source, orphan), *accumulated.rows],
+                assert closed.memory_repo_path is not None
+                assert closed.memory_worktree is not None
+                cache = closed.memory_worktree / "memory.md"
+                if cache_text is None:
+                    cache.unlink(missing_ok=True)
+                else:
+                    cache.write_text(cache_text, encoding="utf-8")
+                commits = IntegratedCommits(closed.code_commit, closed.memory_content_commit)
+                sources = IntegrationSources(
+                    current_code_source=_git(
+                        closed.code_repo_path, "rev-parse", closed.code_source_branch
                     ),
-                    code_source,
-                    orphan,
-                    "does not name memory content the landed ledger commit carries",
-                    (orphan,),
-                ),
-                (
-                    "code commit this repository does not hold",
-                    _ledger_with_rows(
-                        accumulated,
-                        [LedgerRow(source, second_memory), *accumulated.rows],
+                    current_memory_source=_git(
+                        closed.memory_repo_path, "rev-parse", closed.memory_source_branch
                     ),
-                    source,
-                    second_memory,
-                    "which the code repository does not hold",
-                    (source,),
-                ),
-            )
-            for name, ledger, code_commit, memory_content, refusal, evidence in cases:
-                with self.subTest(case=name):
-                    candidate = _commit_ledger(
-                        memory_worktree,
-                        closed.ledger_path,
-                        ledger,
-                        f"Ledger variant: {name}",
-                    )
-                    with self.assertRaises(RuntimeError) as raised:
-                        require_integrated_ledger_mapping(
-                            closed,
-                            IntegratedCommits(
-                                code=code_commit,
-                                memory_content=memory_content,
-                                ledger=candidate,
-                            ),
-                            memory_source_commit=source,
-                        )
-                    message = str(raised.exception)
-                    self.assertIn(refusal, message)
-                    for fragment in evidence:
-                        self.assertIn(fragment, message)
-
-            # ACCEPTED, and deliberately asserted as accepted: the two shapes the removed rule
-            # refused and a rebuild produces. Each candidate keeps the landed pair true, so what
-            # the acceptance measures is the file rule's absence rather than a weakened check.
-            accepted = (
-                (
-                    "dropped source row",
-                    _ledger_with_rows(accumulated, accumulated.rows[:-1]),
-                ),
-                (
-                    "duplicated source row",
-                    _ledger_with_rows(
-                        accumulated,
-                        [*accumulated.rows, accumulated.rows[-1]],
-                    ),
-                ),
-            )
-            for name, ledger in accepted:
-                with self.subTest(accepted=name):
-                    candidate = _commit_ledger(
-                        memory_worktree,
-                        closed.ledger_path,
-                        ledger,
-                        f"Ledger variant accepted: {name}",
-                    )
-                    require_integrated_ledger_mapping(
-                        closed,
-                        IntegratedCommits(
-                            code=closed.code_commit,
-                            memory_content=second_memory,
-                            ledger=candidate,
-                        ),
-                        memory_source_commit=source,
-                    )
-            # A hand edit that leaves every row alone and moves only the header is still a
-            # malformed ledger, and it is the shape this check newly carries a remedy for: the
-            # integrated reader rejected it as an opaque "invalid" before the projection check.
-            with self.subTest(case="header disagreeing with its own first row"):
-                headered = _commit_ledger_text(
-                    memory_worktree,
-                    closed.ledger_path,
-                    _ledger_text_with_header(
-                        accumulated,
-                        (source_rows[0].code_commit, source_rows[0].memory_commit),
-                    ),
-                    "Ledger variant: header disagrees",
+                    code_replay_required=False,
+                    memory_replay_required=False,
                 )
-                with self.assertRaises(RuntimeError) as raised:
-                    require_integrated_ledger_mapping(
-                        closed,
-                        IntegratedCommits(
-                            code=closed.code_commit,
-                            memory_content=second_memory,
-                            ledger=headered,
-                        ),
-                        memory_source_commit=source,
-                    )
-                message = str(raised.exception)
-                self.assertIn("the ledger header disagrees with its own first row", message)
-                self.assertIn("Remedy:", message)
-                self.assertIn("worktree_closeout_apply", message)
-            self.assertEqual(
-                parse_ledger_text(_git(memory_repo, "show", f"{ledger_commit}:memory.md")).rows,
-                [
-                    LedgerRow(closed.code_commit, second_memory),
-                    LedgerRow(closed.code_commit, closed.memory_content_commit),
-                    *source_rows,
-                ],
-            )
+                memory_history = _git(closed.memory_repo_path, "rev-list", "--all", "--count")
+
+                snapshot = prepare_integration_ref_move(closed, commits, WorktreeArgs(), sources)
+                merge_integrated_commits(closed, commits, snapshot)
+
+                self.assertEqual(
+                    _git(closed.code_repo_path, "rev-parse", closed.code_source_branch),
+                    commits.code,
+                )
+                self.assertEqual(
+                    _git(closed.memory_repo_path, "rev-parse", closed.memory_source_branch),
+                    commits.memory_content,
+                )
+                self.assertEqual(
+                    _git(closed.memory_repo_path, "rev-list", "--all", "--count"), memory_history
+                )
 
 
 def _init_repo(root: Path) -> Path:
@@ -547,12 +233,7 @@ def _commit_text(repo: Path, name: str, body: str) -> str:
 
 
 def _integration_contract(repo: Path) -> WorktreeContract:
-    """A leaf contract over one repository, which is all the row-truth clauses read.
-
-    Built directly rather than through ``worktree_start``: these clauses read exactly three cells
-    -- the two repositories and the kind -- and standing up a whole enclosure to ask a question
-    about a row would make the case measure the fixture instead of the rule.
-    """
+    """A leaf over real repositories for the accepted-object and ancestry proof."""
 
     return WorktreeContract(
         task_id="TASK",
@@ -578,65 +259,32 @@ def _integration_contract(repo: Path) -> WorktreeContract:
     )
 
 
-def test_the_landed_ledger_commit_must_carry_the_memory_content_it_maps(tmp_path: Path) -> None:
-    """A row naming memory content the landed ledger commit does not carry is refused.
-
-    This is the promise the file rule never carried: a landed table may resolve nothing to memory
-    that never reached the branch, because such a row is a false entry whether or not a reader
-    ever looks it up -- ``find_mapping`` returns the FIRST row naming a code commit, and a stale
-    duplicate below a current one is exactly how a false entry hides. The case writes the table
-    onto a commit that does not descend from the content it names, so the mapping clause is
-    satisfied and this one refuses.
-    """
-
+def test_the_accepted_memory_commit_must_descend_from_the_exact_source(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path / "reachability")
-    early = _commit_text(repo, "early.md", "a commit the ledger will sit on")
-    code_commit = _commit_text(repo, "code.md", "the code commit the row names")
-    content = "b" * 40
-    ledger = MemoryLedger(
-        schema="ar-memory-ledger/v1",
-        repo_name="repo-a",
-        base_code_commit=code_commit,
-        base_memory_commit=content,
-        last_verified_code_commit=code_commit,
-        last_memory_content_commit=content,
-        sort_order="newest-first",
-        rows=[LedgerRow(code_commit, content)],
-    )
-    contract = replace(
-        _integration_contract(repo),
-        memory_base_commit=early,
-    )
-    assert not is_ancestor(repo, content, early)
-
-    with pytest.raises(RuntimeError) as raised:
-        _require_true_rows(contract, ledger, early)
-    assert "does not name memory content the landed ledger commit carries" in str(raised.value)
-
-
-def test_the_landed_ledger_must_name_a_code_commit_the_repository_holds(tmp_path: Path) -> None:
-    """A row naming a code commit the code repository does not hold is refused.
-
-    The other half of the same promise, and the shape a hand edit takes: the memory side resolves
-    and the row parses, but no such code commit exists, so the mapping it claims is not a mapping
-    anything can use.
-    """
-
-    repo = _init_repo(tmp_path / "code-side")
-    head = _commit_text(repo, "content.md", "content the ledger may name")
-    ledger = MemoryLedger(
-        schema="ar-memory-ledger/v1",
-        repo_name="repo-a",
-        base_code_commit="c" * 40,
-        base_memory_commit=head,
-        last_verified_code_commit="c" * 40,
-        last_memory_content_commit=head,
-        sort_order="newest-first",
-        rows=[LedgerRow("c" * 40, head)],
-    )
+    base = _commit_text(repo, "base.md", "base")
+    _git(repo, "branch", "unlanded", base)
+    source = _commit_text(repo, "source.md", "current source")
+    _git(repo, "switch", "unlanded")
+    unlanded = _commit_text(repo, "unlanded.md", "memory content outside the source line")
     contract = _integration_contract(repo)
-    assert not code_commit_exists(contract.code_repo_path, "c" * 40)
+    assert not is_ancestor(repo, source, unlanded)
 
-    with pytest.raises(RuntimeError) as raised:
-        _require_true_rows(contract, ledger, head)
-    assert "which the code repository does not hold" in str(raised.value)
+    with pytest.raises(RuntimeError, match="not based on the exact memory source"):
+        require_integrated_memory_ancestry(
+            contract,
+            IntegratedCommits(code=source, memory_content=unlanded),
+            memory_source_commit=source,
+        )
+
+
+def test_the_accepted_code_commit_must_exist_even_when_memory_is_current(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "code-side")
+    head = _commit_text(repo, "content.md", "memory content")
+    contract = _integration_contract(repo)
+
+    with pytest.raises(RuntimeError, match="code commit does not exist"):
+        require_integrated_memory_ancestry(
+            contract,
+            IntegratedCommits(code="c" * 40, memory_content=head),
+            memory_source_commit=head,
+        )

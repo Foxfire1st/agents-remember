@@ -10,8 +10,6 @@ from typing import Any
 
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
-    load_ledger,
-    prepend_mapping,
     write_ledger,
 )
 from agents_remember.kernel.primitives.runtime_config import load_config
@@ -696,32 +694,3 @@ class QueueFixture:
             actor=actor or QueueActor(role="orchestrator", task_document_ref=SPRINT),
             now=NOW,
         )
-
-    def close_contract(self, master: TaskDocumentRef) -> WorktreeContract:
-        contract = load_contract(self.contracts[master].contract_path)
-        assert contract.memory_worktree is not None
-        assert contract.ledger_path is not None
-        git(contract.code_worktree, "add", "-A")
-        git(contract.code_worktree, "commit", "-m", "close code")
-        code_commit = git(contract.code_worktree, "rev-parse", "HEAD")
-        git(contract.memory_worktree, "add", "-A")
-        git(contract.memory_worktree, "commit", "-m", "close memory")
-        memory_commit = git(contract.memory_worktree, "rev-parse", "HEAD")
-        write_ledger(
-            contract.ledger_path,
-            prepend_mapping(load_ledger(contract.ledger_path), code_commit, memory_commit),
-        )
-        git(contract.memory_worktree, "add", "memory.md")
-        git(contract.memory_worktree, "commit", "-m", "close ledger")
-        closed = replace(
-            contract,
-            human_review_status="approved",
-            approved_for_commit=True,
-            closeout_status="completed",
-            code_commit=code_commit,
-            memory_content_commit=memory_commit,
-            ledger_commit=git(contract.memory_worktree, "rev-parse", "HEAD"),
-        )
-        write_contract(closed.contract_path, closed)
-        self.contracts[master] = closed
-        return closed

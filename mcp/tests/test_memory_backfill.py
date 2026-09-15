@@ -70,10 +70,6 @@ _IDENTITY = {
 # Two spellings of one object, so a table cell can be abbreviated exactly as the real one is.
 _ABBREVIATION = 8
 
-# A ledger path no commit carries, so a read through it can only answer from trailers. This is how
-# the acceptance proof below denies the fallback its gap-filling role without deleting any file.
-_ABSENT_LEDGER = "memory-absent-for-the-trailer-only-proof.md"
-
 
 def _commit(repo: Path, message: str, *, stamp: int) -> str:
     identity = {
@@ -502,7 +498,7 @@ class MemoryBackfillApplyTests(unittest.TestCase):
         result = self.fixture.apply(tip)
         final = self.fixture.migrate_table(result)
 
-        read = read_ledger_source(self.fixture.memory, final, relative=_ABSENT_LEDGER)
+        read = read_ledger_source(self.fixture.memory, final)
 
         self.assertEqual(
             read.excluded_rows,
@@ -560,7 +556,7 @@ class MemoryBackfillApplyTests(unittest.TestCase):
         result = self.fixture.apply(self.fixture.tip())
         final = self.fixture.migrate_table(result)
 
-        read = read_ledger_source(self.fixture.memory, final, relative=_ABSENT_LEDGER)
+        read = read_ledger_source(self.fixture.memory, final)
 
         encoded = {(row.code_commit, row.memory_commit) for row in read.ledger.rows}
         self.assertIn(
@@ -576,11 +572,19 @@ class MemoryBackfillApplyTests(unittest.TestCase):
         memory = self.fixture.build_memory(2)
         self.fixture.table([(code[0], memory[1])])
         tip = self.fixture.tip()
-        result = self.fixture.apply(tip)
+        created = run_git(self.fixture.memory, ["branch", "second", tip])
+        self.assertEqual(created.returncode, 0, created.stderr)
+        targets = (self.fixture.branch_ref(), "refs/heads/second")
+        result = self.fixture.apply(tip, refs=targets)
 
         rescued = run_git(self.fixture.memory, ["rev-parse", "refs/backup/pre-migration"])
         self.assertEqual(rescued.stdout.strip(), tip)
         self.assertNotEqual(result.new_tip, tip)
+        self.assertEqual(set(result.updated_refs), set(targets))
+        for target in targets:
+            self.assertEqual(
+                run_git(self.fixture.memory, ["rev-parse", target]).stdout.strip(), result.new_tip
+            )
 
     def test_an_existing_rescue_ref_refuses_before_anything_is_rewritten(self) -> None:
         code = self.fixture.build_code(1)
@@ -848,11 +852,16 @@ class MemoryBackfillCliTests(unittest.TestCase):
         self.fixture.table([(code[0], memory[2]), (code[1], memory[1])])
         contract = self.contract_path()
         before = self.fixture.tip()
+        run_git(self.fixture.memory, ["branch", "ar/peer", before]).check_returncode()
+        targets = ("--ref", "refs/heads/ar/leaf", "--ref", "refs/heads/ar/peer")
 
         self.assertEqual(self.invoke("--contract", str(contract)), 1, "planning reports work left")
-        self.assertEqual(self.invoke("--contract", str(contract), "--apply"), 0)
+        self.assertEqual(self.invoke("--contract", str(contract), "--apply", *targets), 0)
         after = self.fixture.tip()
         self.assertNotEqual(after, before, "the apply must have moved the branch")
+        self.assertEqual(
+            run_git(self.fixture.memory, ["rev-parse", "refs/heads/ar/peer"]).stdout.strip(), after
+        )
 
         rescued = run_git(
             self.fixture.memory, ["rev-parse", "refs/backup/memory-pre-migration"]
@@ -877,7 +886,7 @@ class MemoryBackfillCliTests(unittest.TestCase):
         # the rescue ref still records the pre-rewrite tip, and the branch is where the first run
         # left it.
         self.assertEqual(
-            self.invoke("--contract", str(contract), "--apply"),
+            self.invoke("--contract", str(contract), "--apply", *targets),
             0,
             "a retry must not refuse on the rescue ref its own first attempt created",
         )

@@ -11,13 +11,6 @@ from typing import Literal, cast
 
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import run_git
-from agents_remember.kernel.memory_ledger import (
-    LedgerError,
-    LedgerRow,
-    contains_mapping,
-    find_mapping,
-    parse_ledger_text,
-)
 from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
 from agents_remember.models.lifecycles.operation import OrganizationalTaskPublicationIntent
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -25,7 +18,7 @@ from agents_remember.tasks import TaskDocument, completion_blockers, render_mark
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentTopology
 from agents_remember.worktrees.integration.closeout.door import live_closeout_door
 from agents_remember.worktrees.integration.integration_branch_authority import integration_targets
-from agents_remember.worktrees.modules.git import is_ancestor, repository_identity, require_git
+from agents_remember.worktrees.modules.git import is_ancestor, repository_identity
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import (
     ContractError,
@@ -100,7 +93,6 @@ class OrganizationalCompletionPlan:
     code_commit: str
     code_tree: str
     memory_content_commit: str
-    ledger_commit: str
     fingerprint: str
 
 
@@ -163,7 +155,6 @@ def organizational_completion_plan(
             "codeCommit": contract.code_commit,
             "codeTree": code_tree,
             "memoryContentCommit": contract.memory_content_commit,
-            "ledgerCommit": contract.ledger_commit,
         }
     )
     return OrganizationalCompletionPlan(
@@ -176,7 +167,6 @@ def organizational_completion_plan(
         code_commit=contract.code_commit,
         code_tree=code_tree,
         memory_content_commit=contract.memory_content_commit,
-        ledger_commit=contract.ledger_commit,
         fingerprint=fingerprint,
     )
 
@@ -447,7 +437,6 @@ def _require_candidate_identity(
         contract.integration_status == "completed"
         and contract.integrated_code_commit == contract.code_commit
         and contract.integrated_memory_content_commit == contract.memory_content_commit
-        and contract.integrated_ledger_commit == contract.ledger_commit
     )
     if (
         contract.kind != "leaf"
@@ -482,7 +471,6 @@ def _require_landed_sibling(
         "child": child_ref.key,
         "code": contract.integrated_code_commit,
         "memory": contract.integrated_memory_content_commit,
-        "ledger": contract.integrated_ledger_commit,
         "codeBase": contract.code_base_commit,
         "memoryBase": contract.memory_base_commit,
     }
@@ -553,11 +541,7 @@ def _require_landed_sibling_memory(
     completing_contract = expected.completing_contract
     child_ref = expected.child_ref
     _require_sibling_memory_identity(contract, completing_contract, child_ref)
-    mapping, final_mapping_preserved = _sibling_memory_mappings(
-        contract, completing_contract, child_ref
-    )
     _require_sibling_memory_ancestry(contract, completing_contract, child_ref)
-    _require_sibling_memory_mapping(contract, child_ref, mapping, final_mapping_preserved)
 
 
 def _require_sibling_memory_identity(
@@ -571,11 +555,9 @@ def _require_sibling_memory_identity(
         memory_repository is not None,
         completing_memory_repository is not None,
         bool(contract.integrated_memory_content_commit),
-        bool(contract.integrated_ledger_commit),
         contract.integrated_memory_content_commit == contract.memory_content_commit,
-        contract.integrated_ledger_commit == contract.ledger_commit,
     )
-    if identity != (True, True, True, True, True, True):
+    if not all(identity):
         raise OrganizationalCompletionError(
             f"organizational sibling {child_ref.key} has no exact landed memory edge"
         )
@@ -585,39 +567,6 @@ def _require_sibling_memory_identity(
         raise OrganizationalCompletionError(
             f"organizational sibling {child_ref.key} belongs to another memory repository"
         )
-
-
-def _sibling_memory_mappings(
-    contract: WorktreeContract,
-    completing_contract: WorktreeContract,
-    child_ref: TaskDocumentRef,
-) -> tuple[LedgerRow | None, bool]:
-    assert contract.memory_repo_path is not None
-    assert completing_contract.memory_repo_path is not None
-    try:
-        integrated_ledger = parse_ledger_text(
-            require_git(
-                contract.memory_repo_path,
-                ["show", f"{contract.integrated_ledger_commit}:memory.md"],
-            )
-        )
-        final_ledger = parse_ledger_text(
-            require_git(
-                completing_contract.memory_repo_path,
-                ["show", f"{completing_contract.ledger_commit}:memory.md"],
-            )
-        )
-        mapping = find_mapping(integrated_ledger, contract.integrated_code_commit)
-        final_mapping_preserved = contains_mapping(
-            final_ledger,
-            contract.integrated_code_commit,
-            contract.integrated_memory_content_commit,
-        )
-    except LedgerError as error:
-        raise OrganizationalCompletionError(
-            f"organizational sibling {child_ref.key} has an invalid memory ledger"
-        ) from error
-    return mapping, final_mapping_preserved
 
 
 def _require_sibling_memory_ancestry(
@@ -634,40 +583,13 @@ def _require_sibling_memory_ancestry(
         ),
         is_ancestor(
             contract.memory_repo_path,
-            contract.memory_base_commit,
-            contract.integrated_ledger_commit,
-        ),
-        is_ancestor(
-            contract.memory_repo_path,
             contract.integrated_memory_content_commit,
-            contract.integrated_ledger_commit,
-        ),
-        is_ancestor(
-            contract.memory_repo_path,
-            contract.integrated_ledger_commit,
             completing_contract.memory_base_commit,
         ),
     )
     if not all(ancestry):
         raise OrganizationalCompletionError(
-            f"organizational sibling {child_ref.key} memory mapping is not on the sprint super"
-        )
-
-
-def _require_sibling_memory_mapping(
-    contract: WorktreeContract,
-    child_ref: TaskDocumentRef,
-    mapping: LedgerRow | None,
-    final_mapping_preserved: bool,
-) -> None:
-    if getattr(mapping, "memory_commit", None) != contract.integrated_memory_content_commit:
-        raise OrganizationalCompletionError(
-            f"organizational sibling {child_ref.key} memory mapping is not on the sprint super"
-        )
-    if not final_mapping_preserved:
-        raise OrganizationalCompletionError(
-            f"organizational sibling {child_ref.key} mapping is not preserved in the proposed "
-            "final ledger"
+            f"organizational sibling {child_ref.key} memory commit is not on the sprint super"
         )
 
 

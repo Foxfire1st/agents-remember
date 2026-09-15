@@ -91,7 +91,7 @@ to the developer.
 - Closeout-door publication: after that handoff and a current-lineage proof, call
   `closeout_door(request={action:"declare", contract_path:...})` against the configured leaf
   contract with complete current
-  task/source/memory/ledger/admission evidence and the accepted priority grade. Send the
+  task/source/memory/admission evidence and the accepted priority grade. Send the
   orchestrator the published waiting generation plus canonical leaf/master/sprint refs,
   execution nature, routes/seams, blockers, and acceptance facts. The door is source truth; the
   closeout queue is only a disposable projection of current waiting generations. Report facts
@@ -139,8 +139,8 @@ to the developer.
   and cannot block work.
 - The durable-evidence stable-contract-or-expiry hold point is separately mandatory. It cannot
   substitute for the requirement acceptance envelope, and the envelope cannot waive it.
-- Transaction boundary: closeout and integration publish only explicitly authorized Git code,
-  prepared memory, and ledger commits/merges with source/destination refs, conflict checks, and
+- Transaction boundary: closeout and integration publish only explicitly authorized Git code
+  and prepared memory commits/merges with source/destination refs, conflict checks, and
   recovery evidence. They do not automatically run code-quality checks, full test suites,
   memory-quality suites, curator certification, or independent review. Full code quality, full
   tests, and full memory quality run only after an explicit developer request. Worker targeted
@@ -173,7 +173,7 @@ to the developer.
 
 ## The exit
 - When the master reaches its completion boundary, prepare the master-handover packet with the
-  exact code/memory/ledger transaction, worker targeted-check report, curator scoped onboarding/
+  exact code/memory transaction, worker targeted-check report, curator scoped onboarding/
   check report, current refs, and concrete conflicts or failed/not-run checks. If the developer or
   approved brief requests a master-exit review, dispatch the reviewer on its canonical document,
   carry the exact requested review mode, and preserve the three-round monotonic rule: review 1

@@ -6,7 +6,6 @@ from typing import Any, Literal, NotRequired, TypedDict
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import ahead_behind
-from agents_remember.kernel.memory_ledger import LedgerError, find_mapping
 from agents_remember.models.worktree import (
     NextOperation,
     NextTool,
@@ -14,7 +13,6 @@ from agents_remember.models.worktree import (
 )
 from agents_remember.worktrees.modules.git import branch_commit, is_ancestor, worktree_dirty
 from agents_remember.worktrees.modules.landing import landing_refs
-from agents_remember.worktrees.named_ref_memory import load_named_ref_ledger
 from agents_remember.worktrees.services import worktree_services
 from agents_remember.worktrees.source_lineage import source_lineage_for_contract
 from agents_remember.worktrees.worktree_contract import (
@@ -189,36 +187,28 @@ def contract_payload(contract: WorktreeContract) -> dict[str, object]:
 
 
 def carryover_done(contract: WorktreeContract) -> tuple[bool, str]:
-    """Prove the exact landed code-to-memory pair on the named integration ref."""
-    if contract.memory_mode != "external" or contract.memory_repo_path is None:
+    """Prove the accepted code and memory commits reached their named integration refs."""
+    if contract.memory_mode != "external":
         return (True, "")
-    landed = contract.integrated_code_commit or contract.code_commit
-    if not landed:
+    if contract.memory_repo_path is None:
         return (False, "")
+    landed = contract.integrated_code_commit or contract.code_commit
     expected_memory = contract.integrated_memory_content_commit or contract.memory_content_commit
-    if not expected_memory:
+    if not landed or not expected_memory:
         return (False, "")
     try:
-        ledger_tip = branch_commit(
+        memory_tip = branch_commit(
             contract.memory_repo_path,
             contract.memory_source_branch,
         )
-        row = find_mapping(
-            load_named_ref_ledger(
-                contract.memory_repo_path,
-                contract.memory_source_branch,
-            ),
-            landed,
-        )
-    except (LedgerError, RuntimeError):
+        code_tip = branch_commit(contract.code_repo_path, contract.code_source_branch)
+    except RuntimeError:
         return (False, "")
-    if (
-        row is None
-        or row.memory_commit != expected_memory
-        or not is_ancestor(contract.memory_repo_path, expected_memory, ledger_tip)
+    if not is_ancestor(contract.code_repo_path, landed, code_tip) or not is_ancestor(
+        contract.memory_repo_path, expected_memory, memory_tip
     ):
         return (False, "")
-    dated = run_git(contract.memory_repo_path, ["show", "-s", "--format=%cI", row.memory_commit])
+    dated = run_git(contract.memory_repo_path, ["show", "-s", "--format=%cI", expected_memory])
     return (True, dated.stdout.strip() if dated.returncode == 0 else "")
 
 

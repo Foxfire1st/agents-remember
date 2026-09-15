@@ -143,7 +143,6 @@ def worktree_integrate_payload(
     contract_path: str,
     *,
     strategy: IntegrateStrategy = "ff-only",
-    ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -152,7 +151,6 @@ def worktree_integrate_payload(
             config,
             contract_path=contract_path,
             strategy=strategy,
-            ledger_commit_message=ledger_commit_message,
             dry_run=dry_run,
         ),
     )
@@ -163,7 +161,6 @@ def worktree_checkpoint_landing_payload(
     contract_path: str,
     *,
     strategy: IntegrateStrategy = "ff-only",
-    ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -172,7 +169,6 @@ def worktree_checkpoint_landing_payload(
             config,
             contract_path=contract_path,
             strategy=strategy,
-            ledger_commit_message=ledger_commit_message,
             dry_run=dry_run,
         ),
     )

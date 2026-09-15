@@ -49,7 +49,7 @@ from agents_remember.tasks.store import (
 from .integration.integration_branch_authority import require_parent_series
 from .integration.integration_ref_transaction import (
     IntegratedCommits,
-    require_integrated_ledger_mapping,
+    require_integrated_memory_ancestry,
 )
 from .integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocationError,
@@ -194,11 +194,9 @@ def _reopened_contract(contract: WorktreeContract) -> WorktreeContract:
             commit_approval_note="",
             code_commit="",
             memory_content_commit="",
-            ledger_commit="",
             integration_strategy="",
             integrated_code_commit="",
             integrated_memory_content_commit="",
-            integrated_ledger_commit="",
             lifecycle_id="",
             memory_state="",
         ),
@@ -343,12 +341,11 @@ def _reopen_preflight_refusal(contract: WorktreeContract) -> WorktreeCommandResu
 
     if contract.memory_mode == "external":
         try:
-            require_integrated_ledger_mapping(
+            require_integrated_memory_ancestry(
                 contract,
                 IntegratedCommits(
                     code=contract.integrated_code_commit,
                     memory_content=contract.integrated_memory_content_commit,
-                    ledger=contract.integrated_ledger_commit,
                 ),
                 memory_source_commit=contract.memory_base_commit,
             )
@@ -371,7 +368,7 @@ def _reopen_preflight_refusal(contract: WorktreeContract) -> WorktreeCommandResu
         contract,
         code_base_commit=contract.integrated_code_commit,
         memory_base_commit=(
-            contract.integrated_ledger_commit if contract.memory_mode == "external" else ""
+            contract.integrated_memory_content_commit if contract.memory_mode == "external" else ""
         ),
     )
     lineage = parent_source_lineage(landed)

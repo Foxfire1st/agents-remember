@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from agents_remember.kernel.memory_cache import derive_memory_ledger
 from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.models.direct_landing import DirectLandingResponse
@@ -24,8 +25,17 @@ from agents_remember.worktrees.direct_landing import (
 from agents_remember.worktrees.direct_landing import (
     direct_landing as _production_direct_landing,
 )
+from agents_remember.worktrees.integration.direct_landing.direct_landing_operation import (
+    direct_landing_store,
+)
+from agents_remember.worktrees.integration.direct_landing.direct_landing_recovery_state import (
+    classify_direct_landing_recovery,
+)
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
     publish_new_lifecycle_operation_location,
+)
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_recovery import (
+    recover_direct_landing_under_authority,
 )
 from agents_remember.worktrees.modules.git import (
     head_commit,
@@ -158,7 +168,7 @@ class DirectLandingTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
-    def test_direct_landing_verifies_code_commit_then_ledger(self) -> None:
+    def test_direct_landing_publishes_memory_and_recovers_independently_of_cache(self) -> None:
         root = Path(self.temp.name)
         fixture = _series_fixture(root / "fx")
         config = fixture["config"]
@@ -180,14 +190,14 @@ class DirectLandingTests(unittest.TestCase):
                     code_commit="0" * 40,
                     candidate_tree=fixture["candidate_tree"],
                     memory_commit_message="direct memory content",
-                    ledger_commit_message="direct ledger mapping",
                     intent_note="approve",
                 ),
                 contract,
             )
         tree_read.assert_not_called()
 
-        # Preview reports the would-land facts without mutating.
+        # A malformed cache cannot block preview or become accepted mutation authority.
+        (memory / "memory.md").write_text("not a ledger\n", encoding="utf-8")
         before_preview = _byte_tree(root)
         preview = direct_landing(
             config,
@@ -196,7 +206,6 @@ class DirectLandingTests(unittest.TestCase):
                 code_commit=fixture["code_head"],
                 candidate_tree=fixture["candidate_tree"],
                 memory_commit_message="direct memory content",
-                ledger_commit_message="direct ledger mapping",
                 intent_note="approve",
                 dry_run=True,
             ),
@@ -208,29 +217,38 @@ class DirectLandingTests(unittest.TestCase):
         self.assertEqual(_byte_tree(root), before_preview)
         before = git(memory, "rev-parse", "HEAD")
 
-        # Add dirty memory content, then land: code verified + memory + ledger row.
+        # Lose the receipt after the one real content commit; recover it from Git evidence.
         (memory / "onboarding").mkdir(exist_ok=True)
         (memory / "onboarding" / "feature.py.md").write_text("# feature\n", encoding="utf-8")
-        landed = direct_landing(
-            config,
-            DirectLandingRequest(
-                contract_path=contract.contract_path.as_posix(),
-                code_commit=fixture["code_head"],
-                candidate_tree=fixture["candidate_tree"],
-                memory_commit_message="direct memory",
-                ledger_commit_message="direct ledger",
-                intent_note="approved by owner",
+        with (
+            mock.patch(
+                "agents_remember.worktrees.integration.direct_landing."
+                "direct_landing_execution.prove_git_commit",
+                side_effect=RuntimeError("receipt interrupted"),
             ),
-            contract,
-        )
+            self.assertRaises(DirectLandingError),
+        ):
+            direct_landing(
+                config,
+                DirectLandingRequest(
+                    contract_path=contract.contract_path.as_posix(),
+                    code_commit=fixture["code_head"],
+                    candidate_tree=fixture["candidate_tree"],
+                    memory_commit_message="direct memory",
+                    intent_note="approved by owner",
+                ),
+                contract,
+            )
+        landed = self._recover_after_interrupted_receipt(fixture)
         self.assertEqual(landed["state"], "landed")
         self.assertEqual(DirectLandingResponse.model_validate(landed).state, "landed")
         self.assertEqual(landed["codeCommit"], fixture["code_head"])
         self.assertTrue(landed["memoryContentCommit"])
-        self.assertTrue(landed["ledgerCommit"])
+        self.assertNotIn("ledgerCommit", landed)
         after = git(memory, "rev-parse", "HEAD")
         self.assertNotEqual(before, after)
-        self.assertEqual(git(memory, "show", "-s", "--format=%s", after), "direct ledger")
+        self.assertEqual(after, landed["memoryContentCommit"])
+        self.assertEqual(git(memory, "rev-list", "--count", f"{before}..{after}"), "1")
         self.assertEqual(
             git(memory, "show", "-s", "--format=%s", str(landed["memoryContentCommit"])),
             "direct memory",
@@ -238,7 +256,6 @@ class DirectLandingTests(unittest.TestCase):
         # Direct landing is the branch-addressed closeout route, so its memory-content
         # commit is the memory side of the same pairing: the message body verbatim plus
         # exactly one Code-Commit trailer naming the code commit this landing verified.
-        # The memory.md-only ledger commit has no counterpart to name and carries none.
         memory_body = git(memory, "show", "-s", "--format=%B", str(landed["memoryContentCommit"]))
         self.assertEqual(memory_body, f"direct memory\n\nCode-Commit: {fixture['code_head']}")
         message_file = root / "direct-memory-message.txt"
@@ -247,19 +264,80 @@ class DirectLandingTests(unittest.TestCase):
             git(memory, "interpret-trailers", "--parse", message_file.as_posix()),
             f"Code-Commit: {fixture['code_head']}",
         )
-        self.assertEqual(
-            git(
-                memory,
-                "show",
-                "-s",
-                "--format=%(trailers:key=Code-Commit)",
-                str(landed["ledgerCommit"]),
-            ),
-            "",
-        )
-        ledger_text = git(memory, "show", f"{after}:memory.md")
+        self.assertEqual(git(memory, "ls-files", "memory.md"), "")
+        self.assertIn("/memory.md", (memory / ".gitignore").read_text(encoding="utf-8"))
+        ledger_text = (memory / "memory.md").read_text(encoding="utf-8")
         self.assertIn(fixture["code_head"], ledger_text)
         self.assertIn(landed["memoryContentCommit"], ledger_text)
+        self._assert_clean_memory_reused(root / "reuse")
+
+    def _recover_after_interrupted_receipt(self, fixture: dict) -> dict[str, object]:
+        contract = fixture["contract"]
+        memory = fixture["memory"]
+        store = direct_landing_store(contract)
+        record = store.read()
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(set(record.mutationEvidence), {"memory"})
+        self.assertEqual(record.mutationEvidence["memory"].state, "mutation-intent")
+        committed = head_commit(memory)
+
+        # Actual code/ref/content changes still require a decision, regardless of cache bytes.
+        git(fixture["code"], "branch", "-f", contract.code_work_branch, "main")
+        self.assertEqual(
+            classify_direct_landing_recovery(contract, record).state, "developer-decision"
+        )
+        git(fixture["code"], "branch", "-f", contract.code_work_branch, fixture["code_head"])
+        git(memory, "switch", "main")
+        self.assertEqual(
+            classify_direct_landing_recovery(contract, record).state, "developer-decision"
+        )
+        git(memory, "switch", contract.memory_work_branch)
+        extra = memory / "unaccepted.md"
+        extra.write_text("unaccepted content\n", encoding="utf-8")
+        self.assertEqual(
+            classify_direct_landing_recovery(contract, record).state, "developer-decision"
+        )
+        extra.unlink()
+
+        cache = memory / "memory.md"
+        cache.unlink()
+        self.assertEqual(classify_direct_landing_recovery(contract, record).state, "terminalizable")
+        cache.write_text("still not a ledger\n", encoding="utf-8")
+        self.assertEqual(classify_direct_landing_recovery(contract, record).state, "terminalizable")
+        completed = recover_direct_landing_under_authority(contract, store, record)
+        self.assertEqual(head_commit(memory), committed)
+        assert completed.recoveryCommits is not None and isinstance(completed.result, dict)
+        self.assertEqual(completed.status, "completed")
+        self.assertEqual(completed.recoveryCommits.memoryContentCommit, committed)
+        self.assertEqual(completed.mutationEvidence["memory"].state, "commit-proven")
+        return completed.result
+
+    def _assert_clean_memory_reused(self, root: Path) -> None:
+        fixture = _series_fixture(root)
+        contract = fixture["contract"]
+        memory = fixture["memory"]
+        before = head_commit(memory)
+        (memory / "memory.md").unlink()
+        landed = direct_landing(
+            fixture["config"],
+            DirectLandingRequest(
+                contract_path=contract.contract_path.as_posix(),
+                code_commit=fixture["code_head"],
+                candidate_tree=fixture["candidate_tree"],
+                memory_commit_message="reuse current memory",
+                intent_note="approved by owner",
+            ),
+            contract,
+        )
+        self.assertEqual(landed["state"], "landed")
+        self.assertEqual(landed["memoryContentCommit"], before)
+        self.assertEqual(head_commit(memory), before)
+        self.assertFalse(
+            any(
+                row.code_commit == fixture["code_head"] for row in derive_memory_ledger(memory).rows
+            )
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

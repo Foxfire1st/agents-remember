@@ -41,6 +41,7 @@ class GitCloseoutPublicationBinding:
     operation_key: str
     generation: int
     intent_digest: str
+    allow_memory_cache: bool = False
 
     def validate(self) -> None:
         for path in (self.root, self.common_directory):

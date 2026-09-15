@@ -29,12 +29,11 @@ from agents_remember.kernel.memory_attribution import render_memory_content_mess
 # carries none: absence is the detection, not a gap to paper over.
 
 CloseoutInputRoute = Literal["worktree", "direct-landing"]
-CloseoutCommitLegName = Literal["code", "memory", "ledger"]
+CloseoutCommitLegName = Literal["code", "memory"]
 CloseoutLegState = Literal["enabled", "not-applicable"]
 CloseoutPublicMessageField = Literal[
     "code_commit_message",
     "memory_commit_message",
-    "ledger_commit_message",
 ]
 CloseoutMessageObservation = Literal[
     "omitted",
@@ -51,7 +50,6 @@ class CloseoutMessageInput(BaseModel):
 
     code: str | None = None
     memory: str | None = None
-    ledger: str | None = None
 
 
 class CloseoutLegPlan(BaseModel):
@@ -73,7 +71,6 @@ class ResolvedCloseoutPlan(BaseModel):
     memoryMode: Literal["internal", "external", "disabled"]
     code: CloseoutLegPlan
     memory: CloseoutLegPlan
-    ledger: CloseoutLegPlan
 
 
 class CloseoutInvalidField(BaseModel):
@@ -82,7 +79,7 @@ class CloseoutInvalidField(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     field: CloseoutPublicMessageField | Literal["effectiveInput"]
-    leg: Literal["code", "memory", "ledger", "plan"]
+    leg: Literal["code", "memory", "plan"]
     observation: CloseoutMessageObservation
     code: str
 
@@ -137,7 +134,6 @@ class EffectiveCloseoutInput(BaseModel):
     memoryMode: Literal["internal", "external", "disabled"]
     code: EffectiveCloseoutLeg
     memory: EffectiveCloseoutLeg
-    ledger: EffectiveCloseoutLeg
 
     def message_for(self, leg: CloseoutCommitLegName) -> str:
         value = getattr(self, leg)

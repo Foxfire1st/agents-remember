@@ -1,4 +1,4 @@
-"""Execute one selected private code, memory-content or ledger command suffix."""
+"""Execute one selected private code or memory-content command suffix."""
 
 from __future__ import annotations
 

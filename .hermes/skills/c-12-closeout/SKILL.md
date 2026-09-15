@@ -1,6 +1,6 @@
 ---
 name: c-12-closeout
-description: "Close out approved Agents Remember edits as explicit code-memory-ledger Git transactions with conflict safety, ledger alignment, and no automatic push."
+description: "Close out approved Agents Remember edits as code and memory Git transactions with exact pair identity, conflict safety, and no automatic push."
 ---
 
 # c-12-closeout Closeout
@@ -13,7 +13,7 @@ The `c-12-closeout` skill owns closeout sequencing for worktree-backed tasks.
 `c-09-git-worktree-manager` dual worktree (code + memory) — there is no
 direct-checkout closeout path. Use the `c-09-git-worktree-manager` skill for
 worktree start, attach, status, integration, lifecycle finalization, and cleanup;
-use this skill for the explicit closeout authority and code-memory-ledger commit order. Closeout is a
+use this skill for the explicit closeout authority and code-then-memory commit order. Closeout is a
 Git transaction; it does not run or require code-quality checks, test suites, memory-quality checks,
 curator certification, or independent review.
 
@@ -30,12 +30,12 @@ only that list and require a shrinking remaining count, and a fourth round asks 
 Use the worktree closeout tools against the task contract:
 
 ```text
-worktree_closeout_preview(contract_path="<enclosure series-contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
-worktree_closeout_apply(contract_path="<enclosure series-contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+worktree_closeout_preview(contract_path="<enclosure series-contract.md>", code_commit_message="<message>", memory_commit_message="<message>")
+worktree_closeout_apply(contract_path="<enclosure series-contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>")
 worktree_status(repo_id="<repo-id>", contract_path="<enclosure series-contract.md>")
 worktree_operation_control(contract_path="<enclosure series-contract.md>", operation_kind="closeout", action="cancel|resume", expected_generation=<generation>, intent_note="<audit intent>")
 worktree_legacy_operation(contract_path="<enclosure series-contract.md>", operation_kind="closeout", action="inspect|migrate|archive", ...)
-direct_landing(contract_path="<task-root series-contract.md>", code_commit="<verified branch HEAD>", memory_commit_message="<message>", ledger_commit_message="<message>", intent_note="<authority>", candidate_tree="<gated tree>")
+direct_landing(contract_path="<task-root series-contract.md>", code_commit="<verified branch HEAD>", memory_commit_message="<message>", intent_note="<authority>", candidate_tree="<gated tree>")
 ```
 
 Worktree closeout records closeout state in the contract the
@@ -48,14 +48,14 @@ cleanup, and task-document completion.
 Closeout is always authority-gated, but the authority is contextual.
 
 For standalone work, final super-branch landing, or any closeout where the accepted task/series
-authority is unclear, agents must request the matching preview tool first, relay the proposed code,
-memory, and ledger commit messages to the developer, and ask for explicit commit approval.
+authority is unclear, agents must request the matching preview tool first, relay the proposed code
+and memory commit messages to the developer, and ask for explicit commit approval.
 
 For subordinate work inside an accepted orchestrated series, the owning seat may apply closeout
 under delegated series authority after the transaction preview is coherent. Managers govern leaf commits;
 the orchestrator governs manager/master edges and direct flat work when it is wearing the manager
-or worker hat itself. Do not stop for the developer merely because closeout will create code,
-memory, and ledger commits. The `intent_note` records the authority source, e.g. the accepted
+or worker hat itself. Do not stop for the developer merely because closeout will create code
+and memory commits. The `intent_note` records the authority source, e.g. the accepted
 planner/series task and the owning seat's review of the preview.
 
 Closeout still stops for the developer when the work reaches the final completed super branch /
@@ -68,7 +68,7 @@ Real closeout uses the matching apply tool with an `intent_note`. The note recor
 authority: either explicit developer commit approval or delegated accepted-series authority. Agents
 must not treat a vague "looks good" or their own preference as authority.
 
-Every contract-enabled code, memory, and ledger leg also requires its own explicit nonblank commit
+Every contract-enabled code or memory leg also requires its own explicit nonblank commit
 message. Preview and apply normalize the same effective input before any claim, worker, journal, or
 Git authority is acquired; a blank required cell is a typed no-effect refusal, not an immutable
 half-operation. A typed not-applicable leg omits its message instead of receiving a synthesized
@@ -76,7 +76,7 @@ default.
 
 Approval remains outside and before apply: preview, relay, and the applicable explicit or delegated
 authority must be complete before `worktree_closeout_apply`. Apply validates the immutable
-transaction input, stages and commits the enabled code, memory-content, and ledger legs through the
+transaction input, stages and commits the enabled code and memory-content legs through the
 existing transaction owner, and records each resulting commit. It does not run or demand a
 certification profile, code-quality check, test suite, memory-quality check, curator certificate, or
 review record. Full quality or full-suite tools run only when the developer explicitly requests
@@ -101,7 +101,7 @@ in force at that moment, and `--mixed` is index-only, so no file content is touc
 
 Two refusals guard the transaction before staging or ref movement. Closeout refuses when the code
 checkout is **not** the declared task worktree (unless the declared transaction route is a sanctioned
-branch-direct landing) or when the code or memory worktree has unresolved merge conflicts. A missing
+branch-direct landing) or when code or memory content has unresolved merge conflicts. A missing
 quality profile, certificate, review record, or suite result never creates a compatibility route and
 never blocks an otherwise authorized transaction. Older tasks without code changes remain valid and
 do not need a profile merely to be read or resumed.
@@ -130,7 +130,7 @@ recovery evidence.
 
 ## Explicit Durable Closeout Gates
 
-`closeout-approval` is the sole human commit gate for code, memory, and ledger when one is
+`closeout-approval` is the sole human commit gate for code and memory when one is
 explicitly raised. It gates only admission of the addressed closeout generation; it never freezes
 the task document, another sprint, or an already accepted operation. Apply accepts only a current
 developer-attributed approval and consumes it once. Open, rejected, revision-requested, applied,
@@ -149,8 +149,15 @@ requires the code checkout/worktree and memory repo/worktree to be on the same
 selected branch; internal-memory closeout commits its memory changes with the
 code worktree.
 
-Ledger compatibility is based on code-to-memory commit mappings, not branch
-metadata.
+The accepted code and memory commits, their trees, ancestry, and recorded refs are transaction
+authority. Each newly created memory-content commit carries `Code-Commit: <code sha>` in its message.
+Unchanged memory retains its actual accepted commit; a missing attribution for a newer code commit
+does not require a synthetic memory commit.
+
+`memory.md` remains available to consumers as an ignored, computed cache of memory commit trailers.
+Keep it outside staging and commits. Missing, stale, or malformed cache bytes or rows never block
+closeout or recovery. Cache regeneration does not rewrite Git history; historical attribution
+rewrites require a separately authorized deployment operation.
 
 The transaction consumes the worker's targeted-check report and any curator
 onboarding handoff as context; it does not rerun either one. The curator owns
@@ -162,7 +169,7 @@ The transaction does not inspect coding guidelines, certification profiles, or
 historical quality artifacts. Those concerns remain available through their
 own tools when the developer explicitly requests them. Closeout reports the
 actual Git inputs and conflicts, then either performs the authorized
-code-memory-ledger transaction or refuses before mutation.
+code-and-memory transaction or refuses before mutation.
 
 ## External-Memory Order
 
@@ -171,21 +178,20 @@ External-memory closeout order is:
 1. Confirm the worker's targeted-check report and the curator's scoped onboarding
    handoff when those roles are present. Record failed or not-run checks as
    reported; do not reinterpret a subset as full green.
-2. Preview the exact enabled code, memory-content, and ledger commit legs with
+2. Preview the exact enabled code and memory-content commit legs with
    their messages, source refs, destination refs, and current conflict/ref
    facts. Preview performs no quality, test, memory, certification, or review
    invocation.
 3. After the applicable explicit or delegated authority is complete, call
    `worktree_closeout_apply`; it validates the same immutable Git input.
-4. Commit the code changes, then the prepared memory-content changes, then
-   prepend the resulting code/memory pair to `memory.md` and commit the ledger
-   update. Keep the existing transaction owner, pair identity, and recoverable
-   publication journal for each leg.
+4. Commit the code changes, then the prepared memory-content changes with their
+   code attribution. Keep the existing transaction owner, pair identity, and
+   recoverable publication journal for each leg. Refresh the consumer ledger
+   cache from Git history without staging or committing it.
 5. Refuse before mutation when a declared branch/ref moved, a worktree has an
-   unresolved conflict, a required commit message is blank, or the code/memory
-   pair cannot be reconciled. Name the concrete corrective action.
-6. Update the task contract closeout state after the actual commit pair and
-   ledger commit are recorded.
+   unresolved code or memory-content conflict, a required commit message is blank,
+   or the code/memory pair cannot be reconciled. Name the concrete corrective action.
+6. Update the task contract closeout state after the actual commit pair is recorded.
 
 ## Internal-Memory Order
 
@@ -200,7 +206,7 @@ Internal-memory closeout order is:
    for concrete Git/input conflicts, missing authority, or incomplete
    transaction legs.
 
-Push behavior is not automatic. Closeout commits code, memory, and ledger only;
+Push behavior is not automatic. Closeout commits code and memory only;
 it never pushes. Pushing the integration branch is part of the landing tail the
 `c-09-git-worktree-manager` skill owns: call
 `lifecycle_turn_end_notification(summary=…)` as the **last tool call**, then present the push intent as
@@ -226,16 +232,16 @@ code commit already exists at the exact series branch HEAD. A series contract is
 authority for this route; it is not by itself evidence that an operation is direct execution.
 Ordinary master/series closeout and the later master-to-parent `worktree_integrate` edge are not
 branch-direct leaf delivery and must work while `directExecutionEnabled` is false.
-The tool verifies that code commit and gated candidate tree, requires explicit nonblank memory and
-ledger messages for enabled legs, and validates the complete effective input before acquiring
+The tool verifies that code commit and gated candidate tree, requires an explicit nonblank memory
+message when that leg is enabled, and validates the complete effective input before acquiring
 landing authority.
 
-Apply persists a task/contract-addressed `direct-landing` operation generation before either Git
-leg. Intent and proof for memory commit, ledger conflict detection, ledger staging, ledger commit,
-and terminal publication are journaled independently. After interruption, read the same generation
+Apply persists a task/contract-addressed `direct-landing` operation generation before memory Git
+mutation. The memory commit intent, commit proof, and terminal publication are journaled
+independently. After interruption, read the same generation
 through `worktree_status` and execute only its advertised action through
 `worktree_operation_control(operation_kind="direct-landing", ...)`. Recovery reconciles exact
-code/tree/memory/ledger evidence and reuses each already produced commit once; the queue is not an
+code/tree/memory evidence and reuses each already produced commit once; the queue is not an
 input. A transient landing lock, synthesized subject, repeat-from-scratch, or raw Git is not
 recovery.
 
@@ -243,7 +249,7 @@ recovery.
 
 Normal lifecycle readers accept only the current schema. For an exact historical schema-1 record,
 use `worktree_legacy_operation(action="inspect")`, bind the returned digest, and then choose the
-single supported audited transition: `migrate` fills only proven-missing unfinished memory/ledger
+single supported audited transition: `migrate` fills only proven-missing unfinished commit
 message cells for the known blank-input incident and preserves live code-output evidence in one
 canonical generation; `archive` accepts only proven terminal/no-live-authority evidence. Canonical
 `worktree_operation_control` then resumes the migrated generation. The legacy tool is explicit and
@@ -253,8 +259,8 @@ bounded; it is never called by status, normal journal reads, cleanup, or closeou
 
 Closeout refuses before mutation when external memory is unresolved, the
 declared code and memory checkouts do not identify the same transaction, a
-required commit message is blank, no enabled leg has a change, a declared
-source/destination ref moved, or a Git index contains unresolved conflicts.
+required commit message is blank, a declared
+source/destination ref moved, or a Git index contains unresolved code or memory-content conflicts.
 The refusal names the exact input and corrective action. Missing quality
 profiles, certificates, review records, and full-suite results are not refusal
 reasons.
@@ -279,14 +285,14 @@ direction; closeout does not rerun a full memory suite or certify the handoff.
 
 ## Boundaries
 
-1. The `c-12-closeout` skill owns closeout approval and code-memory-ledger commit sequencing.
+1. The `c-12-closeout` skill owns closeout approval and code-then-memory commit sequencing.
 2. The `c-12-closeout` skill does not create worktrees, integrate worktrees, finalize lifecycles, or clean up worktrees.
 3. The `c-12-closeout` skill does not initialize memory roots; use the `c-00-initialize-memory-repo` skill.
 4. The `c-12-closeout` skill must not commit without the applicable authority after a closeout
    preview: explicit developer commit approval for standalone/final work, or recorded delegated
    series authority for subordinate accepted-series work.
-5. The `c-12-closeout` skill must publish only the explicitly enabled code,
-   memory-content, and ledger legs through their existing transaction owners.
+5. The `c-12-closeout` skill must publish only the explicitly enabled code and
+   memory-content legs through their existing transaction owners.
 6. The `c-12-closeout` skill must not invoke or require code-quality checks,
    test suites, memory-quality checks, curator certification, or independent
    review as a closeout prerequisite. Full checks run only after an explicit

@@ -1,29 +1,21 @@
-"""External-memory commit phase for normalized worktree closeout."""
+"""Publish external memory content and refresh its disposable ledger view."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from agents_remember.kernel.memory_ledger import (
-    LedgerRow,
-    find_mapping,
-    load_ledger_unvalidated,
-    write_ledger,
-)
+from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
 from agents_remember.worktrees.integration.mutation_evidence import (
-    begin_exact_file_git_mutation,
     begin_git_mutation,
     prove_git_commit,
 )
-from agents_remember.worktrees.ledger_projection import contract_ledger_projection
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     commit_verified_staged,
     head_commit,
-    is_ancestor,
-    require_git,
+    stage_worktree_content,
     worktree_dirty,
 )
 from agents_remember.worktrees.modules.models import VerifiedChange
@@ -47,47 +39,75 @@ def external_closeout_commits(
     effective_input: EffectiveCloseoutInput,
     change: VerifiedChange,
 ) -> MemoryCloseoutOutcome:
-    if contract.ledger_path is None:
-        raise RuntimeError("external-memory closeout requires a ledger path")
-    code_commit = change.commit
     if contract.kind == "series":
-        return series_memory_closeout(contract, code_commit)
+        return series_memory_closeout(contract, change.commit)
     if contract.memory_worktree is None:
         raise RuntimeError("external-memory leaf closeout requires a memory worktree")
-    recovered = _resumed_external_outcome(contract, args, effective_input, code_commit)
-    if recovered is not None:
-        return recovered
+    recovered = args.recovery_commits
+    if recovered is not None and recovered.memoryContentCommit:
+        return resume_external_commits(
+            contract,
+            args,
+            code_commit=change.commit,
+            memory_commit=recovered.memoryContentCommit,
+        )
     refresh = _refresh_external_memory(contract, args, change)
-    # Read the structure rather than the validated ledger: the existing mapping has to be found
-    # in a table whose header may be one of the shapes the projection is about to repair.
-    ledger = load_ledger_unvalidated(contract.ledger_path)
-    existing_mapping = find_mapping(ledger, code_commit)
-    memory_commit, memory_created = _commit_memory_content(
+    memory_commit, created = _commit_memory_content(
         contract,
         args,
         effective_input,
-        code_commit=code_commit,
-        existing_mapping=existing_mapping,
+        code_commit=change.commit,
     )
-    if not memory_created:
-        _report_memory_commit(args, code_commit, memory_commit)
-    ledger_commit, ledger_created, ledger_repair = _commit_ledger_mapping(
-        contract,
-        args,
-        effective_input,
-        _LedgerCommitFacts(code_commit, memory_commit),
+    if not created:
+        _report_memory_commit(args, change.commit, memory_commit)
+    cache = refresh_memory_cache(
+        contract.memory_worktree,
+        memory_commit,
+        path=contract.ledger_path,
+        repo_name=contract.repo_name,
     )
-    if not ledger_created:
-        _report_ledger_commit(args, code_commit, memory_commit, ledger_commit)
     return MemoryCloseoutOutcome(
         memory_commit=memory_commit,
-        ledger_commit=ledger_commit,
         refreshed_onboarding=refresh.onboarding,
         refreshed_entities=refresh.entities,
         refreshed_route_overviews=refresh.route_overviews,
         route_index_refresh=refresh.route_index,
-        ledger_repair=ledger_repair,
+        ledger_repair=cache,
     )
+
+
+def _commit_memory_content(
+    contract,
+    args: WorktreeArgs,
+    effective_input: EffectiveCloseoutInput,
+    *,
+    code_commit: str,
+) -> tuple[str, bool]:
+    """Commit only actual memory changes, binding code attribution inside the commit."""
+
+    repository = contract.memory_worktree
+    assert repository is not None
+    if not worktree_dirty(repository, exclude_paths=("memory.md",)):
+        return head_commit(repository), False
+    prepare_memory_cache(repository)
+    report_operation_progress(
+        args, "memory-commit", current_command="commit verified memory content"
+    )
+    intent = begin_git_mutation(
+        args,
+        leg="memory",
+        repository=repository,
+        expected_output_tree=None,
+        use_current_candidate=True,
+    )
+    stage_worktree_content(repository, exclude_paths=("memory.md",))
+    committed = commit_verified_staged(
+        repository,
+        effective_input.memory_content_message(code_commit),
+        exclude_paths=("memory.md",),
+    )
+    prove_git_commit(args, intent, repository=repository, commit=committed)
+    return committed, True
 
 
 @dataclass(frozen=True)
@@ -96,12 +116,6 @@ class _ExternalMemoryRefresh:
     entities: list[dict[str, object]]
     route_overviews: list[dict[str, str]]
     route_index: dict[str, object]
-
-
-@dataclass(frozen=True)
-class _LedgerCommitFacts:
-    code_commit: str
-    memory_commit: str
 
 
 def _refresh_external_memory(
@@ -133,69 +147,6 @@ def _refresh_external_memory(
     )
 
 
-def _commit_memory_content(
-    contract,
-    args: WorktreeArgs,
-    effective_input: EffectiveCloseoutInput,
-    *,
-    code_commit: str,
-    existing_mapping,
-) -> tuple[str, bool]:
-    """Create the memory-content commit, attributed to the code commit it describes.
-
-    ``code_commit`` is the commit this same closeout accepted, and it is hashed into the
-    committed message as a ``Code-Commit:`` trailer. That is the whole reason the message is
-    rendered here: the trailer has to be inside the object when the object is created, and
-    the object is proved and journalled by the statements immediately below.
-    """
-
-    assert contract.memory_worktree is not None
-    report_operation_progress(
-        args, "memory-commit", current_command="commit verified external memory"
-    )
-    if worktree_dirty(contract.memory_worktree):
-        memory_intent = begin_git_mutation(
-            args,
-            leg="memory",
-            repository=contract.memory_worktree,
-            expected_output_tree=None,
-            use_current_candidate=True,
-        )
-        require_git(contract.memory_worktree, ["add", "-A"])
-        committed = commit_verified_staged(
-            contract.memory_worktree,
-            effective_input.memory_content_message(code_commit),
-        )
-        prove_git_commit(
-            args,
-            memory_intent,
-            repository=contract.memory_worktree,
-            commit=committed,
-        )
-        return committed, True
-    if existing_mapping is not None:
-        committed = existing_mapping.memory_commit
-        if not is_ancestor(
-            contract.memory_worktree, committed, head_commit(contract.memory_worktree)
-        ):
-            raise RuntimeError(
-                "closeout recovery ledger mapping names memory content that is not reachable "
-                "from the current memory worktree"
-            )
-        return committed, False
-    memory_head = head_commit(contract.memory_worktree)
-    # Re-derive the content commit from the live memory worktree rather than reusing the
-    # contract's recorded ``memory_content_commit``. That recorded value can predate the
-    # branch: a leaf that closes out, syncs because its parent moved, and closes out again
-    # used to re-record a memory commit from before the sync merge, and integration then
-    # refused the whole landing with "integrated memory content commit is not based on the
-    # exact memory source" (integration_ref_transaction.py's is_ancestor check) on the very
-    # recovery flow whose published remedy is sync -> re-closeout -> retry. After a sync
-    # merge the memory head IS the correct content commit, and on a first closeout the
-    # recorded value is empty, so both paths record the head.
-    return memory_head, False
-
-
 def _report_memory_commit(args: WorktreeArgs, code_commit: str, memory_commit: str) -> None:
     report_operation_progress(
         args,
@@ -204,91 +155,5 @@ def _report_memory_commit(args: WorktreeArgs, code_commit: str, memory_commit: s
         recovery_commits={
             "codeCommit": code_commit,
             "memoryContentCommit": memory_commit,
-            "ledgerCommit": "",
         },
-    )
-
-
-def _commit_ledger_mapping(
-    contract,
-    args: WorktreeArgs,
-    effective_input: EffectiveCloseoutInput,
-    facts: _LedgerCommitFacts,
-) -> tuple[str, bool, dict[str, object]]:
-    """Recompute the ledger from its source, and write it only when it is not already right.
-
-    Reading and re-stamping what the file already says is what put a superseded row, a wrong
-    order, and a header disagreeing with its own first row into three landed ledgers in one
-    day. The projection is computed from the source ledger plus this branch's own true
-    mappings instead, so re-running closeout repairs a malformed or partially-merged table.
-    The payload reports what changed, and says so explicitly when nothing did.
-    """
-
-    assert contract.memory_worktree is not None and contract.ledger_path is not None
-    additions = (LedgerRow(facts.code_commit, facts.memory_commit),)
-    repair = contract_ledger_projection(contract, additions)
-    if not repair.needs_write:
-        return head_commit(contract.memory_worktree), False, repair.operator_payload()
-    ledger_intent = begin_exact_file_git_mutation(
-        args,
-        leg="ledger",
-        repository=contract.memory_worktree,
-        path=contract.ledger_path,
-        intended_text=repair.intended_text,
-    )
-    write_ledger(contract.ledger_path, repair.projected)
-    require_git(contract.memory_worktree, ["add", "memory.md"])
-    committed = commit_verified_staged(
-        contract.memory_worktree,
-        effective_input.message_for("ledger"),
-    )
-    prove_git_commit(
-        args,
-        ledger_intent,
-        repository=contract.memory_worktree,
-        commit=committed,
-    )
-    return committed, True, repair.operator_payload()
-
-
-def _report_ledger_commit(
-    args: WorktreeArgs,
-    code_commit: str,
-    memory_commit: str,
-    ledger_commit: str,
-) -> None:
-    report_operation_progress(
-        args,
-        "ledger-commit",
-        current_command="external ledger commit recorded for recovery",
-        recovery_commits={
-            "codeCommit": code_commit,
-            "memoryContentCommit": memory_commit,
-            "ledgerCommit": ledger_commit,
-        },
-    )
-
-
-def _resumed_external_outcome(
-    contract,
-    args: WorktreeArgs,
-    effective_input: EffectiveCloseoutInput,
-    code_commit: str,
-) -> MemoryCloseoutOutcome | None:
-    recovery_memory_commit = (
-        args.recovery_commits.memoryContentCommit if args.recovery_commits is not None else ""
-    )
-    if not recovery_memory_commit:
-        return None
-    memory_commit, ledger_commit, ledger_repair = resume_external_commits(
-        contract,
-        args,
-        effective_input,
-        code_commit=code_commit,
-        memory_commit=recovery_memory_commit,
-    )
-    return MemoryCloseoutOutcome(
-        memory_commit=memory_commit,
-        ledger_commit=ledger_commit,
-        ledger_repair=ledger_repair,
     )

@@ -222,7 +222,7 @@ class CheckpointResultTests(unittest.TestCase):
         # distinguishable from one that left the enclosure alone.
         with tempfile.TemporaryDirectory() as tmp:
             contract = _fixture(Path(tmp))
-            commits = IntegratedCommits(code=_ANY_COMMIT, memory_content="", ledger="")
+            commits = IntegratedCommits(code=_ANY_COMMIT, memory_content="")
             reopened = amend_contract(contract, ContractCells(cleanup="reopened"))
             write_contract(contract.contract_path, reopened)
 

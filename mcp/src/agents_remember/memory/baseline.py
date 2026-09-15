@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Adopt existing external-memory onboarding as the first ledgered baseline.
+"""Adopt existing external-memory onboarding as an attributed Git baseline.
 
 Requires Python 3.10+ and git. Uses only the Python standard library.
 """
@@ -16,12 +16,15 @@ from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.coordination_context.models import CoordinationRequest
 from agents_remember.kernel.coordination_context_resolver import CoordinationHints
 from agents_remember.kernel.git_command import run_git
-from agents_remember.kernel.memory_attribution import render_memory_content_message
-from agents_remember.kernel.memory_ledger import (
-    LedgerError,
-    create_initial_ledger,
-    load_ledger,
-    write_ledger,
+from agents_remember.kernel.memory_attribution import (
+    MemoryAttributionError,
+    attributed_commits,
+    render_memory_content_message,
+)
+from agents_remember.kernel.memory_cache import (
+    derive_memory_ledger,
+    prepare_memory_cache,
+    refresh_memory_cache,
 )
 from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
@@ -178,8 +181,8 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
             "Run c-00-initialize-memory-repo before adopting a memory baseline."
         )
 
-    if context.ledger_path.exists():
-        raise RuntimeError("memory baseline adoption is only valid before the first ledger exists")
+    if has_adopted_baseline(context.memory_root):
+        raise RuntimeError("memory baseline adoption is only valid before attributed memory exists")
     default_branch = _baseline_default_branch(context.memory_root)
     requested_branch = memory_branch.removeprefix("refs/heads/")
     if requested_branch != default_branch or current_branch(context.memory_root) != default_branch:
@@ -201,11 +204,9 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
             "Run c-00-initialize-memory-repo first, then add onboarding before adopting."
         )
 
-    # The code commit this baseline names is resolved once, here, and used twice: the commit
-    # that carries the memory content is attributed to it, and the initial ledger row it writes
-    # maps the same commit. Two resolutions of "the code source-branch commit" is exactly how a
-    # trailer and its ledger row come to disagree.
+    # Resolve attribution once; the consumer cache derives the same pair from this commit.
     code_source_commit = branch_commit(context.code_repository_root, source_branch)
+    prepare_memory_cache(context.memory_root)
     require_git(context.memory_root, ["add", *existing_paths])
     memory_content_commit = commit_if_dirty(
         context.memory_root,
@@ -213,46 +214,48 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
             f"[adopt-{context.code_repository_name}-memory-baseline] Adopt external memory content",
             code_source_commit,
         ),
-    )
-    ledger = create_initial_ledger(
-        context.code_repository_name,
-        code_source_commit,
-        memory_content_commit,
-    )
-    write_ledger(context.ledger_path, ledger)
-    require_git(context.memory_root, ["add", "memory.md"])
-    ledger_commit = commit_if_dirty(
-        context.memory_root,
-        f"[adopt-{context.code_repository_name}-memory-baseline] Bootstrap memory ledger",
+        exclude_paths=("memory.md",),
     )
     return {
         "state": "adopted-baseline",
         "memoryContentCommit": memory_content_commit,
-        "ledgerCommit": ledger_commit,
+        "ledgerCache": refresh_memory_cache(
+            context.memory_root,
+            path=context.ledger_path,
+            repo_name=context.code_repository_name,
+        ),
     }
 
 
-def ledger_status(path: Path) -> dict[str, object]:
-    if not path.exists():
-        return {"exists": False}
+def has_adopted_baseline(repository: Path) -> bool:
+    if run_git(repository, ["rev-parse", "--verify", "HEAD"]).returncode != 0:
+        return False
+    return any(commit.is_attributed for commit in attributed_commits(repository, tip="HEAD"))
+
+
+def ledger_status(repository: Path) -> dict[str, object]:
     try:
-        ledger = load_ledger(path)
-    except LedgerError as error:
-        return {"exists": True, "valid": False, "error": str(error)}
+        ledger = derive_memory_ledger(repository)
+    except MemoryAttributionError as error:
+        return {"state": "unavailable", "error": str(error)}
     return {
-        "exists": True,
-        "valid": True,
+        "state": "derived",
         "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
         "lastMemoryContentCommit": ledger.last_memory_content_commit,
     }
 
 
 def base_payload(context, rows: list[drift.DriftRow], report: Path) -> dict[str, object]:
-    ledger = ledger_status(context.ledger_path)
+    ledger = ledger_status(context.memory_root)
     actionable = actionable_rows(rows)
     state = "ready"
-    if ledger["exists"]:
-        state = "already-ledgered"
+    if ledger.get("state") == "derived" and ledger.get("lastMemoryContentCommit"):
+        state = "already-adopted"
+    elif (
+        ledger.get("state") == "unavailable"
+        and run_git(context.memory_root, ["rev-parse", "--verify", "HEAD"]).returncode == 0
+    ):
+        state = "unavailable"
     elif actionable:
         state = "blocked-drift"
     return {
@@ -262,7 +265,7 @@ def base_payload(context, rows: list[drift.DriftRow], report: Path) -> dict[str,
         "code_repository_root": context.code_repository_root.as_posix(),
         "memory_root": context.memory_root.as_posix(),
         "onboarding_root": context.onboarding_root.as_posix(),
-        "ledger_path": context.ledger_path.as_posix(),
+        "ledger_path": context.ledger_path.as_posix() if context.ledger_path is not None else None,
         "drift_report": report.as_posix(),
         "drift": {
             "counts": drift_summary(rows),
@@ -289,12 +292,15 @@ def baseline_adopt(
     context = resolve_request_context(request)
     if context.topology != "external":
         raise RuntimeError("adoption requires external topology")
-    if context.ledger_path is None:
-        raise RuntimeError("external memory context is missing a ledger path")
     rows, report = run_drift(context, request.report)
     payload = base_payload(context, rows, report)
-    if ledger_status(context.ledger_path)["exists"]:
+    if payload["state"] == "already-adopted":
         return 0, payload
+    if payload["state"] == "unavailable":
+        payload["message"] = (
+            "memory Git history is unavailable; restore readable history before adoption"
+        )
+        return 2, payload
     if actionable_rows(rows) and not accept_drift:
         payload["message"] = (
             "actionable drift blocks adoption; refresh onboarding with the c-05-create-or-update-onboarding-files skill or rerun with --accept-drift"
@@ -312,7 +318,7 @@ def baseline_adopt(
     payload["state"] = "adopted"
     payload["accepted_drift"] = bool(accept_drift)
     payload["bootstrap"] = result
-    payload["ledger"] = ledger_status(context.ledger_path)
+    payload["ledger"] = ledger_status(context.memory_root)
     return 0, payload
 
 
@@ -371,7 +377,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Accept current onboarding as factual enough to become the baseline.",
     )
     adopt.add_argument(
-        "--source-branch", help="Code branch to map in memory.md. Defaults to current branch."
+        "--source-branch", help="Code branch to attribute in Git. Defaults to current branch."
     )
     adopt.add_argument("--work-branch", help="Memory branch to use. Defaults to source branch.")
     adopt.add_argument("--dry-run", action="store_true")
@@ -384,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (RuntimeError, ValueError, LedgerError) as error:
+    except (RuntimeError, ValueError) as error:
         parser.error(str(error))
     return 1
 

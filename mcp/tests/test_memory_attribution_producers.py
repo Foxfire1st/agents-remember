@@ -29,6 +29,7 @@ from agents_remember.application.memory_tools import (
     CarryoverSelection,
     MemoryBranches,
     memory_baseline_adopt_tool,
+    memory_baseline_status_tool,
     memory_carryover_apply_tool,
 )
 from agents_remember.kernel.memory_attribution import (
@@ -240,8 +241,8 @@ def test_carryover_attributes_its_memory_content_commit_to_the_official_head(tmp
     The caller's message is a public argument and is deliberately hostile here: its last
     paragraph is itself ``Key: value`` lines, including a ``Code-Commit:`` line that is not this
     carryover's code commit. The landed body has to keep that paragraph verbatim and the trailer
-    has to be the separate final block, so the attribution names ``official_head`` -- the code
-    commit the ledger row the same call writes already names. The ledger-only commit carries none.
+    has to be the separate final block, so the attribution names ``official_head``. The cache
+    derives that pair from the one content commit, and a repeated carry creates no extra commit.
     """
 
     fixture, contract, old_base, official_head, source_memory = _carryover_world(tmp_path)
@@ -256,43 +257,55 @@ def test_carryover_attributes_its_memory_content_commit_to_the_official_head(tmp
         f"{CODE_COMMIT_TRAILER_KEY}: {CODE_ONE}\n"
     )
 
+    selection = CarryoverSelection(
+        repo_id=contract.repo_name,
+        contract_path=contract.contract_path.as_posix(),
+        source_memory=source_memory,
+        official_code_ref="official",
+        source_code_ref="source",
+        old_base=old_base,
+    )
+    before = git(memory_worktree, "rev-parse", "HEAD")
+    contract.ledger_path.write_text("not a ledger\n", encoding="utf-8")
     result = memory_carryover_apply_tool(
         fixture.cfg,
-        CarryoverSelection(
-            repo_id=contract.repo_name,
-            contract_path=contract.contract_path.as_posix(),
-            source_memory=source_memory,
-            official_code_ref="official",
-            source_code_ref="source",
-            old_base=old_base,
-        ),
+        selection,
         intent_note="carry the landed branch memory",
-        messages=CarryoverCommitMessages(memory=body, ledger="Record branch memory carryover"),
+        messages=CarryoverCommitMessages(memory=body),
     )
 
     assert result["ok"] is True, result
     assert result["state"] == "carried-over", result
     content = str(result["memory_content_commit"])
-    ledger_commit = str(result["ledger_commit"])
+    assert "ledger_commit" not in result
+    assert git(memory_worktree, "rev-parse", "HEAD") == content
+    assert git(memory_worktree, "rev-list", "--count", f"{before}..{content}") == "1"
     landed = git(memory_worktree, "log", "-1", "--format=%B", content)
     # The caller's body, byte for byte, and exactly one added trailer block after it.
     assert landed == f"{body.rstrip()}\n\n{CODE_COMMIT_TRAILER_KEY}: {official_head}"
     assert landed.count(CODE_COMMIT_TRAILER_KEY) == 2
     assert _attribution(memory_worktree, content) == f"Code-Commit: {official_head}"
     assert _parsed_trailer(memory_worktree, content, tmp_path) == f"Code-Commit: {official_head}"
-    # The ledger-only commit names no code commit: it carries memory.md and has no counterpart.
-    assert _attribution(memory_worktree, ledger_commit) == ""
+    assert git(memory_worktree, "ls-files", "memory.md") == ""
     row = load_ledger(contract.ledger_path).rows[0]
     assert (row.code_commit, row.memory_commit) == (official_head, content)
+    contract.ledger_path.unlink()
+    repeated = memory_carryover_apply_tool(
+        fixture.cfg,
+        selection,
+        intent_note="reuse already carried memory",
+        messages=CarryoverCommitMessages(memory=body),
+    )
+    assert repeated["state"] == "nothing-to-carryover", repeated
+    assert git(memory_worktree, "rev-parse", "HEAD") == content
 
 
 def test_baseline_attributes_its_memory_content_commit_to_the_code_source_branch(tmp_path) -> None:
     """``memory_baseline_adopt`` attributes the first memory commit it creates, once.
 
-    The code commit is resolved once and used twice -- as the trailer and as the initial ledger
-    row -- because two resolutions of "the code source-branch commit" is how an attribution and
-    its ledger row come to disagree. The adopted memory content is the first commit in an unborn
-    memory history, and the ledger-only commit that bootstraps the table carries no trailer.
+    The code commit is resolved once for the content trailer, from which the cache derives its
+    pair. The adopted content is the first and only commit in the unborn memory history, and
+    cache absence does not make an already adopted baseline eligible for another commit.
     """
 
     root = tmp_path / "world"
@@ -325,9 +338,13 @@ def test_baseline_attributes_its_memory_content_commit_to_the_code_source_branch
     (memory / "onboarding" / "module.md").write_text("# Module\n", encoding="utf-8")
     (memory / "system").mkdir(parents=True, exist_ok=True)
     (memory / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
+    (memory / "memory.md").write_text("not a ledger\n", encoding="utf-8")
 
+    config = load_config(config_path)
+    initial = memory_baseline_status_tool(config, repo_id="repo")
+    assert initial["state"] == "ready", initial
     result = memory_baseline_adopt_tool(
-        load_config(config_path),
+        config,
         repo_id="repo",
         accept_drift=True,
         branches=MemoryBranches(source_branch="main", work_branch="main"),
@@ -336,10 +353,43 @@ def test_baseline_attributes_its_memory_content_commit_to_the_code_source_branch
     assert result["ok"] is True, result
     assert result["state"] == "adopted", result
     content = str(result["bootstrap"]["memoryContentCommit"])
-    ledger_commit = str(result["bootstrap"]["ledgerCommit"])
+    assert "ledgerCommit" not in result["bootstrap"]
+    assert git(memory, "rev-parse", "HEAD") == content
+    assert git(memory, "rev-list", "--count", "HEAD") == "1"
     source_commit = git(code, "rev-parse", "main")
     assert _attribution(memory, content) == f"Code-Commit: {source_commit}"
     assert _parsed_trailer(memory, content, tmp_path) == f"Code-Commit: {source_commit}"
-    assert _attribution(memory, ledger_commit) == ""
+    assert git(memory, "ls-files", "memory.md") == ""
     row = load_ledger(memory / "memory.md").rows[0]
     assert (row.code_commit, row.memory_commit) == (source_commit, content)
+    (memory / "memory.md").unlink()
+    repeated = memory_baseline_adopt_tool(
+        config,
+        repo_id="repo",
+        accept_drift=True,
+        branches=MemoryBranches(source_branch="main", work_branch="main"),
+    )
+    assert repeated["state"] == "already-adopted", repeated
+    assert git(memory, "rev-parse", "HEAD") == content
+
+    # A resolvable HEAD with unreadable ancestry is unavailable, never a new baseline.
+    _replace_with_missing_parent(memory, content, tmp_path / "missing-parent.commit")
+    refs = git(memory, "show-ref")
+    unavailable = memory_baseline_status_tool(config, repo_id="repo")
+    assert unavailable["ok"] is False and unavailable["state"] == "unavailable", unavailable
+    refused = memory_baseline_adopt_tool(
+        config,
+        repo_id="repo",
+        accept_drift=True,
+        branches=MemoryBranches(source_branch="main", work_branch="main"),
+    )
+    assert refused["ok"] is False and refused["state"] == "unavailable", refused
+    assert git(memory, "show-ref") == refs
+
+
+def _replace_with_missing_parent(memory: Path, content: str, commit_file: Path) -> None:
+    header, message = git(memory, "cat-file", "-p", content).split("\n\n", 1)
+    tree, remaining = header.split("\n", 1)
+    commit_file.write_text(f"{tree}\nparent {'f' * 40}\n{remaining}\n\n{message}\n")
+    broken = git(memory, "hash-object", "-t", "commit", "-w", str(commit_file))
+    git(memory, "update-ref", "refs/heads/main", broken, content)

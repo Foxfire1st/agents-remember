@@ -32,9 +32,6 @@ from agents_remember.worktrees.integration.closeout.door import (
 from agents_remember.worktrees.integration.closeout.initial_door_recovery import (
     classify_initial_closeout_door_recovery,
 )
-from agents_remember.worktrees.integration.closeout.ledger_recovery import (
-    classify_closeout_ledger_recovery,
-)
 from agents_remember.worktrees.integration.direct_landing.direct_landing_recovery_state import (
     classify_direct_landing_recovery,
 )
@@ -664,19 +661,12 @@ def _operation_specific_projected_result(
 ) -> tuple[dict[str, Any] | None, str | None, str | None] | None:
     if contract is not None and record.operationKind == "closeout":
         initial_door = classify_initial_closeout_door_recovery(contract, record)
-        ledger_recovery = classify_closeout_ledger_recovery(contract, record)
         if initial_door.state == "developer-decision":
             result = initial_door.decision_payload()
             return (
                 result,
                 str(result["decisionSurface"]),
                 "Resolve the exact initial closeout-door contradiction.",
-            )
-        if ledger_recovery.state == "developer-decision":
-            return (
-                ledger_recovery.decision_payload(),
-                ledger_recovery.detail,
-                "Resolve the exact ledger byte/tree contradiction.",
             )
     if (
         contract is not None

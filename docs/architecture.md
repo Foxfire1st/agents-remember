@@ -125,6 +125,10 @@ The `c-08-ar-coordination-context-resolver` skill owns context resolution facts 
 
 The `c-09-git-worktree-manager` skill owns worktree lifecycle, integration, and cleanup.
 
-The `c-12-closeout` skill owns the closeout approval gate and the code → memory → ledger commit sequence, for both direct edits and worktree-backed tasks.
+The `c-12-closeout` skill owns closeout approval and the code → memory-content commit sequence for
+worktree-backed tasks and the sanctioned branch-direct landing route. Memory commit messages carry
+`Code-Commit` attribution. `memory.md` is an ignored consumer cache computed from that history,
+outside staging, commits, and transaction admission or recovery. Regenerating the cache does not
+rewrite historical commits; historical attribution rewrites require explicit deployment work.
 
 Provider lifecycle — building images, watchers, and indexing — is owned by the MCP provider tools and `runtime_install`, not by the memory or workflow skills.

@@ -74,7 +74,6 @@ class OperationControlRequest:
     dry_run: bool = False
     code_commit_message: str | None = None
     memory_commit_message: str | None = None
-    ledger_commit_message: str | None = None
     grade: SchedulingGradeInput | None = None
     admission: CandidateAdmissionFacts | None = None
     corrective_dispositions: tuple[RedCatalogDisposition, ...] = ()
@@ -114,7 +113,6 @@ class CloseoutCommitMessages:
 
     code: str | None = None
     memory: str | None = None
-    ledger: str | None = None
 
 
 @dataclass(frozen=True)
@@ -128,7 +126,6 @@ class LandedCommits:
 
     code: str
     memory_content: str = ""
-    ledger: str = ""
 
 
 @dataclass(frozen=True)

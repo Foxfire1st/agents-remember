@@ -3,7 +3,7 @@
 After the plane is gone these rules ARE closeout. Each test here names the rule
 it pins:
 
-* R1 the trifecta -- code, memory and ledger, all three, always
+* R1 every enabled code and memory output carries its required intent
 * R2 a valid nonblank shaped commit message on each enabled leg
 * R3 correct ancestry before closeout passes
 
@@ -66,11 +66,10 @@ def _enabled_plan(*, kind: str = "leaf", memory_mode: str = "external") -> Resol
         memoryMode=memory_mode,  # type: ignore[arg-type]
         code=enabled,
         memory=enabled,
-        ledger=enabled,
     )
 
 
-@pytest.mark.parametrize("leg", ["code", "memory", "ledger"])
+@pytest.mark.parametrize("leg", ["code", "memory"])
 @pytest.mark.parametrize("supplied", [None, "", "   ", "\n\t "])
 def test_r2_each_enabled_leg_requires_a_nonblank_commit_message(leg, supplied) -> None:
     """R2: a blank or absent message refuses on its leg, and every blank leg is reported.
@@ -92,12 +91,10 @@ def test_r2_each_enabled_leg_requires_a_nonblank_commit_message(leg, supplied) -
         )
     reported = [(field.leg, field.code) for field in raised.value.invalid_fields]
     assert (leg, f"enabled-{leg}-message-required") in reported
-    assert reported == [
-        (name, f"enabled-{name}-message-required") for name in ("code", "memory", "ledger")
-    ]
+    assert reported == [(name, f"enabled-{name}-message-required") for name in ("code", "memory")]
 
 
-def test_r2_all_three_blank_legs_refuse_together() -> None:
+def test_r2_both_blank_legs_refuse_together() -> None:
     """R2: every enabled leg is checked, not just the first."""
 
     with pytest.raises(CloseoutInputError) as raised:
@@ -110,7 +107,6 @@ def test_r2_all_three_blank_legs_refuse_together() -> None:
         )
     assert sorted(field.leg for field in raised.value.invalid_fields) == [
         "code",
-        "ledger",
         "memory",
     ]
 
@@ -120,9 +116,7 @@ def test_r2_supplied_messages_are_shape_normalized_and_carried_on_every_leg() ->
 
     effective = normalize_closeout_input(
         _contract(),
-        CloseoutMessageInput(
-            code="  commit code  ", memory=" commit memory ", ledger="commit ledger"
-        ),
+        CloseoutMessageInput(code="  commit code  ", memory=" commit memory "),
         route="worktree",
         corrected_call=CORRECTED_CALL,
         resolved_plan=_enabled_plan(),
@@ -134,51 +128,43 @@ def test_r2_supplied_messages_are_shape_normalized_and_carried_on_every_leg() ->
     assert (
         effective.message_for("code"),
         effective.message_for("memory"),
-        effective.message_for("ledger"),
     ) == (
         "commit code",
         "commit memory",
-        "commit ledger",
     )
-    assert (effective.code.state, effective.memory.state, effective.ledger.state) == (
-        "enabled",
+    assert (effective.code.state, effective.memory.state) == (
         "enabled",
         "enabled",
     )
 
 
-def test_r1_the_trifecta_is_required_as_a_whole_never_partially() -> None:
-    """R1: closeout never proceeds with a subset of code, memory and ledger.
-
-    The refusal is all-or-nothing: supplying two of the three enabled legs still
-    refuses, and the refusal names exactly the missing leg. There is no code path
-    in which an enabled leg is silently dropped.
-    """
+def test_r1_the_enabled_content_pair_requires_both_messages_without_a_ledger_leg() -> None:
+    """Both real outputs need intent; the derived cache adds no third commit requirement."""
 
     with pytest.raises(CloseoutInputError) as raised:
         normalize_closeout_input(
             _contract(),
-            CloseoutMessageInput(code="code", memory="memory"),
+            CloseoutMessageInput(code="code"),
             route="worktree",
             corrected_call=CORRECTED_CALL,
             resolved_plan=_enabled_plan(),
         )
     assert [(field.leg, field.code) for field in raised.value.invalid_fields] == [
-        ("ledger", "enabled-ledger-message-required")
+        ("memory", "enabled-memory-message-required")
     ]
 
     effective = normalize_closeout_input(
         _contract(),
-        CloseoutMessageInput(code="code", memory="memory", ledger="ledger"),
+        CloseoutMessageInput(code="code", memory="memory"),
         route="worktree",
         corrected_call=CORRECTED_CALL,
         resolved_plan=_enabled_plan(),
     )
-    assert {leg: getattr(effective, leg).state for leg in ("code", "memory", "ledger")} == {
+    assert {leg: getattr(effective, leg).state for leg in ("code", "memory")} == {
         "code": "enabled",
         "memory": "enabled",
-        "ledger": "enabled",
     }
+    assert "ledger" not in effective.model_dump()
 
 
 # --------------------------------------------------------------------------

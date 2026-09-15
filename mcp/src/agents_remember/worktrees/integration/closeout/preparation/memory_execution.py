@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from agents_remember.kernel.memory_cache import prepare_memory_cache
 from agents_remember.models.lifecycles.evidence_dependencies import canonical_sha256
 from agents_remember.models.lifecycles.prepared_memory import (
     PreparedCodeExecutionView,
@@ -16,7 +17,7 @@ from agents_remember.worktrees.integration.closeout.certification.execution impo
     current_certification_handoff,
 )
 from agents_remember.worktrees.integration.closeout.certification.observation import refuse
-from agents_remember.worktrees.modules.git import worktree_candidate_tree
+from agents_remember.worktrees.modules.git import has_changes, worktree_candidate_tree
 from agents_remember.worktrees.services import worktree_services
 
 from .code_view import observe_prepared_code_view, prepare_code_view
@@ -34,7 +35,9 @@ def observe_prepared_memory_candidate(
         prefix="prepared-memory-tree-", dir=current.contract.worktree_group
     ) as directory:
         memory_tree = worktree_candidate_tree(
-            Path(view.logicalPair.memoryRoot), Path(directory) / "index"
+            Path(view.logicalPair.memoryRoot),
+            Path(directory) / "index",
+            exclude_paths=("memory.md",),
         )
     payload = {
         "schemaVersion": "prepared-memory-candidate/v1",
@@ -65,6 +68,11 @@ def certify_prepared_memory(
             "registered production memory producer",
             None,
         )
+    handoff = current_certification_handoff(handoff.contract, handoff.record, handoff.store)
+    if handoff.contract.memory_worktree is None:
+        refuse("prepared-memory-route", "external-memory closeout", None)
+    if has_changes(handoff.contract.memory_worktree, exclude_paths=("memory.md",)):
+        prepare_memory_cache(handoff.contract.memory_worktree)
     handoff, view = prepare_code_view(handoff)
     candidate = observe_prepared_memory_candidate(handoff, view)
     result = producer.certify(PreparedMemoryCertificationRequest(handoff, candidate))

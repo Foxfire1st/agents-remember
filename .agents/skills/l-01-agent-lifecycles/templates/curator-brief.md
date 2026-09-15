@@ -122,8 +122,8 @@ commands, scope, and passed/failed/blocked/not-run result. Do not run a full mem
 a curator certification for routine curation. Full memory quality is a separate operation only on
 explicit developer request.
 
-The actual code commit, memory commit, ledger row, and any commit-derived fingerprints belong to
-the closeout transaction. Never fabricate a future hash or call a scoped result full green.
+The actual code commit, memory commit, and any commit-derived fingerprints belong to
+the closeout transaction. The ledger cache is derived from those commits and is never a third output. Never fabricate a future hash or call a scoped result full green.
 
 A `cit:(...)` wrapped in backticks is read as a QUOTATION of the citation grammar — which is how
 these documents document it — so it is not checked; write a real citation unbackticked.
