@@ -133,6 +133,7 @@ def memory_init_payload(
     *,
     dry_run: bool = False,
     initialize_git: bool = True,
+    initial_branch: str | None = None,
 ) -> dict[str, Any]:
     return _tool_payload(
         "memory_init",
@@ -141,6 +142,7 @@ def memory_init_payload(
             repo_id=repo_id,
             dry_run=dry_run,
             initialize_git=initialize_git,
+            initial_branch=initial_branch,
         ),
     )
 

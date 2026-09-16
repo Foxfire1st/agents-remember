@@ -119,6 +119,10 @@ class McpToolTests(unittest.TestCase):
             path = root / "mcp-settings.json"
             write_json(path, settings_payload(root))
             config = load_config(path)
+            # The coordinator scaffold the memory root lives inside. `runtime_install`
+            # creates it in the real flow; `memory_init` refuses to invent one, so the
+            # fixture states it rather than relying on the refusal being lenient.
+            config.coordination_root.mkdir(parents=True, exist_ok=True)
             real_run_git = memory_init_module.run_git
 
             def fail_authority(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -126,18 +130,19 @@ class McpToolTests(unittest.TestCase):
                     "config",
                     "--local",
                     "agents-remember.defaultBranch",
-                    "main",
+                    "memory",
                 ]:
                     return subprocess.CompletedProcess(args, 1, "", "config locked")
                 return real_run_git(repo, args)
 
             with patch.object(memory_init_module, "run_git", side_effect=fail_authority):
-                failed = memory_init_payload(config, "agents-remember")
+                failed = memory_init_payload(config, "agents-remember", initial_branch="memory")
             self.assertFalse(failed["ok"])
             memory_root = Path(str(failed["memoryRoot"]))
             self.assertTrue((memory_root / ".git").exists())
+            self.assertEqual(failed["initialBranch"], "memory")
 
-            repaired = memory_init_payload(config, "agents-remember")
+            repaired = memory_init_payload(config, "agents-remember", initial_branch="memory")
 
             self.assertTrue(repaired["ok"])
             self.assertTrue(repaired["git"]["repairAttempted"])
@@ -148,7 +153,7 @@ class McpToolTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
             ).stdout.strip()
-            self.assertEqual(configured, "main")
+            self.assertEqual(configured, "memory")
 
     def test_typed_cgc_payloads_reject_invalid_inputs_before_provider_execution(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

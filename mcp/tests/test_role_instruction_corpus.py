@@ -8,8 +8,8 @@ the properties a consumer depends on:
 * every role in the registry has exactly one readable role source;
 * every role source carries the agreed readable order and its machine-readable knob block;
 * the manifest resolves to files that exist, for every role and every operation;
-* the role registry is exactly the nine roles, and the ambient launcher is a routing condition
-  rather than a tenth role;
+* the role registry is exactly the ten roles, and the ambient launcher is a routing condition
+  rather than a role;
 * the manifest shares no prose (it is a metadata plane);
 * EVERY relative path the corpus cites resolves, so a consolidation cannot leave a dangling
   reference; and
@@ -39,6 +39,7 @@ ROLE_ORDER = (
     "curator",
     "reviewer",
     "system-specialist",
+    "bootstrap",
 )
 
 REQUIRED_SECTIONS = (
@@ -52,7 +53,9 @@ REQUIRED_SECTIONS = (
 
 MACHINE_SECTION = "## Knobs, Tool Surface, And Dispatch Authority"
 
-# The eight frozen operations from the architecture's operation vocabulary.
+# The nine frozen operations: the architecture's eight, plus the one deliberate extension
+# (`bootstrap`) authored with the bootstrap role and tested in
+# test_role_capsule_admission.py.
 OPERATION_KEYS = (
     "orientation",
     "planning",
@@ -62,6 +65,7 @@ OPERATION_KEYS = (
     "coordination",
     "authorized-closeout",
     "recovery",
+    "bootstrap",
 )
 
 BACKTICKED_PATH = re.compile(r"`([^`\n]+)`")
@@ -249,7 +253,7 @@ def test_manifest_resolves_every_role_and_operation_source(tmp_path: Path) -> No
 
     assert _resolve_sources(LIFECYCLE_ROOT, manifest) == []
 
-    # The registry is exactly nine roles, and the ambient launcher is not one of them.
+    # The registry is exactly the ten roles, and the ambient launcher is not one of them.
     assert list(manifest["role_order"]) == list(ROLE_ORDER)
     assert "launcher" not in manifest["roles"]
     conditions = {condition["id"] for condition in manifest["routing_conditions"]}

@@ -34,6 +34,9 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.git_ops imp
 from agents_remember.memory_quality.integrity.onboarding_drift_check.models import (
     GIT_BLOB_SET_ALGORITHM,
 )
+from agents_remember.models.memory_content_excludes import (
+    MEMORY_CONTENT_EXCLUDES,
+)
 from agents_remember.worktrees.integration.integration_branch_authority import (
     RepositoryCheckoutRequest,
     require_ordinary_repository_checkout,
@@ -777,7 +780,7 @@ def _apply_carryover_for_request(
     memory_content_commit = commit_if_dirty(
         target_memory,
         render_memory_content_message(options.memory_commit_message, official_head),
-        exclude_paths=("memory.md",),
+        exclude_paths=MEMORY_CONTENT_EXCLUDES,
     )
     return {
         **plan,

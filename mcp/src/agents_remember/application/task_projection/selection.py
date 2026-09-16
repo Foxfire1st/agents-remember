@@ -138,6 +138,11 @@ _OPERATION_CHANNELS: Mapping[CapsuleOperation, tuple[ProjectionChannel, ...]] = 
         "handoff",
         "evidence",
     ),
+    # The first-hour seat reads why the workspace is being set up, what is in scope, what
+    # must not be disturbed, and what it hands over. It deliberately reads no task
+    # obligations and no acceptance conditions: at setup time there is no task document to
+    # carry them, which is exactly why this operation's channel set is the smallest one.
+    "bootstrap": ("objective", "scope", "preservation", "handoff"),
 }
 
 

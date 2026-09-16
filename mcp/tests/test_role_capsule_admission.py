@@ -2,8 +2,8 @@
 
 Three boundaries are pinned here, each of which a later leaf consumes:
 
-* the frozen vocabulary is exactly nine roles and eight operations, and the ambient
-  launcher is a routing condition rather than a tenth role;
+* the frozen vocabulary is exactly ten roles and nine operations, and the ambient
+  launcher is a routing condition rather than a role;
 * the canonical composition manifest parses, agrees with that vocabulary, and
   declares no key that no longer exists;
 * admitting sources proves containment before it reads a byte, and preserves
@@ -70,7 +70,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 LIFECYCLE_ROOT = REPOSITORY_ROOT / "skills" / "l-01-agent-lifecycles"
 MANIFEST_RELATIVE = "composition-manifest.json"
 
-# The nine roles the corpus ships, and the eight frozen operations. Restated here
+# The ten roles the corpus ships, and the nine frozen operations. Restated here
 # rather than imported from the compiler so the two definitions must agree: an
 # imported constant would make this case assert that a tuple equals itself.
 SHIPPED_ROLES = (
@@ -83,6 +83,7 @@ SHIPPED_ROLES = (
     "curator",
     "reviewer",
     "system-specialist",
+    "bootstrap",
 )
 
 SHIPPED_OPERATIONS = (
@@ -94,6 +95,7 @@ SHIPPED_OPERATIONS = (
     "coordination",
     "authorized-closeout",
     "recovery",
+    "bootstrap",
 )
 
 
@@ -143,11 +145,11 @@ def worker_binding(*, tool_policy: CapsuleToolPolicy | None = None) -> CapsuleBi
 # --------------------------------------------------------------------------------------
 
 
-def test_the_frozen_vocabulary_is_exactly_the_nine_roles_and_eight_operations() -> None:
+def test_the_frozen_vocabulary_is_exactly_the_ten_roles_and_nine_operations() -> None:
     assert CAPSULE_ROLES == SHIPPED_ROLES
-    assert len(CAPSULE_ROLES) == 9
+    assert len(CAPSULE_ROLES) == 10
     assert CAPSULE_OPERATIONS == SHIPPED_OPERATIONS
-    assert len(CAPSULE_OPERATIONS) == 8
+    assert len(CAPSULE_OPERATIONS) == 9
 
 
 def test_the_role_and_operation_literals_agree_with_their_runtime_tuples() -> None:
@@ -157,7 +159,7 @@ def test_the_role_and_operation_literals_agree_with_their_runtime_tuples() -> No
     assert get_args(CapsuleOperation.__value__) == CAPSULE_OPERATIONS
 
 
-def test_the_launcher_is_a_seat_kind_and_not_a_tenth_role() -> None:
+def test_the_launcher_is_a_seat_kind_and_not_a_role() -> None:
     assert CAPSULE_LAUNCHER_MODE == "launcher"
     assert CAPSULE_LAUNCHER_MODE not in CAPSULE_ROLES
     assert CAPSULE_COMPOSITION_ORDER == ("core", "role", "operation", "specialization")

@@ -1,6 +1,6 @@
 ---
 name: l-01-agent-lifecycles
-description: "The agent lifecycles: one lifecycle per agent type, under one roof. Routes every session by exactly three conditions (spawn-role env -> fresh role brief -> otherwise free-chat launcher), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (architect, orchestrator, designer, strategist, manager, worker, curator, system-specialist, adversarial reviewer) plus the report-template library and the reviewer criteria catalogs. Solo work is the degenerate portfolio. Supersedes and replaces both l-01-session-job-lifecycle and l-02-agent-orchestration."
+description: "The agent lifecycles: one lifecycle per agent type, under one roof. Routes every session by exactly three conditions (spawn-role env -> fresh role brief -> otherwise free-chat launcher), carries the minimal lifecycle frame (the six lifecycle signals every session shares), and houses the self-contained per-role lifecycles (architect, orchestrator, designer, strategist, manager, worker, curator, system-specialist, adversarial reviewer, bootstrap) plus the report-template library and the reviewer criteria catalogs. Solo work is the degenerate portfolio. Supersedes and replaces both l-01-session-job-lifecycle and l-02-agent-orchestration."
 ---
 
 # l-01-agent-lifecycles — The Agent Lifecycles
@@ -31,7 +31,7 @@ lifecycle, and no role reads another role's file.
    role's lifecycle. The brief is your session start; a workspace session-start notice is not
    addressed to you.
 3. **Else** (a developer opened this session) → you are the developer-facing **free chat**: a
-   **launcher, not a role seat** (ruled 2026-07-09), and not a tenth role. Research-only questions
+   **launcher, not a role seat** (ruled 2026-07-09), and not a role. Research-only questions
    are answered inline with no role taken. For ordinary role-shaped work, resolve the target sprint,
    compile one complete brief from `templates/architect-brief.md`, and call
    `dispatch_agent(task_document_ref=<canonical sprint document>, role="architect", brief=<compiled
@@ -77,9 +77,10 @@ There is **no fourth entry**, and the edge cases are decided:
 | **curator** | fresh per leaf after builder/reviewer; writes onboarding only from task docs, notes, and code diff | `roles/curator.md` |
 | **system-specialist** | backend provider-degradation investigator; report first, fixes only after explicit orchestrator order; spawn value `system-specialist` | `roles/system-specialist.md` |
 | **adversarial reviewer** | short-lived, spawned at the two seams (master-exit, super-exit) and as any three-party loop's reviewer seat (criteria catalogs bound per review type); spawn value `reviewer` | `roles/reviewer.md` |
+| **bootstrap** | the new user's first-hour seat for one repository: memory root, spear branch, first onboarding, first attributed baseline, indexing; reachable before any task document exists, and it says so when it is not reachable | `roles/bootstrap.md` |
 
-Exactly nine roles. The **ambient launcher** in condition 3 is a routing condition, not a tenth
-entry, and its own obligations live in `core/launcher.md` rather than `roles/`.
+Exactly ten roles. The **ambient launcher** in condition 3 is a routing condition, not a role,
+and its own obligations live in `core/launcher.md` rather than `roles/`.
 
 The **lenses** (bug · feature · triage · research — `lenses.md`) are how the scoping seats
 (architect, designer, orchestrator) read a piece of work; a dispatched role never picks a lens — its
@@ -96,8 +97,8 @@ vocabulary and applicability); it contains **no prose and no copies** of any sou
 - **Core** (`core/`): `authority.md` · `invariants.md` · `lifecycle-frame.md` · `loop.md` ·
   `acceptance.md` · `launcher.md`. Read once, composed once.
 - **Operation vocabulary** (`operations/`): `orientation` · `planning` · `implementation` · `review`
-  · `curation` · `coordination` · `authorized-closeout` · `recovery`. The set is small and frozen;
-  an unknown operation is an explicit error, never a silent fallback.
+  · `curation` · `coordination` · `authorized-closeout` · `recovery` · `session-bootstrap`. The set
+  is small and frozen; an unknown operation is an explicit error, never a silent fallback.
 - **Role** (`roles/<role>.md`): self-contained for its own seat in one readable order — purpose and
   authority → required inputs → normal workflow → role-specific permitted writes/actions →
   stop/escalation cases → completion/handoff.
@@ -125,10 +126,10 @@ whether the developer is effectively steering the work already in hand.
 ## Companion Files
 
 - `lenses.md` — the four job lenses for the scoping seats.
-- `roles/…` — the nine self-contained role lifecycles (the registry above).
+- `roles/…` — the ten self-contained role lifecycles (the registry above).
 - `core/…` — the shared core: authority, invariants, lifecycle frame, loop doctrine, acceptance,
   and the ambient launcher.
-- `operations/…` — the eight operation-scoped blocks.
+- `operations/…` — the nine operation-scoped blocks.
 - `templates/…` — the field schemas the spawning seats compile briefs from: turn-report ·
   worker-brief · manager-brief (`ROLE BRIEF — manager`) · architect-brief · curator-brief ·
   master-handover-packet · conversation-handover-packet · verdict · impact-analysis ·

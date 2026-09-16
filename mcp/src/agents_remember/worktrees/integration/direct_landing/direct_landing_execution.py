@@ -9,6 +9,9 @@ from agents_remember.kernel.memory_cache import refresh_memory_cache
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
 from agents_remember.models.lifecycles.mutation_evidence import GitMutationEvidence
 from agents_remember.models.lifecycles.operation import LifecycleOperationRecord
+from agents_remember.models.memory_content_excludes import (
+    MEMORY_CONTENT_EXCLUDES,
+)
 from agents_remember.worktrees.integration.direct_landing.direct_landing_errors import (
     DirectLandingError,
 )
@@ -230,7 +233,7 @@ def _direct_memory_commit(
     committed = commit_if_dirty(
         memory_repo,
         direct_landing_input(runtime.record).effectiveInput.memory_content_message(code_commit),
-        exclude_paths=("memory.md",),
+        exclude_paths=MEMORY_CONTENT_EXCLUDES,
     )
     prove_git_commit(args, intent, repository=memory_repo, commit=committed)
     return _required_recovery_commit(runtime.store.read(), "memoryContentCommit")

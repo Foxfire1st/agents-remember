@@ -7,16 +7,32 @@ silently minting a new one: a caller-controlled string must never acquire anothe
 role, and an unknown operation is an explicit error rather than a fallback.
 
 ``launcher`` is deliberately absent from :data:`CAPSULE_ROLES`. The ambient
-launcher is a routing condition, not a tenth role; it is reached through
+launcher is a routing condition, not a role; it is reached through
 :data:`CAPSULE_LAUNCHER_MODE` and its own core block.
+
+``bootstrap`` is a real role and is present: it is the new user's first-hour seat, and
+it is the only role that carries the ``bootstrap`` operation. It is deliberately *last*
+in the registry order so that the nine roles that pre-date it keep their existing
+positions — a compilation, a settings key, or a dashboard projection addressed to an
+earlier role therefore cannot shift because this one was added.
+
+**``bootstrap`` is a FREE agent, not a structural seat** (developer ruling 2026-09-16:
+*"It is not a task related agent. Can't be. It needs to be free agent. All what it needs
+is that can 'call'."*). It has no task altitude and is deliberately absent from
+``SPRINT_ROLES``/``MASTER_ROLES``/``LEAF_ROLES`` and from
+``serving/structural_seats.py``: a session opens with ``AR_SPAWN_ROLE=bootstrap`` and no
+task document, and its instructions are its compiled capsule rather than a dispatch
+brief. Do **not** "fix" the absent altitude by adding one — a task altitude is the wrong
+shape for this seat.
 """
 
 from __future__ import annotations
 
 from typing import Literal, get_args
 
-#: The nine lifecycle roles. Every one of them is a dispatched seat with its own
-#: canonical ``roles/<role>.md`` source.
+#: The ten lifecycle roles. Every one of them has its own canonical
+#: ``roles/<role>.md`` source; nine are dispatched task seats and ``bootstrap`` is the
+#: free agent the module docstring describes.
 type CapsuleRole = Literal[
     "architect",
     "orchestrator",
@@ -27,9 +43,10 @@ type CapsuleRole = Literal[
     "curator",
     "reviewer",
     "system-specialist",
+    "bootstrap",
 ]
 
-#: The eight operations, matching the canonical ``operations/<name>.md`` blocks.
+#: The nine operations, matching the canonical ``operations/<name>.md`` blocks.
 type CapsuleOperation = Literal[
     "orientation",
     "planning",
@@ -39,6 +56,7 @@ type CapsuleOperation = Literal[
     "coordination",
     "authorized-closeout",
     "recovery",
+    "bootstrap",
 ]
 
 #: ``role`` is a dispatched role seat; ``launcher`` is the ambient no-role routing
@@ -57,7 +75,7 @@ CAPSULE_ROLE_MODE: CapsuleSeatKind = "role"
 
 CAPSULE_SEAT_KINDS: tuple[CapsuleSeatKind, ...] = get_args(CapsuleSeatKind)
 
-#: The nine roles, in the registry's canonical order. This tuple and the
+#: The ten roles, in the registry's canonical order. This tuple and the
 #: :data:`CapsuleRole` literal above are one registry with two readers — the type
 #: checker reads the literal, runtime selection reads the tuple — so a test holds the
 #: literal's own arguments to this exact tuple and the pair cannot drift apart.
@@ -71,9 +89,12 @@ CAPSULE_ROLES: tuple[CapsuleRole, ...] = (
     "curator",
     "reviewer",
     "system-specialist",
+    "bootstrap",
 )
 
-#: The eight operations, in the order the architecture names them.
+#: The nine operations, in the order the architecture names them, with the one
+#: deliberate extension appended rather than inserted: ``bootstrap``, the first-hour
+#: operation the ``bootstrap`` role carries.
 CAPSULE_OPERATIONS: tuple[CapsuleOperation, ...] = (
     "orientation",
     "planning",
@@ -83,6 +104,7 @@ CAPSULE_OPERATIONS: tuple[CapsuleOperation, ...] = (
     "coordination",
     "authorized-closeout",
     "recovery",
+    "bootstrap",
 )
 
 #: The composition order: shared core first, then the seat's own block, then the
@@ -97,13 +119,13 @@ CAPSULE_COMPOSITION_ORDER: tuple[CapsuleCompositionRoot, ...] = (
 
 
 def is_capsule_role(value: str) -> bool:
-    """Whether ``value`` is one of the nine frozen roles (exact, not normalized)."""
+    """Whether ``value`` is one of the ten frozen roles (exact, not normalized)."""
 
     return value in CAPSULE_ROLES
 
 
 def is_capsule_operation(value: str) -> bool:
-    """Whether ``value`` is one of the eight frozen operations (exact, not normalized)."""
+    """Whether ``value`` is one of the nine frozen operations (exact, not normalized)."""
 
     return value in CAPSULE_OPERATIONS
 

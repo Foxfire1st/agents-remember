@@ -110,8 +110,9 @@ ALL_OPERATIONS = (
     "coordination",
     "authorized-closeout",
     "recovery",
+    "bootstrap",
 )
-#: The nine frozen roles. Spelled here rather than imported so the fixture can
+#: The ten frozen roles. Spelled here rather than imported so the fixture can
 #: disagree with the code under test instead of moving with it.
 ALL_ROLES = (
     "architect",
@@ -123,6 +124,7 @@ ALL_ROLES = (
     "curator",
     "reviewer",
     "system-specialist",
+    "bootstrap",
 )
 #: Which seat each role occupies, as the task layer spells it.
 ROLE_ALTITUDES = {
@@ -135,8 +137,9 @@ ROLE_ALTITUDES = {
     "curator": "leaf",
     "reviewer": "leaf",
     "system-specialist": "leaf",
+    "bootstrap": "free-agent",
 }
-#: Each role's applicable operations; the manifest declares all eight and narrows
+#: Each role's applicable operations; the manifest declares all nine and narrows
 #: applicability per role, which is the shape the compiler requires.
 OPERATIONS_BY_ROLE = {
     "architect": ("orientation", "planning", "coordination", "review", "recovery"),
@@ -162,6 +165,7 @@ OPERATIONS_BY_ROLE = {
     "curator": ("orientation", "curation", "recovery"),
     "reviewer": ("orientation", "review"),
     "system-specialist": ("orientation", "recovery"),
+    "bootstrap": ("orientation", "bootstrap", "recovery"),
 }
 #: Roles that declare the served skill, so the reference plane is exercised.
 SKILL_DECLARING_ROLES = frozenset(ALL_ROLES)
@@ -670,7 +674,7 @@ def test_a_caller_changing_the_role_string_cannot_acquire_another_role(world: Wo
 
 
 def test_an_unknown_role_is_refused_with_its_own_status(world: World) -> None:
-    """A string outside the frozen nine is a typed refusal, not a nearest match."""
+    """A string outside the frozen ten is a typed refusal, not a nearest match."""
 
     refused = world.compile(world.request(role="not-a-role"))
     assert not refused.ok and refused.refusal is not None
@@ -1428,7 +1432,9 @@ def test_altitude_admission_admits_every_role_the_document_can_carry_and_refuses
             continue
         admitted.append(role)
     assert admitted == ["worker", "curator", "reviewer"]
-    # The other six are refused for their own altitudes: four need a sprint, two a master.
+    # The rest are refused: four need a sprint, one needs a master, and ``bootstrap``
+    # carries no structural task altitude at all -- it is the seat a workspace reaches
+    # before a task document exists.
     assert refused == [
         "architect",
         "orchestrator",
@@ -1436,8 +1442,9 @@ def test_altitude_admission_admits_every_role_the_document_can_carry_and_refuses
         "strategist",
         "manager",
         "system-specialist",
+        "bootstrap",
     ]
-    # A role outside the frozen nine is refused as unsupported, not as a wrong altitude.
+    # A role outside the frozen ten is refused as unsupported, not as a wrong altitude.
     with pytest.raises(Exception) as raised:
         topology.validate_role(ref, "not-a-role")
     assert "no structural task altitude" in str(raised.value)

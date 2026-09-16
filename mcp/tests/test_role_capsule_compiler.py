@@ -75,6 +75,7 @@ FIXTURE_ROLES = (
     "curator",
     "reviewer",
     "system-specialist",
+    "bootstrap",
 )
 
 FIXTURE_OPERATIONS = (
@@ -86,6 +87,7 @@ FIXTURE_OPERATIONS = (
     "coordination",
     "authorized-closeout",
     "recovery",
+    "bootstrap",
 )
 
 FIXTURE_CORE = ("authority", "invariants", "lifecycle-frame", "loop", "acceptance", "launcher")
@@ -106,6 +108,7 @@ FIXTURE_APPLICABILITY = {
         "curator",
         "system-specialist",
     ),
+    "bootstrap": ("bootstrap",),
 }
 
 FIXTURE_ROLE_CORE = {
@@ -118,6 +121,7 @@ FIXTURE_ROLE_CORE = {
     "curator": ("authority", "invariants", "acceptance"),
     "reviewer": ("authority", "invariants", "loop", "acceptance"),
     "system-specialist": ("authority", "invariants", "acceptance"),
+    "bootstrap": ("authority", "invariants", "acceptance"),
 }
 
 DIRECTORIES = {
@@ -532,7 +536,7 @@ def test_operation_the_role_cannot_run_is_refused_instead_of_substituted() -> No
     assert "never selects a neighbouring operation" in error.next_action
 
 
-def test_launcher_seat_composes_its_own_core_and_is_not_a_tenth_role() -> None:
+def test_launcher_seat_composes_its_own_core_and_is_not_a_role() -> None:
     result = compile_worker(binding=launcher_binding())
 
     identities = [block.identity for block in result.capsule.instructions]

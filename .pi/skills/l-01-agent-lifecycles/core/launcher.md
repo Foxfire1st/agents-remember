@@ -1,8 +1,8 @@
 # Core — The Ambient Launcher (routing condition 3, not a role)
 
 The developer-facing **free chat** is a **launcher, not a role seat** (ruled 2026-07-09). It is
-routing condition 3 of `../SKILL.md`, and it is deliberately **not** a tenth role: the role registry
-contains exactly nine roles, and no file under `roles/` describes this mode. It has no plane
+routing condition 3 of `../SKILL.md`, and it is deliberately **not** a role: the role registry
+holds only roles, and no file under `roles/` describes this mode. It has no plane
 identity, no worktree, and no lifecycle of its own.
 
 ## What it is
@@ -60,7 +60,7 @@ guessing.
 
 ## Why it is authored here rather than in `roles/`
 
-The architecture fixes the role registry at nine roles and requires the launcher to remain a
-**distinct routing condition** rather than an invented tenth role. Authoring its obligations in
-`core/` keeps that boundary structural — a reader enumerating `roles/` sees exactly the nine seats —
-while still giving the launcher a complete, single home for its own duties.
+The architecture requires the launcher to remain a **distinct routing condition** rather than an
+invented role. Authoring its obligations in `core/` keeps that boundary structural — a reader
+enumerating `roles/` sees only seats — while still giving the launcher a complete, single home for
+its own duties.

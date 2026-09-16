@@ -120,7 +120,7 @@ def _register_capsule_tool(server: FastMCP, config: McpRuntimeConfig) -> None:
 
 
 def _narrow_operation(value: str) -> CapsuleOperation:
-    """The operation value, refused loudly when it is not one of the frozen eight."""
+    """The operation value, refused loudly when it is not one of the frozen nine."""
 
     if value not in CAPSULE_OPERATIONS:
         raise ValueError(

@@ -24,7 +24,9 @@ class MissingMemoryError(AgentsRememberError):
             "Agents Remember memory is missing for "
             f"{code_repository_name!r}. Checked external memory at {external_memory.as_posix()} "
             f"using coordination root {coordination_root.as_posix()}. "
-            "Ask the developer whether to initialize memory with c-00-initialize-memory-repo, then run c-03-repo-bootstrap if they want onboarding content generated."
+            "Memory setup is not a message's job to prescribe: the c-00-initialize-memory-repo "
+            "skill owns creating or repairing this root, and the c-03-repo-bootstrap skill owns "
+            "generating onboarding content under it."
         )
 
 

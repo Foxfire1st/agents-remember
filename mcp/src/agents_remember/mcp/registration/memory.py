@@ -142,15 +142,23 @@ def _register_memory_baseline_tools(server: FastMCP, config: McpRuntimeConfig) -
         repo_id: str,
         dry_run: bool = False,
         initialize_git: bool = True,
+        initial_branch: str | None = None,
     ) -> dict[str, Any]:
-        """Initialize or repair a repository's memory root (scaffold system/ files, onboarding
-        layout, optionally `git init`). Does not overwrite existing onboarding content. Preview
-        with dry_run=true. Usually driven by the c-00-initialize-memory-repo skill."""
+        """Initialize or repair a repository's memory root (scaffold `system/` files, the
+        `onboarding/` and `docs/` layout, optionally `git init`). `initial_branch` names the code
+        branch the memory is the foundation of: it becomes the memory repository's initial branch
+        and the recorded `agents-remember.defaultBranch` that baseline adoption and every worktree
+        entry point check against. Omitted, it defaults to the configured code repository's
+        currently checked-out branch, and the call refuses rather than inventing a name when
+        neither is available. Creates missing paths only and never overwrites existing onboarding
+        content. Preview with dry_run=true. Usually driven by the c-00-initialize-memory-repo
+        skill."""
         return memory_init_payload(
             config,
             repo_id,
             dry_run=dry_run,
             initialize_git=initialize_git,
+            initial_branch=initial_branch,
         )
 
     @server.tool()

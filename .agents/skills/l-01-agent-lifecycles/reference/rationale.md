@@ -15,7 +15,7 @@ This corpus therefore separates four kinds of text that used to be interleaved:
 | --- | --- | --- |
 | Rules that genuinely apply across roles | `../core/` — authored once | A shared rule restated per role drifts silently |
 | Rules specific to one seat | `../roles/<role>.md` — self-contained | A seat must never need another role's prose to learn its own obligations |
-| Procedure scoped to one kind of work | `../operations/` — eight blocks | Long interwoven procedures become separately loadable instead of padding every role |
+| Procedure scoped to one kind of work | `../operations/` — nine blocks | Long interwoven procedures become separately loadable instead of padding every role |
 | Rationale, history, superseded rulings | this directory | Reason matters to reviewers and architects, not to a seat mid-task |
 
 The consolidation rule that produced it: **frequency of repetition is never authority.** A stale
@@ -47,10 +47,16 @@ than in a build script) means a reviewer can diff the routing against the files 
 
 ## Why the launcher is not a tenth role
 
-The architecture fixes the registry at nine roles and requires the launcher to remain a distinct
-routing condition. Authoring the launcher's obligations in `../core/launcher.md` keeps that boundary
-structural: enumerating `roles/` shows exactly the nine seats, and the router's condition 3 still has
-one complete home for its duties.
+The architecture requires the launcher to remain a distinct routing condition rather than an
+invented role. Authoring the launcher's obligations in `../core/launcher.md` keeps that boundary
+structural: enumerating `roles/` shows only seats, and the router's condition 3 still has one
+complete home for its duties.
+
+The registry holds **ten** roles, and the launcher is not one of them. The tenth is `bootstrap`, the
+new user's first-hour **free agent** (developer ruling 2026-09-16): it has its own `roles/bootstrap.md`
+and its own operation, and it is reached by a session-open call with its role and no task document
+rather than by dispatch. So the count and the distinction are two separate facts: the launcher is not
+a role at all, while `bootstrap` is a role that simply is not a task seat.
 
 ## Why some templates keep their own shape
 

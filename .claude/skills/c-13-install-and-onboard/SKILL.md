@@ -246,8 +246,15 @@ Do not assume the developer wants a fresh memory repo. Ask which case applies,
 unless a memory repo is already present and resolvable:
 
 1. **Scaffold a new memory repo** - they have no existing memory for this code
-   repo. Run `c-00-initialize-memory-repo`, which creates the external memory repo
-   at `<coordination-root>/memory-repos/ar-<code-repository-name>`. Continue to
+   repo. Ask the foundation question before creating anything: **which code branch
+   should be the foundation (spear) of this repository's memory?** Default it to the
+   branch the code repository currently has checked out, say plainly why it matters
+   (memory is written against that branch's state, and changing it later is a
+   carryover step rather than an edit), and hand the answer to
+   `c-00-initialize-memory-repo` as `initial_branch`. That skill owns the procedure,
+   including the short plain-language account for a developer who skipped the
+   README. It creates the external memory repo at
+   `<coordination-root>/memory-repos/ar-<code-repository-name>`. Continue to
    Stage 5.
 2. **Use an existing memory repo** - they already have one. Clone or checkout it
    to the resolved memory location, then adopt it as the Git-attributed baseline with
@@ -261,13 +268,26 @@ migrated. If a checkout still carries one, report the exact path and the route o
 worktree contracts, or re-initialize with `c-00-initialize-memory-repo`); never
 rewrite or delete it, and never treat it as an already-present memory layer.
 
-## Stage 5 - Bootstrap
+## Stage 5 - Bootstrap, Then The First Baseline
 
-Run this stage only when Stage 4 scaffolded a new memory repo.
+Run this stage only when Stage 4 scaffolded a new memory repo. It has two halves, and the
+second is what makes the memory repo usable: a scaffold with no baseline has **no commit and
+no ledger**, so nothing downstream can attribute memory content to a code commit.
 
-Hand off to `c-03-repo-bootstrap` to generate initial onboarding. A thin
-`overview.md` is enough to start; deeper route-local overviews and file-level
-onboarding should grow as work touches new areas.
+1. **Scaffold onboarding** - hand off to `c-03-repo-bootstrap` to generate initial
+   onboarding. A thin `overview.md` is enough to start; deeper route-local overviews and
+   file-level onboarding should grow as work touches new areas. Whether the developer wants
+   onboarding at all is their call: `system/` alone is enough to adopt.
+2. **Adopt the first attributed baseline** - hand off to `c-10-adopt-memory-baseline`,
+   which owns the procedure. Read `memory_baseline_status` **before** adoption, put the
+   drift-acceptance decision to the developer rather than assuming it, adopt through
+   `memory_baseline_adopt`, then read `memory_baseline_status` **again** and report both.
+   Baseline adoption is valid only before attributed memory exists, so an
+   `already-adopted` report means this half is already done.
+
+`bootstrap/` scaffolding is transient and is never part of a memory commit - not the first
+baseline and not any later one. Say so before the first adoption, because the developer is
+the one who decides when the bootstrap directory is removed.
 
 Skip this stage when an existing memory repo was adopted.
 
@@ -312,7 +332,9 @@ Summarize:
 5. memory repo: scaffolded, existing-adopted, or already present, with the
    resolved memory root;
 6. bootstrap: run via `c-03-repo-bootstrap` or skipped;
-7. providers: indexing status and any deferred/degraded state.
+7. first baseline: `memory_baseline_status` before and after adoption, the adoption
+   result at its memory-content commit, or the exact reason it was not run;
+8. providers: indexing status and any deferred/degraded state.
 
 End by telling the developer whether the project is ready for normal work. Do
 not tell them to restart for hooks installed by this skill, because this skill no
@@ -331,7 +353,8 @@ longer installs hooks.
 5. It delegates memory init to `c-00-initialize-memory-repo`, bootstrap to
    `c-03-repo-bootstrap`, baseline adoption to
    `c-10-adopt-memory-baseline`, and context resolution to
-   `c-08-ar-coordination-context-resolver`.
+   `c-08-ar-coordination-context-resolver`. The fresh-scaffold path reaches baseline
+   adoption in Stage 5; it does not stop at the scaffold.
 6. It must not invent a certification profile, discover one by convention, or copy another
    repository's commands. A missing/invalid profile blocks only the explicitly requested
    certification operation; routine code/memory/ledger closeout remains a Git transaction.
