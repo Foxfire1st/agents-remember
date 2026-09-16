@@ -63,6 +63,32 @@ _CLOSED_JOURNAL_MODE = "delete"
 _JOURNAL_PEER_SUFFIXES = ("-wal", "-shm", "-journal")
 
 
+def require_closed_database(stage_path: Path, expected: SnapshotIdentity) -> None:
+    """Establish the closed journal mode on one finished file and prove what it holds.
+
+    This is the reusable half of the freeze: any producer that has just written a complete database
+    file -- the closed-copy path above, an imported artifact staged into a fresh database, a later
+    restore -- proves it the same way, so "closed" means one thing rather than one thing per caller.
+
+    Two steps, in this order, and neither substitutes for the other:
+
+    1. **Normalize on a fresh connection.** A backup destination *inherits* the source's journal
+       mode, so a copy of a WAL source carries a ``wal`` header however the destination connection
+       was configured before the copy. The mode has to be set, and then re-read, after the file is
+       finished.
+    2. **Prove it by reopening read-only.** The file must report the delete journal mode, carry the
+       declared schema, hold the expected logical dataset, and have no journal/WAL peer beside it.
+       A writable connection could repair what it is checking, so it is not asked.
+
+    Nothing here deletes a journal to make a database look clean: a peer that is still there is
+    reported, and the caller decides. Raises :class:`KnowledgeStorageError` on every failure.
+    """
+
+    stage = Path(stage_path)
+    _normalize_stage(stage)
+    _verify_closed_stage(stage, expected)
+
+
 def freeze_closed_snapshot(
     store: OpenedKnowledgeStore, expected: SnapshotIdentity, stage_path: Path
 ) -> PreparedKnowledgeSnapshot:
@@ -91,8 +117,10 @@ def freeze_closed_snapshot(
         )
     try:
         _copy_pinned_view(store, expected, stage)
-        _normalize_stage(stage)
-        _verify_closed_stage(stage, expected)
+        # One "prove this finished file is a closed database" step, shared with the import path:
+        # the freeze normalises the journal mode and proves what the copy holds through the same
+        # function every other producer of a closed stage calls, so the property is defined once.
+        require_closed_database(stage, expected)
         fsync_file(stage)
         return PreparedKnowledgeSnapshot(
             stage_path=stage,

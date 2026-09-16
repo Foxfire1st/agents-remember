@@ -94,13 +94,36 @@ def logical_body(connection: apsw.Connection, schema_name: str) -> dict[str, Any
     """
 
     _require_declared_keys()
+    return logical_body_from_tables(
+        schema_name, {table: _rows_of(connection, table) for table in schema.CANONICAL_TABLES}
+    )
+
+
+def logical_body_from_tables(schema_name: str, tables: Mapping[str, Any]) -> dict[str, Any]:
+    """Wrap an already-encoded table mapping in the canonical logical body around it.
+
+    The body is one structure with one encoder, and this is that structure stated once. The
+    portable export needs to seal a table mapping it decoded from an artifact rather than scanned
+    from a database, and the only acceptable way for it to obtain the same digest is to build the
+    same body through the same function -- a second assembly of ``body_version``/``schema``/
+    ``user_version``/``schema_fingerprint`` is a second digest definition, and a difference between
+    the two would make an export that cannot be re-imported.
+    """
+
+    _require_declared_keys()
     return {
         "body_version": _BODY_VERSION,
         "schema": schema_name,
         "user_version": schema.SCHEMA_USER_VERSION,
         "schema_fingerprint": schema.schema_fingerprint(),
-        "tables": {table: _rows_of(connection, table) for table in schema.CANONICAL_TABLES},
+        "tables": dict(tables),
     }
+
+
+def logical_digest_of_tables(schema_name: str, tables: Mapping[str, Any]) -> str:
+    """Return the canonical logical digest of an already-encoded table mapping."""
+
+    return sha256_digest(logical_body_from_tables(schema_name, tables))
 
 
 def snapshot_identity(

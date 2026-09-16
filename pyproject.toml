@@ -164,6 +164,48 @@ minversion = "9.0"
 # 189 subtests in 56.2s, 57.5s wall clock with `-n=4`; integration: 247 cases + 52 subtests in
 # 62.1s, 63.4s wall clock). The raise itself adds no cases and therefore no runtime: it admits cases
 # the campaign branches already authored, and it is headroom, not a target -- do not fill it.
+# 2026-09-16 -- integration 250 -> 300, owner-authorized in the L6 fix round (260915-KS-L6).  The
+# independent review that rejected the first attempt established that real protections were *missing*,
+# not that cases were redundant, so the ceiling moves once to pay for them and for the two leaves still
+# to come.  Allocation: L6 fix <=12, L7 <=18, L8 <=17, L9 <=3 (this supersedes the 250->285 allocation
+# recorded in the master decision log).  This leaf's fix rounds use 6 of its 12: the staged
+# sealed-aggregate read (an artifact whose payload_digest contradicts the revision row it names is
+# refused before publish with the destination byte-identical, row-count-identical and digest-identical,
+# for both revision tables and for *every* retained row of each); the import's close/verify step (a
+# stage opened in WAL mode is published as a delete-mode database with no peer -- the L4/D-5 class);
+# destination admission before any staging work (three destination states, each with its own code, and
+# no private stage directory even requested); the whole-document canonical form (the reader accepts
+# exactly one spelling -- envelope order, manifest order, declared column order, separators and sorted
+# nested keys -- and refuses every other, which is what makes an accepted artifact re-encode to itself
+# byte for byte and makes its digest a sound comparison); the freeze's own closure (the shared
+# close/verify step proved from the freeze producer, not only from the import); and the typed read of an
+# artifact that is not readable UTF-8 text (a value-or-refusal boundary, with no raw OSError or
+# UnicodeDecodeError).  Support cost: no new shared artifact and no new support module -- the cases use
+# the existing knowledge/merge/snapshot fixture modules plus helpers inside the two leaf test modules,
+# which are split as test_knowledge_portable_roundtrip.py (1155 lines) and
+# test_knowledge_portable_boundaries.py (685 lines) because one file may not exceed the 1200-line hard
+# limit.  Measured cost on this checkout at the raise: integration population 249 -> 255 collected cases
+# (counted under the filterwarnings override this host needs, see D-7); the executable integration lane
+# is 255 cases + 41 subtests in 101.9s -- the four anyio-affected modules *do* execute here, and an
+# intermittent xdist worker death on this host (an unrelated `assert not crashitem` at whichever node
+# was running, seen with and without this leaf's modules present) can abort a full-lane run before it
+# reports; that is a runner fault, not a lane bound, so re-run it rather than shrinking the lane (D-8);
+# this leaf's 24-case portable population is 12.1s wall, and the 6 cases this round added to it are
+# 4.2s wall of that; the 12-module knowledge population is 118 cases in 43.3s.  `unit_case_budget` is deliberately
+# unchanged: the real unit population is 1003 under the same override, a pre-existing repository defect
+# recorded as D-7 and routed to L9 -- no KS leaf may raise that ceiling.
+# 2026-09-16 -- L6 fix round 3 (owner-extended, scoped) adds **no collected case**: the three
+# protections it adds are driven inside the case that already owns each property (the header's declared
+# type in the canonical-form case, the unrenderable-value refusal in the document-defect case, the
+# namespace guard's refusal identity in the artifact-admission case), which is the doctrine's own
+# preference for extending over piling on.  The population is therefore unchanged at 255, and the two
+# line counts above are this candidate's measured sizes.
+# 2026-09-16 -- merge note (260915-KS-L6 synced onto the official line).  The LOCR entry above sets
+# `unit_case_budget` to 1100, which supersedes the "deliberately unchanged" note inside the
+# 260915-KS entries below: no KS leaf raised the unit ceiling, and the 1003-case unit population this
+# master measured under the filterwarnings override (D-7) now fits inside the LOCR ceiling, so D-7's
+# shortfall is closed by the incoming official line rather than by any KS change.  Both sides'
+# integration entries agree on 300; the two integration accounts above are kept as separate records.
 unit_case_budget = 1100
 integration_case_budget = 300
 

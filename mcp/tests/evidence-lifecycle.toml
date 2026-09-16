@@ -1054,6 +1054,8 @@ consumers = [
   "mcp/tests/test_knowledge_relation_rules.py",
   "mcp/tests/test_knowledge_revision_seals.py",
   "mcp/tests/test_knowledge_store.py",
+  "mcp/tests/test_knowledge_portable_boundaries.py",
+  "mcp/tests/test_knowledge_portable_roundtrip.py",
 ]
 
 [[contract]]
@@ -1126,6 +1128,7 @@ replacement_contract = "contract:knowledge-snapshot-lifecycle-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_candidate_workspace.py",
+  "mcp/tests/test_knowledge_portable_boundaries.py",
   "mcp/tests/test_knowledge_snapshot_publication.py",
 ]
 
@@ -1151,6 +1154,8 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_guarded_merge.py",
   "mcp/tests/test_knowledge_guarded_merge_boundaries.py",
+  "mcp/tests/test_knowledge_portable_boundaries.py",
+  "mcp/tests/test_knowledge_portable_roundtrip.py",
 ]
 
 [[artifact]]

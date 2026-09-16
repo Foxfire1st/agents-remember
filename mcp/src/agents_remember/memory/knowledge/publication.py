@@ -257,6 +257,19 @@ class _DestinationObservation:
     detail: str = ""
 
 
+def destination_observation(destination_path: Path) -> _DestinationObservation:
+    """Return what one destination holds right now, without writing or locking it.
+
+    Publication takes this reading again under the destination lock before it installs anything, so
+    this is an *admission* reading and never the authority for a replace: its purpose is to let an
+    operation refuse an occupied or unexpected destination before it does expensive work, and to
+    name what it found. A dataset that moved between this reading and the install is caught by the
+    locked reading, which is the one that decides.
+    """
+
+    return _observe_destination(Path(destination_path))
+
+
 def _observe_destination(destination_path: Path) -> _DestinationObservation:
     """Read the destination's current logical identity without writing it."""
 

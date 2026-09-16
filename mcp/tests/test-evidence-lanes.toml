@@ -151,6 +151,8 @@ public-contract = [
 ]
 integration = [
   "mcp/tests/test_knowledge_guarded_merge_boundaries.py",
+  "mcp/tests/test_knowledge_portable_boundaries.py",
+  "mcp/tests/test_knowledge_portable_roundtrip.py",
   "mcp/tests/test_activation_admission_registered.py",
   "mcp/tests/test_atomic_master_review_public.py",
   "mcp/tests/test_atomic_series_activation.py",

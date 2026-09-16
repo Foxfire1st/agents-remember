@@ -59,6 +59,12 @@ KnowledgeOperation = Literal[
     # base has not attempted a merge, and the refusal has to say so in its own name.
     "resolve_merge_base",
     "merge_knowledge_datasets",
+    # Portable logical export and import. Two operations rather than one for the same reason the
+    # merge pair is split: an export answers "what is this dataset, logically" and an import
+    # answers "may this artifact become a dataset here", and a caller branches on which of the two
+    # it asked.
+    "export_knowledge_dataset",
+    "import_knowledge_dataset",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct
@@ -108,6 +114,13 @@ KnowledgeRefusalCode = Literal[
     "session_unavailable",
     "changeset_incomplete",
     "changeset_postcondition_failed",
+    # Portable logical export and import. ``unsupported_schema``, ``duplicate_identity``,
+    # ``invalid_reference`` and ``destination_occupied`` are shared with the paths where the
+    # failure is the same fact; ``invalid_export`` is the one member that only a portable artifact
+    # can reach, because it is the only input that can be *malformed as a document* -- an unknown
+    # field, a missing manifest key, a repeated JSON key or a value the declared column type
+    # cannot hold is a defect of the artifact, not of an authored payload.
+    "invalid_export",
 ]
 
 
