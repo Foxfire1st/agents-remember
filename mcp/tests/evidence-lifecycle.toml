@@ -1128,3 +1128,27 @@ consumers = [
   "mcp/tests/test_knowledge_candidate_workspace.py",
   "mcp/tests/test_knowledge_snapshot_publication.py",
 ]
+
+[[contract]]
+id = "common-base-merge-cases"
+owner = "mcp/tests/merge_case_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_guarded_merge.py::test_disjoint_edits_from_both_sides_survive_in_a_closed_published_candidate"
+
+[[artifact]]
+path = "mcp/tests/merge_case_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "common-base-merge-cases"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "one repository namespace authored through the real store operations, two sides derived from one base state, and a temporary Git repository whose base commit and two child commits hold those datasets"
+introduced_by = "260915-KS-L5"
+lifetime = "permanent"
+permanence_rationale = "Every merge case needs the same four things -- an authored dataset, a real three-commit branching scenario with its ancestry evidence, the measurements a refusal is judged by, and one explicit way to shape an unusual side state before the commits are built -- and a per-module copy would let the four modules disagree about what a base, a side or an input-preservation check is measured against, which is exactly what the requirement asks to be shown."
+replacement_contract = "contract:common-base-merge-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_guarded_merge.py",
+  "mcp/tests/test_knowledge_guarded_merge_boundaries.py",
+]

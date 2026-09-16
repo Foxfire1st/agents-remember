@@ -54,6 +54,11 @@ KnowledgeOperation = Literal[
     "publish_snapshot",
     "read_published_snapshot",
     "dispose_candidate",
+    # Common-base merge. Two operations rather than one because base resolution is a separate,
+    # separately-refusable step: a caller that cannot even establish which dataset is the common
+    # base has not attempted a merge, and the refusal has to say so in its own name.
+    "resolve_merge_base",
+    "merge_knowledge_datasets",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct
@@ -86,6 +91,23 @@ KnowledgeRefusalCode = Literal[
     "destination_stale",
     "publication_failed",
     "publication_durability_unconfirmed",
+    # Common-base merge. One member per observable failure point of the merge contract, so a
+    # caller branches on the code rather than on prose. ``missing_expected_row``,
+    # ``duplicate_identity``, ``relationship_constraint``, ``immutable_revision`` and
+    # ``changeset_incomplete`` are shared with the write path where the failure is the same
+    # fact; the members here are the ones that only a merge can observe.
+    "common_base_unavailable",
+    "common_base_ambiguous",
+    "common_base_mismatch",
+    "schema_mismatch",
+    "missing_required_table",
+    "conflicting_values",
+    "duplicate_relationship",
+    "delete_reference_conflict",
+    "immutable_revision_changed",
+    "session_unavailable",
+    "changeset_incomplete",
+    "changeset_postcondition_failed",
 ]
 
 
