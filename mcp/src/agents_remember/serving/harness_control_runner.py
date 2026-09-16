@@ -19,12 +19,14 @@ from agents_remember.models.conversations.control_wire import (
     ControlIdentity,
     LaunchSpec,
 )
+from agents_remember.serving.capsule_delivery import CodexCapsuleDelivery
 from agents_remember.serving.harness_control_adapter import (
     LaunchableHarnessProtocolAdapter,
     UnsupportedHarnessProtocolAdapter,
 )
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_factories import (
+    LaunchSelection,
     create_harness_protocol_adapter,
     harness_launch_knobs,
 )
@@ -50,6 +52,13 @@ class RunnerConfig:
     session_commands: tuple[str, ...] = ()
     resolved_launch: ResolvedLaunch | None = None
     resume_thread_id: str | None = None
+    capsule_delivery: CodexCapsuleDelivery | None = None
+    """The admitted role capsule this launch must apply, or ``None`` for the legacy launch.
+
+    One optional carrier on the launch configuration, supplied by whoever admits the capsule at the
+    launch boundary. ``None`` is the ordinary path: a capsule-free launch sends the payload it always
+    sent, so this field changes nothing until a caller fills it.
+    """
 
 
 def control_runner_command(config: RunnerConfig) -> tuple[str, ...]:
@@ -64,6 +73,13 @@ def control_runner_command(config: RunnerConfig) -> tuple[str, ...]:
             config.resolved_launch.to_json() if config.resolved_launch is not None else None
         ),
         "resumeThreadId": config.resume_thread_id,
+        # Added only when a capsule is actually being delivered, so a legacy launch sends the exact
+        # payload it always sent — byte for byte, not merely an equal-shaped one.
+        **(
+            {"capsuleDelivery": config.capsule_delivery.to_json()}
+            if config.capsule_delivery is not None
+            else {}
+        ),
     }
     encoded = base64.urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -85,6 +101,7 @@ def parse_runner_config(encoded: str) -> RunnerConfig:
     resolved_raw = raw.get("resolvedLaunch")
     resolved_launch = ResolvedLaunch.from_json(resolved_raw) if resolved_raw is not None else None
     resume_thread_id = _optional_resume_thread_id(raw)
+    capsule_delivery = _optional_capsule_delivery(raw)
     config = RunnerConfig(
         identity=ControlIdentity.from_json(identity),
         harness_id=_required_text(raw, "harnessId"),
@@ -94,9 +111,26 @@ def parse_runner_config(encoded: str) -> RunnerConfig:
         session_commands=tuple(session_commands),
         resolved_launch=resolved_launch,
         resume_thread_id=resume_thread_id,
+        capsule_delivery=capsule_delivery,
     )
     _require_launch_agrees_with_config(config)
     return config
+
+
+def _optional_capsule_delivery(raw: Mapping[str, object]) -> CodexCapsuleDelivery | None:
+    """The capsule carrier from the encoded payload, refusing a malformed value.
+
+    An absent key is ``None`` (the legacy launch). A present-but-unreadable value is a refusal, not a
+    silent drop: a caller that supplied a capsule must never receive a capsule-free process.
+    """
+
+    value = raw.get("capsuleDelivery")
+    if value is None:
+        return None
+    delivery = CodexCapsuleDelivery.from_json(value)
+    if delivery is None:
+        raise HarnessControlError("hosted control runner received a malformed capsule delivery")
+    return delivery
 
 
 def _decode_runner_payload(encoded: str) -> dict[str, object]:
@@ -212,6 +246,7 @@ async def _prepare_controlled_launch(
                 config.harness_id,
                 env=env,
                 resume_thread_id=config.resume_thread_id,
+                capsule_delivery=config.capsule_delivery,
             ),
             base,
         )
@@ -235,9 +270,9 @@ async def _prepare_controlled_launch(
     adapter = create_harness_protocol_adapter(
         config.harness_id,
         env=env,
-        resolved_launch=selection,
-        launch_knobs=knobs,
+        selection=LaunchSelection(resolved_launch=selection, launch_knobs=knobs),
         resume_thread_id=config.resume_thread_id,
+        capsule_delivery=config.capsule_delivery,
     )
     return adapter, launch
 
