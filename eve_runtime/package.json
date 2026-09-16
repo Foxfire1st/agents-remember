@@ -1,0 +1,21 @@
+{
+  "name": "ar-eve-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Agents Remember-owned eve runtime application controlled over eve's native HTTP session protocol.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "eve dev --no-ui",
+    "info": "eve info",
+    "build": "eve build"
+  },
+  "dependencies": {
+    "@ai-sdk/openai-compatible": "3.0.49",
+    "ai": "7.0.102",
+    "eve": "0.56.0",
+    "zod": "4.6.5"
+  }
+}

@@ -158,10 +158,10 @@ def test_apply_launch_knobs_preserves_fixed_argv_and_refuses_duplicate_authority
 #
 # `claude_launch_knobs`, `codex_launch_knobs` and `pi_launch_knobs` each open with the same
 # two guards, and each spells the resulting knobs differently (Claude and Pi as argv, Codex
-# as session config). Driving them through `harness_launch_knobs` -- the registry the
-# adapter factory itself uses -- asserts the contract rather than three implementations of
-# it, and a fourth harness added to `BUILTIN_PROTOCOL_HARNESSES` is held to it without an
-# edit here.
+# as session config, eve as the launch environment its own adapter composes). Driving them
+# through `harness_launch_knobs` -- the registry the adapter factory itself uses -- asserts
+# the contract rather than four implementations of it, and a fifth harness added to
+# `BUILTIN_PROTOCOL_HARNESSES` is held to it without an edit here.
 #
 # WHY REFUSAL AND NOT NORMALISATION. A padded ` high` is not a typo the launcher may quietly
 # fix: the same string is compared against the vendor's echo by `verify_effective_launch`,
@@ -171,7 +171,18 @@ def test_apply_launch_knobs_preserves_fixed_argv_and_refuses_duplicate_authority
 
 
 def _knob_values(knobs: LaunchKnobs) -> set[str]:
-    return {*knobs.argv, *(str(value) for value in knobs.session_config.values())}
+    """Every carrier a harness may spell its selection on: argv, session config, environment.
+
+    A harness whose selection rides the launch environment rather than a flag (eve's does, because
+    its model is a compiled application value with no argv vocabulary) is held to the same contract
+    as the ones that pass ``--model``.
+    """
+
+    return {
+        *knobs.argv,
+        *(str(value) for value in knobs.session_config.values()),
+        *knobs.env.values(),
+    }
 
 
 @pytest.mark.parametrize("harness_id", sorted(BUILTIN_PROTOCOL_HARNESSES))

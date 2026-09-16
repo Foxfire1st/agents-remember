@@ -5,10 +5,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.models.conversations.control_wire import ControlIdentity, LaunchSpec
 from agents_remember.serving.codex_app_server_adapter import CodexAppServerAdapter
 from agents_remember.serving.codex_app_server_session import (
     CodexAppServerSettings,
     codex_launch_knobs,
+)
+from agents_remember.serving.eve_adapter import EveSessionAdapter
+from agents_remember.serving.eve_runtime_launch import (
+    EveLaunchSelection,
+    eve_launch_knobs,
+    launch_spec_selection,
 )
 from agents_remember.serving.harness_capabilities import LaunchKnobs
 from agents_remember.serving.harness_control_adapter import (
@@ -23,12 +30,13 @@ from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.pi_rpc_adapter import PiRpcAdapter
 from agents_remember.serving.pi_rpc_protocol import pi_launch_knobs
 
-BUILTIN_PROTOCOL_HARNESSES = frozenset({"claude", "codex", "pi"})
+BUILTIN_PROTOCOL_HARNESSES = frozenset({"claude", "codex", "pi", "eve"})
 
 _LAUNCH_KNOBS = {
     "claude": claude_launch_knobs,
     "codex": codex_launch_knobs,
     "pi": pi_launch_knobs,
+    "eve": eve_launch_knobs,
 }
 
 
@@ -87,4 +95,36 @@ def create_harness_protocol_adapter(
         )
     if harness_id == "pi":
         return PiRpcAdapter(expected_launch=resolved_launch)
+    if harness_id == "eve":
+        return EveSessionAdapter(
+            expected_launch=_eve_expected_selection(resolved_launch, launch_knobs),
+        )
     return UnsupportedHarnessProtocolAdapter(harness_id)
+
+
+def _eve_expected_selection(
+    resolved_launch: ResolvedLaunch | None,
+    launch_knobs: LaunchKnobs | None,
+) -> EveLaunchSelection | None:
+    """What the settings resolution pinned for this eve launch, or ``None`` when unselected.
+
+    The selection arrives on the launch knobs the runner already applied, so the adapter verifies
+    the runtime against the same values that reached the child instead of re-deriving them.
+    """
+
+    if resolved_launch is None:
+        return None
+    if launch_knobs is None:
+        raise HarnessControlError("resolved eve launch requires adapter-produced launch knobs")
+    probe = LaunchSpec(
+        identity=ControlIdentity(
+            ar_session_id="eve-factory-probe",
+            tmux_name="eve-factory-probe",
+            created_at="",
+        ),
+        harness_id="eve",
+        cwd=resolved_launch.workspace,
+        argv=("eve",),
+        env=dict(launch_knobs.env),
+    )
+    return launch_spec_selection(probe)

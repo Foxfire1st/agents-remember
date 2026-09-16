@@ -75,4 +75,11 @@ HARNESSES: tuple[Harness, ...] = (
     ),
     Harness(id="pi", name="Pi.dev", command="pi", argv=("pi",)),
 )
-"""The developer-curated max set (2026-06-18): the native harnesses AR supports."""
+"""The developer-curated max set (2026-06-18): the native harnesses AR supports.
+
+A native ``eve`` protocol adapter exists (``serving/eve_adapter.py``) and is registered in
+``harness_control_factories``, but it deliberately has no row here yet: its runtime is an AR-owned
+application rather than a ``PATH`` command, so exposing it as a launchable terminal harness is the
+capability-catalog/packaging leaf's decision, not this adapter's. Until that row exists, an
+``eve`` harness id is reachable only through the protocol factory, never through terminal launch.
+"""
