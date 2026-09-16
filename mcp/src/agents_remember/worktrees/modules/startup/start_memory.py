@@ -22,8 +22,6 @@ def _memory_source_state(
 ) -> dict[str, object] | None:
     """Verify the configured memory repository before preparing its worktree."""
 
-    if contract.memory_mode == "internal":
-        return {"state": "internal", "reason": "memory lives in the code worktree"}
     if contract.memory_mode == "disabled":
         return {"state": "disabled"}
     assert contract.memory_repo_path is not None

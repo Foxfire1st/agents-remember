@@ -48,7 +48,7 @@ Agents Remember fixes that: the matching note is reachable at the moment of the 
 
 ```text
 src/orchestrator/core_editor.py
-ar-memory/onboarding/src/orchestrator/core_editor.py.md
+memory-repos/ar-agents-remember/onboarding/src/orchestrator/core_editor.py.md
 ```
 
 - **Path-addressed memory:** A source file's note lives at a deterministic mirror path, so an agent holding a file can reach the right context without search, ranking, or guesswork.
@@ -58,7 +58,7 @@ ar-memory/onboarding/src/orchestrator/core_editor.py.md
 - **Repo-owned agent behavior:** Each memory repo carries `system/` files for path rules, tools, coding guidelines, documentation sources, branch policy, and reporting shape, so the same project rules load across harnesses.
 - **Harness-ready first run:** Starter packages for Claude Code, Codex, Cursor, Antigravity, VS Code Copilot, Hermes, Pi.dev, and OpenClaw carry the native MCP, skills, hooks, rules, and instruction files each harness needs.
 
-The default setup stores durable memory in the target repository under `ar-memory/`. Teams that need separate memory repositories can use external memory under `ar-coordination/memory-repos/ar-<repo>/`. For the full tour, see [Features](docs/features.md).
+The setup stores durable memory in a memory repository of its own, under `ar-coordination/memory-repos/ar-<repo>/`. Repo-local internal memory under `<repo>/ar-memory/` was removed from the product and is refused with the exact path. For the full tour, see [Features](docs/features.md).
 
 ## What It Looks Like In Practice
 
@@ -66,7 +66,7 @@ A source file has an onboarding note beside it, reached by path:
 
 ```text
 mcp/src/agents_remember/mcp/server.py
-ar-memory/onboarding/mcp/src/agents_remember/mcp/server.py.md
+memory-repos/ar-agents-remember/onboarding/mcp/src/agents_remember/mcp/server.py.md
 ```
 
 At task start the agent orients and checks memory health:
@@ -180,7 +180,7 @@ install 'agents-remember-mcp==3.0.0rc8'`, or one-shot without installing,
 - [Features](docs/features.md) - the concentrated tour of what Agents Remember gives users.
 - [Getting Started](docs/getting-started.md) - a fuller first-run setup.
 - [Concepts](docs/concepts.md) - onboarding units, memory roots, drift, and approval gates.
-- [Architecture](docs/architecture.md) - runtime, coordination, internal memory, and external memory.
+- [Architecture](docs/architecture.md) - runtime, coordination, and memory repos.
 - [Workflows](docs/workflows.md) - the `l-01-agent-lifecycles` skill and its build modes (research-only exit / `w-02-light-task-workflow` skill task / master + light sub-task series), and when to use each.
 - [Benchmark Methodology](docs/benchmarks-methodology.md) - how paired `codex exec --json` runs are captured and compared.
 - [FAQ](docs/FAQ.md) - design principles, objections, and comparisons.
@@ -325,7 +325,7 @@ The 3.0 arc: the working session itself is now observable and steerable — a sy
 
 ## Stability
 
-Following semantic versioning from `1.0.0`, these public contracts will not change without a **major** version bump: **skill IDs** (e.g. the `c-08-ar-coordination-context-resolver` and `w-02-light-task-workflow` skills), **MCP tool names and their inputs/outputs**, the **`ar-coordination/` and `ar-memory/` layout**, and the **settings schema**. Internal modules, provider internals, and prompt wording are not part of this promise and may change in minor releases.
+Following semantic versioning from `1.0.0`, these public contracts will not change without a **major** version bump: **skill IDs** (e.g. the `c-08-ar-coordination-context-resolver` and `w-02-light-task-workflow` skills), **MCP tool names and their inputs/outputs**, the **`ar-coordination/` and `memory-repos/ar-<repo>/` layout**, and the **settings schema**. Internal modules, provider internals, and prompt wording are not part of this promise and may change in minor releases.
 
 ## Contributing
 

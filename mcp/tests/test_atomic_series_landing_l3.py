@@ -15,7 +15,7 @@ class AtomicSeriesLandingTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        self.fixture = QueueFixture(self.root, atomic_b=True, memory_mode="internal")
+        self.fixture = QueueFixture(self.root, atomic_b=True)
         self.current = self.fixture.contracts[MASTER_B]
         self.series_path = self.fixture.tasks / "master-b" / "series-contract.md"
 

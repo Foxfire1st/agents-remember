@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal
 
 from agents_remember.kernel.coordination_context.models import (
     CrossRepoSettings,
@@ -11,7 +10,6 @@ from agents_remember.kernel.coordination_context.models import (
 )
 from agents_remember.kernel.coordination_context.paths import (
     clean_scalar,
-    default_storage_mode,
     normalize_rel_path,
 )
 from agents_remember.kernel.coordination_context.setting_values import (
@@ -24,7 +22,6 @@ from agents_remember.kernel.coordination_context.setting_values import (
 
 def parse_json_settings(
     settings_path: Path,
-    topology: Literal["internal", "external"],
 ) -> tuple[StorageSettings, CrossRepoSettings]:
     try:
         data = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -35,18 +32,14 @@ def parse_json_settings(
     onboarding = (
         optional_mapping(root.get("onboarding"), "onboarding") if "onboarding" in root else root
     )
-    return parse_json_storage_settings(root, onboarding, topology), parse_json_cross_repo_settings(
-        root
-    )
+    return parse_json_storage_settings(root, onboarding), parse_json_cross_repo_settings(root)
 
 
 def parse_json_storage_settings(
     root: dict[str, object],
     onboarding: dict[str, object],
-    topology: Literal["internal", "external"],
 ) -> StorageSettings:
-    mode = default_storage_mode(topology)
-    settings = StorageSettings(mode=mode, default=mode)
+    settings = StorageSettings()
     storage = optional_mapping(onboarding.get("storage") or root.get("storage"), "storage")
     apply_json_storage_mode(settings, storage)
     raw_path_rules = (

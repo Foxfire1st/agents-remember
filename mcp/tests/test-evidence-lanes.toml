@@ -75,6 +75,7 @@ unit-regression = [
   "mcp/tests/test_memory_document_shape.py",
   "mcp/tests/test_memory_incremental_scope_compiler.py",
   "mcp/tests/test_memory_ledger.py",
+  "mcp/tests/test_memory_mode_removal.py",
   "mcp/tests/test_memory_quality.py",
   "mcp/tests/test_memory_quality_runs.py",
   "mcp/tests/test_memory_scope_task_derivation.py",

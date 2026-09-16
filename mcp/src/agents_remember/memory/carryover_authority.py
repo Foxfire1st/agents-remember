@@ -47,7 +47,7 @@ def required_target_storage(target_memory: Path) -> StorageSettings:
                 raise AuthorityError(
                     f"target memory settings do not declare storage/path authority: {json_path}"
                 )
-            storage, _cross_repo = parse_coordination_settings(settings_path, "external")
+            storage, _cross_repo = parse_coordination_settings(settings_path)
         else:
             blocks = extract_yaml_blocks(settings_path.read_text(encoding="utf-8"))
             storage = _effective_markdown_storage(blocks)
@@ -196,7 +196,7 @@ def _effective_markdown_storage(blocks: list[str]) -> StorageSettings | None:
     selected: StorageSettings | None = None
     selected_is_effective = False
     for block in blocks:
-        storage, _cross_repo, _saw_settings = parse_settings_block(block, "external")
+        storage, _cross_repo, _saw_settings = parse_settings_block(block)
         if storage is None:
             continue
         selected = storage

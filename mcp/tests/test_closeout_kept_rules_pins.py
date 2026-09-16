@@ -194,7 +194,7 @@ def _git_contract(repo: Path, **overrides: object) -> WorktreeContract:
         "code_repo_path": repo,
         "code_source_branch": "main",
         "code_work_branch": "ar/task-one",
-        "memory_mode": "internal",
+        "memory_mode": "disabled",
     }
     values.update(overrides)
     return replace(_contract(), **values)  # type: ignore[arg-type]

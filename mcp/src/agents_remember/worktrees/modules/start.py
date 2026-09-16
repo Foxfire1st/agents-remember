@@ -5,7 +5,16 @@ import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from agents_remember.application.memory_mode_refusal import (
+    memory_mode_refusal_evidence,
+    memory_mode_refusal_payload,
+)
+from agents_remember.errors import MemoryModeUnsupportedError
 from agents_remember.kernel.git_freshness import freshness_to_packet, read_branch_freshness
+from agents_remember.kernel.memory_mode import (
+    is_removed_memory_mode,
+    memory_mode_refusal_fields,
+)
 from agents_remember.tasks.store import write_task_docs
 from agents_remember.worktrees.activation.atomic_series_activation import (
     atomic_series_status_projection,
@@ -139,6 +148,25 @@ def status_result(args: WorktreeArgs) -> WorktreeCommandResult:
     contract_path = contract_path_from_args(args)
     try:
         contract = load_contract(contract_path)
+    except MemoryModeUnsupportedError as exc:
+        # The reader's verdict travels with the payload: a contract recording the removed memory
+        # mode is present and readable, so "unreadable" would be the wrong reason and the
+        # recorded value, the supported set and the route would never reach the operator.
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": exc.status,
+                "contract_path": contract_path.as_posix(),
+                "contractReadFailure": public_failure_evidence(
+                    stage="contract-read",
+                    side="contract",
+                    name=contract_path.name,
+                    error_type=type(exc).__name__,
+                    observed=memory_mode_refusal_evidence(exc),
+                ),
+                **memory_mode_refusal_payload(exc),
+            },
+        )
     except (ContractError, OSError, UnicodeError, ValueError) as exc:
         detail = "the canonical worktree contract is unreadable"
         missing = isinstance(exc, FileNotFoundError) or not contract_path.exists()
@@ -488,6 +516,9 @@ def _record_start_progress(
 
 
 def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
+    refused = _removed_vocabulary_result(args)
+    if refused is not None:
+        return refused
     context = resolve_context(args)
     contract = build_start_contract(context, args)
     if isinstance(contract, WorktreeCommandResult):
@@ -499,6 +530,30 @@ def start_result(args: WorktreeArgs) -> WorktreeCommandResult:
     if isinstance(preflighted, WorktreeCommandResult):
         return preflighted
     return _create_start_enclosure(context, preflighted, args)
+
+
+def _removed_vocabulary_result(args: WorktreeArgs) -> WorktreeCommandResult | None:
+    """Refuse a request for the removed memory vocabulary before anything is created.
+
+    The refusal is answered here, at the top of ``worktree_start``, because this is the last
+    point at which no worktree, branch, contract or task binding exists to unwind. It reports
+    the removed member and the supported set as a typed status rather than an exception, and
+    it never substitutes ``external`` for what was asked.
+    """
+    for requested in (args.memory_mode, args.topology):
+        if requested is not None and is_removed_memory_mode(requested):
+            # The request boundary holds the *value*, so it builds the refusal facts from the
+            # vocabulary rather than from a raised error.
+            fields = memory_mode_refusal_fields(requested)
+            return WorktreeCommandResult(
+                2,
+                {
+                    "state": fields["status"],
+                    "summary": fields["detail"],
+                    **fields,
+                },
+            )
+    return None
 
 
 def _existing_contract_result(
@@ -1125,8 +1180,6 @@ def _provider_start_paths(
 def _grepai_target_memory_root(contract: WorktreeContract) -> Path | None:
     if contract.memory_mode == "external":
         return contract.memory_worktree.resolve() if contract.memory_worktree is not None else None
-    if contract.memory_mode == "internal":
-        return (contract.code_worktree / "ar-memory").resolve()
     return None
 
 

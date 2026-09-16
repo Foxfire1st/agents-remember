@@ -57,7 +57,7 @@ class ContractBoundaryTests(unittest.TestCase):
             "workflow_kind: master-task",
             ("workflowKind", "master-task", "light-task"),
         ),
-        ("memory_mode: internal", "memory_mode: hybrid", ("memoryMode", "hybrid", "internal")),
+        ("memory_mode: disabled", "memory_mode: hybrid", ("memoryMode", "hybrid", "disabled")),
         (
             "  status: pending-review",
             "  status: awaiting",

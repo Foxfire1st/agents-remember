@@ -93,7 +93,7 @@ def _legacy_leaf_fixture(
             repo_name="repo",
             coordination_root=coordination,
             workflow_kind="light-task",
-            memory_mode="internal",
+            memory_mode="disabled",
         ),
         leaf=LeafIdentity(worktree_name="legacy-leaf"),
         code=RepoBranchPlan(
@@ -221,7 +221,7 @@ def _atomic_master_fixture(root: Path) -> tuple[WorktreeContract, TaskDocument, 
         repo_name="repo",
         coordination_root=coordination,
         workflow_kind="light-task",
-        memory_mode="internal",
+        memory_mode="disabled",
     )
     contract = default_series_contract(
         task,
@@ -359,7 +359,7 @@ def _organizational_leaf_contract(root: Path) -> WorktreeContract:
         repo_name="repo",
         coordination_root=coordination,
         workflow_kind="light-task",
-        memory_mode="internal",
+        memory_mode="disabled",
     )
     parent = default_series_contract(
         parent_task,
@@ -410,7 +410,7 @@ def _organizational_leaf_contract(root: Path) -> WorktreeContract:
             repo_name="repo",
             coordination_root=coordination,
             workflow_kind="light-task",
-            memory_mode="internal",
+            memory_mode="disabled",
             parent_task_name="organizational-master",
             parent_contract_path=parent.contract_path,
         ),
@@ -436,7 +436,7 @@ def test_standalone_and_organizational_leaves_keep_leaf_review_dispatch(
                 repo_name="repo",
                 coordination_root=tmp_path / "coordination",
                 workflow_kind="light-task",
-                memory_mode="internal",
+                memory_mode="disabled",
             ),
             leaf=LeafIdentity(worktree_name="standalone-leaf"),
             code=RepoBranchPlan(

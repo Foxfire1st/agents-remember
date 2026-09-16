@@ -110,8 +110,7 @@ undocumented historical files from flooding the report.
 ### 3. Understand Drift Classifications
 
 Primary drift detection supports sidecar Markdown onboarding under the resolved
-onboarding root, whether that root is repo-local internal memory or external
-memory. It classifies file-level onboarding, root repo overviews, route-local
+external-memory onboarding root. It classifies file-level onboarding, root repo overviews, route-local
 overviews, and repo entity catalogs when those artifacts carry supported
 `doc_type` metadata. It may also classify inline onboarding blocks when storage
 settings resolve a source path to `inline`.

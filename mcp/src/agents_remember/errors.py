@@ -561,3 +561,54 @@ class TaskProjectionSourceError(AgentsRememberError):
         if self.owner_status:
             fields["ownerStatus"] = self.owner_status
         return fields
+
+
+class MemoryModeUnsupportedError(AgentsRememberError):
+    """A caller asked for a memory mode this product removed.
+
+    The refusal names the removed mode, the supported set and the route out, so an operator
+    who never saw the old vocabulary can still act. It deliberately carries the *artifact*
+    that records the removed mode when one exists -- a contract path, a settings path or a
+    memory root -- because existing state is reported, never silently migrated: the caller
+    must be able to point at the exact file or directory that still says ``internal``.
+
+    ``status`` is the stable, branchable code every surface publishes for this refusal; it is
+    one value rather than a per-surface spelling so a caller can match on it directly.
+    """
+
+    status = "memory-mode-unsupported"
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        requested: str,
+        supported: Sequence[str],
+        artifact: str | None = None,
+        remedies: Sequence[str] = (),
+    ) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.requested = requested
+        self.supported = tuple(supported)
+        self.artifact = artifact
+        self.remedies = tuple(remedies)
+
+    def render(self) -> str:
+        """The one-line operator-facing projection of this refusal."""
+
+        return f"{self.status}: {self.detail}"
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded refusal facts a transport may publish."""
+
+        fields: dict[str, object] = {
+            "status": self.status,
+            "detail": self.detail,
+            "requested": self.requested,
+            "supported": list(self.supported),
+            "remedies": list(self.remedies),
+        }
+        if self.artifact is not None:
+            fields["artifact"] = self.artifact
+        return fields

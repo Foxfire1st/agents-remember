@@ -209,8 +209,6 @@ class QueueFixture:
         code_base = git(self.code, "rev-parse", "HEAD")
         memory_content = init_repo(self.memory, "main")
         (root / REPO).symlink_to(self.code, target_is_directory=True)
-        if memory_mode == "internal":
-            (self.code / "ar-memory").mkdir()
         self.config_path = root / "settings.json"
         self.config_path.write_text(
             json.dumps(

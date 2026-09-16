@@ -83,24 +83,26 @@ REPO_NAME = "repo-a"
 def _draft_leaf_contract(root: Path) -> WorktreeContract:
     """An unstarted leaf over a real repository, so configured authority can bind it.
 
-    ``ar-memory/`` makes the configured topology *internal*: ``default_memory_root`` never
-    returns ``None`` for a configured repository, so a leaf in a configured repo cannot
-    declare ``memory_mode="disabled"`` and still pass configured authority.
+    The configured memory root is always the external one: ``default_memory_root`` never
+    returns ``None`` for a configured repository, and the repo-sidecar ``ar-memory/`` layout
+    it used to prefer is gone. So the fixture provisions that external memory repository.
     """
 
     workspace = root / "workspace"
     code_repo = workspace / REPO_NAME
+    coordination_root = workspace / "ar-coordination"
+    memory_repo = coordination_root / "memory-repos" / f"ar-{REPO_NAME}"
     base = init_repo(code_repo, "main")
-    (code_repo / "ar-memory").mkdir()
+    memory_base = init_repo(memory_repo, "main")
     git(code_repo, "branch", "super", "main")
     git(code_repo, "branch", "ar/01-demo-leaf", "super")
     return default_contract(
         ContractTask(
             name="260698_demo-series",
             repo_name=REPO_NAME,
-            coordination_root=workspace / "ar-coordination",
+            coordination_root=coordination_root,
             workflow_kind="light-task",
-            memory_mode="internal",
+            memory_mode="external",
         ),
         leaf=LeafIdentity(worktree_name="01-demo-leaf", leaf_id="260698-l1"),
         code=RepoBranchPlan(
@@ -108,6 +110,12 @@ def _draft_leaf_contract(root: Path) -> WorktreeContract:
             source_branch="super",
             work_branch="ar/01-demo-leaf",
             base_commit=base,
+        ),
+        memory=RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch="main",
+            work_branch="ar/01-demo-leaf",
+            base_commit=memory_base,
         ),
     )
 

@@ -231,8 +231,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--topology",
-        choices=("internal", "external"),
-        help="Topology for this code repository. Defaults to internal when no onboarding root is supplied.",
+        metavar="external",
+        help="Topology for this code repository. `external` is the only supported topology.",
     )
     parser.add_argument(
         "--coordination-root",

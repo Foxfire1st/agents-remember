@@ -118,7 +118,9 @@ def add_common(parser: argparse.ArgumentParser) -> None:
         help="Root directory of the code repository to resolve.",
     )
     parser.add_argument(
-        "--topology", choices=("internal", "external"), help="Optional topology override."
+        "--topology",
+        metavar="external",
+        help="Optional topology override. `external` is the only supported topology.",
     )
     parser.add_argument("--coordination-root", type=Path, help="Optional coordination root.")
     parser.add_argument(
@@ -137,7 +139,14 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--workflow-kind", default="light-task")
     start.add_argument("--source-branch")
     start.add_argument("--work-branch")
-    start.add_argument("--memory-mode", choices=("internal", "external", "disabled"))
+    start.add_argument(
+        "--memory-mode",
+        metavar="external|disabled",
+        help=(
+            "Memory mode for the started task: `external` or `disabled`. An unsupported "
+            "value is refused by name before any worktree is created."
+        ),
+    )
     start.add_argument("--memory-choice", choices=("disabled-memory",))
     start.add_argument("--custom-instruction")
     start.add_argument("--skip-provider-setup", action="store_true")

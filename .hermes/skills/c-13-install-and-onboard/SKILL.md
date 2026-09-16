@@ -94,10 +94,9 @@ Check, in order:
    Docker. If provider diagnostics report Docker/Ollama/image problems, explain
    the gap. A developer may explicitly defer providers and continue with core
    memory setup.
-6. **Topology consistency.** If MCP settings point at an external coordination
-   root, memory setup must remain consistent with that topology. Do not let
-   memory initialization silently choose internal memory when settings clearly
-   describe an external-memory layout.
+6. **Topology consistency.** `external` is the only supported memory topology. Never
+   let memory setup create a repo-local `ar-memory/` root: it was removed from the
+   product, and a request for it is refused by name rather than substituted.
 7. **Certification authority, when explicitly requested.** For a developer-requested certification
    operation, report the exact `repositories.<repo-id>.certificationProfile` value and whether that
    candidate file exists inside the repository. Routine code closeout/integration is a Git
@@ -247,18 +246,20 @@ Do not assume the developer wants a fresh memory repo. Ask which case applies,
 unless a memory repo is already present and resolvable:
 
 1. **Scaffold a new memory repo** - they have no existing memory for this code
-   repo. Run `c-00-initialize-memory-repo` (internal by default; external only if
-   the developer asks or the configured topology requires it). Continue to Stage
-   5.
+   repo. Run `c-00-initialize-memory-repo`, which creates the external memory repo
+   at `<coordination-root>/memory-repos/ar-<code-repository-name>`. Continue to
+   Stage 5.
 2. **Use an existing memory repo** - they already have one. Clone or checkout it
    to the resolved memory location, then adopt it as the Git-attributed baseline with
    `c-10-adopt-memory-baseline`. Skip Stage 5 because its onboarding already
    exists.
 
-Internal-memory note: pre-existing internal memory lives inside the code repo
-(`<repo>/ar-memory/`), so it is already present on checkout. Detect that through
-`c-08-ar-coordination-context-resolver` and skip the question when the memory
-layer is already there.
+Removed-layout note: repo-local internal memory lived inside the code repo at
+`<repo>/ar-memory/`. That layout was removed from the product and is refused, not
+migrated. If a checkout still carries one, report the exact path and the route out
+(re-point to the external memory root and record `memory_mode: external` on the
+worktree contracts, or re-initialize with `c-00-initialize-memory-repo`); never
+rewrite or delete it, and never treat it as an already-present memory layer.
 
 ## Stage 5 - Bootstrap
 

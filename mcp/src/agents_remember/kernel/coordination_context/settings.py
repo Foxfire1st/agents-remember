@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 from agents_remember.kernel.coordination_context.json_settings import (
     apply_json_storage_mode,
@@ -14,7 +13,6 @@ from agents_remember.kernel.coordination_context.json_settings import (
 from agents_remember.kernel.coordination_context.markdown_settings import parse_settings_block
 from agents_remember.kernel.coordination_context.models import CrossRepoSettings, StorageSettings
 from agents_remember.kernel.coordination_context.paths import (
-    default_storage_mode,
     extract_yaml_blocks,
     path_settings_path_for,
 )
@@ -49,14 +47,12 @@ __all__ = [
 
 def parse_coordination_settings(
     settings_path: Path,
-    topology: Literal["internal", "external"],
 ) -> tuple[StorageSettings, CrossRepoSettings]:
-    mode = default_storage_mode(topology)
-    fallback_storage = StorageSettings(mode=mode, default=mode)
+    fallback_storage = StorageSettings()
     fallback_cross_repo = CrossRepoSettings()
     path_settings_path = path_settings_path_for(settings_path)
     if path_settings_path.exists():
-        return parse_json_settings(path_settings_path, topology)
+        return parse_json_settings(path_settings_path)
 
     if not settings_path.exists():
         return fallback_storage, fallback_cross_repo
@@ -64,7 +60,7 @@ def parse_coordination_settings(
     selected_storage: StorageSettings | None = None
     selected_cross_repo = CrossRepoSettings()
     for block in extract_yaml_blocks(settings_path.read_text(encoding="utf-8")):
-        storage, cross_repo, saw_settings = parse_settings_block(block, topology)
+        storage, cross_repo, saw_settings = parse_settings_block(block)
         if not saw_settings:
             continue
         selected_storage = storage or selected_storage

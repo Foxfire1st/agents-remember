@@ -21,7 +21,7 @@ class AtomicMasterReviewScopeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        self.fixture = QueueFixture(self.root, atomic_b=True, memory_mode="internal")
+        self.fixture = QueueFixture(self.root, atomic_b=True)
         self.leaf = self.fixture.contracts[MASTER_B]
         assert self.leaf.parent_contract_path is not None
         self.series = load_contract(self.leaf.parent_contract_path)
@@ -57,7 +57,7 @@ class AtomicMasterReviewScopeTests(unittest.TestCase):
         self.assertEqual(raised.exception.status, "route-review-atomic-owner-invalid")
 
     def test_organizational_leaf_keeps_the_existing_leaf_review_boundary(self) -> None:
-        fixture = QueueFixture(self.root / "organizational", memory_mode="internal")
+        fixture = QueueFixture(self.root / "organizational")
         leaf = fixture.contracts[MASTER_A]
 
         status = require_current_route_review(leaf)

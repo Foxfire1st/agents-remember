@@ -12,8 +12,9 @@ import argparse
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
+from agents_remember.kernel.memory_mode import Topology
 from agents_remember.kernel.primitives.gate_policy import (
     DEFAULT_GATE_POLICY,
     GatePolicy,
@@ -39,7 +40,7 @@ class WorktreeArgs:
     certification_profile: Path | None = None
     coordination_root: Path | None = None
     workspace_root: Path | None = None
-    topology: Literal["internal", "external"] | None = None
+    topology: Topology | None = None
     contract_path: Path | None = None
     task_name: str | None = None
     parent_task: str | None = None

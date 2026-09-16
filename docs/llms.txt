@@ -79,12 +79,12 @@ and whether Git says it still matches the code.
 ## The core idea: the path is the address
 
 Durable memory is stored as **onboarding units** — Markdown notes derived from
-source paths. In the default repo-local mode, a source file maps to a mirrored
-note:
+source paths. A source file maps to a mirrored note inside the repository's
+external memory repo:
 
 ```text
 src/foo/bar.ts
-ar-memory/onboarding/src/foo/bar.ts.md
+ar-coordination/memory-repos/ar-my-app/onboarding/src/foo/bar.ts.md
 ```
 
 Each note explains what the code cannot make obvious on its own. A short metadata
@@ -185,9 +185,9 @@ This is a lookup table with real consequences. It lets a branch carry the memory
 version that matches its code state, it lets you restore memory to the exact
 version that was synchronized with an earlier code commit — invaluable for
 recovering from a bad state — and it lets the system *refuse* to hand over memory
-that does not match the code in front of you, rather than guess. Repo-local
-internal memory is the simpler default and needs no ledger; the ledger is what
-gives external memory its operational power.
+that does not match the code in front of you, rather than guess. The ledger is
+what gives external memory its operational power, and external is the only
+supported topology: a repo-local `ar-memory/` root was removed from the product.
 
 ## Three ways to reach knowledge
 

@@ -7,10 +7,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from agents_remember.application.memory_mode_refusal import (
+    memory_mode_refusal_evidence,
+    removed_memory_mode_fields_from_evidence,
+)
 from agents_remember.errors import (
     AuthorityError,
     ConfiguredContractAuthorityError,
     ConfiguredContractRereadError,
+    MemoryModeUnsupportedError,
 )
 from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -51,6 +56,7 @@ ConfiguredContractRefusalReason = Literal[
     "address-invalid",
     "location-invalid",
     "contract-unreadable",
+    "memory-mode-unsupported",
     "authority-invalid",
 ]
 
@@ -127,28 +133,10 @@ def admit_configured_contract(
             observed=error.observed,
         )
 
-    try:
-        contract = load_contract(confined)
-    except (ContractError, OSError, UnicodeError, ValueError) as error:
-        state = "missing" if isinstance(error, FileNotFoundError) else "unreadable"
-        return ConfiguredContractRefused(
-            reason="contract-unreadable",
-            status="configured-contract-unreadable",
-            detail="the canonical configured task contract is missing or unreadable",
-            expected={
-                "contractPath": confined.as_posix(),
-                "route": "locator -> root manifest -> root journal",
-            },
-            observed=public_failure_evidence(
-                stage="contract-read",
-                side="contract",
-                name=confined.name,
-                error_type=type(error).__name__,
-                observed={"state": state},
-            ),
-            contract_path=confined,
-            location=location,
-        )
+    read = _read_confined_contract(confined, location)
+    if isinstance(read, ConfiguredContractRefused):
+        return read
+    contract = read
 
     try:
         require_configured_contract_repositories(
@@ -205,27 +193,10 @@ def admit_configured_terminal_contract(
     if observation.state != "terminal-archived":
         return admit_configured_contract(config, confined)
     assert observation.locator is not None
-    try:
-        contract = load_contract(confined)
-    except (ContractError, OSError, UnicodeError, ValueError) as error:
-        detail = "terminal retry requires readable surviving contract truth"
-        return ConfiguredContractRefused(
-            reason="location-invalid",
-            status="terminal-archive-contract-unreadable",
-            detail=detail,
-            expected={
-                "contractPath": confined.as_posix(),
-                "route": "terminal locator -> exact archive/receipt -> surviving contract",
-            },
-            observed=public_failure_evidence(
-                stage="terminal-contract-read",
-                side="contract",
-                name=confined.name,
-                error_type=type(error).__name__,
-                observed={"state": "missing" if not confined.exists() else "unreadable"},
-            ),
-            contract_path=confined,
-        )
+    read = _read_terminal_surviving_contract(confined)
+    if isinstance(read, ConfiguredContractRefused):
+        return read
+    contract = read
     try:
         authority = terminal_cleanup_contract_authority(
             config.coordination_root,
@@ -300,6 +271,106 @@ def configured_authority_refusal(
     )
 
 
+def _read_confined_contract(
+    confined: Path,
+    location: LifecycleOperationLocation,
+) -> WorktreeContract | ConfiguredContractRefused:
+    """Read one confined current-task contract, refusing with the shape the failure deserves.
+
+    The removed memory mode is refused first and by its own reason. The generic clause below
+    would report it as merely unreadable and drop the recorded value, the supported set and the
+    route -- three facts the developer cannot reconstruct from "unreadable".
+    """
+
+    try:
+        return load_contract(confined)
+    except MemoryModeUnsupportedError as error:
+        return _removed_memory_mode_refusal(error, confined)
+    except (ContractError, OSError, UnicodeError, ValueError) as error:
+        state = "missing" if isinstance(error, FileNotFoundError) else "unreadable"
+        return ConfiguredContractRefused(
+            reason="contract-unreadable",
+            status="configured-contract-unreadable",
+            detail="the canonical configured task contract is missing or unreadable",
+            expected={
+                "contractPath": confined.as_posix(),
+                "route": "locator -> root manifest -> root journal",
+            },
+            observed=public_failure_evidence(
+                stage="contract-read",
+                side="contract",
+                name=confined.name,
+                error_type=type(error).__name__,
+                observed={"state": state},
+            ),
+            contract_path=confined,
+            location=location,
+        )
+
+
+def _read_terminal_surviving_contract(
+    confined: Path,
+) -> WorktreeContract | ConfiguredContractRefused:
+    """Read the surviving contract of a terminal archive, on the same two-shape boundary."""
+
+    try:
+        return load_contract(confined)
+    except MemoryModeUnsupportedError as error:
+        return _removed_memory_mode_refusal(error, confined)
+    except (ContractError, OSError, UnicodeError, ValueError) as error:
+        return ConfiguredContractRefused(
+            reason="location-invalid",
+            status="terminal-archive-contract-unreadable",
+            detail="terminal retry requires readable surviving contract truth",
+            expected={
+                "contractPath": confined.as_posix(),
+                "route": "terminal locator -> exact archive/receipt -> surviving contract",
+            },
+            observed=public_failure_evidence(
+                stage="terminal-contract-read",
+                side="contract",
+                name=confined.name,
+                error_type=type(error).__name__,
+                observed={"state": "missing" if not confined.exists() else "unreadable"},
+            ),
+            contract_path=confined,
+        )
+
+
+def _removed_memory_mode_refusal(
+    error: MemoryModeUnsupportedError,
+    confined: Path,
+) -> ConfiguredContractRefused:
+    """Report a configured contract that records the removed memory mode.
+
+    The admission boundary used to fold this into ``contract-unreadable``, which named the file
+    but not the value, the supported set or the route -- the three facts packet R3 asks a
+    developer to receive. It keeps its own reason so the projection publishes the refusal's
+    typed status rather than an unreadable-contract status.
+    """
+    expected: dict[str, object] = {
+        "contractPath": confined.as_posix(),
+        "supported": list(error.supported),
+        "route": "locator -> root manifest -> root journal",
+    }
+    if error.artifact is not None:
+        expected["artifact"] = error.artifact
+    return ConfiguredContractRefused(
+        reason="memory-mode-unsupported",
+        status=error.status,
+        detail=error.detail,
+        expected=expected,
+        observed=public_failure_evidence(
+            stage="contract-read",
+            side="contract",
+            name=confined.name,
+            error_type=type(error).__name__,
+            observed=memory_mode_refusal_evidence(error),
+        ),
+        contract_path=confined,
+    )
+
+
 def configured_contract_reread_refusal(
     accepted: ConfiguredContractAccepted,
     error: ConfiguredContractRereadError,
@@ -337,6 +408,25 @@ def project_configured_contract_refusal(
 ) -> dict[str, Any]:
     """Project one semantic refusal without re-reading or inferring authority."""
 
+    if refusal.reason == "memory-mode-unsupported":
+        # The refusal already carries the value, the supported set and the route, so it takes the
+        # same developer-decision shape as every other complete refusal rather than the
+        # unreadable-contract projection, which would drop all three. The three are also lifted
+        # to the payload's top level, where the developer reads them without walking the
+        # evidence block.
+        decision = _developer_decision(
+            operation=operation,
+            status=refusal.status,
+            detail=refusal.detail,
+            expected=refusal.expected,
+            observed=refusal.observed,
+        )
+        for key, value in (
+            removed_memory_mode_fields_from_evidence(refusal.observed) or {}
+        ).items():
+            if key in {"requested", "supported", "remedies", "artifact"}:
+                decision[key] = value
+        return decision
     if refusal.reason == "contract-unreadable":
         return _project_unreadable_contract(refusal, operation=operation, address=address)
     if refusal.reason == "location-invalid":

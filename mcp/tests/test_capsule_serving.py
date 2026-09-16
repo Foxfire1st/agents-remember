@@ -187,7 +187,7 @@ task_id: SPRINT-ID
 task_name: SPRINT
 repo_name: {REPOSITORY}
 workflow_kind: light-task
-memory_mode: internal
+memory_mode: disabled
 
 coordination:
   root: {coordination_root.as_posix()}
@@ -206,7 +206,7 @@ code:
   worktree: {spec.code_root.as_posix()}
 
 memory:
-  mode: internal
+  mode: disabled
   repo_path: {coordination_root.as_posix()}
   source_branch: ar/sprint
   work_branch: {spec.work_branch}

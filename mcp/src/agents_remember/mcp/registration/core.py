@@ -102,9 +102,9 @@ def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> No
         worktree_name: str | None = None,
         topology: str | None = None,
     ) -> dict[str, Any]:
-        """Resolve a repository's coordination/memory context: topology (internal/external), code
-        and memory roots, settings paths, storage mode, and path rules. Read-only. Use this (or
-        context_packet) before relying on onboarding, task files, or provider tools."""
+        """Resolve a repository's coordination/memory context: topology (external), code and memory
+        roots, settings paths, storage mode, and path rules. Read-only. Use this (or context_packet)
+        before relying on onboarding, task files, or provider tools."""
         return resolve_context_payload(
             config,
             TaskRef(

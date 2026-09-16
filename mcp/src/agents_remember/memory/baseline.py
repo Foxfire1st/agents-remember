@@ -10,7 +10,6 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.coordination_context.models import CoordinationRequest
@@ -26,6 +25,7 @@ from agents_remember.kernel.memory_cache import (
     prepare_memory_cache,
     refresh_memory_cache,
 )
+from agents_remember.kernel.memory_mode import Topology, require_supported_topology
 from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.integration.integration_branch_authority import (
@@ -47,14 +47,21 @@ class BaselineRequest:
     workspace_root: Path
     code_repository_root: Path | None = None
     coordination_root: Path | None = None
-    topology: Literal["internal", "external"] | None = "external"
+    topology: Topology | None = "external"
     report: Path | None = None
 
 
-def _normalize_topology(value: str | None) -> Literal["internal", "external"] | None:
-    if value in ("internal", "external"):
-        return value
-    return None
+def _normalize_topology(value: str | None) -> Topology | None:
+    """Narrow ``--topology`` onto the supported set, or refuse.
+
+    Through the shared vocabulary helper, for two reasons that used to be one: letting an
+    unrecognized value fall through to ``None`` would turn an explicit request into ordinary
+    detection, and answering *every* unrecognized value with "which was removed" tells a
+    developer who mistyped the flag that a mode was removed when none was named.
+    """
+    if value is None:
+        return None
+    return require_supported_topology(value)
 
 
 def request_from_args(args: argparse.Namespace) -> BaselineRequest:
@@ -353,7 +360,9 @@ def add_common(parser: argparse.ArgumentParser) -> None:
         help="Root directory of the code repository to resolve.",
     )
     parser.add_argument(
-        "--topology", choices=("internal", "external"), help="Optional topology override."
+        "--topology",
+        metavar="external",
+        help="Optional topology override. `external` is the only supported topology.",
     )
     parser.add_argument("--coordination-root", type=Path, help="Optional coordination root.")
     parser.add_argument(

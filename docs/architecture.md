@@ -48,36 +48,18 @@ The installed runtime does not keep a parallel `scripts/` execution route; MCP t
 
 ## Target Code Repository
 
-This is the repository the agent is actually changing. It may contain internal memory:
+This is the repository the agent is actually changing. It carries no memory of its own:
+durable memory lives beside it, under the coordination root.
 
-```text
-my-app/
-  src/
-  ar-memory/
-```
-
-When internal memory exists, the `c-08-ar-coordination-context-resolver` skill resolves it before checking for external memory.
-
-## Internal Memory
-
-Internal memory is the default. Durable memory lives inside the code repository:
-
-```text
-my-app/ar-memory/
-  onboarding/
-  docs/
-  system/
-    settings.md
-    settings.json
-    sources.md
-    tools.md
-```
-
-The `c-00-initialize-memory-repo` skill creates this scaffold. The `c-03-repo-bootstrap` skill bootstraps onboarding content. The `c-05-create-or-update-onboarding-files` skill maintains file-level onboarding and repo entity catalogs.
+A repository that still carries the removed repo-local `ar-memory/` root is reported by exact
+path and refused, not migrated. The route out is to re-point the repository at its external
+memory root and record `memory_mode: external` on the worktree contracts, or to re-initialize
+with the `c-00-initialize-memory-repo` skill.
 
 ## External Memory
 
-External memory stores durable memory in one repo per selected code repository:
+External memory is the only supported topology. It stores durable memory in one repo per
+selected code repository:
 
 ```text
 ar-coordination/memory-repos/ar-my-app/
@@ -87,17 +69,16 @@ ar-coordination/memory-repos/ar-my-app/
   system/
 ```
 
-Use external memory when teams need a separate memory repository, branch-specific memory movement, or memory review outside the code repository.
-
 ## Resolution Order
 
 The `c-08-ar-coordination-context-resolver` skill resolves a target repository by checking:
 
 1. explicit inputs such as `code_repository_root`, `coordination_root`, or task contract
-2. repo-local internal memory at `<repo>/ar-memory/`
-3. external memory at `<coordination-root>/memory-repos/ar-<repo>/`
+2. the external memory repo at `<coordination-root>/memory-repos/ar-<repo>/`
 
-If neither supported memory location exists, the `c-08-ar-coordination-context-resolver` skill fails and asks the caller to initialize memory instead of inventing an empty context.
+If that memory location does not exist, the `c-08-ar-coordination-context-resolver` skill fails
+and asks the caller to initialize memory instead of inventing an empty context. A repository
+still carrying the removed repo-local `ar-memory/` root is refused by name with that exact path.
 
 ## Retrieval Substrates
 

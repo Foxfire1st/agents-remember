@@ -5,8 +5,8 @@ description: "Close out approved Agents Remember edits as code and memory Git tr
 
 # c-12-closeout Closeout
 
-Use this skill when approved Agents Remember edits in an external- or
-internal-memory worktree need to be committed.
+Use this skill when approved Agents Remember edits in an external-memory
+worktree need to be committed.
 
 The `c-12-closeout` skill owns closeout sequencing for worktree-backed tasks.
 **Closeout is worktree-only:** every change affecting the code repo runs through a
@@ -146,8 +146,7 @@ an explicitly existing gate, not a second lifecycle or recovery mechanism.
 The `c-12-closeout` skill resolves or consumes the current
 `c-08-ar-coordination-context-resolver` context. External-memory closeout
 requires the code checkout/worktree and memory repo/worktree to be on the same
-selected branch; internal-memory closeout commits its memory changes with the
-code worktree.
+selected branch. A `disabled`-memory contract has no memory leg to commit.
 
 The accepted code and memory commits, their trees, ancestry, and recorded refs are transaction
 authority. Each newly created memory-content commit carries `Code-Commit: <code sha>` in its message.
@@ -171,7 +170,7 @@ own tools when the developer explicitly requests them. Closeout reports the
 actual Git inputs and conflicts, then either performs the authorized
 code-and-memory transaction or refuses before mutation.
 
-## External-Memory Order
+## Closeout Order
 
 External-memory closeout order is:
 
@@ -192,19 +191,6 @@ External-memory closeout order is:
    unresolved code or memory-content conflict, a required commit message is blank,
    or the code/memory pair cannot be reconciled. Name the concrete corrective action.
 6. Update the task contract closeout state after the actual commit pair is recorded.
-
-## Internal-Memory Order
-
-Internal-memory closeout order is:
-
-1. Confirm the worker and curator handoff facts when present; do not rerun
-   their checks or require a review/certificate.
-2. Complete preview and the applicable explicit or delegated commit authority.
-3. Call `worktree_closeout_apply` and commit the code plus prepared internal
-   memory changes in the existing transaction.
-4. Record the actual resulting pair and update the task contract. Refuse only
-   for concrete Git/input conflicts, missing authority, or incomplete
-   transaction legs.
 
 Push behavior is not automatic. Closeout commits code and memory only;
 it never pushes. Pushing the integration branch is part of the landing tail the

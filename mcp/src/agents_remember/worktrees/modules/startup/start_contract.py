@@ -775,11 +775,7 @@ def _parent_series_contract(
             "master-series leaf work branch would equal the integration branch; "
             "choose a distinct worktree_name or work_branch"
         )
-    configured_memory = (
-        _start_memory_repo(context, memory_mode)
-        if memory_mode == "external"
-        else (repo / "ar-memory" if memory_mode == "internal" else None)
-    )
+    configured_memory = _start_memory_repo(context, memory_mode)
     series = ensure_master_series_contract(
         MasterSeriesContractSpec(
             coordination_root=context.coordination_root,
@@ -959,9 +955,7 @@ def _existing_master_series_admission_refusal(
         coordination_root=context.coordination_root,
         repo_name=context.code_repository_name,
         code_repo=context.code_repository_root,
-        memory_root=memory_repo
-        if memory_mode == "external"
-        else (context.code_repository_root / "ar-memory" if memory_mode == "internal" else None),
+        memory_root=memory_repo if memory_mode == "external" else None,
         task_root=task_root,
         task_name=args.task_name or task_root.name,
         parent_task_name=args.parent_task or "",

@@ -15,7 +15,7 @@ doesn't apply.
 - Work branches are cut from the spear: **`feat/<slug>`** (features) and **`fix/<slug>`** (fixes).
 - **Worktree-backed?** `<yes — chat and task both>` keeps external memory consistent: memory parks on
   the worktree memory branch and lands on the spear via the **`c-11-memory-carryover-from-branch` skill** *after* the code lands.
-  Repos with internal/disabled memory can relax this.
+  Repos with `disabled` memory can relax this.
 
 ---
 

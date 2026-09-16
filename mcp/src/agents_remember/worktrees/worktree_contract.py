@@ -16,6 +16,10 @@ from typing import cast, get_args
 from agents_remember.controlplane.durable_store import SCHEMA_VERSION, schema_version_supported
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.memory_mode import (
+    is_removed_memory_mode,
+    refuse_removed_memory_mode,
+)
 from agents_remember.models.worktree import (
     CleanupStatus,
     CloseoutStatus,
@@ -141,19 +145,18 @@ def _vocabulary_cell[Cell: str](
 def _memory_mode_fallback(memory: dict[str, str]) -> MemoryMode:
     """What an unreadable ``memory_mode`` degrades to, read off the section it governs.
 
-    The one cell whose fallback cannot be a constant: ``internal`` and ``external`` are not
+    The one cell whose fallback cannot be a constant: ``external`` and ``disabled`` are not
     two shades of the same state, they decide whether there is a second repository to commit
-    and a ledger to map. Guessing ``internal`` for a contract that owns a memory worktree
-    would make closeout skip work that exists. The memory section itself already answers the
-    question -- a recorded worktree or ledger *is* an external topology, and ``state:
-    disabled`` is written by ``default_contract`` for a disabled one -- so the degrade reads
-    the facts rather than picking a default.
+    and a ledger to map. Guessing ``external`` for a contract that owns no memory worktree
+    would make closeout claim work that does not exist. The memory section itself already
+    answers the question -- a recorded worktree or ledger *is* an external topology -- so the
+    degrade reads the facts rather than picking a default. A section showing neither is the
+    shape the removed repo-sidecar mode left behind, and ``disabled`` is the only supported
+    mode with no memory repository; the cell still carries its quarantine record.
     """
-    if _scalar(memory.get("state")) == "disabled":
-        return "disabled"
     if _scalar(memory.get("worktree")) or _scalar(memory.get("ledger")):
         return "external"
-    return "internal"
+    return "disabled"
 
 
 def _task_vocabulary(task: ContractTask) -> tuple[WorkflowKind, MemoryMode]:
@@ -169,6 +172,8 @@ def _task_vocabulary(task: ContractTask) -> tuple[WorkflowKind, MemoryMode]:
     mistake to refuse before it is written down. ``build_start_contract`` turns this refusal
     into a blocked ``worktree_start`` result rather than letting it leave the tool handler.
     """
+    if is_removed_memory_mode(task.memory_mode):
+        refuse_removed_memory_mode(task.memory_mode)
     if task.memory_mode not in VALID_MEMORY_MODES:
         raise ContractError(f"memory_mode must be one of {sorted(VALID_MEMORY_MODES)}")
     if task.workflow_kind not in VALID_WORKFLOW_KINDS:
@@ -917,16 +922,26 @@ class _ParsedVocabulary:
     cleanup: CleanupStatus
 
 
-def _parsed_vocabulary(data: dict[str, object], quarantined: list[str]) -> _ParsedVocabulary:
+def _parsed_vocabulary(
+    data: dict[str, object], quarantined: list[str], contract_path: Path
+) -> _ParsedVocabulary:
     """Read the six vocabulary cells, appending to ``quarantined`` for each one that failed.
 
-    All six read the same way, with one rule and no exceptions: blank is the declared
+    All six read the same way, with one rule and one exception: blank is the declared
     default, a member is itself, anything else is the default plus a quarantine record.
     `workflow_kind` used to be the odd one out -- no `or <default>`, so a cell a developer
     had emptied was a hard refusal where its five siblings were tolerant, on a file the
     packet was perfectly able to report.
+
+    The exception is a *removed* memory mode. That is not an unreadable token to degrade
+    around: it is a specific, previously supported state whose owner must be told which
+    contract still records it, because the route out of it is the developer's decision. It is
+    refused with the contract path attached and the file is left byte-identical.
     """
     memory = _section(data, "memory")
+    recorded_memory_mode = _scalar(data.get("memory_mode")) or _scalar(memory.get("mode"))
+    if is_removed_memory_mode(recorded_memory_mode):
+        refuse_removed_memory_mode(recorded_memory_mode, artifact=contract_path.as_posix())
     human_review = _section(data, "human_review")
     closeout = _section(data, "closeout")
     integration = _section(data, "integration")
@@ -939,7 +954,7 @@ def _parsed_vocabulary(data: dict[str, object], quarantined: list[str]) -> _Pars
             quarantined,
         ),
         memory_mode=_vocabulary_cell(
-            _scalar(data.get("memory_mode")) or _scalar(memory.get("mode")),
+            recorded_memory_mode,
             VALID_MEMORY_MODES,
             "memory_mode",
             _memory_mode_fallback(memory),
@@ -992,7 +1007,7 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
     lifecycle = _section(data, "lifecycle")
     # Every cell this parse could not read, collected as it goes and carried on the result.
     quarantined: list[str] = []
-    vocabulary = _parsed_vocabulary(data, quarantined)
+    vocabulary = _parsed_vocabulary(data, quarantined, contract_path)
     path = (
         _optional_path(coordination.get("series_contract_path", ""))
         or _optional_path(coordination.get("enclosure_path", ""))

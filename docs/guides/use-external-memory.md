@@ -1,6 +1,6 @@
 # Use External Memory
 
-Most repositories should start with internal memory under `<repo>/ar-memory/`. Use external memory when you intentionally want durable memory in a separate repository.
+External memory is the supported topology: durable memory lives in its own repo per code repository. Repo-local internal memory under `<repo>/ar-memory/` was removed from the product and is refused rather than migrated.
 
 ## When External Memory Helps
 
@@ -42,7 +42,7 @@ Install the runtime first through the MCP server:
 runtime_install()
 ```
 
-Then ask the agent to run `c-00-initialize-memory-repo` in external-memory mode for the target repository. External mode should be explicit; the `c-00-initialize-memory-repo` skill defaults to internal memory.
+Then ask the agent to run `c-00-initialize-memory-repo` for the target repository. It creates the external memory repo; there is no other mode to choose.
 
 ## Configure
 
@@ -76,14 +76,14 @@ In a one-repo memory repo, unscoped path rules are fine. In shared coordinator s
 
 ## Resolve
 
-The `c-08-ar-coordination-context-resolver` skill checks internal memory first, then external memory:
+The `c-08-ar-coordination-context-resolver` skill resolves the repository to its memory repo:
 
 ```text
-<repo>/ar-memory/
 <ar-coordination>/memory-repos/ar-<repo>/
 ```
 
-An external memory repo does not force sibling repositories into external mode. Resolution is per target repository.
+A repository that still carries the removed repo-local `<repo>/ar-memory/` root is refused with
+that exact path and the route to re-point it. Resolution is per target repository.
 
 ## Closeout
 
