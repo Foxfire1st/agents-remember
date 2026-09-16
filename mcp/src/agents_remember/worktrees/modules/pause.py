@@ -23,13 +23,12 @@ from agents_remember.worktrees.activation.atomic_series_activation import (
     observe_atomic_series,
 )
 from agents_remember.worktrees.activation.atomic_series_activation_release import (
+    SELECTION_MISSING_STATUS,
     release_atomic_series_selection,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.worktree_contract import WorktreeContract
-
-_SELECTION_MISSING = "atomic-series-activation-selection-missing"
 
 # A master that holds no selection is already in the state a release produces. Stopping it is
 # therefore already true, and the pause reports that explicitly instead of failing an intent it
@@ -142,7 +141,7 @@ def _already_stopped_result(
     became unreadable between the two reads still refuses instead of reporting a stop.
     """
 
-    if error.status != _SELECTION_MISSING:
+    if error.status != SELECTION_MISSING_STATUS:
         return None
     observed = observe_atomic_series(contract)
     if observed.state != "vacant":

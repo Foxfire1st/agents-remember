@@ -156,10 +156,12 @@ def _assert_the_catalog_kept_its_bytes_and_identities(catalog: Mapping[str, obje
     assert REJECTED_STANDALONE_IDENTITY not in declared, REJECTED_STANDALONE_IDENTITY
     assert declared == referenced, sorted(declared - referenced)
     digest = hashlib.sha256((REPOSITORY_ROOT / LIFECYCLE_CATALOG).read_bytes()).hexdigest()
+    contracts = _tables(catalog, "contract")
+    artifacts = _tables(catalog, "artifact")
     assert (
         digest,
-        len(catalog["contract"]),
-        len(catalog["artifact"]),
+        len(contracts),
+        len(artifacts),
     ) == (
         LIFECYCLE_CATALOG_SHA256,
         LIFECYCLE_CONTRACT_COUNT,

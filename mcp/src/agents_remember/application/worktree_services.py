@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application import provider_runtime as provider_runtime_api
+from agents_remember.application.prepared_certification import (
+    PreparedMemoryCertificationAdapter,
+)
 from agents_remember.memory_quality import check as memory_quality_check_api
 from agents_remember.memory_quality.gate_five_rails import gate_five_memory_rails
 from agents_remember.memory_quality.incremental_scope.candidate import observe_contract_task
@@ -17,9 +20,6 @@ from agents_remember.models.task_document import CanonicalTaskObservation
 from agents_remember.providers import provider_setup as provider_setup_api
 from agents_remember.worktrees.integration.closeout.preparation.continuation import (
     PreparedCloseoutContinuation,
-)
-from agents_remember.worktrees.integration.closeout.prepared_certification import (
-    PreparedMemoryCertificationAdapter,
 )
 from agents_remember.worktrees.services import (
     ProviderSetupRequestSpec,

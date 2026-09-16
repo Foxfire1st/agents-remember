@@ -19,6 +19,14 @@ from agents_remember.worktrees.activation.atomic_series_activation import (
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
+SELECTION_MISSING_STATUS = "atomic-series-activation-selection-missing"
+"""The refusal a release raises when this contract holds no exact series selection.
+
+``worktrees/modules/pause.py`` answers exactly this status itself, because the vacancy it names
+is the state a pause produces, so the literal is declared once -- here, where it is raised --
+and read from here by the one other module that has to recognise it.
+"""
+
 
 def release_atomic_series_selection(
     contract: WorktreeContract,
@@ -42,7 +50,7 @@ def release_atomic_series_selection(
         record = previous.record
         if record is None:
             raise AtomicSeriesActivationError(
-                "atomic-series-activation-selection-missing",
+                SELECTION_MISSING_STATUS,
                 "explicit sync cancellation requires an existing exact series selection",
             )
         if not _record_selects_contract(record, contract, selected_master):

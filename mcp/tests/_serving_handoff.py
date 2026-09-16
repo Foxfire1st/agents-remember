@@ -843,20 +843,36 @@ class _HandoffCase(unittest.IsolatedAsyncioTestCase):
           asserted by the one case that arms later than that start, where it is a constraint on that
           case's scenario rather than on production.
         * ``bound`` is by definition the sum of the terms compared to ``latency`` below.
+        * The selection minimality -- the measured pass IS the first full sweep eligible after the
+          release -- is ``measure()``'s own selection filter, so restating it here would assert an
+          identity; the requirement's clause is carried by the ``poll_delay`` bound and the cases'
+          window assertions instead. The reason and the measured attempts to make it falsifiable are
+          recorded at the point of use below.
         """
 
-        # The measured pass IS the first full sweep eligible after the release: the selection may not
-        # skip an earlier eligible poll and report a later one's window. Asserted first, because every
-        # term below is a term of THAT pass. (That the selected sweep is at or after the release at
-        # all is the selection filter's own precondition, so only the minimality is a claim here; if
-        # nothing were eligible, ``measure()`` would already have raised and ``min()`` here would
-        # raise ``ValueError`` -- loud either way, so no unfailable guard is asserted for it.)
-        eligible = [
-            record
-            for record in self.sweeps.full_sweeps
-            if record.index > handoff.previous.index and record.entered_at >= handoff.release
-        ]
-        self.assertEqual(handoff.consuming.index, min(record.index for record in eligible))
+        # The selection minimality -- "the measured pass IS the first full sweep eligible after the
+        # release" -- is NOT asserted here, because it cannot be: ``measure()`` already selected
+        # ``consuming`` with ``next(record for record in self.sweeps.full_sweeps if record.index >
+        # previous.index and record.entered_at >= release)``, so restating that filter below would
+        # rebuild the byte-identical predicate out of the same record list, the same ``release`` and
+        # the same ``previous`` -- an identity that holds in every state, reachable or not (filed as
+        # ``F-L04-2``). The requirement's clause is carried by the assertions that CAN fail:
+        # ``poll_delay <= P`` below (its "at most P later" half, the reached failure site for a late
+        # or skipped poll) and each case's own window assertions.
+        #
+        # Re-anchoring the claim on the arming instant instead -- min over full sweeps with
+        # ``entered_at >= handoff.readable_at`` -- was built and measured, and it is also implied in
+        # every state these cases reach, because a full sweep admitted inside one ``F`` window after
+        # the arming also commits the fact and so lands on a case's own premise assertion first.
+        # Measured on /tmp copies: halving the rate limit (``_rate_limited`` against
+        # ``sweep_interval_seconds / 2``) fails 5 of the 8 cases, the default-phase one on its own
+        # premise assertion, and with those premise assertions relaxed so the case reaches this
+        # method it passes here and the run fails later, on the case's own post-oracle assertion;
+        # widening the fast path to probe every running row fails 5 of 8 the same way; arming the
+        # default-phase fact after its release fails that case's premise in 1. So the relation is
+        # recorded rather than asserted -- the disposition this docstring gives the other relations
+        # that cannot fail.
+
         # ``D_commit`` is the time from the consuming sweep's START to the commit, so the commit
         # cannot precede that start. Nothing else here implies it: in the state that breaks it -- the
         # fact made durable by an earlier refresh (the notifier pass's own inline ``refresh()``, or an

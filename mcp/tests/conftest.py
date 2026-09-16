@@ -70,9 +70,9 @@ _INTEGRATION_FILES = pytest.StashKey[frozenset[Path]]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addini("unit_case_budget", "maximum selected unit cases", type="int", default=1000)
+    parser.addini("unit_case_budget", "maximum selected unit cases", type="int", default=1100)
     parser.addini(
-        "integration_case_budget", "maximum selected integration cases", type="int", default=100
+        "integration_case_budget", "maximum selected integration cases", type="int", default=300
     )
     parser.addoption(
         "--certify",

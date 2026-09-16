@@ -32,6 +32,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from agents_remember.application import worktree_tools
 from agents_remember.models.structural.atomic_series_activation import (
@@ -39,12 +40,14 @@ from agents_remember.models.structural.atomic_series_activation import (
 )
 from agents_remember.tasks import TaskDocument
 from agents_remember.worktrees.activation.atomic_series_activation import (
+    AtomicSeriesActivationError,
     activation_path,
     activation_waiting_reason,
     contract_fingerprint,
     observe_atomic_series,
     series_master_ref,
 )
+from agents_remember.worktrees.modules import pause as pause_module
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 from test_closeout_queue import MASTER_A, MASTER_B, QueueFixture
 from test_worktree_support import git
@@ -521,9 +524,43 @@ class PauseStopsAnAtomicMasterTests(unittest.TestCase):
         self.assertEqual(self._record_bytes(self.series_b), other_record)
         self.assertEqual(observe_atomic_series(self.series_b).state, "active")
         self.assertEqual(self._world(), before)
-        self.assertEqual(self._record_bytes(self.series_b), other_record)
-        self.assertEqual(observe_atomic_series(self.series_b).state, "active")
-        self.assertEqual(self._world(), before)
+
+    def test_a_record_that_appears_between_the_two_reads_refuses_instead_of_reporting_a_stop(
+        self,
+    ) -> None:
+        """The already-stopped answer is OBSERVED, not assumed: a race still refuses.
+
+        The release refuses a missing selection, and the pause answers that one refusal itself --
+        but only after re-reading this contract's own record. A master whose record appears between
+        the refused release and that re-read is working, and reporting it stopped would be a pause
+        that never happened. The interleave is staged deterministically: the REAL release runs, its
+        refusal is held, the master is selected through the public route, and only then does the
+        refusal surface -- so the record genuinely exists when the pause observes it. Remove the
+        vacancy re-observation and this case reports the already-vacant success over a working
+        master.
+        """
+
+        real_release = pause_module.release_atomic_series_selection
+
+        def release_then_the_record_appears(contract: WorktreeContract) -> Any:
+            try:
+                return real_release(contract)
+            except AtomicSeriesActivationError:
+                self._select(self.series_a)
+                raise
+
+        self.assertEqual(self._activation_bytes(), {})
+        with mock.patch.object(
+            pause_module, "release_atomic_series_selection", release_then_the_record_appears
+        ):
+            refused = self._pause(self.series_a)
+
+        # Refused as the release refused, and never as a stop: the master is selected and working.
+        self.assertFalse(refused["ok"], refused)
+        self.assertEqual(refused["state"], "atomic-series-activation-selection-missing")
+        self.assertNotEqual(refused["state"], "atomic-series-already-vacant")
+        self.assertIs(refused["paused"], False)
+        self.assertEqual(observe_atomic_series(self.series_a).state, "active")
 
     def test_resuming_a_paused_master_restores_work_with_nothing_published(self) -> None:
         """The pause is reversible, and the interval between stop and resume publishes nothing."""

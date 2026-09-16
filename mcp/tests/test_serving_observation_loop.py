@@ -622,14 +622,18 @@ class ServingObservationLoopTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertGreaterEqual(len(helper_calls), 2)
         self.assertTrue(all(thread is not threading.main_thread() for thread in probe.threads))
-        # The app under test exposes no terminal-session route at all: nothing here can have
-        # advanced the catalog by way of a GET.
-        terminal_routes = [
-            route.path
-            for route in fixture.app.routes
-            if isinstance(route, APIRoute) and "terminal" in route.path
-        ]
-        self.assertEqual(terminal_routes, [])
+        # The premise that makes this an HTTP-free proof: the app whose lifespan is entered here
+        # carries no route beyond the ones FastAPI mounts on every instance, so no request could
+        # have reached the sweeper whose polls this case recorded. Compared against a fresh app's
+        # own route table rather than filtered for "terminal" paths: a filter over an app with no
+        # registered route matches nothing whatever the fixture or a later case does, while this
+        # fails the moment a route -- any kind, path-carrying or not -- is added, and the case stops
+        # isolating the observation owner.
+        self.assertEqual(len(fixture.app.routes), len(FastAPI().routes))
+        self.assertEqual(
+            [route.path for route in fixture.app.routes if isinstance(route, APIRoute)],
+            [route.path for route in FastAPI().routes if isinstance(route, APIRoute)],
+        )
 
     async def test_the_observer_task_is_registered_and_cancelled_by_lifespan_teardown(self) -> None:
         probe = _RefreshProbe()
