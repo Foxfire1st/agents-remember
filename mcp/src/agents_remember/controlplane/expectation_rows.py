@@ -9,8 +9,12 @@ product, which is owner work. Seat spawn and readiness waiting start no assignme
 Deadlines are ROWS, never in-memory timers -- the Restate durable-timer lesson (R2): a row
 survives a daemon/MCP restart; a timer does not.
 
-``ExpectationKind`` must be kept in sync with ``KNOWN_EXPECTATION_KINDS`` in
-``kernel/agentic_settings.py`` (duplicated there to avoid a kernel<->controlplane import cycle).
+``ExpectationKind`` is the deliberate parse-only SUPERSET of the settings vocabulary. Its two
+active members stay aligned with ``KNOWN_EXPECTATION_KINDS`` in ``kernel/agentic_settings.py``
+(duplicated there to avoid a kernel<->controlplane import cycle), while the two retired members
+are intentionally excluded from that set and from ``DEFAULT_EXPECTATION_SLA_SECONDS``: they exist
+only so historical ``ar-expectation-row/v2`` records still validate. The two sets are therefore
+deliberately NOT equal, and no writer, evaluator, or notifier action may name a retired kind.
 """
 
 from __future__ import annotations
