@@ -41,12 +41,16 @@ from agents_remember.models.terminal_catalog import (
 )
 from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.observer.events import now_iso
+from agents_remember.serving.capsule_delivery import CodexCapsuleDelivery
 from agents_remember.serving.harness_control_adapter import protocol_adapter_status
 from agents_remember.serving.harness_control_ipc import LocalControlEndpoint
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
 )
-from agents_remember.serving.harness_control_runner import RunnerConfig, control_runner_command
+from agents_remember.serving.harness_control_runner import (
+    RunnerConfig,
+    control_runner_command,
+)
 from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.harnesses import (
     Which,
@@ -116,6 +120,12 @@ class ControlRunnerRequest:
 
     resolved_launch: ResolvedLaunch | None = None
     resume_thread_id: str | None = None
+    capsule_delivery: CodexCapsuleDelivery | None = None
+    """The admitted role capsule this launch applies, or ``None`` for the legacy launch.
+
+    The caller-facing half of the one optional carrier: whoever admits the capsule at the launch
+    boundary sets it here, and it travels unchanged to the adapter factory.
+    """
     endpoint: Path | None = None
     """An explicit socket path; ``None`` mints one for this session under :attr:`endpoint_root`."""
     endpoint_root: Path | None = None
@@ -552,6 +562,7 @@ def _session_command(
             session_commands=tuple(launch.knobs.session_commands or ()),
             resolved_launch=launch.control.resolved_launch,
             resume_thread_id=launch.control.resume_thread_id,
+            capsule_delivery=launch.control.capsule_delivery,
         )
     )
     return list(runner), endpoint

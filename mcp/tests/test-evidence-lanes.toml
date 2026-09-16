@@ -214,6 +214,7 @@ provider-conformance = [
   "mcp/tests/test_codex_app_server_adapter_correlation.py",
   "mcp/tests/test_codex_app_server_adapter_reconnect.py",
   "mcp/tests/test_codex_app_server_adapter_turns.py",
+  "mcp/tests/test_codex_capsule_delivery.py",
   "mcp/tests/test_harness_control_claude.py",
   "mcp/tests/test_harness_control_claude_interrupt.py",
   "mcp/tests/test_harness_control_claude_stream_1.py",

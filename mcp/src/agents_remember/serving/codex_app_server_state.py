@@ -66,6 +66,13 @@ class CodexThreadEvidence:
     status: JsonObject
     turns: tuple[JsonObject, ...]
     raw: JsonObject
+    instruction_sources: tuple[str, ...] = ()
+    """The app-server's own list of instruction files loaded for this thread.
+
+    Read from the thread-open response's ``instructionSources``. This is host-native observation, not
+    a claim we author: it is how the seam detects automatic host injection such as a workspace
+    ``AGENTS.md``, and it is empty when the pinned version reports none.
+    """
 
 
 @dataclass(frozen=True)
@@ -264,6 +271,29 @@ def validate_reasoning_effort(model: CodexModelCapability, desired_effort: str) 
         )
 
 
+def _instruction_sources(result: Mapping[str, object], *, method: str) -> tuple[str, ...]:
+    """The thread-open ``instructionSources`` list, when the pinned version reports one.
+
+    Absent or null is a legitimate answer on a version that does not expose the field, so this
+    returns ``()`` rather than raising; a present value that is not a list of paths is a protocol
+    violation and does raise.
+    """
+
+    raw = result.get("instructionSources")
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise CodexAppServerError(f"Codex {method} response.instructionSources must be a list")
+    sources: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, str) or not entry.strip():
+            raise CodexAppServerError(
+                f"Codex {method} response.instructionSources entries must be non-empty strings"
+            )
+        sources.append(entry)
+    return tuple(sources)
+
+
 def parse_thread_open_response(
     result: Mapping[str, object],
     *,
@@ -284,6 +314,7 @@ def parse_thread_open_response(
     status = required_object(thread.get("status"), context=f"{method} response.thread.status")
     activity_from_thread_status(status)
     return CodexThreadEvidence(
+        instruction_sources=_instruction_sources(result, method=method),
         thread_id=required_text(thread, "id", context=f"{method} response.thread"),
         cli_version=required_text(thread, "cliVersion", context=f"{method} response.thread"),
         model=required_text(result, "model", context=f"{method} response"),
