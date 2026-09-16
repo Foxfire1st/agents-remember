@@ -446,9 +446,10 @@ describe("DetailPanel master series navigation (6g)", () => {
   });
 
   it("keeps a masterRef row static when the commanded master is not projected", () => {
-    // Fallback honesty: a masterRef whose target is absent from the projected pool (bounded
-    // summary limit, another repo's docs) degrades to the row's older behavior — here, with no
-    // same-folder slice and no cross-series link, the static index row.
+    // Fallback honesty: a masterRef whose target is absent from the projected pool (another
+    // repo's docs, or a document the projection withheld) degrades to the row's older behavior —
+    // here, with no same-folder slice and no cross-series link, the static index row. There is no
+    // document-count bound any more (260916-TDPU removed it), so absence means absent, not evicted.
     const sprint = taskDoc({
       id: "SPRINT",
       lifecycleId: undefined,

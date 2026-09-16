@@ -1073,9 +1073,11 @@ class EngineProcessFacts:
     ledger_row_count: int = 0
 
 
-# 260707-HFX2-L13 F6/CS-6 D2+D1: ``TaskDocNode`` in the always-on projection is a bounded summary.
-# The full reader body is fetched through the on-demand task-document endpoint. This budget remains as
-# a regression guardrail: the write path should now measure 0 body bytes for broadcast task documents.
+# 260707-HFX2-L13 F6/CS-6 D2+D1: ``TaskDocNode`` in the always-on projection is a summary -- the
+# reader body is omitted there and fetched through the on-demand task-document endpoint. No bound
+# limits how many documents are projected (260916-TDPU removed the document-count cap); "summary"
+# describes the omitted fields only. This budget remains as a regression guardrail: the write path
+# should now measure 0 body bytes for broadcast task documents.
 TASK_DOCUMENTS_PAYLOAD_BUDGET_BYTES = 256 * 1024
 
 

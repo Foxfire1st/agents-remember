@@ -21,8 +21,6 @@ from agents_remember.worktrees.task_resolver import ARCHIVE_DIR, ENCLOSURES_DIR
 # Task and series readers share one stat-identity parse cache. Runtime-only
 # watcher changes still trigger a projection, but unchanged task JSON is never
 # reparsed merely because wall-clock time passed.
-TASK_DOCUMENT_SUMMARY_LIMIT = 250
-SERIES_DOCUMENT_SUMMARY_LIMIT = 250
 _task_doc_cache = TaskDocumentPayloadCache()
 
 # 260707-HFX2-L12 F11: status_payload() shells out to git per leaf; without a cache the projection
@@ -62,33 +60,13 @@ def _iter_task_document_payloads(
     ]
 
 
-def _bounded_task_document_payloads(
-    docs: list[tuple[Path, dict[str, object]]], *, limit: int
-) -> list[tuple[Path, dict[str, object]]]:
-    """Keep every task-root authority, then fill the bounded leaf window.
-
-    ``task.json`` is the canonical document for one active task root and therefore
-    owns sprint/master grouping.  Age-based eviction may trim leaf summaries, but it
-    must never flatten the hierarchy by dropping an older root authority.
-    """
-    if len(docs) <= limit:
-        return docs
-    root_docs = [item for item in docs if item[0].name == "task.json"]
-    remaining = [item for item in docs if item[0].name != "task.json"]
-    remaining_limit = max(limit - len(root_docs), 0)
-    newest_remaining = sorted(
-        remaining,
-        key=lambda item: (-_stat_mtime_ns(item[0]), item[0].as_posix()),
-    )[:remaining_limit]
-    selected = {path for path, _payload in [*root_docs, *newest_remaining]}
-    return [item for item in docs if item[0] in selected]
-
-
-def _stat_mtime_ns(path: Path) -> int:  # pragma: no cover
-    try:
-        return path.stat().st_mtime_ns
-    except OSError:
-        return 0
+# A task-document summary limit (250 roots-plus-newest-leaves) used to bound the readers
+# below. It was removed deliberately. The eviction was silent and untested, so an operator
+# saw a master whose sub-task rows were simply not clickable, with no diagnostic anywhere,
+# and no way to tell a missing document from an unreadable one. Every canonical task
+# document under ``tasks/<repo>/<task>/`` is projected now. If a bound is ever needed
+# again it must be larger, must ANNOUNCE its own truncation to the operator, and must offer
+# a way to reach what it hid.
 
 
 def _iter_task_json(tasks_root: Path) -> list[Path]:
