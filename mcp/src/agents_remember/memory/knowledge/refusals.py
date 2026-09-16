@@ -869,3 +869,171 @@ def map_sqlite_error(error: apsw.Error, context: SqliteFailureContext) -> Knowle
         facts=facts,
         next_action="Correct the payload and resubmit; the transaction left no row behind.",
     )
+
+
+# -- the candidate lifecycle and snapshot publication boundary --------------------------
+#
+# A candidate is durable working state, so its failures are stated as facts about *which*
+# working object was addressed and what was actually there. Every one of them preserves the
+# existing bytes: nothing in this group removes, replaces or repairs a database, a receipt or
+# a published snapshot to make a later step succeed.
+
+
+def selected_input_unavailable_refusal(
+    operation: KnowledgeOperation, detail: str, *, record_id: str | None = None
+) -> KnowledgeRefusal:
+    """Refuse when one explicitly selected input is absent or unreadable.
+
+    A missing input is an input error, never an empty dataset: the alternative -- answering an
+    absent selection with a fresh schema -- is how a reader comes to report "no knowledge" for a
+    candidate whose file simply was not there.
+    """
+
+    return refusal(
+        "selected_input_unavailable",
+        operation,
+        detail,
+        facts=RefusalFacts(record_id=record_id),
+        next_action=(
+            "Supply the exact selected input again, or admit a new candidate at an explicitly "
+            "chosen destination. Nothing here falls back to HEAD, a branch name or Markdown."
+        ),
+    )
+
+
+def candidate_binding_changed_refusal(
+    operation: KnowledgeOperation,
+    detail: str,
+    *,
+    expected: str | None = None,
+    observed: str | None = None,
+) -> KnowledgeRefusal:
+    """Refuse a candidate whose recorded binding is not the admission's.
+
+    This is the restart and branch-switch refusal: the working database is preserved exactly as
+    it was, because the authored work it holds is not reproducible from the new baseline.
+    """
+
+    return refusal(
+        "candidate_binding_changed",
+        operation,
+        detail,
+        facts=RefusalFacts(expected=expected, observed=observed),
+        next_action=(
+            "Resume the candidate the receipt was written for, or explicitly admit a new "
+            "candidate for the new baseline. The existing working database and its journals are "
+            "left untouched."
+        ),
+    )
+
+
+def candidate_snapshot_unpublished_refusal(
+    operation: KnowledgeOperation, *, expected: str, observed: str, destination_ref: str
+) -> KnowledgeRefusal:
+    """Refuse a read whose runtime candidate is not the dataset the closed snapshot holds.
+
+    It is a report, not a repair: the publication is a separate explicit operation owned by the
+    caller, and no read publishes rows or attaches them to an older snapshot.
+    """
+
+    return refusal(
+        "candidate_snapshot_unpublished",
+        operation,
+        "the runtime candidate's logical dataset is not the one the closed snapshot holds",
+        facts=RefusalFacts(record_id=destination_ref, expected=expected, observed=observed),
+        next_action=(
+            "Publish the candidate through the snapshot publication operation and capture that "
+            "exact closed file into the selected memory tree, then read again."
+        ),
+    )
+
+
+def snapshot_incomplete_refusal(
+    operation: KnowledgeOperation, detail: str, *, stage_ref: str
+) -> KnowledgeRefusal:
+    """Refuse a private stage that was not completed, verified or durably flushed.
+
+    Both halves use this one code: a closed snapshot that could not be frozen, and a candidate
+    whose receipt or database could not be sealed in its private stage. In both cases nothing
+    outside the operation's own stage exists afterwards, so the caller has one decision to make --
+    stop, or retry from the same explicitly selected input -- and the destination or the admitted
+    path was never touched.
+    """
+
+    return refusal(
+        "snapshot_incomplete",
+        operation,
+        f"the private stage was not completed: {detail}",
+        facts=RefusalFacts(record_id=stage_ref),
+        next_action=(
+            "Investigate the reported stage failure, then re-run the operation from the same "
+            "expected input. The destination was not replaced and the incomplete stage is removed "
+            "by the operation that made it."
+        ),
+    )
+
+
+def destination_stale_refusal(
+    operation: KnowledgeOperation,
+    *,
+    destination_ref: str,
+    expected: str | None,
+    observed: str,
+) -> KnowledgeRefusal:
+    """Refuse a publication whose admitted destination is not the destination that is there."""
+
+    return refusal(
+        "destination_stale",
+        operation,
+        "the destination does not match the identity the publication was admitted against",
+        facts=RefusalFacts(
+            record_id=destination_ref,
+            expected=expected if expected is not None else "<absent>",
+            observed=observed,
+        ),
+        next_action=(
+            "Reread the destination's logical identity and publish against the identity that is "
+            "actually there. No destination was replaced."
+        ),
+    )
+
+
+def publication_failed_refusal(
+    operation: KnowledgeOperation, detail: str, *, destination_ref: str, observed: str
+) -> KnowledgeRefusal:
+    """Refuse a publication whose install or readback did not complete."""
+
+    return refusal(
+        "publication_failed",
+        operation,
+        f"the closed snapshot was not installed: {detail}",
+        facts=RefusalFacts(
+            record_id=destination_ref, expected="<the frozen snapshot>", observed=observed
+        ),
+        next_action=(
+            "Inspect the destination path, then publish again from the same expected candidate. "
+            "No success is reported for bytes this operation did not install."
+        ),
+    )
+
+
+def publication_durability_unconfirmed_refusal(
+    operation: KnowledgeOperation, detail: str, *, destination_ref: str, observed: str
+) -> KnowledgeRefusal:
+    """Refuse to claim success when the replacement completed but could not be confirmed.
+
+    The complete new file may already be at the destination. Reporting that honestly is the
+    point: claiming the old file was restored would be false, and claiming success from an
+    unverified readback would be unchecked.
+    """
+
+    return refusal(
+        "publication_durability_unconfirmed",
+        operation,
+        f"the destination could not be revalidated after the replacement: {detail}",
+        facts=RefusalFacts(record_id=destination_ref, observed=observed),
+        next_action=(
+            "Reopen the destination directly and revalidate its logical identity. The complete "
+            "new snapshot may already be in place; do not restore the previous file blindly."
+        ),
+    )

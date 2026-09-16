@@ -1104,3 +1104,27 @@ consumers = [
   "mcp/tests/test_candidate_batch_commands.py",
   "mcp/tests/test_candidate_batch_transaction.py",
 ]
+
+[[contract]]
+id = "knowledge-snapshot-lifecycle-cases"
+owner = "mcp/tests/snapshot_lifecycle_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_snapshot_publication.py::test_a_wal_resident_batch_is_published_whole_while_a_main_file_copy_is_not"
+
+[[artifact]]
+path = "mcp/tests/snapshot_lifecycle_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "knowledge-snapshot-lifecycle-cases"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "one admitted candidate created through the lifecycle operation, records authored through the candidate-change batch, closed snapshots published through the publication operation, and one real crash child interpreter"
+introduced_by = "260915-KS-L4"
+lifetime = "permanent"
+permanence_rationale = "Both snapshot modules measure the same four things -- one admitted candidate, the write boundary it publishes, the file-level durability facts, and one real process crash -- and a per-module copy would let the two disagree about how isolation, closure or recovery is measured, which is exactly what the requirement asks to be shown."
+replacement_contract = "contract:knowledge-snapshot-lifecycle-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_candidate_workspace.py",
+  "mcp/tests/test_knowledge_snapshot_publication.py",
+]

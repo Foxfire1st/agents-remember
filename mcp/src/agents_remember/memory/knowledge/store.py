@@ -36,7 +36,6 @@ from agents_remember.memory.knowledge import labels, lineage, logical, records
 from agents_remember.memory.knowledge.connection import (
     _ImmediateTransaction,
     create_or_validate_schema,
-    discard_closed_wal_peers,
     fetch_one,
     immediate_transaction,
     inspect_schema,
@@ -112,15 +111,17 @@ class OpenedKnowledgeStore:
     # -- lifecycle -----------------------------------------------------------------
 
     def close(self) -> None:
-        """Close the connection and discard a WAL peer left by an uncheckpointed close.
+        """Close the connection and let SQLite decide what survives beside the database.
 
-        A durable candidate never deletes a journal to look clean while a connection is open;
-        this runs only after the last connection to this file is closed, where the peer files
-        are scratch that SQLite itself removes on a clean shutdown.
+        Nothing is unlinked here. SQLite checkpoints its WAL and removes the peer files itself on
+        the last clean close, so removing them explicitly would add nothing on the happy path --
+        and one thing on the unhappy one: a *reader* holding a read transaction blocks that
+        checkpoint, so a committed write's frames are still only in the WAL when a closing writer
+        would unlink it. That unlink destroyed the committed batch and left the database
+        unreadable, which is why the call was removed rather than made conditional.
         """
 
         self.connection.close()
-        discard_closed_wal_peers(self.database_path)
 
     # -- identity ------------------------------------------------------------------
 

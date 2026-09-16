@@ -48,6 +48,12 @@ KnowledgeOperation = Literal[
     "set_invariant_label",
     "set_family_label",
     "change_candidate",
+    "create_candidate",
+    "clone_candidate",
+    "open_candidate",
+    "publish_snapshot",
+    "read_published_snapshot",
+    "dispose_candidate",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct
@@ -71,6 +77,15 @@ KnowledgeRefusalCode = Literal[
     "target_not_candidate",
     "promotion_not_supported",
     "no_change",
+    # Snapshot publication. One member per observable failure point of the publication and
+    # candidate-lifecycle contract, so a caller branches on the code rather than on prose.
+    "selected_input_unavailable",
+    "candidate_binding_changed",
+    "candidate_snapshot_unpublished",
+    "snapshot_incomplete",
+    "destination_stale",
+    "publication_failed",
+    "publication_durability_unconfirmed",
 ]
 
 

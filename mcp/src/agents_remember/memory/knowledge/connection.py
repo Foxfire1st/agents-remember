@@ -52,6 +52,26 @@ def apply_connection_contract(connection: apsw.Connection) -> None:
         )
 
 
+def open_read_only_database(database_path: Path) -> apsw.Connection:
+    """Open one existing database through a connection that cannot write it.
+
+    Verification uses this on purpose. A pass that could repair the file it is checking would
+    prove only that the repair worked, and a snapshot whose identity is confirmed by a writable
+    connection is not confirmed by a reader. ``foreign_keys`` is not set here because no
+    statement this connection runs writes a row.
+    """
+
+    connection = apsw.Connection(str(database_path), flags=apsw.SQLITE_OPEN_READONLY)
+    connection.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MILLISECONDS}")
+    return connection
+
+
+def journal_mode(connection: apsw.Connection) -> str:
+    """Return the connection's current journal mode, lowercased."""
+
+    return str(next(iter(connection.execute("PRAGMA journal_mode")))[0]).lower()
+
+
 def fetch_one(
     connection: apsw.Connection,
     statement: str,
@@ -128,11 +148,21 @@ class _ImmediateTransaction:
 
 
 def discard_closed_wal_peers(database_path: Path) -> None:
-    """Remove SQLite's scratch journal peers once no connection holds the database.
+    """Remove the journal peers of one database that no connection holds.
 
-    This never runs while a connection is open, because deleting a live journal is how a
-    crashed database loses committed content. With the last connection closed, the peer files
-    are scratch that SQLite removes itself on a clean shutdown.
+    **No caller in this package may use this on close.** It cannot tell whether another
+    connection -- in this process or another -- still has the database open, and it does not need
+    to: SQLite checkpoints its WAL and removes both peer files itself when the last connection
+    closes cleanly. What the unlink can do instead is destroy committed content. A reader holding
+    a read transaction blocks that checkpoint, so a writer's committed frames are still only in
+    the WAL when a closing writer unlinks it; the committed rows are then absent from the main
+    file and the database is left unreadable until it is rebuilt. That is the failure this
+    function's earlier docstring claimed was impossible, and it is reachable in the intended
+    multi-consumer shape of this store (one consumer reading while another writes).
+
+    It remains here, with that boundary stated, for a caller that has independently established
+    that no connection holds the database -- an offline repair or an enclosure cleanup that owns
+    the file exclusively. Every ordinary close relies on SQLite instead.
     """
 
     for suffix in ("-wal", "-shm"):

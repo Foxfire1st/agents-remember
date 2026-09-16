@@ -16,13 +16,18 @@ up, copied and reopened anywhere.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import apsw
 
 from agents_remember.kernel.canonical_json import decoded_json, sha256_digest
 from agents_remember.memory.knowledge import schema
-from agents_remember.memory.knowledge.connection import fetch_one
+from agents_remember.memory.knowledge.connection import (
+    fetch_one,
+    inspect_schema,
+    open_read_only_database,
+)
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.repository import RepositoryIdentity
@@ -108,6 +113,51 @@ def snapshot_identity(
         schema_version=schema_name,
         logical_digest=logical_digest(connection, schema_name),
     )
+
+
+def dataset_identity(database_path: Path) -> SnapshotIdentity:
+    """Read one database file's logical identity through a connection that cannot write it.
+
+    A file at a path is not a dataset until it is read as one: this opens it read-only, validates
+    the declared schema generation and the bound namespace, and returns the identity those two
+    facts scope. Every failure is a storage error rather than a returned value, so a caller that
+    is comparing identities can name the path it could not read instead of treating it as empty.
+    """
+
+    connection = open_read_only_database(database_path)
+    try:
+        schema = inspect_schema(connection)
+        repository = bound_repository(connection)
+        if repository is None:
+            raise KnowledgeStorageError(
+                f"the database {database_path} holds no repository namespace row, so it is not a "
+                "knowledge dataset this code can address"
+            )
+        return snapshot_identity(connection, repository, schema.schema_name)
+    finally:
+        connection.close()
+
+
+def bound_repository(connection: apsw.Connection) -> RepositoryIdentity | None:
+    """Return the one repository row a knowledge dataset is bound to, or ``None``.
+
+    A dataset addressed by this package is bound to exactly one namespace: the store's own
+    initialization refuses a rebind, so more than one row means the file is not a dataset this
+    code wrote. That ambiguity is refused rather than resolved by picking a row.
+    """
+
+    rows = [
+        tuple(row)
+        for row in connection.execute("SELECT repository_id, authority_home FROM repository")
+    ]
+    if not rows:
+        return None
+    if len(rows) > 1:
+        raise KnowledgeStorageError(
+            f"a knowledge dataset must be bound to exactly one repository namespace; this one "
+            f"holds {len(rows)} rows"
+        )
+    return RepositoryIdentity(repository_id=str(rows[0][0]), authority_home=str(rows[0][1]))
 
 
 def require_bound_repository(connection: apsw.Connection, repository_id: str) -> RepositoryIdentity:
