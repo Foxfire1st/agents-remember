@@ -56,19 +56,15 @@ from agents_remember.serving.projections.snapshots_impl._analytics import (
     read_tool_reports,
 )
 from agents_remember.serving.projections.snapshots_impl._common import (
-    SERIES_DOCUMENT_SUMMARY_LIMIT,
     STATUS_PAYLOAD_TTL_SECONDS,
-    TASK_DOCUMENT_SUMMARY_LIMIT,
     _as_float,
     _as_int,
-    _bounded_task_document_payloads,
     _current_phase_text,
     _file_age_seconds,
     _iter_task_document_payloads,
     _iter_task_json,
     _read_json,
     _report_label,
-    _stat_mtime_ns,
     _status_payload_cache,
     _task_doc_cache,
     _TaskDocumentLifecycleMaps,
@@ -106,14 +102,11 @@ WORKTREE_PROVIDER_STATE_SCHEMA = "ar-worktree-provider-state/v1"
 WORKTREE_PROVIDER_INSPECT_SECONDS = 5
 
 __all__ = [
-    "SERIES_DOCUMENT_SUMMARY_LIMIT",
     "STATUS_PAYLOAD_TTL_SECONDS",
     "TASK_DOCUMENT_SCHEMA",
-    "TASK_DOCUMENT_SUMMARY_LIMIT",
     "_TaskDocumentLifecycleMaps",
     "_as_float",
     "_as_int",
-    "_bounded_task_document_payloads",
     "_cached_local_status",
     "_commit_meta_for",
     "_current_phase_text",
@@ -132,7 +125,6 @@ __all__ = [
     "_safe_status_payload",
     "_series_subtask_created_at",
     "_series_subtask_nodes",
-    "_stat_mtime_ns",
     "_status_payload_cache",
     "_task_doc_body_revision",
     "_task_doc_cache",
