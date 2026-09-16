@@ -135,6 +135,8 @@
     "architect": {
       "file": "roles/architect.md",
       "altitude": "sprint",
+      "tools": ["task_doc", "dispatch_agent", "lifecycle_gate", "message_child"],
+      "skills": ["l-01-agent-lifecycles"],
       "seat": "developer-facing owner seat; design conversation, decision-item relay, and drawing board",
       "core": ["authority", "invariants", "lifecycle-frame", "loop", "acceptance"],
       "operations": ["orientation", "planning", "coordination", "review", "recovery"],
@@ -144,6 +146,8 @@
     "orchestrator": {
       "file": "roles/orchestrator.md",
       "altitude": "sprint",
+      "tools": ["task_doc", "dispatch_agent", "lifecycle_gate", "worktree_status"],
+      "skills": ["l-01-agent-lifecycles"],
       "seat": "sprint-local spawned backend portfolio and orchestration seat; never developer-facing",
       "core": ["authority", "invariants", "lifecycle-frame", "loop", "acceptance"],
       "operations": ["orientation", "planning", "coordination", "review", "authorized-closeout", "recovery"],
@@ -153,6 +157,8 @@
     "designer": {
       "file": "roles/designer.md",
       "altitude": "sprint",
+      "tools": ["read_ar_files", "grepai_search", "cgc_symbol_search"],
+      "skills": ["l-01-agent-lifecycles"],
       "seat": "a HAT the architect pulls inline, or an optional separate sprint chair; evidence-backed problem framing at the assigned scope",
       "core": ["authority", "invariants", "loop", "acceptance"],
       "operations": ["orientation", "planning"],
@@ -162,6 +168,8 @@
     "strategist": {
       "file": "roles/strategist.md",
       "altitude": "sprint",
+      "tools": ["read_ar_files", "task_doc"],
+      "skills": ["l-01-agent-lifecycles"],
       "seat": "the sprint planner, spawn-first under the architect's propose-first question; reader, not mutator",
       "core": ["authority", "invariants", "loop", "acceptance"],
       "operations": ["orientation", "planning"],
@@ -171,6 +179,8 @@
     "manager": {
       "file": "roles/manager.md",
       "altitude": "master",
+      "tools": ["task_doc", "dispatch_agent", "lifecycle_gate", "worktree_status", "worktree_closeout_apply"],
+      "skills": ["l-01-agent-lifecycles"],
       "seat": "sprint-local coordination seat per master; drives exactly one master's leaf loop",
       "core": ["authority", "invariants", "lifecycle-frame", "loop", "acceptance"],
       "operations": ["orientation", "coordination", "review", "curation", "authorized-closeout", "recovery"],
@@ -180,6 +190,8 @@
     "worker": {
       "file": "roles/worker.md",
       "altitude": "leaf",
+      "tools": ["read_ar_files", "message_parent"],
+      "skills": ["l-01-agent-lifecycles"],
       "seat": "one leaf worktree, short-lived, fresh session; the builder with a no-commit contract",
       "core": ["authority", "invariants", "lifecycle-frame", "acceptance"],
       "operations": ["orientation", "implementation", "recovery"],
@@ -189,6 +201,8 @@
     "curator": {
       "file": "roles/curator.md",
       "altitude": "leaf",
+      "tools": ["read_ar_files", "memory_quality_check", "curator_coherence"],
+      "skills": ["l-01-agent-lifecycles"],
       "seat": "fresh per leaf after builder and (when requested) reviewer; writes onboarding only",
       "core": ["authority", "invariants", "acceptance"],
       "operations": ["orientation", "curation", "recovery"],
@@ -198,6 +212,8 @@
     "reviewer": {
       "file": "roles/reviewer.md",
       "altitude": "leaf | master | sprint, by seam",
+      "tools": ["read_ar_files", "message_parent"],
+      "skills": ["l-01-agent-lifecycles"],
       "seat": "short-lived adversarial reviewer at the requested seam; verdicts are evidence, not decisions",
       "core": ["authority", "invariants", "loop", "acceptance"],
       "operations": ["orientation", "review"],
@@ -207,6 +223,8 @@
     "system-specialist": {
       "file": "roles/system-specialist.md",
       "altitude": "sprint",
+      "tools": ["provider_status", "provider_diagnostics"],
+      "skills": ["l-01-agent-lifecycles"],
       "seat": "provider-degradation investigator; report first, fixes only after an explicit orchestrator order",
       "core": ["authority", "invariants", "acceptance"],
       "operations": ["orientation", "recovery"],
@@ -215,12 +233,20 @@
     }
   },
 
+  "skills": {
+    "l-01-agent-lifecycles": {
+      "origin": "agents-remember/skills",
+      "uri": "skill://agents-remember/skills/l-01-agent-lifecycles",
+      "source": "SKILL.md"
+    }
+  },
+
   "launcher": {
     "is_role": false,
     "routing_condition": "ambient-launcher",
     "instruction_source": "core/launcher.md",
     "core": ["launcher", "authority"],
-    "operations": [],
+    "operations": ["orientation", "coordination"],
     "templates": ["architect-brief.md"],
     "criteria": []
   },

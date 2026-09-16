@@ -459,3 +459,55 @@ class NativeHistoryLimitExceeded(NativeHistoryUnavailable):
         super().__init__(detail, code="materialization-limit")
         self.actual_bytes = actual_bytes
         self.limit_bytes = limit_bytes
+
+
+class CapsuleCompilationError(AgentsRememberError):
+    """A role capsule could not be compiled, or an admitted input refused to build.
+
+    A compilation failure never produces a partially valid capsule: the caller
+    receives this typed refusal instead of content. ``status`` is a stable,
+    branchable code (``unknown-role``, ``missing-required-instruction``,
+    ``equal-authority-contradiction``, ...); ``detail`` names the exact defect for
+    an operator who does not know the internals; ``next_action`` names the owner
+    that has to change something. ``conflicts`` carries the structured
+    contradiction rows when the refusal is a stopped conflict.
+    """
+
+    def __init__(
+        self,
+        status: str,
+        detail: str,
+        *,
+        next_action: str = "",
+        conflicts: Sequence[Mapping[str, object]] = (),
+    ) -> None:
+        super().__init__(detail)
+        self.status = status
+        self.detail = detail
+        self.next_action = next_action
+        self.conflicts = tuple(MappingProxyType(dict(row)) for row in conflicts)
+
+    def render(self) -> str:
+        """The one-line operator-facing projection of this refusal."""
+
+        if self.next_action:
+            return f"{self.status}: {self.detail} (remedy: {self.next_action})"
+        return f"{self.status}: {self.detail}"
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded refusal facts, without lower-layer diagnostics."""
+
+        fields: dict[str, object] = {"status": self.status, "detail": self.detail}
+        if self.next_action:
+            fields["nextAction"] = self.next_action
+        if self.conflicts:
+            fields["conflicts"] = [dict(row) for row in self.conflicts]
+        return fields
+
+
+class CapsuleManifestError(CapsuleCompilationError):
+    """The canonical composition manifest (or a declared source path) was invalid."""
+
+
+class CapsuleSourceError(CapsuleCompilationError):
+    """A canonical instruction source was absent, unreadable, or outside its root."""
