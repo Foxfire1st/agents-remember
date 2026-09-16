@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import GitRunnerOptions, run_git
 from agents_remember.providers.cgc.bundle import rewrite_cgc_bundle_paths
 from agents_remember.providers.context_common import to_container_path
 from agents_remember.providers.setup_common import (
@@ -439,7 +439,7 @@ def seed_commit_divergence(
     result = run_git(
         source_repo_root,
         ["diff", "--name-status", source_head, target_head],
-        timeout=_CATCH_UP_DIFF_TIMEOUT_SECONDS,
+        GitRunnerOptions(timeout=_CATCH_UP_DIFF_TIMEOUT_SECONDS),
     )
     if result.returncode != 0:
         return None

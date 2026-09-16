@@ -31,7 +31,7 @@ from importlib import resources
 from pathlib import Path
 
 import agents_remember
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import GitRunnerOptions, run_git
 from agents_remember.kernel.primitives.version import SERVER_VERSION
 from agents_remember.models.core import ServingBuildPayload
 from agents_remember.observer.events import now_iso
@@ -107,7 +107,11 @@ def _git_short_head(anchor: Path) -> str | None:
         # The one runner: it strips GIT_DIR (so the stamp describes the checkout the
         # server was started from, not an inherited one) and DEVNULLs stdin (so the
         # probe can never touch the MCP stdio protocol pipes).
-        result = run_git(anchor, ["rev-parse", "--short", "HEAD"], timeout=_PROBE_TIMEOUT_SECONDS)
+        result = run_git(
+            anchor,
+            ["rev-parse", "--short", "HEAD"],
+            GitRunnerOptions(timeout=_PROBE_TIMEOUT_SECONDS),
+        )
         if result.returncode == 0:
             head = result.stdout.strip()
             return head or None
@@ -125,7 +129,11 @@ def _git_worktree_dirty(anchor: Path) -> bool | None:
     the absent marker a false verified-pristine meaning.
     """
     with contextlib.suppress(Exception):
-        result = run_git(anchor, ["status", "--porcelain"], timeout=_PROBE_TIMEOUT_SECONDS)
+        result = run_git(
+            anchor,
+            ["status", "--porcelain"],
+            GitRunnerOptions(timeout=_PROBE_TIMEOUT_SECONDS),
+        )
         if result.returncode == 0:
             return bool(result.stdout.strip())
     return None  # unprovable: fail OPEN to unknown, not a fabricated clean tree

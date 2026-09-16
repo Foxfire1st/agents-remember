@@ -8,7 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.base import ToolResponse
 from agents_remember.models.closeout.projection import (
-    MAX_CLOSEOUT_CANDIDATES,
     MAX_CLOSEOUT_SHORT_TEXT,
     MAX_CLOSEOUT_SOURCE_PROBLEMS,
     MAX_CLOSEOUT_TEXT,
@@ -54,9 +53,7 @@ class CloseoutQueueResponse(ToolResponse):
     sourceProblems: list[ProjectionSourceProblem] = Field(
         default_factory=list, max_length=MAX_CLOSEOUT_SOURCE_PROBLEMS
     )
-    members: list[CloseoutProjectionMember] = Field(
-        default_factory=list, max_length=MAX_CLOSEOUT_CANDIDATES
-    )
+    members: list[CloseoutProjectionMember] = Field(default_factory=list)
     firstReadyGenerationId: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     nextAction: str | None = Field(default=None, max_length=MAX_CLOSEOUT_TEXT)
     updatedAt: str = Field(max_length=MAX_CLOSEOUT_SHORT_TEXT)

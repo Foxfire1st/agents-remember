@@ -1,13 +1,12 @@
-"""Direct landing: code-commit verification + memory commit + ledger row.
+"""Direct landing: exact code-commit verification and memory content publication.
 
 The direct landing is the branch-addressed counterpart of the worktree closeout
 commit phase for sanctioned direct execution. Where the worktree path stages a
 leaf worktree candidate, this operation binds the task-root series contract and
 verifies the exact code commit on the series branch, then commits external-
-memory content and prepends the code-to-memory ledger row with the same ledger
-semantics as the worktree path. Input is normalized before the integration
+memory content with code attribution. Input is normalized before the integration
 authority lock. Apply records a durable direct-landing generation before the
-first memory or ledger mutation.
+memory content commit.
 
 This is specifically the delivery route for a leaf implemented without its own
 worktree enclosure. It is not master/series closeout and it is not the ordinary
@@ -18,22 +17,20 @@ their contract kind is ``series``.
 The gate stays strictly pre-commit: pass the staged ``candidate_tree`` that the
 owner already gated through the Dagger module's ``--source``/``--repository-bundle``
 contract, and the landing verifies the branch HEAD tree equals it before any
-memory or ledger commit. Commit-then-gate is the accepted-risk exception only
+memory commit. Commit-then-gate is the accepted-risk exception only
 where the developer rules it.
 
 The operation is policy-gated (``directExecutionEnabled``) and deliberately
 synchronous: direct mode does not use the ``start_or_observe_operation`` detached
 worker. The lane lock serializes execution; the canonical lifecycle journal owns
-crash recovery across memory and ledger outputs.
+crash recovery for the memory output.
 """
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
-from pathlib import Path
 
-from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
+from agents_remember.kernel.memory_cache import prepare_memory_cache
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.closeout.input import CloseoutCorrectedCall, EffectiveCloseoutInput
 from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
@@ -98,7 +95,6 @@ class DirectLandingRequest:
     contract_path: str
     code_commit: str
     memory_commit_message: str | None = None
-    ledger_commit_message: str | None = None
     intent_note: str = ""
     candidate_tree: str | None = None
     dry_run: bool = False
@@ -165,7 +161,6 @@ def _direct_landing_after_policy(
         raw_closeout_messages(
             code=None,
             memory=request.memory_commit_message,
-            ledger=request.ledger_commit_message,
         ),
         route="direct-landing",
         corrected_call=CloseoutCorrectedCall(
@@ -260,14 +255,13 @@ def _verify_code_commit(contract, code_commit: str, candidate_tree: str | None) 
 
 
 def _memory_facts(contract) -> dict[str, object]:
-    """Read the external-memory repository and ledger facts for the landing."""
+    """Read the external-memory repository and ref facts for the landing."""
     if contract.memory_mode != "external":
         return {"memoryMode": contract.memory_mode}
-    if contract.memory_repo_path is None or contract.ledger_path is None:
+    if contract.memory_repo_path is None:
         raise DirectLandingError(
             "direct-landing-memory-authority-missing",
-            "external-memory direct landing requires the configured memory "
-            "repository and ledger path",
+            "external-memory direct landing requires the configured memory repository",
         )
     try:
         memory_head = branch_commit(contract.memory_repo_path, contract.memory_work_branch)
@@ -283,12 +277,10 @@ def _memory_facts(contract) -> dict[str, object]:
                 observed={"state": "unreadable"},
             ),
         ) from exc
-    _load_direct_ledger(contract.ledger_path)
     return {
         "memoryMode": "external",
         "memoryBranch": contract.memory_work_branch,
         "memoryHead": memory_head,
-        "ledgerParsed": True,
     }
 
 
@@ -304,12 +296,11 @@ def _direct_landing_preview(
         "ok": True,
         "operation": "direct_landing",
         "state": "would-land",
-        "summary": "Direct landing preview: code commit verified; memory and ledger "
-        "commits would be created.",
+        "summary": "Direct landing preview: code commit verified; memory content "
+        "would be published or reused.",
         "contractPath": contract.contract_path.as_posix(),
         "codeCommit": code_commit,
         "memoryContentCommit": "",
-        "ledgerCommit": "",
         "dryRun": True,
         "memory": memory,
         "effectiveInput": effective_input.model_dump(mode="json"),
@@ -341,9 +332,12 @@ def _direct_memory_admission_snapshot(contract: WorktreeContract):
             observed={"branch": observed_branch},
         )
     try:
+        if require_git(memory_repo, ["status", "--porcelain", "--", ".", ":(exclude)memory.md"]):
+            prepare_memory_cache(memory_repo)
         return git_mutation_snapshot(
             memory_repo,
             contract.worktree_group / "reports" / ".direct-admission.index",
+            memory_cache=True,
         )
     except (OSError, RuntimeError) as exc:
         raise DirectLandingError(
@@ -369,14 +363,12 @@ def _start_or_observe_direct_landing(
     if contract.memory_mode != "external":
         raise DirectLandingError(
             "direct-landing-memory-required",
-            "direct landing currently requires external memory so the ledger row "
-            "has a real mapping to commit; internal/disabled memory has no ledger",
+            "direct landing currently requires an external memory repository",
         )
-    if contract.memory_repo_path is None or contract.ledger_path is None:
+    if contract.memory_repo_path is None:
         raise DirectLandingError(
             "direct-landing-memory-authority-missing",
-            "external-memory direct landing requires the configured memory "
-            "repository and ledger path",
+            "external-memory direct landing requires the configured memory repository",
         )
     candidate_tree = (request.candidate_tree or "").strip()
     if not candidate_tree:
@@ -437,12 +429,10 @@ def _prepare_direct_landing_candidate(
     contract = identity.contract
     request = identity.request
     memory_repo = contract.memory_repo_path
-    assert memory_repo is not None and contract.ledger_path is not None
+    assert memory_repo is not None
     candidate_tree = identity.candidate_tree
     code_tree = _verify_code_commit(contract, identity.code_commit, candidate_tree)
     memory_before = _direct_memory_admission_snapshot(contract)
-    _load_direct_ledger(contract.ledger_path)
-    ledger_text = _read_direct_ledger_text(contract.ledger_path)
     operation_input = DirectLandingOperationInput(
         configPath=config.config_path.as_posix(),
         contractPath=contract.contract_path.as_posix(),
@@ -456,9 +446,6 @@ def _prepare_direct_landing_candidate(
         memoryBranch=contract.memory_work_branch,
         memoryRef=memory_before.headRef,
         memoryBefore=memory_before,
-        ledgerPath=contract.ledger_path.resolve().as_posix(),
-        ledgerBeforeText=ledger_text,
-        ledgerBeforeSha256=_text_sha256(ledger_text),
     )
     candidate = lifecycle_operation_candidate(
         LifecycleOperationCandidateBinding(
@@ -527,40 +514,6 @@ def _direct_landing_observation(
     }
 
 
-def _load_direct_ledger(path: Path):
-    try:
-        return load_ledger(path)
-    except (LedgerError, OSError) as exc:
-        raise DirectLandingError(
-            "direct-landing-ledger-invalid",
-            "direct landing cannot parse the accepted ledger",
-            observed=public_failure_evidence(
-                stage="direct-ledger-read",
-                side="ledger",
-                name=path.name,
-                error_type=type(exc).__name__,
-                observed={"state": "unreadable"},
-            ),
-        ) from exc
-
-
-def _read_direct_ledger_text(path: Path) -> str:
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise DirectLandingError(
-            "direct-landing-ledger-unreadable",
-            "direct landing cannot read the accepted ledger bytes",
-            observed=public_failure_evidence(
-                stage="direct-ledger-read",
-                side="ledger",
-                name=path.name,
-                error_type=type(exc).__name__,
-                observed={"state": "unreadable"},
-            ),
-        ) from exc
-
-
 def _gate_policy_snapshot(config: McpRuntimeConfig) -> list[GatePolicyRuleSnapshot]:
     return [
         GatePolicyRuleSnapshot(
@@ -570,7 +523,3 @@ def _gate_policy_snapshot(config: McpRuntimeConfig) -> list[GatePolicyRuleSnapsh
         )
         for rule in config.orchestration.gate_policy.rules
     ]
-
-
-def _text_sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()

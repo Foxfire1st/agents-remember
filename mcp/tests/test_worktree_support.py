@@ -4,7 +4,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from argparse import Namespace
 from contextlib import (
     contextmanager,
 )
@@ -26,8 +25,6 @@ from agents_remember.kernel import filesystem
 from agents_remember.kernel.memory_ledger import (
     create_initial_ledger,
     load_ledger,
-    parse_ledger_text,
-    prepend_mapping,
     write_ledger,
 )
 from agents_remember.memory import baseline as adopt_baseline
@@ -58,7 +55,6 @@ from agents_remember.worktrees.worktree_contract import (
     default_series_contract,
     write_contract,
 )
-from closeout_input_test_support import MutationEvidenceRecorder
 from curator_coherence_test_support import (
     write_curator_evidence,
     write_curator_task_topology,
@@ -363,17 +359,6 @@ def commit_file(repo: Path, path: str, content: str, message: str) -> str:
     git(repo, "add", path)
     git(repo, "commit", "-m", message)
     return git(repo, "rev-parse", "HEAD")
-
-
-def commit_memory_ledger(
-    memory_repo: Path, code_commit: str, memory_content_commit: str, message: str
-) -> str:
-    ledger_path = memory_repo / "memory.md"
-    ledger = parse_ledger_text(ledger_path.read_text(encoding="utf-8"))
-    write_ledger(ledger_path, prepend_mapping(ledger, code_commit, memory_content_commit))
-    git(memory_repo, "add", "memory.md")
-    git(memory_repo, "commit", "-m", message)
-    return git(memory_repo, "rev-parse", "HEAD")
 
 
 def initialized_memory_repo(
@@ -720,114 +705,6 @@ def long_path_tempdir():
         shutil.rmtree(filesystem.extended_path(path), ignore_errors=True)
 
 
-def closed_external_contract_fixture(
-    root: Path, code_path: str = "feature.txt", code_content: str = "feature\n"
-):
-    code_repo = root / "repo-a"
-    init_repo(code_repo, "main")
-    install_fixture_profile(code_repo, "repo-a")
-    git(code_repo, "add", "-A")
-    git(code_repo, "commit", "-m", "Add repository certification profile")
-    code_base = git(code_repo, "rev-parse", "HEAD")
-    memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
-    memory_seed = init_repo(memory_repo, "main")
-    write_ledger(memory_repo / "memory.md", create_initial_ledger("repo-a", code_base, memory_seed))
-    git(memory_repo, "add", "memory.md")
-    git(memory_repo, "commit", "-m", "Add memory ledger")
-    memory_base = git(memory_repo, "rev-parse", "HEAD")
-    parent, code_master, memory_master = _series_parent_fixture(
-        root,
-        task_name="Integrate Thing",
-        code_repo=code_repo,
-        memory_repo=memory_repo,
-    )
-    contract = default_contract(
-        ContractTask(
-            name="Integrate Thing",
-            repo_name="repo-a",
-            coordination_root=root / "ar-coordination",
-            workflow_kind="chat-task",
-            memory_mode="external",
-        ),
-        leaf=LeafIdentity(worktree_name="integrate-thing", lifecycle_id="LC-INTEGRATE-THING"),
-        code=RepoBranchPlan(
-            repo_path=code_master,
-            source_branch=parent.code_work_branch,
-            work_branch="ar/integrate-thing-leaf",
-            base_commit=code_base,
-        ),
-        memory=RepoBranchPlan(
-            repo_path=memory_master,
-            source_branch=parent.memory_work_branch,
-            work_branch="ar/integrate-thing-leaf",
-            base_commit=memory_base,
-        ),
-    )
-    assert contract.memory_worktree is not None
-    git(
-        code_master,
-        "worktree",
-        "add",
-        "-b",
-        contract.code_work_branch,
-        str(contract.code_worktree),
-        parent.code_work_branch,
-    )
-    git(
-        memory_master,
-        "worktree",
-        "add",
-        "-b",
-        contract.memory_work_branch,
-        str(contract.memory_worktree),
-        parent.memory_work_branch,
-    )
-    code_commit = commit_file(contract.code_worktree, code_path, code_content, "Add feature")
-    memory_content_commit = commit_file(
-        contract.memory_worktree, "onboarding/feature.txt.md", "# feature\n", "Document feature"
-    )
-    ledger_commit = commit_memory_ledger(
-        contract.memory_worktree, code_commit, memory_content_commit, "Sync ledger"
-    )
-    closed = replace(
-        contract,
-        parent_contract_path=parent.contract_path,
-        human_review_status="approved",
-        approved_for_commit=True,
-        closeout_status="completed",
-        code_commit=code_commit,
-        memory_content_commit=memory_content_commit,
-        ledger_commit=ledger_commit,
-    )
-    write_contract(closed.contract_path, closed)
-    write_passing_route_review(closed)
-    return closed
-
-
-def closeout_args(contract, *, dry_run: bool = False) -> Namespace:
-    return Namespace(
-        contract_path=contract.contract_path,
-        certification_profile=Path("mcp/certification-profile-v1.json"),
-        approved=not dry_run,
-        approval_note="" if dry_run else "developer approved commit preview",
-        code_commit_message="Add feature",
-        memory_commit_message="Document feature",
-        ledger_commit_message="Sync ledger",
-        dry_run=dry_run,
-        operation_progress=None if dry_run else MutationEvidenceRecorder(),
-    )
-
-
-def integrate_args(contract, *, dry_run: bool = False) -> Namespace:
-    return Namespace(
-        contract_path=contract.contract_path,
-        approved=not dry_run,
-        strategy="ff-only",
-        ledger_commit_message="",
-        dry_run=dry_run,
-    )
-
-
 class WorktreeSupportTests(unittest.TestCase):
     def _external_memory_skeleton(self, root: Path) -> tuple[Path, Path]:
         """Build an external-memory code+memory skeleton; return (code_repo, coordination_root)."""
@@ -870,7 +747,7 @@ class WorktreeSupportTests(unittest.TestCase):
         return contract
 
     def _unmapped_external_contract(self, root: Path):
-        """A contract whose code base commit is NOT in the memory ledger -> the missing-mapping block."""
+        """A historical-cache fixture whose code base has no cached mapping."""
         code_repo = root / "repo-a"
         c1 = init_repo(code_repo, "main")
         # A code-only commit on top: a new SHA the ledger has never seen (the F-R scenario).
@@ -878,8 +755,8 @@ class WorktreeSupportTests(unittest.TestCase):
         self.assertNotEqual(unmapped, c1)
         memory_repo = root / "ar-coordination" / "memory-repos" / "ar-repo-a"
         memory_head = initialized_memory_repo(memory_repo, "repo-a", "main", "main", c1)
-        # The ledger's memory CONTENT tip (the README commit init_repo made) -- distinct from the
-        # ledger-commit HEAD; reconciliation maps the unmapped code base to THIS, leaving it unchanged.
+        # Retain the older cached content identity separately from the actual branch HEAD.
+        # The cache intentionally does not attest the newer code commit.
         content_commit = load_ledger(memory_repo / "memory.md").last_memory_content_commit
         contract = default_contract(
             ContractTask(

@@ -79,6 +79,7 @@ from agents_remember.worktrees.route_review import (
 from agents_remember.worktrees.series_closeout import (
     publish_closeout_under_authority,
     refuse_series_workbench_commit,
+    require_closeout_publication_authority,
 )
 from agents_remember.worktrees.task_leaf_binding import leaf_enclosure_binding_refusal
 from agents_remember.worktrees.worktree_contract import (
@@ -141,9 +142,19 @@ def _refresh_plans_have_work(
     )
 
 
-def _completed_integration_source_heads(contract, base: str, integrated: str) -> set[str]:
+def _landed_source_heads(contract, base: str, integrated: str) -> set[str]:
+    """The source heads this contract's own landing may legitimately have produced.
+
+    Both a finished integration and a checkpoint move the recorded source branch forward and
+    record the commit they moved it to, so both make that commit an expected head. Keying only
+    on ``completed`` refused a checkpointed series on its next closeout with "source branch
+    moved since task start", describing the checkpoint's own recorded landing as foreign
+    movement. A source that genuinely moved elsewhere is still refused, because it matches
+    neither head.
+    """
+
     expected = {base}
-    if contract.integration_status == "completed" and integrated:
+    if contract.integration_status in {"completed", "checkpointed"} and integrated:
         expected.add(integrated)
     return expected
 
@@ -222,8 +233,16 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
 
 
 def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
-    """Answer what closeout would do, having done none of it."""
+    """Answer what closeout would do, having done none of it.
+
+    It refuses on the SAME eligibility the apply refuses on, read from
+    :func:`require_closeout_publication_authority`: the dry run used to plan a closeout the apply
+    then rejected on every completion blocker, which is exactly how a partial master's landing came to
+    look available when it was not. A leaf owes nothing there, so no leaf preview changes.
+    """
+
     refuse_series_workbench_commit(contract)
+    require_closeout_publication_authority(contract)
     code_dirty = contract.kind == "leaf" and worktree_dirty(contract.code_worktree)
     memory_dirty = (
         contract.kind == "leaf"
@@ -254,7 +273,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
         "approval_question": (
             "Approve recording the exact existing series commits in the closeout contract?"
             if contract.kind == "series"
-            else "Approve creating the code, memory, and ledger commits with these messages?"
+            else "Approve creating the code and memory commits with these messages?"
         ),
         "closeout_order": closeout_order(contract),
         "changed_code_paths": _bounded_paths(changed_paths),
@@ -275,7 +294,7 @@ def closeout_preview_payload(contract, args: WorktreeArgs) -> dict[str, object]:
 
 def _validate_closeout_source_heads(contract) -> None:
     current_code_source = branch_commit(contract.code_repo_path, contract.code_source_branch)
-    expected_code_heads = _completed_integration_source_heads(
+    expected_code_heads = _landed_source_heads(
         contract, contract.code_base_commit, contract.integrated_code_commit
     )
     if current_code_source not in expected_code_heads:
@@ -292,8 +311,8 @@ def _validate_closeout_source_heads(contract) -> None:
         current_memory_source = branch_commit(
             contract.memory_repo_path, contract.memory_source_branch
         )
-        expected_memory_heads = _completed_integration_source_heads(
-            contract, contract.memory_base_commit, contract.integrated_ledger_commit
+        expected_memory_heads = _landed_source_heads(
+            contract, contract.memory_base_commit, contract.integrated_memory_content_commit
         )
         if current_memory_source not in expected_memory_heads:
             raise RuntimeError(
@@ -457,13 +476,11 @@ def _amended_closeout_contract(
             commit_approval_note=approval_note,
             code_commit=code_commit,
             memory_content_commit=memory.memory_commit,
-            ledger_commit=memory.ledger_commit,
             integration_strategy="" if reopened else contract.integration_strategy,
             integrated_code_commit="" if reopened else contract.integrated_code_commit,
             integrated_memory_content_commit=""
             if reopened
             else contract.integrated_memory_content_commit,
-            integrated_ledger_commit="" if reopened else contract.integrated_ledger_commit,
         ),
         # The vocabulary cells go through the typed record; `replace` above carries only the
         # free-text commits and notes, which have no vocabulary to check them against.
@@ -487,16 +504,12 @@ class _CloseoutResultFacts:
 def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeCommandResult | None:
     """Finalize an already-committed detached closeout exactly once."""
     commits = args.recovery_commits
-    if commits is None or (
-        contract.memory_mode == "external"
-        and (not commits.memoryContentCommit or not commits.ledgerCommit)
-    ):
+    if commits is None or (contract.memory_mode == "external" and not commits.memoryContentCommit):
         return None
     if contract.closeout_status == "completed":
         if (
             contract.code_commit != commits.codeCommit
             or contract.memory_content_commit != commits.memoryContentCommit
-            or contract.ledger_commit != commits.ledgerCommit
         ):
             raise RuntimeError(
                 "completed closeout contract does not match its recorded recovery commits"
@@ -525,7 +538,6 @@ def _recover_closeout_finalization(contract, args: WorktreeArgs) -> WorktreeComm
             current,
             code_commit=commits.codeCommit,
             memory_content_commit=commits.memoryContentCommit,
-            ledger_commit=commits.ledgerCommit,
         )
         updated = _amended_closeout_contract(
             current,
@@ -567,7 +579,6 @@ def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, An
         "summary": "Closeout completed; integrate the task branches back into their source branches.",
         "code_commit": facts.code_commit,
         "memory_content_commit": memory.memory_commit,
-        "ledger_commit": memory.ledger_commit,
         "refreshed_onboarding": _bounded_paths(
             [item["source_path"] for item in memory.refreshed_onboarding]
         ),
@@ -667,7 +678,6 @@ def _closeout_commit_phase(
         contract,
         code_commit=code_commit,
         memory_content_commit=memory.memory_commit,
-        ledger_commit=memory.ledger_commit,
     )
     return _CloseoutCommitPhase(code_commit, memory, integration_reopen, gate_guard)
 
@@ -790,7 +800,6 @@ def _publish_closeout_candidate(
             recovery_commits={
                 "codeCommit": committed.code_commit,
                 "memoryContentCommit": committed.memory.memory_commit,
-                "ledgerCommit": committed.memory.ledger_commit,
             },
             closeout_finalized_contract_sha256=closeout_contract_sha256(updated),
         )

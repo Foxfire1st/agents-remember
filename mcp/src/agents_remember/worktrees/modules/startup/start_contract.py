@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agents_remember.controlplane.durable_store import StoreOwnership, exclusive_access
 from agents_remember.kernel.atomic_write import atomic_write_text
+from agents_remember.kernel.git_command import GitRunnerOptions
 from agents_remember.tasks import TaskDocument, read_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.tasks.leaf_doc import (
@@ -21,7 +22,6 @@ from agents_remember.worktrees.activation.atomic_series_activation_transaction i
     atomic_series_activation_input_refusal,
     reconcile_selected_series_under_authority,
 )
-from agents_remember.worktrees.atomic_series_seal import require_series_accepting_leaves
 from agents_remember.worktrees.integration.integration_branch_authority import (
     ProposedWorkBranches,
     integration_surfaces,
@@ -227,10 +227,10 @@ def ensure_master_series_contract(
     entry points remain one operation rather than competing bootstrap implementations.
 
     Contract presence proves durable work exists; it does not own scheduling.  Once
-    this operation has recovered or created the requested contract, it selects that
-    master for the exact protected source pair, marks it reconciling (logically
-    pausing the previous selection), syncs its pinned source pair, and publishes it
-    active before returning implementation authority.
+    this operation has recovered or created the requested contract, it publishes that
+    contract's own activation as reconciling (no other master's record is touched),
+    syncs its pinned source pair, and publishes it active before returning
+    implementation authority.
     """
 
     _require_commanded_atomic_master(spec)
@@ -243,8 +243,6 @@ def ensure_master_series_contract(
                 error,
                 operation=leaf_admission_operation or "worktree_start",
             )
-        if leaf_admission_operation is not None:
-            require_series_accepting_leaves(candidate, operation=leaf_admission_operation)
         return candidate
 
     # Observe the journal -> task-bound-contract handoff under the same per-master
@@ -276,7 +274,7 @@ def ensure_master_series_contract(
     # it can never enter rollback and delete the winner's contract.
     _require_commanded_atomic_master(spec)
     # Store locks never nest: finish the per-master bootstrap journal transaction
-    # before reading or writing the source-pair activation store.
+    # before reading or writing the per-contract activation store.
     with exclusive_access(
         _master_series_bootstrap_lock_target(spec), MASTER_SERIES_BOOTSTRAP_OWNERSHIP
     ):
@@ -298,8 +296,6 @@ def ensure_master_series_contract(
                 contract = _new_master_series_contract(spec)
                 integration_surfaces(contract)
                 _publish_master_series_contract(spec, contract)
-    if leaf_admission_operation is not None:
-        require_series_accepting_leaves(contract, operation=leaf_admission_operation)
     return reconcile_selected_series_under_authority(
         contract,
         activation_args=activation_args,
@@ -642,15 +638,17 @@ def _require_bootstrap_ref(
     result = run_git(
         ref.repository,
         ["update-ref", "--stdin"],
-        input_text="\n".join(
-            [
-                "start",
-                f"verify refs/heads/{ref.source_branch} {ref.source_commit}",
-                f"create refs/heads/{ref.branch} {ref.commit}",
-                "prepare",
-                "commit",
-                "",
-            ]
+        GitRunnerOptions(
+            input_text="\n".join(
+                [
+                    "start",
+                    f"verify refs/heads/{ref.source_branch} {ref.source_commit}",
+                    f"create refs/heads/{ref.branch} {ref.commit}",
+                    "prepare",
+                    "commit",
+                    "",
+                ]
+            )
         ),
     )
     if result.returncode != 0:
@@ -798,9 +796,6 @@ def _parent_series_contract(
         activation_args=args,
         leaf_admission_operation="atomic leaf start",
     )
-    if isinstance(series, WorktreeCommandResult):
-        return series
-    require_series_accepting_leaves(series, operation="atomic leaf start")
     return series
 
 

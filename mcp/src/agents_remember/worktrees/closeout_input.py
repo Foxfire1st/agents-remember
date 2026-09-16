@@ -31,7 +31,6 @@ from agents_remember.worktrees.worktree_contract import WorktreeContract
 _PUBLIC_FIELDS: dict[CloseoutCommitLegName, CloseoutPublicMessageField] = {
     "code": "code_commit_message",
     "memory": "memory_commit_message",
-    "ledger": "ledger_commit_message",
 }
 
 
@@ -97,18 +96,14 @@ def resolve_closeout_plan(
 
     if route == "worktree" and contract_kind == "series":
         memory = _not_applicable("series closeout records existing memory content")
-        ledger = _not_applicable("series closeout verifies an existing ledger mapping")
     elif contract.memory_mode == "external":
         if route == "direct-landing":
             memory = _enabled("direct landing can create external-memory content")
-            ledger = _enabled("direct landing can create a ledger mapping")
         else:
             memory = _enabled("external-memory refresh can create content")
-            ledger = _enabled("external-memory closeout can create a ledger mapping")
     else:
         reason = f"memory mode {contract.memory_mode} has no external-memory commit"
         memory = _not_applicable(reason)
-        ledger = _not_applicable(reason)
 
     return ResolvedCloseoutPlan(
         route=route,
@@ -116,7 +111,6 @@ def resolve_closeout_plan(
         memoryMode=contract.memory_mode,
         code=code,
         memory=memory,
-        ledger=ledger,
     )
 
 
@@ -136,7 +130,7 @@ def normalize_closeout_input(
         raise _plan_mismatch_error(plan, corrected_call=corrected_call) from None
     invalid: list[CloseoutInvalidField] = []
     normalized: dict[str, EnabledCloseoutLeg | NotApplicableCloseoutLeg] = {}
-    for leg in ("code", "memory", "ledger"):
+    for leg in ("code", "memory"):
         leg_name = leg  # Preserve the Literal narrowing for the typed field map.
         leg_plan = getattr(plan, leg_name)
         supplied = getattr(messages, leg_name)
@@ -158,7 +152,7 @@ def normalize_closeout_input(
 
     if invalid:
         arguments = dict(corrected_call.arguments)
-        for leg in ("code", "memory", "ledger"):
+        for leg in ("code", "memory"):
             if getattr(plan, leg).state == "enabled":
                 arguments[_PUBLIC_FIELDS[leg]] = f"<nonblank {leg} commit message>"
         raise CloseoutInputError(
@@ -173,7 +167,6 @@ def normalize_closeout_input(
         memoryMode=plan.memoryMode,
         code=normalized["code"],
         memory=normalized["memory"],
-        ledger=normalized["ledger"],
     )
 
 
@@ -230,10 +223,6 @@ def resolved_plan_from_effective_input(
             state=effective_input.memory.state,
             reason=effective_input.memory.reason,
         ),
-        ledger=CloseoutLegPlan(
-            state=effective_input.ledger.state,
-            reason=effective_input.ledger.reason,
-        ),
     )
 
 
@@ -244,7 +233,7 @@ def candidate_drift_error(
 ) -> CloseoutInputError:
     """Return the canonical typed refusal for an unstable admission candidate."""
     arguments = dict(corrected_call.arguments)
-    for leg in ("code", "memory", "ledger"):
+    for leg in ("code", "memory"):
         if getattr(plan, leg).state == "enabled":
             arguments[_PUBLIC_FIELDS[leg]] = f"<nonblank {leg} commit message>"
     return CloseoutInputError(
@@ -314,10 +303,9 @@ def raw_closeout_messages(
     *,
     code: str | None,
     memory: str | None,
-    ledger: str | None,
 ) -> CloseoutMessageInput:
     """Name the raw boundary explicitly at callers that still receive flat fields."""
-    return CloseoutMessageInput(code=code, memory=memory, ledger=ledger)
+    return CloseoutMessageInput(code=code, memory=memory)
 
 
 def corrected_closeout_arguments(contract_path: str, **values: Any) -> dict[str, object]:
@@ -328,7 +316,7 @@ def corrected_closeout_arguments(contract_path: str, **values: Any) -> dict[str,
 def effective_message_arguments(effective_input: EffectiveCloseoutInput) -> dict[str, str]:
     """Render only enabled messages for public next-call guidance."""
     arguments: dict[str, str] = {}
-    for leg in ("code", "memory", "ledger"):
+    for leg in ("code", "memory"):
         if effective_input.enabled(leg):
             arguments[_PUBLIC_FIELDS[leg]] = effective_input.message_for(leg)
     return arguments

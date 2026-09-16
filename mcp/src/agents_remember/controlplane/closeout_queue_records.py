@@ -21,7 +21,7 @@ class CloseoutProjectionBuild(DurableRecord):
     sprintTaskDocumentRef: TaskDocumentRef
     sourceFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     sourceClassification: ProjectionSourceClassification
-    members: list[CloseoutProjectionMember] = Field(default_factory=list, max_length=256)
+    members: list[CloseoutProjectionMember] = Field(default_factory=list)
     builtAt: str = Field(min_length=1, max_length=256)
 
     @model_validator(mode="after")

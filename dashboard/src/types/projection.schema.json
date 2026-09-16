@@ -635,7 +635,6 @@
           "items": {
             "$ref": "#/$defs/CloseoutCandidateNode"
           },
-          "maxItems": 256,
           "title": "Members",
           "type": "array"
         },
@@ -1982,7 +1981,6 @@
             "code-commit",
             "memory-refresh",
             "memory-commit",
-            "ledger-commit",
             "integration-replay",
             "integration-quality",
             "source-merge",
@@ -1991,7 +1989,6 @@
             "termination-required",
             "direct-preflight",
             "direct-memory-commit",
-            "direct-ledger-commit",
             "direct-terminal-publication",
             "completed",
             "failed",
@@ -4017,7 +4014,8 @@
             "landed",
             "ready",
             "waiting",
-            "in-flight"
+            "in-flight",
+            "abandoned"
           ],
           "title": "Frontierstate",
           "type": "string"

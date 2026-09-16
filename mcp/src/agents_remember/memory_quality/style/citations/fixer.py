@@ -27,6 +27,7 @@ from agents_remember.memory_quality.style.citations import (
     model,
     old_form,
     prose,
+    provenance,
     range_resolution,
     repair,
     source_index,
@@ -206,6 +207,17 @@ class Walk:
     sources: Sources
     documents: Documents
     result: Result
+    histories: provenance.Histories = field(init=False)
+    origins: dict[Path, repair.Continuity] = field(default_factory=dict, init=False)
+
+    def __post_init__(self) -> None:
+        self.histories = provenance.Histories(self.trees.code_root, self.trees.memory_root)
+
+    def continuity(self, document: Path) -> repair.Continuity:
+        """This document's verification provenance, resolved at most once per run."""
+        if document not in self.origins:
+            self.origins[document] = repair.continuity_for(document, self.trees, self.histories)
+        return self.origins[document]
 
 
 def candidates(
@@ -296,7 +308,11 @@ def fix_onboarding_root(
         if staging.stamp is None:
             staging.stamp = deterministic_projection.now_utc()
         for one in found:
-            outcome = repair.plan(one.claim, trees, sources, seen) if one.repairing else None
+            outcome = (
+                repair.plan(one.claim, trees, sources, seen, walk.continuity(one.document))
+                if one.repairing
+                else None
+            )
             _decide(one, outcome, walk, staging, onboarding_root)
         _publish(staging, walk, dry_run=dry_run)
         result.remaining = _postcheck(onboarding_root, code_repository_root, walk, selected, only)
@@ -488,7 +504,9 @@ def _scoped_citation(
         unchecked_spans=0,
     )
     unseen = {anchor: symbol_index.Sightings() for anchor in anchors}
-    outcome = repair.plan(claim, run.trees, run.sources, unseen)
+    # The empty sightings mean this citation can never be relocated, so it carries no
+    # continuity authority and reaches no cross-file decision to prove.
+    outcome = repair.plan(claim, run.trees, run.sources, unseen, None)
     if isinstance(outcome, repair.Decline):
         return citation.text, Refused.from_repair(one.relative, one.claim.line, outcome)
     generated = "; ".join(outcome.sources)

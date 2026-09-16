@@ -11,6 +11,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
     task_doc_tool,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.tasks import TaskDocument, write_task_doc
 from test_task_document import _config
 
 
@@ -19,6 +20,23 @@ def _target() -> TaskDocTarget:
 
 
 def _create(config: McpRuntimeConfig) -> dict[str, Any]:
+    # The review API is exercised on a leaf, so the task root needs its master: the authoring
+    # plane refuses a leaf document whose series has no master document at all.
+    write_task_doc(
+        config.coordination_root / "tasks" / "agents-remember" / "review-api",
+        TaskDocument.model_validate(
+            {
+                "id": "review-series",
+                "slug": "task",
+                "title": "Review Series",
+                "kind": "master",
+                "repo": "agents-remember",
+                "type": "Master (Code)",
+                "createdAt": "2026-01-01T00:00",
+                "sections": [{"kind": "subTasks", "heading": "Sub-tasks"}],
+            }
+        ),
+    )
     return task_doc_tool(
         config,
         TaskDocTarget(repo_id="agents-remember", task_name="review-api"),

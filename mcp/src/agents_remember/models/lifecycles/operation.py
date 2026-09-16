@@ -17,7 +17,6 @@ from agents_remember.models.lifecycles.certification import (
     validate_certification_owner,
 )
 from agents_remember.models.lifecycles.direct_landing import (
-    DirectLandingLedgerIntent,
     DirectLandingOperationInput,
 )
 from agents_remember.models.lifecycles.door import DoorPublicationEvidence
@@ -71,7 +70,6 @@ class LifecycleOperationRecoveryCommits(BaseModel):
 
     codeCommit: str = Field(pattern=r"^[0-9a-f]{40,64}$")
     memoryContentCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
-    ledgerCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
 
 
 class OrganizationalTaskPublicationIntent(BaseModel):
@@ -164,7 +162,6 @@ class IntegrationConflictTransaction(BaseModel):
     memorySourceRef: str = Field(default="", pattern=r"^$|^refs/heads/.+$", max_length=4096)
     memorySourceCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     memoryContentCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
-    ledgerCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     codeWorktree: str = Field(min_length=1, max_length=4096)
     memoryWorktree: str = Field(default="", max_length=4096)
     resolutionOwner: Literal["leaf-closeout"] = "leaf-closeout"
@@ -186,7 +183,6 @@ class IntegrationOperationAuthority(BaseModel):
     memorySourceRef: str = Field(default="", pattern=r"^$|^refs/heads/.+$", max_length=4096)
     memorySourceCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     memoryContentCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
-    ledgerCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     conflictTransaction: IntegrationConflictTransaction | None = None
 
 
@@ -205,7 +201,6 @@ class OrganizationalCompletionRepairEvidence(BaseModel):
     owningMasterTaskDocument: str = Field(min_length=1, max_length=4096)
     codeCommit: str = Field(pattern=r"^[0-9a-f]{40,64}$")
     memoryContentCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
-    ledgerCommit: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     acceptedContractSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     resetContractSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -332,7 +327,6 @@ class IntegrateOperationInput(BaseModel):
     configPath: str
     contractPath: str
     strategy: IntegrateStrategy = "ff-only"
-    ledgerCommitMessage: str = ""
     gatePolicy: list[GatePolicyRuleSnapshot] = Field(default_factory=list)
     autoCompleteSeats: bool = True
 
@@ -410,7 +404,6 @@ class LifecycleOperationRecord(BaseModel):
         default_factory=list,
         max_length=256,
     )
-    directLandingLedgerIntent: DirectLandingLedgerIntent | None = None
     attempt: int = Field(default=1, ge=1)
     workerPid: int | None = Field(default=None, ge=1)
     workerLease: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
@@ -549,7 +542,6 @@ _MEANINGFUL_STATE_FIELDS: tuple[str, ...] = (
     "integrationPublication",
     "organizationalRepair",
     "doorPublication",
-    "directLandingLedgerIntent",
     "legacyMigration",
     "result",
     "failure",
@@ -621,8 +613,6 @@ def _require_altitude_authority(record: LifecycleOperationRecord) -> None:
         ),
     )
     _require_integration_certification_authority(record)
-    if record.operationKind != "direct-landing" and record.directLandingLedgerIntent is not None:
-        raise ValueError("direct landing ledger intent belongs only to direct landing")
     if record.operationKind not in {"closeout", "direct-landing"} and (
         record.doorPublication is not None or record.doorPublicationHistory
     ):
@@ -699,9 +689,7 @@ def _require_irreversible_boundary(record: LifecycleOperationRecord) -> None:
 def _expected_commit_legs(
     closeout_input: CloseoutOperationInput | DirectLandingOperationInput,
 ) -> set[str]:
-    return {
-        leg for leg in ("code", "memory", "ledger") if closeout_input.effectiveInput.enabled(leg)
-    }
+    return {leg for leg in ("code", "memory") if closeout_input.effectiveInput.enabled(leg)}
 
 
 def _require_mutation_leg_sets(record: LifecycleOperationRecord, expected_legs: set[str]) -> None:
@@ -744,7 +732,6 @@ def _require_recovery_commit_evidence(record: LifecycleOperationRecord) -> None:
     recovery_field = {
         "code": "codeCommit",
         "memory": "memoryContentCommit",
-        "ledger": "ledgerCommit",
     }
     for leg, evidence in record.mutationEvidence.items():
         _require_recovered_leg(record.recoveryCommits, recovery_field[leg], evidence)
@@ -826,27 +813,20 @@ def _require_legacy_effective_input(
         "verified-existing legacy code output",
     ):
         raise ValueError("legacy migration code leg must be typed verified-existing")
-    if not isinstance(effective.memory, EnabledCloseoutLeg) or not isinstance(
-        effective.ledger,
-        EnabledCloseoutLeg,
-    ):
-        raise ValueError("legacy migration must keep memory and ledger enabled")
+    if not isinstance(effective.memory, EnabledCloseoutLeg):
+        raise ValueError("legacy migration must keep unfinished memory content enabled")
     observed = (
         effective.memory.state,
-        effective.ledger.state,
         effective.memory.message,
-        effective.ledger.message,
         operation_input.approvalNote,
     )
     expected = (
         "enabled",
-        "enabled",
         proof.memoryCommitMessage,
-        proof.ledgerCommitMessage,
         proof.legacyApprovalNote,
     )
     if observed != expected:
-        raise ValueError("legacy migration must bind both unfinished message cells exactly")
+        raise ValueError("legacy migration must bind unfinished memory intent exactly")
 
 
 def _require_worker_authority(record: LifecycleOperationRecord) -> None:
@@ -991,7 +971,6 @@ def _require_integration_publication(record: LifecycleOperationRecord) -> None:
     if (
         commits.codeCommit != authority.codeCandidateCommit
         or commits.memoryContentCommit != authority.memoryContentCommit
-        or commits.ledgerCommit != authority.ledgerCommit
     ):
         raise ValueError("integration publication ref intent contradicts accepted authority")
     organizational = publication.organizationalCompletion

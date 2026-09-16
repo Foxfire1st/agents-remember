@@ -11,7 +11,6 @@ from agents_remember.worktrees.sync_transaction_authority import (
     authority_refs_exist,
     command_result,
     pin_authority,
-    preflight_official_pair,
     require_pinned_authority,
     require_record_contract,
     resolution_phase,
@@ -25,16 +24,16 @@ from agents_remember.worktrees.sync_transaction_authority import (
 from agents_remember.worktrees.sync_transaction_git import (
     SyncGitProofError,
     apply_parked_wip,
+    content_conflicts,
     continue_side_merge,
     drop_parked_wip,
     ensure_temporary_worktree,
+    merge_head,
     park_worktree_wip,
     require_side_checkout,
     side_branch_head,
     side_merge_completed,
     start_side_merge,
-    unmerged_paths,
-    validate_current_memory_side,
     worktree_dirty_paths,
 )
 from agents_remember.worktrees.sync_transaction_recovery import (
@@ -208,9 +207,6 @@ def _admit_and_run(
     fetch: dict[str, object],
 ) -> WorktreeCommandResult:
     code_tip, memory_tip, external = source_pair(contract)
-    stop = preflight_official_pair(contract, code_tip, memory_tip, external, fetch)
-    if stop is not None:
-        return stop
     code = side_record(contract, "code", code_tip)
     memory = side_record(contract, "memory", memory_tip) if external else None
     current = _already_current_result(
@@ -279,12 +275,12 @@ def _park_participating_wip(
         if not _side_parks_wip(side):
             continue
         assert side is not None
-        paths = worktree_dirty_paths(Path(side.worktree))
+        paths = worktree_dirty_paths(side)
         if not paths:
             continue
         try:
             stash = park_worktree_wip(
-                Path(side.worktree),
+                side,
                 message=_wip_stash_message(contract, side),
             )
         except SyncGitProofError as error:
@@ -340,6 +336,13 @@ def _already_current_result(
     memory: SyncSideRecord | None,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult | None:
+    """Report a pair whose recorded base and work branches already carry the source.
+
+    A memory branch that already descends from its source is current whatever its
+    ``memory.md`` says: the ledger is derived state, its rebuild reports the rows it
+    cannot resolve, and this surface does not keep a second copy of that judgement.
+    """
+
     bases_current = code.sourceCommit == contract.code_base_commit and (
         memory is None or memory.sourceCommit == contract.memory_base_commit
     )
@@ -348,11 +351,6 @@ def _already_current_result(
     )
     if not (bases_current and branches_current):
         return None
-    try:
-        if memory is not None:
-            validate_current_memory_side(memory)
-    except SyncGitProofError as error:
-        return command_result(2, "sync-work-branch-invalid", str(error), fetch)
     return command_result(
         0,
         "already-current",
@@ -407,12 +405,14 @@ def _preflight_participating_sides(
 def _require_parkable_worktree(side: SyncSideRecord) -> None:
     """A dirty moving side is parked; only an unsettleable index or worktree is refused."""
 
-    conflicts = unmerged_paths(Path(side.worktree))
+    conflicts = content_conflicts(side)
     if conflicts:
         raise SyncGitProofError(
             f"{side.side} sync cannot park a worktree with unmerged paths: "
             f"{', '.join(conflicts[:30])}"
         )
+    if merge_head(Path(side.worktree)) is not None:
+        raise SyncGitProofError(f"{side.side} has an active merge outside sync admission")
 
 
 def _resume_active(
@@ -557,7 +557,7 @@ def _continue_resolution(
     try:
         result_head = continue_side_merge(side)
     except SyncGitProofError as error:
-        refreshed = side.model_copy(update={"conflictFiles": unmerged_paths(Path(side.worktree))})
+        refreshed = side.model_copy(update={"conflictFiles": content_conflicts(side)})
         record = update_record(store, record, phase=record.phase, side=refreshed)
         return manual_repair_result("sync-resolution-incomplete", str(error), record, fetch)
     completed = side.model_copy(
@@ -584,7 +584,7 @@ def _continue_parked_wip_restore(
     try:
         record = settle_resolved_parked_wip(store, record, side_name, side)
     except SyncGitProofError as error:
-        refreshed = side.model_copy(update={"conflictFiles": unmerged_paths(Path(side.worktree))})
+        refreshed = side.model_copy(update={"conflictFiles": content_conflicts(side)})
         record = update_record(store, record, phase=record.phase, side=refreshed)
         return manual_repair_result("sync-resolution-incomplete", str(error), record, fetch)
     completed = side.model_copy(

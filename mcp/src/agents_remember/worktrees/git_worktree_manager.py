@@ -56,6 +56,7 @@ from agents_remember.worktrees.modules.guidance import (
 )
 from agents_remember.worktrees.modules.integrate import (
     blocked_integration_payload,
+    checkpoint_landing_result,
     integrate_result,
     validate_integrate_contract,
 )
@@ -82,6 +83,8 @@ from agents_remember.worktrees.modules.onboarding import (
     validate_onboarding_refresh_plan,
     validate_onboarding_refresh_plan_for_context,
 )
+from agents_remember.worktrees.modules.pause import pause_result
+from agents_remember.worktrees.modules.record_landing import record_landing_result
 from agents_remember.worktrees.modules.start import (
     attach_result,
     load_contract_from_args,
@@ -106,6 +109,7 @@ __all__ = [
     "branch_exists",
     "build_parser",
     "changed_worktree_paths",
+    "checkpoint_landing_result",
     "cleanup_result",
     "closeout_changed_paths",
     "closeout_preview_payload",
@@ -147,8 +151,10 @@ __all__ = [
     "onboarding_refresh_plan_for_context",
     "parse_entity_fingerprint_rows",
     "parse_json_stdout",
+    "pause_result",
     "prepare_memory_for_start",
     "prepare_providers_for_start",
+    "record_landing_result",
     "refresh_entity_fingerprints_for_context",
     "refresh_onboarding_metadata",
     "refresh_onboarding_metadata_for_context",

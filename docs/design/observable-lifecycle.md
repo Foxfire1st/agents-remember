@@ -196,14 +196,14 @@ subsystems; until then they are derivable from `tool.*`. The fleeting→persiste
 
 | Tier | Contents | Policy |
 | --- | --- | --- |
-| Durable work records | task docs, series docs, contracts, ledger rows, lifecycle skeleton needed to explain active/completed work | retained by the task/worktree lifecycle, not by transient UI interaction logs |
+| Durable work records | task docs, series docs, contracts, Git commit attribution, lifecycle skeleton needed to explain active/completed work | retained by the task/worktree lifecycle, not by transient UI interaction logs |
 | Interaction records | gates, dashboard Chat/operator-inbox entries, attention-queue gate rows | short-lived; visible rows disappear on developer response/dismiss/clear, agent pickup consumes inbox entries, and untouched rows are pruned by a 24h TTL |
 | Rolling raw | dense `tool.*`/`span.*`/heartbeats and event-river telemetry | never pruned while needed to project active work; closed/telemetry tails are bounded by an explicit cleanup window instead of growing silently forever |
-| Derived aggregates | rollups (tokens/day, events/hour, health series) | compact; retained only when they are intentionally useful after raw pruning |
+| Derived aggregates | computed ledger cache; rollups (tokens/day, events/hour, health series) | rebuild the ledger cache from memory Git history; retain rollups only when useful after raw pruning |
 
 A dormant fleeting lifecycle reaped by TTL has no persistent task/work record, so its
 whole log is **pruned** (§1.5). Approval facts that must outlive a click are copied into
-the durable work record that consumes them (for example the closeout contract/ledger
+the durable work record that consumes them (for example the closeout contract/operation
 state); the gate row itself is still interaction data.
 
 ### 2.4.1 Operator inbox storm recovery runbook
@@ -353,8 +353,12 @@ are settled when this tool is implemented.
 5. The new subsystems that define 3.0: the observer, the event store, the serving layer,
    the dashboard, and the CLI verbs `dashboard` and `gate-wait`.
 
-**Explicitly compatible:** no tool removals, renames, or parameter breaks; memory, ledger,
-and onboarding formats untouched; provider tooling untouched; storage path-rules untouched.
+**Original lifecycle-design compatibility scope:** no tool removals, renames, or parameter breaks;
+memory and onboarding formats untouched; provider tooling untouched; storage path-rules untouched.
+The later ledger transaction retirement uses two real Git outputs and retains `memory.md` as an
+ignored consumer cache computed from memory commit trailers. Cache bytes and rows are neither
+durable approval evidence nor transaction authority. Regeneration never rewrites historical
+commits; historical attribution rewrites require an explicit deployment operation.
 
 **Governance:** any change discovered during implementation to be breaking and not on this
 list returns to a design review before it lands. The single 3.0.0 version flip happens once,

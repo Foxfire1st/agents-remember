@@ -201,7 +201,6 @@ def organizational_completion_repair_evidence(
         owningMasterTaskDocument=owning_master,
         codeCommit=expected_commits[0],
         memoryContentCommit=expected_commits[1],
-        ledgerCommit=expected_commits[2],
         acceptedContractSha256=_contract_sha256(contract),
         resetContractSha256=_contract_sha256(reset),
     )
@@ -231,7 +230,6 @@ def prepare_organizational_completion_repair(
     expected_commits = (
         authority.codeCandidateCommit,
         authority.memoryContentCommit,
-        authority.ledgerCommit,
     )
     _require_matching_repair_commits(expected_commits, evidence)
     sprint_ref, candidate_ref, owning_master = _repair_binding(contract)
@@ -276,10 +274,10 @@ def _required_repair_evidence(
 
 
 def _require_matching_repair_commits(
-    expected: tuple[str, str, str],
+    expected: tuple[str, str],
     evidence: OrganizationalCompletionRepairEvidence,
 ) -> None:
-    observed = (evidence.codeCommit, evidence.memoryContentCommit, evidence.ledgerCommit)
+    observed = (evidence.codeCommit, evidence.memoryContentCommit)
     if observed != expected:
         raise CloseoutQueueError(
             "organizational-completion-repair-evidence-mismatch",
@@ -530,7 +528,6 @@ def _require_no_memory_operation_authority(authority: IntegrationOperationAuthor
             authority.memorySourceRef,
             authority.memorySourceCommit,
             authority.memoryContentCommit,
-            authority.ledgerCommit,
         )
     )
     if unexpected:
@@ -598,7 +595,7 @@ def _contract_sha256(contract: WorktreeContract) -> str:
 def _repair_commits(
     contract: WorktreeContract,
     authority: IntegrationOperationAuthority,
-) -> tuple[str, str, str]:
+) -> tuple[str, str]:
     if authority.targetKind != "sprint-super":
         raise CloseoutQueueError(
             "organizational-completion-authority-mismatch",
@@ -607,9 +604,8 @@ def _repair_commits(
     expected = (
         authority.codeCandidateCommit,
         authority.memoryContentCommit,
-        authority.ledgerCommit,
     )
-    observed = (contract.code_commit, contract.memory_content_commit, contract.ledger_commit)
+    observed = (contract.code_commit, contract.memory_content_commit)
     if observed != expected:
         raise CloseoutQueueError(
             "organizational-completion-authority-mismatch",
@@ -621,7 +617,7 @@ def _repair_commits(
 def _quality_repair_contract(
     contract: WorktreeContract,
     *,
-    expected_commits: tuple[str, str, str],
+    expected_commits: tuple[str, str],
     repair_record: LifecycleOperationRecord,
 ) -> WorktreeContract:
     _require_reopenable_contract(contract, expected_commits)
@@ -633,11 +629,9 @@ def _quality_repair_contract(
             commit_approval_note="",
             code_commit="",
             memory_content_commit="",
-            ledger_commit="",
             integration_strategy="",
             integrated_code_commit="",
             integrated_memory_content_commit="",
-            integrated_ledger_commit="",
             memory_state="",
             closeout_door=door,
         ),
@@ -651,7 +645,7 @@ def _quality_repair_contract(
 
 def _require_reopenable_contract(
     contract: WorktreeContract,
-    expected_commits: tuple[str, str, str],
+    expected_commits: tuple[str, str],
 ) -> None:
     mismatch = any(
         (
@@ -660,8 +654,7 @@ def _require_reopenable_contract(
             contract.integration_status != "not-started",
             not contract.approved_for_commit,
             not contract.code_commit,
-            (contract.code_commit, contract.memory_content_commit, contract.ledger_commit)
-            != expected_commits,
+            (contract.code_commit, contract.memory_content_commit) != expected_commits,
         )
     )
     if mismatch:

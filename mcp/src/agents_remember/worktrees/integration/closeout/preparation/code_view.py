@@ -10,7 +10,10 @@ from agents_remember.kernel.git_command import (
     inspect_existing_git_preparation,
     inspect_git_preparation,
 )
-from agents_remember.kernel.git_preparation import GitPreparationError
+from agents_remember.kernel.git_preparation import (
+    ExistingGitPreparationBinding,
+    GitPreparationError,
+)
 from agents_remember.memory_quality.memory_candidate_pair import (
     resolve_memory_candidate_pair,
 )
@@ -121,11 +124,13 @@ def observe_selected_prepared_code_view(
 
     if output.disposition == "existing":
         raw = inspect_existing_git_preparation(
-            Path(intent.logicalRoot),
-            common_directory=Path(intent.repositoryIdentity),
-            logical_ref=intent.logicalRef,
-            commit=intent.expectedOldCommit,
-            tree=intent.admittedTree,
+            ExistingGitPreparationBinding(
+                root=Path(intent.logicalRoot),
+                common_directory=Path(intent.repositoryIdentity),
+                logical_ref=intent.logicalRef,
+                commit=intent.expectedOldCommit,
+                tree=intent.admittedTree,
+            )
         )
         _require_selected_code_current(contract, record, store, selected, intent)
     else:

@@ -54,7 +54,7 @@ def sidecar_onboarding_path(onboarding_root: Path, source_path: str) -> Path:
 
 def contract_memory_verified_commit(contract: WorktreeContract) -> str:
     """The last memory commit closeout verified against, for body-gate baselines."""
-    return contract.ledger_commit or contract.memory_content_commit or contract.memory_base_commit
+    return contract.memory_content_commit or contract.memory_base_commit
 
 
 def _changed_memory_paths(memory_root: Path, memory_verified_commit: str) -> set[str]:

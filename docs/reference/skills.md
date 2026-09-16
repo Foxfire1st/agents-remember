@@ -41,9 +41,9 @@ package skill folder. The pre-commit and pre-push hooks run
 | `c-05-create-or-update-onboarding-files` | Create and maintain file-level onboarding and entity catalogs. |
 | `c-08-ar-coordination-context-resolver` | Resolve memory, coordination, task, temp, and cross-repo facts. |
 | `c-09-git-worktree-manager` | Manage worktree lifecycle, integration, and cleanup gates. |
-| `c-10-adopt-memory-baseline` | Adopt existing external-memory onboarding into the first ledgered baseline. |
+| `c-10-adopt-memory-baseline` | Adopt existing external-memory onboarding as an accepted Git memory baseline and refresh its computed ledger cache. |
 | `c-11-memory-carryover-from-branch` | Carry richer memory forward after matching code lands. |
-| `c-12-closeout` | Own the closeout approval gate and the code → memory → ledger commit sequence, for both direct edits and worktree-backed tasks. |
+| `c-12-closeout` | Own closeout approval and the code → memory-content commit sequence; keep the computed ledger cache outside the Git transaction. |
 | `c-13-install-and-onboard` | Lead package-based first-run setup after the harness starter package and MCP server are wired: preflight checks, `runtime_install`, memory repo, onboarding bootstrap, and provider indexing. |
 
 ## Installing Skills Into Harnesses

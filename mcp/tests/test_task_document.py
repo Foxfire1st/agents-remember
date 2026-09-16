@@ -35,6 +35,7 @@ from agents_remember.tasks import (
     current_step,
     json_path_for,
     markdown_path_for,
+    master_is_terminal,
     read_task_doc,
     render_markdown,
     step_done,
@@ -42,6 +43,7 @@ from agents_remember.tasks import (
     write_task_doc,
     write_task_docs,
 )
+from agents_remember.tasks.master_sync import derived_master_status
 
 
 def _doc(**over: Any) -> TaskDocument:
@@ -155,6 +157,74 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(current_step(pending), "S2 — Two")
         finished = _doc(steps=[{"id": "S1", "title": "One", "status": "done"}])
         self.assertIsNone(current_step(finished))
+
+
+class AbandonedRowTests(unittest.TestCase):
+    """``abandoned`` is a terminal decision, so it resolves a row without pretending work happened.
+
+    These lock the two directions of that rule. Without the first, a master can never complete
+    once any leaf is deliberately not taken; without the second, the rule would silently accept a
+    master whose leaves were never looked at.
+    """
+
+    def test_abandoned_row_does_not_hold_its_master_open(self) -> None:
+        master = _master(
+            subTasks=[
+                {"number": "1", "name": "Landed", "status": "Completed"},
+                {"number": "2", "name": "Not taken", "status": "abandoned"},
+            ]
+        )
+        self.assertEqual(completion_blockers(master), [])
+
+    def test_planning_row_still_holds_its_master_open(self) -> None:
+        master = _master(
+            subTasks=[
+                {"number": "1", "name": "Landed", "status": "Completed"},
+                {"number": "2", "name": "Untouched", "status": "planning"},
+            ]
+        )
+        self.assertEqual(
+            [(item.id, item.status) for item in completion_blockers(master)],
+            [("2", "planning")],
+        )
+
+    def test_abandoned_leaf_projects_an_abandoned_row_despite_partial_work(self) -> None:
+        # A done step would otherwise collapse the projection to inProgress, and the next master
+        # sync would reopen a row that was abandoned on purpose.
+        leaf = _doc(status="abandoned", steps=[{"id": "S1", "title": "One", "status": "done"}])
+        self.assertEqual(derived_master_status(leaf), "abandoned")
+
+    def test_abandoned_row_renders_its_own_marker(self) -> None:
+        # ``_MARKER`` is a direct lookup, so a DocStatus value missing from it raises on render.
+        master = _master(
+            subTasks=[{"number": "1", "name": "Not taken", "status": "abandoned"}],
+            sections=[{"heading": "Sub-Tasks", "kind": "subTasks", "body": ""}],
+        )
+        self.assertIn("⛔", render_markdown(master))
+
+    def test_an_abandoned_master_is_terminal_even_with_untouched_rows(self) -> None:
+        # Case A: abandonment is terminal by declaration, so its rows are deliberately left
+        # ``planning``. This is exactly why terminality cannot be spelled
+        # "Completed and no blockers" -- that test is false here by construction.
+        master = _master(
+            status="abandoned",
+            subTasks=[{"number": "1", "name": "Never started", "status": "planning"}],
+        )
+        self.assertTrue(master_is_terminal(master))
+
+    def test_a_completed_master_with_an_open_row_is_not_terminal(self) -> None:
+        master = _master(
+            status="Completed",
+            subTasks=[{"number": "1", "name": "Untouched", "status": "planning"}],
+        )
+        self.assertFalse(master_is_terminal(master))
+
+    def test_an_in_progress_master_is_not_terminal(self) -> None:
+        master = _master(
+            status="inProgress",
+            subTasks=[{"number": "1", "name": "Landed", "status": "Completed"}],
+        )
+        self.assertFalse(master_is_terminal(master))
 
 
 class RenderTests(unittest.TestCase):
@@ -404,6 +474,10 @@ class ApplicationTests(unittest.TestCase):
         self.cfg = _config(self.coord)
 
     def _create(self, **fields: Any) -> dict[str, Any]:
+        # These leaf operations are authored under a master, which is the flow the task_doc
+        # authoring plane allows: a leaf in a task root with no master document at all is
+        # refused (nothing would ever bind its derived seriesContractPath/enclosures).
+        self._ensure_parent_master()
         payload: dict[str, Any] = {
             "id": "3C",
             "slug": "03c_x",
@@ -420,6 +494,11 @@ class ApplicationTests(unittest.TestCase):
             operation="create",
             edit=TaskDocEdit(fields=payload),
         )
+
+    def _ensure_parent_master(self) -> None:
+        master_path = self.coord / "tasks" / "agents-remember" / "3c-x" / "task.json"
+        if not master_path.exists():
+            self._create_parent_master()
 
     def _create_parent_master(self, **fields: Any) -> dict[str, Any]:
         payload: dict[str, Any] = {

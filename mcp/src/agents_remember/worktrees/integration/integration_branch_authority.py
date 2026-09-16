@@ -13,7 +13,6 @@ from agents_remember.tasks.document_refs import (
     TaskDocumentTopology,
     repository_master_documents,
 )
-from agents_remember.worktrees.atomic_series_seal import require_series_accepting_leaves
 from agents_remember.worktrees.integration.integration_branch_repository import (
     branch_worktree_owners,
     canonical_local_branch,
@@ -205,13 +204,7 @@ def require_terminal_worktree(contract: WorktreeContract, *, operation: str) -> 
     if contract.kind != "series":
         raise RuntimeError(f"{operation} refused: unsupported contract kind {contract.kind!r}")
     authority = require_series_contract_authority(contract, operation=operation)
-    if operation == "worktree_cleanup":
-        master = authority.topology.resolve(authority.master_ref)
-        if master.document.status != "Completed":
-            raise RuntimeError(
-                "worktree_cleanup refused: atomic master task must be Completed before its "
-                "integration branch can retire"
-            )
+    _require_series_task_terminal(authority, contract, operation=operation)
     expected = f"ar/{slugify(contract.task_root.name)}"
     for side in _repository_sides(contract):
         spelled = side.work_branch.strip().removeprefix("refs/heads/")
@@ -234,6 +227,53 @@ def require_terminal_worktree(contract: WorktreeContract, *, operation: str) -> 
         )
         if actual in (default, parent):
             raise RuntimeError(f"{operation} refused: protected parent ref cannot be retired")
+
+
+def _require_series_task_terminal(
+    authority: _MasterAuthority,
+    contract: WorktreeContract,
+    *,
+    operation: str,
+) -> None:
+    """Require the master's own task document to authorize retiring its integration branch.
+
+    This is the only guard that can see *unstarted* work. Its sibling
+    :func:`require_series_children_retired` is an enclosure census -- it walks
+    ``task_root/enclosures`` -- and a child that was never started has no enclosure to walk, so a
+    master whose remaining leaves are all still ``planning`` reads as fully retired there. That
+    is how ``ar/260831_lifecycle-owned-completion-relay`` could have had its branch retired while
+    19 of its 28 leaves had never been created.
+
+    ``worktree_abandon`` used to skip the task check the cleanup arm already had, so an
+    in-progress master was retirable through it.
+    """
+
+    master = authority.topology.resolve(authority.master_ref)
+    status = master.document.status
+    if operation == "worktree_cleanup":
+        if status != "Completed":
+            raise RuntimeError(
+                "worktree_cleanup refused: atomic master task must be Completed before its "
+                "integration branch can retire"
+            )
+        return
+    if status not in {"Completed", "abandoned"}:
+        raise RuntimeError(
+            "worktree_abandon refused: an atomic master must be declared abandoned (or "
+            f"Completed) before its integration branch can retire; it is {status!r}"
+        )
+    if status == "abandoned" and contract.integration_status in {"completed", "checkpointed"}:
+        # Abandoning a master asserts that none of its work was taken. Once part of it landed --
+        # whether finally (``completed``) or at a checkpoint of a master that is still open
+        # (``checkpointed``) -- that assertion is false, and the honest terminal route is
+        # completion: set the rows that never integrated to ``abandoned`` and complete the master.
+        # ``checkpointed`` is precisely the case a partial landing used to hide: the master's line
+        # was already upstream while the contract still read ``not-started``.
+        raise RuntimeError(
+            "worktree_abandon refused: this master already landed work into its source branch, so "
+            "its work cannot be abandoned as a whole; mark the rows that never integrated abandoned "
+            "and complete the master instead"
+        )
 
 
 def require_series_contract_authority(
@@ -266,12 +306,12 @@ def require_series_contract_authority(
     return authority
 
 
-def require_parent_series_accepting_leaves(
+def require_parent_series(
     contract: WorktreeContract,
     *,
     operation: str,
 ) -> WorktreeContract | None:
-    """Return an atomic leaf's open parent, or None for organizational direct-super work."""
+    """Return an atomic leaf's parent series, or None for organizational direct-super work."""
 
     authority = _master_authority(_scope(contract))
     if authority.sprint_ref is not None and authority.execution_nature == "organizational":
@@ -287,12 +327,11 @@ def require_parent_series_accepting_leaves(
         contract.task_root,
         authority.sprint_branch,
     )
-    require_series_accepting_leaves(series, operation=operation)
     return series
 
 
 def atomic_leaf_parent(contract: WorktreeContract, *, operation: str) -> WorktreeContract | None:
-    """Resolve the exact open atomic owner before deferring leaf-wide acceptance."""
+    """Resolve the exact atomic owner before deferring leaf-wide acceptance."""
     if contract.kind != "leaf":
         return None
     topology = TaskDocumentTopology(contract.coordination_root)
@@ -300,7 +339,7 @@ def atomic_leaf_parent(contract: WorktreeContract, *, operation: str) -> Worktre
     if topology.resolve(owner).document.kind != "master":
         return None
     require_ordinary_worktree(contract, operation=operation)
-    parent = require_parent_series_accepting_leaves(contract, operation=operation)
+    parent = require_parent_series(contract, operation=operation)
     if parent is not None:
         require_current_source_lineage(contract, operation=operation)
     return parent
@@ -787,7 +826,7 @@ def _leaf_target(
             assert authority.sprint_branch is not None
             return "sprint-super", authority.sprint_branch, _ref_key(authority.sprint_ref)
         _require_atomic_master(authority)
-    series = require_parent_series_accepting_leaves(
+    series = require_parent_series(
         contract,
         operation="atomic leaf integration",
     )

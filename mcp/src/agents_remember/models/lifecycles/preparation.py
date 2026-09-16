@@ -23,7 +23,7 @@ _Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 _PathText = Annotated[str, Field(min_length=1, max_length=8192)]
 _MAX_COMMIT_BYTES = 8_388_608
 
-PreparationLeg = Literal["code", "memory-content", "ledger"]
+PreparationLeg = Literal["code", "memory-content"]
 PreparationHookPolicy = Literal["strict-code-no-verify", "ordinary"]
 
 
@@ -41,13 +41,7 @@ def _canonical_preparation_path(value: str) -> str:
 
 
 class ExistingMemoryPreparationProof(FrozenContractModel):
-    """Exact memory reuse observations; physical Git and mapping proof stay upstream.
-
-    The ledger blob names memory.md at logicalHeadCommit. Mapped content can
-    precede that head; an explicitly unmapped route uses that exact head. The
-    owner proves mapping presence/absence, ancestry and equal non-ledger entries;
-    this record only binds their observed identities.
-    """
+    """Bind the real historical HEAD/tree and its separately certified memory content."""
 
     schemaVersion: Literal["existing-memory-preparation-proof/v1"] = (
         "existing-memory-preparation-proof/v1"
@@ -55,12 +49,7 @@ class ExistingMemoryPreparationProof(FrozenContractModel):
     repositoryIdentity: _PathText
     logicalHeadCommit: _GitObject
     logicalHeadTree: _GitObject
-    ledgerBlob: _GitObject
-    codeCommit: _GitObject
-    mappingDisposition: Literal["existing-mapping", "unmapped-head"]
-    memoryContentCommit: _GitObject
-    memoryContentTree: _GitObject
-    nonLedgerEntriesSha256: _Digest
+    certifiedContentTree: _GitObject
     proofDigest: _Digest
 
     @field_validator("repositoryIdentity")
@@ -70,20 +59,9 @@ class ExistingMemoryPreparationProof(FrozenContractModel):
 
     @model_validator(mode="after")
     def _require_proof(self) -> Self:
-        memory_objects = (
-            self.logicalHeadCommit,
-            self.logicalHeadTree,
-            self.ledgerBlob,
-            self.memoryContentCommit,
-            self.memoryContentTree,
-        )
-        if len({len(value) for value in memory_objects}) != 1:
+        objects = (self.logicalHeadCommit, self.logicalHeadTree, self.certifiedContentTree)
+        if len({len(value) for value in objects}) != 1:
             raise ValueError("existing memory Git identities must use one object format")
-        if self.mappingDisposition == "unmapped-head" and (
-            self.memoryContentCommit,
-            self.memoryContentTree,
-        ) != (self.logicalHeadCommit, self.logicalHeadTree):
-            raise ValueError("unmapped memory reuse requires the exact logical head and tree")
         if self.proofDigest != canonical_sha256(
             self.model_dump(mode="json", exclude={"proofDigest"})
         ):
@@ -206,20 +184,12 @@ def _require_preparation_reuse(intent: CloseoutPreparationIntent) -> None:
     ):
         raise ValueError("existing memory proof differs from the intended repository or head")
     if intent.writeEnabled:
-        if intent.leg != "ledger" or intent.parentCommit != proof.logicalHeadCommit:
-            raise ValueError(
-                "created ledger after reused memory must parent the exact logical head"
-            )
-        return
-    if intent.leg == "ledger" and proof.mappingDisposition != "existing-mapping":
-        raise ValueError("existing ledger preparation requires an exact existing mapping")
-    parent, tree = (
-        (proof.memoryContentCommit, proof.memoryContentTree)
-        if intent.leg == "memory-content"
-        else (proof.logicalHeadCommit, proof.logicalHeadTree)
-    )
-    if (intent.parentCommit, intent.admittedTree) != (parent, tree):
-        raise ValueError("existing memory preparation must retain its exact leg commit and tree")
+        raise ValueError("created memory preparation cannot carry an existing memory proof")
+    if (intent.parentCommit, intent.admittedTree) != (
+        proof.logicalHeadCommit,
+        proof.logicalHeadTree,
+    ):
+        raise ValueError("existing memory preparation must retain its exact head and tree")
 
 
 def _require_preparation_references(intent: CloseoutPreparationIntent) -> None:
@@ -237,7 +207,7 @@ def _require_preparation_references(intent: CloseoutPreparationIntent) -> None:
         if intent.gateFiveCertificate is not None:
             raise ValueError("code preparation must precede Gate-5 certification")
     elif intent.gateFiveCertificate is None or intent.gateFiveCertificate.kind != "certificate":
-        raise ValueError("memory and ledger preparation require a Gate-5 certificate reference")
+        raise ValueError("memory preparation requires a Gate-5 certificate reference")
 
 
 class PreparedCloseoutOutput(FrozenContractModel):

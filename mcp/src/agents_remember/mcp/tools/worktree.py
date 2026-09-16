@@ -10,6 +10,7 @@ from agents_remember.application.worktree_tools import (
     DEFAULT_TASK_BASES,
     CloseoutApproval,
     CloseoutCommitMessages,
+    LandedCommits,
     OperationControlRequest,
     StartExecution,
     TaskBases,
@@ -17,11 +18,14 @@ from agents_remember.application.worktree_tools import (
     summarized_worktree_start_tool,
     worktree_abandon_tool,
     worktree_attach_tool,
+    worktree_checkpoint_landing_tool,
     worktree_cleanup_tool,
     worktree_closeout_apply_tool,
     worktree_closeout_preview_tool,
     worktree_integrate_tool,
     worktree_operation_control_tool,
+    worktree_pause_tool,
+    worktree_record_landing_tool,
     worktree_status_tool,
     worktree_sync_tool,
 )
@@ -81,6 +85,16 @@ def worktree_attach_payload(
     )
 
 
+def worktree_pause_payload(
+    config: McpRuntimeConfig,
+    contract_path: str,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "worktree_pause",
+        worktree_pause_tool(config, contract_path=contract_path),
+    )
+
+
 def worktree_status_payload(
     config: McpRuntimeConfig,
     task: TaskRef,
@@ -129,7 +143,6 @@ def worktree_integrate_payload(
     contract_path: str,
     *,
     strategy: IntegrateStrategy = "ff-only",
-    ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -138,7 +151,42 @@ def worktree_integrate_payload(
             config,
             contract_path=contract_path,
             strategy=strategy,
-            ledger_commit_message=ledger_commit_message,
+            dry_run=dry_run,
+        ),
+    )
+
+
+def worktree_checkpoint_landing_payload(
+    config: McpRuntimeConfig,
+    contract_path: str,
+    *,
+    strategy: IntegrateStrategy = "ff-only",
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "worktree_checkpoint_landing",
+        worktree_checkpoint_landing_tool(
+            config,
+            contract_path=contract_path,
+            strategy=strategy,
+            dry_run=dry_run,
+        ),
+    )
+
+
+def worktree_record_landing_payload(
+    config: McpRuntimeConfig,
+    contract_path: str,
+    *,
+    landed: LandedCommits,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "worktree_record_landing",
+        worktree_record_landing_tool(
+            config,
+            contract_path=contract_path,
+            landed=landed,
             dry_run=dry_run,
         ),
     )

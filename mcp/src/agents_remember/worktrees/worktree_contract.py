@@ -255,12 +255,10 @@ class WorktreeContract:
     closeout_status: CloseoutStatus = DEFAULT_CLOSEOUT_STATUS
     code_commit: str = ""
     memory_content_commit: str = ""
-    ledger_commit: str = ""
     integration_status: IntegrationStatus = DEFAULT_INTEGRATION_STATUS
     integration_strategy: str = ""
     integrated_code_commit: str = ""
     integrated_memory_content_commit: str = ""
-    integrated_ledger_commit: str = ""
     cleanup: CleanupStatus = DEFAULT_CLEANUP_STATUS
     kind: str = "leaf"
     leaf_id: str = ""
@@ -656,8 +654,6 @@ def _closeout_lines(contract: WorktreeContract) -> list[str]:
         lines.append(f"  code_commit: {contract.code_commit}")
     if contract.memory_content_commit:
         lines.append(f"  memory_content_commit: {contract.memory_content_commit}")
-    if contract.ledger_commit:
-        lines.append(f"  ledger_commit: {contract.ledger_commit}")
     return lines
 
 
@@ -672,8 +668,6 @@ def _integration_lines(contract: WorktreeContract) -> list[str]:
         lines.append(f"  code_commit: {contract.integrated_code_commit}")
     if contract.integrated_memory_content_commit:
         lines.append(f"  memory_content_commit: {contract.integrated_memory_content_commit}")
-    if contract.integrated_ledger_commit:
-        lines.append(f"  ledger_commit: {contract.integrated_ledger_commit}")
     lines.append(f"  cleanup: {contract.cleanup}")
     return lines
 
@@ -1040,12 +1034,10 @@ def _contract_from_data(data: dict[str, object], contract_path: Path) -> Worktre
         closeout_status=vocabulary.closeout_status,
         code_commit=closeout.get("code_commit", ""),
         memory_content_commit=closeout.get("memory_content_commit", ""),
-        ledger_commit=closeout.get("ledger_commit", ""),
         integration_status=vocabulary.integration_status,
         integration_strategy=integration.get("strategy", ""),
         integrated_code_commit=integration.get("code_commit", ""),
         integrated_memory_content_commit=integration.get("memory_content_commit", ""),
-        integrated_ledger_commit=integration.get("ledger_commit", ""),
         cleanup=vocabulary.cleanup,
         leaf_id=coordination.get("leaf_id", ""),
         parent_task_name=coordination.get("parent_task_name", ""),

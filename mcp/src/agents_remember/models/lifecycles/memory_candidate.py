@@ -11,8 +11,8 @@ class MemoryCandidatePairIdentity(BaseModel):
     """Every contract cell that selects one worktree-backed memory candidate pair.
 
     ``contractDigest`` hashes the canonical pair-authority projection represented by
-    this model, excluding the digest itself. Unrelated mutable lifecycle cells do not
-    invalidate a pair; every path, branch, or base change does.
+    this model, excluding the digest itself and the informational cache location.
+    Candidate paths, branches and bases determine authority; the ledger does not.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

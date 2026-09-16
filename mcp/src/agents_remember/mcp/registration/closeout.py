@@ -8,6 +8,7 @@ from agents_remember.application.lifecycle.direct_landing import DirectLandingRe
 from agents_remember.application.worktree_tools import (
     CloseoutApproval,
     CloseoutCommitMessages,
+    LandedCommits,
     OperationControlRequest,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -23,11 +24,13 @@ from agents_remember.models.lifecycles.operation_kinds import (
 from ..tools import (
     direct_landing_payload,
     worktree_abandon_payload,
+    worktree_checkpoint_landing_payload,
     worktree_cleanup_payload,
     worktree_closeout_apply_payload,
     worktree_closeout_preview_payload,
     worktree_integrate_payload,
     worktree_operation_control_payload,
+    worktree_record_landing_payload,
 )
 
 
@@ -46,7 +49,6 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         code_commit: str,
         *,
         memory_commit_message: str | None = None,
-        ledger_commit_message: str | None = None,
         intent_note: str = "",
         candidate_tree: str | None = None,
         dry_run: bool = False,
@@ -69,18 +71,17 @@ def _register_direct_landing_tools(server: FastMCP, config: McpRuntimeConfig) ->
         authority settings. The code commit is verified, never created. Pass
         candidate_tree (the exact candidate tree admitted by the closeout journal) to keep
         a moved branch from being committed after admission.
-        Each of memory_commit_message and ledger_commit_message must be explicit and
+        The memory_commit_message must be explicit and
         nonblank only when its contract-derived leg is enabled; typed not-applicable
         legs may omit the corresponding message. The verified-existing code commit has
         no code-message input.
-        MUTATING (memory + ledger commits); preview with dry_run=true."""
+        MUTATING (attributed memory content commit); preview with dry_run=true."""
         return direct_landing_payload(
             config,
             DirectLandingRequest(
                 contract_path=contract_path,
                 code_commit=code_commit,
                 memory_commit_message=memory_commit_message,
-                ledger_commit_message=ledger_commit_message,
                 intent_note=intent_note,
                 candidate_tree=candidate_tree,
                 dry_run=dry_run,
@@ -95,7 +96,6 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         contract_path: str,
         code_commit_message: str | None = None,
         memory_commit_message: str | None = None,
-        ledger_commit_message: str | None = None,
     ) -> dict[str, Any]:
         """Non-mutating preview of the bounded closeout Git transaction.
 
@@ -109,7 +109,6 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
             CloseoutCommitMessages(
                 code=code_commit_message,
                 memory=memory_commit_message,
-                ledger=ledger_commit_message,
             ),
         )
 
@@ -120,7 +119,6 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
         intent_note: str,
         code_commit_message: str | None = None,
         memory_commit_message: str | None = None,
-        ledger_commit_message: str | None = None,
         dry_run: bool = False,
         corrective_dispositions: list[RedCatalogDisposition] | None = None,
     ) -> dict[str, Any]:
@@ -142,7 +140,6 @@ def _register_closeout_command_tools(server: FastMCP, config: McpRuntimeConfig) 
             CloseoutCommitMessages(
                 code=code_commit_message,
                 memory=memory_commit_message,
-                ledger=ledger_commit_message,
             ),
             CloseoutApproval(intent_note=intent_note, dry_run=dry_run),
             corrective_dispositions=tuple(corrective_dispositions or ()),
@@ -155,7 +152,6 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         *,
         contract_path: str,
         strategy: IntegrateStrategy = "ff-only",
-        ledger_commit_message: str = "",
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Start or observe task-bound landing onto its source branch (strategy 'ff-only'
@@ -170,7 +166,60 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
             config,
             contract_path,
             strategy=strategy,
-            ledger_commit_message=ledger_commit_message,
+            dry_run=dry_run,
+        )
+
+    @server.tool()
+    def worktree_checkpoint_landing(
+        *,
+        contract_path: str,
+        strategy: IntegrateStrategy = "ff-only",
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Partially PUBLISH an UNFINISHED atomic master: land its accumulated line into its super
+        branch and keep the master open. This is a publication, not a pause -- the master's
+        committed code and memory refs move onto the protected source branch, where every other
+        master sees them, and an explicitly requested developer approval is required. It exists
+        because worktree_integrate refuses a partial master: that route proves a finished unit
+        (task document Completed, one landed enclosure per canonical leaf, and a completed
+        closeout), which an open master does not have. This route captures the master's own
+        committed refs instead -- the live series code work branch tip and the live memory work
+        branch tip -- proves the existing ledger maps the code ref, and lands exactly those. It
+        shares the final route's whole preflight and ref move, records the integration cell as
+        'checkpointed' rather than 'completed', retires nothing and runs no cleanup, so the
+        master's worktrees, branches and enclosure survive for the work that continues. Pausing a
+        master is a separate matter and is NOT this call: stopping its work publishes nothing,
+        moves no ref, and leaves its branch, worktrees and enclosure private. MUTATING: moves
+        branch refs; preview with dry_run=true."""
+        return worktree_checkpoint_landing_payload(
+            config,
+            contract_path,
+            strategy=strategy,
+            dry_run=dry_run,
+        )
+
+    @server.tool()
+    def worktree_record_landing(
+        *,
+        contract_path: str,
+        landed_code_commit: str,
+        landed_memory_content_commit: str = "",
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        """Record that this task's code landed through a pull request, so its contract stops
+        reading as never-integrated. Use this as the PR tail's recording step, after the merge and
+        after the protected branch is pulled locally: pass the commit the pull request landed.
+        It shares one contract write with worktree_integrate, so the terminal integration cell has
+        a single definition on both routes; nothing is inferred afterwards, because inferring would
+        mean querying GitHub and this cell gates branch retirement. It refuses a commit that is not
+        reachable from a landing target. MUTATING (contract only); preview with dry_run=true."""
+        return worktree_record_landing_payload(
+            config,
+            contract_path,
+            landed=LandedCommits(
+                code=landed_code_commit,
+                memory_content=landed_memory_content_commit,
+            ),
             dry_run=dry_run,
         )
 
@@ -184,7 +233,6 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
         intent_note: str,
         code_commit_message: str | None = None,
         memory_commit_message: str | None = None,
-        ledger_commit_message: str | None = None,
         grade: SchedulingGradeInput | None = None,
         admission: CandidateAdmissionFacts | None = None,
         corrective_dispositions: list[RedCatalogDisposition] | None = None,
@@ -208,7 +256,6 @@ def _register_integration_command_tools(server: FastMCP, config: McpRuntimeConfi
                 intent_note=intent_note,
                 code_commit_message=code_commit_message,
                 memory_commit_message=memory_commit_message,
-                ledger_commit_message=ledger_commit_message,
                 grade=grade,
                 admission=admission,
                 corrective_dispositions=tuple(corrective_dispositions or ()),

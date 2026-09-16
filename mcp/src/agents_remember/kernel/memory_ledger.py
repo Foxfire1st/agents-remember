@@ -18,6 +18,14 @@ LEDGER_SCHEMA = "ar-memory-ledger/v1"
 LEGACY_LEDGER_SCHEMA = "ar-memory-branch-ledger/v1"
 LEDGER_FENCE_RE = re.compile(r"```json\s+ar-memory-ledger\s*\n(.*?)\n```", re.DOTALL)
 
+# Where a repository's ledger lives, relative to its root. Declared beside the format it belongs
+# to rather than beside any one reader: the path is a property of the ledger, and a kernel-level
+# migration that reads the same table must not import a feature package to learn a filename.
+LEDGER_RELATIVE_PATH = "memory.md"
+# The exact glob avoids Git treating an ignored literal exclusion as an explicit add request.
+# It still matches only the root cache, including when that legacy file is unreadable.
+MEMORY_CACHE_EXCLUDE = ":(top,glob,exclude)[m]emory.md"
+
 
 @dataclass(frozen=True)
 class LedgerRow:
@@ -60,8 +68,7 @@ def parse_ledger_text(text: str) -> MemoryLedger:
 def parse_ledger_text_unvalidated(text: str) -> MemoryLedger:
     """Parse a ledger's structure without the header/first-row agreement check.
 
-    ``parse_ledger_text`` is the authority for a ledger that must already be right, and it is
-    what the source-side and integration readers use. Repairing a ledger needs to *read* one
+    ``parse_ledger_text`` validates the complete consumer format. Repairing a cache needs to read one
     whose header disagrees with its own first row -- that disagreement is one of the shapes
     being repaired -- so the structural parse is exposed on its own. Every structural check
     stays: the fence, the metadata fields, the schema, the two-column table, and at least one
@@ -93,10 +100,6 @@ def parse_ledger_text_unvalidated(text: str) -> MemoryLedger:
     required = {
         "schema": schema,
         "repoName": repo_name,
-        "baseCodeCommit": base_code_commit,
-        "baseMemoryCommit": base_memory_commit,
-        "lastVerifiedCodeCommit": last_verified_code_commit,
-        "lastMemoryContentCommit": last_memory_content_commit,
         "sortOrder": sort_order,
     }
     missing = [name for name, value in required.items() if not value]
@@ -107,6 +110,16 @@ def parse_ledger_text_unvalidated(text: str) -> MemoryLedger:
     if schema not in {LEDGER_SCHEMA, LEGACY_LEDGER_SCHEMA}:
         raise LedgerError(f"unsupported memory ledger schema: {schema}")
 
+    rows = parse_ledger_rows(text[match.end() :])
+    if rows and not all(
+        (
+            base_code_commit,
+            base_memory_commit,
+            last_verified_code_commit,
+            last_memory_content_commit,
+        )
+    ):
+        raise LedgerError("a nonempty memory ledger requires its commit metadata")
     return MemoryLedger(
         schema=schema,
         repo_name=repo_name,
@@ -115,7 +128,7 @@ def parse_ledger_text_unvalidated(text: str) -> MemoryLedger:
         last_verified_code_commit=last_verified_code_commit,
         last_memory_content_commit=last_memory_content_commit,
         sort_order=sort_order,
-        rows=parse_ledger_rows(text[match.end() :]),
+        rows=rows,
     )
 
 
@@ -130,8 +143,6 @@ def _ledger_rows_from(row_lines: list[str]) -> list[LedgerRow]:
         if len(row_cells) != 2:
             raise LedgerError("memory.md ledger table rows must have exactly two columns")
         rows.append(LedgerRow(row_cells[0], row_cells[1]))
-    if not rows:
-        raise LedgerError("memory.md ledger table must contain at least one mapping row")
     return rows
 
 
@@ -163,7 +174,9 @@ def validate_ledger(ledger: MemoryLedger) -> None:
     if ledger.sort_order != "newest-first":
         raise LedgerError("memory.md ledger sortOrder must be `newest-first`")
     if not ledger.rows:
-        raise LedgerError("memory.md ledger must contain at least one row")
+        if ledger.last_verified_code_commit or ledger.last_memory_content_commit:
+            raise LedgerError("an empty memory ledger cannot claim a current mapping")
+        return
     first = ledger.rows[0]
     if first.code_commit != ledger.last_verified_code_commit:
         raise LedgerError("memory.md first Code commit row must match lastVerifiedCodeCommit")
@@ -214,25 +227,10 @@ def load_ledger_unvalidated(path: Path) -> MemoryLedger:
 
 
 def write_ledger(path: Path, ledger: MemoryLedger) -> None:
-    """Write the ledger. A plain whole-file write, and deliberately still one.
+    """Materialize the consumer representation without staging or committing it.
 
-    260731-EFA-L5 R12, verified 2026-08-01. The review panel argued this needed the durability
-    treatment the control-plane JSONL stores just got -- an atomic temp+rename, or a lock. The
-    editor ruled it degraded rather than unrecoverable, and the tree agrees on both counts:
-
-    * Every one of the five callers -- ``worktrees/modules/closeout.py``,
-      ``worktrees/modules/integrate.py``, ``worktrees/modules/start.py``,
-      ``memory/carryover.py`` (twice) and ``memory/baseline.py`` -- follows this call with
-      ``require_git(..., ["add", "memory.md"])`` and ``commit_if_dirty(...)`` in the next two
-      lines. A truncated ledger costs the uncommitted delta, never the mapping history: the
-      durable authority is the git object, and ``git checkout -- memory.md`` restores it.
-    * All five are reached only through MCP tool registrations. The dashboard reads the ledger
-      (the projection snapshot readers import ``load_ledger`` and nothing else) and never writes it,
-      so there is no second process to serialize against and a lock here would protect nothing.
-
-    Recorded as a no-action finding. If a writer ever appears outside the MCP process, or one
-    stops committing immediately, this stops being true and the ledger joins the contract in
-    ``controlplane/durable_store.py``.
+    Runtime refreshes use memory_cache.refresh_memory_cache to derive the view from Git.
+    This serializer writes only the explicitly supplied representation.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(ledger_to_text(ledger), encoding="utf-8")

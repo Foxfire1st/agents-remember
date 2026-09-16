@@ -251,7 +251,7 @@ unless a memory repo is already present and resolvable:
    the developer asks or the configured topology requires it). Continue to Stage
    5.
 2. **Use an existing memory repo** - they already have one. Clone or checkout it
-   to the resolved memory location, then adopt it as the ledgered baseline with
+   to the resolved memory location, then adopt it as the Git-attributed baseline with
    `c-10-adopt-memory-baseline`. Skip Stage 5 because its onboarding already
    exists.
 

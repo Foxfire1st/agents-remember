@@ -5,10 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from agents_remember.models.lifecycles.direct_landing import (
-    DirectLandingLedgerIntent,
-    DirectLandingOperationInput,
-)
+from agents_remember.models.lifecycles.direct_landing import DirectLandingOperationInput
 from agents_remember.models.lifecycles.mutation_evidence import (
     CloseoutMutationLeg,
     GitMutationEvidence,
@@ -90,15 +87,6 @@ class DirectLandingRuntime:
             )
 
         self.record = self.store.update(advance)
-
-    def publish_ledger_intent(self, intent: DirectLandingLedgerIntent) -> None:
-        def publish(record: LifecycleOperationRecord) -> LifecycleOperationRecord:
-            current = record.directLandingLedgerIntent
-            if current is not None and current != intent:
-                raise RuntimeError("direct landing ledger intent is immutable once published")
-            return record.model_copy(update={"directLandingLedgerIntent": intent})
-
-        self.record = self.store.update(publish)
 
     def finish(self, result: dict[str, object]) -> LifecycleOperationRecord:
         stamp = _stamp()
@@ -239,7 +227,6 @@ def reconcile_direct_landing(
             reported = LifecycleOperationRecoveryCommits(
                 codeCommit=recovery.codeCommit,
                 memoryContentCommit=classification.memory_commit,
-                ledgerCommit=classification.ledger_commit,
             )
             recovery = derive_closeout_recovery_commits(
                 projected,

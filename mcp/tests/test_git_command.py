@@ -30,6 +30,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.kernel.git_command import (
     GIT_REPOSITORY_SELECTOR_ENV,
+    GitRunnerOptions,
     admit_private_git_preparation,
     inspect_git_preparation,
     preparation_command,
@@ -128,7 +129,11 @@ class RunnerContractTests(unittest.TestCase):
             stall = ["-c", "alias.stall=!sleep 5", "stall"]
 
             with self.assertRaises(subprocess.TimeoutExpired):
-                run_git(repo, stall, timeout=1)
+                run_git(
+                    repo,
+                    stall,
+                    GitRunnerOptions(timeout=1),
+                )
 
 
 class CandidateTreeConcurrencyTests(unittest.TestCase):
@@ -247,7 +252,7 @@ class PrivateGitPreparationTests(unittest.TestCase):
         written = run_git(
             self.repo,
             ["hash-object", "-t", "commit", "-w", "--stdin"],
-            input_text=raw.decode("utf-8", "surrogateescape"),
+            GitRunnerOptions(input_text=raw.decode("utf-8", "surrogateescape")),
         )
         self.assertEqual(written.returncode, 0, written.stderr)
         object_id = written.stdout.strip()

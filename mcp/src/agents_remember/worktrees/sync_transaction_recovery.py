@@ -39,7 +39,6 @@ from agents_remember.worktrees.sync_transaction_git import (
     remove_temporary_worktree,
     rollback_side,
     side_branch_head,
-    validate_completed_side,
 )
 from agents_remember.worktrees.sync_transaction_state import (
     SyncJournalReadError,
@@ -535,7 +534,6 @@ def _require_completed_branches(record: SyncOperationRecord) -> None:
             raise SyncGitProofError(
                 f"{side.side} final head is not the exact operation-created head"
             )
-        validate_completed_side(side, current)
 
 
 def _cancel_args(contract: WorktreeContract) -> dict[str, object]:

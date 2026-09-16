@@ -319,6 +319,9 @@ def remove_tree(
             "reclaimedViaDocker": True,
         }
         if not removed:
+            # A result that reclaimed nothing always says why: the terminal blocker is built
+            # from this field, and a reasonless one names nothing an operator can act on. This
+            # is also the only branch that could answer ``removed: False`` without a reason.
             result["reason"] = "still present after docker ownership reclaim"
         return result
 

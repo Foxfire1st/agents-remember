@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.git_command import run_git, run_git_with_index
+from agents_remember.kernel.memory_ledger import LEDGER_RELATIVE_PATH, MEMORY_CACHE_EXCLUDE
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 # This module used to define its own `run_git` -- the kernel's function with the
@@ -30,16 +31,28 @@ def require_git(repo: Path, args: list[str]) -> str:
     return result.stdout.strip()
 
 
-def worktree_candidate_tree(repo: Path, index_path: Path) -> str:
-    """Hash the full add-all candidate through one invocation-owned Git index."""
+def _excluded_pathspec(path: str) -> str:
+    return MEMORY_CACHE_EXCLUDE if path == LEDGER_RELATIVE_PATH else f":(top,exclude){path}"
+
+
+def worktree_candidate_tree(
+    repo: Path, index_path: Path, *, exclude_paths: tuple[str, ...] = ()
+) -> str:
+    """Hash content through a private index, omitting explicitly owned derived files."""
     # The caller selects a scratch namespace; every observation owns its physical index.
     index_path.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=f".{index_path.name}-", dir=index_path.parent) as temporary:
         isolated_index = Path(temporary) / "index"
-        for action, args in (
-            ("seed candidate index", ["read-tree", "HEAD"]),
-            ("materialize candidate tree", ["add", "-A"]),
-        ):
+        add_args = ["add", "-A"]
+        if exclude_paths:
+            add_args.extend(["--", ".", *map(_excluded_pathspec, exclude_paths)])
+        actions = [("seed candidate index", ["read-tree", "HEAD"])]
+        if exclude_paths:
+            actions.append(
+                ("exclude derived files", ["update-index", "--force-remove", "--", *exclude_paths])
+            )
+        actions.append(("materialize candidate tree", add_args))
+        for action, args in actions:
             result = run_git_with_index(repo, args, isolated_index)
             if result.returncode != 0:
                 raise RuntimeError(
@@ -96,20 +109,29 @@ def repository_identity(repo: Path | None) -> Path | None:
     return Path(common_dir).resolve()
 
 
-def has_changes(repo: Path) -> bool:
-    return bool(require_git(repo, ["status", "--porcelain"]))
+def _status_args(exclude_paths: tuple[str, ...]) -> list[str]:
+    args = ["status", "--porcelain"]
+    if exclude_paths:
+        args.extend(["--", ".", *map(_excluded_pathspec, exclude_paths)])
+    return args
 
 
-def worktree_dirty(repo: Path | None) -> bool:
-    return bool(repo and repo.exists() and run_git(repo, ["status", "--porcelain"]).stdout.strip())
+def has_changes(repo: Path, *, exclude_paths: tuple[str, ...] = ()) -> bool:
+    return bool(require_git(repo, _status_args(exclude_paths)))
+
+
+def worktree_dirty(repo: Path | None, *, exclude_paths: tuple[str, ...] = ()) -> bool:
+    return bool(repo and repo.exists() and has_changes(repo, exclude_paths=exclude_paths))
 
 
 def contract_has_worktree_changes(contract: WorktreeContract) -> bool:
-    return worktree_dirty(contract.code_worktree) or worktree_dirty(contract.memory_worktree)
+    return worktree_dirty(contract.code_worktree) or worktree_dirty(
+        contract.memory_worktree, exclude_paths=("memory.md",)
+    )
 
 
-def require_clean(repo: Path, label: str) -> None:
-    changes = require_git(repo, ["status", "--porcelain"])
+def require_clean(repo: Path, label: str, *, exclude_paths: tuple[str, ...] = ()) -> None:
+    changes = require_git(repo, _status_args(exclude_paths))
     if changes:
         raise RuntimeError(f"{label} is not clean:\n{changes}")
 
@@ -166,10 +188,21 @@ def ensure_worktree(
     return "created"
 
 
-def commit_if_dirty(repo: Path, message: str) -> str:
-    if not has_changes(repo):
+def stage_worktree_content(repo: Path, *, exclude_paths: tuple[str, ...] = ()) -> None:
+    """Stage real content without reading or retaining explicitly derived index entries."""
+    args = ["add", "-A"]
+    if exclude_paths:
+        require_git(repo, ["update-index", "--force-remove", "--", *exclude_paths])
+        args.extend(["--", ".", *map(_excluded_pathspec, exclude_paths)])
+    require_git(repo, args)
+
+
+def commit_if_dirty(repo: Path, message: str, *, exclude_paths: tuple[str, ...] = ()) -> str:
+    if not has_changes(repo, exclude_paths=exclude_paths):
         return head_commit(repo)
-    require_git(repo, ["add", "-A"])
+    stage_worktree_content(repo, exclude_paths=exclude_paths)
+    if exclude_paths:
+        require_git(repo, ["update-index", "--force-remove", "--", *exclude_paths])
     require_git(repo, ["commit", "-m", message])
     return head_commit(repo)
 
@@ -185,14 +218,19 @@ def run_pre_commit_hook_if_configured(repo: Path) -> bool:
     return True
 
 
-def commit_verified_staged(repo: Path, message: str) -> str:
+def commit_verified_staged(repo: Path, message: str, *, exclude_paths: tuple[str, ...] = ()) -> str:
     """Commit exactly the staged tree without invoking repository hooks.
 
     The caller has already staged and verified the intended index. In particular, this
     helper must neither restage the working tree nor rerun a hook after the caller's
     transaction or quality preparation.
     """
-    if run_git(repo, ["diff", "--cached", "--quiet"]).returncode == 0:
+    if exclude_paths:
+        require_git(repo, ["update-index", "--force-remove", "--", *exclude_paths])
+    diff_args = ["diff", "--cached", "--quiet"]
+    if exclude_paths:
+        diff_args.extend(["--", ".", *map(_excluded_pathspec, exclude_paths)])
+    if run_git(repo, diff_args).returncode == 0:
         return head_commit(repo)
     require_git(repo, ["commit", "--no-verify", "-m", message])
     return head_commit(repo)

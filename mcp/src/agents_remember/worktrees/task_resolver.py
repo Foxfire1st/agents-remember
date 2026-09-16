@@ -1,24 +1,56 @@
-"""Resolve active task roots and leaf enclosure contract paths."""
+"""Resolve active task roots and leaf enclosure contract paths.
+
+The path rules themselves -- the series contract filename, the enclosure
+directory, a leaf's enclosure contract, the archive segment -- are defined in
+``agents_remember.tasks.task_paths``, the task package that owns them, and
+re-exported here. This module stays the published import site for every existing
+caller, while the definition lives below ``worktrees`` where the layering
+contract requires it.
+"""
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterator
 from pathlib import Path
 
-SERIES_CONTRACT_FILENAME = "series-contract.md"
-ARCHIVE_DIR = "0_archive"
-ENCLOSURES_DIR = "enclosures"
+from agents_remember.tasks.task_paths import (
+    ARCHIVE_DIR,
+    ENCLOSURES_DIR,
+    SERIES_CONTRACT_FILENAME,
+    is_archived_path,
+    is_enclosure_contract,
+    iter_leaf_enclosure_contracts,
+    leaf_enclosure_dir,
+    leaf_enclosure_path,
+    series_contract_path,
+    slugify,
+)
+
+__all__ = [
+    "ARCHIVE_DIR",
+    "ENCLOSURES_DIR",
+    "SERIES_CONTRACT_FILENAME",
+    "TaskResolutionError",
+    "is_archived_path",
+    "is_enclosure_contract",
+    "iter_active_series_contracts",
+    "iter_leaf_enclosure_contracts",
+    "leaf_enclosure_dir",
+    "leaf_enclosure_path",
+    "legacy_task_folder_name",
+    "legacy_task_root_for",
+    "resolve_active_task_root",
+    "resolve_leaf_enclosure_contract",
+    "series_contract_path",
+    "slugify",
+    "task_folder_name",
+    "task_root_candidates",
+    "task_root_for",
+]
 
 
 class TaskResolutionError(ValueError):
     """Raised when an active task name cannot resolve to one task root."""
-
-
-def slugify(value: str) -> str:
-    lowered = value.strip().lower()
-    slug = re.sub(r"[^a-z0-9._-]+", "-", lowered).strip(".-_")
-    return slug or "task"
 
 
 def task_folder_name(task_name: str) -> str:
@@ -44,30 +76,6 @@ def task_root_candidates(coordination_root: Path, repo_name: str, task_name: str
     return [current] if current == legacy else [current, legacy]
 
 
-def series_contract_path(task_root: Path) -> Path:
-    return task_root / SERIES_CONTRACT_FILENAME
-
-
-def leaf_enclosure_dir(task_root: Path, leaf_id: str) -> Path:
-    return task_root / ENCLOSURES_DIR / slugify(leaf_id)
-
-
-def leaf_enclosure_path(task_root: Path, leaf_id: str) -> Path:
-    return leaf_enclosure_dir(task_root, leaf_id) / SERIES_CONTRACT_FILENAME
-
-
-def is_archived_path(path: Path) -> bool:
-    return ARCHIVE_DIR in path.parts
-
-
-def is_enclosure_contract(path: Path) -> bool:
-    return (
-        path.name == SERIES_CONTRACT_FILENAME
-        and len(path.parts) >= 3
-        and path.parent.parent.name == ENCLOSURES_DIR
-    )
-
-
 def iter_active_series_contracts(repo_task_root: Path) -> Iterator[Path]:
     if not repo_task_root.is_dir():
         return
@@ -75,14 +83,6 @@ def iter_active_series_contracts(repo_task_root: Path) -> Iterator[Path]:
         if is_archived_path(path) or ENCLOSURES_DIR in path.parts:
             continue
         yield path
-
-
-def iter_leaf_enclosure_contracts(tasks_root: Path) -> Iterator[Path]:
-    if not tasks_root.is_dir():
-        return
-    for path in sorted(tasks_root.rglob(f"{ENCLOSURES_DIR}/*/{SERIES_CONTRACT_FILENAME}")):
-        if not is_archived_path(path):
-            yield path
 
 
 def resolve_active_task_root(

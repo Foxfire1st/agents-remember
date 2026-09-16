@@ -17,10 +17,10 @@ from agents_remember.kernel.git_command import (
     inspect_existing_git_preparation,
     inspect_git_closeout_publication,
     publish_git_closeout_ref,
-    read_git_blob_bytes,
     read_git_commit_bytes,
 )
-from agents_remember.kernel.memory_ledger import ledger_to_text, parse_ledger_text, write_ledger
+from agents_remember.kernel.git_preparation import ExistingGitPreparationBinding
+from agents_remember.kernel.memory_cache import refresh_memory_cache
 from agents_remember.kernel.primitives.gate_policy import (
     DecisionRole,
     GatePolicyRule,
@@ -54,9 +54,6 @@ from agents_remember.worktrees.integration.closeout.certification.observation im
 from agents_remember.worktrees.integration.closeout.certification.selection import (
     load_typed,
     require_selected_certification,
-)
-from agents_remember.worktrees.integration.closeout.ledger_recovery import (
-    classify_closeout_ledger_recovery,
 )
 from agents_remember.worktrees.integration.closeout.preparation_selection import (
     selected_preparation_intents,
@@ -93,7 +90,7 @@ from .selected import SelectedCloseoutPreparation
 def _output(selected: SelectedCloseoutPreparation) -> PreparedCloseoutOutput:
     state = selected.handoff.record.preparation
     if state is None:
-        refuse("finalization-preparation-missing", "selected C/M/L", None)
+        refuse("finalization-preparation-missing", "selected code and memory", None)
     leg = next((item for item in state.legs if item.leg == selected.intent.leg), None)
     if leg is None or leg.intent != selected.reference or leg.output is None:
         refuse("finalization-output-missing", selected.reference, leg)
@@ -150,19 +147,17 @@ def _owner(bundle: PreparedMemoryOutputs) -> LifecycleOperationRecord:
 
 def _binding(selected: SelectedCloseoutPreparation) -> GitCloseoutPublicationBinding:
     intent, output = selected.intent, _output(selected)
-    # L follows newly published M; expectedOldCommit separately retains the
-    # logical pre-preparation tip and is not the ledger publication parent.
-    old = intent.parentCommit if intent.leg == "ledger" else intent.expectedOldCommit
     return GitCloseoutPublicationBinding(
         Path(intent.logicalRoot),
         intent.logicalRef,
         Path(intent.repositoryIdentity),
-        old,
+        intent.expectedOldCommit,
         output.commit,
         output.tree,
         intent.operationKey,
         intent.generation,
         intent.intentDigest,
+        allow_memory_cache=intent.leg == "memory-content",
     )
 
 
@@ -220,7 +215,6 @@ def _cas(
 
 
 def _published_head(
-    bundle: PreparedMemoryOutputs,
     record: LifecycleOperationRecord,
     selected: SelectedCloseoutPreparation,
     leg: CloseoutMutationLeg,
@@ -228,89 +222,49 @@ def _published_head(
     intent = selected.intent
     root = Path(intent.logicalRoot)
     head = require_git(root, ["rev-parse", "--verify", intent.logicalRef])
-    initial = (
-        bundle.memory.intent.expectedOldCommit if leg == "ledger" else intent.expectedOldCommit
-    )
-    allowed = {initial}
-    legs: tuple[tuple[CloseoutMutationLeg, SelectedCloseoutPreparation], ...] = (
-        ("code", bundle.code),
-        ("memory", bundle.memory),
-        ("ledger", bundle.ledger),
-    )
-    for name, item in legs:
-        if Path(item.intent.logicalRoot) != root or not item.intent.writeEnabled:
-            continue
-        proof = record.mutationEvidence.get(name)
-        output = _output(item)
+    allowed = {intent.expectedOldCommit}
+    if intent.writeEnabled:
+        proof = record.mutationEvidence.get(leg)
+        output = _output(selected)
         if proof is not None and proof.state in {"mutation-intent", "commit-proven"}:
-            expected_old = (
-                item.intent.parentCommit if name == "ledger" else item.intent.expectedOldCommit
-            )
             if (
                 proof.before is None
-                or proof.before.head != expected_old
+                or proof.before.head != intent.expectedOldCommit
                 or proof.expectedOutputTree != output.tree
-                or proof.repository != item.intent.logicalRoot
+                or proof.repository != intent.logicalRoot
             ):
-                refuse("finalization-mutation-binding-moved", item.intent.intentDigest, proof)
+                refuse("finalization-mutation-binding-moved", intent.intentDigest, proof)
             allowed.add(output.commit)
     if head not in allowed:
         refuse("finalization-unowned-ref-movement", sorted(allowed), head)
     return head
 
 
-def _physical_memory(bundle: PreparedMemoryOutputs, record: LifecycleOperationRecord) -> None:
-    memory, ledger = bundle.memory, bundle.ledger
+def _physical_memory(bundle: PreparedMemoryOutputs) -> None:
+    memory = bundle.memory
     root = Path(memory.intent.logicalRoot)
-    proof = record.mutationEvidence.get("ledger")
-    if ledger.intent.writeEnabled and proof is not None and proof.state == "mutation-intent":
-        classified = classify_closeout_ledger_recovery(bundle.handoff.contract, record)
-        if classified.state not in {
-            "accepted-before",
-            "prepared-unstaged",
-            "prepared-staged",
-            "commit-proven-pending-publication",
-        }:
-            refuse(
-                "finalization-ledger-prestate-refused",
-                "exact original ledger states",
-                classified.decision_payload(),
-            )
-        expected = (
-            classified.before_text.encode("utf-8")
-            if classified.state == "accepted-before"
-            else bundle.ledgerBytes
-        )
-        if (root / "memory.md").read_bytes() != expected:
-            refuse(
-                "finalization-ledger-physical-bytes-moved",
-                ledger.intent.intentDigest,
-                "exact bytes differ",
-            )
-        return
-    selected = (
-        ledger
-        if ledger.intent.writeEnabled and proof is not None and proof.state == "commit-proven"
-        else memory
-    )
-    if selected.intent.writeEnabled:
+    if memory.intent.writeEnabled:
 
         def authorize(_binding: GitCloseoutPublicationBinding) -> None:
             _owner(bundle)
 
         inspect_git_closeout_publication(
-            admit_git_closeout_publication(_binding(selected), authorize=authorize)
+            admit_git_closeout_publication(_binding(memory), authorize=authorize)
         )
     else:
         head = memory.intent.expectedOldCommit
-        existing = memory.intent.existingMemoryProof
-        tree = existing.logicalHeadTree if existing is not None else memory.intent.admittedTree
+        proof = memory.intent.existingMemoryProof
+        assert proof is not None
         inspect_existing_git_preparation(
-            root,
-            common_directory=Path(memory.intent.repositoryIdentity),
-            logical_ref=memory.intent.logicalRef,
-            commit=head,
-            tree=tree,
+            ExistingGitPreparationBinding(
+                root=root,
+                common_directory=Path(memory.intent.repositoryIdentity),
+                logical_ref=memory.intent.logicalRef,
+                commit=head,
+                tree=memory.intent.admittedTree,
+                allow_memory_cache=True,
+                memory_content_tree=proof.certifiedContentTree,
+            )
         )
 
 
@@ -327,10 +281,11 @@ def _live(bundle: PreparedMemoryOutputs) -> LifecycleOperationRecord:
     final_certificate = selected.terminals[-1].certificate
     assert final_certificate is not None  # The complete prefix was checked above.
     inputs = final_certificate.semanticEnvelope.gateFiveInputs
+    memory_proof = bundle.memory.intent.existingMemoryProof
     certified_tree = (
         bundle.memory.intent.admittedTree
-        if bundle.memory.intent.existingMemoryProof is None
-        else bundle.memory.intent.existingMemoryProof.logicalHeadTree
+        if memory_proof is None
+        else memory_proof.certifiedContentTree
     )
     if (
         inputs is None
@@ -338,10 +293,10 @@ def _live(bundle: PreparedMemoryOutputs) -> LifecycleOperationRecord:
         or bundle.memory.intent.gateFiveCertificate != selected.terminals[-1].certificateReference
     ):
         refuse("finalization-memory-tree-unbound", certified_tree, inputs)
-    code_head = _published_head(bundle, record, bundle.code, "code")
-    memory_head = _published_head(bundle, record, bundle.memory, "memory")
-    _physical_memory(bundle, record)
-    for item in (bundle.code, bundle.memory, bundle.ledger):
+    code_head = _published_head(record, bundle.code, "code")
+    memory_head = _published_head(record, bundle.memory, "memory")
+    _physical_memory(bundle)
+    for item in (bundle.code, bundle.memory):
         _output(item)
         observe_git_preparation_policy(Path(item.intent.logicalRoot)).require_intent(item.intent)
     operation = record.input
@@ -406,7 +361,9 @@ def _record_proof(
 ) -> None:
     record = _owner(bundle)
     output = _output(selected)
-    actual = ephemeral_git_mutation_snapshot(Path(selected.intent.logicalRoot))
+    actual = ephemeral_git_mutation_snapshot(
+        Path(selected.intent.logicalRoot), memory_cache=leg == "memory"
+    )
     if (actual.head, actual.headTree, actual.indexTree, actual.candidateTree) != (
         output.commit,
         output.tree,
@@ -430,44 +387,6 @@ def _record_proof(
     )
 
 
-def _materialize_ledger(bundle: PreparedMemoryOutputs, record: LifecycleOperationRecord) -> None:
-    selected = bundle.ledger
-    root = Path(selected.intent.logicalRoot)
-    classification = classify_closeout_ledger_recovery(bundle.handoff.contract, record)
-    if classification.state not in {
-        "accepted-before",
-        "prepared-unstaged",
-        "prepared-staged",
-        "commit-proven-pending-publication",
-    }:
-        refuse(
-            "finalization-ledger-prestate-refused",
-            "exact retained ledger intent",
-            classification.decision_payload(),
-        )
-    if classification.intended_text.encode("utf-8") != bundle.ledgerBytes:
-        refuse(
-            "finalization-ledger-bytes-mismatch",
-            selected.intent.intentDigest,
-            "different deterministic ledger",
-        )
-    ledger = parse_ledger_text(bundle.ledgerBytes.decode("utf-8"))
-    if ledger_to_text(ledger).encode("utf-8") != bundle.ledgerBytes:
-        refuse(
-            "finalization-ledger-not-canonical",
-            selected.intent.intentDigest,
-            "different serialized bytes",
-        )
-    if classification.state == "accepted-before":
-        _live(bundle)
-        write_ledger(root / "memory.md", ledger)
-    if classification.state in {"accepted-before", "prepared-unstaged"}:
-        _live(bundle)
-        require_git(root, ["add", "--", "memory.md"])
-    if (root / "memory.md").read_bytes() != bundle.ledgerBytes:
-        refuse("finalization-ledger-write-moved", selected.intent.intentDigest, "physical bytes")
-
-
 def _retain_existing_leg(
     bundle: PreparedMemoryOutputs,
     selected: SelectedCloseoutPreparation,
@@ -477,49 +396,33 @@ def _retain_existing_leg(
 ) -> None:
     """Retain an unchanged output under the already observed live generation."""
     root = Path(selected.intent.logicalRoot)
-    ledger_proof = record.mutationEvidence.get("ledger")
-    if (
-        leg == "memory"
-        and ledger_proof is not None
-        and ledger_proof.state in {"mutation-intent", "commit-proven"}
-    ):
-        if (
-            record.recoveryCommits is None
-            or record.recoveryCommits.memoryContentCommit != output.commit
-        ):
-            refuse(
-                "finalization-existing-memory-proof-missing", output.commit, record.recoveryCommits
-            )
-        return
     head = require_git(root, ["rev-parse", "HEAD"])
     tree = require_git(root, ["rev-parse", "HEAD^{tree}"])
     expected_head = selected.intent.expectedOldCommit
     if head != expected_head:
         refuse("finalization-existing-head-moved", expected_head, head)
+    memory_proof = selected.intent.existingMemoryProof
     inspect_existing_git_preparation(
-        root,
-        common_directory=Path(selected.intent.repositoryIdentity),
-        logical_ref=selected.intent.logicalRef,
-        commit=head,
-        tree=tree,
+        ExistingGitPreparationBinding(
+            root=root,
+            common_directory=Path(selected.intent.repositoryIdentity),
+            logical_ref=selected.intent.logicalRef,
+            commit=head,
+            tree=tree,
+            allow_memory_cache=leg == "memory",
+            memory_content_tree=None if memory_proof is None else memory_proof.certifiedContentTree,
+        )
     )
-    field = {"code": "codeCommit", "memory": "memoryContentCommit", "ledger": "ledgerCommit"}[leg]
+    field = {"code": "codeCommit", "memory": "memoryContentCommit"}[leg]
     cells = (
         record.recoveryCommits.model_dump()
         if record.recoveryCommits
-        else {"codeCommit": "", "memoryContentCommit": "", "ledgerCommit": ""}
+        else {"codeCommit": "", "memoryContentCommit": ""}
     )
     cells[field] = output.commit
     _cas(
         bundle, record, {"recoveryCommits": LifecycleOperationRecoveryCommits.model_validate(cells)}
     )
-    return
-
-
-def _ledger_publication_started(record: LifecycleOperationRecord) -> bool:
-    """Ledger publication supersedes the shared memory ref's intermediate M output."""
-    proof = record.mutationEvidence.get("ledger")
-    return proof is not None and proof.state in {"mutation-intent", "commit-proven"}
 
 
 def _observe_proven_leg(
@@ -548,7 +451,7 @@ def _publication_intent(
     root = Path(selected.intent.logicalRoot)
     proof = record.mutationEvidence.get(leg)
     if proof is None or proof.state == "pre-mutation":
-        before = ephemeral_git_mutation_snapshot(root)
+        before = ephemeral_git_mutation_snapshot(root, memory_cache=leg == "memory")
         binding = _binding(selected)
         if before.head != binding.expected_old_commit:
             refuse("finalization-prestate-moved", binding.expected_old_commit, before)
@@ -585,16 +488,12 @@ def _publish_leg(
         return
     record, proof = _publication_intent(bundle, selected, leg, record, output)
     if proof.state == "commit-proven":
-        if leg == "memory" and _ledger_publication_started(record):
-            return
         _observe_proven_leg(bundle, selected, output)
         return
     if proof.state != "mutation-intent":
         refuse("finalization-original-mutation-unavailable", "original mutation intent", proof)
-    if leg == "ledger":
-        _materialize_ledger(bundle, record)
-    elif require_git(root, ["rev-parse", "HEAD"]) == selected.intent.expectedOldCommit:
-        actual = ephemeral_git_mutation_snapshot(root)
+    if require_git(root, ["rev-parse", "HEAD"]) == selected.intent.expectedOldCommit:
+        actual = ephemeral_git_mutation_snapshot(root, memory_cache=leg == "memory")
         if actual != proof.before:
             refuse("finalization-original-prestate-moved", proof.before, actual)
 
@@ -615,8 +514,10 @@ def _closed_payload(
 ) -> WorktreeCommandResult:
     commits = record.recoveryCommits
     if commits is None:
-        refuse("finalization-recovery-tuple-missing", "C/M/L", None)
+        refuse("finalization-recovery-tuple-missing", "code and memory", None)
     prove_closeout_recovery_commits(contract, commits)
+    if contract.memory_worktree is not None:
+        refresh_memory_cache(contract.memory_worktree, repo_name=contract.repo_name)
     return WorktreeCommandResult(
         0,
         {
@@ -625,13 +526,12 @@ def _closed_payload(
             "summary": "Closeout completed; integrate the task branches into their source branches.",
             "code_commit": commits.codeCommit,
             "memory_content_commit": commits.memoryContentCommit,
-            "ledger_commit": commits.ledgerCommit,
         },
     )
 
 
 def finalize_prepared_closeout(bundle: PreparedMemoryOutputs) -> WorktreeCommandResult:
-    """Claim once, publish exact C/M/L in order, then finalize the canonical contract."""
+    """Publish exact code and memory outputs, then finalize the canonical contract."""
     record = _live(bundle)
     if not record.approvalClaimed:
         _approval(bundle, record, claim=True)
@@ -641,14 +541,13 @@ def finalize_prepared_closeout(bundle: PreparedMemoryOutputs) -> WorktreeCommand
     legs: tuple[tuple[CloseoutMutationLeg, SelectedCloseoutPreparation], ...] = (
         ("code", bundle.code),
         ("memory", bundle.memory),
-        ("ledger", bundle.ledger),
     )
     for leg, selected in legs:
         _publish_leg(bundle, selected, leg)
     record = _live(bundle)
     commits = record.recoveryCommits
     if commits is None:
-        refuse("finalization-recovery-tuple-missing", "C/M/L", None)
+        refuse("finalization-recovery-tuple-missing", "code and memory", None)
     memory = prove_closeout_recovery_commits(bundle.handoff.contract, commits)
     operation = record.input
     assert isinstance(operation, CloseoutOperationInput)
@@ -693,18 +592,15 @@ def resume_prepared_closeout(
     selected = require_selected_certification(contract, current)
     handoff = CloseoutCertificationHandoff(contract, current, store, selected)
     intents = selected_preparation_intents(contract, current)
-    if tuple(item.leg for item in intents) != ("code", "memory-content", "ledger") or any(
+    if tuple(item.leg for item in intents) != ("code", "memory-content") or any(
         item.output is None for item in current.preparation.legs
     ):
-        refuse("finalization-selected-output-prefix-missing", "C/M/L", current.preparation)
+        refuse(
+            "finalization-selected-output-prefix-missing", "code and memory", current.preparation
+        )
     wrappers = tuple(
         SelectedCloseoutPreparation(handoff, intent, leg.intent)
         for intent, leg in zip(intents, current.preparation.legs, strict=True)
     )
-    ledger_output = _output(wrappers[2])
-    root = Path(wrappers[2].intent.logicalRoot)
-    ledger_blob = require_git(root, ["rev-parse", f"{ledger_output.tree}:memory.md"])
-    bundle = PreparedMemoryOutputs(
-        handoff, wrappers[0], wrappers[1], wrappers[2], read_git_blob_bytes(root, ledger_blob)
-    )
+    bundle = PreparedMemoryOutputs(handoff, wrappers[0], wrappers[1])
     return finalize_prepared_closeout(bundle)

@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from agents_remember.models.closeout.source import PriorityGrade
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
-MAX_CLOSEOUT_CANDIDATES = 256
 MAX_CLOSEOUT_SOURCE_PROBLEMS = 256
 MAX_CLOSEOUT_REASONS = 264
 MAX_CLOSEOUT_TEXT = 8192
@@ -62,9 +61,7 @@ class CloseoutQueueState(_StrictModel):
     serviceCondition: ProjectionServiceCondition
     sourceClassification: ProjectionSourceClassification | None = None
     sourceFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    members: list[CloseoutProjectionMember] = Field(
-        default_factory=list, max_length=MAX_CLOSEOUT_CANDIDATES
-    )
+    members: list[CloseoutProjectionMember] = Field(default_factory=list)
     sourceProblems: list[ProjectionSourceProblem] = Field(
         default_factory=list, max_length=MAX_CLOSEOUT_SOURCE_PROBLEMS
     )

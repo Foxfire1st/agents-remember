@@ -139,8 +139,8 @@ via chat context:
    `judgmentId` in the same call; disagreeing with an existing nature refuses. Membership and typed
    rows must remain an exact set; when an `executionGraph` exists, its graph nodes must match that
    set too. `task_doc.author_execution_graph` owns edge edits afterwards, including the first
-   bootstrap onto a graph-less sprint (which otherwise runs the source-pair-selected
-   atomic-sequential default);
+   bootstrap onto a graph-less sprint (which otherwise runs the graph-less atomic-sequential
+   default, where nothing serializes the masters);
    `task_doc.detach_master` is the symmetric inverse and never deletes files.
 3. **Log both sides:** a decision-log entry on the sprint doc (master added, why, developer
    ruling) and one on the master doc (joined sprint X).

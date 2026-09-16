@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.guidance import contract_next_args, recovery_guidance
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.sync_transaction_authority import command_result, side_payload
 from agents_remember.worktrees.sync_transaction_git import (
     SyncGitProofError,
-    unmerged_paths,
+    content_conflicts,
     validate_staged_resolution,
 )
 from agents_remember.worktrees.sync_transaction_recovery import (
@@ -119,7 +117,7 @@ def parked_wip_validation_preview(
 ) -> WorktreeCommandResult:
     """Read-only preview of settling a parked-candidate reapply the agent resolved."""
 
-    conflicts = unmerged_paths(Path(side.worktree))
+    conflicts = content_conflicts(side)
     ready = not conflicts
     return WorktreeCommandResult(
         0 if ready else 2,
@@ -147,7 +145,7 @@ def resolution_validation_preview(
     side: SyncSideRecord,
     fetch: dict[str, object],
 ) -> WorktreeCommandResult:
-    conflicts = unmerged_paths(Path(side.worktree))
+    conflicts = content_conflicts(side)
     try:
         validate_staged_resolution(side)
         ready = True

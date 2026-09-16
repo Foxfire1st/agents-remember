@@ -8,6 +8,16 @@ heuristics. The lookup mirrors the observer projection's exact joins — doc id,
 ``enclosures[]`` refs, then file stem, all case-insensitive (doc ids are
 authored labels like ``260628-L11`` while enclosure leaf ids are lowercase
 directory names like ``260628-l11``).
+
+Planning a master necessarily authors its leaf documents *before* the master's
+first start bootstraps the series contract, so at authoring time the two derived
+fields ``seriesContractPath`` and ``enclosures[]`` cannot exist yet and
+``task_doc`` deliberately leaves them empty for that documented case. Start is
+therefore the moment they become writable, and both planning paths here bind
+them: :func:`plan_leaf_doc_lifecycle_restamp` (the start/reopen restamp) and
+:func:`plan_leaf_doc_enclosure_registration` (the start/attach publisher). A
+document missing only its master link is consequently a candidate for a write,
+not a no-op — that omission is the defect this binding exists to close.
 """
 
 from __future__ import annotations
@@ -19,6 +29,10 @@ from pathlib import Path
 from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.readiness import CompletionBlocker, completion_blockers
 from agents_remember.tasks.store import read_task_doc
+from agents_remember.tasks.task_paths import (
+    leaf_enclosure_path,
+    series_contract_path,
+)
 
 
 class TerminalLeafResolutionError(ValueError):
@@ -181,18 +195,66 @@ def _assert_terminal_path(
         )
 
 
+def _derived_bindings(
+    task_root: Path,
+    leaf_id: str,
+    *,
+    series_contract_path_missing: bool,
+    enclosures_missing: bool,
+) -> dict[str, object]:
+    """The derived master-link fields this leaf doc is missing, or an empty mapping.
+
+    ``leaf_id`` follows the same rule as the rest of this module: the enclosure
+    directory is derived from it, and only a nonblank id names an enclosure.
+    """
+
+    bindings: dict[str, object] = {}
+    if series_contract_path_missing:
+        bindings["seriesContractPath"] = series_contract_path(task_root).as_posix()
+    if enclosures_missing and leaf_id.strip():
+        bindings["enclosures"] = [
+            {
+                "leafId": leaf_id,
+                "enclosurePath": leaf_enclosure_path(task_root, leaf_id).as_posix(),
+            }
+        ]
+    return bindings
+
+
+def _derived_leaf_bindings(
+    task_root: Path, leaf_id: str, document: TaskDocument
+) -> dict[str, object]:
+    """Bind only what is absent, so an existing binding is never rewired here."""
+
+    return _derived_bindings(
+        task_root,
+        leaf_id,
+        series_contract_path_missing=not document.seriesContractPath,
+        enclosures_missing=not document.enclosures,
+    )
+
+
 def plan_leaf_doc_lifecycle_restamp(
     task_root: Path, leaf_id: str, lifecycle_id: str
 ) -> LeafLifecycleRestampPlan:
-    """Plan a lifecycle-only write and expose terminal blockers without mutating bytes."""
+    """Plan the start/reopen write and expose terminal blockers without mutating bytes.
+
+    The candidate carries every derived field the document is missing as well as
+    the lifecycle binding: a doc whose ``lifecycleId`` already matches is still a
+    candidate when its master link is absent (that is a leaf authored before the
+    series contract existed), and no candidate means nothing was missing.
+    """
     found = find_leaf_doc(task_root, leaf_id)
     if found is None:
         return LeafLifecycleRestampPlan(None, lifecycle_id, None, False)
     json_path, doc = found
-    if doc.lifecycleId == lifecycle_id:
+    changed = doc.lifecycleId != lifecycle_id
+    bindings = _derived_leaf_bindings(task_root, leaf_id, doc)
+    if not changed and not bindings:
         return LeafLifecycleRestampPlan(json_path, lifecycle_id, None, False)
     data = doc.model_dump(by_alias=True)
     data["lifecycleId"] = lifecycle_id
+    data.update(bindings)
     updated = TaskDocument.model_validate(data)
     blockers = tuple(completion_blockers(updated)) if updated.status == "Completed" else ()
     return LeafLifecycleRestampPlan(json_path, lifecycle_id, updated, True, blockers)
@@ -207,10 +269,14 @@ def restamp_leaf_doc_lifecycle(
 ) -> dict | None:
     """Point the leaf's doc at ``lifecycle_id`` (the enclosure's current lifecycle).
 
-    Overwrites any previous stamp: the enclosure's newest lifecycle IS the doc's
-    binding — a reopened leaf's doc must follow the fresh lifecycle, not the
-    finalized one. Returns a small report dict, or None when the leaf has no doc
-    yet (a first start authors the doc afterwards, already stamped by task_doc).
+    Overwrites any previous lifecycle stamp: the enclosure's newest lifecycle IS
+    the doc's binding — a reopened leaf's doc must follow the fresh lifecycle,
+    not the finalized one. The same write also binds the derived master link
+    (``seriesContractPath``, ``enclosures[]``) when it is absent, because a first
+    start finds the doc authored *before* the series contract existed — the only
+    moment at which those fields could not be stamped. Returns a small report
+    dict, or None when the leaf has no doc yet (a first start against an
+    unstarted leaf authors the doc afterwards, already stamped by task_doc).
     """
     plan = plan_leaf_doc_lifecycle_restamp(task_root, leaf_id, lifecycle_id)
     if plan.blockers:
@@ -226,6 +292,43 @@ def restamp_leaf_doc_lifecycle(
     }
 
 
+def _enclosure_registration_candidate(
+    document: TaskDocument,
+    leaf_id: str,
+    expected_path: str,
+    missing_link: dict[str, object],
+    lifecycle_id: str | None,
+) -> TaskDocument:
+    """One full-document candidate: the exact enclosure address, its derived link, the stamp."""
+
+    data = document.model_dump(by_alias=True)
+    data["enclosures"] = [{"leafId": leaf_id, "enclosurePath": expected_path}]
+    data.update(missing_link)
+    if lifecycle_id is not None:
+        data["lifecycleId"] = lifecycle_id
+    return TaskDocument.model_validate(data)
+
+
+def _enclosure_registration_state(
+    document: TaskDocument,
+    *,
+    address_exact: bool,
+    lifecycle_id: str | None,
+) -> str:
+    """Which repair this candidate is, in the order that matters to the caller.
+
+    An exact address with only the lifecycle moved is a reopened leaf following its
+    fresh lifecycle; an exact address with the derived master link absent is the
+    start binding that link; anything else is a missing or mismatched enclosure.
+    """
+
+    if address_exact:
+        if lifecycle_id is not None and document.lifecycleId != lifecycle_id:
+            return "lifecycle-mismatch"
+        return "master-link-missing"
+    return "mismatched" if document.enclosures else "missing"
+
+
 def plan_leaf_doc_enclosure_registration(
     doc_path: Path,
     leaf_id: str,
@@ -237,9 +340,9 @@ def plan_leaf_doc_enclosure_registration(
 
     ``doc_path`` is resolved by the canonical parent-row resolver.  This function
     therefore never searches for a plausible sibling document and never mutates
-    the task source.  An already exact binding with the requested lifecycle is a
-    no-op; every other state produces one full-document candidate for the normal
-    task publication writer.
+    the task source.  An already exact binding with the requested lifecycle *and*
+    its derived master link is a no-op; every other state produces one
+    full-document candidate for the normal task publication writer.
     """
 
     path = doc_path.resolve(strict=False)
@@ -250,8 +353,12 @@ def plan_leaf_doc_enclosure_registration(
         and document.enclosures[0].leafId == leaf_id
         and _same_path(document.enclosures[0].enclosurePath, expected_path)
     )
-    exact = address_exact and (lifecycle_id is None or document.lifecycleId == lifecycle_id)
-    if exact:
+    missing_link = _derived_leaf_bindings(path.parent, leaf_id, document)
+    if (
+        address_exact
+        and not missing_link
+        and (lifecycle_id is None or document.lifecycleId == lifecycle_id)
+    ):
         return LeafEnclosureRegistrationPlan(
             path,
             leaf_id,
@@ -261,24 +368,25 @@ def plan_leaf_doc_enclosure_registration(
             "present",
         )
 
-    data = document.model_dump(by_alias=True)
-    existing_binding = any(ref.leafId == leaf_id for ref in document.enclosures)
-    data["enclosures"] = [{"leafId": leaf_id, "enclosurePath": expected_path}]
-    if lifecycle_id is not None:
-        data["lifecycleId"] = lifecycle_id
-    candidate = TaskDocument.model_validate(data)
+    candidate = _enclosure_registration_candidate(
+        document,
+        leaf_id,
+        expected_path,
+        missing_link,
+        lifecycle_id,
+    )
     blockers = tuple(completion_blockers(candidate)) if candidate.status == "Completed" else ()
-    if address_exact and lifecycle_id is not None and document.lifecycleId != lifecycle_id:
-        state = "lifecycle-mismatch"
-    else:
-        state = "mismatched" if existing_binding or document.enclosures else "missing"
     return LeafEnclosureRegistrationPlan(
         path,
         leaf_id,
         expected_path,
         lifecycle_id,
         candidate,
-        state,
+        _enclosure_registration_state(
+            document,
+            address_exact=address_exact,
+            lifecycle_id=lifecycle_id,
+        ),
         blockers,
     )
 

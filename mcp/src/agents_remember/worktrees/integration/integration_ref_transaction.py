@@ -6,13 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
-from agents_remember.kernel.memory_ledger import (
-    LedgerError,
-    LedgerRow,
-    MemoryLedger,
-    find_mapping,
-    parse_ledger_text,
-    parse_ledger_text_unvalidated,
+from agents_remember.kernel.memory_attribution import (
+    code_commit_exists,
 )
 from agents_remember.worktrees.integration.integration_branch_authority import (
     branch_worktree_owners,
@@ -20,11 +15,6 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
 )
 from agents_remember.worktrees.integration.integration_operation_authority import (
     require_authorized_integration_commits,
-)
-from agents_remember.worktrees.ledger_projection import (
-    LedgerSource,
-    LedgerWorld,
-    project_ledger,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
@@ -71,11 +61,10 @@ _PREPARED_MOVE_AUTHORITY = object()
 
 @dataclass(frozen=True)
 class IntegratedCommits:
-    """The code, memory-content, and ledger commits landed as one authority set."""
+    """The accepted code and memory commits landed as one authority set."""
 
     code: str
     memory_content: str
-    ledger: str
 
 
 @dataclass(frozen=True)
@@ -87,6 +76,19 @@ class IntegrationRefSnapshot:
     memory_branch: str = ""
     memory_before: str = ""
     _authority: object | None = None
+
+
+@dataclass(frozen=True)
+class LandingAdmission:
+    """The route-specific facts one landing admits before it moves a protected ref.
+
+    The final routes land the closeout candidate the contract records. The checkpoint route admits
+    an *unfinished* master, which has no closeout cell: its output must equal the candidate its own
+    live capture proved. Every other refusing read on this path is identical for both routes, so
+    the difference lives here as data rather than as a second copy of the transaction.
+    """
+
+    checkpoint_candidate: IntegratedCommits | None = None
 
 
 @dataclass(frozen=True)
@@ -104,17 +106,12 @@ def prepare_integration_ref_move(
     args: WorktreeArgs,
     sources: IntegrationSources,
     *,
-    expected_series_ledger_prefix: tuple[LedgerRow, ...] = (),
+    admission: LandingAdmission | None = None,
 ) -> IntegrationRefSnapshot:
     """Perform every refusing read before the lifecycle marks the move irreversible."""
 
-    require_authorized_integration_commits(
-        contract,
-        args,
-        code_commit=commits.code,
-        memory_content_commit=commits.memory_content,
-        ledger_commit=commits.ledger,
-    )
+    admitted = admission or LandingAdmission()
+    _require_landing_output_authority(contract, args, commits, admitted)
     targets = {target.side: target for target in integration_targets(contract)}
     code_target = targets["code"]
     external = contract.memory_mode == "external"
@@ -134,16 +131,14 @@ def prepare_integration_ref_move(
         memory_head_before = branch_commit(contract.memory_repo_path, memory_target.branch)
         if memory_head_before != sources.current_memory_source:
             raise RuntimeError("memory integration source moved at the protected-ref boundary")
-        if not is_ancestor(contract.memory_repo_path, memory_head_before, commits.ledger):
+        if not is_ancestor(contract.memory_repo_path, memory_head_before, commits.memory_content):
             raise RuntimeError(
-                "integrated memory ledger commit is not a fast-forward from the current "
-                "memory branch"
+                "integrated memory commit is not a fast-forward from the current memory branch"
             )
-        require_integrated_ledger_mapping(
+        require_integrated_memory_ancestry(
             contract,
             commits,
             memory_source_commit=memory_head_before,
-            expected_series_prefix=expected_series_ledger_prefix,
         )
 
     _require_clean_branch_checkout(contract.code_repo_path, code_target.branch, code_head_before)
@@ -154,6 +149,7 @@ def prepare_integration_ref_move(
             contract.memory_repo_path,
             memory_target.branch,
             memory_head_before,
+            exclude_paths=("memory.md",),
         )
     return IntegrationRefSnapshot(
         code_branch=code_target.branch,
@@ -194,8 +190,7 @@ def merge_integrated_commits(
         refresh_owned_checkout(
             contract.code_repo_path,
             snapshot.code_branch,
-            snapshot.code_before,
-            commits.code,
+            CheckoutRefresh("code", snapshot.code_before, commits.code),
             authority=_PREPARED_MOVE_AUTHORITY,
         )
         return
@@ -205,7 +200,7 @@ def merge_integrated_commits(
         contract.memory_repo_path,
         snapshot.memory_branch,
         snapshot.memory_before,
-        commits.ledger,
+        commits.memory_content,
         authority=_PREPARED_MOVE_AUTHORITY,
     ):
         raise IntegrationRefRace(
@@ -218,7 +213,7 @@ def merge_integrated_commits(
                 },
                 "intended": {
                     "codeRef": commits.code,
-                    "memoryRef": commits.ledger,
+                    "memoryRef": commits.memory_content,
                 },
             },
             observed={},
@@ -226,217 +221,66 @@ def merge_integrated_commits(
     refresh_owned_checkout(
         contract.code_repo_path,
         snapshot.code_branch,
-        snapshot.code_before,
-        commits.code,
+        CheckoutRefresh("code", snapshot.code_before, commits.code),
         authority=_PREPARED_MOVE_AUTHORITY,
     )
     refresh_owned_checkout(
         contract.memory_repo_path,
         snapshot.memory_branch,
-        snapshot.memory_before,
-        commits.ledger,
+        CheckoutRefresh("memory", snapshot.memory_before, commits.memory_content),
         authority=_PREPARED_MOVE_AUTHORITY,
     )
 
 
-def _integrated_ledger_pair(
-    repository: Path,
-    ledger_commit: str,
-    source_commit: str,
-) -> tuple[MemoryLedger, MemoryLedger]:
-    blob = run_git(repository, ["show", f"{ledger_commit}:memory.md"])
-    if blob.returncode != 0:
-        raise RuntimeError("integrated ledger commit has no readable memory.md")
-    source_blob = run_git(
-        repository,
-        ["show", f"{source_commit}:memory.md"],
-    )
-    if source_blob.returncode != 0:
-        raise RuntimeError("exact memory source commit has no readable memory.md")
-    try:
-        # The integrated ledger is read structurally. A header that disagrees with its own first
-        # row is one of the shapes the projection check refuses *with its remedy*, and refusing
-        # it here as unparseable would replace that remedy with an opaque "invalid". The source
-        # ledger stays authoritative: a malformed official source is a different failure.
-        return (
-            parse_ledger_text_unvalidated(blob.stdout),
-            parse_ledger_text(source_blob.stdout),
-        )
-    except LedgerError as error:
-        raise RuntimeError(f"memory ledger is invalid: {error}") from error
-
-
-def require_integrated_ledger_mapping(
+def require_integrated_memory_ancestry(
     contract: WorktreeContract,
     commits: IntegratedCommits,
     *,
     memory_source_commit: str,
-    expected_series_prefix: tuple[LedgerRow, ...] = (),
 ) -> None:
+    """Prove the accepted objects and memory source ancestry without consulting a cache."""
+
     if contract.kind not in {"leaf", "series"}:
-        raise RuntimeError("integrated memory ledger requires a leaf or series contract")
-    assert contract.memory_repo_path is not None
-    ledger, source_ledger = _integrated_ledger_pair(
-        contract.memory_repo_path,
-        commits.ledger,
-        memory_source_commit,
-    )
-    mapping = find_mapping(ledger, commits.code)
-    if mapping is None or mapping.memory_commit != commits.memory_content:
-        raise RuntimeError(
-            "integrated memory ledger does not map landed code commit to landed memory content"
-        )
-    source_mapping = find_mapping(source_ledger, commits.code)
-    if source_mapping is not None and source_mapping.memory_commit == commits.memory_content:
-        # No-change leaf: the source ledger's current mapping already names the landed memory
-        # content, so there is no new ledger row to verify.
-        return
-    _require_preserved_ledger_history(
-        contract,
-        ledger,
-        source_ledger,
-        expected_series_prefix,
-        _LedgerLanding(commits.ledger, memory_source_commit),
-    )
-    if not is_ancestor(contract.memory_repo_path, commits.memory_content, commits.ledger):
-        raise RuntimeError(
-            "integrated memory content commit is not reachable from the landed ledger commit"
-        )
-    if not is_ancestor(
-        contract.memory_repo_path,
-        memory_source_commit,
-        commits.memory_content,
-    ):
-        raise RuntimeError(
-            "integrated memory content commit is not based on the exact memory source"
-        )
+        raise RuntimeError("integrated memory requires a leaf or series contract")
+    if contract.memory_repo_path is None:
+        raise RuntimeError("integrated memory requires its repository")
+    if not code_commit_exists(contract.code_repo_path, commits.code):
+        raise RuntimeError("integrated code commit does not exist in its repository")
+    if not is_ancestor(contract.memory_repo_path, memory_source_commit, commits.memory_content):
+        raise RuntimeError("integrated memory commit is not based on the exact memory source")
 
 
-@dataclass(frozen=True)
-class _LedgerLanding:
-    """The landed ledger commit and the exact memory source it must be based on."""
-
-    ledger_commit: str
-    memory_source_commit: str
-
-
-def _require_preserved_ledger_history(
+def _require_landing_output_authority(
     contract: WorktreeContract,
-    ledger: MemoryLedger,
-    source_ledger: MemoryLedger,
-    expected_series_prefix: tuple[LedgerRow, ...],
-    landing: _LedgerLanding,
+    args: WorktreeArgs,
+    commits: IntegratedCommits,
+    admission: LandingAdmission,
 ) -> None:
-    """The landed ledger equals the projection of its source and its own true mappings.
+    """Prove the commits about to land are the ones this route is entitled to land.
 
-    This used to compare paperwork: the last ``len(source_rows)`` rows had to be the source
-    ledger, and everything ahead of that tail was taken on trust as "the leaf's own" and then
-    proven row by row. Closeout now *computes* the ledger from exactly that projection, so the
-    question worth asking has changed. A malformed ledger reaching here means someone
-    hand-edited ``memory.md`` after closeout, and the way to catch that is to recompute the
-    projection from the world -- the source ledger, the code repository, and this landing's
-    memory ancestry -- and require the landed ledger to be the fixed point. It refuses a
-    dropped or reordered source row, a superseded row kept, a duplicated row, and a header
-    that disagrees with its own first row, and it advertises the closeout re-run that repairs
-    all four.
+    The final routes land the closeout candidate recorded on the contract: that cell is a
+    completion fact, and :func:`require_authorized_integration_commits` refuses a replay whose
+    output is not it.
 
-    The check is not redundant with closeout computing the ledger, so it is not deleted: it is
-    the only thing standing between a post-closeout hand edit and a protected-ref landing.
+    The checkpoint route has no such cell -- an unfinished master was never closed out -- so its
+    output is authorized by its own capture instead, which is re-proved against the live refs by
+    :func:`~agents_remember.worktrees.series_closeout.publish_series_checkpoint_under_authority`
+    immediately before this call. This function only refuses a landing whose output is not the
+    candidate that was admitted, so the two halves cannot drift apart.
     """
 
-    if contract.kind == "series":
-        if expected_series_prefix and ledger.rows == [
-            *expected_series_prefix,
-            *source_ledger.rows,
-        ]:
-            return
-        raise RuntimeError(
-            "integrated atomic series ledger does not preserve the exact ordered leaf "
-            "landing prefix and complete source ledger history"
+    if admission.checkpoint_candidate is None:
+        require_authorized_integration_commits(
+            contract,
+            args,
+            code_commit=commits.code,
+            memory_content_commit=commits.memory_content,
         )
-    assert contract.memory_repo_path is not None
-    projection = project_ledger(
-        source=LedgerSource(landing.memory_source_commit, source_ledger),
-        observed=ledger,
-        world=LedgerWorld(
-            memory_repository=contract.memory_repo_path,
-            memory_reachable_from=landing.ledger_commit,
-            code_repository=contract.code_repo_path,
-        ),
-    )
-    if projection.is_fixed_point:
         return
-    raise RuntimeError(_ledger_projection_refusal(projection, landing.memory_source_commit))
-
-
-def _ledger_projection_refusal(projection, memory_source_commit: str) -> str:
-    """Operator-legible evidence for a ledger that is not its own projection.
-
-    Each sentence names the offending row in the vocabulary the row's own rule uses, so the
-    operator can tell a superseded row from a dropped source row without reading the diff.
-    """
-
-    details = _projection_divergence_evidence(projection)
-    return (
-        "integrated memory ledger is not the projection of its source and its own true "
-        f"mappings: {details}. Ledger rows newest-first: "
-        f"{_ledger_row_list(list(projection.observed_rows))}. Source rows newest-first: "
-        f"{_ledger_row_list(list(projection.source_rows))}. A leaf may prepend any number of its "
-        "own mappings ahead of the source rows; no source row may be dropped, reordered, or "
-        "replaced, no superseded row may be kept, and the header must name the first row. "
-        "Remedy: re-run worktree_closeout_apply for this contract -- closeout recomputes "
-        "memory.md from the source ledger plus the branch's own true mappings, so the repair "
-        "needs no hand edit -- and if the file was hand-edited, restore it from memory source "
-        f"commit {memory_source_commit} first."
-    )
-
-
-def _projection_divergence_evidence(projection) -> str:
-    """One bounded sentence per class of difference, empty classes omitted."""
-
-    evidence = [removal.evidence() for removal in projection.removals]
-    if projection.missing_source_rows:
-        evidence.append(
-            "does not preserve the complete source ledger history: missing "
-            f"{len(projection.missing_source_rows)} source row(s): "
-            f"{_ledger_row_list(list(projection.missing_source_rows))}"
+    if commits != admission.checkpoint_candidate:
+        raise RuntimeError(
+            "checkpoint landing output is not the exact candidate its live capture proved"
         )
-    if projection.reordered_rows:
-        evidence.append(
-            "does not preserve the complete source ledger history: the rows "
-            f"{_ledger_row_list(list(projection.reordered_rows))} are present but not as its "
-            "trailing rows in source order"
-        )
-    unattributed = [
-        row
-        for row in projection.removed_rows
-        if row not in {removal.row for removal in projection.removals}
-    ]
-    if unattributed:
-        evidence.append(
-            "does not preserve the complete source ledger history: "
-            f"{_ledger_row_list(unattributed)} appear more than once and no source row may be "
-            "duplicated"
-        )
-    if projection.header_changed:
-        evidence.append(
-            "the ledger header disagrees with its own first row: lastVerifiedCodeCommit is "
-            f"{projection.header_before[0]!r} and the first row's code commit is "
-            f"{projection.header_after[0]!r}"
-        )
-    if not evidence:
-        evidence.append(
-            "its mapping table carries rows the projection does not, or misses rows it does"
-        )
-    return "; ".join(evidence)
-
-
-def _ledger_row_list(rows: list[LedgerRow]) -> str:
-    return "; ".join(_ledger_row_text(row) for row in rows)
-
-
-def _ledger_row_text(row: LedgerRow) -> str:
-    return f"{row.code_commit} -> {row.memory_commit}"
 
 
 def _compare_and_swap_ref(
@@ -456,37 +300,59 @@ def _compare_and_swap_ref(
 def refresh_owned_checkout(
     repo: Path,
     branch: str,
-    old: str,
-    new: str,
+    refresh: CheckoutRefresh,
     *,
     authority: object | None = None,
 ) -> None:
     if authority is not _PREPARED_MOVE_AUTHORITY:
         raise RuntimeError("protected checkout refresh requires journaled authority")
+    old, new = refresh.old, refresh.new
+    exclude_paths = ("memory.md",) if refresh.side == "memory" else ()
     if branch_commit(repo, branch) != new:
         raise RuntimeError("protected checkout refresh requires its named ref at the landed tip")
+    paths = ["--", ".", *(f":(top,exclude){path}" for path in exclude_paths)]
     for checkout in branch_worktree_owners(repo, branch):
-        untracked = run_git(checkout, ["ls-files", "--others", "--exclude-standard"])
+        untracked = run_git(checkout, ["ls-files", "--others", "--exclude-standard", *paths])
         if untracked.returncode != 0 or untracked.stdout.strip():
             raise RuntimeError(
                 f"protected ref {branch!r} landed, but its checkout contains untracked files"
             )
-        worktree_at_new = run_git(checkout, ["diff", "--quiet", new, "--"]).returncode == 0
-        index_at_new = run_git(checkout, ["diff", "--cached", "--quiet", new, "--"]).returncode == 0
+        worktree_at_new = run_git(checkout, ["diff", "--quiet", new, *paths]).returncode == 0
+        index_at_new = (
+            run_git(checkout, ["diff", "--cached", "--quiet", new, *paths]).returncode == 0
+        )
         if worktree_at_new and index_at_new:
             continue
-        worktree_at_old = run_git(checkout, ["diff", "--quiet", old, "--"]).returncode == 0
-        index_at_old = run_git(checkout, ["diff", "--cached", "--quiet", old, "--"]).returncode == 0
+        worktree_at_old = run_git(checkout, ["diff", "--quiet", old, *paths]).returncode == 0
+        index_at_old = (
+            run_git(checkout, ["diff", "--cached", "--quiet", old, *paths]).returncode == 0
+        )
         if not worktree_at_old or not index_at_old:
             raise RuntimeError(
                 f"protected ref {branch!r} landed, but its checkout contains unrelated changes"
             )
+        for path in exclude_paths:
+            _reset_derived_path(checkout, old, path)
         require_git(checkout, ["read-tree", "--reset", "-u", new])
 
 
-def _require_clean_branch_checkout(repo: Path, branch: str, expected: str) -> None:
+def _reset_derived_path(checkout: Path, old: str, path: str) -> None:
+    """Discard only an excluded cache's local changes before Git refreshes content."""
+
+    if require_git(checkout, ["ls-tree", "--name-only", old, "--", path]):
+        require_git(checkout, ["restore", f"--source={old}", "--staged", "--worktree", "--", path])
+        return
+    require_git(checkout, ["rm", "--cached", "--force", "--ignore-unmatch", "--", path])
+    cache = checkout / path
+    if cache.is_file() or cache.is_symlink():
+        cache.unlink()
+
+
+def _require_clean_branch_checkout(
+    repo: Path, branch: str, expected: str, *, exclude_paths: tuple[str, ...] = ()
+) -> None:
     for checkout in branch_worktree_owners(repo, branch):
-        require_clean(checkout, f"protected ref {branch!r} checkout")
+        require_clean(checkout, f"protected ref {branch!r} checkout", exclude_paths=exclude_paths)
         if head_commit(checkout) != expected:
             raise RuntimeError(
                 f"protected ref {branch!r} checkout is not at its expected named-ref tip"

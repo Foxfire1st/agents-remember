@@ -90,7 +90,7 @@ Optional supporting tools such as Confluence search, Brave search, or Context7 m
 2. The task file is the living contract for requirements, checklist state, decisions, and proposed code examples.
 3. When onboarding files are part of planning context, drift is checked before planning using `c-02-memory-quality-control`.
 4. No implementation begins before explicit developer approval.
-5. Refreshed external-memory onboarding and ledger changes are committed before the `c-09-git-worktree-manager` skill starts worktrees.
+5. Refreshed external-memory onboarding content is committed, with the computed ledger cache excluded, before the `c-09-git-worktree-manager` skill starts worktrees.
 6. Implementation approval is separate from commit approval; worktree-backed closeout commits require a later explicit developer approval after a closeout preview.
 7. Implementation steps and substeps use checkbox state rather than freeform progress prose.
 8. Code-changing light tasks include code examples for each distinct implementation change; a slice that intentionally defers its examples to the plan gate sets `codeExamplesNote` (e.g. "Drafted at the plan gate.") so the render distinguishes *deferred* from *none needed*.

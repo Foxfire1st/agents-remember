@@ -1,10 +1,13 @@
 """Sprint scheduling-mode resolution for graph and atomic-sequential planning (L13).
 
 A sprint carries at most one scheduling authority. An authored ``executionGraph``
-selects the ``dag`` mode; its absence selects the ``atomic-sequential`` default.
-Source-pair activation separately decides which durable atomic master may expose
-implementation work; series-contract presence is never scheduling ownership. This
-module only reads canonical documents and stored terminal artifacts.
+selects the ``dag`` mode; its absence selects the ``atomic-sequential`` default,
+which describes the sprint's shape — every commanded master executes atomically —
+and serializes nothing. A graph-less sprint declares no dependencies, so independent
+masters proceed concurrently. Per-contract activation separately records each durable
+atomic master's own reconciling -> active transition; series-contract presence is
+never scheduling ownership. This module only reads canonical documents and stored
+terminal artifacts.
 """
 
 from __future__ import annotations
@@ -60,8 +63,9 @@ def resolve_scheduling_mode(
             sprint=sprint,
             masters=masters,
             facts=(
-                "executionGraph absent: atomic-sequential default — one source-pair-selected "
-                "atomic master exposes implementation work at a time",
+                "executionGraph absent: atomic-sequential default — every commanded master "
+                "executes atomically and no dependency is declared, so nothing serializes the "
+                "masters",
             ),
         )
     return SchedulingMode(
@@ -81,8 +85,8 @@ def commanded_sprint_masters(
     """The exact commanded masters of a sprint under either scheduling mode (L13-R1).
 
     Graph sprints validate membership and natures; under the atomic-sequential
-    default the orchestrates aliases derive membership and source-pair activation —
-    not contract presence or a graph — serializes implementation exposure.
+    default the orchestrates aliases derive membership, and neither contract presence
+    nor the absence of a graph adds a dependency — nothing serializes the masters.
     """
 
     if sprint.document.executionGraph is None:

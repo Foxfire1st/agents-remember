@@ -34,7 +34,7 @@ from agents_remember.kernel.atomic_write import (
     atomic_write_bytes,
     atomic_write_text,
 )
-from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.git_command import GitRunnerOptions, run_git
 from agents_remember.kernel.platform_subprocess import (
     native_command,
     native_path_environment,
@@ -357,7 +357,7 @@ def _prepare_sandbox(request: CleanQualityRequest) -> _PreparedSandbox:
                 request.code_worktree.as_posix(),
                 source.as_posix(),
             ],
-            work_dir=sandbox,
+            GitRunnerOptions(work_dir=sandbox),
         ),
         "clone exact candidate",
     )
@@ -369,7 +369,14 @@ def _prepare_sandbox(request: CleanQualityRequest) -> _PreparedSandbox:
         preserve_output=True,
     )
     if staged:
-        _git_ok(run_git(source, ["apply", "--index", "-"], input_text=staged), "apply overlay")
+        _git_ok(
+            run_git(
+                source,
+                ["apply", "--index", "-"],
+                GitRunnerOptions(input_text=staged),
+            ),
+            "apply overlay",
+        )
     candidate_tree = _git_ok(run_git(source, ["write-tree"]), "resolve candidate tree")
     bundle = sandbox / "candidate.bundle"
     _git_ok(

@@ -21,7 +21,6 @@ from agents_remember.worktrees.integration.mutation_evidence import (
 _RECOVERY_FIELD: dict[CloseoutMutationLeg, str] = {
     "code": "codeCommit",
     "memory": "memoryContentCommit",
-    "ledger": "ledgerCommit",
 }
 
 
@@ -37,7 +36,7 @@ def derive_closeout_recovery_commits(
     cells = (
         current.model_dump(mode="json")
         if current is not None
-        else {"codeCommit": "", "memoryContentCommit": "", "ledgerCommit": ""}
+        else {"codeCommit": "", "memoryContentCommit": ""}
     )
     if reported is not None:
         _merge_reported_cells(cells, evidence, reported)
@@ -155,8 +154,8 @@ def _has_exact_finalization_evidence(record: LifecycleOperationRecord) -> bool:
     ):
         return False
     if operation_input.effectiveInput.memoryMode == "external":
-        return bool(commits.memoryContentCommit and commits.ledgerCommit)
-    return not commits.memoryContentCommit and not commits.ledgerCommit
+        return bool(commits.memoryContentCommit)
+    return not commits.memoryContentCommit
 
 
 def _valid_finalization_lifecycle(record: LifecycleOperationRecord) -> bool:

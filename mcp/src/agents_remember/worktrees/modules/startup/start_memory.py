@@ -6,17 +6,13 @@ import os
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
-from agents_remember.kernel.memory_ledger import LedgerError, MemoryLedger, find_mapping
-from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence import (
-    public_failure_evidence,
-)
+from agents_remember.kernel.memory_cache import derive_memory_ledger
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import (
     branch_exists,
     ensure_worktree,
     head_commit,
 )
-from agents_remember.worktrees.named_ref_memory import load_named_ref_ledger
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -24,7 +20,7 @@ def _memory_source_state(
     contract: WorktreeContract,
     args: WorktreeArgs,
 ) -> dict[str, object] | None:
-    """Settle the memory side before its ledger is ever read."""
+    """Verify the configured memory repository before preparing its worktree."""
 
     if contract.memory_mode == "internal":
         return {"state": "internal", "reason": "memory lives in the code worktree"}
@@ -44,14 +40,13 @@ def prepare_memory_for_start(
     if source_state is not None:
         return source_state
     memory_source_branch = _ensure_memory_source_branch(contract)
-    ledger = _load_memory_ledger(contract, args)
-    if isinstance(ledger, dict):
-        return ledger
-    if find_mapping(ledger, contract.code_base_commit) is None:
-        disabled = _disabled_memory_choice(args)
-        return disabled or _missing_mapping_state(contract, ledger)
     assert contract.memory_repo_path is not None
     assert contract.memory_worktree is not None
+    ledger = derive_memory_ledger(
+        contract.memory_repo_path,
+        contract.memory_base_commit,
+        repo_name=contract.repo_name,
+    )
     memory_branch_state = ensure_worktree(contract, side="memory", dry_run=args.dry_run)
     mtime_sync = _sync_worktree_memory_mtimes(contract, args.dry_run)
     return {
@@ -148,51 +143,6 @@ def _missing_memory_repo_state(args: WorktreeArgs) -> dict[str, object]:
         "state": "blocked",
         "reason": "external memory repo is missing; run c-00-initialize-memory-repo before starting an external-memory worktree",
         "choices": ["initialize-memory-repo", "disabled-memory"],
-    }
-
-
-def _load_memory_ledger(
-    contract: WorktreeContract,
-    args: WorktreeArgs,
-) -> MemoryLedger | dict[str, object]:
-    assert contract.memory_repo_path is not None
-    try:
-        return load_named_ref_ledger(
-            contract.memory_repo_path,
-            contract.memory_source_branch,
-        )
-    except LedgerError as error:
-        disabled = _disabled_memory_choice(args)
-        if disabled:
-            return disabled
-        return {
-            "state": "blocked",
-            "reason": "the configured memory ledger is unreadable",
-            "failure": public_failure_evidence(
-                stage="worktree-start-ledger-read",
-                side="ledger",
-                name=(contract.ledger_path.name if contract.ledger_path else "memory.md"),
-                error_type=type(error).__name__,
-                observed={"state": "unreadable"},
-            ),
-            "choices": ["initialize-memory-repo", "disabled-memory"],
-        }
-
-
-def _missing_mapping_state(
-    contract: WorktreeContract,
-    ledger: MemoryLedger,
-) -> dict[str, object]:
-    return {
-        "state": "blocked",
-        "reason": "no exact ledger mapping for selected code base commit",
-        "codeBaseCommit": contract.code_base_commit,
-        "lastVerifiedCodeCommit": ledger.last_verified_code_commit,
-        "choices": ["disabled-memory"],
-        "recovery": (
-            "repair the exact code-to-memory mapping in an ordinary task-owned conflict leaf, "
-            "then land it through the normal closeout and integration plane"
-        ),
     }
 
 

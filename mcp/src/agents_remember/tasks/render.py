@@ -80,7 +80,13 @@ def _execution_registration_lines(
     ]
 
 
-_MARKER: dict[str, str] = {"Completed": "✅", "inProgress": "🔨", "planning": "⬜"}
+# A direct lookup, so every ``DocStatus`` value must appear here or rendering raises.
+_MARKER: dict[str, str] = {
+    "Completed": "✅",
+    "inProgress": "🔨",
+    "planning": "⬜",
+    "abandoned": "⛔",
+}
 
 
 def _render_master(doc: TaskDocument, *, graph_titles: SprintGraphTitles | None = None) -> str:
@@ -435,12 +441,15 @@ def _step_lines(steps: list[Step]) -> list[str]:
     blocks: list[list[str]] = []
     for step in steps:
         # The heading is the step title; the checkbox carries the distinct outcome (R2). A bare step
-        # (no outcome, no substeps) is just its heading -- no redundant title echo.
+        # (no outcome, no substeps, no note) is just its heading -- no redundant title echo. A note
+        # suffixes the checkbox line the same way a substep's does, so a step note is visible in the
+        # render instead of living only in the JSON.
         block = [f"### {step.id} — {step.title}"]
-        if step.outcome or step.substeps or step.disposition:
+        if step.outcome or step.substeps or step.disposition or step.note:
+            note_suffix = f" — {step.note}" if step.note else ""
             block += [
                 "",
-                f"- [{_checkbox(step.status)}] {step.outcome or step.title}"
+                f"- [{_checkbox(step.status)}] {step.outcome or step.title}{note_suffix}"
                 f"{_disposition_suffix(step.disposition)}",
             ]
             for sub in step.substeps:

@@ -79,7 +79,6 @@ def _door_generation() -> CloseoutDoorGeneration:
         taskIntent=MissingTaskIntent(),
         reviewProvenance=not_applicable,
         memoryProvenance=not_applicable,
-        ledgerProvenance=not_applicable,
         admissionProvenance=DoorAdmissionProvenance(
             fingerprint=_digest(b"retired-door-admission"),
         ),

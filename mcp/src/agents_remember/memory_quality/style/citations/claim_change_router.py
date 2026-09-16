@@ -12,7 +12,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from agents_remember.kernel.git_command import GIT_METADATA_TIMEOUT_SECONDS, run_git
+from agents_remember.kernel.git_command import (
+    GIT_METADATA_TIMEOUT_SECONDS,
+    GitRunnerOptions,
+    run_git,
+)
 from agents_remember.memory_quality.style.citations import model, provenance
 from agents_remember.memory_quality.style.citations.resolution import Trees
 
@@ -107,7 +111,7 @@ class RepositoryChanges:
                     "--ignore-submodules=none",
                     "--no-renames",
                 ],
-                timeout=GIT_METADATA_TIMEOUT_SECONDS,
+                GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
             )
             if completed.returncode != 0:
                 self._working = PathRead(error=_git_error(completed.stderr, self.name, "status"))
@@ -127,7 +131,7 @@ class RepositoryChanges:
             completed = run_git(
                 self.root,
                 ["ls-tree", "-r", "--name-only", "-z", "HEAD"],
-                timeout=GIT_METADATA_TIMEOUT_SECONDS,
+                GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
             )
             if completed.returncode != 0:
                 self._head = PathRead(error=_git_error(completed.stderr, self.name, "HEAD tree"))
@@ -150,7 +154,7 @@ class RepositoryChanges:
                     commit,
                     "HEAD",
                 ],
-                timeout=GIT_METADATA_TIMEOUT_SECONDS,
+                GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
             )
             if completed.returncode != 0:
                 self._historical[commit] = PathRead(

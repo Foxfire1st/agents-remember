@@ -12,9 +12,6 @@ from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.worktrees.integration.closeout.initial_door_recovery import (
     classify_initial_closeout_door_recovery,
 )
-from agents_remember.worktrees.integration.closeout.ledger_recovery import (
-    classify_closeout_ledger_recovery,
-)
 from agents_remember.worktrees.integration.closeout.recovery_projection import (
     closeout_generation_retained,
 )
@@ -154,12 +151,8 @@ def _recovery_evidence_controls(
     initial_door = classify_initial_closeout_door_recovery(contract, record)
     if initial_door.state == "developer-decision":
         return []
-    ledger_recovery = classify_closeout_ledger_recovery(contract, record)
     direct_recovery = classify_direct_landing_recovery(contract, record)
-    if (
-        ledger_recovery.state == "developer-decision"
-        or direct_recovery.state == "developer-decision"
-    ):
+    if direct_recovery.state == "developer-decision":
         return []
     return None
 
@@ -543,7 +536,7 @@ def _resume_control(
     operation_input = record.input
     effective = getattr(operation_input, "effectiveInput", None)
     arguments = control["arguments"]
-    for leg in ("code", "memory", "ledger"):
+    for leg in ("code", "memory"):
         arguments[f"{leg}_commit_message"] = (
             f"<fresh nonblank {leg} commit message>"
             if effective is not None and effective.enabled(leg)
@@ -564,7 +557,6 @@ def _integration_control(
         "arguments": {
             "contract_path": contract.contract_path.as_posix(),
             "strategy": "ff-only",
-            "ledger_commit_message": "",
             "dry_run": False,
         },
         "summary": summary,
@@ -589,7 +581,6 @@ def _direct_successor_control(
             "code_commit": code_commit,
             "candidate_tree": candidate_tree,
             "memory_commit_message": "<nonblank memory commit message>",
-            "ledger_commit_message": "<nonblank ledger commit message>",
             "intent_note": "<developer intent>",
             "dry_run": False,
         },

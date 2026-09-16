@@ -141,7 +141,6 @@ export interface CloseoutProjectionProblemNode {
 }
 
 export interface CloseoutQueueNode {
-  /** JSON Schema refinements: {"maxItems":256} */
   members: CloseoutCandidateNode[];
   revision: number;
   serviceCondition: string;
@@ -349,7 +348,7 @@ export interface LifecycleOperationProjection {
   legalControls: Record<string, unknown>[];
   /** JSON Schema refinements: {"minimum":1} */
   meaningfulRevision?: number;
-  phase: "queued" | "preflight" | "memory-preflight" | "quality" | "approval-claim" | "recovering-after-claim" | "recovering-private-preparation" | "code-commit" | "memory-refresh" | "memory-commit" | "ledger-commit" | "integration-replay" | "integration-quality" | "source-merge" | "contract-finalization" | "door-publication" | "termination-required" | "direct-preflight" | "direct-memory-commit" | "direct-ledger-commit" | "direct-terminal-publication" | "completed" | "failed" | "cancelled";
+  phase: "queued" | "preflight" | "memory-preflight" | "quality" | "approval-claim" | "recovering-after-claim" | "recovering-private-preparation" | "code-commit" | "memory-refresh" | "memory-commit" | "integration-replay" | "integration-quality" | "source-merge" | "contract-finalization" | "door-publication" | "termination-required" | "direct-preflight" | "direct-memory-commit" | "direct-terminal-publication" | "completed" | "failed" | "cancelled";
   /** JSON Schema refinements: {"maxItems":8} */
   projectionEffects: TaskDocProjectionEffect[];
   recommendedAction?: LifecycleRecommendedAction;
@@ -730,7 +729,7 @@ export interface TaskExecutionNode {
 
 export interface TaskExecutionNodeView {
   executionNature?: string;
-  frontierState: "landed" | "ready" | "waiting" | "in-flight";
+  frontierState: "landed" | "ready" | "waiting" | "in-flight" | "abandoned";
   kind: "lump" | "segment";
   leafIds: string[];
   leafTitles: string[];

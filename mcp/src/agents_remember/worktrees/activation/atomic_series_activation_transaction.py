@@ -254,26 +254,11 @@ def _admission_refusal(request: _AdmissionRefusalRequest) -> WorktreeCommandResu
             observed=getattr(request.error, "observed", None),
         )
     )
-    if admission["classification"] == "wait" and admission.get("blocking") is not None:
-        blocking = admission["blocking"]
-        assert isinstance(blocking, dict)
-        blocker = blocking.get("master")
-        blocker_key = (
-            f"{blocker.get('repository')}:{blocker.get('path')}"
-            if isinstance(blocker, dict)
-            else "the named selected master"
-        )
-        summary = (
-            f"Atomic-series admission is waiting: {blocker_key} currently owns the "
-            f"source-pair selection in {blocking.get('state')} state. "
-            "Inspect the supplied worktree_status address before retrying."
-        )
-    else:
-        summary = (
-            f"Atomic-series admission refused ({request.status}): {request.detail} "
-            "Apply the reported corrective action and inspect the supplied worktree_status "
-            "address before retrying."
-        )
+    summary = (
+        f"Atomic-series admission refused ({request.status}): {request.detail} "
+        "Apply the reported corrective action and inspect the supplied worktree_status "
+        "address before retrying."
+    )
     return WorktreeCommandResult(
         2,
         {
@@ -298,11 +283,53 @@ def _reconciling_result(
 ) -> WorktreeCommandResult:
     payload = dict(synced.payload)
     payload["atomicSeriesActivation"] = activation
-    payload["summary"] = (
-        f"{payload.get('summary', 'Atomic-series source reconciliation did not complete.')} "
-        "The requested master remains selected and reconciling; complete or cancel the "
-        "contract-addressed sync, then retry this selecting operation."
-    )
+    if payload.get("state") in {"synced", "already-current"}:
+        # The pass itself succeeded; what did not is the selection. Reporting the pass's
+        # own success state beside a mid-flight record is the wording that made this shape
+        # read as a finished operation, so the state names what is actually true.
+        payload["state"] = "atomic-series-reconciling"
+    payload["summary"] = _mid_flight_summary(payload.get("summary"), activation)
     # A completed individual pass is not implementation admission when its source
     # moved again.  Selection stays reconciling and the selecting surface blocks.
     return WorktreeCommandResult(2 if synced.returncode == 0 else synced.returncode, payload)
+
+
+def _mid_flight_summary(refusal: object, activation: dict[str, object]) -> str:
+    """Lead with the mid-flight contract, because that is what the caller must act on.
+
+    The refused pass is the symptom. The state the caller has to know about is that the
+    contract this call addressed is still selected and reconciling, so every later
+    closeout and integrate for it meets the same wall -- and, before this, the only
+    thing said about it was the refused pass's own branch complaint, which names
+    neither the stuck contract nor what it was doing. Measured: a selecting operation
+    refused with "resolved memory ledger dropped parent mapping(s): ..." and the
+    reconciling record it left behind was visible only in a payload key nothing pointed
+    at.
+    """
+
+    record = activation.get("record")
+    contract_path = str(record.get("contractPath") or "") if isinstance(record, dict) else ""
+    published = str(record.get("selectedAt") or "") if isinstance(record, dict) else ""
+    revision = record.get("revision") if isinstance(record, dict) else None
+    master = record.get("selectedMaster") if isinstance(record, dict) else None
+    if isinstance(master, dict):
+        identity = f"The master {master.get('path')} of {master.get('repository')} "
+    else:
+        identity = "This contract "
+    if contract_path:
+        identity += f"({contract_path}) "
+    since = f" since {published}" if published else ""
+    at_revision = f" (revision {revision})" if revision is not None else ""
+    exits = (
+        "Complete it with worktree_sync(contract_path=..., dry_run=false) -- add "
+        "memory_sync_choice='merge-memory' when the memory line has to be merged -- or "
+        "cancel it with worktree_sync(contract_path=..., resolution_action='cancel', "
+        "dry_run=false)."
+    )
+    refused = f" The reconciliation itself reported: {refusal}" if refusal else ""
+    return (
+        f"{identity}is mid-flight: its atomic-series selection has been 'reconciling'"
+        f"{since}{at_revision}, left by a source reconciliation that did not complete, and "
+        f"nothing else can proceed through this contract until that state is resolved. {exits}"
+        f"{refused}"
+    )

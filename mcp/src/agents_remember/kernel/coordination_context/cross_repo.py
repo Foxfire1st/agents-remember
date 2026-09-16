@@ -6,7 +6,11 @@ from agents_remember.kernel.coordination_context.models import (
     CrossRepoAllowEntry,
     CrossRepoSettings,
 )
-from agents_remember.kernel.git_command import GIT_METADATA_TIMEOUT_SECONDS, run_git
+from agents_remember.kernel.git_command import (
+    GIT_METADATA_TIMEOUT_SECONDS,
+    GitRunnerOptions,
+    run_git,
+)
 from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
 
 __all__ = [
@@ -23,7 +27,11 @@ def git_branch(repo_root: Path) -> str:
     # reads take the metadata bound rather than the local default: if one has not
     # returned in 30s git is blocked on an index lock, and waiting five minutes for a
     # `branch --show-current` would stall the caller instead of failing it.
-    result = run_git(repo_root, ["branch", "--show-current"], timeout=GIT_METADATA_TIMEOUT_SECONDS)
+    result = run_git(
+        repo_root,
+        ["branch", "--show-current"],
+        GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+    )
     if result.returncode != 0:
         return ""
     return result.stdout.strip()
@@ -32,7 +40,11 @@ def git_branch(repo_root: Path) -> str:
 def git_head_or_empty(repo_root: Path) -> str:
     """Return the HEAD commit, or an empty string when git fails."""
 
-    result = run_git(repo_root, ["rev-parse", "HEAD"], timeout=GIT_METADATA_TIMEOUT_SECONDS)
+    result = run_git(
+        repo_root,
+        ["rev-parse", "HEAD"],
+        GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+    )
     if result.returncode != 0:
         return ""
     return result.stdout.strip()

@@ -288,10 +288,8 @@ def _contract_fact(
         (
             contract.code_commit,
             contract.memory_content_commit,
-            contract.ledger_commit,
             contract.integrated_code_commit,
             contract.integrated_memory_content_commit,
-            contract.integrated_ledger_commit,
         )
     )
     facts.append(_fact("commit", "present" if commit_present else "absent", path))

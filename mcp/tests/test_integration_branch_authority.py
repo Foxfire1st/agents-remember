@@ -9,18 +9,11 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
-from agents_remember.kernel.memory_ledger import (
-    LedgerRow,
-    MemoryLedger,
-    ledger_to_text,
-    load_ledger,
-    parse_ledger_text,
-    prepend_mapping,
-    write_ledger,
-)
 from agents_remember.models.lifecycles.operation import (
     IntegrateOperationInput,
 )
@@ -35,7 +28,7 @@ from agents_remember.worktrees.integration.integration_ref_transaction import (
     IntegrationRefRace,
     merge_integrated_commits,
     prepare_integration_ref_move,
-    require_integrated_ledger_mapping,
+    require_integrated_memory_ancestry,
 )
 from agents_remember.worktrees.integration.lifecycle import lifecycle_operations
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
@@ -43,89 +36,18 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store i
     operation_record_path,
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
+from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.integrate import (
     IntegrationSources,
+)
+from agents_remember.worktrees.worktree_contract import (
+    WorktreeContract,
 )
 from integration_branch_authority_test_support import (
     _authority_fixture,
     _closed_external_leaf_worktrees,
 )
 from test_source_lineage import _commit_on, _git
-
-
-def _ledger_with_rows(ledger: MemoryLedger, rows: list[LedgerRow]) -> MemoryLedger:
-    """A ledger whose exact rows are rewritten; the metadata follows the newest row."""
-
-    return replace(
-        ledger,
-        rows=rows,
-        last_verified_code_commit=rows[0].code_commit,
-        last_memory_content_commit=rows[0].memory_commit,
-    )
-
-
-def _commit_ledger(
-    memory_worktree: Path, ledger_path: Path, ledger: MemoryLedger, message: str
-) -> str:
-    write_ledger(ledger_path, ledger)
-    _git(memory_worktree, "add", "memory.md")
-    _git(memory_worktree, "commit", "-m", message)
-    return _git(memory_worktree, "rev-parse", "HEAD")
-
-
-def _ledger_text_with_header(ledger: MemoryLedger, header: tuple[str, str]) -> str:
-    """The canonical rendering with a header that deliberately disagrees with its own first row.
-
-    The metadata block precedes the table, so the first occurrence of row 1's two values is the
-    header, and patching exactly those two leaves every table cell as rendered. This reproduces
-    the third real closeout-merge error on demand.
-    """
-
-    text = ledger_to_text(ledger)
-    return text.replace(f'"{ledger.rows[0].code_commit}"', f'"{header[0]}"', 1).replace(
-        f'"{ledger.rows[0].memory_commit}"', f'"{header[1]}"', 1
-    )
-
-
-def _commit_ledger_text(memory_worktree: Path, ledger_path: Path, text: str, message: str) -> str:
-    ledger_path.write_text(text, encoding="utf-8")
-    _git(memory_worktree, "add", "memory.md")
-    _git(memory_worktree, "commit", "-m", message)
-    return _git(memory_worktree, "rev-parse", "HEAD")
-
-
-def _reclosed_leaf_memory_history(root: Path):
-    """One closed leaf whose memory work branch then re-closed out after its parent moved.
-
-    Returns ``(closed, memory_source, source_rows, second_memory, ledger_commit, ledger)``:
-    the contract as the second closeout left it, the exact memory source commit it must stay
-    based on, that source's ledger rows, and the ledger whose two added rows are both true.
-    """
-
-    fixture = _authority_fixture(root, external_memory=True)
-    closed = _closed_external_leaf_worktrees(fixture, root, publish_closeout_evidence=False)
-    memory_repo = closed.memory_repo_path
-    memory_worktree = closed.memory_worktree
-    assert memory_repo is not None and memory_worktree is not None
-    assert closed.ledger_path is not None
-    source = _git(memory_repo, "rev-parse", closed.memory_source_branch)
-    source_rows = parse_ledger_text(_git(memory_repo, "show", f"{source}:memory.md")).rows
-    # The second closeout's own memory content, on top of the first one's ledger.
-    work_branch = _git(memory_worktree, "rev-parse", "--abbrev-ref", "HEAD")
-    _commit_on(memory_worktree, work_branch, "second-content.md")
-    second_memory = _git(memory_worktree, "rev-parse", "HEAD")
-    accumulated = prepend_mapping(
-        load_ledger(closed.ledger_path),
-        closed.code_commit,
-        second_memory,
-    )
-    ledger_commit = _commit_ledger(
-        memory_worktree,
-        closed.ledger_path,
-        accumulated,
-        "Record the re-closeout mapping",
-    )
-    return closed, source, source_rows, second_memory, ledger_commit, accumulated
 
 
 class IntegrationBranchAuthorityTests(unittest.TestCase):
@@ -218,7 +140,6 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
                 commits = IntegratedCommits(
                     code=closed.code_commit,
                     memory_content=closed.memory_content_commit,
-                    ledger=closed.ledger_commit,
                 )
                 snapshot = prepare_integration_ref_move(
                     closed,
@@ -239,7 +160,7 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             )
             self.assertEqual(
                 expected["intended"],
-                {"codeRef": closed.code_commit, "memoryRef": closed.ledger_commit},
+                {"codeRef": closed.code_commit, "memoryRef": closed.memory_content_commit},
             )
             self.assertEqual(raised.exception.observed, {})
             self.assertEqual(
@@ -248,159 +169,122 @@ class IntegrationBranchAuthorityTests(unittest.TestCase):
             )
             self.assertEqual(_git(memory_repo, "rev-parse", "ar/master"), raced_memory)
 
-    def test_ledger_keeps_every_true_mapping_a_reclosed_leaf_accumulated(self) -> None:
-        """A leaf that closed out, synced, and closed out again lands both real mappings.
-
-        Both closeouts really happened and both commits exist in their repositories, so the
-        landed ledger carries two rows ahead of the source history. The row count is not the
-        safeguard; each added row is verified instead.
-        """
-
-        with tempfile.TemporaryDirectory() as tmp:
-            closed, source, source_rows, second_memory, ledger_commit, _ = (
-                _reclosed_leaf_memory_history(Path(tmp))
-            )
-            assert closed.memory_repo_path is not None
-
-            require_integrated_ledger_mapping(
-                closed,
-                IntegratedCommits(
-                    code=closed.code_commit,
-                    memory_content=second_memory,
-                    ledger=ledger_commit,
-                ),
-                memory_source_commit=source,
-            )
-
-            landed = parse_ledger_text(
-                _git(closed.memory_repo_path, "show", f"{ledger_commit}:memory.md")
-            )
-            self.assertEqual(
-                landed.rows,
-                [
-                    LedgerRow(closed.code_commit, second_memory),
-                    LedgerRow(closed.code_commit, closed.memory_content_commit),
-                    *source_rows,
-                ],
-            )
-
-    def test_ledger_refuses_unpreserved_source_rows_and_untrue_added_mappings(self) -> None:
-        """Every added mapping is proven, and the source history is never traded away."""
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            closed, source, source_rows, second_memory, ledger_commit, accumulated = (
-                _reclosed_leaf_memory_history(root)
-            )
-            memory_repo = closed.memory_repo_path
-            memory_worktree = closed.memory_worktree
-            assert memory_repo is not None and memory_worktree is not None
-            assert closed.ledger_path is not None
-            code_source = _git(closed.code_repo_path, "rev-parse", closed.code_source_branch)
-            # A memory commit on a sibling branch: real, but never part of this leaf's history.
-            _git(memory_repo, "branch", "orphan-content", source)
-            _commit_on(memory_repo, "orphan-content", "orphan-content.md")
-            orphan = _git(memory_repo, "rev-parse", "orphan-content")
-            _git(memory_repo, "switch", "super")
-            cases = (
-                (
-                    "dropped source row",
-                    _ledger_with_rows(accumulated, accumulated.rows[:-1]),
-                    closed.code_commit,
-                    second_memory,
-                    "does not preserve the complete source ledger history",
-                    (f"missing 1 source row(s): {source_rows[0].code_commit}",),
-                ),
-                (
-                    "memory commit that never landed",
-                    _ledger_with_rows(
-                        accumulated,
-                        [LedgerRow(code_source, orphan), *accumulated.rows],
-                    ),
-                    code_source,
-                    orphan,
-                    "is not an ancestor of the landed ledger commit",
-                    (orphan,),
-                ),
-                (
-                    "code commit this repository does not hold",
-                    _ledger_with_rows(
-                        accumulated,
-                        [LedgerRow(source, second_memory), *accumulated.rows],
-                    ),
-                    source,
-                    second_memory,
-                    "does not exist in the code repository",
-                    (source,),
-                ),
-                (
-                    "duplicated source row",
-                    _ledger_with_rows(
-                        accumulated,
-                        [*accumulated.rows, accumulated.rows[-1]],
-                    ),
-                    closed.code_commit,
-                    second_memory,
-                    "does not preserve the complete source ledger history",
-                    (source_rows[-1].code_commit,),
-                ),
-            )
-            for name, ledger, code_commit, memory_content, refusal, evidence in cases:
-                with self.subTest(case=name):
-                    candidate = _commit_ledger(
-                        memory_worktree,
-                        closed.ledger_path,
-                        ledger,
-                        f"Ledger variant: {name}",
-                    )
-                    with self.assertRaises(RuntimeError) as raised:
-                        require_integrated_ledger_mapping(
-                            closed,
-                            IntegratedCommits(
-                                code=code_commit,
-                                memory_content=memory_content,
-                                ledger=candidate,
-                            ),
-                            memory_source_commit=source,
-                        )
-                    message = str(raised.exception)
-                    self.assertIn(refusal, message)
-                    for fragment in evidence:
-                        self.assertIn(fragment, message)
-                    self.assertIn("Remedy:", message)
-                    self.assertIn("worktree_closeout_apply", message)
-            # A hand edit that leaves every row alone and moves only the header is still a
-            # malformed ledger, and it is the shape this check newly carries a remedy for: the
-            # integrated reader rejected it as an opaque "invalid" before the projection check.
-            with self.subTest(case="header disagreeing with its own first row"):
-                headered = _commit_ledger_text(
-                    memory_worktree,
-                    closed.ledger_path,
-                    _ledger_text_with_header(
-                        accumulated,
-                        (source_rows[0].code_commit, source_rows[0].memory_commit),
-                    ),
-                    "Ledger variant: header disagrees",
+    def test_cache_damage_cannot_change_the_accepted_pair_or_block_its_ref_move(self) -> None:
+        for cache_text in (None, "<<<<<<< malformed cache\n", "stale cache row\n"):
+            with self.subTest(cache_text=cache_text), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                fixture = _authority_fixture(root, external_memory=True)
+                closed = _closed_external_leaf_worktrees(
+                    fixture, root, publish_closeout_evidence=False
                 )
-                with self.assertRaises(RuntimeError) as raised:
-                    require_integrated_ledger_mapping(
-                        closed,
-                        IntegratedCommits(
-                            code=closed.code_commit,
-                            memory_content=second_memory,
-                            ledger=headered,
-                        ),
-                        memory_source_commit=source,
-                    )
-                message = str(raised.exception)
-                self.assertIn("the ledger header disagrees with its own first row", message)
-                self.assertIn("Remedy:", message)
-                self.assertIn("worktree_closeout_apply", message)
-            self.assertEqual(
-                parse_ledger_text(_git(memory_repo, "show", f"{ledger_commit}:memory.md")).rows,
-                [
-                    LedgerRow(closed.code_commit, second_memory),
-                    LedgerRow(closed.code_commit, closed.memory_content_commit),
-                    *source_rows,
-                ],
-            )
+                assert closed.memory_repo_path is not None
+                assert closed.memory_worktree is not None
+                cache = closed.memory_worktree / "memory.md"
+                if cache_text is None:
+                    cache.unlink(missing_ok=True)
+                else:
+                    cache.write_text(cache_text, encoding="utf-8")
+                commits = IntegratedCommits(closed.code_commit, closed.memory_content_commit)
+                sources = IntegrationSources(
+                    current_code_source=_git(
+                        closed.code_repo_path, "rev-parse", closed.code_source_branch
+                    ),
+                    current_memory_source=_git(
+                        closed.memory_repo_path, "rev-parse", closed.memory_source_branch
+                    ),
+                    code_replay_required=False,
+                    memory_replay_required=False,
+                )
+                memory_history = _git(closed.memory_repo_path, "rev-list", "--all", "--count")
+
+                snapshot = prepare_integration_ref_move(closed, commits, WorktreeArgs(), sources)
+                merge_integrated_commits(closed, commits, snapshot)
+
+                self.assertEqual(
+                    _git(closed.code_repo_path, "rev-parse", closed.code_source_branch),
+                    commits.code,
+                )
+                self.assertEqual(
+                    _git(closed.memory_repo_path, "rev-parse", closed.memory_source_branch),
+                    commits.memory_content,
+                )
+                self.assertEqual(
+                    _git(closed.memory_repo_path, "rev-list", "--all", "--count"), memory_history
+                )
+
+
+def _init_repo(root: Path) -> Path:
+    """One real repository, because every clause here is asked of Git rather than of a stub."""
+
+    root.mkdir(parents=True, exist_ok=True)
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.email", "landing@example.invalid")
+    _git(root, "config", "user.name", "Landing Clauses")
+    return root
+
+
+def _commit_text(repo: Path, name: str, body: str) -> str:
+    """One real commit of this repository, so a cell names something git can resolve."""
+
+    (repo / name).write_text(body + "\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", name)
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _integration_contract(repo: Path) -> WorktreeContract:
+    """A leaf over real repositories for the accepted-object and ancestry proof."""
+
+    return WorktreeContract(
+        task_id="TASK",
+        task_name="task",
+        repo_name="repo-a",
+        workflow_kind="light-task",
+        memory_mode="external",
+        coordination_root=repo,
+        task_root=repo,
+        contract_path=repo / "series-contract.md",
+        task_artifact=repo / "task.md",
+        worktree_group=repo,
+        code_repo_path=repo,
+        code_source_branch="main",
+        code_work_branch="work",
+        code_base_commit="",
+        code_worktree=repo,
+        memory_repo_path=repo,
+        memory_source_branch="main",
+        memory_work_branch="memory-work",
+        memory_base_commit="",
+        ledger_path=repo / "memory.md",
+    )
+
+
+def test_the_accepted_memory_commit_must_descend_from_the_exact_source(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "reachability")
+    base = _commit_text(repo, "base.md", "base")
+    _git(repo, "branch", "unlanded", base)
+    source = _commit_text(repo, "source.md", "current source")
+    _git(repo, "switch", "unlanded")
+    unlanded = _commit_text(repo, "unlanded.md", "memory content outside the source line")
+    contract = _integration_contract(repo)
+    assert not is_ancestor(repo, source, unlanded)
+
+    with pytest.raises(RuntimeError, match="not based on the exact memory source"):
+        require_integrated_memory_ancestry(
+            contract,
+            IntegratedCommits(code=source, memory_content=unlanded),
+            memory_source_commit=source,
+        )
+
+
+def test_the_accepted_code_commit_must_exist_even_when_memory_is_current(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "code-side")
+    head = _commit_text(repo, "content.md", "memory content")
+    contract = _integration_contract(repo)
+
+    with pytest.raises(RuntimeError, match="code commit does not exist"):
+        require_integrated_memory_ancestry(
+            contract,
+            IntegratedCommits(code="c" * 40, memory_content=head),
+            memory_source_commit=head,
+        )

@@ -24,7 +24,6 @@ class LegacyCloseoutMigrationProof(BaseModel):
     legacyCodeCommitMessage: str = Field(min_length=1)
     legacyApprovalNote: str = Field(min_length=1)
     memoryCommitMessage: str = Field(min_length=1)
-    ledgerCommitMessage: str = Field(min_length=1)
     auditReason: str = Field(min_length=1, max_length=8192)
     codeRepository: str = Field(min_length=1, max_length=4096)
     codeRef: str = Field(pattern=r"^refs/heads/.+$", max_length=4096)
@@ -46,7 +45,6 @@ class LegacyCloseoutMigrationProof(BaseModel):
             self.legacyCodeCommitMessage,
             self.legacyApprovalNote,
             self.memoryCommitMessage,
-            self.ledgerCommitMessage,
             self.auditReason,
         ):
             if value.strip() != value:

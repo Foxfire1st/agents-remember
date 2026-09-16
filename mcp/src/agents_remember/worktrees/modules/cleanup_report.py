@@ -1,72 +1,38 @@
-"""Run the existing cleanup procedure automatically after a completed integration.
+"""Shape the operator-facing report for a completed terminal reclamation.
 
-The developer ruling is that a completed leaf is reclaimed without another prompt: cleanup is
-an automatic procedure that follows integration. This module owns only the wiring and the
-operator-facing report. The destructive work stays in
-:func:`agents_remember.worktrees.modules.cleanup.cleanup_result`, which already proves
-terminal evidence, archives it and reads it back, and refuses when authority is live or
-ambiguous.
+Reclamation itself is run by ``lifecycle_finalize_task``. It calls
+:func:`agents_remember.worktrees.modules.cleanup.cleanup_result`, which proves terminal
+evidence, archives it and reads it back, and refuses when authority is live or ambiguous. This
+module owns only the report an operator reads afterwards: the inventory of what was removed and
+what was left in place, and the one sentence that names both. Reclamation stays automatic and
+unprompted -- what moved is which procedure reaches it.
 
-A refused or failed cleanup is reported, never raised. It runs after a successful landing, and
-turning that landing into a reported failure would hide a real integration; the failure stays
-loud through this payload and through the contract's own ``cleanup`` cell, which the phase
-machine turns into ``cleanup-pending``.
+The shaping is pure. :func:`cleanup_report` reads the cleanup payload plus the contract's own
+declared targets and returns the report; it mutates nothing and refuses nothing. A refused or
+failed cleanup never reaches it: that payload is passed through unchanged, so its ``blockers``,
+its partial removal inventory and its citation-cache facts stay visible instead of being
+flattened into a sentence.
 """
 
 from __future__ import annotations
 
-from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.cleanup import cleanup_result
+from pathlib import Path
+
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-# The states in which the cleanup procedure reports that reclamation is finished.
-_TERMINAL_CLEANUP_STATES = {"cleanup-completed", "already-clean"}
+ALREADY_CLEAN = "already-clean"
 
 RemovalInventory = dict[str, list[dict[str, object]]]
 
 
-def run_automatic_cleanup(contract: WorktreeContract) -> dict[str, object]:
-    """Reclaim one integrated enclosure and report, in operator language, what happened.
+def cleanup_report(contract: WorktreeContract, payload: dict[str, object]) -> dict[str, object]:
+    """Report what a completed terminal reclamation removed and what it left in place."""
 
-    ``approved`` is the integration approval: the developer ruling removes the separate
-    cleanup prompt, so the landing that just completed is the authorization for its own
-    terminal reclamation. A refusal or a partial mutation changes only what this report
-    says -- it never changes the integration result that carries it.
-    """
-
-    try:
-        result = cleanup_result(
-            WorktreeArgs(
-                contract_path=contract.contract_path,
-                approved=True,
-                dry_run=False,
-                teardown_providers=True,
-            )
-        )
-    except Exception as error:
-        # A cleanup refusal or crash is the step after a real landing: report it, never
-        # convert a completed integration into a failure.
-        return _refused(contract, f"{type(error).__name__}: {error}")
-    state = result.payload.get("state")
-    if result.returncode != 0 or state not in _TERMINAL_CLEANUP_STATES:
-        return _refused(contract, _refusal_reason(result.payload), result.payload)
-    return _completed(contract, result.payload)
-
-
-def _refusal_reason(payload: dict[str, object]) -> str:
-    reason = str(payload.get("summary") or payload.get("state") or "cleanup refused")
-    blockers = payload.get("blockers")
-    if not isinstance(blockers, list) or not blockers:
-        return reason
-    return f"{reason} ({blockers!r})"
-
-
-def _completed(contract: WorktreeContract, payload: dict[str, object]) -> dict[str, object]:
     state = str(payload.get("state"))
-    if state == "already-clean":
-        # The terminal archive already proves this enclosure was reclaimed: nothing
-        # remained to remove, and reporting the contract's targets as "still in place"
-        # would state the opposite of what the terminal proof says.
+    if state == ALREADY_CLEAN:
+        # The terminal archive already proves this enclosure was reclaimed: nothing remained
+        # to remove, and reporting the contract's targets as "still in place" would state the
+        # opposite of what the terminal proof says.
         return {
             "automatic": True,
             "state": state,
@@ -81,7 +47,7 @@ def _completed(contract: WorktreeContract, payload: dict[str, object]) -> dict[s
     return {
         "automatic": True,
         "state": state,
-        "summary": _summary(state, "", removed, not_removed),
+        "summary": _summary(removed, not_removed),
         "removed": removed,
         "notRemoved": not_removed,
     }
@@ -89,28 +55,6 @@ def _completed(contract: WorktreeContract, payload: dict[str, object]) -> dict[s
 
 def _empty_inventory() -> RemovalInventory:
     return {"worktrees": [], "localBranches": [], "reports": [], "enclosureRoot": []}
-
-
-def _refused(
-    contract: WorktreeContract,
-    reason: str,
-    payload: dict[str, object] | None = None,
-) -> dict[str, object]:
-    observed = payload or {}
-    removed, not_removed = _inventory(contract, observed)
-    report: dict[str, object] = {
-        "automatic": True,
-        "state": "refused",
-        "summary": _summary("refused", reason, removed, not_removed),
-        "removed": removed,
-        "notRemoved": not_removed,
-        "refusal": {
-            "reason": reason,
-            "cleanupState": observed.get("state"),
-            "blockers": observed.get("blockers") or [],
-        },
-    }
-    return report
 
 
 def _inventory(
@@ -176,7 +120,7 @@ def _kept_branches(
     return kept
 
 
-def _directory(path, payload: dict[str, object], name: str) -> dict[str, object]:
+def _directory(path: Path, payload: dict[str, object], name: str) -> dict[str, object]:
     item = _entries(payload.get("directories")).get(name)
     return {
         "path": path.as_posix(),
@@ -223,24 +167,7 @@ def _contract_branches(contract: WorktreeContract) -> list[tuple[str, str]]:
     return branches
 
 
-def _summary(
-    state: str,
-    reason: str,
-    removed: RemovalInventory,
-    not_removed: RemovalInventory,
-) -> str:
-    if state == "refused":
-        reclaimed = _inventory_phrase(removed)
-        if reclaimed:
-            standing = _inventory_phrase(not_removed) or "nothing that was reported"
-            return (
-                f"Automatic cleanup was refused after removing {reclaimed}; "
-                f"still in place {standing}. Reason: {reason}."
-            )
-        return (
-            f"Automatic cleanup was refused and removed nothing: {reason}. "
-            "The worktrees, local task branches, reports and enclosure root are still in place."
-        )
+def _summary(removed: RemovalInventory, not_removed: RemovalInventory) -> str:
     reclaimed = _inventory_phrase(removed) or "nothing"
     left = _inventory_phrase(not_removed)
     if not left:

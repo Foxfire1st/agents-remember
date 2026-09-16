@@ -198,6 +198,7 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "title": NORMATIVE,
         "outcome": NORMATIVE,
         "status": PROGRESS_AND_READINESS,
+        "note": AUDIT,
         "substeps": INTENT_AND_PROGRESS | READINESS,
         "disposition": AUDIT,
     },

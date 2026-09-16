@@ -14,6 +14,7 @@ from pathlib import Path
 from agents_remember.kernel.git_command import (
     GIT_LOCAL_TIMEOUT_SECONDS,
     GIT_METADATA_TIMEOUT_SECONDS,
+    GitRunnerOptions,
     run_git,
 )
 
@@ -36,7 +37,11 @@ def run_git_command(
     if dry_run:
         print(f"Would run in {work_dir or repo_root}: {printable}")
         return
-    result = run_git(repo_root, args, work_dir=work_dir, timeout=timeout)
+    result = run_git(
+        repo_root,
+        args,
+        GitRunnerOptions(work_dir=work_dir, timeout=timeout),
+    )
     if result.returncode != 0:
         tail = (result.stderr or result.stdout or "").strip()[-2000:]
         raise RuntimeError(f"command failed ({result.returncode}): {printable}\n{tail}")
@@ -47,6 +52,6 @@ def repo_has_commit(repo_root: Path, commit: str) -> bool:
     result = run_git(
         repo_root,
         ["cat-file", "-e", f"{commit}^{{commit}}"],
-        timeout=GIT_METADATA_TIMEOUT_SECONDS,
+        GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
     )
     return result.returncode == 0

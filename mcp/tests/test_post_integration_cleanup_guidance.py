@@ -1,9 +1,12 @@
-"""Cleanup after integration is automatic, and the published projection says so.
+"""Reclamation is automatic and unprompted, and the published projection names its owner.
 
-Integration used to end by asking the developer whether to remove the worktrees. The
-projection must not keep describing that decision once the procedure runs itself: a contract
-whose cleanup did not complete is a recovery, and the move it offers is the retry, addressed
-to the same tool the automatic path already calls.
+Integration used to end by asking the developer whether to remove the worktrees, and the
+projection used to describe the procedure that replaced that prompt. It now describes the
+procedure that owns it: a contract whose landing completed but whose enclosures still stand is
+the moment before the terminal edge, so the move it offers is ``lifecycle_finalize_task`` --
+the route that reclaims the code and memory worktrees and reconciles the leaf document and its
+master row. Reclamation is still automatic and never a question; what changed is which
+procedure reaches it.
 """
 
 from __future__ import annotations
@@ -13,8 +16,9 @@ from pathlib import Path
 from typing import get_args
 
 from agents_remember.models.worktree import NextOperation
-from agents_remember.worktrees.modules.guidance import lifecycle_guidance
+from agents_remember.worktrees.modules.guidance import carryover_done, lifecycle_guidance
 from agents_remember.worktrees.worktree_contract import WorktreeContract
+from test_worktree_support import git, init_repo
 
 
 def _integrated_contract(root: Path) -> WorktreeContract:
@@ -42,21 +46,103 @@ def _integrated_contract(root: Path) -> WorktreeContract:
     )
 
 
-def test_a_pending_cleanup_offers_a_retry_and_never_a_cleanup_decision(tmp_path: Path) -> None:
+def test_a_pending_cleanup_offers_finalization_and_never_a_cleanup_decision(
+    tmp_path: Path,
+) -> None:
     contract = replace(_integrated_contract(tmp_path))
 
     guidance = lifecycle_guidance(contract)
 
     assert guidance["phase"] == "cleanup-pending"
-    assert guidance["nextOperation"] == "retry_cleanup"
-    assert guidance.get("nextTool") == "worktree_cleanup"
+    assert guidance["nextOperation"] == "finalize"
+    assert guidance.get("nextTool") == "lifecycle_finalize_task"
     assert guidance.get("nextArgs", {})["contract_path"] == contract.contract_path.as_posix()
-    assert "automatic" in guidance["summary"]
-    assert "retry worktree_cleanup" in guidance["summary"]
+    # ``lifecycle_finalize_task`` is addressed by contract, so the projection must say so or an
+    # operator is told to call a tool without the one argument that names the edge.
+    assert guidance.get("nextRequiredArgs") == ["contract_path"]
+    assert "finalizing the task edge" in guidance["summary"]
+    assert "reclaims the code and memory worktrees" in guidance["summary"]
+    assert "worktree_cleanup" not in guidance["summary"]
 
 
 def test_the_cleanup_decision_is_no_longer_in_the_next_operation_vocabulary() -> None:
-    """The vocabulary outgrew its writer when the prompt was removed; the member is gone."""
+    """Both cleanup moves are gone from the vocabulary, not parked beside their replacement.
 
-    assert "retry_cleanup" in get_args(NextOperation)
+    ``request_cleanup_decision`` was the prompt this lane deleted. ``retry_cleanup`` was only
+    ever written by the pending-cleanup phase, and that phase now offers ``finalize`` -- so the
+    member has no writer left and is removed rather than kept as a nameable operation no
+    procedure can produce.
+    """
+
+    assert "retry_cleanup" not in get_args(NextOperation)
+    # The move that replaced the retry as the normal path has to be nameable, or the phase
+    # above could not describe it at all.
+    assert "finalize" in get_args(NextOperation)
     assert "request_cleanup_decision" not in get_args(NextOperation)
+
+
+def test_external_completion_proves_landed_commits_without_reading_the_cache(
+    tmp_path: Path,
+) -> None:
+    code_repo = tmp_path / "code"
+    memory_repo = tmp_path / "memory"
+    code = init_repo(code_repo)
+    memory = init_repo(memory_repo)
+    cache = memory_repo / "memory.md"
+    contract = replace(
+        _integrated_contract(tmp_path),
+        memory_mode="external",
+        code_repo_path=code_repo,
+        code_commit=code,
+        integrated_code_commit=code,
+        memory_repo_path=memory_repo,
+        memory_source_branch="main",
+        memory_content_commit=memory,
+        integrated_memory_content_commit=memory,
+        ledger_path=cache,
+    )
+    for contents in (None, "<<<<<<< broken cache\n", "a stale row with no accepted pair\n"):
+        if contents is not None:
+            cache.write_text(contents, encoding="utf-8")
+        done, date = carryover_done(contract)
+        assert done and date
+        guidance = lifecycle_guidance(contract)
+        assert guidance["phase"] == "cleanup-pending"
+        assert guidance["nextOperation"] == "finalize"
+
+    git(memory_repo, "checkout", "-b", "unlanded")
+    git(memory_repo, "commit", "--allow-empty", "-m", "Unlanded memory")
+    unlanded = git(memory_repo, "rev-parse", "HEAD")
+    git(memory_repo, "checkout", "main")
+    assert not carryover_done(replace(contract, integrated_memory_content_commit=unlanded))[0]
+    assert not carryover_done(replace(contract, integrated_code_commit="f" * 40))[0]
+    assert not carryover_done(replace(contract, memory_repo_path=None))[0]
+
+
+def test_a_checkpointed_series_keeps_working_instead_of_being_told_to_integrate(
+    tmp_path: Path,
+) -> None:
+    """A checkpoint lands the series without closing it, so its position is still working.
+
+    A checkpoint publishes the closeout edge while the series stays open. Without its own
+    branch the projection therefore read as closeout-done-and-awaiting-integration:
+    ``integration-pending`` with ``worktree_integrate``, the tool that refuses while the
+    series is open. The move out of a checkpoint is the single one the checkpoint lands into,
+    because the next thing that happens is the remaining work.
+
+    This is a LANDING and not a pause, and the assertion on ``continue_work`` is what keeps
+    that true: pausing is a separate operation that releases the master's atomic-series
+    selection and moves no ref, so it must never be what a landed checkpoint reports. Reading
+    this branch as the pause's next move is the hidden side effect the split exists to prevent.
+    """
+
+    contract = replace(_integrated_contract(tmp_path), integration_status="checkpointed")
+
+    guidance = lifecycle_guidance(contract)
+
+    assert guidance["phase"] == "worktree-started"
+    assert guidance["nextOperation"] == "continue_work"
+    assert guidance.get("nextTool") == "worktree_status"
+    assert guidance.get("nextArgs", {})["contract_path"] == contract.contract_path.as_posix()
+    assert "checkpointed" in guidance["summary"]
+    assert "cleanup is deliberately not pending" in guidance["summary"]

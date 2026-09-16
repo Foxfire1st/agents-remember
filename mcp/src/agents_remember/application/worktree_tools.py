@@ -92,6 +92,7 @@ from .worktree_tool_requests import (
     CloseoutApproval,
     CloseoutCommitMessages,
     FinalizeTaskDocs,
+    LandedCommits,
     OperationControlRequest,
     StartExecution,
     TaskBases,
@@ -372,7 +373,6 @@ def worktree_integrate_tool(
     *,
     contract_path: str,
     strategy: IntegrateStrategy = "ff-only",
-    ledger_commit_message: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Land the task branches onto their source branches in this process.
@@ -400,7 +400,6 @@ def worktree_integrate_tool(
         contract_path=confined_contract,
         strategy=strategy,
         approved=not dry_run,
-        ledger_commit_message=ledger_commit_message,
         dry_run=dry_run,
         # The configured policy MUST reach the seam guard (mirror of the closeout
         # path below): the dataclass default is all-human, which would refuse the
@@ -421,6 +420,115 @@ def worktree_integrate_tool(
             )
         )
     return result
+
+
+def worktree_checkpoint_landing_tool(
+    config: McpRuntimeConfig,
+    *,
+    contract_path: str,
+    strategy: IntegrateStrategy = "ff-only",
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Land an unfinished atomic master's accumulated line into its super branch.
+
+    ``worktree_integrate`` closes a finished master: it proves the master's task document is
+    ``Completed``, that every canonical leaf owns a landed enclosure, and that the master has
+    closed out. A master being paused has none of those, so before this route a partial master
+    could not land at all. This captures the master's own committed refs instead -- the live series
+    code work branch tip and the live memory work branch tip -- proves the source ancestry,
+    and lands exactly those. It shares the final route's entire preflight and ref move --
+    the series contract binding, the atomic landing authority, the replay/ff source-state gate, the
+    lineage proof, the master-handover gate and the compare-and-swap -- and requires the same
+    explicit developer approval (``dry_run=False``). It records ``checkpointed`` rather than
+    ``completed`` and retires nothing, so the master keeps its worktrees, its branches and its
+    enclosure for the work that continues.
+    """
+
+    configured = admit_configured_contract(config, contract_path)
+    if isinstance(configured, ConfiguredContractRefused):
+        return project_configured_contract_refusal(
+            configured,
+            operation="worktree_checkpoint_landing",
+        )
+    args = git_worktree_manager.WorktreeArgs(
+        contract_path=configured.contract_path,
+        strategy=strategy,
+        approved=not dry_run,
+        dry_run=dry_run,
+        gate_policy=config.orchestration.gate_policy,
+    )
+    return _worktree_result(
+        "worktree_checkpoint_landing",
+        git_worktree_manager.checkpoint_landing_result(args, configured.contract),
+    )
+
+
+def worktree_pause_tool(
+    config: McpRuntimeConfig,
+    *,
+    contract_path: str,
+) -> dict[str, Any]:
+    """Stop an atomic master without publishing anything.
+
+    This is the stop the developer asked for and the split exists to make possible. It
+    releases the master's atomic-series activation selection -- so the master really does stop
+    being the one exposing implementation work, rather than being marked as stopped -- and
+    returns control to the developer with no continued-execution step. It moves no ref, creates
+    no commit, lands nothing and writes no ledger row, and the master keeps its work branches,
+    its worktrees, its enclosure and every unstarted leaf exactly as they were.
+
+    ``worktree_checkpoint_landing`` is the separate, explicitly requested PUBLICATION that
+    lands a partial master's accumulated line. It is not reachable from here: pausing a master
+    and publishing one are two operations, and reaching for the stop must never publish.
+    """
+
+    configured = admit_configured_contract(config, contract_path)
+    if isinstance(configured, ConfiguredContractRefused):
+        return project_configured_contract_refusal(configured, operation="worktree_pause")
+    args = git_worktree_manager.WorktreeArgs(
+        contract_path=configured.contract_path,
+        gate_policy=config.orchestration.gate_policy,
+    )
+    return _worktree_result(
+        "worktree_pause",
+        git_worktree_manager.pause_result(args, configured.contract),
+    )
+
+
+def worktree_record_landing_tool(
+    config: McpRuntimeConfig,
+    *,
+    contract_path: str,
+    landed: LandedCommits,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Record a landing the remote already performed (the pull-request route).
+
+    ``worktree_integrate`` moves refs locally; a pull request does not. This entry point shares
+    that operation's one contract write (``modules.landing_record``) so the terminal
+    ``integration`` cell has exactly one definition regardless of how the code landed. It refuses
+    a commit that is not reachable from a landing target, so the cell cannot be set from a commit
+    that landed nowhere.
+    """
+
+    configured = admit_configured_contract(config, contract_path)
+    if isinstance(configured, ConfiguredContractRefused):
+        return project_configured_contract_refusal(
+            configured,
+            operation="worktree_record_landing",
+        )
+    args = git_worktree_manager.WorktreeArgs(
+        contract_path=configured.contract_path,
+        approved=not dry_run,
+        dry_run=dry_run,
+        landed_code_commit=landed.code,
+        landed_memory_content_commit=landed.memory_content,
+        gate_policy=config.orchestration.gate_policy,
+    )
+    return _worktree_result(
+        "worktree_record_landing",
+        git_worktree_manager.record_landing_result(args),
+    )
 
 
 def worktree_operation_control_tool(
@@ -458,7 +566,6 @@ def _operation_control_request_refusal(
                 commit_messages={
                     "code_commit_message": request.code_commit_message,
                     "memory_commit_message": request.memory_commit_message,
-                    "ledger_commit_message": request.ledger_commit_message,
                 },
                 has_grade=request.grade is not None,
                 has_admission=request.admission is not None,
@@ -543,7 +650,6 @@ def _execute_operation_control(
         raw_closeout_messages(
             code=request.code_commit_message,
             memory=request.memory_commit_message,
-            ledger=request.ledger_commit_message,
         )
         if request.action == "resume"
         else None
@@ -864,7 +970,7 @@ def _normalize_worktree_closeout(
     )
     return normalize_closeout_input(
         contract,
-        raw_closeout_messages(code=messages.code, memory=messages.memory, ledger=messages.ledger),
+        raw_closeout_messages(code=messages.code, memory=messages.memory),
         route="worktree",
         corrected_call=CloseoutCorrectedCall(
             tool=tool_name,

@@ -111,7 +111,8 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         markdown. The JSON is the source of truth; task.md / <slug>.md is generated and never
         parsed back. Mutating (writes the doc's .json and .md) except operation='get'.
 
-        operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'skip_step' | 'set_subtask' | 'remove_subtask' |
+        operation: 'create' | 'replace' | 'set_status' | 'set_step' | 'add_step' | 'remove_step' |
+        'skip_step' | 'read_steps' | 'set_subtask' | 'remove_subtask' |
         'set_section' | 'append_decision' | 'begin_review' | 'record_review' | 'record_route_review' |
         'author_execution_graph' | 'attach_master' | 'detach_master' | 'linkage_report' |
         'set_field' | 'get'. Locate the doc by task_name (also resolves the
@@ -122,8 +123,15 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         orchestration sprint is scaffolded with empty canonical Judgment and Priority Register
         sections); 'replace' takes a
         full replacement document in fields and rewrites the existing JSON+markdown after schema
-        validation; 'set_step' takes
-        step={id, title, status, parent?, note?}; an explicit status clears an earlier skip disposition.
+        validation; the step plane is split by intent and addresses one exact existing unit by
+        step={id, parent?}, where parent selects top level (absent) or that parent's substeps.
+        'set_step' updates exactly one existing unit ({id, title?, status?, note?, parent?}) and
+        never creates; an explicit status clears an earlier skip disposition. 'add_step' creates
+        exactly one unit and requires {id, title} (plus optional status/note/parent); it refuses an
+        id that already exists in its scope. 'remove_step' deletes exactly one existing unit and
+        requires a nonblank step.reason; it records a decision entry, and may remove a done unit or
+        operate on a Completed document once that reason is given. 'read_steps' is the read-only
+        focused checklist read (id/title/status/note plus nested substeps).
         'skip_step' takes exact existing step={id, reason, parent?}, sets only that unit done, and
         records intentional-skip provenance without cascading. A nonblank reason is required.
         'set_subtask' (master) takes subtask={number, name,

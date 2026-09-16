@@ -37,7 +37,7 @@ class DirectLandingResponse(ToolResponse):
     )
     codeCommit: str | None = None
     memoryContentCommit: str | None = None
-    ledgerCommit: str | None = None
+    ledgerCache: dict[str, Any] | None = None
     dryRun: bool = False
     memory: dict[str, Any] | None = None
     effectiveInput: EffectiveCloseoutInput | None = None

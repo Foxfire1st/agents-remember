@@ -53,10 +53,14 @@ Only proven tiers are auto-carry candidates. Same-path overlap is review-require
 ## Output States
 
 - `would-carryover`: dry-run plan with candidate decisions.
-- `carried-over`: recovery-leaf memory content and ledger commits were created.
+- `carried-over`: a recovery-leaf memory-content commit was created with `Code-Commit` attribution to the selected official code commit.
 - `nothing-to-carryover`: no selected candidate changed target recovery-leaf memory.
-- `ledger-mapped-head`: nothing was actionable, but an unmapped official code HEAD (e.g. a PR merge commit) was mapped to the current memory content commit and the ledger committed.
-- `blocked`: apply was requested without approval, an open recovery-leaf contract, a clean exact landed code base, a usable ledger, or required candidate data.
+- `blocked`: apply was requested without approval, an open recovery-leaf contract, a clean exact landed code base, or required candidate data.
+
+Apply refreshes the ignored `memory.md` consumer cache from memory commit trailers. It never
+stages or commits that cache, and missing or malformed cache data does not block carryover.
+When no content changes, it retains the actual memory commit; a new official code SHA does not
+cause a synthetic mapping-only commit. Regeneration does not rewrite historical attribution.
 
 Carryover commits only on the worktree named by the selected recovery-leaf contract. It
 never writes or force-moves memory `main`, a sprint super, or an atomic integration ref.
@@ -65,7 +69,7 @@ Protected-ref movement remains the recovery leaf's separate journaled integratio
 ## Boundaries
 
 1. The `c-11-memory-carryover-from-branch` skill must not copy source branch memory for code that did not land.
-2. The `c-11-memory-carryover-from-branch` skill must not copy source branch ledger rows into the recovery leaf.
+2. The `c-11-memory-carryover-from-branch` skill must derive the consumer ledger cache from target memory history, never copy source cache rows or treat them as authority.
 3. The `c-11-memory-carryover-from-branch` skill must refresh carried onboarding metadata to the official code commit, not the source branch commit.
 4. The `c-11-memory-carryover-from-branch` skill must not auto-carry same-path-only evidence.
 5. The `c-11-memory-carryover-from-branch` skill must not overwrite existing different recovery-leaf onboarding unless `replace_existing=true` or explicit review-required inclusion is used.

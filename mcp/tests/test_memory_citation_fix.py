@@ -4,10 +4,15 @@ Four repair classes, one probe each (L6-R16), and the three refusals matter more
 repair: a confident wrong answer here silently repoints a claim at code that does not do
 what the claim says.
 
-    PURE MOVE      the anchor kept its name and changed file       -> applied
+    PURE MOVE      the anchor kept its name, changed file, and the extent the claim was
+                   verified against is readable at its stamp with the same kind -> applied
     RENAME         a differently-named function does the job now   -> refused
     DELETION       the anchor exists nowhere                       -> refused
     AMBIGUOUS      the anchor resolves in more than one place      -> refused
+
+A pure move is only a move when CONTINUITY IS PROVED: the same name in a new file is not the
+claim's evidence having moved, so the fixtures below commit the verified tree with
+``Tree.stamp()`` before applying the move they expect to be repaired.
 
 :class:`NoSimilarityMatchingTests` is the one that would fail loudest if somebody added
 "did you mean": it plants the recorded pair, ``_map_command_lifecycle`` cited against a tree
@@ -17,6 +22,7 @@ holding only ``_require_command_lifecycle``, and requires the refusal not to nam
 repo is untouched, and a contract that names it is refused rather than followed.
 """
 
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -52,7 +58,7 @@ CARD_HEADER = (
     "| Finding | Anchor | Source |",
     "| --- | --- | --- |",
 )
-FIRST_ROW = len(CARD_HEADER) + 1
+CITATION_HEADER = "| Finding | Anchor | Source |"
 
 
 @contextmanager
@@ -92,9 +98,13 @@ def _frozen_no_discovery() -> Iterator[None]:
         yield
 
 
-def document(*rows: str, path: str) -> str:
-    header = "\n".join(line.format(path=path) for line in CARD_HEADER)
-    return header + "\n" + "\n".join(rows) + "\n"
+def document(*rows: str, path: str, stamp: str | None = None) -> str:
+    header = [line.format(path=path) for line in CARD_HEADER]
+    if stamp is not None:
+        # Inside the metadata table, never below the citation header, where a bare row would
+        # be parsed as another claim.
+        header.insert(6, f"| lastVerifiedCommitHash | `{stamp}` |")
+    return "\n".join(header) + "\n" + "\n".join(rows) + "\n"
 
 
 def filler(count: int, *, marker: str = "line") -> str:
@@ -120,10 +130,44 @@ class Tree:
     def source(self, relative: str, body: str) -> Path:
         return self.write(self.code, relative, body)
 
-    def card(self, source_path: str, *rows: str, at: str | None = None) -> Path:
+    def card(
+        self, source_path: str, *rows: str, at: str | None = None, stamp: str | None = None
+    ) -> Path:
         return self.write(
-            self.onboarding, at or f"{source_path}.md", document(*rows, path=source_path)
+            self.onboarding,
+            at or f"{source_path}.md",
+            document(*rows, path=source_path, stamp=stamp),
         )
+
+    def git(self, root: Path, *args: str) -> str:
+        """One Git command in one root, failing loudly rather than silently returning nothing."""
+        result = subprocess.run(
+            ["git", *args], cwd=root, text=True, capture_output=True, check=False
+        )
+        if result.returncode != 0:
+            raise AssertionError(result.stderr or result.stdout)
+        return result.stdout.strip()
+
+    def history(self) -> None:
+        """Make the code root a Git repository, so a card can name a verification stamp."""
+        self.git(self.code, "init", "--quiet")
+        self.git(self.code, "config", "user.email", "fixture@example.invalid")
+        self.git(self.code, "config", "user.name", "Fixture")
+
+    def stamp(self) -> str:
+        """Commit every source written so far, and return the commit that now holds them.
+
+        A relocation may only follow a name when the extent the claim was verified against is
+        readable at this commit, so a fixture that pins a legitimate move has to create the
+        verified tree before it applies the move.
+        """
+        self.git(self.code, "add", "--all")
+        self.git(self.code, "commit", "--quiet", "--allow-empty", "-m", "verified")
+        return self.git(self.code, "rev-parse", "HEAD")
+
+    def remove_source(self, relative: str) -> None:
+        """Delete one already-committed source, leaving the move to be discovered."""
+        (self.code / relative).unlink()
 
     def trees(self) -> Trees:
         return Trees(code_root=self.code, memory_root=self.memory)
@@ -142,7 +186,9 @@ class Tree:
         return (self.onboarding / relative).read_text(encoding="utf-8")
 
     def row(self, relative: str, offset: int = 0) -> str:
-        return self.card_text(relative).splitlines()[FIRST_ROW - 1 + offset]
+        """One citation row, located by its table header so card metadata cannot shift it."""
+        lines = self.card_text(relative).splitlines()
+        return lines[lines.index(CITATION_HEADER) + 2 + offset]
 
 
 class TreeCase(unittest.TestCase):

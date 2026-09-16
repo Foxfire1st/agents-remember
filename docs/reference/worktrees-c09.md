@@ -2,7 +2,9 @@
 
 The `c-09-git-worktree-manager` skill owns worktree creation, exact enclosure addressability,
 integration, terminal archival, and cleanup. The `c-12-closeout` skill owns validated immutable
-closeout input, approval, acceptance, and code-memory-ledger commit order.
+closeout input, approval, acceptance, and code-then-memory commit order. The accepted Git pair,
+its ancestry, and recorded refs supply transaction authority. `memory.md` is an ignored cache
+computed from memory commit trailers; its bytes and rows never authorize or block the transaction.
 
 ## When To Use It
 

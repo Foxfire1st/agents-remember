@@ -22,14 +22,16 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agents_remember.models.task_document import RESOLVED_MASTER_ROW_STATUSES
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 FRONTIER_LANDED = "landed"
 FRONTIER_READY = "ready"
 FRONTIER_WAITING = "waiting"
 FRONTIER_IN_FLIGHT = "in-flight"
+FRONTIER_ABANDONED = "abandoned"
 
-FrontierState = Literal["landed", "ready", "waiting", "in-flight"]
+FrontierState = Literal["landed", "ready", "waiting", "in-flight", "abandoned"]
 
 
 class GraphNodeLike(Protocol):
@@ -158,15 +160,51 @@ def _node_is_in_flight(node: GraphNodeLike, facts: MasterGraphFacts | None) -> b
     )
 
 
+def _node_is_resolved(node: GraphNodeLike, facts: MasterGraphFacts | None) -> bool:
+    """Whether this node's work has reached a terminal decision, landed or not.
+
+    Deliberately distinct from :func:`_node_is_landed`. A node whose leaves were abandoned did not
+    land, so it must not read as ``landed``; but it is also never going to produce the work its
+    successors are waiting on, so it must not leave them ``waiting`` forever either.
+    """
+
+    if facts is None:
+        return False
+    if facts.status == "abandoned":
+        return True
+    if node.kind == "master":
+        return facts.status == "Completed"
+    return all(
+        status in RESOLVED_MASTER_ROW_STATUSES for status in _leaf_statuses(facts, node.leafIds)
+    )
+
+
+def _node_is_abandoned(node: GraphNodeLike, facts: MasterGraphFacts | None) -> bool:
+    """Whether this node's scope was deliberately not taken."""
+
+    if facts is None:
+        return False
+    if facts.status == "abandoned":
+        return True
+    if node.kind == "master":
+        return False
+    statuses = _leaf_statuses(facts, node.leafIds)
+    return any(status == "abandoned" for status in statuses)
+
+
 def _frontier_state(
     node: GraphNodeLike,
     facts: MasterGraphFacts | None,
-    landed: Mapping[GraphNodeLike, bool],
+    resolved: Mapping[GraphNodeLike, bool],
     predecessor_edges: Mapping[GraphNodeLike, Sequence[GraphPredecessorFacts]],
 ) -> FrontierState:
     if _node_is_landed(node, facts):
         return FRONTIER_LANDED
-    if any(not landed.get(edge.predecessor, False) for edge in predecessor_edges[node]):
+    if _node_is_abandoned(node, facts):
+        # Deliberately ahead of the predecessor test: a dropped node is not waiting on anything,
+        # and falling through to READY would present scope that was never taken as work to do.
+        return FRONTIER_ABANDONED
+    if any(not resolved.get(edge.predecessor, False) for edge in predecessor_edges[node]):
         return FRONTIER_WAITING
     if _node_is_in_flight(node, facts):
         return FRONTIER_IN_FLIGHT
@@ -181,7 +219,7 @@ class _GraphViewContext:
     wave_of: Mapping[GraphNodeLike, int]
     titles: GraphTitlesLike | None
     masters: Mapping[TaskDocumentRef, MasterGraphFacts]
-    landed: Mapping[GraphNodeLike, bool]
+    resolved: Mapping[GraphNodeLike, bool]
     predecessor_edges: Mapping[GraphNodeLike, Sequence[GraphPredecessorFacts]]
 
 
@@ -205,7 +243,7 @@ def _node_view(node: GraphNodeLike, context: _GraphViewContext) -> TaskExecution
         leafIds=list(node.leafIds),
         leafTitles=leaf_titles,
         waveIndex=context.wave_of[node],
-        frontierState=_frontier_state(node, facts, context.landed, context.predecessor_edges),
+        frontierState=_frontier_state(node, facts, context.resolved, context.predecessor_edges),
         executionNature=facts.executionNature if facts is not None else None,
         predecessors=[
             TaskExecutionPredecessorNode(
@@ -243,13 +281,13 @@ def build_execution_graph_view(
     """
 
     wave_of = {node: index for index, wave in enumerate(waves, start=1) for node in wave}
-    landed = {node: _node_is_landed(node, masters.get(node.ref)) for node in nodes}
+    resolved = {node: _node_is_resolved(node, masters.get(node.ref)) for node in nodes}
     context = _GraphViewContext(
         nodes=nodes,
         wave_of=wave_of,
         titles=titles,
         masters=masters,
-        landed=landed,
+        resolved=resolved,
         predecessor_edges=predecessor_edges,
     )
     views = [

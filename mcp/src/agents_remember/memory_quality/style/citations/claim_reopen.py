@@ -16,6 +16,18 @@ exactly once inside a cited range it surfaces report-only; otherwise it stays ha
 changed construct whose citation is not current -- or that never resolves uniquely -- is an
 enforced reopened claim.
 
+That review surface distinguishes WHERE the range came from, because a range written by the
+mechanical projection is indistinguishable in the document from a curator's edit and only the
+generated Update History bullet records it. When the bullet names this claim's anchors the
+item stops asserting the citation is current and asks the support question instead: the
+projection resolves an exact NAME, never the claim's subject, so a range that arrived that way
+can point at a declaration the claim was never about. That item is ENFORCED rather than
+report-only, because a mechanically projected range is unverified evidence: nothing in the
+tree records whether anyone reviewed the projection, the check cannot prove that a review
+happened, and evidence it cannot verify has to force an explicit disposition instead of
+offering a note a curator may simply read past. The cost is deliberate and total -- every
+mechanically projected range blocks until somebody disposes of it.
+
 Known limit -- dishonest stamp: if verification metadata is advanced without reviewing
 the changed construct, historical and current resolution see the same body. This check
 detects changes after an honest verification point; it cannot prove that the stated
@@ -42,7 +54,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel.git_command import run_git
-from agents_remember.kernel.memory_ledger import LedgerError, load_ledger
+from agents_remember.kernel.memory_attribution import MemoryAttributionError
 from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery import (
     parse_table_metadata,
     rel,
@@ -50,6 +62,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.discovery i
 from agents_remember.memory_quality.style.citations import (
     cells,
     claim_change_router,
+    deterministic_projection,
     extents,
     model,
     prose,
@@ -64,6 +77,12 @@ STAMP = re.compile(r"[0-9a-fA-F]{7,40}")
 MISSING = "citation_provenance_missing"
 INVALID = "citation_provenance_invalid"
 REOPENED = "citation_claim_reopened"
+# The generated Update History bullet a mechanical anchor-range projection writes into the
+# document it rewrote -- see ``deterministic_projection.history_bullet``. Its name list runs
+# from this header to the ``repointed to`` clause; everything after that clause is a range,
+# and a range's path can share its file name with an unrelated anchor.
+PROJECTION_BULLET = "Generated citation repair"
+REPOINTED_TO = " repointed to "
 # The unbounded first implementation completed this 1,168-document tree at 615,448 KiB RSS.
 # A parsed revision is useful while nearby cards cite it, not for the lifetime of the sweep.
 SOURCE_VIEW_CACHE_LIMIT = 128
@@ -266,31 +285,103 @@ def changed_finding(
     )
 
 
+def generated_repair_bullets(claim: model.Claim, lines: list[str]) -> list[str]:
+    """The Update History bullets recording that a mechanical repair moved THIS claim's range.
+
+    ``history_section_line`` bounds the scan to the canonical section, and the anchor list is
+    read between the bullet's header and its ``repointed to`` clause: the ranges after that
+    clause carry file paths, which would otherwise match an anchor that merely shares its name
+    with a file the repair wrote. Every named anchor is matched by exact text, so the bullet
+    for a different claim in the same document is not evidence about this one.
+    """
+    heading = deterministic_projection.history_section_line(lines)
+    if heading is None:
+        return []
+    return [line.strip() for line in lines[heading:] if _names_an_anchor(claim, line)]
+
+
+def _names_an_anchor(claim: model.Claim, line: str) -> bool:
+    if PROJECTION_BULLET not in line or REPOINTED_TO not in line:
+        return False
+    clause = line.split(PROJECTION_BULLET, 1)[1].split(REPOINTED_TO, 1)[0]
+    return any(anchor.written in clause for anchor in claim.anchors)
+
+
+def _repointed_ranges(bullet: str) -> str:
+    tail = bullet.split(REPOINTED_TO, 1)[1]
+    return tail.split(deterministic_projection.NO_IMPACT_MARKER, 1)[0].strip().rstrip(".").strip()
+
+
+def _projected_review_message(details: list[str], bullets: list[str]) -> str:
+    """The review item for a range that arrived by mechanical projection.
+
+    The old text asserted the citation was current because the anchor resolves and a cited
+    range covers its declaration -- a test the projection satisfies BY CONSTRUCTION, since it
+    picked the declaration it wrote. A curator asked that one question could only answer it
+    yes, so the item now asks the question the projection cannot answer: whether the construct
+    at the new location supports the claim's own words, and whether the range was projected
+    rather than rebound from the mention the claim was verified against.
+    """
+    ranges = "; ".join(dict.fromkeys(_repointed_ranges(one) for one in bullets))
+    return (
+        f"This claim's evidence changed after verification, and a generated citation repair "
+        f"has already rewritten its range mechanically, so the citation is NOT shown to be "
+        f"current: {'; '.join(details)}. Update History records the range change as "
+        f"{' | '.join(bullets)} -- it now reads {ranges}, and unchanged claim bytes are not "
+        "evidence that the claim still holds there. Two questions, and the first is not about "
+        "wording: (1) does the construct the new range covers support what this claim's own "
+        "words state? (2) did that range arrive by mechanical anchor-range projection, or was "
+        "it rebound from a mention the claim was verified against to the anchor's declaration "
+        "elsewhere? If the range was projected, the correct action is to re-cite the location "
+        "the claim is about -- or re-word the claim -- and only then advance the stamp: a "
+        "declaration elsewhere does not evidence a claim about a mention here."
+    )
+
+
 def surfaced_finding(
     document: str,
     claim: model.Claim,
     details: list[str],
+    lines: list[str],
 ) -> QualityFinding:
-    """The review surface, never a blocker: the evidence changed AND the citation is current.
+    """One changed claim's review item, at the severity its evidence actually supports.
 
-    Currency means the anchor still resolves exactly once and some cited range still contains
-    the current construct's declaration line, so the pointer provably points at the new
-    content. Whether the prose still describes it correctly is the curator's review duty,
-    surfaced here for the relay in the check's ``surfacedFindings`` bucket -- the check detects
-    change, it cannot prove a review, and it does not pretend one happened.
+    An evidence change whose citation is CURRENT is the report-only surface: the anchor still
+    resolves exactly once and some cited range still contains the current construct's
+    declaration line, so the pointer provably points at the new content. Whether the prose
+    still describes it correctly is the curator's review duty, relayed in the check's
+    ``surfacedFindings`` bucket -- the check detects change, it cannot prove a review, and it
+    does not pretend one happened.
+
+    A range written by the mechanical projection passes that currency test BY CONSTRUCTION,
+    so the document's generated repair bullets are read first. Where they name this claim's
+    anchors the item asks the support question instead of asserting currency, AND it comes
+    back ``error`` so ``_gate_result`` leaves it in the enforced set. The projection is
+    unverified evidence, and the check cannot prove a review happened, so it must force an
+    explicit disposition rather than offer an ignorable note. The trade is deliberate: every
+    mechanically projected range now blocks until a curator disposes of it.
     """
-    return QualityFinding(
-        check=CHECK_NAME,
-        path=document,
-        line=claim.line,
-        severity="warning",
-        code=REOPENED,
-        message=(
+    bullets = generated_repair_bullets(claim, lines)
+    message = (
+        _projected_review_message(details, bullets)
+        if bullets
+        else (
             f"This claim's evidence changed after verification, and the citation is current "
             f"(anchor resolves and some cited range still holds the changed construct's "
             f"declaration): {'; '.join(details)}. "
             "Curator review confirms the wording still holds; no citation repair is needed."
-        ),
+        )
+    )
+    return QualityFinding(
+        check=CHECK_NAME,
+        path=document,
+        line=claim.line,
+        # Enforced, not surfaced, for the projected variant only: its currency test is
+        # satisfied by the projection itself, so it is not evidence that a review happened.
+        # The ordinary evidence-change item keeps its warning -- its currency test IS evidence.
+        severity="error" if bullets else "warning",
+        code=REOPENED,
+        message=message,
     )
 
 
@@ -520,30 +611,29 @@ def dependency_changes(
 
 
 def _mapping_pending_for_code_head(error: str, evaluation: Evaluation) -> bool:
-    """The route failed only because the code HEAD's ledger mapping is not written yet.
+    """The current code output has no attributed memory-content commit yet.
 
     Verification stamps are written by the closeout refresh, so a stamp naming the code
-    worktree's HEAD exists only mid-closeout: the run that stamped it has not written the
-    C2->M2 ledger row yet. Pending means exactly that -- HEAD is unmapped AND the ledger
-    already maps an ancestor of HEAD (the closeout is mid-update on this line). An unmapped
-    HEAD with no mapped ancestor is a different, genuinely invalid provenance.
+    worktree's HEAD can exist before memory publication. Pending requires HEAD to be unmapped
+    and an actual memory commit to attribute an ancestor of HEAD. A missing cache supplies
+    neither evidence nor a refusal.
     """
-    if "no ledger mapping for code commit" not in error:
+    if "no attribution for code commit" not in error:
         return False
     code_root = evaluation.trees.code_root
     head = run_git(code_root, ["rev-parse", "HEAD"])
     if head.returncode != 0 or head.stdout.strip() not in error:
         return False
     try:
-        ledger = load_ledger(evaluation.trees.memory_root / "memory.md")
-    except (LedgerError, OSError, UnicodeError):
+        mappings = evaluation.histories.memory_mappings
+    except MemoryAttributionError:
         return False
     return any(
         run_git(
             code_root, ["merge-base", "--is-ancestor", row.code_commit, head.stdout.strip()]
         ).returncode
         == 0
-        for row in ledger.rows
+        for row in mappings
         if row.code_commit != head.stdout.strip()
     )
 
@@ -553,9 +643,8 @@ def _route_error_finding(
 ) -> QualityFinding | None:
     if _mapping_pending_for_code_head(error, evaluation):
         # The stamp names the code worktree's HEAD -- a commit the in-flight closeout made
-        # (or recorded) and whose C2->M2 ledger mapping this same closeout writes at the
-        # end. The claims were gated when the run stamped them; faulting them for a mapping
-        # the gate itself is about to write would deadlock every interrupted-closeout resume.
+        # (or recorded) before publishing attributed memory content. Faulting claims for
+        # attribution that this publication supplies would deadlock its own preparation.
         return None
     return provenance_finding(
         document,
@@ -569,6 +658,7 @@ def evaluate_claim(
     document: str,
     claim: model.Claim,
     evaluation: Evaluation,
+    lines: list[str],
 ) -> QualityFinding | None:
     route = evaluation.router.route_claim(claim.citations, evaluation.code_commit)
     if route.status == "error":
@@ -606,7 +696,7 @@ def evaluate_claim(
     if changed:
         return changed_finding(document, claim, changed)
     if surfaced:
-        return surfaced_finding(document, claim, surfaced)
+        return surfaced_finding(document, claim, surfaced, lines)
     return None
 
 
@@ -649,9 +739,9 @@ def check_onboarding_root(
     findings: list[QualityFinding] = []
     claims_checked = 0
     modified = _modified_onboarding_paths(memory_root)
-    grouped: dict[str, list[tuple[str, tuple[model.Claim, ...]]]] = {}
+    grouped: dict[str, list[tuple[str, list[str], tuple[model.Claim, ...]]]] = {}
     for document in documents:
-        _lines, claims = claims_in(document)
+        lines, claims = claims_in(document)
         if not claims:
             continue
         claims_checked += len(claims)
@@ -689,7 +779,7 @@ def check_onboarding_root(
                 for claim in claims
             )
             continue
-        grouped.setdefault(resolved.text, []).append((relative, claims))
+        grouped.setdefault(resolved.text, []).append((relative, lines, claims))
     for code_commit, document_claims in grouped.items():
         evaluation = Evaluation(
             code_commit=code_commit,
@@ -699,11 +789,11 @@ def check_onboarding_root(
             source_views=source_views,
             router=router,
         )
-        for relative, claims in document_claims:
+        for relative, lines, claims in document_claims:
             findings.extend(
                 found
                 for claim in claims
-                if (found := evaluate_claim(relative, claim, evaluation)) is not None
+                if (found := evaluate_claim(relative, claim, evaluation, lines)) is not None
             )
     return _gate_result(documents, findings, memory_root, claims_checked, router)
 

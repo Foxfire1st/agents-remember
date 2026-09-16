@@ -32,7 +32,6 @@ GeneratedArtifactStatus = Literal["current", "stale", "unknown"]
 FinalizationLeg = Literal[
     "code-commit",
     "external-memory-commit",
-    "ledger-commit",
     "contract-finalization",
 ]
 FinalizationLegState = Literal["pending", "intent", "proven", "not-applicable"]
@@ -40,7 +39,6 @@ FinalizationLegState = Literal["pending", "intent", "proven", "not-applicable"]
 _FINALIZATION_LEGS: tuple[FinalizationLeg, ...] = (
     "code-commit",
     "external-memory-commit",
-    "ledger-commit",
     "contract-finalization",
 )
 

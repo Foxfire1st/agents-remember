@@ -250,7 +250,7 @@ def _require_series_recording_only(
     require_series_contract_authority(contract, operation="worktree_closeout")
     effective = operation_input.effectiveInput
     if effective.contractKind != "series" or any(
-        effective.enabled(leg) for leg in ("code", "memory", "ledger")
+        effective.enabled(leg) for leg in ("code", "memory")
     ):
         raise RuntimeError("series closeout may only record existing commits")
     refuse_series_workbench_commit(contract)

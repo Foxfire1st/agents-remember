@@ -29,8 +29,8 @@ worktree_status(repo_id="<repo-id>", task_name="<task>", leaf_id="<leaf-id>")
 worktree_sync(contract_path="<enclosure series-contract.md>")
 closeout_door(request={action:"declare|status|defer|resume|withdraw|update-provenance", contract_path:"<enclosure series-contract.md>", ...})
 closeout_queue(request={action:"status|rebuild", sprint_task_document_ref:{repository:"<repo-id>", path:"<sprint task.json>"}})
-worktree_closeout_preview(contract_path="<enclosure series-contract.md>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
-worktree_closeout_apply(contract_path="<enclosure series-contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>", ledger_commit_message="<message>")
+worktree_closeout_preview(contract_path="<enclosure series-contract.md>", code_commit_message="<message>", memory_commit_message="<message>")
+worktree_closeout_apply(contract_path="<enclosure series-contract.md>", intent_note="<developer intent>", code_commit_message="<message>", memory_commit_message="<message>")
 worktree_operation_control(contract_path="<enclosure series-contract.md>", operation_kind="closeout", action="cancel|resume", expected_generation=<generation>, intent_note="<audit intent>")
 worktree_operation_control(contract_path="<enclosure series-contract.md>", operation_kind="integrate|direct-landing", action="retry|recover|cancel|retire|supersede", expected_generation=<generation>, intent_note="<audit intent>")
 worktree_legacy_operation(contract_path="<enclosure series-contract.md>", operation_kind="closeout|integrate|direct-landing", action="inspect|migrate|archive", ...)
@@ -109,7 +109,7 @@ The intended order is:
 
 1. run the `c-08-ar-coordination-context-resolver` skill for the target repository
 2. run the `c-02-memory-quality-control` skill's task-start drift check and follow the existing AGENTS Gate 3/4 choice point
-3. when onboarding is refreshed, commit the memory content and ledger before starting any worktree
+3. when onboarding is refreshed, commit the memory content before starting any worktree; keep the computed ledger cache outside Git staging and commits
 4. place every build in a leaf under a master, even when the leaf is tiny and one owner wears the
    backend hats; “short root” changes orchestration depth, not the task topology
 5. read the repository's `system/git-workflow.md` and identify the parent branch
@@ -171,8 +171,9 @@ order. A crash at any cut is recovered through the same stable contract address;
 converges and a conflicting reservation refuses. If the task root is a master and no root series
 contract exists yet, start first creates the master integration branch and root
 `series-contract.md`, then starts the leaf from that integration branch. External-memory start
-refuses to continue when the source memory repo has uncommitted changes; refreshed onboarding and
-the ledger must be committed first so the new worktree starts from an auditable memory baseline.
+refuses to continue when source memory content has uncommitted changes; refreshed onboarding must
+be committed first so the new worktree starts from an auditable memory baseline. The ignored
+`memory.md` cache is not part of that cleanliness or admission check.
 
 Before start, attach, reopen, task-bound terminal assignment, or hosted role spawn can expose a
 checkout to an agent, the control plane resolves **transitive source lineage from task identity**.
@@ -207,17 +208,18 @@ series this is the master integration branch; in a nested master it is the
 nearest parent integration branch. Protected targets are handled after the
 integration branch lands.
 
-When external memory is enabled, the `c-09-git-worktree-manager` skill validates the memory repo and `memory.md` ledger before allowing memory to be used as trusted context. Missing external memory is not a `c-09-git-worktree-manager` bootstrap path; run the `c-00-initialize-memory-repo` skill first. If no compatible memory state exists, the `c-09-git-worktree-manager` skill stops and reports the allowed human choices:
+When external memory is enabled, the `c-09-git-worktree-manager` skill validates the memory repository and the actual code/memory objects, ancestry, and refs. Missing external memory is not a `c-09-git-worktree-manager` bootstrap path; run the `c-00-initialize-memory-repo` skill first. If the actual memory history cannot be reconciled, the skill stops and reports the allowed human choices:
 
 1. `reconciliation`
 2. `disabled-memory`
 3. `custom`
 
-The common trigger is starting a worktree off a **freshly-merged gated branch**: the PR merge commit
-lands on top of the verified tip with a new SHA the ledger has not mapped. Running
-`c-11-memory-carryover-from-branch` against the merged spear *after* the PR merges maps that merge
-commit automatically — even when nothing else needs carrying — so the next worktree starts cleanly
-without needing `reconciliation`.
+`memory.md` is an ignored consumer cache computed from `Code-Commit` trailers in memory commits.
+Its absence, stale rows, or malformed bytes never make an otherwise valid pair incompatible.
+A freshly merged code SHA may have no new attribution when memory is unchanged; report that fact
+without creating a mapping-only commit. Use `c-11-memory-carryover-from-branch` after the merge only
+when applicable richer onboarding needs carrying into a recovery leaf. Historical attribution
+rewrites are separately authorized deployment work, never routine cache regeneration.
 
 For a live locator, `worktree_attach` and `worktree_status` resolve the configured contract address
 through the locator and root manifest, then report recoverable state without mutating Git. A
@@ -234,20 +236,21 @@ reports archive-ready separately from cleanup-completed or abandoned, including 
 `cleanupArguments` and `nextArgs` for the required `worktree_cleanup` / `worktree_abandon` retry.
 Queue presence is neither required nor consulted on either route.
 
-Atomic-series implementation admission is a separate, source-pair-scoped authority. Exactly one
-atomic master for an exact code/memory source pair is selected at a time. Manager dispatch, worker
-dispatch, atomic `worktree_start`, and `worktree_attach` are selecting operations; reviewer and
-curator inspection is not. Once the requested canonical contract exists, selection first publishes
-`reconciling`, which logically pauses the former master without suspending its chat, process,
-worktree, contract, or already-claimed lifecycle journal. The selected master is source-synced and
-becomes `active` only when both protected source tips are current. A completed sync pass whose
+Atomic-series implementation admission is a separate, contract-scoped authority. Each canonical
+series contract owns its own activation record, so masters that share one exact code/memory source
+pair never share this state and one master's selection never pauses or excludes another. Manager
+dispatch, worker dispatch, atomic `worktree_start`, and `worktree_attach` are selecting operations;
+reviewer and curator inspection is not. Once the requested canonical contract exists, selection
+first publishes `reconciling` for that contract, which suspends nothing — not its chat, process,
+worktree, contract, or already-claimed lifecycle journal. The selected contract is source-synced
+and becomes `active` only when both protected source tips are current. A completed sync pass whose
 source moved again remains reconciling. Explicit sync cancellation publishes durable `vacant`;
 terminal cleanup releases an exact selected contract before its authority can disappear. Contract
-presence never elects an owner, and multiple paused/nonterminal contracts remain valid.
+presence never elects an owner, and multiple nonterminal contracts remain valid.
 
 Task authoring never reads this activation authority and is never blocked by it. A task mutation
 publishes first and invalidates/rebuilds affected queue projections. The closeout queue merely
-projects active, reconciling, paused, or vacant waiting candidates; it owns none of those lifecycle
+projects active, reconciling, or vacant waiting candidates; it owns none of those lifecycle
 facts. A malformed selection makes only the affected projection invalid-empty. An exact selecting
 operation archives the malformed bytes with evidence and replaces them; there is no tolerant reader
 or contract-presence fallback.
@@ -257,11 +260,11 @@ or contract-presence fallback.
 A live worktree's base pair decays while parallel cycles land (a sibling leaf may advance the
 integration/source branch; carryover may advance official memory). `worktree_sync` (GitHub #54)
 reconciles the exact moved code/memory source pair as one resumable transaction. It fetches source
-upstreams, proves the new code tip is ledger-mapped at the admitted official memory tip, pins the
+upstreams, proves the actual source code/memory objects and ancestry, pins the
 recorded base, pre-sync branch head, and source tip for each participating side, and writes its
-journal below the stable worktree-enclosure root before merge mutation. A mid-cycle official line
-blocks with guidance to run `c-11-memory-carryover-from-branch` first. Preview with `dry_run=true`
-before admission.
+journal below the stable worktree-enclosure root before merge mutation. An unreconcilable source
+pair returns its concrete recovery guidance. Missing cache mappings do not block sync. Preview
+with `dry_run=true` before admission.
 
 Automatic sync is only the first phase. A code or memory merge conflict is retained in its exact
 sync worktree and published as `code-resolution-required` or `memory-resolution-required`; it is not
@@ -269,8 +272,8 @@ aborted or reduced to a generic refusal. Resolve mechanically derivable conflict
 validate it, then call the advertised `resolution_action=continue` on the same contract. The journal
 and pinned refs make that continuation resumable across calls and process restarts. Escalate only
 when competing changes encode a semantic truth the agent cannot derive from current requirements,
-code, tests, and durable decisions. A routine textual, import, fixture, or ledger conflict is not by
-itself a developer decision.
+code, tests, and durable decisions. A routine textual, import, fixture, or memory-content conflict
+is not by itself a developer decision.
 
 Closeout invokes this sync automatically when its ancestor check finds a carry it can settle — a
 fast-forward, or a merge where the leaf owns its own commit — so a moved line is not an operator
@@ -287,12 +290,14 @@ vacant. Never imitate continuation or cancellation with direct Git. A selected a
 reconciling while a conflict is retained; its worktree and journal stay intact.
 
 **Sync early — before memories are written.** With parked memory the sync is a pure fast-forward:
-the other cycle's sidecars and ledger rows end up beneath this task's future memory work, closeout
-appends on top, and end-of-series integration stays `ff-only` with no carryover reconciliation. If
+the other cycle's sidecars and attributed memory commits end up beneath this task's future memory
+work, closeout appends on top, and end-of-series integration stays `ff-only` with no carryover reconciliation. If
 the memory work branch already has local commits and official memory moved, sync requires a
-`memory_sync_choice`: `merge-memory` retains any textual or semantic ledger conflict for explicit
-resolution and validates that every exact parent ledger row survives before continuation. Repeated
-code commits remain valid newest-first memory history and are never collapsed; `skip-memory`
+`memory_sync_choice`: `merge-memory` retains real memory-content conflicts for explicit resolution,
+and the retained resolution is committed as the exact pinned merge. The owner excludes `memory.md`
+from the merge output and refreshes its cache from Git history; cache-row conflicts never require
+manual reconciliation. Repeated code attributions remain valid newest-first memory history and are
+never collapsed; `skip-memory`
 defers memory to end-of-task carryover and
 advances only the code base. An atomic-series selection cannot become active after `skip-memory`; it
 remains reconciling until the exact current memory source is merged and validated.
@@ -300,15 +305,15 @@ remains reconciling until the exact current memory source is merged and validate
 ## Worktree Closeout
 
 Use the `c-12-closeout` skill for worktree closeout. The `c-12-closeout` skill owns
-the explicit approval/series authority, code commit, prepared memory-content
-commit, ledger update, and ledger commit. Closeout is a Git transaction and does
-not run or require code-quality checks, test suites, memory-quality checks,
+the explicit approval/series authority, code commit, and prepared memory-content
+commit. The consumer ledger cache is refreshed separately from those outputs. Closeout is a Git
+transaction and does not run or require code-quality checks, test suites, memory-quality checks,
 curator certification, or independent review.
 
 Closeout scheduling and closeout execution have different owners:
 
 1. The `closeout_door` MCP tool publishes one exact contract-owned generation after current task,
-   memory, ledger, admission, source, priority, and explicit authority evidence is complete. Review
+   memory, admission, source, priority, and explicit authority evidence is complete. Review
    or quality evidence may be attached when requested, but is not required. Its disposition is
    `waiting`, `deferred`, `withdrawn`, or `claimed`.
 2. The `closeout_queue` MCP tool is only the sprint's source-fingerprinted ordering projection of
@@ -329,7 +334,7 @@ completion. Unrelated sprints and repositories retain their projection revisions
 
 For worktree-backed tasks, pass the configured leaf `series-contract.md` to
 `worktree_closeout_preview` / `worktree_closeout_apply`. Every enabled commit leg requires its own
-explicit nonblank message before authority is acquired. The accepted code/memory/ledger input is
+explicit nonblank message before authority is acquired. The accepted code/memory input is
 immutable per generation. Preview reports the concrete Git transaction and input conflicts without
 running quality, test, memory, certification, or review tools. Apply uses the existing transaction
 owner and publishes recoverable per-leg evidence. `cancel` preserves source changes and historical
@@ -407,7 +412,7 @@ be reflected in the branch choice made before `worktree_start`.
 Strategies:
 
 1. `ff-only`: require current code and memory source branches to be ancestors of the closeout commits, then fast-forward both source branches.
-2. `replay`: the carryover mechanics — replay the code task commit onto current code source, replay only the memory content commit onto current memory source, regenerate `memory.md` for the final landed code and memory content commits, then fast-forward both source branches — used where carryover is genuinely the only choice. It is not the recovery for a leaf whose source merely advanced while its own candidate sat unlanded: that leaf refreshes downstream with `worktree_sync` and produces a new targeted closeout.
+2. `replay`: replay the code task commit onto current code source and the memory-content commit onto current memory source with its landed-code attribution, then fast-forward both source branches and refresh the ignored ledger cache from history. Use this where carryover is genuinely the only choice. It is not the recovery for a leaf whose source merely advanced while its own candidate sat unlanded: that leaf refreshes downstream with `worktree_sync` and produces a new targeted closeout.
 
 Conflict rule: a retained code or memory conflict stops the operation before any source branch
 moves; resolve it through the advertised continuation path. The agent owns technically derivable
@@ -420,11 +425,10 @@ technical reconciliation `developerDecisionRequired`. A stale edge is carried do
 fast-forward where the descendant owns no commits, a merge where it does, which is the normal shape
 because a closed-out leaf always owns its own commit. Only a break no carry can settle — an
 unprovable edge (missing contract, branch, or comparable history), or a sync that reports it cannot
-settle the delta — escalates to the human developer, never an automatic resolution. Do not
-replay an old ledger commit over current memory main; always regenerate the ledger row after memory
-content has been mediated.
+settle the delta — escalates to the human developer, never an automatic resolution. Keep the
+computed ledger cache outside replay and refresh it from the resulting memory history.
 
-After successful integration, complete any repo-specific landing tail first: push/PR/merge for PR-gated code, pull the protected target back locally, and carry memory forward until the official memory branch maps the landed code commit. Then use `lifecycle_finalize_task` for the terminal edge.
+After successful integration, complete any repo-specific landing tail first: push/PR/merge for PR-gated code, pull the protected target back locally, and carry any applicable richer onboarding through its recovery leaf. An unchanged memory commit does not need a new mapping-only commit for the merged code SHA. Then use `lifecycle_finalize_task` for the terminal edge.
 
 ## Lifecycle Finalization And Cleanup
 
@@ -536,7 +540,7 @@ abandonment. A live, ambiguous, or merely cleaned-without-receipt locator can ne
 4. The `c-09-git-worktree-manager` skill must not use divergent memory as semi-trusted reference context.
 5. The `c-09-git-worktree-manager` skill must not bypass the `c-12-closeout` skill's applicable
    closeout authority gate.
-6. The `c-09-git-worktree-manager` skill must not create closeout commits outside the `c-12-closeout` skill's code-memory-ledger sequence.
+6. The `c-09-git-worktree-manager` skill must not create closeout commits outside the `c-12-closeout` skill's code-then-memory sequence.
 7. The `c-09-git-worktree-manager` skill must not call `worktree_start` until
    the applicable authority has been recorded: developer-approved Worktree Intent Gate for a new
    master/leaf plan, or accepted-series authority for subordinate orchestrated work.

@@ -730,7 +730,7 @@ class CloseoutQueueNode(BaseModel):
         default_factory=list,
         max_length=256,
     )
-    members: list[CloseoutCandidateNode] = Field(default_factory=list, max_length=256)
+    members: list[CloseoutCandidateNode] = Field(default_factory=list)
 
 
 class TaskDocNode(BaseModel):

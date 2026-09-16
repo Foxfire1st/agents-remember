@@ -1193,9 +1193,7 @@
         "cancellable": false,
         "componentBindings": {
           "approval": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-          "legalControls": [
-            "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-          ],
+          "legalControls": ["dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"],
           "recommendedAction": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
           "result": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
           "worker": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
@@ -1599,37 +1597,6 @@
       "repoName": "agents-remember",
       "taskId": "SIM-OP-MEMORY-COMMIT",
       "taskName": "lifecycle-memory-commit",
-      "taskRoot": "/tasks/sim",
-      "worktreeGroup": "sim-group"
-    },
-    {
-      "actions": [],
-      "cleanup": "pending",
-      "closeoutStatus": "running",
-      "codeWorktreeExists": true,
-      "enclosure": "sim-op-ledger-commit",
-      "enclosureId": "sim-op-ledger-commit",
-      "humanReviewStatus": "approved",
-      "integrationStatus": "not-started",
-      "leafId": "sim-op-ledger-commit",
-      "lifecycleId": "sim-op-ledger-commit-lifecycle",
-      "lifecycleOperation": {
-        "cancellable": false,
-        "currentCommand": "ledger commit",
-        "elapsedSeconds": 9,
-        "kind": "closeout",
-        "legalControls": [],
-        "phase": "ledger-commit",
-        "projectionEffects": [],
-        "reportPath": "/coordination/worktrees/sim-group/reports/closeout-operation.log",
-        "schemaVersion": "lifecycle-operation-projection/v1",
-        "stateMatrixVersion": "lifecycle-operation-state-matrix/v1",
-        "status": "running"
-      },
-      "memoryWorktreeExists": true,
-      "repoName": "agents-remember",
-      "taskId": "SIM-OP-LEDGER-COMMIT",
-      "taskName": "lifecycle-ledger-commit",
       "taskRoot": "/tasks/sim",
       "worktreeGroup": "sim-group"
     },

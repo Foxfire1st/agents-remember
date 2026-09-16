@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agents_remember.kernel.git_command import inspect_existing_git_preparation
+from agents_remember.kernel.git_preparation import ExistingGitPreparationBinding
 from agents_remember.models.certification.references import CertificateObjectReference
 from agents_remember.models.lifecycles.preparation import PreparedCloseoutOutput
 from agents_remember.worktrees.integration.closeout.certification.execution import (
@@ -23,11 +24,13 @@ def observe_code_output(selected: SelectedCloseoutPreparation) -> bytes:
     if intent.writeEnabled:
         return observe_private_output(selected, reobserve=current_code_preparation)
     raw = inspect_existing_git_preparation(
-        Path(intent.logicalRoot),
-        common_directory=Path(intent.repositoryIdentity),
-        logical_ref=intent.logicalRef,
-        commit=intent.expectedOldCommit,
-        tree=intent.admittedTree,
+        ExistingGitPreparationBinding(
+            root=Path(intent.logicalRoot),
+            common_directory=Path(intent.repositoryIdentity),
+            logical_ref=intent.logicalRef,
+            commit=intent.expectedOldCommit,
+            tree=intent.admittedTree,
+        )
     )
     current_code_preparation(selected)
     return raw

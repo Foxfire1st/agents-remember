@@ -51,7 +51,6 @@ def completed_integration_reopen(
     *,
     code_commit: str,
     memory_content_commit: str,
-    ledger_commit: str,
 ) -> dict[str, object]:
     """Describe which newly committed legs require plane-owned reintegration."""
 
@@ -61,7 +60,6 @@ def completed_integration_reopen(
     memory_unlanded = _completed_memory_is_unlanded(
         contract,
         memory_content_commit=memory_content_commit,
-        ledger_commit=ledger_commit,
     )
     reopened = code_unlanded or memory_unlanded
     return {
@@ -70,7 +68,6 @@ def completed_integration_reopen(
         "memory_unlanded": memory_unlanded,
         "previous_code_commit": contract.code_commit,
         "previous_memory_content_commit": contract.memory_content_commit,
-        "previous_ledger_commit": contract.ledger_commit,
         "reason": (
             "new closeout commit is not on the recorded source branch"
             if reopened
@@ -98,7 +95,6 @@ def _completed_memory_is_unlanded(
     contract: WorktreeContract,
     *,
     memory_content_commit: str,
-    ledger_commit: str,
 ) -> bool:
     content_changed = (
         contract.memory_mode == "external"
@@ -110,7 +106,7 @@ def _completed_memory_is_unlanded(
         and contract.memory_repo_path is not None
         and _commit_missing_from_source(
             contract.memory_repo_path,
-            ledger_commit,
+            memory_content_commit,
             contract.memory_source_branch,
         )
     )

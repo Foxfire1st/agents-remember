@@ -26,6 +26,7 @@ from agents_remember.worktrees.activation.atomic_series_activation_terminal impo
 )
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.cleanup import cleanup_result
+from agents_remember.worktrees.modules.cleanup_report import cleanup_report
 from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.guidance import carryover_done
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
@@ -283,7 +284,7 @@ def _run_or_verify_cleanup(contract: WorktreeContract, args: FinalizeArgs) -> Wo
             },
         )
     try:
-        return cleanup_result(
+        result = cleanup_result(
             WorktreeArgs(
                 contract_path=contract.contract_path,
                 approved=not args.dry_run,
@@ -299,6 +300,15 @@ def _run_or_verify_cleanup(contract: WorktreeContract, args: FinalizeArgs) -> Wo
                 "summary": str(exc),
             },
         )
+    if args.dry_run or result.returncode != 0:
+        # A dry run reports the plan in cleanup's own words, and a failed cleanup is a refusal
+        # the caller must see whole, ``blockers`` and partial inventory included. Only a real,
+        # completed reclamation is shaped into the operator report this module restores.
+        return result
+    return WorktreeCommandResult(
+        result.returncode,
+        cleanup_report(contract, result.payload),
+    )
 
 
 def _resolve_task_targets(

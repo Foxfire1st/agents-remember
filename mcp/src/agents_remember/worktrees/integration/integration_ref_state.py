@@ -148,7 +148,7 @@ def classify_integration_authority_refs(
     intended = (
         {
             "codeRef": commits.codeCommit,
-            **({"memoryRef": commits.ledgerCommit} if authority.memoryRepository else {}),
+            **({"memoryRef": commits.memoryContentCommit} if authority.memoryRepository else {}),
         }
         if commits is not None
         else {}

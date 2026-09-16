@@ -273,7 +273,7 @@ source_version_or_generator = "typed closeout and lifecycle fixture composition"
 introduced_by = "260824-closeout-liveness-recovery"
 lifetime = "permanent"
 permanence_rationale = "The helper owns the shared closeout repository topology used by eighteen lifecycle suites."
-replacement_contract = "node:mcp/tests/test_transaction_only_worktree_delivery.py::test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools"
+replacement_contract = "node:mcp/tests/test_transaction_only_worktree_delivery.py::test_public_closeout_commits_code_and_memory_without_acceptance_tools"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_operation_certification_selection.py",
@@ -291,43 +291,39 @@ source_version_or_generator = "typed closeout input and repository authority bui
 introduced_by = "260824-PDLS"
 lifetime = "permanent"
 permanence_rationale = "The helper is the single test-side composition root for closeout inputs across lifecycle and tool boundaries."
-replacement_contract = "node:mcp/tests/test_transaction_only_worktree_delivery.py::test_public_closeout_commits_code_memory_and_ledger_without_acceptance_tools"
+replacement_contract = "node:mcp/tests/test_transaction_only_worktree_delivery.py::test_public_closeout_commits_code_and_memory_without_acceptance_tools"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_activation_admission_registered.py",
   "mcp/tests/test_atomic_master_review_public.py",
-  "mcp/tests/test_atomic_master_review_scope.py",
-  "mcp/tests/test_atomic_series_activation.py",
-  "mcp/tests/test_atomic_series_landing_l3.py",
-  "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
-  "mcp/tests/test_closeout_certification_entrypoint.py",
-  "mcp/tests/test_closeout_kept_rules_pins.py",
-  "mcp/tests/test_closeout_queue.py",
-  "mcp/tests/test_compact_content.py",
-  "mcp/tests/test_config.py",
-  "mcp/tests/test_context_packet.py",
-  "mcp/tests/test_direct_landing.py",
+  "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_integration_branch_authority.py",
-  "mcp/tests/test_lifecycle_finalize.py",
   "mcp/tests/test_lifecycle_operations.py",
-  "mcp/tests/test_mcp_stdio_transport.py",
   "mcp/tests/test_operation_certification_selection.py",
-  "mcp/tests/test_provider_current_state.py",
-  "mcp/tests/test_quality_gate_public_contract.py",
-  "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_retired_door_publication_fields.py",
-  "mcp/tests/test_spawn_agent_session.py",
-  "mcp/tests/test_task_doc_structural_publication_l2.py",
-  "mcp/tests/test_task_reopen.py",
-  "mcp/tests/test_task_sprint_linkage.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
-  "mcp/tests/test_tools.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
-  "mcp/tests/test_worktree_closeout_quality_gate.py",
-  "mcp/tests/test_worktree_quality_gate_runner.py",
-  "mcp/tests/test_worktree_support.py",
-  "mcp/tests/test_worktree_support_tests_1.py",
+]
+
+[[artifact]]
+path = "mcp/tests/checkpoint_landing_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "checkpoint-landing-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "real temporary Git master/leaf series world: contracts, branches, memory commits, and ledger rows"
+introduced_by = "260913-LCA-L12"
+lifetime = "permanent"
+permanence_rationale = "The world builder composes the one real-repository master/leaf series topology that the checkpoint-landing boundary proof drives through the public operations; the cases keep the whole claim."
+replacement_contract = "node:mcp/tests/test_checkpoint_landing_end_to_end.py::CheckpointPausesAnUnfinishedMasterTests::test_an_unfinished_master_checkpoints_its_own_refs_end_to_end"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_checkpoint_landing_end_to_end.py",
+  "mcp/tests/test_cross_master_concurrency.py",
+  "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
 ]
 
 [[artifact]]
@@ -352,18 +348,26 @@ consumers = [
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_checkpoint_landing_end_to_end.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_kept_rules_pins.py",
+  "mcp/tests/test_closeout_projection_source_classification.py",
   "mcp/tests/test_closeout_queue.py",
   "mcp/tests/test_compact_content.py",
   "mcp/tests/test_config.py",
   "mcp/tests/test_context_packet.py",
+  "mcp/tests/test_cross_master_concurrency.py",
   "mcp/tests/test_direct_landing.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_leaf_doc_master_link_binding.py",
   "mcp/tests/test_lifecycle_finalize.py",
   "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
   "mcp/tests/test_mcp_stdio_transport.py",
+  "mcp/tests/test_memory_attribution_producers.py",
   "mcp/tests/test_operation_certification_selection.py",
+  "mcp/tests/test_pause_stop_only_end_to_end.py",
+  "mcp/tests/test_post_integration_cleanup_guidance.py",
   "mcp/tests/test_provider_current_state.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_read_ar_files.py",
@@ -372,11 +376,13 @@ consumers = [
   "mcp/tests/test_task_doc_structural_publication_l2.py",
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_task_sprint_linkage.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_tools.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
+  "mcp/tests/test_worktree_status_terminal_next_tool.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
 ]
@@ -414,6 +420,7 @@ consumers = [
   "mcp/tests/test_automatic_post_integration_cleanup.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
 ]
@@ -452,6 +459,7 @@ replacement_contract = "node:mcp/tests/test_task_reopen.py::ReopenResetTests::te
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_worktree_status_terminal_next_tool.py",
 ]
 
 [[artifact]]
@@ -542,6 +550,7 @@ consumers = [
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
@@ -580,6 +589,7 @@ consumers = [
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
@@ -618,6 +628,7 @@ consumers = [
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
@@ -929,6 +940,7 @@ consumers = [
   "mcp/tests/test_operation_certification_selection.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
@@ -985,6 +997,7 @@ consumers = [
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
@@ -1010,6 +1023,7 @@ consumers = [
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_lifecycle_operations.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
 ]

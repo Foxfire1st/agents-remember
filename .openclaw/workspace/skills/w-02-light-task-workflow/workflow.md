@@ -89,7 +89,7 @@ If the task plan relies on onboarding files:
 3. do not plan against clean-source drifted or missing-verification pre-existing onboarding until the update candidates have been handed off to `c-05-create-or-update-onboarding-files` or the developer has explicitly accepted directional-only trust
 4. leave dirty-source drift findings alone as active work-in-progress unless the developer explicitly takes ownership of them in this task
 5. treat files created or modified during the current task as task-local working state after that initial gate passes; they remain pending verification, but they do not by themselves re-block planning for the same task
-6. before any `c-09-git-worktree-manager` worktree starts, commit refreshed external-memory onboarding and the ledger so the worktree starts from a clean, mapped memory baseline
+6. before any `c-09-git-worktree-manager` worktree starts, commit refreshed external-memory onboarding so the worktree starts from a clean Git memory baseline; keep the computed ledger cache outside staging and commits
 
 ### 5. Gather context before writing the plan
 
@@ -251,7 +251,7 @@ When the approved plan has been fully implemented:
 3. confirm each delivered leaf manifestation has a newly appended immutable worker attempt bound
    to the exact candidate and that all predecessor findings are accounted for
 4. for worktree-backed tasks, run `c-09-git-worktree-manager` closeout in dry-run mode to prepare the commit preview; this does not require commit approval and must not mutate Git
-5. present a concise completion summary in chat covering what changed, what onboarding was updated, which listed checks were run, and the proposed code, memory, and ledger commit messages
+5. present a concise completion summary in chat covering what changed, what onboarding was updated, which listed checks were run, and the proposed code and memory commit messages
 6. ask explicitly for commit/closeout approval; do not treat implementation approval as commit approval
 7. leave worktree-backed task status below `Completed` after closeout; every declared parent/nested step must be explicitly `done` (or intentionally skipped through exact `task_doc.skip_step`) before `lifecycle_finalize_task` can set completion. If a final step includes cleanup, run standalone `worktree_cleanup`, mark that exact step done afterwards, then finalize the already-clean contract
 

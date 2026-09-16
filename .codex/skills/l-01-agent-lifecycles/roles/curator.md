@@ -159,8 +159,10 @@ passed/failed/blocked/not-run results. A scoped result is evidence for the curat
 not a closeout or integration gate, and it does not imply full repository or memory quality.
 
 Do not invent a future code commit hash, advance fingerprints to an uncommitted tree, or add
-attestation prose to silence a finding. The closeout transaction records the actual code, memory,
-and ledger commits after this handoff. Any source-change or missing-commit observation is reported
+attestation prose to silence a finding. The closeout transaction records the actual code and memory
+commits after this handoff, with code attribution in each created memory-content commit. The ledger
+is an ignored consumer cache derived from those trailers, never a handoff or commit prerequisite.
+Any source-change or missing-commit observation is reported
 for the owning seat to resolve as part of that transaction.
 
 The optional `memory_quality_check` call is allowed only for a named, explicitly requested scoped

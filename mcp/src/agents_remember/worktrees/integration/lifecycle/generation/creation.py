@@ -85,18 +85,14 @@ def snapshot_integration_authority(
     memory_source_commit = ""
     memory_replay_required = False
     if contract.memory_mode == "external":
-        if (
-            contract.memory_repo_path is None
-            or not contract.memory_content_commit
-            or not contract.ledger_commit
-        ):
+        if contract.memory_repo_path is None or not contract.memory_content_commit:
             raise RuntimeError(
                 "external-memory integration authority requires repo and closeout commits"
             )
         memory_target = targets["memory"]
         memory_source_commit = branch_commit(contract.memory_repo_path, memory_target.branch)
         memory_replay_required = not is_ancestor(
-            contract.memory_repo_path, memory_source_commit, contract.ledger_commit
+            contract.memory_repo_path, memory_source_commit, contract.memory_content_commit
         )
     else:
         memory_target = None
@@ -118,7 +114,6 @@ def snapshot_integration_authority(
             ),
             memorySourceCommit=memory_source_commit,
             memoryContentCommit=contract.memory_content_commit,
-            ledgerCommit=contract.ledger_commit,
             codeWorktree=contract.code_worktree.resolve().as_posix(),
             memoryWorktree=(
                 contract.memory_worktree.resolve().as_posix()
@@ -138,6 +133,5 @@ def snapshot_integration_authority(
         memorySourceRef=(f"refs/heads/{memory_target.branch}" if memory_target is not None else ""),
         memorySourceCommit=memory_source_commit,
         memoryContentCommit=contract.memory_content_commit,
-        ledgerCommit=contract.ledger_commit,
         conflictTransaction=conflict,
     )

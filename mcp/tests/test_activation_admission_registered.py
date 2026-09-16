@@ -17,7 +17,7 @@ from agents_remember.mcp.server import create_server
 from agents_remember.tasks import SubTaskRef, read_task_doc, write_task_doc
 from agents_remember.worktrees.activation.atomic_series_activation import (
     activation_path,
-    atomic_series_source_pair,
+    contract_fingerprint,
     publish_atomic_series_selection,
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
@@ -100,7 +100,8 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         self.assertTrue(payload["detail"].endswith("\u2026 [detail truncated]"))
 
         admission = payload["admission"]
-        self.assertEqual(admission["classification"], "corrective-action")
+        self.assertNotIn("classification", admission)
+        self.assertNotIn("blocking", admission)
         self.assertEqual(admission["status"], "atomic-series-contract-unreadable")
         self.assertIn("invalid contract kind:", admission["detail"])
         self.assertLessEqual(len(admission["detail"]), 8192)
@@ -174,16 +175,17 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         self.assertGreaterEqual(payload["atomicSeriesActivation"]["record"]["revision"], 1)
         self.assertEqual(selected.activation_path.read_bytes(), before)
 
-    def test_registered_sync_refusal_names_foreign_holder_and_read_status(self) -> None:
+    def test_registered_sync_refusal_addresses_only_this_contracts_own_state(self) -> None:
+        # Two atomic masters of one sprint share the protected source pair, so this is
+        # exactly the shape that used to report the OTHER master as the blocker. The
+        # address is now this contract's own record, and a foreign live master is never
+        # a retry precondition or a scheduling block.
         contract_a = self._contract("master-a")
         contract_b = self._contract("master-b")
         self._publish_locator(contract_a)
         publish_atomic_series_selection(contract_b, "active")
-        pair_path = activation_path(
-            self.fixture.coord,
-            atomic_series_source_pair(contract_a),
-        )
-        before = pair_path.read_bytes()
+        path_a = activation_path(self.fixture.coord, contract_a)
+        before = path_a.read_bytes()
 
         result = anyio.run(
             self._call,
@@ -200,25 +202,28 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         payload = result.structuredContent
         self.assertFalse(payload["ok"])
         admission = payload["admission"]
-        self.assertEqual(admission["classification"], "wait")
-        self.assertEqual(admission["blocking"]["master"]["path"], "master-b/task.json")
-        self.assertEqual(admission["blocking"]["state"], "active")
+        self.assertNotIn("classification", admission)
+        self.assertNotIn("blocking", admission)
+        self.assertNotIn("sourcePair", admission)
+        self.assertNotIn("sourcePairFingerprint", admission)
+        self.assertEqual(admission["activation"]["observedState"], "vacant")
+        self.assertEqual(admission["contractFingerprint"], contract_fingerprint(contract_a))
+        self.assertNotEqual(admission["contractFingerprint"], contract_fingerprint(contract_b))
         self.assertEqual(admission["statusAction"]["tool"], "worktree_status")
         self.assertEqual(admission["statusAction"]["args"]["repo_id"], "repo-a")
         self.assertEqual(
             admission["statusAction"]["args"]["contract_path"],
             contract_a.contract_path.as_posix(),
         )
-        self.assertIn("does not prove that a live process exists", admission["retryPrecondition"])
-        self.assertIn("master-b/task.json", self._text(result))
+        self.assertIn("not sufficient to continue", admission["retryPrecondition"])
+        self.assertNotIn("master-b/task.json", self._text(result))
         self.assertIn("worktree_status", self._text(result))
-        self.assertEqual(pair_path.read_bytes(), before)
+        self.assertEqual(path_a.read_bytes(), before)
 
     def test_registered_sync_refusal_distinguishes_vacant_and_unreadable(self) -> None:
         contract = self._contract("master-a")
         self._publish_locator(contract)
-        pair = atomic_series_source_pair(contract)
-        path = activation_path(self.fixture.coord, pair)
+        path = activation_path(self.fixture.coord, contract)
         server = self._server()
 
         vacant = anyio.run(
@@ -233,7 +238,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         self.assertFalse(vacant.isError)
         assert vacant.structuredContent is not None
         vacant_payload = vacant.structuredContent
-        self.assertEqual(vacant_payload["admission"]["classification"], "corrective-action")
+        self.assertNotIn("blocking", vacant_payload["admission"])
         self.assertEqual(vacant_payload["admission"]["activation"]["observedState"], "vacant")
         self.assertIn("not sufficient to continue", vacant_payload["retryPrecondition"])
         self.assertIn("not sufficient to continue", self._text(vacant))
@@ -263,8 +268,7 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
     def test_registered_status_and_sync_bound_oversized_unreadable_detail(self) -> None:
         contract = self._contract("master-a")
         self._publish_locator(contract)
-        pair = atomic_series_source_pair(contract)
-        path = activation_path(self.fixture.coord, pair)
+        path = activation_path(self.fixture.coord, contract)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps({f"unknown_{index}": index for index in range(100)}),

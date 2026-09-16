@@ -410,10 +410,8 @@ def _restartable_predecessor_contract(contract: WorktreeContract) -> bool:
             (
                 contract.code_commit,
                 contract.memory_content_commit,
-                contract.ledger_commit,
                 contract.integrated_code_commit,
                 contract.integrated_memory_content_commit,
-                contract.integrated_ledger_commit,
             )
         )
     )

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agents_remember.models.closeout.projection import ProjectionSourceProblem
-from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.worktrees.activation.atomic_series_activation import (
     AtomicSeriesActivationError,
     activation_waiting_reason,
@@ -29,7 +28,6 @@ class SeriesActivationProjection:
 
 def project_series_activation(
     contract: WorktreeContract,
-    master_ref: TaskDocumentRef,
 ) -> SeriesActivationProjection:
     """Strictly observe one live series without granting queue mutation authority."""
 
@@ -49,7 +47,7 @@ def project_series_activation(
             (),
             _problem(activation.activation_path.as_posix(), error_type),
         )
-    reason = activation_waiting_reason(activation, master_ref)
+    reason = activation_waiting_reason(activation)
     return SeriesActivationProjection(fact, (reason,) if reason is not None else ())
 
 

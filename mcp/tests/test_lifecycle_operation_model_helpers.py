@@ -62,7 +62,7 @@ def test_mutation_history_and_irreversible_boundary_require_exact_proof() -> Non
 def test_recovery_commits_cannot_contradict_commit_proof() -> None:
     proof = _value(state="commit-proven", commit="a" * 40)
     pending = _value(state="pre-mutation", commit=None)
-    commits = _value(codeCommit="a" * 40, memoryContentCommit="", ledgerCommit="")
+    commits = _value(codeCommit="a" * 40, memoryContentCommit="")
     operation._require_recovered_leg(commits, "codeCommit", proof)
     operation._require_recovered_leg(commits, "memoryContentCommit", pending)
 

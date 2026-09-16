@@ -61,7 +61,7 @@ from .execution_graph_titles import (
     build_graph_titles,
     read_graph_titles,
 )
-from .readiness import CompletionBlocker, completion_blockers
+from .readiness import CompletionBlocker, completion_blockers, master_is_terminal
 from .render import render_markdown
 from .route_review import (
     ReviewFinding,
@@ -135,6 +135,7 @@ __all__ = [
     "json_path_for",
     "leaf_placement_facts",
     "markdown_path_for",
+    "master_is_terminal",
     "missing_task_doc_source",
     "numbering_drift_hints",
     "read_graph_titles",

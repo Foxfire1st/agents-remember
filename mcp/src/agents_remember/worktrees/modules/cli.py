@@ -62,7 +62,6 @@ def command_closeout(args: argparse.Namespace) -> int:
         raw_closeout_messages(
             code=getattr(args, "code_commit_message", None),
             memory=getattr(args, "memory_commit_message", None),
-            ledger=getattr(args, "ledger_commit_message", None),
         ),
         route="worktree",
         corrected_call=CloseoutCorrectedCall(
@@ -71,7 +70,7 @@ def command_closeout(args: argparse.Namespace) -> int:
         ),
     )
     result = closeout_result(
-        replace(worktree_args, closeout_input=effective, ledger_commit_message=""),
+        replace(worktree_args, closeout_input=effective),
         contract,
     )
     print(json.dumps(result.payload, indent=2))
@@ -158,7 +157,6 @@ def build_parser() -> argparse.ArgumentParser:
     closeout.add_argument("--contract-path", type=Path, required=True)
     closeout.add_argument("--code-commit-message")
     closeout.add_argument("--memory-commit-message")
-    closeout.add_argument("--ledger-commit-message")
     closeout.add_argument("--dry-run", action="store_true")
     closeout.set_defaults(func=command_closeout)
 
@@ -166,7 +164,6 @@ def build_parser() -> argparse.ArgumentParser:
     integrate.add_argument("--contract-path", type=Path, required=True)
     integrate.add_argument("--approved", action="store_true")
     integrate.add_argument("--strategy", choices=("ff-only", "replay"), default="ff-only")
-    integrate.add_argument("--ledger-commit-message", default="")
     integrate.add_argument("--dry-run", action="store_true")
     integrate.set_defaults(func=command_integrate)
 

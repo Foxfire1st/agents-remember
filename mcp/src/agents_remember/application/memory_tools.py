@@ -340,10 +340,9 @@ class CarryoverSelection:
 
 @dataclass(frozen=True)
 class CarryoverCommitMessages:
-    """The recovery-leaf onboarding commit and its code-to-memory ledger commit."""
+    """The recovery-leaf onboarding commit message."""
 
     memory: str = "Carry over landed branch memory"
-    ledger: str = "Record branch memory carryover"
 
 
 DEFAULT_CARRYOVER_MESSAGES = CarryoverCommitMessages()
@@ -354,7 +353,7 @@ def memory_baseline_status_tool(config: McpRuntimeConfig, *, repo_id: str) -> di
     repo = require_repo(config, repo_id)
     payload = baseline.baseline_status(_baseline_request(config, repo))
     return {
-        "ok": payload.get("state") != "blocked-drift",
+        "ok": payload.get("state") not in {"blocked-drift", "unavailable"},
         "operation": "memory_baseline_status",
         **payload,
     }
@@ -404,7 +403,6 @@ def memory_carryover_apply_tool(
             intent_note=intent_note,
             include_review_required=include_review_required,
             memory_commit_message=messages.memory,
-            ledger_commit_message=messages.ledger,
         ),
     )
     return {"ok": True, "operation": "memory_carryover_apply", **payload}

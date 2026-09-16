@@ -7,8 +7,8 @@ workbench, a feature branch, or a branch handled in a reconciliation pass).
 `c-11-memory-carryover-from-branch` is **not a Git merge**. It is a selective
 memory reconciliation: it proves which source-branch code changes have actually
 landed on the official branch, then carries only the *corresponding* onboarding
-into official memory and refreshes its verification metadata to the official code
-commit.
+into an open external-memory recovery leaf and refreshes its verification metadata to the official
+code commit. The recovery leaf closes and integrates through the normal code/memory lifecycle.
 
 ## When to use it
 
@@ -21,20 +21,21 @@ whole point.
 
 ## Plan, then apply
 
-Run the plan first and review the candidate report; only then apply.
+Start a recovery leaf from the landed code/memory source pair. Run the plan against its contract
+and review the candidate report; only then apply under the applicable approval.
 
 ```text
-memory_carryover_plan(repo_id="<repo-id>", source_memory="<source-memory-repo>",
+memory_carryover_plan(repo_id="<repo-id>", contract_path="<open-recovery-leaf-contract>", source_memory="<source-memory-repo>",
   official_code_ref="<official-ref>", source_code_ref="<source-ref>", old_base="<base-ref-or-sha>")
 
-memory_carryover_apply(repo_id="<repo-id>", source_memory="<source-memory-repo>",
+memory_carryover_apply(repo_id="<repo-id>", contract_path="<open-recovery-leaf-contract>", source_memory="<source-memory-repo>",
   official_code_ref="<official-ref>", source_code_ref="<source-ref>", old_base="<base-ref-or-sha>",
   intent_note="<developer intent>")
 ```
 
-`apply` mutates official memory only — it never moves code branches, and it
-refreshes carried onboarding to the **official** code commit (not the source
-branch commit).
+`apply` mutates only the recovery leaf's ordinary memory worktree. It does not move code or
+protected memory refs, and it refreshes carried onboarding to the **official** code commit.
+Close and integrate the recovery leaf normally to land those changes.
 
 ## Evidence tiers
 
@@ -55,20 +56,25 @@ another developer may have changed the same file independently.
 ## Output states
 
 - `would-carryover` — dry-run plan with candidate decisions
-- `carried-over` — official memory content + ledger commits were created
-- `nothing-to-carryover` — no selected candidate changed official memory
-- `blocked` — apply requested without approval, dirty official memory, missing
-  ledger, or missing candidate data
+- `carried-over` — a recovery-leaf memory-content commit was created with `Code-Commit` attribution
+- `nothing-to-carryover` — no selected candidate changed recovery-leaf memory
+- `blocked` — apply requested without approval, an open recovery-leaf contract, a clean exact
+  landed code base, or required candidate data
+
+The ignored `memory.md` consumer cache is regenerated from memory commit trailers, without staging
+or committing it. Missing, stale, or malformed cache data does not block carryover. When content
+does not change, the actual memory commit is retained; a new official code SHA does not trigger a
+mapping-only commit. Historical attribution rewrites remain explicit deployment work.
 
 ## Boundaries
 
 - Never carries memory for code that did not land on official.
-- Never copies source-branch ledger rows into official memory.
+- Derives the ledger cache from target memory history; source cache rows are not copied or trusted.
 - Refreshes carried onboarding metadata to the official commit.
 - Does not auto-carry `same-path-changed` evidence.
 - The `c-02-memory-quality-control` skill remains the branch-accuracy drift detector; carryover only imports memory
   whose code validity is proven or explicitly approved.
 
 Related: [Adopt Existing Memory](adopt-existing-memory.md) (the `c-10-adopt-memory-baseline` skill) creates the
-first ledgered baseline; carryover (the `c-11-memory-carryover-from-branch` skill) keeps an existing official memory
+accepted memory baseline; carryover (the `c-11-memory-carryover-from-branch` skill) keeps existing official memory
 enriched as branch work lands.

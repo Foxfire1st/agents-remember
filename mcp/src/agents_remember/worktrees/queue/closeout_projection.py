@@ -14,7 +14,6 @@ from typing import Literal, cast
 from agents_remember.controlplane.closeout_queue_store import ProjectionSourceIdentity
 from agents_remember.errors import TaskIntentError
 from agents_remember.models.closeout.projection import (
-    MAX_CLOSEOUT_CANDIDATES,
     MAX_CLOSEOUT_SOURCE_PROBLEMS,
     CloseoutProjectionMember,
     ProjectionSourceClassification,
@@ -22,7 +21,7 @@ from agents_remember.models.closeout.projection import (
 )
 from agents_remember.models.lifecycles.door import CloseoutDoorGeneration
 from agents_remember.models.task_document_ref import TaskDocumentRef
-from agents_remember.tasks import SprintExecutionGraph, TaskDocument
+from agents_remember.tasks import SprintExecutionGraph, TaskDocument, master_is_terminal
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
     TaskDocumentRefError,
@@ -58,7 +57,11 @@ from .closeout_projection_source_facts import (
     semantic_topology_source_fact,
     task_source_fact,
 )
-from .closeout_queue_errors import CloseoutQueueError
+from .closeout_queue_errors import (
+    CAPACITY_REFUSAL_CODES,
+    SOURCE_PROBLEM_CAP_EXCEEDED,
+    CloseoutQueueError,
+)
 from .closeout_queue_evidence import GradeAuthority, planning_authorities
 from .closeout_queue_graph import QueueGraphContext, graph_context
 
@@ -168,7 +171,7 @@ def capture_projection_source(
     if problems:
         return _unreadable_snapshot(tuple(_bounded_problems(problems, sprint_ref)), captured_at)
     classification: ProjectionSourceClassification = (
-        "terminal" if tasks.sprint.document.status == "Completed" else "active"
+        "terminal" if master_is_terminal(tasks.sprint.document) else "active"
     )
     if classification == "terminal":
         return ProjectionSourceSnapshot(
@@ -444,15 +447,6 @@ def _require_waiting_door_identities(
 ) -> None:
     generation_ids = [row[0].door.generationId for row in waiting if row[0].door is not None]
     task_refs = [row[1].ref.key for row in waiting]
-    if len(waiting) > MAX_CLOSEOUT_CANDIDATES:
-        problems.append(
-            _problem(
-                "door",
-                sprint_ref.key,
-                "waiting-door-cap-exceeded",
-                "withdraw excess door generations before rebuilding",
-            )
-        )
     if len(generation_ids) != len(set(generation_ids)) or len(task_refs) != len(set(task_refs)):
         problems.append(
             _problem(
@@ -642,7 +636,7 @@ def _observe_series_activation(
 ) -> None:
     contract = observed.live_contract
     assert contract is not None
-    activation = project_series_activation(contract, master.ref)
+    activation = project_series_activation(contract)
     observed.row["activation"] = activation.source_fact
     activation_waiting[master.ref] = activation.waiting
     if activation.problem is not None:
@@ -844,9 +838,20 @@ def _problem(
     error_type: str,
     repair: str,
 ) -> ProjectionSourceProblem:
+    """Classify one source problem from the code its own raiser published.
+
+    A capacity refusal is named by the declaration that owns its code, not by a substring of
+    its spelling: the two surviving capacity codes spell the bound "capacity-exceeded" while
+    this classifier tested "cap-exceeded", so a sprint past its graph bound was reported as a
+    source that could not be read. The remaining markers are shared vocabulary of the codes
+    that carry them, and the two states stay distinct in both directions -- an unreadable
+    source is still reported unreadable.
+    """
+
     missing = any(marker in error_type for marker in ("missing", "not-found"))
     invalid = (
-        any(marker in error_type for marker in ("invalid", "mismatch", "conflict", "cap-exceeded"))
+        error_type in CAPACITY_REFUSAL_CODES
+        or any(marker in error_type for marker in ("invalid", "mismatch", "conflict"))
         or error_type == "sprint-required"
     )
     return ProjectionSourceProblem(
@@ -874,7 +879,7 @@ def _bounded_problems(
     overflow = _problem(
         "projection",
         sprint_ref.key,
-        "source-problem-cap-exceeded",
+        SOURCE_PROBLEM_CAP_EXCEEDED,
         "repair the reported canonical sources, then rebuild",
     )
     return [*unique[: MAX_CLOSEOUT_SOURCE_PROBLEMS - 1], overflow]

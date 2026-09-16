@@ -29,17 +29,21 @@ def prove_external_memory_recovery(
     contract: WorktreeContract,
     commits: LifecycleOperationRecoveryCommits,
 ) -> None:
-    """Prove the closed task memory head still names the recovered ledger."""
+    """Prove the closed task memory head still names the recovered content commit."""
     assert contract.memory_repo_path is not None
     if contract.kind == "series":
         task_memory_head = branch_commit(contract.memory_repo_path, contract.memory_work_branch)
     else:
         assert contract.memory_worktree is not None
-        require_clean(contract.memory_worktree, "recovering integration memory worktree")
+        require_clean(
+            contract.memory_worktree,
+            "recovering integration memory worktree",
+            exclude_paths=("memory.md",),
+        )
         task_memory_head = head_commit(contract.memory_worktree)
-    if task_memory_head != commits.ledgerCommit:
+    if task_memory_head != commits.memoryContentCommit:
         raise RuntimeError(
             "integration contract-finalization recovery requires manual reconciliation: "
-            f"recorded ledger commit {commits.ledgerCommit}, found task memory HEAD "
+            f"recorded memory commit {commits.memoryContentCommit}, found task memory HEAD "
             f"{task_memory_head}"
         )

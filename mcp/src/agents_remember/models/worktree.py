@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from agents_remember.kernel.coordination_context.models import MemoryMode
 from agents_remember.models.base import FlexibleToolResponse, StrictResponseModel
@@ -21,16 +21,21 @@ from agents_remember.models.quality import QualityGateResult
 from agents_remember.models.structural.atomic_series_activation import (
     AtomicSeriesActivationRecord,
     AtomicSeriesObservedState,
-    AtomicSeriesSourcePair,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 
 # Worktree wire vocabulary (moved from worktrees.worktree_contract / modules.guidance).
 WorkflowKind = Literal["chat-task", "light-task"]
 HumanReviewStatus = Literal["pending-review", "approved"]
 CloseoutStatus = Literal["not-started", "completed"]
 LifecycleStatus = CloseoutStatus  # the published wire name for the closeout status
-IntegrationStatus = Literal["not-started", "completed", "blocked"]
+# ``checkpointed`` is the third terminal-adjacent value and the one this model was missing: the
+# master's current line has landed into its super branch and the master will continue. Without it a
+# partially landed master had to report ``not-started`` -- "nothing of mine has left" -- while its
+# content was already upstream, which is exactly the state that made a partial master's retirement
+# look safe.
+IntegrationStatus = Literal["not-started", "completed", "blocked", "checkpointed"]
 CleanupStatus = Literal["pending", "completed", "abandoned", "reopened"]
 WorktreePhase = Literal[
     "worktree-started",
@@ -48,15 +53,24 @@ NextOperation = Literal[
     "request_integration_decision",
     "developer_decision",
     "request_carryover_decision",
-    "retry_cleanup",
+    "finalize",
     "done",
 ]
 NextTool = Literal[
     "worktree_status",
     "worktree_closeout_apply",
     "worktree_integrate",
+    # The checkpoint's apply call. It is a registered public worktree tool and an approval-gated
+    # protected-ref landing, so the same `request_integration_decision` intent that carries a
+    # finished master to `worktree_integrate` carries an unfinished one here. It is a partial
+    # PUBLICATION, not the pause: pausing a master moves no ref and is no integration decision at
+    # all. The operation vocabulary is deliberately NOT widened for it either -- adding a member to
+    # `NextOperation` would put a non-phase value into the set `WorktreeSummary` and the context
+    # packet claim.
+    "worktree_checkpoint_landing",
     "memory_carryover_plan",
     "worktree_cleanup",
+    "lifecycle_finalize_task",
 ]
 SourceLineageState = Literal["current", "blocked", "unavailable"]
 SourceLineageEdgeState = Literal["current", "behind", "diverged", "unavailable"]
@@ -154,10 +168,10 @@ class SyncResolutionProjection(StrictResponseModel):
 
 
 class AtomicSeriesActivationFact(StrictResponseModel):
-    """Read-only source-pair activation evidence carried by status/refusals."""
+    """Read-only per-contract activation evidence carried by status/refusals."""
 
     address: str | None = Field(default=None, max_length=4096)
-    sourcePairFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    contractFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     state: AtomicSeriesObservedState
     record: AtomicSeriesActivationRecord | None = None
     errorType: str | None = Field(default=None, max_length=256)
@@ -170,7 +184,7 @@ class AtomicSeriesAdmissionActivation(StrictResponseModel):
     path: str = Field(min_length=1, max_length=4096)
     observedState: AtomicSeriesObservedState
     recordPresent: bool
-    sourcePairFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    contractFingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     revision: int | None = Field(default=None, ge=1)
     selectedAt: str | None = Field(default=None, max_length=128)
     selectedMaster: TaskDocumentRef | None = None
@@ -184,14 +198,6 @@ class AtomicSeriesAdmissionRequested(StrictResponseModel):
     contractPath: str | None = Field(default=None, max_length=4096)
 
 
-class AtomicSeriesAdmissionBlocking(StrictResponseModel):
-    master: TaskDocumentRef
-    contractPath: str = Field(min_length=1, max_length=4096)
-    state: AtomicSeriesObservedState
-    revision: int = Field(ge=1)
-    selectedAt: str = Field(min_length=1, max_length=128)
-
-
 class AtomicSeriesAdmissionStatusAction(StrictResponseModel):
     tool: Literal["worktree_status"] = "worktree_status"
     args: dict[str, object]
@@ -200,13 +206,10 @@ class AtomicSeriesAdmissionStatusAction(StrictResponseModel):
 class AtomicSeriesAdmission(StrictResponseModel):
     """Bounded explanation of why an activation boundary admitted or refused work."""
 
-    classification: Literal["wait", "corrective-action"]
     operation: str = Field(min_length=1, max_length=256)
     requested: AtomicSeriesAdmissionRequested
-    sourcePair: AtomicSeriesSourcePair | None = None
-    sourcePairFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    contractFingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     activation: AtomicSeriesAdmissionActivation | None = None
-    blocking: AtomicSeriesAdmissionBlocking | None = None
     retryPrecondition: str = Field(min_length=1, max_length=8192)
     statusAction: AtomicSeriesAdmissionStatusAction | None = None
     status: str = Field(min_length=1, max_length=256)
@@ -317,6 +320,50 @@ class WorktreeCommandResponse(FlexibleToolResponse):
     retryPrecondition: str | None = Field(default=None, max_length=8192)
     statusAction: AtomicSeriesAdmissionStatusAction | None = None
 
+    # The next-move triple, declared here so the worktree surface's guidance is part of
+    # its own contract instead of an unchecked extra. `WorktreeStatusResponse` inherits
+    # these; `WorktreeSyncResponse` and `WorktreeOperationControlResponse` narrow
+    # `nextTool` further, exactly as they did before.
+    nextAction: str | None = None
+    nextTool: str | None = None
+    nextArgs: dict[str, Any] | None = None
+
+    # The worktree surface's rule: a next move names a *registered public* tool, because
+    # these values are advertised guidance an agent is meant to act on and the roster is
+    # the already-enforced authority for what the agent can actually call. The rule is
+    # deliberately per surface, not global: the `task_doc` surface may name a non-public
+    # tool (see the boundary note below), so this is not an inconsistency to flatten.
+    #
+    # Complete producer survey behind the invariant (union of 20 values, each traced to
+    # its producer): NextTool and RecoveryTool literals (models/worktree.py,
+    # worktrees/modules/guidance.py); SourceLineageRecovery.tool; TerminalCleanupOperation;
+    # route_review.inspection_tool; the narrowed `nextTool` on WorktreeSyncResponse and
+    # WorktreeOperationControlResponse; the `legal_operation_controls` row `tool` values
+    # (lifecycle_operation_control_projection.py); the terminal_enclosure_archive refusals;
+    # the task_unstarted_evidence `RecoveryRoute` tools; and the remaining direct literals
+    # in worktrees/modules/{integrate,start}.py, worktrees/task_leaf_binding.py,
+    # application/worktree_tools.py, application/next_step.py and models/base.py.
+    # Every one is in PUBLIC_TOOLS except `session_retire`, which cannot reach this field.
+    #
+    # BOUNDARY -- `session_retire` is a registered but deliberately NON-PUBLIC tool
+    # (models/tools/tool_registry.py registers it with SessionRetireResponse; it is absent
+    # from mcp/tools/base.PUBLIC_TOOLS by design). It is reachable only as the `task_doc`
+    # payload's top-level `nextTool` and inside its nested `discardEvidence`, and
+    # `TaskDocResponse` is not a `WorktreeCommandResponse`, so this invariant does not
+    # apply to it. Do not "fix" that by widening PUBLIC_TOOLS to cover a non-public tool.
+    @field_validator("nextTool")
+    @classmethod
+    def _require_registered_public_next_tool(cls, value: str | None) -> str | None:
+        """Refuse a next move that names a tool the public roster does not advertise."""
+
+        if value is None:
+            return value
+        if value not in PUBLIC_TOOLS:
+            raise ValueError(
+                f"nextTool must name a registered public tool; {value!r} is not in PUBLIC_TOOLS"
+            )
+        return value
+
 
 class WorktreeStartResponse(WorktreeCommandResponse):
     operation: Literal["worktree_start"] = "worktree_start"
@@ -407,6 +454,32 @@ class WorktreeIntegrateResponse(WorktreeCommandResponse):
     autoCloseDeferredSeats: list[str] = Field(default_factory=list)
     autoCloseFailedSeats: list[str] = Field(default_factory=list)
     autoLandedSeats: list[str] = Field(default_factory=list)
+
+
+class WorktreeCheckpointLandingResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_checkpoint_landing"] = "worktree_checkpoint_landing"
+    integrationStrategy: str = ""
+    integratedCodeCommit: str = ""
+    integratedMemoryContentCommit: str = ""
+
+
+class WorktreePauseResponse(WorktreeCommandResponse):
+    """The stop-only pause: it releases the master's selection and publishes nothing.
+
+    ``paused`` is the whole state this response claims, and it is claimed only by the route
+    that releases the selection. A publication that moved refs has no business setting it --
+    the two operations answer different questions and only one of them stops anything.
+    """
+
+    operation: Literal["worktree_pause"] = "worktree_pause"
+    paused: bool = False
+
+
+class WorktreeRecordLandingResponse(WorktreeCommandResponse):
+    operation: Literal["worktree_record_landing"] = "worktree_record_landing"
+    integrationStrategy: str = ""
+    landedCodeCommit: str = ""
+    landingTargets: list[str] = Field(default_factory=list)
 
 
 class WorktreeOperationControlResponse(WorktreeCommandResponse):

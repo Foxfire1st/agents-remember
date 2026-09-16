@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Literal
 
 from agents_remember.errors import CitationCacheError
-from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, run_git
+from agents_remember.kernel.git_command import GIT_REMOTE_TIMEOUT_SECONDS, GitRunnerOptions, run_git
+from agents_remember.kernel.memory_cache import discard_memory_cache_changes
 from agents_remember.kernel.primitives.drift_snapshot import remove_drift_snapshot
 from agents_remember.models.lifecycles.enclosure import TerminalWorktreeCleanupArguments
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
@@ -34,6 +35,7 @@ from agents_remember.worktrees.modules.guidance import carryover_done, status_pa
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.terminal_validation import (
     TerminalPreflight,
+    TerminalResult,
     legacy_series_reports_is_child_enclosure,
     terminal_preflight,
     terminal_result_blockers,
@@ -65,6 +67,7 @@ class _TerminalMutationAuthority:
 
     operation: Literal["worktree_cleanup", "worktree_abandon"]
     worktrees: frozenset[tuple[Path, Path]]
+    memory_worktree: Path | None
     branches: frozenset[tuple[Path, str, str]]
     remote_branches: frozenset[tuple[Path, str]]
     _capability: object
@@ -86,6 +89,7 @@ def _terminal_mutation_authority(
     worktrees: set[tuple[Path, Path]] = set()
     branches: set[tuple[Path, str, str]] = set()
     remote_branches: set[tuple[Path, str]] = set()
+    memory_worktree = None
 
     code_repository = _required_repository_identity(contract.code_repo_path, "code")
     if contract.kind == "leaf":
@@ -98,7 +102,8 @@ def _terminal_mutation_authority(
     if contract.memory_mode == "external" and contract.memory_repo_path is not None:
         memory_repository = _required_repository_identity(contract.memory_repo_path, "memory")
         if contract.kind == "leaf" and contract.memory_worktree is not None:
-            worktrees.add((memory_repository, contract.memory_worktree.resolve()))
+            memory_worktree = contract.memory_worktree.resolve()
+            worktrees.add((memory_repository, memory_worktree))
         branches.add(
             (
                 memory_repository,
@@ -109,6 +114,7 @@ def _terminal_mutation_authority(
     return _TerminalMutationAuthority(
         operation=operation,
         worktrees=frozenset(worktrees),
+        memory_worktree=memory_worktree,
         branches=frozenset(branches),
         remote_branches=frozenset(remote_branches),
         _capability=_TERMINAL_MUTATION_CAPABILITY,
@@ -187,6 +193,9 @@ def remove_registered_worktree(
         return {"path": worktree.as_posix(), "removed": False, "reason": "already-absent"}
     if dry_run:
         return {"path": worktree.as_posix(), "removed": False, "would_remove": True}
+    assert authority is not None
+    if worktree.resolve() == authority.memory_worktree:
+        discard_memory_cache_changes(worktree)
     command = ["worktree", "remove", *(["--force"] if force else []), str(worktree)]
     result = run_git(repo, command)
     if result.returncode != 0:
@@ -317,7 +326,11 @@ def _remote_git(repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]
     already-handled unreachable-remote case rather than escaping as an exception.
     """
     try:
-        return run_git(repo, args, timeout=GIT_REMOTE_TIMEOUT_SECONDS)
+        return run_git(
+            repo,
+            args,
+            GitRunnerOptions(timeout=GIT_REMOTE_TIMEOUT_SECONDS),
+        )
     except subprocess.TimeoutExpired:
         return None
 
@@ -871,11 +884,14 @@ def _cleanup_outputs_result(
 ) -> WorktreeCommandResult:
     providers, removed_worktrees, branches, drift_snapshots, directories = outputs
     blockers = terminal_result_blockers(
-        providers=providers,
-        worktrees=removed_worktrees,
-        branches=branches,
-        directories=directories,
-        drift_snapshots=drift_snapshots,
+        TerminalResult(
+            providers=providers,
+            worktrees=removed_worktrees,
+            branches=branches,
+            directories=directories,
+            drift_snapshots=drift_snapshots,
+            preview=args.dry_run,
+        )
     )
     if blockers and not args.dry_run:
         return WorktreeCommandResult(
@@ -978,10 +994,7 @@ def _cleanup_terminal_outputs(
         else {"state": "skipped", "reason": "teardown_providers disabled"}
     )
     if not args.dry_run and terminal_result_blockers(
-        providers=providers,
-        worktrees={},
-        branches={},
-        directories={},
+        TerminalResult(providers=providers, worktrees={}, branches={}, directories={})
     ):
         return providers, {}, {}, {}, {}
     removed_worktrees = (
@@ -990,10 +1003,9 @@ def _cleanup_terminal_outputs(
         else _removed_worktrees(contract, dry_run=False, authority=authority)
     )
     if not args.dry_run and terminal_result_blockers(
-        providers=providers,
-        worktrees=removed_worktrees,
-        branches={},
-        directories={},
+        TerminalResult(
+            providers=providers, worktrees=removed_worktrees, branches={}, directories={}
+        )
     ):
         return providers, removed_worktrees, {}, {}, {}
     branches = (
@@ -1002,10 +1014,9 @@ def _cleanup_terminal_outputs(
         else _deleted_branches(contract, dry_run=False, authority=authority)
     )
     if not args.dry_run and terminal_result_blockers(
-        providers=providers,
-        worktrees=removed_worktrees,
-        branches=branches,
-        directories={},
+        TerminalResult(
+            providers=providers, worktrees=removed_worktrees, branches=branches, directories={}
+        )
     ):
         return providers, removed_worktrees, branches, {}, {}
     drift_snapshots = {
@@ -1017,11 +1028,13 @@ def _cleanup_terminal_outputs(
         )
     }
     if not args.dry_run and terminal_result_blockers(
-        providers=providers,
-        worktrees=removed_worktrees,
-        branches=branches,
-        directories={},
-        drift_snapshots=drift_snapshots,
+        TerminalResult(
+            providers=providers,
+            worktrees=removed_worktrees,
+            branches=branches,
+            directories={},
+            drift_snapshots=drift_snapshots,
+        )
     ):
         return providers, removed_worktrees, branches, drift_snapshots, {}
     planned_removed = (

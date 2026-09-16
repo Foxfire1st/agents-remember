@@ -31,7 +31,7 @@ worktree, check `worktree_status` before starting memory entries. If its
 `freshness` block reports that the recorded code or memory source branch moved,
 run `worktree_sync` before writing onboarding content unless that sync is blocked
 by conflicts or an explicit developer decision. Carrying the moved official line
-first keeps later onboarding updates and ledger rows on top of current source
+first keeps later onboarding updates and their Git attribution on top of current source
 history instead of forcing a conflict-heavy carryover after the task is otherwise
 done.
 

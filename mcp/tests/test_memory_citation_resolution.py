@@ -6,16 +6,20 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+from agents_remember.kernel.memory_attribution import render_memory_content_message
+from agents_remember.kernel.memory_cache import refresh_memory_cache
 from agents_remember.memory_quality.check import (
     run_memory_quality_check,
 )
 from agents_remember.memory_quality.style.citations import (
     claim_reopen,
+    deterministic_projection,
     range_resolution,
 )
 
@@ -345,6 +349,177 @@ class RetainedPreparedProvenanceTests(TreeCase):
 
         ordinary = self.check(current)
         self.assertTrue(ordinary["ok"], ordinary["findings"])
+
+    def test_memory_citation_provenance_uses_git_when_the_cache_is_missing_or_malformed(
+        self,
+    ) -> None:
+        self.tree.source("src.py", "VALUE = 1\n")
+        self.git(self.tree.code, "add", "src.py")
+        self.git(self.tree.code, "commit", "-qm", "code")
+        code = self.git(self.tree.code, "rev-parse", "HEAD")
+        self.tree.memory_file("system/policy.py", "VALUE = 1\n")
+        self.git(self.tree.memory, "add", "system/policy.py")
+        self.git(self.tree.memory, "commit", "-qm", render_memory_content_message("memory", code))
+        memory = self.git(self.tree.memory, "rev-parse", "HEAD")
+        self.card(code)
+        card = self.tree.onboarding / "current.md"
+        card.write_text(card.read_text().replace("src.py:1-1", "system/policy.py:1-1"))
+        refresh_memory_cache(self.tree.memory)
+        cache = self.tree.memory / "memory.md"
+        for contents in (cache.read_text(), None, "malformed consumer cache\n"):
+            with self.subTest(cache=contents):
+                if contents is None:
+                    cache.unlink()
+                else:
+                    cache.write_text(contents)
+                result = claim_reopen.check_onboarding_root(self.tree.onboarding, self.tree.code)
+                self.assert_clean(result)
+                self.assertEqual(self.git(self.tree.code, "rev-parse", "HEAD"), code)
+                self.assertEqual(self.git(self.tree.memory, "rev-parse", "HEAD"), memory)
+        self.tree.memory_file("system/policy.py", "VALUE = 2\n")
+        result = claim_reopen.check_onboarding_root(self.tree.onboarding, self.tree.code)
+        self.assertEqual(result["surfacedFindings"][0]["code"], "citation_claim_reopened")
+
+
+class MechanicallyProjectedRangeTests(TreeCase):
+    """A range the mechanical repair wrote is not evidence that the citation is current.
+
+    The currency test -- the anchor resolves exactly once and some cited range still holds the
+    changed construct's declaration line -- is satisfied BY CONSTRUCTION by a projected range,
+    because the projection chose the declaration it wrote. Production recorded where that ends:
+    a claim about two adjacent tool names was rebound by ``--fix`` to the registrar definitions
+    that declared them, recorded ``No content impact: ... claim bytes unchanged``, and the
+    review item then asserted the citation was current -- the one question whose answer cannot
+    repair the damage. The generated Update History bullet is the only surviving record of HOW
+    the range arrived, so the item reads it and asks the support question instead.
+
+    That item is ENFORCED, not surfaced: a mechanically projected range is unverified evidence,
+    nothing records whether anyone reviewed it, and this check cannot prove that a review
+    happened. So it forces an explicit disposition instead of offering an ignorable note. The
+    ordinary (non-projected) evidence-change item below keeps its warning, because there the
+    currency test IS evidence.
+    """
+
+    PROJECTED_AT = datetime(2026, 9, 11, 8, 30, tzinfo=UTC)
+    CARD = "onboarding/current.md"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.git(self.tree.code, "init", "--quiet")
+        self.git(self.tree.code, "config", "user.email", "fixture@example.invalid")
+        self.git(self.tree.code, "config", "user.name", "Fixture")
+
+    def git(self, root: Path, *args: str) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=root, text=True, capture_output=True, check=False
+        )
+        if result.returncode != 0:
+            raise AssertionError(result.stderr or result.stdout)
+        return result.stdout.strip()
+
+    def commit(self) -> str:
+        self.tree.source("kernel/build.py", "def build_route_indexes():\n    return 1\n")
+        self.git(self.tree.code, "add", "kernel/build.py")
+        self.git(self.tree.code, "commit", "--quiet", "-m", "stamp")
+        return self.git(self.tree.code, "rev-parse", "HEAD")
+
+    def card(self, stamp: str, history: str = "- 2026-08-01T00:00:00+00:00: Original.") -> Path:
+        return self.tree.memory_file(
+            self.CARD,
+            "\n".join(
+                (
+                    "# Current",
+                    "",
+                    "| Field | Value |",
+                    "| --- | --- |",
+                    f"| lastVerifiedCommitHash | `{stamp}` |",
+                    "| lastVerifiedCommitDate | 2026-09-10 |",
+                    "",
+                    "## Repo-Internal References",
+                    "",
+                    "| Finding | Anchor | Source |",
+                    "| --- | --- | --- |",
+                    "| The census build. | `build_route_indexes` | kernel/build.py:1-2 |",
+                    "",
+                    "## Update History",
+                    "",
+                    history,
+                    "",
+                )
+            ),
+        )
+
+    def projection_bullet(self, card: Path) -> str:
+        """The real generated bullet for this card's own anchors, exactly as `--fix` writes it."""
+        _lines, claims = claim_reopen.claims_in(card)
+        return deterministic_projection.history_bullet(
+            at=self.PROJECTED_AT,
+            snapshot_id="a" * 64,
+            extents=tuple(
+                deterministic_projection.ResolvedExtentInfo(
+                    anchor=anchor.written,
+                    path="kernel/build.py",
+                    start=1,
+                    end=2,
+                    kind="definition",
+                )
+                for anchor in claims[0].anchors
+            ),
+        )
+
+    def changed_construct(self) -> None:
+        """The body changed while its declaration line, and the cited range, held still."""
+        self.tree.source("kernel/build.py", "def build_route_indexes():\n    return 2\n")
+
+    def test_a_projected_range_is_enforced_with_the_support_question_not_currency(self) -> None:
+        stamp = self.commit()
+        card = self.card(stamp)
+        bullet = self.projection_bullet(card)
+        self.card(stamp, bullet)
+        self.changed_construct()
+
+        result = claim_reopen.check_onboarding_root(self.tree.onboarding, self.tree.code)
+
+        # The projected range is UNVERIFIED EVIDENCE, so it stays in the gated set rather than
+        # dropping into the report-only bucket: a curator may not read it and still pass.
+        self.assertEqual(result["surfacedFindings"], [], result["findings"])
+        self.assertEqual(len(result["findings"]), 1, result["findings"])
+        enforced = result["findings"][0]
+        message = enforced["message"]
+        self.assertEqual(enforced["code"], "citation_claim_reopened")
+        self.assertEqual(enforced["severity"], "error")
+        self.assertFalse(result["ok"], result["findings"])
+        # The memory root here is not a Git tree, so the pre-existing-debt demotion has no
+        # view to demote from and returns every finding enforced -- the fail-closed direction.
+        # Nothing about that path can swallow this item either: it demotes ``INVALID`` alone.
+        self.assertIsNone(claim_reopen._modified_onboarding_paths(self.tree.memory))
+        self.assertNotIn("the citation is current", message)
+        self.assertIn("NOT shown to be current", message)
+        self.assertIn(bullet, message)
+        self.assertIn("it now reads kernel/build.py:1-2", message)
+        self.assertIn("does the construct the new range covers support", message)
+        self.assertIn("mechanical anchor-range projection", message)
+        self.assertIn("re-cite the location the claim is about", message)
+        self.assertIn("only then advance the stamp", message)
+
+    def test_history_without_this_claims_bullet_keeps_the_currency_assertion(self) -> None:
+        stamp = self.commit()
+        card = self.card(stamp)
+        other = self.projection_bullet(card).replace("`build_route_indexes`", "`some_other_name`")
+        for history in ("- 2026-08-01T00:00:00+00:00: Original.", other):
+            with self.subTest(history=history):
+                self.card(stamp, history)
+                self.changed_construct()
+
+                result = claim_reopen.check_onboarding_root(self.tree.onboarding, self.tree.code)
+
+                self.assertEqual(len(result["surfacedFindings"]), 1, result["findings"])
+                # The ordinary evidence-change item is unchanged: report-only, severity warning.
+                self.assertEqual(result["surfacedFindings"][0]["severity"], "warning")
+                self.assertEqual(result["findings"], [], result["findings"])
+                message = result["surfacedFindings"][0]["message"]
+                self.assertIn("the citation is current", message)
+                self.assertNotIn("NOT shown to be current", message)
 
 
 if __name__ == "__main__":

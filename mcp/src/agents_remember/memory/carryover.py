@@ -14,15 +14,10 @@ from pathlib import Path
 
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.coordination_context.models import StorageSettings
-from agents_remember.kernel.git_command import run_git
-from agents_remember.kernel.memory_ledger import (
-    LedgerError,
-    MemoryLedger,
-    find_mapping,
-    load_ledger,
-    prepend_mapping,
-    write_ledger,
-)
+from agents_remember.kernel.git_command import GitRunnerOptions, run_git
+from agents_remember.kernel.memory_attribution import render_memory_content_message
+from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
+from agents_remember.kernel.memory_ledger import LEDGER_RELATIVE_PATH
 from agents_remember.kernel.onboarding_doc import (
     discover_route_overviews,
     route_contains_changed_path,
@@ -44,10 +39,15 @@ from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_repository_checkout,
     require_ordinary_worktree,
 )
-from agents_remember.worktrees.modules.git import repository_identity
+from agents_remember.worktrees.modules.git import (
+    commit_if_dirty,
+    ensure_git_identity,
+    repository_identity,
+)
 from agents_remember.worktrees.worktree_contract import load_contract
 
 PROVEN_EVIDENCE = {"exact-landed-commit", "patch-id-match", "final-content-match"}
+MEMORY_CONTENT_PATHS = (".", f":(exclude){LEDGER_RELATIVE_PATH}")
 FILE_SIDECAR_KIND = "file-sidecar"
 ROUTE_OVERVIEW_KIND = "route-overview"
 ENTITY_CATALOG_KIND = "entity-catalog"
@@ -92,7 +92,6 @@ class CarryoverApplyOptions:
     intent_note: str
     include_review_required: list[str] | None = None
     memory_commit_message: str = "Carry over landed branch memory"
-    ledger_commit_message: str = "Record branch memory carryover"
 
 
 def request_from_args(args: argparse.Namespace) -> CarryoverRequest:
@@ -111,7 +110,11 @@ def request_from_args(args: argparse.Namespace) -> CarryoverRequest:
 
 
 def require_git(repo: Path, args: list[str], *, input_text: str | None = None) -> str:
-    result = run_git(repo, args, input_text=input_text)
+    result = run_git(
+        repo,
+        args,
+        GitRunnerOptions(input_text=input_text),
+    )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
     return result.stdout.strip()
@@ -125,30 +128,14 @@ def commit_date(repo: Path, commit: str) -> str:
     return require_git(repo, ["show", "-s", "--format=%cI", commit])
 
 
-def ensure_clean(repo: Path, label: str) -> None:
-    status = require_git(repo, ["status", "--porcelain"])
+def ensure_clean(repo: Path, label: str, *pathspecs: str) -> None:
+    status = require_git(repo, ["status", "--porcelain", "--", *pathspecs])
     if status:
         raise RuntimeError(f"{label} is not clean:\n{status}")
 
 
-def ensure_git_identity(repo: Path) -> None:
-    if not run_git(repo, ["config", "--get", "user.email"]).stdout.strip():
-        require_git(repo, ["config", "user.email", "agents-remember@example.invalid"])
-    if not run_git(repo, ["config", "--get", "user.name"]).stdout.strip():
-        require_git(repo, ["config", "user.name", "Agents Remember"])
-
-
-def has_changes(repo: Path) -> bool:
-    return bool(require_git(repo, ["status", "--porcelain"]))
-
-
-def commit_if_dirty(repo: Path, message: str) -> str:
-    if not has_changes(repo):
-        return head_commit(repo, "HEAD")
-    ensure_git_identity(repo)
-    require_git(repo, ["add", "-A"])
-    require_git(repo, ["commit", "-m", message])
-    return head_commit(repo, "HEAD")
+def has_changes(repo: Path, *pathspecs: str) -> bool:
+    return bool(require_git(repo, ["status", "--porcelain", "--", *pathspecs]))
 
 
 def changed_paths(repo: Path, base_ref: str, head_ref: str) -> set[str]:
@@ -182,7 +169,11 @@ def patch_id(repo: Path, base_ref: str, head_ref: str, source_path: str) -> str 
     diff_text = require_git(repo, ["diff", base_ref, head_ref, "--", source_path])
     if not diff_text.strip():
         return None
-    result = run_git(repo, ["patch-id", "--stable"], input_text=diff_text)
+    result = run_git(
+        repo,
+        ["patch-id", "--stable"],
+        GitRunnerOptions(input_text=diff_text),
+    )
     if result.returncode != 0 or not result.stdout.strip():
         return None
     return result.stdout.split()[0]
@@ -704,58 +695,6 @@ def _validate_entity_fingerprints(
     return {"state": state, "rows": len(rows), "mismatches": mismatches, "errors": errors}
 
 
-@dataclass(frozen=True)
-class TargetLedger:
-    """The recovery-leaf ledger as carryover writes it: the loaded ledger, the file it was
-    read from, the memory tree that must stage and commit that file, and the message to commit
-    it with. A ledger without its path and tree cannot be persisted, so they are one handle."""
-
-    ledger: MemoryLedger
-    path: Path
-    memory_root: Path
-    commit_message: str
-
-
-def _nothing_to_carry_result(
-    plan: dict[str, object],
-    target_ledger: TargetLedger,
-    *,
-    cleaned_note: str,
-    carried: list[dict[str, object]],
-    official_head: str,
-) -> dict[str, object]:
-    """Result when no onboarding was carried over.
-
-    When nothing is actionable (no auto-carry candidate and no pending
-    review-required candidate) the target memory is already current for
-    ``official_head``. If the ledger has no entry for that exact code commit —
-    e.g. a PR merge commit that landed on top of the verified tip, tree-identical
-    but a new SHA — map it to the current memory content commit so the next
-    worktree can base off the merged branch without a manual reconciliation.
-    Otherwise there is genuinely nothing to record.
-    """
-    ledger = target_ledger.ledger
-    counts = plan.get("counts", {})
-    assert isinstance(counts, dict)
-    pending = bool(counts.get("auto-carry", 0)) or bool(counts.get("review-required", 0))
-    if not pending and find_mapping(ledger, official_head) is None:
-        write_ledger(
-            target_ledger.path,
-            prepend_mapping(ledger, official_head, ledger.last_memory_content_commit),
-        )
-        require_git(target_ledger.memory_root, ["add", "memory.md"])
-        ledger_commit = commit_if_dirty(target_ledger.memory_root, target_ledger.commit_message)
-        return {
-            **plan,
-            "state": "ledger-mapped-head",
-            "intent_note": cleaned_note,
-            "carried": carried,
-            "memory_content_commit": ledger.last_memory_content_commit,
-            "ledger_commit": ledger_commit,
-        }
-    return {**plan, "state": "nothing-to-carryover", "carried": carried}
-
-
 def _apply_carryover_for_request(
     request: CarryoverRequest,
     *,
@@ -779,10 +718,8 @@ def _apply_carryover_for_request(
         )
     )
     plan = build_plan_for_request(request)
-    ensure_clean(target_memory, "target memory")
+    ensure_clean(target_memory, "target memory", *MEMORY_CONTENT_PATHS)
     target_storage = required_target_storage(target_memory)
-    ledger_path = target_memory / "memory.md"
-    ledger = load_ledger(ledger_path)
     official_head = str(plan["official_code_head"])
     official_date = commit_date(request.code_repository_root.resolve(), official_head)
     included_review_required = set(options.include_review_required or [])
@@ -821,26 +758,27 @@ def _apply_carryover_for_request(
             official_head,
             target_storage,
         )
-    if not carried or not has_changes(target_memory):
+    if not carried or not has_changes(target_memory, *MEMORY_CONTENT_PATHS):
         return {
-            **_nothing_to_carry_result(
-                plan,
-                TargetLedger(
-                    ledger=ledger,
-                    path=ledger_path,
-                    memory_root=target_memory,
-                    commit_message=options.ledger_commit_message,
-                ),
-                cleaned_note=cleaned_note,
-                carried=carried,
-                official_head=official_head,
-            ),
+            **plan,
+            "state": "nothing-to-carryover",
+            "carried": carried,
             "route_index_refresh": route_index_refresh,
+            "ledger_cache": refresh_memory_cache(
+                target_memory, repo_name=request.code_repository_name
+            ),
         }
-    memory_content_commit = commit_if_dirty(target_memory, options.memory_commit_message)
-    write_ledger(ledger_path, prepend_mapping(ledger, official_head, memory_content_commit))
-    require_git(target_memory, ["add", "memory.md"])
-    ledger_commit = commit_if_dirty(target_memory, options.ledger_commit_message)
+    # The caller's message is committed verbatim, with the attribution appended at the commit
+    # site by the one renderer rather than by editing the string the caller supplied: carryover's
+    # commit message is a public argument, so its body may be several paragraphs and its own last
+    # paragraph may itself be ``Key: value`` lines. The cache derives the pair from this commit.
+    prepare_memory_cache(target_memory)
+    ensure_git_identity(target_memory)
+    memory_content_commit = commit_if_dirty(
+        target_memory,
+        render_memory_content_message(options.memory_commit_message, official_head),
+        exclude_paths=("memory.md",),
+    )
     return {
         **plan,
         "state": "carried-over",
@@ -849,7 +787,7 @@ def _apply_carryover_for_request(
         "route_index_refresh": route_index_refresh,
         "entity_fingerprint_validation": entity_fingerprint_validation,
         "memory_content_commit": memory_content_commit,
-        "ledger_commit": ledger_commit,
+        "ledger_cache": refresh_memory_cache(target_memory, repo_name=request.code_repository_name),
     }
 
 
@@ -930,7 +868,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except (RuntimeError, ValueError, LedgerError) as error:
+    except (RuntimeError, ValueError) as error:
         parser.error(str(error))
     return 1
 

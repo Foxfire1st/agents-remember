@@ -52,7 +52,6 @@ class MigratedLifecycleClassification:
                 "codeCommit": recovery.codeCommit if recovery is not None else "",
                 "codeTree": proof.codeTree,
                 "memoryCommitProven": bool(recovery and recovery.memoryContentCommit),
-                "ledgerCommitProven": bool(recovery and recovery.ledgerCommit),
             },
             "nextAction": "recover",
         }

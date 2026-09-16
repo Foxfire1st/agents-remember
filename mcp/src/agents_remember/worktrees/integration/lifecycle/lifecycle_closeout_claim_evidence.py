@@ -10,7 +10,6 @@ def closeout_preview_args(operation_input: CloseoutOperationInput) -> dict[str, 
     for leg, field in (
         ("code", "code_commit_message"),
         ("memory", "memory_commit_message"),
-        ("ledger", "ledger_commit_message"),
     ):
         accepted = getattr(operation_input.effectiveInput, leg)
         if accepted.state == "enabled":

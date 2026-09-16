@@ -334,9 +334,7 @@ const VOCABULARIES: Record<
     'in-flight',
   ],
   'projection.enclosures[].lifecycleOperation.kind': ['closeout', 'integrate', 'direct-landing'],
-  'projection.enclosures[].lifecycleOperation.schemaVersion': [
-    'lifecycle-operation-projection/v1',
-  ],
+  'projection.enclosures[].lifecycleOperation.schemaVersion': ['lifecycle-operation-projection/v1'],
   'projection.enclosures[].lifecycleOperation.stateMatrixVersion': [
     'lifecycle-operation-state-matrix/v1',
   ],
@@ -373,7 +371,6 @@ const VOCABULARIES: Record<
     'code-commit',
     'memory-refresh',
     'memory-commit',
-    'ledger-commit',
     'integration-replay',
     'integration-quality',
     'source-merge',
@@ -382,7 +379,6 @@ const VOCABULARIES: Record<
     'termination-required',
     'direct-preflight',
     'direct-memory-commit',
-    'direct-ledger-commit',
     'direct-terminal-publication',
     'completed',
     'failed',

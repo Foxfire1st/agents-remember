@@ -43,9 +43,10 @@ Adapt to your repo; a gated-`main` repo typically does:
 7. Agent owns the tail: **push branch → `gh pr create` (target spear) → checks green →
    `gh pr merge --delete-branch`.**
 8. The `c-09-git-worktree-manager` skill handles closeout + worktree/provider cleanup.
-9. The `c-11-memory-carryover-from-branch` skill carries parked memory to spear-memory, run against the merged spear. Carryover maps the
-   ledger to the actual spear HEAD, **including a PR merge commit** even when nothing else needs
-   carrying, so the next worktree bases off the merged spear without a manual reconciliation.
+9. The `c-11-memory-carryover-from-branch` skill carries parked memory into an ordinary recovery
+   leaf against the merged spear. Each actual memory-content commit attributes the landed code
+   HEAD. If no content needs carrying, it creates no commit. The consumer ledger is computed
+   from history and never authorizes the next worktree.
 
 ### Gates, in one line
 

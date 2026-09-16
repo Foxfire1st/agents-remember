@@ -9,10 +9,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from agents_remember.models.closeout.projection import (
-    MAX_CLOSEOUT_CANDIDATES,
-    CloseoutProjectionMember,
-)
+from agents_remember.models.closeout.projection import CloseoutProjectionMember
 from agents_remember.models.queue.closeout_queue import (
     MAX_CLOSEOUT_GRAPH_EDGES,
     MAX_CLOSEOUT_MASTERS,
@@ -24,6 +21,7 @@ from agents_remember.tasks import (
     TaskDocument,
     derived_leaf_placement,
     leaf_placement_facts,
+    master_is_terminal,
 )
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
@@ -36,7 +34,12 @@ from agents_remember.tasks.semantic_topology_graph import (
     build_semantic_topology_graph_index,
 )
 
-from .closeout_queue_errors import CloseoutQueueError, bounded_queue_failure_detail
+from .closeout_queue_errors import (
+    EDGE_CAPACITY_EXCEEDED,
+    MASTER_CAPACITY_EXCEEDED,
+    CloseoutQueueError,
+    bounded_queue_failure_detail,
+)
 from .closeout_queue_evidence import PRIORITY_RANK, GradeAuthority, planning_authorities
 
 
@@ -88,8 +91,8 @@ def graph_context(
         raise CloseoutQueueError(exc.status, exc.detail) from exc
     graph = topology_index.boundGraph
     sprint = _sprint_with_bound_graph(sprint, graph)
-    completed = {ref for ref, master in master_map.items() if master.document.status == "Completed"}
-    leaf_nodes, leaf_facts = _leaf_node_index(graph, master_map, completed)
+    resolved = {ref for ref, master in master_map.items() if master_is_terminal(master.document)}
+    leaf_nodes, leaf_facts = _leaf_node_index(graph, master_map, resolved)
     try:
         judgments, priorities = planning_authorities(sprint, strict=strict_registers)
     except CloseoutQueueError as exc:
@@ -112,7 +115,7 @@ def graph_context(
         nodes_by_master=_nodes_by_master(graph),
         leaf_nodes=leaf_nodes,
         leaf_facts=leaf_facts,
-        incomplete_predecessors=incomplete_predecessor_map(graph, completed=completed),
+        incomplete_predecessors=incomplete_predecessor_map(graph, resolved=resolved),
         grade_authority=GradeAuthority(sprint, judgments, priorities),
     )
 
@@ -155,18 +158,18 @@ def _validated_graph_documents(
         raise CloseoutQueueError(
             "task-execution-topology-migration-required",
             "sprint has no executionGraph; the sprint runs atomic-sequentially by default "
-            "(one source-pair-selected atomic master exposes implementation at a time), "
-            "or bootstrap a graph "
+            "(every commanded master executes atomically and no dependency is declared, so "
+            "nothing serializes the masters), or bootstrap a graph "
             "with task_doc.author_execution_graph",
         )
     if len(graph.nodes) > MAX_CLOSEOUT_MASTERS:
         raise CloseoutQueueError(
-            "closeout-queue-master-capacity-exceeded",
+            MASTER_CAPACITY_EXCEEDED,
             f"sprint has more than {MAX_CLOSEOUT_MASTERS} graph masters; split it before queue admission",
         )
     if len(graph.edges) > MAX_CLOSEOUT_GRAPH_EDGES:
         raise CloseoutQueueError(
-            "closeout-queue-edge-capacity-exceeded",
+            EDGE_CAPACITY_EXCEEDED,
             f"sprint has more than {MAX_CLOSEOUT_GRAPH_EDGES} dependency edges; split it before queue admission",
         )
     try:
@@ -182,14 +185,6 @@ def _validated_graph_documents(
             ),
         ) from exc
     master_map = {master.ref: master for master in masters}
-    if (
-        sum(len(master_map[ref].document.subTasks) for ref in graph.master_refs())
-        > MAX_CLOSEOUT_CANDIDATES
-    ):
-        raise CloseoutQueueError(
-            "closeout-queue-capacity-exceeded",
-            f"sprint has more than {MAX_CLOSEOUT_CANDIDATES} leaf candidates; split it before queue admission",
-        )
     return sprint, graph, master_map
 
 
@@ -235,7 +230,7 @@ def _nodes_by_master(
 def _leaf_node_index(
     graph: SprintExecutionGraph,
     masters: dict[TaskDocumentRef, ResolvedTaskDocument],
-    completed: set[TaskDocumentRef],
+    resolved: set[TaskDocumentRef],
 ) -> tuple[dict[TaskDocumentRef, SprintExecutionNode], tuple[dict[str, Any], ...]]:
     """Fold authored and derived (L11-R2) leaf placements into one leaf->node index."""
 
@@ -246,7 +241,7 @@ def _leaf_node_index(
             graph,
             master.ref,
             [row.number for row in master.document.subTasks],
-            completed,
+            resolved,
         )
         targets = {**placement.placed, **placement.derived}
         master_dir = Path(master.ref.path).parent
@@ -340,13 +335,15 @@ def master_incomplete_predecessors(
 def incomplete_predecessor_map(
     graph: SprintExecutionGraph,
     *,
-    completed: set[TaskDocumentRef],
+    resolved: set[TaskDocumentRef],
 ) -> dict[SprintExecutionNode, tuple[SprintExecutionNode, ...]]:
     """Build every node's predecessor set in one bounded O(V+E) pass.
 
-    Completion is master-granular: a node counts complete when its master document is
-    Completed. An edge into a segment therefore blocks exactly that segment's leafs
-    until the predecessor's master completes (L11-R3).
+    Resolution is master-granular: a node counts resolved when its master document reached a
+    terminal decision -- ``Completed``, or ``abandoned``. Both stop blocking dependents, which is
+    the point: an abandoned master is never going to produce its work, so leaving its dependents
+    blocked forever would make abandonment worse than doing nothing. An edge into a segment
+    therefore blocks exactly that segment's leafs until the predecessor's master resolves (L11-R3).
     """
 
     incomplete: dict[SprintExecutionNode, list[SprintExecutionNode]] = {
@@ -359,7 +356,7 @@ def incomplete_predecessor_map(
         predecessor = graph.resolve_endpoint(edge.predecessor)
         successors[predecessor].append(graph.resolve_endpoint(edge.successor))
     for predecessor in graph.nodes:
-        if predecessor.ref in completed:
+        if predecessor.ref in resolved:
             continue
         for successor in successors[predecessor]:
             incomplete[successor].append(predecessor)

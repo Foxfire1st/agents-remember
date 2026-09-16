@@ -95,7 +95,7 @@ def _validate_recovery_commits_transition(
         return
     if updated.recoveryCommits is None:
         raise RuntimeError("recorded lifecycle recovery commits cannot be cleared")
-    for field in ("codeCommit", "memoryContentCommit", "ledgerCommit"):
+    for field in ("codeCommit", "memoryContentCommit"):
         before = getattr(current_commits, field)
         after = getattr(updated.recoveryCommits, field)
         if before and after != before:
@@ -303,15 +303,6 @@ def _validate_legacy_migration_transition(
         raise RuntimeError("legacy migration proof is immutable")
 
 
-def _validate_direct_ledger_transition(
-    current: LifecycleOperationRecord,
-    updated: LifecycleOperationRecord,
-) -> None:
-    before = current.directLandingLedgerIntent
-    if before is not None and updated.directLandingLedgerIntent != before:
-        raise RuntimeError("direct landing ledger intent is immutable once published")
-
-
 def _validate_identity_and_evidence_transition(
     current: LifecycleOperationRecord,
     updated: LifecycleOperationRecord,
@@ -379,7 +370,6 @@ def _validate_identity_and_evidence_transition(
     _validate_worker_transition(current, updated)
     _validate_door_publication_transition(current, updated)
     _validate_legacy_migration_transition(current, updated)
-    _validate_direct_ledger_transition(current, updated)
     if (
         current.cancellationEvidence is not None
         and updated.cancellationEvidence != current.cancellationEvidence

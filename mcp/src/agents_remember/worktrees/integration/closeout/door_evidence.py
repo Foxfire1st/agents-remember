@@ -1,4 +1,4 @@
-"""Exact repository and ledger evidence owned by a closeout-door generation."""
+"""Exact repository and candidate evidence owned by a closeout-door generation."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from agents_remember.kernel.memory_ledger import find_mapping, load_ledger
 from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.lifecycles.door import (
     CloseoutDoorGeneration,
@@ -17,7 +16,6 @@ from agents_remember.models.lifecycles.door import (
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.worktrees.modules.git import (
     branch_commit,
-    require_git,
     worktree_candidate_tree,
 )
 from agents_remember.worktrees.queue.closeout_queue_errors import (
@@ -42,10 +40,8 @@ class DoorCandidateEvidence:
 
     candidate_tree: str
     memory_candidate_tree: str
-    ledger_memory_commit: str
     review: DoorProvenance
     memory: DoorProvenance
-    ledger: DoorProvenance
 
     def fingerprint_fact(self, contract: WorktreeContract) -> dict[str, object]:
         return {
@@ -53,21 +49,9 @@ class DoorCandidateEvidence:
             "memoryCandidateTree": self.memory_candidate_tree,
             "codeBaseCommit": contract.code_base_commit,
             "memoryBaseCommit": contract.memory_base_commit,
-            "ledgerMemoryCommit": self.ledger_memory_commit,
             "review": self.review.model_dump(mode="json"),
             "memory": self.memory.model_dump(mode="json"),
-            "ledger": self.ledger.model_dump(mode="json"),
         }
-
-
-def _bounded_ledger_error_text(value: str, *, limit: int) -> str:
-    marker = "...[truncated]..."
-    if len(value) <= limit:
-        return value
-    available = limit - len(marker)
-    head = available // 2
-    tail = available - head
-    return value[:head] + marker + value[-tail:]
 
 
 def require_source_bases_current(contract: WorktreeContract) -> None:
@@ -111,48 +95,6 @@ def require_source_bases_current(contract: WorktreeContract) -> None:
         )
 
 
-def ledger_mapping(contract: WorktreeContract) -> str | None:
-    """Return the exact source-code to source-memory ledger edge when applicable."""
-
-    if contract.memory_mode != "external":
-        return None
-    if contract.ledger_path is None:
-        raise CloseoutQueueError(
-            "closeout-door-ledger-missing",
-            "external-memory contract has no ledger path",
-        )
-    memory_repo_path = contract.memory_repo_path
-    if memory_repo_path is None or not contract.memory_base_commit:
-        raise CloseoutQueueError(
-            "closeout-door-memory-source-missing",
-            "external memory base is incomplete",
-        )
-    row = find_mapping(load_ledger(contract.ledger_path), contract.code_base_commit)
-    if row is None:
-        raise CloseoutQueueError(
-            "closeout-door-ledger-incompatible",
-            f"ledger does not map code base {contract.code_base_commit}",
-        )
-    try:
-        return require_git(
-            memory_repo_path,
-            [
-                "rev-parse",
-                "--verify",
-                "--end-of-options",
-                f"{row.memory_commit}^{{commit}}",
-            ],
-        )
-    except RuntimeError as exc:
-        identity = _bounded_ledger_error_text(repr(row.memory_commit), limit=128)
-        cause = _bounded_ledger_error_text(str(exc), limit=512)
-        raise CloseoutQueueError(
-            "closeout-door-ledger-incompatible",
-            f"ledger maps code base {contract.code_base_commit} to memory commit "
-            f"{identity}, but the exact Git commit cannot be resolved: {cause}",
-        ) from exc
-
-
 def memory_candidate_tree(contract: WorktreeContract) -> str | None:
     """Hash the exact external-memory worktree candidate, or mark it inapplicable."""
 
@@ -161,6 +103,7 @@ def memory_candidate_tree(contract: WorktreeContract) -> str | None:
     return worktree_candidate_tree(
         contract.memory_worktree,
         contract.worktree_group / "reports" / ".closeout-door-memory.index",
+        exclude_paths=("memory.md",),
     )
 
 
@@ -174,13 +117,11 @@ def capture_door_candidate_evidence(
     try:
         candidate_tree = code_candidate_tree(contract)
         memory_tree = memory_candidate_tree(contract) or ""
-        mapping = ledger_mapping(contract) or ""
         review = _review_provenance(contract, candidate, candidate_tree)
         memory = _provenance(
             curator_evidence(contract) if contract.memory_mode == "external" else [],
             applicable=contract.memory_mode == "external",
         )
-        ledger = _ledger_provenance(contract, mapping)
     except CloseoutQueueError:
         raise
     except (OSError, RuntimeError, UnicodeError, ValueError) as exc:
@@ -196,10 +137,8 @@ def capture_door_candidate_evidence(
     return DoorCandidateEvidence(
         candidate_tree=candidate_tree,
         memory_candidate_tree=memory_tree,
-        ledger_memory_commit=mapping,
         review=review,
         memory=memory,
-        ledger=ledger,
     )
 
 
@@ -219,14 +158,10 @@ def door_candidate_evidence_blockers(
         blockers.append("door-memory-candidate-stale")
     if door.memoryBaseCommit != contract.memory_base_commit:
         blockers.append("door-memory-base-stale")
-    if door.ledgerMemoryCommit != current.ledger_memory_commit:
-        blockers.append("door-ledger-mapping-stale")
     if door.reviewProvenance != current.review:
         blockers.append("door-review-provenance-stale")
     if door.memoryProvenance != current.memory:
         blockers.append("door-memory-provenance-stale")
-    if door.ledgerProvenance != current.ledger:
-        blockers.append("door-ledger-provenance-stale")
     return blockers
 
 
@@ -345,26 +280,6 @@ def _provenance(facts: list[EvidenceFact], *, applicable: bool) -> DoorProvenanc
     )
 
 
-def _ledger_provenance(contract: WorktreeContract, mapping: str) -> DoorProvenance:
-    if contract.memory_mode != "external":
-        return _provenance([], applicable=False)
-    if contract.ledger_path is None:
-        raise CloseoutQueueError(
-            "closeout-door-ledger-missing",
-            "external-memory door requires the exact ledger",
-        )
-    payload = contract.ledger_path.read_bytes()
-    fact = DoorEvidenceFact(
-        path=contract.ledger_path.resolve().as_posix(),
-        sha256=hashlib.sha256(payload).hexdigest(),
-    )
-    return DoorProvenance(
-        state="proven",
-        fingerprint=_fingerprint({"mapping": mapping, "evidence": fact.model_dump(mode="json")}),
-        evidence=[fact],
-    )
-
-
 def _fingerprint(payload: object) -> str:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -374,7 +289,6 @@ __all__ = [
     "DoorCandidateEvidence",
     "capture_door_candidate_evidence",
     "door_candidate_evidence_blockers",
-    "ledger_mapping",
     "memory_candidate_tree",
     "require_source_bases_current",
 ]

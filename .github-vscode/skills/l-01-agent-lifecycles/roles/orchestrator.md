@@ -99,8 +99,9 @@ task doc (approved)  →  branch (intent)  →  worktree (only where something i
    include_freshness=true)`.
 2. Report the packet facts before relying on memory or providers: repository/branch/dirty state;
    memory + onboarding roots; provider state; drift status and actionable count; branch freshness
-   (`behind`/`diverged` → fast-forward the local official line first;
-   `ledgerMapsCodeHead=false` → carryover or the right memory branch first).
+   (`behind`/`diverged` → fast-forward the local official line first). Reconcile actual memory
+   content or ancestry conflicts; missing cache rows or attribution for unchanged memory do not
+   block an otherwise valid code/memory pair.
 3. Drifted/missing/orphaned onboarding on committed, non-dirty source: **emit a decision item to
    the architect** before refreshing via `c-05-create-or-update-onboarding-files` — drift handling
    is approval-gated.
@@ -261,9 +262,10 @@ the design: run the bulwark check against the portfolio and the past before disp
   one previewed `task_doc.attach_master` call (row + membership + nature assertion, plus a graph
   node only when a graph already exists, in a single atomic batch that refuses partial attaches;
   `detach_master` is its symmetric inverse and never deletes files). A sprint without an
-  `executionGraph` runs the source-pair-selected atomic-sequential default: canonical commanded
-  order is the stable tie-break, while selecting another master may logically pause the former
-  without retiring its durable work or inventing a dependency. If the ruled topology instead
+  `executionGraph` runs the graph-less atomic-sequential default: canonical commanded order is the
+  stable tie-break, and nothing serializes its masters — a graph-less sprint declares no
+  dependencies, so independent masters proceed concurrently, no master is held because another is
+  selected, and none is retired. If the ruled topology instead
   adopts an explicit graph from that state, attach every
   commanded master first, then use one complete `task_doc.author_execution_graph` batch containing
   every node and evidence-backed edge; edit the graph incrementally only after that bootstrap
@@ -318,10 +320,10 @@ tombstone, replan, or drain an old projection row.
 Dispatch independent ready organizational masters and their build work in parallel up to
 `orchestration.concurrency.maxParallelMasters`. An atomic master waits for its explicit graph
 predecessors, when any. Before its manager or worker receives implementation exposure, the
-control plane selects its exact code/memory source pair as `reconciling`, logically pausing the
-former selected master, source-syncs it, and publishes `active`. This never suspends a chat,
-process, worktree, contract, or already-claimed lifecycle journal; selecting another atomic master
-may later pause and preserve this one. Reviewer and curator inspection does not switch selection.
+control plane publishes that contract's own activation as `reconciling`, source-syncs it, and
+publishes `active`. The record is per contract, so selecting another atomic master neither pauses
+nor preserves this one, and this never suspends a chat, process, worktree, contract, or
+already-claimed lifecycle journal. Reviewer and curator inspection does not switch selection.
 For each admitted master, run the
 three-state hosted-role dispatch for `dispatch_agent` on the canonical master document with role
 `manager`, compiling its complete brief from `../templates/manager-brief.md`; the manager occupies
@@ -341,12 +343,13 @@ silently re-run a governed review, reset its baseline, or create a new finding l
   review counts the next round. This spawned backend seat does not run flat hat-collapse (see
 the Hat-Collapse Rule).
 
-Source-pair activation serializes new atomic implementation exposure; the landing lane separately
-serializes conflicting protected-ref movement. Neither authority can
+Per-contract activation records each master's own `reconciling -> active` transition and
+serializes nothing across masters; the landing lane separately serializes conflicting
+protected-ref movement. Neither authority can
 veto task creation, replacement, progress/checkmarks, requirements/decisions/sections, route review,
 graph/linkage, attach/detach/reparent/removal, or sprint completion. Process those writes normally,
-then consume their per-scope projection effects. Queue rows only project active/reconciling/paused
-waiting facts. A present-unreadable activation or landing owner fails closed at that exact
+then consume their per-scope projection effects. Queue rows only project each contract's own
+active/reconciling waiting facts. A present-unreadable activation or landing owner fails closed at that exact
 projection/admission or conflicting landing boundary, not for planning elsewhere.
 
 **Delegated series authority:** after the developer accepts the orchestration plan, this seat owns
@@ -354,7 +357,7 @@ subordinate execution without repeated developer formality. Managers may close o
 their leaves; this seat may decide manager handovers, close out direct work when it wears the
 manager/worker hat, finalize/cleanup subordinate edges, release organizational leaf candidates,
 and land completed atomic masters under the accepted-series authority. Preview the exact
-code/memory/ledger legs and record the authority source in the intent note or decision log;
+code/memory legs and record the authority source in the intent note or decision log;
 worker targeted and curator scoped check results travel with the edge, while closeout does not
 launch automatic quality or test suites. Do not stop merely because the next operation creates a
 commit, advances a lifecycle, cleans up a spent worktree, or fast-forwards a subordinate branch.
@@ -394,7 +397,7 @@ handover you cannot honestly decide escalates to the architect as a decision ite
 
 1. Consume the manager's readiness or handover packet: execution nature, canonical refs,
    waiting door generation, change-set summary, worker targeted-check report, curator scoped
-   onboarding/check report, optional requested verdict, lineage, ledger state, blockers, risks, and
+   onboarding/check report, optional requested verdict, lineage, accepted Git pair, blockers, risks, and
    dependent nodes.
 2. Recompute the graph frontier and current valid-built closeout projection, then release only its
    exact first-ready generation. A manager publishes door facts; it never selects against another
@@ -402,19 +405,20 @@ handover you cannot honestly decide escalates to the architect as a decision ite
    attempt/worker/commit/recovery evidence belongs to the operation journal even if the projection
    is later invalidated or absent.
 3. **Organizational:** release one prepared leaf transaction against the current super source and
-   land its code/memory/ledger legs directly. No full acceptance is launched at the final leaf. No
+   land its code/memory legs directly. No full acceptance is launched at the final leaf. No
    master branch is merged because none exists.
-4. **Atomic:** require the master to be the active source-pair selection while its manager exposes
-   implementation, integrate every prepared leaf into the isolated atomic branch, then acquire the
-   narrow landing authority and land that one code/memory/ledger block on super. Full quality or
-   memory suites run only when the developer explicitly requests them.
-   Expose no intermediate atomic leaf to super; a paused master retains its branch and journals.
+4. **Atomic:** require the master's own contract activation to be `active` while its manager
+   exposes implementation, integrate every prepared leaf into the isolated atomic branch, then
+   acquire the narrow landing authority and land that one code/memory block on super. Full
+   quality or memory suites run only when the developer explicitly requests them.
+   Expose no intermediate atomic leaf to super; an unfinished master retains its branch and
+   journals.
 5. Map the external-memory edge with the code edge. Prefer an ancestry-preserving fast-forward, and
    reserve `replay` for the case where carryover is genuinely the only choice; carry-over is an
    explicit recovery for unavoidable divergence, not a routine consequence of parallel
    organizational work. A candidate that no longer sits on the current source produces a new
    targeted closeout after the moved source is propagated downstream into its worktrees.
-6. Record the new super tips in their owning Git/ledger/operation evidence, publish any resulting
+6. Record the new super tips in their owning Git/operation evidence, publish any resulting
    task or door disposition change, rebuild affected projections, release or retain the exact
    landing blocker, and recompute. Do not retain a terminal or certified queue row for audit.
 7. **Close completed subordinate seats; retain the manager owner** —
@@ -432,8 +436,8 @@ handover you cannot honestly decide escalates to the architect as a decision ite
    Setting `retirement.autoCloseCompletedSeats=false` restores landed/archive behavior for the
    three automatic leaf-altitude roles; it never makes manager/orchestrator automatic targets.
 
-**Transaction boundary.** Closeout and integration publish only the explicitly authorized Git code,
-prepared memory, and ledger commits/merges, with source/destination refs, conflict checks, and
+**Transaction boundary.** Closeout and integration publish only the explicitly authorized Git code
+and prepared memory commits/merges, with source/destination refs, conflict checks, and
 recovery evidence. They do not automatically run code-quality checks, full test suites,
 memory-quality suites, curator certification, or independent review. Full code quality, full tests,
 and full memory quality run only after an explicit developer request. Worker targeted checks and
@@ -448,7 +452,7 @@ main
         ├── organizational master A (logical owner only)
         │     ├── leaf A1 (off current super) ──→ super
         │     └── leaf A2 (off refreshed super) ── prepared transaction ─→ super
-        ├── atomic master B branch (off current super; source-pair-selected; one landing)
+        ├── atomic master B branch (off current super; selected; one landing)
         │     ├── leaf B1 ─→ B
         │     └── leaf B2 ─→ B ── prepared transaction ─→ super
         └── … final: super → main PR (remote merge) + memory carry-over to main + push
@@ -458,9 +462,10 @@ Strict stack: super off main. An organizational master is a task/manager boundar
 its leaves branch from the current super. Only an atomic master owns an intermediate integration
 branch, and its leaves branch from that block. Every later candidate refreshes from the moved super
 before closeout so code and memory remain ancestry-compatible. The final super → main landing
-follows `system/git-workflow.md`: PR to gated main, remote merge, memory carry-over so the ledger
-maps the actual merge commit, then push — **push only after the architect returns the developer's
-approval**.
+follows `system/git-workflow.md`: PR to gated main, remote merge, any needed onboarding carryover,
+then push — **push only after the architect returns the developer's approval**. Unchanged memory
+keeps its actual commit; do not create a mapping-only commit for the merge SHA. The ignored ledger
+cache derives from memory commit trailers and never grants or blocks landing authority.
 
 **Conflict resolution — integration branches are not workbenches.** *Up-front (preferred):* an
 overlap found during planning becomes a cited predecessor edge or an atomic foundation master
