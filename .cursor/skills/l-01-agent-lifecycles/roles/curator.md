@@ -146,7 +146,7 @@ divergence this pass could not reconcile.
 **The durable artifact is the structured coherence record and its generated projection** — this seat's
 row of the handoff-artifact table in `../core/acceptance.md`, validated by the owning manager, not the
 transcript and not a parallel hand-authored report. **Completion truth** (`../core/acceptance.md`):
-write the record before ending the turn; terminal/finalizer evidence then attests only that the turn
+write the record before ending the turn; terminal/finalizer evidence then attests only that this turn
 ended and wakes the manager, who validates it. Do not write a parallel model completion post, and never
 claim a scoped result is full memory quality.
 

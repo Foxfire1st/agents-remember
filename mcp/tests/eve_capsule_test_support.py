@@ -59,7 +59,11 @@ SOURCE_BRANCH = "ar/sprint"
 
 #: The frozen vocabularies, spelled here rather than imported: a fixture that imported what the
 #: compiler enforces could not disagree with it, and the compiler's refusal on a partial manifest is
-#: itself a behaviour worth keeping honest.
+#: itself a behaviour worth keeping honest. "Spelled rather than imported" only holds while the
+#: spelling is CURRENT: ``bootstrap`` is the tenth role and the ninth operation (260915-CAPS-L13),
+#: and a fixture that stops at nine no longer disagrees with the compiler -- it fails it, which is
+#: what these sixteen cases did until this fixture caught up. The sibling fixture in
+#: ``test_capsule_serving.py`` carries the same four entries; they must move together.
 ALL_ROLES = (
     "architect",
     "orchestrator",
@@ -70,6 +74,7 @@ ALL_ROLES = (
     "curator",
     "reviewer",
     "system-specialist",
+    "bootstrap",
 )
 ALL_OPERATIONS = (
     "orientation",
@@ -80,6 +85,7 @@ ALL_OPERATIONS = (
     "coordination",
     "authorized-closeout",
     "recovery",
+    "bootstrap",
 )
 ROLE_ALTITUDES = {
     "architect": "sprint",
@@ -91,6 +97,7 @@ ROLE_ALTITUDES = {
     "curator": "leaf",
     "reviewer": "leaf",
     "system-specialist": "leaf",
+    "bootstrap": "free-agent",
 }
 OPERATIONS_BY_ROLE = {
     "architect": ("orientation", "planning", "coordination", "review", "recovery"),
@@ -116,6 +123,7 @@ OPERATIONS_BY_ROLE = {
     "curator": ("orientation", "curation", "recovery"),
     "reviewer": ("orientation", "review"),
     "system-specialist": ("orientation", "recovery"),
+    "bootstrap": ("orientation", "bootstrap", "recovery"),
 }
 CORE_BLOCKS = ("authority", "invariants")
 

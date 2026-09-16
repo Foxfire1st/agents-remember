@@ -2,9 +2,11 @@
 
 One immutable SQLite index represents one exact code-tree content snapshot. The snapshot
 identity hashes every indexed relative path and file body, including dirty, added, deleted,
-and renamed files. Default acquisition is Git-independent; explicit candidate acquisition
-selects one exact Git tree and verifies its working bytes. Independent CLI processes share
-the published index through a deterministic bounded cache outside both worktrees.
+and renamed files. Default acquisition enumerates the code root's **Git-reported population**
+(tracked, plus untracked-but-not-ignored; a gitignored scratch tree is not the candidate) and
+falls back to a plain walk when the root is not a work tree; explicit candidate acquisition selects one exact Git tree and
+verifies its working bytes. Independent CLI processes share the published index through a
+deterministic bounded cache outside both worktrees.
 
 Default warm acquisition enumerates and stats the indexed files and directories. A changed
 file stat re-hashes only that file: unchanged content refreshes the metadata manifest
@@ -23,15 +25,21 @@ import hashlib
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import TracebackType
 from typing import BinaryIO
 from uuid import uuid4
 
 from agents_remember.kernel.atomic_write import atomic_replace, atomic_write_text
+from agents_remember.kernel.git_command import (
+    GIT_METADATA_TIMEOUT_SECONDS,
+    GitRunnerOptions,
+    run_git,
+)
 from agents_remember.memory_quality.style.citations import (
     extents,
     model,
@@ -707,6 +715,98 @@ def _publish_generation(
     atomic_write_text(paths.readiness, readiness_json)
 
 
+def _git_candidate_paths(root: Path) -> frozenset[str] | None:
+    """The paths Git reports as ``root``'s own, or ``None`` when ``root`` is not a work tree.
+
+    D18: default acquisition used to index every file its skip lists did not name, so a
+    machine-local, gitignored scratch tree (this experiment's ``eve_runtime/.eve`` dev hosts) counted
+    against the index's per-file and aggregate caps and made the mandatory memory-quality checks
+    *error* on a checkout whose tracked content is inside both. The population is therefore asked of
+    Git -- ``ls-files --cached --others --exclude-standard``: everything Git reports as this work
+    tree's own, which is the tracked population plus untracked-but-not-ignored paths -- instead of
+    being every file the skip lists happen not to name. It is deliberately **not** "tracked only":
+    the walk exists to hash dirty, added, deleted, and renamed working-tree bytes (see the module
+    docstring), and a curator cites code a leaf has written but not yet committed, which is the state
+    every citation-repair fixture in this suite builds. ``--exclude-standard`` is what removes the
+    ignored scratch tree, and it is the only thing removed here that the old walk kept.
+
+    Git-*assisted*, not Git-required: a root outside a work tree, a machine without ``git``, or a
+    refused or timed-out command returns ``None`` and the caller keeps the documented walk, because
+    the index must still work on a plain directory. ``git ls-files`` is run from ``root`` so the
+    paths it prints are the same root-relative spellings the walk produces.
+    """
+
+    try:
+        completed = run_git(
+            root,
+            ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return frozenset(entry for entry in completed.stdout.split("\0") if entry)
+
+
+def _candidate_directories(candidates: frozenset[str] | None) -> frozenset[str]:
+    """Every directory on a candidate's path, plus the root, spelled as the walk spells them.
+
+    A directory with no candidate beneath it belongs to no candidate, and pruning it keeps an ignored
+    build tree's churning directory identities out of the snapshot as well as out of the caps.
+    """
+
+    if candidates is None:
+        return frozenset()
+    directories = {"."}
+    for candidate in candidates:
+        parent = PurePosixPath(candidate).parent
+        while parent.as_posix() not in {"", "."}:
+            directories.add(parent.as_posix())
+            parent = parent.parent
+    return frozenset(directories)
+
+
+def _indexed_file(
+    path: Path,
+    root: Path,
+    candidates: frozenset[str] | None,
+) -> SourceFile | None:
+    """One walked file as an indexed source, or ``None`` when it is not part of the candidate."""
+
+    if (
+        path.name in {".git", ".hg", ".svn"}
+        or path.suffix.lower() in SKIPPED_SUFFIXES
+        or not path.is_file()
+    ):
+        return None
+    relative = path.relative_to(root).as_posix()
+    if candidates is not None and relative not in candidates:
+        return None
+    return SourceFile(path, Identity.read(path, relative))
+
+
+def _walkable_directory(
+    directory: Path,
+    root: Path,
+    memory: Path,
+    candidates: frozenset[str] | None,
+    candidate_directories: frozenset[str],
+) -> bool:
+    """Whether the walk descends into ``directory``: not the memory root, and part of the candidate.
+
+    D18: a directory with no candidate beneath it is not part of the candidate, and pruning it here
+    also keeps an ignored build tree's churning directory identities out of the snapshot, so a
+    machine-local scratch tree can neither refuse the caps nor invalidate a published generation.
+    """
+
+    if _under(directory, memory):
+        return False
+    if candidates is None:
+        return True
+    return directory.relative_to(root).as_posix() in candidate_directories
+
+
 def _tree_state(trees: Trees, metrics: IndexMetrics | None = None) -> TreeState:
     root = trees.code_root.resolve()
     memory = trees.memory_root.resolve()
@@ -722,9 +822,15 @@ def _tree_state(trees: Trees, metrics: IndexMetrics | None = None) -> TreeState:
     files: list[SourceFile] = []
     if metrics is not None:
         metrics.metadata_tree_enumerations += 1
+    candidates = _git_candidate_paths(root)
+    candidate_directories = _candidate_directories(candidates)
     for current, raw_dirs, raw_files in os.walk(root, followlinks=False):
         directory = Path(current)
-        if _under(directory, memory):
+        if not _walkable_directory(directory, root, memory, candidates, candidate_directories):
+            # D18: a gitignored scratch tree is not part of the candidate, and walking into it makes
+            # the mandatory memory-quality check refuse a tree whose own content is inside every cap.
+            # Pruning here also keeps its directory identities out of the snapshot, so a build tree
+            # that churns cannot invalidate a published generation.
             raw_dirs[:] = []
             continue
         relative_dir = directory.relative_to(root).as_posix()
@@ -738,15 +844,10 @@ def _tree_state(trees: Trees, metrics: IndexMetrics | None = None) -> TreeState:
             if name not in SKIPPED_DIRECTORIES and not _under(directory / name, memory)
         ]
         for name in sorted(raw_files):
-            path = directory / name
-            if (
-                name in {".git", ".hg", ".svn"}
-                or path.suffix.lower() in SKIPPED_SUFFIXES
-                or not path.is_file()
-            ):
+            one = _indexed_file(directory / name, root, candidates)
+            if one is None:
                 continue
-            relative = path.relative_to(root).as_posix()
-            files.append(SourceFile(path, Identity.read(path, relative)))
+            files.append(one)
             if metrics is not None:
                 metrics.metadata_files_stat += 1
     return TreeState(

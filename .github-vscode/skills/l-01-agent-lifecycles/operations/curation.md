@@ -116,5 +116,5 @@ The curator's exit returns to the owning manager: the changed onboarding paths, 
 reconciliation, the exact scoped commands and results, and any failed, blocked, or not-run checks.
 The structured coherence record and its generated projection are the durable output — not the
 transcript and not a parallel hand-authored report. Write the record before ending the turn;
-terminal/finalizer evidence then attests only that the turn ended and wakes the manager, who
+terminal/finalizer evidence then attests only that this turn ended and wakes the manager, who
 validates it. Do not hand-write a curator certification or write a parallel model completion post.

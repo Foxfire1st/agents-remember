@@ -23,6 +23,7 @@ unit-regression = [
   "mcp/tests/test_cgc_watch_guard.py",
   "mcp/tests/test_checkout_coordination_isolation.py",
   "mcp/tests/test_checkpoint_landing.py",
+  "mcp/tests/test_citation_source_index_membership.py",
   "mcp/tests/test_cli_discovery.py",
   "mcp/tests/test_closeout_certification_recovery.py",
   "mcp/tests/test_closeout_kept_rules_pins.py",

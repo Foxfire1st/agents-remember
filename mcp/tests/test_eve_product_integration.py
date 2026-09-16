@@ -100,7 +100,12 @@ from agents_remember.serving.terminal_opener import (
     TerminalLaunchRequest,
     resolve_terminal_launch,
 )
-from eve_adapter_test_support import FakeEveRuntime, FakeRuntimeFactory, FakeTurn
+from eve_adapter_test_support import (
+    FakeEveRuntime,
+    FakeRuntimeFactory,
+    FakeTurn,
+    require_installed_eve_application,
+)
 from test_conversation_active_service import _projector as engine_projector
 from test_conversation_active_service import _ScriptedBridge
 from test_eve_adapter import _launch as _eve_launch
@@ -564,6 +569,9 @@ class _StartedEve:
 
 
 async def _start_eve(launch: LaunchSpec | None = None) -> _StartedEve:
+    # The transport is a double, but ``start`` is the real launch path and it stages the
+    # application; without the machine-local install there is nothing to stage (D19).
+    require_installed_eve_application()
     adapter = EveSessionAdapter(
         runtime_factory=FakeRuntimeFactory(FakeEveRuntime()),
         clock=lambda: NOW,
@@ -1285,6 +1293,7 @@ class EveAdapterToProjectionIntegrationTests(unittest.IsolatedAsyncioTestCase):
     """
 
     async def _evidence_frames(self, runtime: FakeEveRuntime) -> tuple[EvidenceFrame, ...]:
+        require_installed_eve_application()
         adapter = EveSessionAdapter(runtime_factory=FakeRuntimeFactory(runtime), clock=lambda: NOW)
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)
         await bridge.start(_eve_launch())
@@ -1567,6 +1576,7 @@ class EveInteractionProjectionTests(unittest.IsolatedAsyncioTestCase):
     ) -> tuple[tuple[ConversationItem, ...], AdapterSnapshot]:
         """Emit one native event, then return the projected items and the adapter's own snapshot."""
 
+        require_installed_eve_application()
         runtime = FakeEveRuntime()
         adapter = EveSessionAdapter(runtime_factory=FakeRuntimeFactory(runtime), clock=lambda: NOW)
         bridge = HarnessControlBridge(_identity(), adapter, clock=lambda: NOW)

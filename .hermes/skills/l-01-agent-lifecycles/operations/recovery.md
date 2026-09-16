@@ -69,3 +69,6 @@ resumed operation generation, the reopened-and-reshaped leaf, or the reported de
 recovery leaves the same durable trail as the operation it restores — a task/door disposition, an
 operation-journal generation, or the seat's own artifact — so a successor can reconstruct the state
 without a transcript.
+
+**Completion truth** (`../core/acceptance.md`): terminal/finalizer truth attests only that this turn
+ended; the owner the recovery exits into opens and validates the artifact itself.

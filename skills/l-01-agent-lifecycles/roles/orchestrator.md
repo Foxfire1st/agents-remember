@@ -103,8 +103,8 @@ The frame's phase axis stays the observable `lifecycle_phase` vocabulary (`refra
 or the architect dispatches "orchestrate these" (`../operations/planning.md`).
 
 - **Route-coherence scan and bulwark.** Scan the set (route indexes · onboarding · grepai · cgc) in this seat's
-  own loop or via a dispatched system-specialist, writing a durable report (`../templates/impact-analysis.md`);
-  the baseline review then runs the complete planned-vs-planned and planned-vs-past sweep, which a
+  own loop or via a dispatched system-specialist, writing a durable report (`../templates/impact-analysis.md`).
+  The baseline review then runs the complete planned-vs-planned and planned-vs-past sweep, which a
   `reviewMode=fix-verification` successor reuses — inspecting only the outstanding IDs and their fixes, never
   repeating the sweep or promoting an outside-list observation into a finding.
 - **Reshape.** Foundation-master extraction; leaf **moves** for planning-status leaves (real moves, never

@@ -22,6 +22,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pytest
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
 from agents_remember.serving.eve_protocol import EveStreamEvent, parse_event_frame
 from eve_capsule_test_support import (
@@ -30,6 +31,33 @@ from eve_capsule_test_support import (
     fixture_carrier_for,
     repository_with_commit,
 )
+
+EVE_APPLICATION_ROOT = Path(__file__).resolve().parents[2] / "eve_runtime"
+"""The AR-owned eve application the runtime launches from. Its ``node_modules`` is not committed."""
+
+EVE_INSTALL_COMMAND = "cd eve_runtime && PATH=<node 24 bin>:$PATH npm install --no-audit --no-fund"
+"""The one-command install ``eve_runtime/README.md`` documents for one checkout."""
+
+
+def require_installed_eve_application() -> None:
+    """Skip, by name, when the machine-local eve dependency install is absent.
+
+    A case that starts the real runtime stages a per-epoch application directory whose
+    ``node_modules`` is a link to ``eve_runtime/node_modules``; without that install the launch
+    refuses by design, so such a case is not failing -- it cannot run on this machine. The skip
+    names what is missing and the exact command that fixes it, because a silent skip would let a
+    fresh checkout claim coverage it never ran, and a bare failure would read as a product defect
+    instead of a missing machine-local install. Nothing here installs the runtime: a suite whose
+    verdict depends on which machine ran it is the defect this guard exists to remove.
+    """
+
+    if (EVE_APPLICATION_ROOT / "node_modules").is_dir():
+        return
+    pytest.skip(
+        "the eve runtime application's dependencies are not installed in this checkout: "
+        f"{EVE_APPLICATION_ROOT}/node_modules is missing, and this case starts the real runtime. "
+        f"Install them once per checkout with: {EVE_INSTALL_COMMAND} (eve_runtime/README.md)."
+    )
 
 
 @dataclass(frozen=True)
@@ -62,6 +90,8 @@ class FakeEveSession:
     input_responses: list[Mapping[str, object]] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
     message_ids: list[str] = field(default_factory=list)
+    compactions: list[str] = field(default_factory=list)
+    """Every summary this session was compacted into, in order (see ``compact_session``)."""
 
     def emit(
         self,
@@ -103,6 +133,14 @@ class FakeEveRuntime:
         self.cancel_error: HarnessControlError | None = None
         self.cancel_status = "accepted"
         self.stream_refusals = 0
+        #: The two session controls ``eve_runtime_client.EveRuntimeTransport`` declares. They are
+        #: recorded here because a fake that silently accepts a control the adapter never calls is
+        #: how this fake fell out of the protocol in the first place (D19): a member the fake does
+        #: not implement cannot be observed, so only a case that exercises it keeps it honest.
+        self.compacted: list[str] = []
+        self.cleared: list[str] = []
+        self.compact_error: Exception | None = None
+        self.clear_error: Exception | None = None
         self._session_counter = 0
         self._delivery_counter = 0
 
@@ -162,6 +200,38 @@ class FakeEveRuntime:
         if self.cancel_status != "accepted":
             return {"ok": True, "status": self.cancel_status}
         return {"ok": True, "sessionId": session_id, "status": "accepted"}
+
+    # -- session controls (the two protocol members no adapter case calls directly) ---------
+
+    async def compact_session(self, session_id: str) -> Mapping[str, object]:
+        """Summarize this session's model-message history in place, as the compact route does.
+
+        The durable session keeps its identity, and the recorded summary is what a case can observe:
+        compaction represents the history rather than dropping it, which is exactly the difference
+        between this control and ``clear_session``.
+        """
+
+        session = self._require_session(session_id)
+        if self.compact_error is not None:
+            raise self.compact_error
+        self.compacted.append(session_id)
+        summary = f"summary-of-{len(session.messages)}-messages"
+        session.compactions.append(summary)
+        session.emit("session.compacted", {"summary": summary, "messages": len(session.messages)})
+        return {"ok": True, "sessionId": session_id, "summary": summary}
+
+    async def clear_session(self, session_id: str) -> Mapping[str, object]:
+        """Drop this session's model-message history in place, keeping its identity."""
+
+        session = self._require_session(session_id)
+        if self.clear_error is not None:
+            raise self.clear_error
+        self.cleared.append(session_id)
+        removed = len(session.messages)
+        session.messages.clear()
+        session.message_ids.clear()
+        session.emit("session.cleared", {"removed": removed})
+        return {"ok": True, "sessionId": session_id, "removed": removed}
 
     async def stream(self, session_id: str, *, start_index: int) -> AsyncIterator[EveStreamEvent]:
         """Read the durable record from ``start_index`` up to the tail this read pinned.

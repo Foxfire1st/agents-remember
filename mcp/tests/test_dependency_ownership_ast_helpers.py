@@ -42,9 +42,9 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 4
-LIFECYCLE_ARTIFACT_COUNT = 45
-LIFECYCLE_CATALOG_SHA256 = "293a187fa91d2ac83909d3ff7517c674b428b29ef777d8e2f7479d7fd86bc771"
-"""``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately once.
+LIFECYCLE_ARTIFACT_COUNT = 51
+LIFECYCLE_CATALOG_SHA256 = "812211e9f93fc3a75c2759126e7605a5998f79d745cd491aeee63348c11c9d6e"
+"""``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately twice.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
 ``a9d83c375d1bfdcae7d0c46020eba41fbaf305a306fe89bb1b9b479b861c2002``. ``LOCR-R26@v1``'s
@@ -53,6 +53,22 @@ artifacts that ANOTHER leaf introduced, and the two ``LOCR-L04`` handoff support
 registered, closing the inventory. This value is the post-registration catalog. The proof's own
 artifact delta remains exactly empty, so the freeze still forbids the proof adding or widening
 anything, and any further catalog change must re-pin this digest deliberately.
+
+**Second deliberate re-pin (260915-CAPS-L16, 2026-09-16).** The first re-pin left the pin behind
+the file: at the source-line convergence merge ``23cc7a72`` the catalog was already
+``bb567a25f30b9e3bdbd48a9dd1d2641a6a240763f545ddeca1a4b7932e98cb15`` over **4 contracts / 50
+artifacts** while this pin still read ``293a187f…`` / 45, because the merge carried the landed
+260831-LOCR line's governed artifacts in without a re-pin, and ``260915-CAPS-L13`` then moved the
+file again (``9ea1d207…``, 4/50). That stale pin was the single pre-existing integration failure
+(D10) inherited by every candidate cut from the master tip, and it is nobody's finding.
+
+The value below is re-derived at ``8997e184`` -- the tip this leaf lands -- where the catalog is
+``812211e9…`` over **4 contracts / 51 artifacts**: ``260915-CAPS-L7``'s landing added the
+fifty-first governed artifact row. The population moved 45 -> 50 (the merged LOCR line) -> 51
+(L7), and each of those states was measured rather than assumed. It is pinned here because a leaf
+that changes the catalog last must pin the value at its own tip; a value correct for someone
+else's base re-reds the moment this one lands. The proof's own artifact delta is still exactly
+empty: this leaf registered nothing and added no consumer.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"

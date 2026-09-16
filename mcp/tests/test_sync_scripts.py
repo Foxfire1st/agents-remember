@@ -110,9 +110,18 @@ class BoundaryClause:
 # `mcp/tests/test_lifecycle_turn_truth_doctrine.py`; this table exists so the projection's REACH is a
 # checked subject, and it quotes that module's shipped wording rather than paraphrasing it into a
 # second vocabulary that could drift from the first.
+#
+# Re-pointed at the consolidated corpus, because the subject is where a clause now ships, not where
+# it used to: the boundary's whole set moved with its one home from the retired `SKILL.md` section to
+# `core/acceptance.md`, and the manager clause is quoted at the words the file carries today. Both
+# rows are the same clauses they always were; a row whose surface or marker stops matching the
+# canonical tree and its nine copies still fails, which is what `test_a_clause_missing_from_one_...`
+# pins by deleting one clause from one copy.
 PROJECTED_BOUNDARY_CLAUSES: tuple[BoundaryClause, ...] = (
-    BoundaryClause("SKILL.md", "Terminal truth is mechanical; acceptance is the owner's."),
-    BoundaryClause("roles/manager.md", "it never opens or evaluates the artifact"),
+    BoundaryClause(
+        "core/acceptance.md", "Terminal truth is mechanical; acceptance is the owner's."
+    ),
+    BoundaryClause("roles/manager.md", "never opens or evaluates the artifact"),
     BoundaryClause("roles/worker.md", "terminal/finalizer truth attests only that this turn ended"),
     BoundaryClause("roles/worker.md", "Never author a second model-authored completion post"),
     BoundaryClause("templates/turn-report.md", "The relay never inspects it"),

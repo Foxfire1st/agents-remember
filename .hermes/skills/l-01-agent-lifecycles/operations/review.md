@@ -115,6 +115,6 @@ non-code digest + anchors); the worker attempt records; and the resolved `system
 
 ## Handoff / exit
 
-The verdict artifact is the durable handoff. Terminal/finalizer truth then attests only that the
-reviewer's turn ended and wakes the decider, who validates the verdict independently. The reviewer
+The verdict artifact is the durable handoff. Terminal/finalizer truth then attests only that this
+turn ended and wakes the decider, who validates the verdict independently. The reviewer
 does not author a second completion row and does not carry the decider's runtime identity.

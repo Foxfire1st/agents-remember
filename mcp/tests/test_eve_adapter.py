@@ -42,6 +42,7 @@ from agents_remember.serving.eve_adapter import (
     EveAdapterLimits,
     EveSessionAdapter,
 )
+from agents_remember.serving.eve_runtime_client import EveRuntimeTransport
 from agents_remember.serving.eve_runtime_launch import (
     EFFORT_ENV,
     MODEL_ENV,
@@ -61,6 +62,7 @@ from eve_adapter_test_support import (
     FakeTurn,
     fixture_launch_binding,
     raw_payload,
+    require_installed_eve_application,
 )
 
 REQUIRED_CAPABILITY_COUNT = 7
@@ -255,6 +257,9 @@ async def _started(
     runtime: FakeEveRuntime | None = None,
     launch: LaunchSpec | None = None,
 ) -> _Harness:
+    # The transport below is a double, but ``start`` is the real launch path and it stages the
+    # application; without the machine-local install there is nothing to stage (D19).
+    require_installed_eve_application()
     resolved_runtime = runtime or FakeEveRuntime()
     factory = FakeRuntimeFactory(resolved_runtime)
     adapter = EveSessionAdapter(runtime_factory=factory, limits=limits, clock=_clock)
@@ -294,6 +299,7 @@ class EveAdapterHandshakeTests(unittest.IsolatedAsyncioTestCase):
             await harness.aclose()
 
     async def test_start_refuses_when_the_runtime_never_becomes_healthy(self) -> None:
+        require_installed_eve_application()
         runtime = FakeEveRuntime()
         runtime.health_error = HarnessControlError("eve health route did not report ready")
         adapter = EveSessionAdapter(
@@ -306,6 +312,7 @@ class EveAdapterHandshakeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.stop_modes, ["forced"])
 
     async def test_start_refuses_a_runtime_whose_selection_differs_from_the_launch(self) -> None:
+        require_installed_eve_application()
         runtime = FakeEveRuntime()
         selection = launch_spec_selection(_launch(model="fixture-deterministic-1"))
         adapter = EveSessionAdapter(
@@ -318,6 +325,7 @@ class EveAdapterHandshakeTests(unittest.IsolatedAsyncioTestCase):
             await adapter.start(_launch(model="some-other-model"))
 
     async def test_discover_is_token_free_and_does_not_keep_the_runtime(self) -> None:
+        require_installed_eve_application()
         runtime = FakeEveRuntime()
         factory = FakeRuntimeFactory(runtime)
         adapter = EveSessionAdapter(runtime_factory=factory, clock=_clock)
@@ -1129,6 +1137,59 @@ class EveAdapterIsolationTests(unittest.IsolatedAsyncioTestCase):
 
 
 LIVE_EVIDENCE_ENTRY_POINT = Path(__file__).parent / "live_eve_native_fixture.py"
+
+
+class EveRuntimeTransportFakeContractTests(unittest.IsolatedAsyncioTestCase):
+    """D19: the deterministic double implements the whole transport protocol it stands in for.
+
+    ``EveRuntimeTransport`` gained ``compact_session`` and ``clear_session`` when eve's own
+    session-control routes landed; the double in ``eve_adapter_test_support`` did not, so every case
+    that hands it to ``EveSessionAdapter`` as its ``runtime_factory`` was a type error waiting for a
+    reader -- pyright reported seven of them and nothing else did, because no case called either
+    member. The typed assignment below is the static half of the pin, re-checked by the whole-tree
+    pyright gate; the behavioural cases are the half a type checker cannot see, because a member
+    that exists and does nothing is a double that lies about the runtime it replaces.
+    """
+
+    def test_the_double_is_a_transport_the_adapter_can_be_handed(self) -> None:
+        transport: EveRuntimeTransport = FakeEveRuntime()
+        self.assertEqual(transport.endpoint, "http://127.0.0.1:4757")
+        for member in ("compact_session", "clear_session"):
+            with self.subTest(member=member):
+                self.assertTrue(callable(getattr(transport, member)))
+
+    async def test_compaction_represents_the_history_in_place_and_clear_removes_it(self) -> None:
+        runtime = FakeEveRuntime()
+        session_id, _delivery = await runtime.create_session("first question")
+        session = runtime.sessions[session_id]
+        self.assertEqual(session.messages, ["first question"])
+
+        compacted = await runtime.compact_session(session_id)
+        self.assertEqual(runtime.compacted, [session_id])
+        self.assertEqual(session.compactions, ["summary-of-1-messages"])
+        self.assertEqual(compacted["summary"], "summary-of-1-messages")
+        self.assertEqual(compacted["sessionId"], session_id)
+        self.assertEqual(session.messages, ["first question"], "compaction represents, never drops")
+        self.assertEqual(session.events[-1]["type"], "session.compacted")
+
+        cleared = await runtime.clear_session(session_id)
+        self.assertEqual(runtime.cleared, [session_id])
+        self.assertEqual(cleared["removed"], 1)
+        self.assertEqual(session.messages, [])
+        self.assertEqual(session.message_ids, [])
+        self.assertEqual(session.events[-1]["type"], "session.cleared")
+        self.assertIn(session_id, runtime.sessions, "clear keeps the session's identity")
+
+    async def test_both_controls_refuse_an_unknown_session(self) -> None:
+        runtime = FakeEveRuntime()
+        for member in (runtime.compact_session, runtime.clear_session):
+            with (
+                self.subTest(member=member.__name__),
+                self.assertRaises(HarnessControlError),
+            ):
+                await member("wrun_fixture_absent")
+        self.assertEqual(runtime.compacted, [])
+        self.assertEqual(runtime.cleared, [])
 
 
 def test_the_live_native_evidence_entry_point_keeps_its_documented_surface() -> None:

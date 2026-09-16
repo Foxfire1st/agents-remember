@@ -104,7 +104,7 @@ declaring the master-scoped blind spot for the backend orchestrator's later adve
 Fan-out evidence reports sit beside them so the framing survives into streamlining. Write both
 **before** intentionally ending a successful handoff turn, then end; the write is unconditional and
 `message_parent` stays available for a clarification or blocking issue. Once the artifact exists,
-terminal/finalizer truth attests only that the turn ended — **not the architect's acceptance** — and
+terminal/finalizer truth attests only that this turn ended — **not the architect's acceptance** — and
 never substitutes for the artifact. Do not author a second completion row. The handover: the
 finished design **joins the portfolio**; the architect rules it and the orchestrator adopts the
 ruled plan into durable execution form.

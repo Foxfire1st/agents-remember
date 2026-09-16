@@ -285,12 +285,12 @@ and decision logs; dispatch notes naming which role seat owns which work; and ha
 spawned backend orchestrator, compiled with `../templates/conversation-handover-packet.md`.
 
 **What this seat validates on wake.** Mechanical terminal truth (a canonical `completed` outcome)
-attests only that a provider turn ended normally; it never proves the artifact exists, is current,
+attests only that the provider turn ended normally; it never proves the artifact exists, is current,
 or satisfies its requirement. So this seat opens the required artifact, candidate identity,
 evidence, and acceptance envelope and validates them **before advancing lifecycle state**
 (`../core/acceptance.md`). Its own inbound artifacts are the orchestrator's super-exit packet and
 demo notes and the strategist's orchestration-task draft, which this seat rules. The relay delivers
-the state signal but never evaluates the artifact; a missing, malformed, or stale artifact is a
+the state signal but never evaluates the artifact. A missing, malformed, or stale artifact is a
 handoff defect this seat detects, then nudges, rejects, replaces, or escalates.
 
 **Terminal custody and the catch-up report.** Rows whose entire owner chain is dead surface here as

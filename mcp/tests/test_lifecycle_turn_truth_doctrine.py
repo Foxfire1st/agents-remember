@@ -99,9 +99,25 @@ TREE_LITERAL = REPOSITORY_ROOT / DOCTRINE_TREE
 
 # Every surface that must speak the completion-truth vocabulary, as exact path literals so the
 # dependency-ownership selector observes this module as their consumer.
+#
+# Re-pointed at the consolidated corpus (R01's one-home ruling, 2026-09-16). The boundary's one home
+# is now `core/acceptance.md`: the retired `SKILL.md` section *is* that file, verbatim, and the
+# consolidated `SKILL.md` cites it instead of restating it, so it stopped speaking the vocabulary --
+# and this census rule's own remedy for a row whose surface went silent is to remove the row. The
+# seven other surfaces added here already composed completion from terminal/finalizer truth in the
+# consolidated tree and were simply never declared. The roster is a declaration, not a wish list: it
+# must EQUAL the speakers in both directions, so every entry below is a measured speaker and every
+# measured speaker is an entry. `roles/worker.md` keeps its row because its own side of the boundary
+# is restored to the wording this module reads (see OWED_STATEMENTS).
 COMPLETION_TRUTH_ROSTER = (
-    "skills/l-01-agent-lifecycles/SKILL.md",
+    "skills/l-01-agent-lifecycles/core/acceptance.md",
+    "skills/l-01-agent-lifecycles/operations/curation.md",
+    "skills/l-01-agent-lifecycles/operations/recovery.md",
+    "skills/l-01-agent-lifecycles/operations/review.md",
+    "skills/l-01-agent-lifecycles/reference/rulings.md",
+    "skills/l-01-agent-lifecycles/roles/architect.md",
     "skills/l-01-agent-lifecycles/roles/curator.md",
+    "skills/l-01-agent-lifecycles/roles/designer.md",
     "skills/l-01-agent-lifecycles/roles/manager.md",
     "skills/l-01-agent-lifecycles/roles/reviewer.md",
     "skills/l-01-agent-lifecycles/roles/strategist.md",
@@ -115,6 +131,10 @@ COMPLETION_TRUTH_ROSTER = (
 COMPLETION_TRUTH_VOCABULARY = re.compile(r"terminal/finalizer|terminal truth", re.IGNORECASE)
 
 # Surfaces that state the relay's own mechanical side without composing completion.
+#
+# Verified against the consolidated corpus rather than assumed: both members still state the relay's
+# own side ("the relay itself never inspects the artifact" in the worker file, "The relay never
+# inspects it" in the turn-report template), and no surface that newly states it was left out.
 RELAY_MECHANICS_SURFACES = (
     "skills/l-01-agent-lifecycles/roles/worker.md",
     "skills/l-01-agent-lifecycles/templates/turn-report.md",
@@ -446,8 +466,17 @@ RETIRED_CLAIMS = (
 # The clause sets each declared surface owes. A surface may be legitimately silent on a clause; a
 # surface on this roster is not, and the markers are the shipped wording for its own side of the
 # boundary. Matching is on normalized words, so emphasis and re-wrapping are free.
+#
+# Re-pointed at the consolidated corpus's shipped wording. The whole-boundary set moved with the
+# boundary itself, from the retired `SKILL.md` section to `core/acceptance.md`, which carries all
+# eight clauses verbatim; the per-role markers that no longer matched were re-quoted from the file
+# that ships them today, and one of them (`roles/strategist.md`) named the wrong validating seat --
+# the consolidated handoff-artifact table in `core/acceptance.md` gives the strategist's
+# orchestration-task draft to the architect, so the marker follows the corpus and not the reverse.
+# A marker is still the same clause it always was: `_assert_owed` requires its words to be present
+# AND the surface to contradict nothing, so deletion or an in-place denial still fails.
 OWED_STATEMENTS: dict[str, tuple[str, ...]] = {
-    "skills/l-01-agent-lifecycles/SKILL.md": (
+    "skills/l-01-agent-lifecycles/core/acceptance.md": (
         "Terminal truth is mechanical; acceptance is the owner's.",
         "means only that the provider turn ended normally",
         "does not attest that the required artifact exists, is current, or satisfies its requirement",
@@ -459,13 +488,13 @@ OWED_STATEMENTS: dict[str, tuple[str, ...]] = {
         "needs no second model-authored completion post",
     ),
     "skills/l-01-agent-lifecycles/roles/manager.md": (
-        "it never opens or evaluates the artifact",
+        "never opens or evaluates the artifact",
         "only that the provider turn ended",
         "never attests that the report exists, is current, or satisfies its requirement",
         "open and validate the required artifact, candidate identity, evidence, and acceptance "
         "envelope",
         "before advancing lifecycle state",
-        "your detected handoff defect",
+        "this seat's own detected handoff defect",
     ),
     "skills/l-01-agent-lifecycles/roles/worker.md": (
         "terminal/finalizer truth attests only that this turn ended",
@@ -474,20 +503,20 @@ OWED_STATEMENTS: dict[str, tuple[str, ...]] = {
         "Never author a second model-authored completion post",
     ),
     "skills/l-01-agent-lifecycles/roles/reviewer.md": (
-        "terminal/finalizer truth attests only that this turn ended",
+        "Terminal/finalizer truth then attests only that this turn ended",
         "wakes the decider, who validates the verdict independently",
     ),
     "skills/l-01-agent-lifecycles/roles/curator.md": (
         "terminal/finalizer evidence then attests only that this turn ended",
-        "wakes the owner, who validates the report",
+        "wakes the manager, who validates it",
     ),
     "skills/l-01-agent-lifecycles/roles/system-specialist.md": (
         "terminal/finalizer state then attests only that this turn ended",
         "wakes the orchestrator, which validates the report",
     ),
     "skills/l-01-agent-lifecycles/roles/strategist.md": (
-        "terminal/finalizer truth then attests only that this turn ended",
-        "wakes the orchestrator, which validates the artifact",
+        "Terminal/finalizer truth attests only that this turn ended",
+        "wakes the architect, who validates the artifact",
     ),
     "skills/l-01-agent-lifecycles/templates/master-handover-packet.md": (
         "which attests only that the manager's turn ended",
@@ -609,8 +638,19 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
             + "\n  ".join(findings),
         )
 
-    def test_the_shared_root_states_the_whole_boundary(self) -> None:
-        self._assert_owed("skills/l-01-agent-lifecycles/SKILL.md")
+    def test_the_boundarys_one_home_states_the_whole_boundary(self) -> None:
+        """The whole boundary is owed by the surface that owns it, not by the file it used to sit in.
+
+        This case asserted the shared root (`SKILL.md`) while the boundary lived in a section there.
+        R01 moved that section -- verbatim -- into `core/acceptance.md`, whose own title declares it
+        the boundary's one home, and the consolidated `SKILL.md` cites it instead of restating it.
+        The case follows the boundary instead of the path it used to be reachable at: the same
+        assertion, against the surface that now holds the whole of it. `SKILL.md` is not unchecked by
+        that move -- it is swept by `test_no_canonical_surface_contradicts_the_boundary` like every
+        other canonical surface.
+        """
+
+        self._assert_owed("skills/l-01-agent-lifecycles/core/acceptance.md")
 
     def test_every_declared_surface_states_its_owed_clause(self) -> None:
         for relative in sorted(OWED_STATEMENTS):
@@ -670,6 +710,96 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
         for relative in sorted(RELAY_MECHANICS_SURFACES):
             with self.subTest(surface=relative):
                 self._assert_owed(relative)
+
+
+class ConvergenceTeethTests(unittest.TestCase):
+    """The re-pointed data kept the detectors' teeth: one mutant pair per reconciled site.
+
+    The consolidation repair moved this module's roster and required-statement *data* to the
+    consolidated corpus and moved four corpus sentences so the EXISTING detectors read them
+    correctly. That is exactly the kind of change that can buy a green run by hollowing a guard out,
+    so the proof is stated instead of implied: for each reconciled site, the surface as it ships must
+    read clean, and the contradicting variant that site carried (or would carry) must still fail the
+    same detector. The shipped side is READ FROM THE CORPUS -- not pasted here -- so the pair cannot
+    agree with itself; only the mutant is synthetic. Change the corpus into a contradiction, or
+    hollow a detector out, and one half of a pair fails.
+    """
+
+    #: site -> (corpus surface, synthetic contradicting variant, claim the variant must trip)
+    RECONCILED_SITE_MUTANTS: tuple[tuple[str, str, str, str], ...] = (
+        (
+            "reference/rulings.md migration map (historical record)",
+            "skills/l-01-agent-lifecycles/reference/rulings.md",
+            "| LOCR-1 | x | The completed outcome accepts the handoff and validates the artifact |",
+            "terminal-outcome-semantic-acceptance",
+        ),
+        (
+            "roles/architect.md relay sentence",
+            "skills/l-01-agent-lifecycles/roles/architect.md",
+            "The relay evaluates the artifact and nudges the seat when a report is missing.",
+            "relay-evaluates-artifact",
+        ),
+        (
+            "roles/orchestrator.md sweep sentence",
+            "skills/l-01-agent-lifecycles/roles/orchestrator.md",
+            "The sweep inspects the durable report before the owner is woken.",
+            "relay-evaluates-artifact",
+        ),
+        (
+            "roles/reviewer.md negated instruction",
+            "skills/l-01-agent-lifecycles/roles/reviewer.md",
+            "**Never:** implement or edit code, run an unrequested full suite, or author a second "
+            "completion row.",
+            "second-completion-message",
+        ),
+    )
+
+    def test_each_reconciled_site_reads_clean_and_its_mutant_still_fails(self) -> None:
+        for site, relative, mutant, claim_id in self.RECONCILED_SITE_MUTANTS:
+            with self.subTest(site=site):
+                self.assertEqual(
+                    [
+                        finding.render(relative)
+                        for finding in contradictions(read_surface(relative))
+                    ],
+                    [],
+                    f"{site}: the surface stopped reading clean; the reconciliation went the wrong way",
+                )
+                self.assertIn(
+                    claim_id,
+                    [finding.claim_id for finding in contradictions(mutant)],
+                    f"{site}: the detector no longer catches the contradiction it exists for",
+                )
+
+    def test_a_contradicting_sentence_added_to_a_roster_surface_still_fails_it(self) -> None:
+        """The per-surface check is state-and-deny aware, and this is the packet's own named failure."""
+
+        relative = "skills/l-01-agent-lifecycles/roles/manager.md"
+        shipped = read_surface(relative)
+        self.assertEqual(contradictions(shipped), ())
+        self.assertEqual(classify_reading(shipped), Reading.STATED)
+        mutated = (
+            shipped
+            + "\nThe manager may treat a `completed` outcome as acceptance of the handoff.\n"
+        )
+        self.assertEqual(classify_reading(mutated), Reading.CONTRADICTED)
+
+    def test_removing_an_owed_clause_from_the_shipped_text_still_fails_its_surface(self) -> None:
+        relative = "skills/l-01-agent-lifecycles/core/acceptance.md"
+        # The mutation is applied to the normalized reading, because that is what `_assert_owed`
+        # tests: a clause the shipped file carries across a line break or through markdown emphasis
+        # is removed here by its words, exactly as the check reads it.
+        shipped = _flatten(read_surface(relative))
+        for clause in OWED_STATEMENTS[relative]:
+            with self.subTest(clause=clause):
+                marker = normalize(clause)
+                self.assertIn(marker, shipped, f"{relative} no longer states its owed clause")
+                mutated = shipped.replace(marker, " ")
+                self.assertIn(
+                    clause,
+                    [owed for owed in OWED_STATEMENTS[relative] if normalize(owed) not in mutated],
+                    "a surface that lost its owed clause must be reported as missing it",
+                )
 
 
 class SilenceIsNotContradictionTests(unittest.TestCase):

@@ -157,7 +157,7 @@ requested review.
   problem; stdin push is not a driver here, since this seat reports through its verdict.
 
 **Never:** implement or edit code, rewrite a requirement, edit the worker record, write onboarding,
-decide a gate, run an unrequested full suite, or author a second completion row.
+decide a gate, run an unrequested full suite. Never author a second completion row.
 
 ## 5 — Stop And Escalation Cases
 

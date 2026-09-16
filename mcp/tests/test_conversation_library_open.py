@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from agents_remember.kernel.harnesses import Harness
 from agents_remember.models.conversations.capabilities import (
     CapabilityEvidence,
     FeatureCapability,
@@ -28,6 +29,7 @@ from agents_remember.models.conversations.identity import (
 from agents_remember.models.terminal_catalog import (
     TerminalCatalogEntry,
 )
+from agents_remember.serving.conversation.library import gates as library_gates
 from agents_remember.serving.conversation.library import open_service as open_module
 from agents_remember.serving.conversation.library.cursor import (
     LibraryCursorAuthority,
@@ -39,6 +41,15 @@ from agents_remember.serving.conversation.library.errors import (
     StaleNativeIdentityError,
 )
 from agents_remember.serving.conversation.library.factories import LibraryShared
+from agents_remember.serving.conversation.library.gates import (
+    GateProbes,
+    LibraryGateRegistry,
+)
+from agents_remember.serving.conversation.library.helper_host import (
+    HELPER_ENTRY_BY_HARNESS,
+    ConversationLibraryHelperHost,
+    HelperHarness,
+)
 from agents_remember.serving.conversation.library.open_service import (
     ConversationOpenService,
     LibraryBinding,
@@ -1132,6 +1143,154 @@ class _FixedResolver:
     def require(self, authorization: AuthorizationBinding) -> None:
         if authorization != self._binding:
             raise AssertionError("unexpected cross-principal binding in test")
+
+
+class _NeverCalledHelperHost(ConversationLibraryHelperHost):
+    """A helper host that fails loudly, so a case can prove the helper route was NOT taken."""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    async def call(
+        self,
+        harness: HelperHarness,  # noqa: ARG002 - helper-host protocol signature
+        operation: str,  # noqa: ARG002 - helper-host protocol signature
+        payload: Mapping[str, object],  # noqa: ARG002 - helper-host protocol signature
+    ) -> tuple[Mapping[str, object], str, str]:
+        raise AssertionError("the helper host was called by a gate case that must not reach it")
+
+
+_GATE_WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+_GATE_RESOLVABLE_COMMAND = str(Path(__file__).resolve())
+_GATE_HARNESSES = (
+    Harness(id="codex", name="Codex", command="codex-fixture", argv=()),
+    Harness(id="claude", name="Claude", command="claude-fixture", argv=()),
+    Harness(id="pi", name="Pi", command="pi-fixture", argv=()),
+    Harness(id="eve", name="Eve", command="eve-fixture", argv=()),
+)
+
+
+def _gate_registry(*, resolves: bool) -> LibraryGateRegistry:
+    """A live gate registry whose only substituted surface is ``which``.
+
+    ``eve`` resolves to a real file when ``resolves``; every other id resolves to the same file,
+    because the subject is the gate's routing for a resolvable harness, not PATH contents.
+    """
+
+    def which(_command: str) -> str | None:
+        return _GATE_RESOLVABLE_COMMAND if resolves else None
+
+    return LibraryGateRegistry(
+        harness_registry=lambda: _GATE_HARNESSES,
+        workspace_root=_GATE_WORKSPACE_ROOT,
+        helper_host=_NeverCalledHelperHost(),
+        probes=GateProbes(which=which, environment=lambda: {}),
+    )
+
+
+class UnservedHarnessRefusalTests(unittest.IsolatedAsyncioTestCase):
+    """D15: the history gate refuses a harness the helper host does not serve, BY NAME.
+
+    This experiment extended ``HarnessId`` to ``Literal["codex", "claude", "pi", "eve"]`` and
+    registered an ``eve`` row, but the locked library helper still declares
+    ``HelperHarness = Literal["claude", "pi"]`` with ``HELPER_ENTRY_BY_HARNESS`` naming only those
+    two. ``_run_gate`` sent **every non-codex harness** to ``_helper_gate``, whose
+    ``helper_preflight`` indexes that table directly, so an ``eve`` id reaching the route raised
+    ``KeyError`` -- not a refusal, a crash out of a capability query that exists to fail closed and
+    visibly.
+
+    Reachability, stated exactly: the shipped ``eve`` row's argv is not a PATH program, so a default
+    install returns ``harness not installed: 'eve'`` before the helper is consulted -- the path is
+    latent, not live. It becomes live as soon as an ``eve``-id harness resolves to an executable,
+    and ``kernel/harnesses.py`` says in its own header that the registry is "GOOD DEFAULTS, not a
+    wall": a settings ``orchestration.harnesses`` entry with an existing id overrides the shipped
+    row. That is the case below, and it is the case pyright's ``Literal['claude','pi','eve']`` ->
+    ``HelperHarness`` error was the only trace of.
+
+    No helper process is spawned: the gate's routing and refusal are the subject, and the locked
+    helper's own contract is covered where it lives.
+    """
+
+    async def test_an_eve_harness_whose_command_resolves_is_refused_not_crashed(self) -> None:
+        result = await _gate_registry(resolves=True).history_capabilities("eve")
+        for feature in (
+            result.list,
+            result.read,
+            result.resume,
+            result.completeness,
+            result.tool_completeness,
+        ):
+            with self.subTest(feature=feature):
+                self.assertEqual(feature.state, "unavailable")
+        self.assertIn("has no 'eve' implementation", result.list.reason)
+        self.assertIn("conversation-library history gate", result.list.reason)
+        self.assertIsNone(result.list.evidence)
+
+    async def test_an_eve_harness_whose_command_does_not_resolve_stays_not_installed(self) -> None:
+        result = await _gate_registry(resolves=False).history_capabilities("eve")
+        self.assertEqual(result.list.state, "unavailable")
+        self.assertEqual(result.list.reason, "harness not installed: 'eve'")
+
+
+class HelperRouteAuthorityTests(unittest.IsolatedAsyncioTestCase):
+    """The gate's route is the helper host's own entry table -- derived, and the only authority.
+
+    A ``_run_gate`` that named ``("claude", "pi")`` itself would still call the helper gate for both,
+    and would still refuse ``eve``; the difference only shows when the table is what moves. Emptying
+    the derived ids is that move: a table member must then be refused by name instead of routed,
+    which a hardcoded pair cannot do.
+    """
+
+    @staticmethod
+    async def _spy(
+        _self: LibraryGateRegistry,
+        harness_id: HelperHarness,
+        _executable: Path,
+        _observed_at: str,
+    ) -> HistoryCapabilities:
+        return library_gates._unavailable_history(f"helper gate reached for {harness_id}")
+
+    async def test_every_helper_harness_reaches_the_helper_gate(self) -> None:
+        seen: list[str] = []
+
+        async def spy(
+            inner_self: LibraryGateRegistry,
+            harness_id: HelperHarness,
+            executable: Path,
+            observed_at: str,
+        ) -> HistoryCapabilities:
+            seen.append(harness_id)
+            return await self._spy(inner_self, harness_id, executable, observed_at)
+
+        with mock.patch.object(LibraryGateRegistry, "_helper_gate", spy):
+            gate = _gate_registry(resolves=True)
+            for harness_id in HELPER_ENTRY_BY_HARNESS:
+                with self.subTest(harness_id=harness_id):
+                    await gate.history_capabilities(harness_id)
+        self.assertEqual(sorted(seen), sorted(HELPER_ENTRY_BY_HARNESS))
+
+    async def test_the_route_follows_the_helper_table_rather_than_a_hardcoded_pair(self) -> None:
+        calls: list[str] = []
+
+        async def spy(
+            inner_self: LibraryGateRegistry,
+            harness_id: HelperHarness,
+            executable: Path,
+            observed_at: str,
+        ) -> HistoryCapabilities:
+            calls.append(harness_id)
+            return await self._spy(inner_self, harness_id, executable, observed_at)
+
+        self.assertEqual(sorted(library_gates._HELPER_HARNESS_IDS), sorted(HELPER_ENTRY_BY_HARNESS))
+        with (
+            mock.patch.object(LibraryGateRegistry, "_helper_gate", spy),
+            mock.patch.object(library_gates, "_HELPER_HARNESS_IDS", ()),
+        ):
+            result = await _gate_registry(resolves=True).history_capabilities("claude")
+        self.assertEqual(
+            calls, [], "the gate routed a harness without consulting the derived table"
+        )
+        self.assertIn("has no 'claude' implementation", result.list.reason)
 
 
 if __name__ == "__main__":

@@ -167,6 +167,10 @@ safe, not a risk you have to cover for: a report you never wrote is a handoff de
 detects after your turn-ended state signal wakes it, and the relay itself never inspects the artifact
 (`../core/acceptance.md`).
 
+**Completion truth** (`../core/acceptance.md`): terminal/finalizer truth attests only that this turn
+ended — never that the report exists, is current, or satisfies its requirement. Write the report, end
+the turn, and stop there. Never author a second model-authored completion post.
+
 ## Knobs, Tool Surface, And Dispatch Authority
 
 | Knob    | Default        | Notes |
