@@ -136,6 +136,46 @@ def test_reopening_the_same_path_keeps_identity_and_schema(
             assert stored.revision.payload_digest == digest
 
 
+def test_a_repeated_identical_invariant_is_no_change_and_a_relabel_refuses(
+    fixture: BranchingKnowledgeFixture,
+) -> None:
+    """``create_invariant`` confirms an identical repeat and refuses a different label under one id.
+
+    This is the identity operation's own contract as the earlier leaf published it, and it is pinned
+    here because the difference between the two outcomes is the whole reason the store distinguishes
+    "you already did this" from "you are trying to change a stored identity". The sibling concepts
+    (family, family revision, membership, realization, anchor) answer the same way; a shared insert
+    helper must not quietly unify them into one stricter rule.
+    """
+
+    store = fixture.reopen()
+    try:
+        stored = store.get_invariant(fixture.invariant_id)
+        assert stored is not None
+        request = InvariantRequest(
+            repository_id=fixture.repository_id,
+            invariant_id=fixture.invariant_id,
+            display_label=stored.display_label,
+            provenance=fixture.authorship,
+        )
+        repeated = store.create_invariant(request)
+        relabelled = store.create_invariant(
+            request.model_copy(update={"display_label": "a different label for a stored identity"})
+        )
+        still_stored = store.get_invariant(fixture.invariant_id)
+    finally:
+        store.close()
+
+    assert repeated.state == "no_change"
+    assert repeated.stored is False
+    assert repeated.refusal is None
+    assert relabelled.state == "refused"
+    assert relabelled.refusal is not None
+    assert relabelled.refusal.code == "duplicate_identity"
+    assert still_stored is not None
+    assert still_stored.display_label == stored.display_label
+
+
 def test_created_revision_stores_the_digest_the_store_recomputed(
     fixture: BranchingKnowledgeFixture,
 ) -> None:

@@ -34,6 +34,7 @@ from agents_remember.memory.knowledge.refusals import (
     scope_refusal,
     unknown_family_refusal,
 )
+from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.family import (
     FamilyIdentity,
     FamilyRevision,
@@ -81,10 +82,10 @@ def create_family(store: OpenedKnowledgeStore, request: FamilyRequest) -> Create
     denied = scope_refusal("create_family", store.repository_id, request.repository_id)
     if denied is not None:
         return _family_refusal(request, denied)
-    with store._exclusive_candidate_lock("create_family") as lock_refusal:
+    with store.exclusive_candidate_lock("create_family") as lock_refusal:
         if lock_refusal is not None:
             return _family_refusal(request, lock_refusal)
-        return store._within_immediate(
+        return store.within_immediate(
             lambda: _insert_family(store, request),
             on_refusal=lambda refused: _family_refusal(request, refused),
             failure=SqliteFailureContext(
@@ -95,18 +96,38 @@ def create_family(store: OpenedKnowledgeStore, request: FamilyRequest) -> Create
 
 def _insert_family(store: OpenedKnowledgeStore, request: FamilyRequest) -> CreateFamilyResult:
     existing = get_family(store, request.family_id)
-    label = request.display_label.strip()
-    if existing is not None:
-        if existing.display_label == label:
-            return _family_result(request, "no_change")
-        raise KnowledgeRefused(
-            duplicate_family_refusal(request.family_id, existing.display_label, label)
-        )
-    store._write(
-        _FAMILY_INSERT,
-        records.family_row(request.repository_id, request.family_id, label, request.provenance),
+    if existing is not None and existing.display_label == request.display_label.strip():
+        return _family_result(request, "no_change")
+    insert_family(
+        store,
+        family_id=request.family_id,
+        display_label=request.display_label,
+        provenance=request.provenance,
     )
     return _family_result(request, "created")
+
+
+def insert_family(
+    store: OpenedKnowledgeStore,
+    *,
+    family_id: str,
+    display_label: str,
+    provenance: Authorship,
+) -> None:
+    """Insert one family identity inside the caller's open transaction.
+
+    Raises :class:`KnowledgeRefused` when the identity is already stored, whatever it now holds: a
+    reused identity inside one committed namespace is a contradiction the caller has to resolve by
+    reading, not an update to apply.
+    """
+
+    existing = get_family(store, family_id)
+    label = display_label.strip()
+    if existing is not None:
+        raise KnowledgeRefused(duplicate_family_refusal(family_id, existing.display_label, label))
+    store.write(
+        _FAMILY_INSERT, records.family_row(store.repository_id, family_id, label, provenance)
+    )
 
 
 def create_family_revision(
@@ -125,10 +146,10 @@ def create_family_revision(
         return _family_revision_refusal(
             request, invalid_family_payload_refusal(request.revision.family_id, str(error))
         )
-    with store._exclusive_candidate_lock("create_family_revision") as lock_refusal:
+    with store.exclusive_candidate_lock("create_family_revision") as lock_refusal:
         if lock_refusal is not None:
             return _family_revision_refusal(request, lock_refusal)
-        return store._within_immediate(
+        return store.within_immediate(
             lambda: _insert_family_revision(store, request, revision),
             on_refusal=lambda refused: _family_revision_refusal(request, refused),
             failure=SqliteFailureContext(
@@ -143,11 +164,35 @@ def _insert_family_revision(
     store: OpenedKnowledgeStore, request: FamilyRevisionRequest, revision: FamilyRevision
 ) -> CreateFamilyRevisionResult:
     existing = get_family_revision(store, revision.revision_id)
+    if existing is not None and existing.revision.payload_digest == revision.payload_digest:
+        return _family_revision_result(request, "no_change", payload_digest=revision.payload_digest)
+    insert_family_revision(store, revision)
+    return _family_revision_result(request, "created", payload_digest=revision.payload_digest)
+
+
+def insert_family_revision(
+    store: OpenedKnowledgeStore,
+    revision: FamilyRevision,
+    *,
+    pending: frozenset[tuple[str, str]] = frozenset(),
+) -> None:
+    """Insert one sealed family revision aggregate inside the caller's open transaction.
+
+    The aggregate is the revision row plus its declared predecessor edges, and the shared lineage
+    rule is applied over the post-insert family graph before any row is written.
+    """
+
+    if (
+        get_family(store, revision.family_id) is None
+        and (
+            "family",
+            revision.family_id,
+        )
+        not in pending
+    ):
+        raise KnowledgeRefused(unknown_family_refusal(revision.family_id))
+    existing = get_family_revision(store, revision.revision_id)
     if existing is not None:
-        if existing.revision.payload_digest == revision.payload_digest:
-            return _family_revision_result(
-                request, "no_change", payload_digest=revision.payload_digest
-            )
         raise KnowledgeRefused(
             duplicate_family_revision_refusal(
                 revision.revision_id,
@@ -155,23 +200,30 @@ def _insert_family_revision(
                 revision.payload_digest,
             )
         )
-    if get_family(store, revision.family_id) is None:
-        raise KnowledgeRefused(unknown_family_refusal(revision.family_id))
-    _require_same_family_predecessors(store, revision)
+    _require_same_family_predecessors(store, revision, pending=pending)
     _require_acyclic_family(store, revision)
-    store._write(_FAMILY_REVISION_INSERT, records.family_revision_row(revision))
+    store.write(_FAMILY_REVISION_INSERT, records.family_revision_row(revision))
     for edge in records.family_predecessor_rows(revision):
-        store._write(_FAMILY_PREDECESSOR_INSERT, edge)
-    store._require_referential_integrity()
-    return _family_revision_result(request, "created", payload_digest=revision.payload_digest)
+        store.write(_FAMILY_PREDECESSOR_INSERT, edge)
+    store.require_referential_integrity()
 
 
 def _require_same_family_predecessors(
-    store: OpenedKnowledgeStore, revision: FamilyRevision
+    store: OpenedKnowledgeStore,
+    revision: FamilyRevision,
+    *,
+    pending: frozenset[tuple[str, str]] = frozenset(),
 ) -> None:
-    """Every declared predecessor must be an existing revision of the *same* family."""
+    """Every declared predecessor must be a stored family revision, or one of the batch's.
+
+    A predecessor a command in the same batch declares has no row yet, so it is admitted from the
+    batch's own declaration; the batch validates the completed graph before it writes and re-proves
+    both graphs after.
+    """
 
     for parent_id in sorted(revision.predecessors):
+        if ("family_revision", parent_id) in pending:
+            continue
         parent_family_id = family_id_of_revision(store, parent_id)
         if parent_family_id is None:
             raise KnowledgeRefused(
@@ -333,5 +385,7 @@ __all__ = [
     "family_id_of_revision",
     "get_family",
     "get_family_revision",
+    "insert_family",
+    "insert_family_revision",
     "list_family_revision_ids",
 ]

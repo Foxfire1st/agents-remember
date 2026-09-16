@@ -17,7 +17,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from agents_remember.memory.knowledge import anchors, families, memberships, realizations
+from agents_remember.memory.knowledge import anchors, families, labels, memberships, realizations
+from agents_remember.memory.knowledge.candidate import change_candidate
 from agents_remember.memory.knowledge.refusals import RefusalFacts, refusal
 from agents_remember.memory.knowledge.store import (
     OpenedKnowledgeStore,
@@ -25,6 +26,15 @@ from agents_remember.memory.knowledge.store import (
     open_knowledge_store,
 )
 from agents_remember.models.knowledge.authorship import Authorship
+from agents_remember.models.knowledge.candidate import (
+    CandidateResolution,
+    ChangeBatch,
+    ExactCandidateInput,
+    KnowledgeContext,
+    MutationResult,
+    SnapshotIdentity,
+    context_digest,
+)
 from agents_remember.models.knowledge.context import AdmittedKnowledgeDestination
 from agents_remember.models.knowledge.family import FamilyDraft, FamilyRevisionDraft
 from agents_remember.models.knowledge.graph import FamilyMemberDraft, RealizationClaimDraft
@@ -50,6 +60,10 @@ from agents_remember.models.knowledge.result import (
     RepositoryCreationResult,
     RevisionDraft,
     RevisionRequest,
+    SetFamilyLabelRequest,
+    SetFamilyLabelResult,
+    SetInvariantLabelRequest,
+    SetInvariantLabelResult,
     SourceAnchorRequest,
 )
 from agents_remember.models.knowledge.source import SourceAnchorDraft
@@ -65,6 +79,8 @@ __all__ = [
     "admitted_member_removal",
     "admitted_member_request",
     "admitted_revision_request",
+    "build_candidate_context",
+    "change_knowledge_candidate",
     "create_knowledge_anchor",
     "create_knowledge_family",
     "create_knowledge_family_member",
@@ -76,6 +92,9 @@ __all__ = [
     "remove_knowledge_anchor",
     "remove_knowledge_family_member",
     "remove_knowledge_realization_claim",
+    "resolve_candidate_context",
+    "set_knowledge_family_label",
+    "set_knowledge_invariant_label",
     "write_authorship",
 ]
 
@@ -198,6 +217,101 @@ def create_knowledge_revision(
     store = open_admitted_knowledge_store(destination)
     try:
         return store.create_revision(request)
+    finally:
+        store.close()
+
+
+def set_knowledge_invariant_label(
+    destination: AdmittedKnowledgeDestination, request: SetInvariantLabelRequest
+) -> SetInvariantLabelResult:
+    """Change one invariant's display label in the admitted destination.
+
+    The label is the one mutable field of an identity row, and the request names the row it expects,
+    so a label edit cannot silently overwrite a row that changed under the caller.
+    """
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        return store.set_invariant_label(request)
+    finally:
+        store.close()
+
+
+def set_knowledge_family_label(
+    destination: AdmittedKnowledgeDestination, request: SetFamilyLabelRequest
+) -> SetFamilyLabelResult:
+    """Change one family's display label in the admitted destination."""
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        return labels.set_family_label(store, request)
+    finally:
+        store.close()
+
+
+def resolve_candidate_context(
+    destination: AdmittedKnowledgeDestination, resolution: CandidateResolution
+) -> KnowledgeContext:
+    """Resolve one candidate context from the destination's current logical identity.
+
+    This is the entry point a caller uses to *build* a batch's context: it opens the admitted
+    destination read-only, reads the identity the candidate actually holds, and seals the whole
+    resolution into a context digest. A caller therefore cannot hand-write the dataset identity its
+    batch will be compared against -- it can only resolve one, and the operation compares that
+    resolution again inside its own transaction.
+
+    The lane is carried, not decided here: the admission that produced the destination is what
+    establishes which candidate this is, and the operation refuses a lane that is not a candidate.
+    """
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        snapshot = store.snapshot_identity()
+    finally:
+        store.close()
+    return build_candidate_context(snapshot, resolution)
+
+
+def build_candidate_context(
+    snapshot: SnapshotIdentity, resolution: CandidateResolution
+) -> KnowledgeContext:
+    """Seal one already-read snapshot identity into a candidate context.
+
+    The digest is computed here rather than accepted, so a context assembled field by field is
+    self-consistent by construction and the operation's own comparison is against a value the
+    resolution produced.
+    """
+
+    context = KnowledgeContext.model_construct(
+        repository_id=snapshot.repository_id,
+        lane=resolution.lane,
+        code=ExactCandidateInput(
+            tree_id=resolution.code_tree_id, commit_id=resolution.code_commit_id
+        ),
+        memory=ExactCandidateInput(
+            tree_id=resolution.memory_tree_id, commit_id=resolution.memory_commit_id
+        ),
+        knowledge=snapshot,
+        snapshot_ref=resolution.snapshot_ref,
+        context_digest="0" * 64,
+        candidate_ref=resolution.candidate_ref,
+        task_ref=resolution.task_ref,
+    )
+    return context.model_copy(update={"context_digest": context_digest(context)})
+
+
+def change_knowledge_candidate(
+    destination: AdmittedKnowledgeDestination, batch: ChangeBatch
+) -> MutationResult:
+    """Apply one candidate change batch through the admitted destination.
+
+    The provenance envelope comes from the destination, which the admission built after its own
+    checks, and never from the batch or from any draft inside it.
+    """
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        return change_candidate(store, batch, authorship=destination.authorship)
     finally:
         store.close()
 

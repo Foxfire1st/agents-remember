@@ -54,10 +54,10 @@ def create_source_anchor(
     denied = scope_refusal("create_source_anchor", store.repository_id, request.repository_id)
     if denied is not None:
         return _anchor_refusal(request, denied)
-    with store._exclusive_candidate_lock("create_source_anchor") as lock_refusal:
+    with store.exclusive_candidate_lock("create_source_anchor") as lock_refusal:
         if lock_refusal is not None:
             return _anchor_refusal(request, lock_refusal)
-        return store._within_immediate(
+        return store.within_immediate(
             lambda: _insert_anchor(store, request),
             on_refusal=lambda refused: _anchor_refusal(request, refused),
             failure=SqliteFailureContext(
@@ -73,16 +73,8 @@ def _insert_anchor(
 ) -> CreateSourceAnchorResult:
     anchor = source_anchor_from_draft(request.anchor, request.provenance)
     existing = get_anchor(store, str(anchor.anchor_id))
-    if existing is not None:
-        if existing == anchor:
-            return _anchor_result(request, "no_change")
-        raise KnowledgeRefused(
-            duplicate_anchor_refusal(
-                str(anchor.anchor_id),
-                records.anchor_row_digest(existing, store.repository_id),
-                records.anchor_row_digest(anchor, store.repository_id),
-            )
-        )
+    if existing is not None and existing == anchor:
+        return _anchor_result(request, "no_change")
     insert_anchor_row(store, anchor)
     return _anchor_result(request, "created")
 
@@ -105,9 +97,25 @@ def source_anchor_from_draft(draft: SourceAnchorDraft, provenance: Authorship) -
 
 
 def insert_anchor_row(store: OpenedKnowledgeStore, anchor: SourceAnchor) -> None:
-    """Write one anchor row inside the caller's open transaction."""
+    """Write one anchor row inside the caller's open transaction.
 
-    store._write(_ANCHOR_INSERT, records.anchor_row(anchor, store.repository_id))
+    Raises :class:`KnowledgeRefused` when the identity is already stored with a different payload:
+    an anchor records the location the author attributed, so silently accepting a different one
+    under the same identity would serve a location nobody authored.
+    """
+
+    existing = get_anchor(store, str(anchor.anchor_id))
+    if existing is not None:
+        if existing == anchor:
+            return
+        raise KnowledgeRefused(
+            duplicate_anchor_refusal(
+                str(anchor.anchor_id),
+                records.anchor_row_digest(existing, store.repository_id),
+                records.anchor_row_digest(anchor, store.repository_id),
+            )
+        )
+    store.write(_ANCHOR_INSERT, records.anchor_row(anchor, store.repository_id))
 
 
 def find_claim_citing_anchor(store: OpenedKnowledgeStore, anchor_id: str) -> str | None:
@@ -150,10 +158,10 @@ def remove_source_anchor(
     denied = scope_refusal("remove_source_anchor", store.repository_id, request.repository_id)
     if denied is not None:
         return _anchor_removal_refusal(request, denied)
-    with store._exclusive_candidate_lock("remove_source_anchor") as lock_refusal:
+    with store.exclusive_candidate_lock("remove_source_anchor") as lock_refusal:
         if lock_refusal is not None:
             return _anchor_removal_refusal(request, lock_refusal)
-        return store._within_immediate(
+        return store.within_immediate(
             lambda: _delete_anchor(store, request),
             on_refusal=lambda refused: _anchor_removal_refusal(request, refused),
             failure=SqliteFailureContext(
@@ -167,23 +175,34 @@ def remove_source_anchor(
 def _delete_anchor(
     store: OpenedKnowledgeStore, request: RemoveSourceAnchorRequest
 ) -> RemoveSourceAnchorResult:
-    if get_anchor(store, request.anchor_id) is None:
+    delete_anchor(store, request.anchor_id)
+    return RemoveSourceAnchorResult(
+        state="removed", repository_id=request.repository_id, anchor_id=request.anchor_id
+    )
+
+
+def delete_anchor(store: OpenedKnowledgeStore, anchor_id: str) -> None:
+    """Remove one unreferenced anchor inside the caller's open transaction.
+
+    Raises :class:`KnowledgeRefused` when the anchor is not stored, or while a stored realization
+    claim still cites it: the claim is what the anchor was recorded for, so removing the location
+    under it would leave the claim pointing at nothing.
+    """
+
+    if get_anchor(store, anchor_id) is None:
         raise KnowledgeRefused(
             missing_expected_row_refusal(
                 operation="remove_source_anchor",
                 table="source_anchor",
-                record_id=request.anchor_id,
+                record_id=anchor_id,
             )
         )
-    citing = find_claim_citing_anchor(store, request.anchor_id)
+    citing = find_claim_citing_anchor(store, anchor_id)
     if citing is not None:
-        raise KnowledgeRefused(referenced_anchor_refusal(request.anchor_id, citing))
-    store._write(
+        raise KnowledgeRefused(referenced_anchor_refusal(anchor_id, citing))
+    store.write(
         "DELETE FROM source_anchor WHERE repository_id = ? AND anchor_id = ?",
-        (store.repository_id, request.anchor_id),
-    )
-    return RemoveSourceAnchorResult(
-        state="removed", repository_id=request.repository_id, anchor_id=request.anchor_id
+        (store.repository_id, anchor_id),
     )
 
 
@@ -224,6 +243,7 @@ def _anchor_removal_refusal(
 
 __all__ = [
     "create_source_anchor",
+    "delete_anchor",
     "find_claim_citing_anchor",
     "get_anchor",
     "insert_anchor_row",

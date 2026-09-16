@@ -67,10 +67,10 @@ def create_realization_claim(
     if denied is not None:
         return _claim_refusal(request, _requested_anchor_id(request), denied)
     anchor_id = _requested_anchor_id(request)
-    with store._exclusive_candidate_lock("create_realization_claim") as lock_refusal:
+    with store.exclusive_candidate_lock("create_realization_claim") as lock_refusal:
         if lock_refusal is not None:
             return _claim_refusal(request, anchor_id, lock_refusal)
-        return store._within_immediate(
+        return store.within_immediate(
             lambda: _insert_claim(store, request),
             on_refusal=lambda refused: _claim_refusal(request, anchor_id, refused),
             failure=SqliteFailureContext(
@@ -84,6 +84,27 @@ def create_realization_claim(
 def _insert_claim(
     store: OpenedKnowledgeStore, request: RealizationClaimRequest
 ) -> CreateRealizationClaimResult:
+    stored = insert_realization_claim(store, request)
+    if stored is None:
+        return _claim_result(request, _requested_anchor_id(request), "no_change")
+    return _claim_result(request, str(stored.anchor_id), "created")
+
+
+def insert_realization_claim(
+    store: OpenedKnowledgeStore, request: RealizationClaimRequest
+) -> RealizationClaim | None:
+    """Insert one realization claim inside the caller's open transaction.
+
+    Returns ``None`` when the exact same claim is already stored, which is the one case where the
+    write is a no-op rather than an insertion. Raises :class:`KnowledgeRefused` for every other
+    conflict: a reused identity with a different payload, a missing invariant-revision endpoint, a
+    pair that is already related, or an anchor endpoint this request cannot record.
+
+    A newly authored anchor is recorded here, before the claim's own duplicate checks, because a
+    location and the claim about it are one act of authorship: a refusal raised after that write
+    rolls the anchor back instead of leaving an orphan location behind.
+    """
+
     claim = request.claim
     require_invariant_revision_endpoint(
         store, claim.invariant_revision_id, claim.claim_id, "create_realization_claim"
@@ -93,7 +114,7 @@ def _insert_claim(
     existing = get_realization_claim(store, claim.claim_id)
     if existing is not None:
         if existing == stored:
-            return _claim_result(request, anchor_id, "no_change")
+            return None
         raise KnowledgeRefused(
             duplicate_relation_identity_refusal(
                 operation="create_realization_claim",
@@ -115,9 +136,9 @@ def _insert_claim(
                 "realization claim",
             )
         )
-    store._write(_CLAIM_INSERT, records.claim_row(stored, store.repository_id))
-    store._require_referential_integrity()
-    return _claim_result(request, anchor_id, "created")
+    store.write(_CLAIM_INSERT, records.claim_row(stored, store.repository_id))
+    store.require_referential_integrity()
+    return stored
 
 
 def _record_anchor(store: OpenedKnowledgeStore, request: RealizationClaimRequest) -> str:
@@ -165,10 +186,10 @@ def remove_realization_claim(
     denied = scope_refusal("remove_realization_claim", store.repository_id, request.repository_id)
     if denied is not None:
         return _claim_removal_refusal(request, denied)
-    with store._exclusive_candidate_lock("remove_realization_claim") as lock_refusal:
+    with store.exclusive_candidate_lock("remove_realization_claim") as lock_refusal:
         if lock_refusal is not None:
             return _claim_removal_refusal(request, lock_refusal)
-        return store._within_immediate(
+        return store.within_immediate(
             lambda: _delete_claim(store, request),
             on_refusal=lambda refused: _claim_removal_refusal(request, refused),
             failure=SqliteFailureContext(
@@ -182,31 +203,43 @@ def remove_realization_claim(
 def _delete_claim(
     store: OpenedKnowledgeStore, request: RemoveRealizationClaimRequest
 ) -> RemoveRealizationClaimResult:
-    existing = get_realization_claim(store, request.claim_id)
+    delete_realization_claim(store, request.claim_id, request.expected_row_digest)
+    return RemoveRealizationClaimResult(
+        state="removed", repository_id=request.repository_id, claim_id=request.claim_id
+    )
+
+
+def delete_realization_claim(
+    store: OpenedKnowledgeStore, claim_id: str, expected_row_digest: str
+) -> None:
+    """Remove one realization claim inside the caller's open transaction.
+
+    Raises :class:`KnowledgeRefused` when the row is not stored, or when it is not the row the
+    caller read.
+    """
+
+    existing = get_realization_claim(store, claim_id)
     if existing is None:
         raise KnowledgeRefused(
             missing_expected_row_refusal(
                 operation="remove_realization_claim",
                 table="realization_claim",
-                record_id=request.claim_id,
+                record_id=claim_id,
             )
         )
-    if existing.row_digest != request.expected_row_digest:
+    if existing.row_digest != expected_row_digest:
         raise KnowledgeRefused(
             stale_expected_row_refusal(
                 operation="remove_realization_claim",
                 table="realization_claim",
-                record_id=request.claim_id,
-                expected=request.expected_row_digest,
+                record_id=claim_id,
+                expected=expected_row_digest,
                 observed=existing.row_digest,
             )
         )
-    store._write(
+    store.write(
         "DELETE FROM realization_claim WHERE repository_id = ? AND claim_id = ?",
-        (store.repository_id, request.claim_id),
-    )
-    return RemoveRealizationClaimResult(
-        state="removed", repository_id=request.repository_id, claim_id=request.claim_id
+        (store.repository_id, claim_id),
     )
 
 
@@ -332,8 +365,10 @@ def _claim_removal_refusal(
 
 __all__ = [
     "create_realization_claim",
+    "delete_realization_claim",
     "find_claim_by_pair",
     "get_realization_claim",
+    "insert_realization_claim",
     "list_claims_for_anchor",
     "list_claims_for_invariant_revision",
     "remove_realization_claim",

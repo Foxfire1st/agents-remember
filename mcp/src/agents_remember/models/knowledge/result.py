@@ -45,6 +45,9 @@ KnowledgeOperation = Literal[
     "remove_family_member",
     "create_realization_claim",
     "remove_realization_claim",
+    "set_invariant_label",
+    "set_family_label",
+    "change_candidate",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct
@@ -65,6 +68,8 @@ KnowledgeRefusalCode = Literal[
     "relationship_constraint",
     "unknown_invariant",
     "unknown_family",
+    "target_not_candidate",
+    "promotion_not_supported",
     "no_change",
 ]
 
@@ -225,6 +230,29 @@ class RemoveSourceAnchorRequest(KnowledgeModel):
 
     repository_id: str = Field(pattern=UUID_PATTERN)
     anchor_id: str = Field(pattern=UUID_PATTERN)
+
+
+class SetInvariantLabelRequest(KnowledgeModel):
+    """One label edit naming the exact invariant row the caller read.
+
+    The expected digest is the row's ``row_digest`` as a read returned it. A label is the only
+    mutable field of the identity row, so this is the only identity edit the store exposes, and
+    the expectation is what keeps it from overwriting a row that changed under the caller.
+    """
+
+    repository_id: str = Field(pattern=UUID_PATTERN)
+    invariant_id: str = Field(pattern=UUID_PATTERN)
+    display_label: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    expected_row_digest: str = Field(pattern=SHA256_PATTERN)
+
+
+class SetFamilyLabelRequest(KnowledgeModel):
+    """One label edit naming the exact family row the caller read."""
+
+    repository_id: str = Field(pattern=UUID_PATTERN)
+    family_id: str = Field(pattern=UUID_PATTERN)
+    display_label: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    expected_row_digest: str = Field(pattern=SHA256_PATTERN)
 
 
 class RemoveFamilyMemberRequest(KnowledgeModel):
@@ -406,6 +434,52 @@ class RemoveRealizationClaimResult(KnowledgeModel):
     @model_validator(mode="after")
     def _require_consistent_outcome(self) -> RemoveRealizationClaimResult:
         require_removal_outcome(state=self.state, refusal=self.refusal)
+        return self
+
+
+class SetInvariantLabelResult(KnowledgeModel):
+    """The typed outcome of one invariant label edit."""
+
+    state: Literal["labeled", "refused"]
+    operation: KnowledgeOperation = "set_invariant_label"
+    repository_id: str = Field(pattern=UUID_PATTERN)
+    invariant_id: str = Field(pattern=UUID_PATTERN)
+    display_label: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
+    refusal: KnowledgeRefusal | None = None
+
+    @model_validator(mode="after")
+    def _require_consistent_outcome(self) -> SetInvariantLabelResult:
+        if self.state == "labeled":
+            if self.refusal is not None:
+                raise ValueError("a labeled result cannot also carry a refusal")
+            if self.display_label is None:
+                raise ValueError("a labeled result carries the label it stored")
+            return self
+        if self.refusal is None:
+            raise ValueError("a refused result must carry its refusal")
+        return self
+
+
+class SetFamilyLabelResult(KnowledgeModel):
+    """The typed outcome of one family label edit."""
+
+    state: Literal["labeled", "refused"]
+    operation: KnowledgeOperation = "set_family_label"
+    repository_id: str = Field(pattern=UUID_PATTERN)
+    family_id: str = Field(pattern=UUID_PATTERN)
+    display_label: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
+    refusal: KnowledgeRefusal | None = None
+
+    @model_validator(mode="after")
+    def _require_consistent_outcome(self) -> SetFamilyLabelResult:
+        if self.state == "labeled":
+            if self.refusal is not None:
+                raise ValueError("a labeled result cannot also carry a refusal")
+            if self.display_label is None:
+                raise ValueError("a labeled result carries the label it stored")
+            return self
+        if self.refusal is None:
+            raise ValueError("a refused result must carry its refusal")
         return self
 
 

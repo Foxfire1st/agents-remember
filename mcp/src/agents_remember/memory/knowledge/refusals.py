@@ -593,6 +593,225 @@ def candidate_busy_refusal(operation: KnowledgeOperation, detail: str) -> Knowle
     )
 
 
+# -- the candidate-change batch boundary ------------------------------------------------
+#
+# The batch composes the single-record operations, so its refusals are built here rather than by
+# the per-record factories: a caller that submitted one batch needs to know which command in it
+# failed, and the code has to name the batch as the operation it addressed. The per-command
+# refusals keep their own codes and remedies -- they are relabelled onto the batch operation, not
+# rewritten -- so a batch failure reads exactly like the single-record failure it is.
+
+
+def batch_target_not_candidate_refusal(lane: str, repository_id: str) -> KnowledgeRefusal:
+    """Refuse a batch addressed to a lane that is not a writable candidate."""
+
+    return refusal(
+        "target_not_candidate",
+        "change_candidate",
+        f"the addressed lane {lane!r} is not a candidate this operation may write",
+        facts=RefusalFacts(table="repository", record_id=repository_id, observed=lane),
+        next_action=(
+            "Address the explicitly admitted draft or task candidate. A historical or accepted "
+            "snapshot is read-only here, and this operation promotes nothing."
+        ),
+    )
+
+
+def batch_task_binding_unresolved_refusal(
+    task_ref: str | None, repository_id: str
+) -> KnowledgeRefusal:
+    """Refuse a task-candidate batch whose task binding this operation cannot resolve.
+
+    The packet requires a task-bound candidate to use its existing contract authority, and that
+    authority is resolved by the application that owns the task contract -- not here. Accepting the
+    lane on the strength of a caller-supplied reference would be the fail-open the requirement
+    forbids, so the lane is refused until a resolved binding is available to require and check. The
+    refusal names what is missing rather than degrading to the draft lane.
+    """
+
+    return refusal(
+        "unauthorized_scope",
+        "change_candidate",
+        "the addressed lane is a task candidate, and this operation holds no resolved task binding "
+        "it could validate",
+        facts=RefusalFacts(
+            table="repository",
+            record_id=repository_id,
+            expected="a resolved, owner-validated task binding",
+            observed=task_ref if task_ref is not None else "<no task reference supplied>",
+        ),
+        next_action=(
+            "Resolve the candidate's task binding through its existing contract owner and submit "
+            "the batch through that admission; a draft candidate that asserts no task authority "
+            "uses the draft lane instead."
+        ),
+    )
+
+
+def batch_promotion_not_supported_refusal(record_id: str) -> KnowledgeRefusal:
+    """Refuse a command that would store accepted origin data or promote a proposal."""
+
+    return refusal(
+        "promotion_not_supported",
+        "change_candidate",
+        "the batch carries accepted origin data, which this candidate-only operation never stores",
+        facts=RefusalFacts(table="invariant_revision", record_id=record_id),
+        next_action=(
+            "Author the record as proposed. Acceptance is decided by the owner of that process, "
+            "not by a candidate change batch."
+        ),
+    )
+
+
+def batch_absent_target_refusal(*, table: str, record_id: str) -> KnowledgeRefusal:
+    """Refuse a batch that expects no record but names an identity that is already stored."""
+
+    return refusal(
+        "duplicate_identity",
+        "change_candidate",
+        "the batch expects this identity to be absent, but a record already carries it",
+        facts=RefusalFacts(table=table, record_id=record_id),
+        next_action=(
+            "Keep the stored record intact and author a separately identified record, or reread "
+            "the current rows and state the expectation that actually holds."
+        ),
+    )
+
+
+def batch_duplicate_expectation_refusal(*, table: str, record_id: str) -> KnowledgeRefusal:
+    """Refuse a command whose target identity is stated by two commands in the same batch."""
+
+    return refusal(
+        "duplicate_identity",
+        "change_candidate",
+        "two commands in this batch address the same record identity",
+        facts=RefusalFacts(table=table, record_id=record_id),
+        next_action=(
+            "Give each command its own identity. A batch is one authored act, so an identity "
+            "authored twice in it is a contradiction rather than a sequence."
+        ),
+    )
+
+
+def batch_stale_record_refusal(
+    *, table: str, record_id: str, expected: str, observed: str
+) -> KnowledgeRefusal:
+    """Refuse a batch whose expected record state is not the state that is stored."""
+
+    return refusal(
+        "stale_precondition",
+        "change_candidate",
+        "a stored record differs from the state the batch was authored against",
+        facts=RefusalFacts(table=table, record_id=record_id, expected=expected, observed=observed),
+        next_action=(
+            "Reread the exact record identities and author a new explicit batch; the stored state "
+            "was left untouched."
+        ),
+    )
+
+
+def batch_context_refusal(*, expected: str, observed: str) -> KnowledgeRefusal:
+    """Refuse a batch whose expected dataset identity is not the one the candidate holds."""
+
+    return refusal(
+        "stale_precondition",
+        "change_candidate",
+        "the candidate's logical dataset identity differs from the context the batch names",
+        facts=RefusalFacts(table="repository", expected=expected, observed=observed),
+        next_action=(
+            "Reread the candidate's identities and author a new batch against them; the batch is "
+            "never silently rebased onto the state that arrived meanwhile."
+        ),
+    )
+
+
+def batch_context_digest_refusal(expected: str, observed: str) -> KnowledgeRefusal:
+    """Refuse a context whose sealed digest does not match the context presented."""
+
+    return refusal(
+        "stale_precondition",
+        "change_candidate",
+        "the context digest does not seal the context the batch carries",
+        facts=RefusalFacts(table="repository", expected=expected, observed=observed),
+        next_action=(
+            "Reresolve the context from the admission that owns it and submit the batch against "
+            "that resolution."
+        ),
+    )
+
+
+def batch_refusal(refused: KnowledgeRefusal, *, index: int, command: str) -> KnowledgeRefusal:
+    """Return one command's refusal restated as a refusal of the batch that carried it.
+
+    The code, the offending record and the remedy are preserved; only the operation becomes the
+    batch, and the position and kind of the failing command are added, because that is what the
+    caller submitted.
+    """
+
+    return refusal(
+        refused.code,
+        "change_candidate",
+        f"command {index} ({command}) refused: {refused.detail}",
+        facts=RefusalFacts(
+            table=refused.table,
+            record_id=refused.record_id,
+            expected=refused.expected,
+            observed=refused.observed,
+        ),
+        next_action=refused.next_action,
+    )
+
+
+def batch_lineage_cycle_refusal(
+    revision_id: str, cycle_members: tuple[str, ...], *, family: bool
+) -> KnowledgeRefusal:
+    """Refuse a batch that leaves a lineage graph cyclic after it was applied.
+
+    The rule and its two branches are the shared ones; this restates the refusal for the batch
+    operation, because the caller submitted a batch and needs to know which graph came out cyclic.
+    """
+
+    relation = "family" if family else "invariant"
+    return refusal(
+        "lineage_cycle",
+        "change_candidate",
+        f"the completed batch leaves the {relation} lineage cyclic at revision {revision_id}",
+        facts=RefusalFacts(
+            table="family_predecessor" if family else "invariant_predecessor",
+            record_id=revision_id,
+            observed=", ".join(cycle_members),
+        ),
+        next_action=(
+            "Author an acyclic predecessor set; a lineage is a set of exact ancestors, so a "
+            "circular one describes no order at all. The transaction left no row behind."
+        ),
+    )
+
+
+def batch_command_refusal(
+    code: KnowledgeRefusalCode,
+    command: str,
+    *,
+    detail: str,
+    next_action: str,
+    facts: RefusalFacts | None = None,
+) -> KnowledgeRefusal:
+    """Build one batch-scoped refusal the per-record factories cannot express.
+
+    ``command`` names the failing command as ``"<index>:<kind>"``, so one argument carries both the
+    position the caller has to look at and the kind of command that was there.
+    """
+
+    position, _, kind = command.partition(":")
+    return refusal(
+        code,
+        "change_candidate",
+        f"command {position} ({kind}) refused: {detail}",
+        facts=facts,
+        next_action=next_action,
+    )
+
+
 @dataclass(frozen=True)
 class SqliteFailureContext:
     """Which operation and table a surviving SQLite failure belongs to.

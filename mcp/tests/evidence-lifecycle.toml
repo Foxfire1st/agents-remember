@@ -1050,6 +1050,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_family_revision.py",
   "mcp/tests/test_knowledge_graph_reads.py",
+  "mcp/tests/test_knowledge_label_operations.py",
   "mcp/tests/test_knowledge_relation_rules.py",
   "mcp/tests/test_knowledge_revision_seals.py",
   "mcp/tests/test_knowledge_store.py",
@@ -1078,4 +1079,28 @@ consumers = [
   "mcp/tests/test_knowledge_family_revision.py",
   "mcp/tests/test_knowledge_graph_reads.py",
   "mcp/tests/test_knowledge_relation_rules.py",
+]
+
+[[contract]]
+id = "candidate-batch-case-harness"
+owner = "mcp/tests/candidate_batch_test_support.py"
+evidence_node = "mcp/tests/test_candidate_batch_transaction.py::test_a_late_invalid_command_rolls_back_every_earlier_insert_in_the_batch"
+
+[[artifact]]
+path = "mcp/tests/candidate_batch_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "candidate-batch-case-harness"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "an admitted destination built through initialize_knowledge_namespace plus contexts resolved through resolve_candidate_context"
+introduced_by = "260915-KS-L3"
+lifetime = "permanent"
+permanence_rationale = "Every candidate-batch case needs one admitted candidate and one measured before/after dataset; a per-module copy would let the two modules disagree about how a refusal is measured, and the measurement is the evidence the requirement asks for."
+replacement_contract = "contract:candidate-batch-case-harness"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_candidate_batch_commands.py",
+  "mcp/tests/test_candidate_batch_transaction.py",
 ]

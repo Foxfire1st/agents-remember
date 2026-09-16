@@ -30,8 +30,10 @@ from agents_remember.memory.knowledge.refusals import (
     scope_refusal,
     stale_expected_row_refusal,
 )
+from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.graph import (
     FamilyMember,
+    FamilyMemberDraft,
     FamilyMembers,
     InvariantFamilies,
 )
@@ -56,6 +58,33 @@ _MEMBER_INSERT = (
 )
 
 
+def insert_family_member_draft(
+    store: OpenedKnowledgeStore, draft: FamilyMemberDraft, provenance: Authorship
+) -> FamilyMember:
+    """Insert one authored membership draft inside the caller's open transaction.
+
+    The row digest is computed here, from the admitted provenance, so a draft that arrived carrying
+    its own envelope cannot make the stored row digest something the caller chose.
+    """
+
+    member = FamilyMember(
+        repository_id=store.repository_id,
+        member_id=draft.member_id,
+        family_revision_id=draft.family_revision_id,
+        invariant_revision_id=draft.invariant_revision_id,
+        provenance=provenance,
+        row_digest=records.member_row_digest(
+            store.repository_id,
+            draft.member_id,
+            draft.family_revision_id,
+            draft.invariant_revision_id,
+            provenance,
+        ),
+    )
+    insert_family_member(store, member)
+    return member
+
+
 def create_family_member(
     store: OpenedKnowledgeStore, request: FamilyMemberRequest
 ) -> CreateFamilyMemberResult:
@@ -64,10 +93,10 @@ def create_family_member(
     denied = scope_refusal("create_family_member", store.repository_id, request.repository_id)
     if denied is not None:
         return _member_refusal(request, denied)
-    with store._exclusive_candidate_lock("create_family_member") as lock_refusal:
+    with store.exclusive_candidate_lock("create_family_member") as lock_refusal:
         if lock_refusal is not None:
             return _member_refusal(request, lock_refusal)
-        return store._within_immediate(
+        return store.within_immediate(
             lambda: _insert_member(store, request),
             on_refusal=lambda refused: _member_refusal(request, refused),
             failure=SqliteFailureContext(
@@ -83,9 +112,23 @@ def _insert_member(
 ) -> CreateFamilyMemberResult:
     member = _stored_member(store, request)
     existing = get_family_member(store, member.member_id)
+    if existing is not None and existing == member:
+        return _member_result(request, "no_change")
+    insert_family_member(store, member)
+    return _member_result(request, "created")
+
+
+def insert_family_member(store: OpenedKnowledgeStore, member: FamilyMember) -> None:
+    """Insert one membership inside the caller's open transaction.
+
+    Raises :class:`KnowledgeRefused` when the identity is already stored with a different payload,
+    when either endpoint is absent, or when the pair is already related: the declared unique tuple
+    means one pair of endpoints is related exactly once, so a second row for it would be a second
+    statement of the same fact rather than a new one.
+    """
+
+    existing = get_family_member(store, member.member_id)
     if existing is not None:
-        if existing == member:
-            return _member_result(request, "no_change")
         raise KnowledgeRefused(
             duplicate_relation_identity_refusal(
                 operation="create_family_member",
@@ -115,9 +158,8 @@ def _insert_member(
                 "stored membership",
             )
         )
-    store._write(_MEMBER_INSERT, records.member_row(member, store.repository_id))
-    store._require_referential_integrity()
-    return _member_result(request, "created")
+    store.write(_MEMBER_INSERT, records.member_row(member, store.repository_id))
+    store.require_referential_integrity()
 
 
 def remove_family_member(
@@ -128,10 +170,10 @@ def remove_family_member(
     denied = scope_refusal("remove_family_member", store.repository_id, request.repository_id)
     if denied is not None:
         return _member_removal_refusal(request, denied)
-    with store._exclusive_candidate_lock("remove_family_member") as lock_refusal:
+    with store.exclusive_candidate_lock("remove_family_member") as lock_refusal:
         if lock_refusal is not None:
             return _member_removal_refusal(request, lock_refusal)
-        return store._within_immediate(
+        return store.within_immediate(
             lambda: _delete_member(store, request),
             on_refusal=lambda refused: _member_removal_refusal(request, refused),
             failure=SqliteFailureContext(
@@ -145,31 +187,43 @@ def remove_family_member(
 def _delete_member(
     store: OpenedKnowledgeStore, request: RemoveFamilyMemberRequest
 ) -> RemoveFamilyMemberResult:
-    existing = get_family_member(store, request.member_id)
+    delete_family_member(store, request.member_id, request.expected_row_digest)
+    return RemoveFamilyMemberResult(
+        state="removed", repository_id=request.repository_id, member_id=request.member_id
+    )
+
+
+def delete_family_member(
+    store: OpenedKnowledgeStore, member_id: str, expected_row_digest: str
+) -> None:
+    """Remove one membership inside the caller's open transaction.
+
+    Raises :class:`KnowledgeRefused` when the row is not stored, or when it is not the row the
+    caller read: a stale caller must not delete whatever now carries the identity it remembered.
+    """
+
+    existing = get_family_member(store, member_id)
     if existing is None:
         raise KnowledgeRefused(
             missing_expected_row_refusal(
                 operation="remove_family_member",
                 table="family_member",
-                record_id=request.member_id,
+                record_id=member_id,
             )
         )
-    if existing.row_digest != request.expected_row_digest:
+    if existing.row_digest != expected_row_digest:
         raise KnowledgeRefused(
             stale_expected_row_refusal(
                 operation="remove_family_member",
                 table="family_member",
-                record_id=request.member_id,
-                expected=request.expected_row_digest,
+                record_id=member_id,
+                expected=expected_row_digest,
                 observed=existing.row_digest,
             )
         )
-    store._write(
+    store.write(
         "DELETE FROM family_member WHERE repository_id = ? AND member_id = ?",
-        (store.repository_id, request.member_id),
-    )
-    return RemoveFamilyMemberResult(
-        state="removed", repository_id=request.repository_id, member_id=request.member_id
+        (store.repository_id, member_id),
     )
 
 
@@ -285,8 +339,11 @@ def _member_removal_refusal(
 
 __all__ = [
     "create_family_member",
+    "delete_family_member",
     "find_membership_by_pair",
     "get_family_member",
+    "insert_family_member",
+    "insert_family_member_draft",
     "list_families_for_invariant_revision",
     "list_members",
     "remove_family_member",

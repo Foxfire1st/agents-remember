@@ -20,7 +20,7 @@ from a cycle while the write path still refuses it.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 
 import apsw
@@ -68,15 +68,60 @@ def family_edges(
     return _edges(connection, _FAMILY_EDGES_SQL, (repository_id, family_id))
 
 
+def declared_cycle(
+    *,
+    extras: Callable[[str, tuple[LineageEdge, ...]], Iterable[LineageEdge]],
+    edges: Iterable[LineageEdge],
+    declared: Iterable[LineageEdge],
+) -> CycleFinding | None:
+    """Return the cycle a batch's *own* declarations leave in the completed lineage graph.
+
+    ``edges`` are the stored edges and ``declared`` are the edges every command in one batch
+    declares. Each revision a declaration belongs to is judged by :func:`find_cycle`, and ``extras``
+    is how the caller supplies that revision's wider edge set -- the other declarations of the same
+    batch, and anything else the caller knows about the graph the completed request describes. The
+    rule that decides is therefore the shared one, and the wider edges genuinely reach it: a
+    batch-aware check that dropped them would be judging a graph nobody authored.
+
+    Only the declaring revisions are reported: a stored revision's position was settled when it was
+    written, and a cycle that merely passes through one is already refusable by the single-record
+    rule. Returns ``None`` when the completed graph leaves every declared revision acyclic.
+    """
+
+    declared_edges = tuple(declared)
+    if not declared_edges:
+        return None
+    for child in sorted({edge[0] for edge in declared_edges}):
+        predecessors = tuple(parent for member, parent in declared_edges if member == child)
+        finding = find_cycle(
+            candidate_id=child,
+            predecessors=predecessors,
+            edges=edges,
+            extra_predecessors=extras(child, declared_edges),
+        )
+        if finding is not None:
+            return finding
+    return None
+
+
 def find_cycle(
     *,
     candidate_id: str,
     predecessors: Iterable[str],
     edges: Iterable[LineageEdge],
+    extra_predecessors: Iterable[LineageEdge] = (),
 ) -> CycleFinding | None:
-    """Return the cycle inserting ``candidate_id`` would leave, or ``None`` when acyclic."""
+    """Return the cycle inserting ``candidate_id`` would leave, or ``None`` when acyclic.
 
-    graph = post_insert_graph(edges, candidate_id, predecessors)
+    ``extra_predecessors`` carries the edges of *other* revisions authored in the same batch, as
+    ``(child_revision_id, parent_revision_id)`` pairs. A batch may author several revisions at
+    once, so the graph a candidate has to be judged against is the stored graph plus every edge
+    the batch declares -- including edges between two revisions that do not exist yet. Judging
+    without them would let a batch write a cycle that neither revision could have written alone.
+    :func:`declared_cycle` is the caller that supplies them for a whole batch.
+    """
+
+    graph = post_insert_graph(edges, candidate_id, predecessors, extra_predecessors)
     cycle = cycle_vertices(graph)
     if candidate_id in cycle:
         return CycleFinding(members=tuple(sorted(cycle)), candidate_on_cycle=True)
@@ -110,12 +155,20 @@ def edges_on_cycle(
 
 
 def post_insert_graph(
-    edges: Iterable[LineageEdge], candidate_id: str, predecessors: Iterable[str]
+    edges: Iterable[LineageEdge],
+    candidate_id: str,
+    predecessors: Iterable[str],
+    extra_predecessors: Iterable[LineageEdge] = (),
 ) -> dict[str, set[str]]:
-    """Return the lineage graph as it would stand after inserting one candidate revision."""
+    """Return the lineage graph as it would stand after inserting one candidate revision.
+
+    ``extra_predecessors`` are the declared edges of other revisions authored in the same batch;
+    they enter the graph exactly as stored edges do, so a cycle formed entirely inside one batch is
+    visible to the same rule that catches a cycle against stored rows.
+    """
 
     graph: dict[str, set[str]] = {}
-    for child, parent in edges:
+    for child, parent in (*tuple(edges), *tuple(extra_predecessors)):
         graph.setdefault(child, set()).add(parent)
         graph.setdefault(parent, set())
     graph.setdefault(candidate_id, set())
