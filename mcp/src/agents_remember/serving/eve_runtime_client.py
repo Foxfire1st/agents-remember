@@ -88,6 +88,17 @@ def cancel_turn_body(turn_id: str | None) -> dict[str, object] | None:
     return {"turnId": turn_id} if turn_id is not None else None
 
 
+def session_control_body() -> None:
+    """The body eve's compaction and clear controls take: none at all.
+
+    Both routes are ID-addressed and accept no continuation token or options, and the documented
+    ``curl`` form sends no body. Sending one is not merely redundant: a strict schema would refuse a
+    field the route does not declare.
+    """
+
+    return None
+
+
 class EveRuntimeTransport(Protocol):
     """The narrow native seam the eve adapter and its deterministic fakes implement."""
 
@@ -109,6 +120,10 @@ class EveRuntimeTransport(Protocol):
     async def cancel_turn(
         self, session_id: str, *, turn_id: str | None
     ) -> Mapping[str, object]: ...
+
+    async def compact_session(self, session_id: str) -> Mapping[str, object]: ...
+
+    async def clear_session(self, session_id: str) -> Mapping[str, object]: ...
 
     def stream(self, session_id: str, *, start_index: int) -> AsyncIterator[EveStreamEvent]: ...
 
@@ -220,6 +235,34 @@ class EveRuntimeProcess:
         response = await self._post_json(
             eve_session_control_route(session_id, "cancel"),
             cancel_turn_body(turn_id),
+            expect=(ACCEPTED_STATUS, NO_ACTIVE_TURN_STATUS),
+        )
+        return response.body if isinstance(response.body, Mapping) else {}
+
+    async def compact_session(self, session_id: str) -> Mapping[str, object]:
+        """Ask the durable session to summarize its history in place.
+
+        Compaction may represent user-role instructions by a summary. System-role instructions stay
+        outside history, which is why the trusted capsule survives it.
+        """
+
+        response = await self._post_json(
+            eve_session_control_route(session_id, "compact"),
+            session_control_body(),
+            expect=(ACCEPTED_STATUS, NO_ACTIVE_TURN_STATUS),
+        )
+        return response.body if isinstance(response.body, Mapping) else {}
+
+    async def clear_session(self, session_id: str) -> Mapping[str, object]:
+        """Remove the session's model-message history in place, keeping its identity and system role.
+
+        Clear does not rerun instruction definitions or resolvers, so only a system-role instruction
+        can still govern the next call after it.
+        """
+
+        response = await self._post_json(
+            eve_session_control_route(session_id, "clear"),
+            session_control_body(),
             expect=(ACCEPTED_STATUS, NO_ACTIVE_TURN_STATUS),
         )
         return response.body if isinstance(response.body, Mapping) else {}

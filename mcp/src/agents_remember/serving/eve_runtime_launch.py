@@ -38,6 +38,14 @@ from agents_remember.kernel.eve_runtime_readiness import (
     MINIMUM_NODE_MAJOR as KERNEL_MINIMUM_NODE_MAJOR,
 )
 from agents_remember.models.conversations.control_wire import LaunchSpec
+from agents_remember.models.eve_capsule_carrier import (
+    BINDING_REF_ENV,
+    CAPSULE_DIGEST_ENV,
+    CAPSULE_PATH_ENV,
+    WORKSPACE_ROOT_ENV,
+    EveCapsuleCarrier,
+    carrier_digest,
+)
 from agents_remember.serving.eve_protocol import EveRuntimeLaunch
 from agents_remember.serving.harness_capabilities import LaunchKnobs
 
@@ -78,9 +86,6 @@ PROVIDER_NAME_ENV = "AR_EVE_PROVIDER_NAME"
 MODEL_ENV = "AR_EVE_MODEL"
 EFFORT_ENV = "AR_EVE_EFFORT"
 CONTEXT_WINDOW_ENV = "AR_EVE_CONTEXT_WINDOW_TOKENS"
-BINDING_REF_ENV = "AR_BINDING_REF"
-CAPSULE_DIGEST_ENV = "AR_CAPSULE_DIGEST"
-WORKSPACE_ROOT_ENV = "AR_WORKSPACE_ROOT"
 STATE_ROOT_ENV = "AR_EVE_STATE_ROOT"
 """Where each epoch's staged application directory is created.
 
@@ -123,16 +128,19 @@ class EveLaunchSelection:
 
 @dataclass(frozen=True)
 class EveWorkspaceBinding:
-    """The admitted workspace and AR binding a run is launched against.
+    """The admitted workspace and AR capsule binding a run is launched against.
 
-    The capsule/workspace leaf owns where these values come from. This adapter only carries them:
-    it applies the binding before the first model call and confines the runtime's file tools to
-    the named root.
+    The capsule/workspace seam owns where these values come from. This adapter carries them and
+    proves them before a process exists: a launch that declares any part of the binding must declare
+    all of it, and the carrier it names must be the exact bytes the declared digest covers. An
+    unbound launch stays unbound and is started without a binding, which the runtime refuses at its
+    session routes rather than executing without admitted instructions.
     """
 
     workspace_root: Path
     binding_ref: str | None = None
     capsule_digest: str | None = None
+    capsule_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -149,6 +157,12 @@ class EveRuntimeSpec:
     port: int
     env: Mapping[str, str] = field(default_factory=dict)
     node_executable: str | None = None
+    capsule: EveCapsuleCarrier | None = None
+    """The verified carrier this launch applies, or ``None`` for an unbound launch.
+
+    Present so a caller reports what was actually applied — the carrier digest, the seat and the
+    admitted workspace — rather than re-deriving it from the environment it just wrote.
+    """
 
 
 def resolve_runtime_root(
@@ -291,6 +305,9 @@ def resolve_runtime_spec(
     """
 
     environ = dict(env if env is not None else os.environ)
+    # Admission precedes the process: the carrier is verified, and the workspace is proven to be the
+    # admitted worktree, before an application root is staged or a port is reserved.
+    capsule = verify_capsule_binding(binding)
     source = resolve_runtime_root(env=environ)
     root = stage_runtime_root(source, state_root) if state_root is not None else source
     bound_port = port or choose_runtime_port()
@@ -299,6 +316,7 @@ def resolve_runtime_spec(
         root=root,
         port=bound_port,
         env=runtime_env,
+        capsule=capsule,
         launch=EveRuntimeLaunch(
             runtime_root=str(root),
             # The caller's interpreter choice is carried verbatim so a bad path fails at spawn with
@@ -329,6 +347,11 @@ def build_runtime_env(
     # would otherwise point the process at another application.
     child.pop(RUNTIME_ROOT_ENV, None)
     child.pop(NODE_EXECUTABLE_ENV, None)
+    # Nor may an ambient binding survive into a child the adapter did not bind: the runtime treats a
+    # complete set of these as an admitted capsule, so one inherited from the operator's shell would
+    # be a binding nobody verified. They are re-set below from the binding this launch declares.
+    for name in (BINDING_REF_ENV, CAPSULE_PATH_ENV, CAPSULE_DIGEST_ENV):
+        child.pop(name, None)
     child[MODEL_ENV] = selection.model_key
     child[EFFORT_ENV] = selection.effort
     child[PROVIDER_NAME_ENV] = selection.provider_name
@@ -342,6 +365,8 @@ def build_runtime_env(
         child[BINDING_REF_ENV] = binding.binding_ref
     if binding.capsule_digest is not None:
         child[CAPSULE_DIGEST_ENV] = binding.capsule_digest
+    if binding.capsule_path is not None:
+        child[CAPSULE_PATH_ENV] = str(binding.capsule_path)
     return child
 
 
@@ -403,13 +428,126 @@ def launch_spec_state_root(launch: LaunchSpec) -> Path:
 
 
 def launch_spec_binding(launch: LaunchSpec) -> EveWorkspaceBinding:
-    """Read the admitted workspace and binding one launch spec carries."""
+    """Read the admitted workspace and capsule binding one launch spec carries.
 
+    Only the launch spec is read: an ambient ``AR_BINDING_REF`` in the server's own environment is
+    not this launch's binding, and treating it as one would let the operator's shell decide which
+    seat a runtime runs as.
+    """
+
+    declared = launch.env.get(CAPSULE_PATH_ENV)
     return EveWorkspaceBinding(
         workspace_root=launch.cwd,
         binding_ref=launch.env.get(BINDING_REF_ENV),
         capsule_digest=launch.env.get(CAPSULE_DIGEST_ENV),
+        capsule_path=None if declared is None else Path(declared),
     )
+
+
+def verify_capsule_binding(binding: EveWorkspaceBinding) -> EveCapsuleCarrier | None:
+    """Prove the declared capsule before any process exists, or return ``None`` when unbound.
+
+    Six refusals, each naming its defect: a partly declared binding, a carrier that cannot be read, a
+    carrier whose bytes are not the declared digest, a carrier written for another binding, a carrier
+    whose admitted workspace is not this launch's workspace, and a workspace that is not the admitted
+    git worktree. Every one of them stops the launch, because a runtime that cannot be bound
+    correctly must not be given a model.
+    """
+
+    declared = {
+        BINDING_REF_ENV: binding.binding_ref,
+        CAPSULE_PATH_ENV: None if binding.capsule_path is None else str(binding.capsule_path),
+        CAPSULE_DIGEST_ENV: binding.capsule_digest,
+    }
+    present = {name: value for name, value in declared.items() if value}
+    if not present:
+        return None
+    if len(present) != len(declared):
+        missing = ", ".join(sorted(name for name in declared if name not in present))
+        raise HarnessControlError(
+            f"this eve launch declares part of an Agents Remember binding but not {missing}; a bound "
+            "launch names the binding reference, the carrier and its digest together"
+        )
+    assert binding.capsule_path is not None and binding.binding_ref and binding.capsule_digest
+    carrier_path = binding.capsule_path
+    try:
+        payload = carrier_path.read_bytes()
+    except OSError as exc:
+        raise HarnessControlError(
+            f"the declared eve capsule carrier {carrier_path} could not be read: {exc}"
+        ) from exc
+    observed = carrier_digest(payload)
+    if observed != binding.capsule_digest:
+        raise HarnessControlError(
+            f"the eve capsule carrier at {carrier_path} is {observed}, not the declared "
+            f"{binding.capsule_digest}; refusing to launch a runtime against a capsule that changed "
+            "after it was admitted"
+        )
+    carrier = EveCapsuleCarrier.from_bytes(payload)
+    carrier.require_identity(binding.binding_ref)
+    workspace_root = binding.workspace_root.resolve()
+    if Path(carrier.workspace.root).resolve() != workspace_root:
+        raise HarnessControlError(
+            f"the eve capsule carrier admits workspace {carrier.workspace.root}, but this launch "
+            f"runs in {workspace_root}; refusing to execute a capsule outside the worktree it was "
+            "compiled for"
+        )
+    _require_admitted_git_worktree(carrier, workspace_root)
+    return carrier
+
+
+def _require_admitted_git_worktree(carrier: EveCapsuleCarrier, workspace_root: Path) -> None:
+    """The workspace must be the admitted worktree, read from git metadata rather than assumed.
+
+    A directory that exists at the admitted path is not the admitted worktree: a sibling task's
+    checkout, a copied tree or a detached checkout all satisfy "the path exists" while executing
+    somewhere nobody admitted. The carrier records the branch and base commit the enclosure contract
+    declared, and this reads the workspace's own git metadata to compare.
+    """
+
+    head = _read_git_head(workspace_root)
+    if head is None:
+        raise HarnessControlError(
+            f"the admitted workspace {workspace_root} is not a git worktree; refusing to launch eve "
+            "outside the worktree the enclosure admitted"
+        )
+    kind, value = head
+    if kind == "branch":
+        if value != f"refs/heads/{carrier.workspace.work_branch}":
+            raise HarnessControlError(
+                f"the admitted workspace {workspace_root} is on {value}, not the admitted work "
+                f"branch {carrier.workspace.work_branch}; refusing to execute in another checkout"
+            )
+        return
+    if value != carrier.workspace.base_commit:
+        raise HarnessControlError(
+            f"the admitted workspace {workspace_root} is detached at {value}, not the admitted base "
+            f"commit {carrier.workspace.base_commit}; refusing to execute in another revision"
+        )
+
+
+def _read_git_head(workspace_root: Path) -> tuple[str, str] | None:
+    """One worktree's git HEAD as ``("branch", ref)`` or ``("detached", commit)``."""
+
+    dot_git = workspace_root / ".git"
+    metadata = dot_git
+    if dot_git.is_file():
+        try:
+            text = dot_git.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        marker = "gitdir:"
+        line = next((item for item in text.splitlines() if item.startswith(marker)), None)
+        if line is None:
+            return None
+        metadata = (workspace_root / line[len(marker) :].strip()).resolve()
+    try:
+        head = (metadata / "HEAD").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if head.startswith("ref:"):
+        return ("branch", head[len("ref:") :].strip())
+    return ("detached", head)
 
 
 def _require_application(root: Path, *, tried: tuple[Path, ...]) -> None:

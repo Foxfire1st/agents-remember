@@ -15,12 +15,21 @@ cursor and reconnect assertions meaningful:
 
 from __future__ import annotations
 
+import functools
 import json
+import tempfile
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from agents_remember.errors import HarnessAdapterDisconnectedError, HarnessControlError
 from agents_remember.serving.eve_protocol import EveStreamEvent, parse_event_frame
+from eve_capsule_test_support import (
+    FixtureCarrierRequest,
+    binding_env,
+    fixture_carrier_for,
+    repository_with_commit,
+)
 
 
 @dataclass(frozen=True)
@@ -321,3 +330,35 @@ def _boundary_data(boundary: str) -> Mapping[str, object]:
     if boundary == "session.failed":
         return {"code": "SESSION_FAILED", "message": "fixture session failure"}
     return {}
+
+
+@functools.lru_cache(maxsize=1)
+def fixture_launch_binding() -> dict[str, str]:
+    """A complete, verifiable capsule binding for the adapter's faked-transport launches.
+
+    The transport is a double here, but the launch path is the real one: it verifies the declared
+    carrier, its digest and the admitted worktree before a process would exist. A launch that
+    declared half a binding would therefore be refused before any protocol behaviour could be
+    observed, so the fixture builds the same four values a real launch carries.
+    """
+
+    root = Path(tempfile.mkdtemp(prefix="ar-eve-adapter-binding-"))
+    workspace = root / "workspace"
+    branch = "ar/unit-fixture"
+    base_commit = repository_with_commit(workspace, branch=branch)
+    carrier_path, digest = fixture_carrier_for(
+        FixtureCarrierRequest(
+            workspace=workspace,
+            carrier_directory=root / "capsule",
+            branch=branch,
+            base_commit=base_commit,
+            instructions=("UNIT FIXTURE CAPSULE instruction.\n",),
+            binding_ref="ar-binding:leaf-test",
+        )
+    )
+    return binding_env(
+        carrier_path=carrier_path,
+        digest=digest,
+        workspace_root=workspace,
+        binding_ref="ar-binding:leaf-test",
+    )

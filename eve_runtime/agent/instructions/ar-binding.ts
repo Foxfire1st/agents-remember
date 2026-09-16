@@ -1,28 +1,48 @@
 import { defineDynamic, defineInstructions } from "eve/instructions";
 
+import { loadVerifiedCapsule } from "../lib/capsule.js";
+import { verifyAdmittedWorkspace } from "../lib/git-workspace.js";
+
 /**
- * Apply the Agents Remember binding before the first model call of every session.
+ * State the Agents Remember identity this session runs under, before the first model call.
  *
- * The binding is a launch-time, adapter-owned value, never caller prose: the runtime echoes the
- * reference and capsule digest the operator handed it, and contributes nothing when the launch
- * carried no binding. The dynamic resolver runs at `session.started`, so the block is part of the
- * system context of the session's first model call.
+ * The identity comes from the session's authenticated context — the record eve created when the
+ * channel's AR binder verified this launch's capsule — and is re-checked against the carrier on
+ * disk before it is stated, so a user message cannot forge or move it. The block is a system-role
+ * instruction, which eve keeps outside conversation history and includes on every model call: it
+ * therefore survives turn boundaries, compaction and clear.
+ *
+ * A session that reaches this resolver already has a verified carrier, because the channel refuses
+ * the session route otherwise. The throws below are defect signals, not the policy gate: eve logs a
+ * throwing instruction resolver and leaves the wider static selection in place, which is precisely
+ * why mandatory material is enforced at the route instead of here.
  */
 export default defineDynamic({
   events: {
-    "session.started": () => {
-      const bindingRef = process.env.AR_BINDING_REF;
-      if (!bindingRef) {
-        return null;
+    "session.started": (_event, ctx) => {
+      const auth = ctx.session.auth.current;
+      if (auth === null || auth === undefined) {
+        throw new Error("this session carries no authenticated Agents Remember binding");
       }
-      const capsuleDigest = process.env.AR_CAPSULE_DIGEST ?? "<unbound>";
-      const workspaceRoot = process.env.AR_WORKSPACE_ROOT ?? "<unbound>";
+      const capsule = loadVerifiedCapsule(process.env);
+      verifyAdmittedWorkspace(capsule);
+      const authenticated = auth.attributes["bindingRef"];
+      if (authenticated !== capsule.identity.bindingRef) {
+        throw new Error(
+          `the authenticated binding ${String(authenticated)} is not the carrier's ` +
+            `${capsule.identity.bindingRef}`,
+        );
+      }
       return defineInstructions({
         content: [
           "<agents-remember-binding>",
-          `binding: ${bindingRef}`,
-          `capsule: ${capsuleDigest}`,
-          `workspace: ${workspaceRoot}`,
+          `role: ${capsule.identity.role}`,
+          `task: ${capsule.identity.taskReference}`,
+          `operation: ${capsule.identity.operation}`,
+          `binding: ${capsule.identity.bindingRef}`,
+          `capsule: ${capsule.carrierDigest} (semantic ${capsule.identity.semanticDigest})`,
+          `workspace: ${capsule.workspace.root}`,
+          `branch: ${capsule.workspace.workBranch}`,
           "</agents-remember-binding>",
         ].join("\n"),
       });

@@ -63,6 +63,13 @@ class FixturePlan:
             return 0
 
     def trace(self, index: int, request: dict) -> None:
+        """Record one request. ``messages`` is the provider's own view of the effective prompt.
+
+        The four original keys are unchanged, and ``messages`` was added beside them so a fixture can
+        read the first effective prompt — the system block and the durable history a model would
+        actually receive — instead of inferring it from the plan it wrote.
+        """
+
         if self.trace_path is None:
             return
         with self.trace_path.open("a", encoding="utf-8") as handle:
@@ -73,6 +80,7 @@ class FixturePlan:
                         "model": request.get("model"),
                         "stream": bool(request.get("stream")),
                         "messageCount": len(request.get("messages") or []),
+                        "messages": request.get("messages") or [],
                     }
                 )
                 + "\n"

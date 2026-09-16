@@ -644,6 +644,8 @@ consumers = [
   "mcp/tests/test_dispatch_brief.py",
   "mcp/tests/test_environment_reconstruction.py",
   "mcp/tests/test_eve_adapter.py",
+  "mcp/tests/test_eve_capsule_binding.py",
+  "mcp/tests/test_eve_capsule_runtime.py",
   "mcp/tests/test_eve_product_integration.py",
   "mcp/tests/test_eve_protocol.py",
   "mcp/tests/test_gate_certificate_authority.py",
@@ -708,6 +710,27 @@ consumers = [
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
+]
+
+[[artifact]]
+path = "mcp/tests/eve_capsule_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "mcp/src/agents_remember/application/eve_capsule/__init__.py"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "real git worktrees plus a real coordination tree and an authored composition corpus"
+introduced_by = "260915-CAPS-L7"
+lifetime = "permanent"
+permanence_rationale = "The capsule and workspace binding is only observable against real worktrees, a real enclosure and a real corpus."
+replacement_contract = "node:mcp/tests/test_eve_capsule_binding.py::test_carrier_carries_the_compiled_capsule_verbatim"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_eve_adapter.py",
+  "mcp/tests/test_eve_capsule_binding.py",
+  "mcp/tests/test_eve_capsule_runtime.py",
+  "mcp/tests/test_eve_product_integration.py",
 ]
 
 [[artifact]]

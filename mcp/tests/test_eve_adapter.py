@@ -45,6 +45,7 @@ from agents_remember.serving.eve_adapter import (
 from agents_remember.serving.eve_runtime_launch import (
     EFFORT_ENV,
     MODEL_ENV,
+    WORKSPACE_ROOT_ENV,
     launch_spec_selection,
 )
 from agents_remember.serving.harness_capabilities import SetResult
@@ -58,6 +59,7 @@ from eve_adapter_test_support import (
     FakeEveRuntime,
     FakeRuntimeFactory,
     FakeTurn,
+    fixture_launch_binding,
     raw_payload,
 )
 
@@ -77,17 +79,15 @@ def _identity() -> ControlIdentity:
 
 
 def _launch(model: str = "fixture-deterministic-1", effort: str = "provider-default") -> LaunchSpec:
+    """One launch for the faked transport, carrying the complete binding the launch path verifies."""
+
+    binding = fixture_launch_binding()
     return LaunchSpec(
         identity=_identity(),
         harness_id="eve",
-        cwd=Path("/tmp/ar-eve-workspace"),
+        cwd=Path(binding[WORKSPACE_ROOT_ENV]),
         argv=("eve",),
-        env={
-            MODEL_ENV: model,
-            EFFORT_ENV: effort,
-            "AR_WORKSPACE_ROOT": "/tmp/ar-eve-workspace",
-            "AR_BINDING_REF": "ar-binding:leaf-test",
-        },
+        env={MODEL_ENV: model, EFFORT_ENV: effort, **binding},
     )
 
 
