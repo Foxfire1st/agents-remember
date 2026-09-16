@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from agents_remember.memory.knowledge import anchors, families, memberships, realizations
 from agents_remember.memory.knowledge.refusals import RefusalFacts, refusal
 from agents_remember.memory.knowledge.store import (
     OpenedKnowledgeStore,
@@ -25,20 +26,56 @@ from agents_remember.memory.knowledge.store import (
 )
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.context import AdmittedKnowledgeDestination
+from agents_remember.models.knowledge.family import FamilyDraft, FamilyRevisionDraft
+from agents_remember.models.knowledge.graph import FamilyMemberDraft, RealizationClaimDraft
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.result import (
+    AnchorEndpoint,
+    CreateFamilyMemberResult,
+    CreateFamilyResult,
+    CreateFamilyRevisionResult,
+    CreateRealizationClaimResult,
     CreateRevisionResult,
+    CreateSourceAnchorResult,
+    FamilyMemberRequest,
+    FamilyRequest,
+    FamilyRevisionRequest,
+    RealizationClaimRequest,
+    RemoveFamilyMemberRequest,
+    RemoveFamilyMemberResult,
+    RemoveRealizationClaimRequest,
+    RemoveRealizationClaimResult,
+    RemoveSourceAnchorRequest,
+    RemoveSourceAnchorResult,
     RepositoryCreationResult,
     RevisionDraft,
     RevisionRequest,
+    SourceAnchorRequest,
 )
+from agents_remember.models.knowledge.source import SourceAnchorDraft
 
 __all__ = [
+    "admitted_anchor_removal",
+    "admitted_anchor_request",
+    "admitted_claim_removal",
+    "admitted_claim_request",
+    "admitted_family_request",
+    "admitted_family_revision_request",
     "admitted_knowledge_destination",
+    "admitted_member_removal",
+    "admitted_member_request",
     "admitted_revision_request",
+    "create_knowledge_anchor",
+    "create_knowledge_family",
+    "create_knowledge_family_member",
+    "create_knowledge_family_revision",
+    "create_knowledge_realization_claim",
     "create_knowledge_revision",
     "initialize_knowledge_namespace",
     "open_admitted_knowledge_store",
+    "remove_knowledge_anchor",
+    "remove_knowledge_family_member",
+    "remove_knowledge_realization_claim",
     "write_authorship",
 ]
 
@@ -161,5 +198,205 @@ def create_knowledge_revision(
     store = open_admitted_knowledge_store(destination)
     try:
         return store.create_revision(request)
+    finally:
+        store.close()
+
+
+# -- the family, anchor and relation half --------------------------------------------------
+#
+# The graph operations are module functions over one opened store rather than methods on it, so
+# these wrappers are how a caller reaches them without handling a namespace, a path or a
+# provenance envelope itself. Each one opens the admitted destination, runs one atomic operation
+# and closes the handle; nothing here decides authority, and nothing here writes a row directly.
+
+
+def admitted_family_request(
+    destination: AdmittedKnowledgeDestination, draft: FamilyDraft
+) -> FamilyRequest:
+    """Attach one authored family identity to its admitted destination."""
+
+    return FamilyRequest(
+        repository_id=destination.repository.repository_id,
+        family_id=draft.family_id,
+        display_label=draft.display_label,
+        provenance=destination.authorship,
+    )
+
+
+def admitted_family_revision_request(
+    destination: AdmittedKnowledgeDestination, draft: FamilyRevisionDraft
+) -> FamilyRevisionRequest:
+    """Attach one authored family revision aggregate to its admitted destination."""
+
+    return FamilyRevisionRequest(
+        repository_id=destination.repository.repository_id,
+        revision=draft.model_copy(update={"provenance": destination.authorship}),
+    )
+
+
+def admitted_anchor_request(
+    destination: AdmittedKnowledgeDestination, draft: SourceAnchorDraft
+) -> SourceAnchorRequest:
+    """Attach one authored source anchor to its admitted destination."""
+
+    return SourceAnchorRequest(
+        repository_id=destination.repository.repository_id,
+        anchor=draft,
+        provenance=destination.authorship,
+    )
+
+
+def admitted_member_request(
+    destination: AdmittedKnowledgeDestination, draft: FamilyMemberDraft
+) -> FamilyMemberRequest:
+    """Attach one authored membership to its admitted destination."""
+
+    return FamilyMemberRequest(
+        repository_id=destination.repository.repository_id,
+        member=draft.model_copy(update={"provenance": destination.authorship}),
+    )
+
+
+def admitted_claim_request(
+    destination: AdmittedKnowledgeDestination,
+    draft: RealizationClaimDraft,
+    anchor: AnchorEndpoint,
+) -> RealizationClaimRequest:
+    """Attach one authored realization claim and its anchor endpoint to its destination."""
+
+    return RealizationClaimRequest(
+        repository_id=destination.repository.repository_id,
+        claim=draft,
+        anchor=anchor,
+        provenance=destination.authorship,
+    )
+
+
+def admitted_anchor_removal(
+    destination: AdmittedKnowledgeDestination, anchor_id: str
+) -> RemoveSourceAnchorRequest:
+    """Address one explicit anchor removal to its admitted destination."""
+
+    return RemoveSourceAnchorRequest(
+        repository_id=destination.repository.repository_id, anchor_id=anchor_id
+    )
+
+
+def admitted_member_removal(
+    destination: AdmittedKnowledgeDestination, member_id: str, expected_row_digest: str
+) -> RemoveFamilyMemberRequest:
+    """Address one explicit membership removal, with its expected row digest, to its destination."""
+
+    return RemoveFamilyMemberRequest(
+        repository_id=destination.repository.repository_id,
+        member_id=member_id,
+        expected_row_digest=expected_row_digest,
+    )
+
+
+def admitted_claim_removal(
+    destination: AdmittedKnowledgeDestination, claim_id: str, expected_row_digest: str
+) -> RemoveRealizationClaimRequest:
+    """Address one explicit claim removal, with its expected row digest, to its destination."""
+
+    return RemoveRealizationClaimRequest(
+        repository_id=destination.repository.repository_id,
+        claim_id=claim_id,
+        expected_row_digest=expected_row_digest,
+    )
+
+
+def create_knowledge_family(
+    destination: AdmittedKnowledgeDestination, request: FamilyRequest
+) -> CreateFamilyResult:
+    """Insert one family identity into the admitted destination."""
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        return families.create_family(store, request)
+    finally:
+        store.close()
+
+
+def create_knowledge_family_revision(
+    destination: AdmittedKnowledgeDestination, request: FamilyRevisionRequest
+) -> CreateFamilyRevisionResult:
+    """Insert one family revision aggregate into the admitted destination."""
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        return families.create_family_revision(store, request)
+    finally:
+        store.close()
+
+
+def create_knowledge_anchor(
+    destination: AdmittedKnowledgeDestination, request: SourceAnchorRequest
+) -> CreateSourceAnchorResult:
+    """Insert one source anchor into the admitted destination, resolving nothing."""
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        return anchors.create_source_anchor(store, request)
+    finally:
+        store.close()
+
+
+def remove_knowledge_anchor(
+    destination: AdmittedKnowledgeDestination, request: RemoveSourceAnchorRequest
+) -> RemoveSourceAnchorResult:
+    """Remove one unreferenced source anchor from the admitted destination."""
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        return anchors.remove_source_anchor(store, request)
+    finally:
+        store.close()
+
+
+def create_knowledge_family_member(
+    destination: AdmittedKnowledgeDestination, request: FamilyMemberRequest
+) -> CreateFamilyMemberResult:
+    """Insert one membership into the admitted destination."""
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        return memberships.create_family_member(store, request)
+    finally:
+        store.close()
+
+
+def remove_knowledge_family_member(
+    destination: AdmittedKnowledgeDestination, request: RemoveFamilyMemberRequest
+) -> RemoveFamilyMemberResult:
+    """Remove one membership from the admitted destination by its expected row digest."""
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        return memberships.remove_family_member(store, request)
+    finally:
+        store.close()
+
+
+def create_knowledge_realization_claim(
+    destination: AdmittedKnowledgeDestination, request: RealizationClaimRequest
+) -> CreateRealizationClaimResult:
+    """Insert one realization claim, and any new anchor it carries, into the destination."""
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        return realizations.create_realization_claim(store, request)
+    finally:
+        store.close()
+
+
+def remove_knowledge_realization_claim(
+    destination: AdmittedKnowledgeDestination, request: RemoveRealizationClaimRequest
+) -> RemoveRealizationClaimResult:
+    """Remove one realization claim from the admitted destination by its expected row digest."""
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        return realizations.remove_realization_claim(store, request)
     finally:
         store.close()

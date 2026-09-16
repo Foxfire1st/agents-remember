@@ -9,6 +9,15 @@ approval decision and no Git resolution. Two properties are load-bearing:
 * **Insert-only.** There is no update or delete path for a revision, no upsert, and no
   standalone predecessor-append operation. A successor is a new revision naming its exact
   predecessors, and the database refuses the alternative even if a future caller forgets.
+
+The family, anchor, membership and realization half of the graph lives in the sibling modules
+:mod:`families`, :mod:`anchors`, :mod:`memberships` and :mod:`realizations` -- one module per
+authored concept, each owning its own reads -- and the acyclic lineage rule both lineage graphs
+apply lives in :mod:`lineage`. Those modules take this store as their first argument instead of
+adding two dozen more methods to one class: the connection, the resource lock and the transaction
+boundary stay owned here, and a caller reaches the graph through the module functions. The lock and
+transaction helpers below are this package's shared plumbing, not a private detail of the
+invariant operations.
 """
 
 from __future__ import annotations
@@ -23,7 +32,7 @@ import apsw
 
 from agents_remember.errors import LockCapabilityError
 from agents_remember.kernel.file_lock import exclusive_file_lock
-from agents_remember.memory.knowledge import records
+from agents_remember.memory.knowledge import lineage, records
 from agents_remember.memory.knowledge.connection import (
     create_or_validate_schema,
     discard_closed_wal_peers,
@@ -34,6 +43,7 @@ from agents_remember.memory.knowledge.connection import (
 from agents_remember.memory.knowledge.refusals import (
     KnowledgeRefused,
     KnowledgeStorageError,
+    SqliteFailureContext,
     candidate_busy_refusal,
     cross_invariant_predecessor_refusal,
     dangling_predecessor_refusal,
@@ -70,14 +80,6 @@ _REVISION_COLUMNS = (
     "repository_id, invariant_id, revision_id, display_version, statement, applicability, "
     "conditions, exclusions, state_at_origin, acceptance_ref, provenance, payload_digest"
 )
-
-# The declared lineage graph of one invariant, as (child, parent) pairs. The whole graph is
-# loaded, not a reachable slice: the structural cycle check has to see every edge, and the graph
-# is bounded by the revisions of one invariant.
-_LINEAGE_EDGES_SQL = """
-SELECT child_revision_id, parent_revision_id FROM invariant_predecessor
-WHERE repository_id = ? AND invariant_id = ?
-"""
 
 
 @dataclass(frozen=True)
@@ -193,6 +195,11 @@ class OpenedKnowledgeStore:
                 on_refusal=lambda refused: RepositoryCreationResult(
                     state="refused", repository=identity, refusal=refused
                 ),
+                failure=SqliteFailureContext(
+                    operation="create_repository",
+                    table="repository",
+                    record_id=identity.repository_id,
+                ),
             )
 
     def create_invariant(self, request: InvariantRequest) -> CreateInvariantResult:
@@ -207,6 +214,11 @@ class OpenedKnowledgeStore:
             return self._within_immediate(
                 lambda: self._insert_invariant(request),
                 on_refusal=lambda refused: self._invariant_refusal(request, refused),
+                failure=SqliteFailureContext(
+                    operation="create_invariant",
+                    table="invariant",
+                    record_id=request.invariant_id,
+                ),
             )
 
     def create_revision(self, request: RevisionRequest) -> CreateRevisionResult:
@@ -237,6 +249,11 @@ class OpenedKnowledgeStore:
                 lambda: self._insert_revision(request, revision),
                 on_refusal=lambda refused: self._revision_result(
                     request, "refused", refusal=refused
+                ),
+                failure=SqliteFailureContext(
+                    operation="create_invariant_revision",
+                    table="invariant_revision",
+                    record_id=revision.revision_id,
                 ),
             )
 
@@ -307,7 +324,7 @@ class OpenedKnowledgeStore:
         # cyclic state can only arise outside the operation -- the admission rule admits only
         # existing predecessors and refuses a self-referencing payload -- which is why the
         # refusal is demonstrated against a graph written by hand.
-        self._require_no_lineage_cycle(revision)
+        self._require_acyclic_lineage(revision)
         self._write(
             "INSERT INTO invariant_revision "
             "(repository_id, invariant_id, revision_id, display_version, statement, applicability, "
@@ -359,106 +376,44 @@ class OpenedKnowledgeStore:
           see a cycle the surrounding transaction has not created yet.
         * Only edges *on* a cycle through the revision are members. A revision that descends from a
           stored cycle without being on it is refused by the write path (see
-          :meth:`_require_no_lineage_cycle`) but has no members here, because no cycle passes
+          :meth:`_require_acyclic_lineage`) but has no members here, because no cycle passes
           through it.
         """
 
-        graph = self._post_insert_lineage(revision)
-        cycle_vertices = self._graph_cycle_vertices(graph)
-        if revision.revision_id not in cycle_vertices:
-            return ()
-        return tuple(
-            sorted(
-                child
-                for child, parents in graph.items()
-                if child in cycle_vertices and parents & cycle_vertices
-            )
+        return lineage.edges_on_cycle(
+            candidate_id=revision.revision_id,
+            predecessors=revision.predecessors,
+            edges=lineage.invariant_edges(
+                self.connection, revision.repository_id, revision.invariant_id
+            ),
         )
 
-    def _require_no_lineage_cycle(self, revision: InvariantRevision) -> None:
+    def _require_acyclic_lineage(self, revision: InvariantRevision) -> None:
         """Refuse when the post-insert lineage graph leaves the candidate on, or above, a cycle.
 
-        ``graph`` is the post-insert graph; ``cycle_vertices`` is every vertex of it that lies on a
-        cycle. Two branches reach the refusal, and the message names the one that applied: the
+        The rule itself, its two branches and the reason it is evaluated over the post-insert graph
+        live in :mod:`agents_remember.memory.knowledge.lineage`, which the family lineage applies
+        unchanged. Two branches reach the refusal and the message names the one that applied: the
         candidate is itself on a cycle, or a retained revision reachable from the candidate through
         predecessors is on one. The second branch is the wider reading of the rule and is why a
         revision whose own lineage is acyclic can still be refused.
         """
 
-        graph = self._post_insert_lineage(revision)
-        cycle_vertices = self._graph_cycle_vertices(graph)
-        if revision.revision_id in cycle_vertices:
+        finding = lineage.find_cycle(
+            candidate_id=revision.revision_id,
+            predecessors=revision.predecessors,
+            edges=lineage.invariant_edges(
+                self.connection, revision.repository_id, revision.invariant_id
+            ),
+        )
+        if finding is not None:
             raise KnowledgeRefused(
                 lineage_cycle_refusal(
                     revision.revision_id,
-                    tuple(sorted(cycle_vertices)),
-                    candidate_on_cycle=True,
+                    finding.members,
+                    candidate_on_cycle=finding.candidate_on_cycle,
                 )
             )
-        touched = self._descendants(revision.revision_id, graph) & cycle_vertices
-        if touched:
-            raise KnowledgeRefused(
-                lineage_cycle_refusal(
-                    revision.revision_id, tuple(sorted(touched)), candidate_on_cycle=False
-                )
-            )
-
-    def _post_insert_lineage(self, revision: InvariantRevision) -> dict[str, set[str]]:
-        """Return the lineage graph as it would stand after inserting ``revision``."""
-
-        graph: dict[str, set[str]] = {}
-        for child, parent in self._lineage_edges(revision):
-            graph.setdefault(child, set()).add(parent)
-            graph.setdefault(parent, set())
-        graph.setdefault(revision.revision_id, set())
-        for parent in revision.predecessors:
-            graph[revision.revision_id].add(parent)
-            graph.setdefault(parent, set())
-        return graph
-
-    def _lineage_edges(self, revision: InvariantRevision) -> tuple[tuple[str, str], ...]:
-        parameters = (revision.repository_id, revision.invariant_id)
-        return tuple(
-            (str(row[0]), str(row[1]))
-            for row in self.connection.execute(_LINEAGE_EDGES_SQL, parameters)
-        )
-
-    @staticmethod
-    def _graph_cycle_vertices(graph: dict[str, set[str]]) -> frozenset[str]:
-        """Return every vertex of ``graph`` that lies on a cycle.
-
-        A vertex lies on a cycle exactly when it belongs to a strongly connected component of more
-        than one vertex, or has an edge to itself. The components are found with Tarjan's
-        algorithm, kept in :class:`_CycleScan` so the traversal carries one object rather than a
-        dozen parallel maps. It is written here rather than as a recursive SQL walk because
-        SQLite's ``UNION`` deduplication changes which rows a recursive CTE revisits, so a
-        traversal written that way does not close a cycle.
-        """
-
-        scan = _CycleScan(graph)
-        cycle_vertices: set[str] = set()
-        for component in scan.components():
-            if len(component) > 1:
-                cycle_vertices.update(component)
-                continue
-            member = next(iter(component))
-            if member in graph.get(member, ()):
-                cycle_vertices.add(member)
-        return frozenset(cycle_vertices)
-
-    @staticmethod
-    def _descendants(origin: str, graph: dict[str, set[str]]) -> frozenset[str]:
-        """Transitive closure of ``graph`` from ``origin``, excluding ``origin`` itself."""
-
-        reachable: set[str] = set()
-        pending = [origin]
-        while pending:
-            for successor in graph.get(pending.pop(), ()):
-                if successor == origin or successor in reachable:
-                    continue
-                reachable.add(successor)
-                pending.append(successor)
-        return frozenset(reachable)
 
     def _require_referential_integrity(self) -> None:
         violations = list(self.connection.execute("PRAGMA foreign_key_check"))
@@ -522,13 +477,15 @@ class OpenedKnowledgeStore:
         action: Callable[[], ResultT],
         *,
         on_refusal: Callable[[KnowledgeRefusal], ResultT],
+        failure: SqliteFailureContext,
     ) -> ResultT:
         """Run one action inside a single immediate transaction over this store.
 
         A refusal rolls the whole transaction back, which is what makes a late lineage or
         referential failure leave no row behind. A storage defect is not converted: it
         propagates, because a defect the caller could "handle" as a refusal would be reported
-        as an expected outcome.
+        as an expected outcome. ``failure`` says which operation and table a *surviving* SQLite
+        failure belongs to, so the mapped refusal names the right row.
         """
 
         try:
@@ -537,7 +494,7 @@ class OpenedKnowledgeStore:
         except KnowledgeRefused as refused:
             return on_refusal(refused.refusal)
         except apsw.Error as error:
-            return on_refusal(map_sqlite_error(error, self.repository_id))
+            return on_refusal(map_sqlite_error(error, failure))
 
     def _write(self, statement: str, parameters: Sequence[Any]) -> None:
         """Run one parameterized write inside the open immediate transaction."""
@@ -597,75 +554,3 @@ def open_existing_knowledge_store(database_path: Path, repository_id: str) -> Op
         connection=connection,
         resource_lock_path=path,
     )
-
-
-class _CycleScan:
-    """One Tarjan strongly-connected-component scan over a lineage graph.
-
-    The traversal keeps its own work stack rather than recursing, so a long lineage chain does not
-    put the interpreter's recursion limit in the middle of a write.
-    """
-
-    def __init__(self, graph: dict[str, set[str]]) -> None:
-        self._graph = graph
-        self._index: dict[str, int] = {}
-        self._low_link: dict[str, int] = {}
-        self._component_stack: list[str] = []
-        self._on_stack: set[str] = set()
-        self._counter = 0
-        self._components: list[tuple[str, ...]] = []
-        self._pending: list[tuple[str, Iterator[str]]] = []
-
-    def components(self) -> list[tuple[str, ...]]:
-        """Return every component, each with its members in pop order."""
-
-        for root in sorted(self._graph):
-            if root in self._index:
-                continue
-            self._root = root
-            self._open(root)
-            self._pending.append((root, iter(sorted(self._graph[root]))))
-            self._drain()
-        return self._components
-
-    def _open(self, vertex: str) -> None:
-        self._index[vertex] = self._low_link[vertex] = self._counter
-        self._counter += 1
-        self._component_stack.append(vertex)
-        self._on_stack.add(vertex)
-
-    def _drain(self) -> None:
-        while self._pending:
-            vertex, successors = self._pending[-1]
-            successor = self._next_unvisited(successors)
-            if successor is not None:
-                self._open(successor)
-                self._pending.append((successor, iter(sorted(self._graph.get(successor, ())))))
-                continue
-            self._close(vertex)
-
-    def _next_unvisited(self, successors: Iterator[str]) -> str | None:
-        for successor in successors:
-            if successor not in self._index:
-                return successor
-        return None
-
-    def _close(self, vertex: str) -> None:
-        self._pending.pop()
-        for successor in self._graph.get(vertex, ()):
-            if successor in self._on_stack:
-                self._low_link[vertex] = min(self._low_link[vertex], self._index[successor])
-        if self._low_link[vertex] == self._index[vertex]:
-            self._components.append(self._pop_component(vertex))
-        if self._pending:
-            parent = self._pending[-1][0]
-            self._low_link[parent] = min(self._low_link[parent], self._low_link[vertex])
-
-    def _pop_component(self, vertex: str) -> tuple[str, ...]:
-        component: list[str] = []
-        while True:
-            member = self._component_stack.pop()
-            self._on_stack.discard(member)
-            component.append(member)
-            if member == vertex:
-                return tuple(component)

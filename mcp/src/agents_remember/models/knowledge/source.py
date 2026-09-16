@@ -20,7 +20,6 @@ from agents_remember.models.knowledge.base import (
     LABEL_MAX_LENGTH,
     PATH_MAX_LENGTH,
     PROSE_MAX_LENGTH,
-    UUID_PATTERN,
     KnowledgeModel,
 )
 
@@ -79,14 +78,22 @@ SourceLocator = Annotated[
 ]
 
 
-class SourceAnchor(KnowledgeModel):
-    """One attributed location in the selected repository's source."""
+class SourceAnchorDraft(KnowledgeModel):
+    """One attributed location proposed for a repository namespace, before its provenance.
 
-    anchor_id: UUID = Field(pattern=UUID_PATTERN)
+    The split from :class:`SourceAnchor` is what keeps provenance out of a caller's hands: a
+    draft carries only what the author decided -- where the location is and which source object
+    it names -- while the admitted application attaches the provenance envelope.
+    """
+
+    # A real ``UUID``, not a pattern-constrained string: Pydantic refuses to apply a string
+    # ``pattern`` constraint to its UUID schema, so the earlier spelling made every anchor
+    # unconstructible. The canonical stored text is derived from the parsed value at the storage
+    # boundary, exactly as it is for an authorship operation identity.
+    anchor_id: UUID
     path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
     source_identity: SourceIdentity
     locator: SourceLocator
-    provenance: Authorship
 
     @field_validator("path")
     @classmethod
@@ -113,3 +120,9 @@ class SourceAnchor(KnowledgeModel):
         if len(cleaned) > PROSE_MAX_LENGTH:
             raise ValueError("source path is longer than the stored limit")
         return cleaned
+
+
+class SourceAnchor(SourceAnchorDraft):
+    """One stored attributed location: the draft plus the provenance envelope that recorded it."""
+
+    provenance: Authorship

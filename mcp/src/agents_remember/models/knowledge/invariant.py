@@ -15,7 +15,6 @@ from __future__ import annotations
 from pydantic import Field, field_validator, model_validator
 
 from agents_remember.models.knowledge.authorship import (
-    ACCEPTED_STATE,
     PROPOSED_STATE,
     Authorship,
     KnowledgeState,
@@ -27,6 +26,7 @@ from agents_remember.models.knowledge.base import (
     SHA256_PATTERN,
     UUID_PATTERN,
     KnowledgeModel,
+    require_consistent_acceptance,
 )
 
 
@@ -107,11 +107,7 @@ class InvariantRevision(KnowledgeModel):
 
     @model_validator(mode="after")
     def _require_self_consistent_acceptance(self) -> InvariantRevision:
-        if self.state_at_origin == ACCEPTED_STATE:
-            if not (self.acceptance_ref or "").strip():
-                raise ValueError("accepted origin data requires a nonempty acceptance_ref")
-        elif self.acceptance_ref is not None:
-            raise ValueError("a proposed revision must not carry an acceptance_ref")
+        require_consistent_acceptance(self.state_at_origin, self.acceptance_ref)
         if self.revision_id in self.predecessors:
             raise ValueError("a revision must not declare itself as its own predecessor")
         return self

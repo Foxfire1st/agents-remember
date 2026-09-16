@@ -1,4 +1,4 @@
-"""The sealed revision payload and its digest.
+"""The sealed revision payloads and their digests.
 
 One function owns what a revision's identity seals. The payload is the complete authored
 semantic content -- statement, essential applicability, conditions, exclusions, origin state,
@@ -6,6 +6,11 @@ acceptance reference, the provenance envelope and the *sorted* predecessor set -
 digest excludes only itself. Because the predecessor set is inside the digest, an edge cannot
 be edited behind an existing sealed revision: adding or removing one changes the aggregate
 the revision identity stands for.
+
+A family revision is sealed by the same rule over its own payload: the joint guarantee, origin
+state, acceptance reference, provenance and sorted predecessor set. The two payloads carry
+different payload versions because they seal different field sets, so a digest can never be
+mistaken for the other object's identity.
 """
 
 from __future__ import annotations
@@ -13,11 +18,13 @@ from __future__ import annotations
 from typing import Any
 
 from agents_remember.kernel.canonical_json import sha256_digest
+from agents_remember.models.knowledge.family import FamilyRevision
 from agents_remember.models.knowledge.invariant import InvariantRevision
 
 # Bumped only when the sealed field set changes. A different payload version is a different
 # identity computation, so it is recorded rather than inferred from the presence of fields.
 REVISION_PAYLOAD_VERSION = "invariant-revision-payload/v1"
+FAMILY_REVISION_PAYLOAD_VERSION = "family-revision-payload/v1"
 
 
 def canonical_revision_payload(revision: InvariantRevision) -> dict[str, Any]:
@@ -59,3 +66,37 @@ def sealed_revision(revision: InvariantRevision) -> InvariantRevision:
     """
 
     return revision.model_copy(update={"payload_digest": revision_payload_digest(revision)})
+
+
+def canonical_family_revision_payload(revision: FamilyRevision) -> dict[str, Any]:
+    """Return the exact mapping a family revision's digest seals.
+
+    The joint guarantee is sealed here rather than anywhere a membership could reach it: a
+    membership cites the family *revision*, so the text it resolves is covered by that
+    revision's identity and cannot be changed behind it.
+    """
+
+    return {
+        "payload_version": FAMILY_REVISION_PAYLOAD_VERSION,
+        "repository_id": revision.repository_id,
+        "family_id": revision.family_id,
+        "revision_id": revision.revision_id,
+        "display_version": revision.display_version,
+        "joint_guarantee": revision.joint_guarantee,
+        "state_at_origin": revision.state_at_origin,
+        "acceptance_ref": revision.acceptance_ref,
+        "provenance": revision.provenance.model_dump(mode="json"),
+        "predecessors": sorted(revision.predecessors),
+    }
+
+
+def family_revision_payload_digest(revision: FamilyRevision) -> str:
+    """Return the SHA-256 hex digest sealing ``revision``'s authored payload."""
+
+    return sha256_digest(canonical_family_revision_payload(revision))
+
+
+def sealed_family_revision(revision: FamilyRevision) -> FamilyRevision:
+    """Return the family revision carrying its recomputed digest."""
+
+    return revision.model_copy(update={"payload_digest": family_revision_payload_digest(revision)})

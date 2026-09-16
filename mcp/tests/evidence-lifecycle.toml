@@ -1041,12 +1041,41 @@ owner = "knowledge-identity-branching-fixture"
 category = "unit-regression"
 fidelity = "in-process"
 cadence = "affected"
-source_version_or_generator = "the public knowledge-store operations: repository, invariant and revision creation through create_revision"
+source_version_or_generator = "the public knowledge-store operations: repository, invariant, invariant revision, family, family revision, source anchor, membership and realization claim creation"
 introduced_by = "260915-KS-L1"
 lifetime = "permanent"
-permanence_rationale = "Every fixture built outside the public operation would prove only that a hand-written row decodes; the branching identity scenario needs one shared builder so later leaves extend it instead of copying it."
+permanence_rationale = "Every fixture built outside the public operation would prove only that a hand-written row decodes; the branching identity scenario and the graph scenario it carries need one shared builder so later leaves extend it instead of copying it."
 replacement_contract = "contract:knowledge-identity-branching-fixture"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_knowledge_family_revision.py",
+  "mcp/tests/test_knowledge_graph_reads.py",
+  "mcp/tests/test_knowledge_relation_rules.py",
+  "mcp/tests/test_knowledge_revision_seals.py",
   "mcp/tests/test_knowledge_store.py",
+]
+
+[[contract]]
+id = "knowledge-graph-case-support"
+owner = "mcp/tests/knowledge_graph_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_family_revision.py::test_the_family_lineage_rule_matches_the_invariant_rule"
+
+[[artifact]]
+path = "mcp/tests/knowledge_graph_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "knowledge-graph-case-support"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the seeded request builders plus the raw family-revision and family-predecessor writes the graph cases need"
+introduced_by = "260915-KS-L2"
+lifetime = "permanent"
+permanence_rationale = "Three focused graph modules build the same requests and need the same two probes; a per-module copy would let one module's fixture drift from the others, and the raw write is the only way to construct the cyclic state the lineage rule is exercised against."
+replacement_contract = "contract:knowledge-graph-case-support"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_family_revision.py",
+  "mcp/tests/test_knowledge_graph_reads.py",
+  "mcp/tests/test_knowledge_relation_rules.py",
 ]

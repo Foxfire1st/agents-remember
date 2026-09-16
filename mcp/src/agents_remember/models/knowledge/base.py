@@ -37,6 +37,25 @@ class KnowledgeModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+def require_consistent_acceptance(
+    state_at_origin: KnowledgeState, acceptance_ref: str | None
+) -> None:
+    """Refuse an origin state whose acceptance reference contradicts it.
+
+    Accepted origin data is accepted because a named authority accepted it, so the reference is
+    required; a proposed revision that carried one would claim an acceptance that never happened.
+    Both rules are properties of the authored value, so every revision aggregate in this
+    vocabulary applies them at construction rather than only at the storage boundary.
+    """
+
+    if state_at_origin == ACCEPTED_STATE:
+        if not (acceptance_ref or "").strip():
+            raise ValueError("accepted origin data requires a nonempty acceptance_ref")
+        return
+    if acceptance_ref is not None:
+        raise ValueError("a proposed revision must not carry an acceptance_ref")
+
+
 def normalized_uuid(value: uuid.UUID | str) -> str:
     """Return the canonical stored spelling of an identifier.
 

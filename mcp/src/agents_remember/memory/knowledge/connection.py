@@ -9,6 +9,7 @@ rules.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import apsw
@@ -49,6 +50,22 @@ def apply_connection_contract(connection: apsw.Connection) -> None:
             "this SQLite build did not accept PRAGMA foreign_keys=ON; the store refuses to "
             "operate without enforced referential integrity"
         )
+
+
+def fetch_one(
+    connection: apsw.Connection,
+    statement: str,
+    parameters: Sequence[str | int | float | bytes | None] = (),
+) -> tuple[object, ...] | None:
+    """Return the one row a query selects, or ``None`` when it selects nothing.
+
+    Every reader in this package asks the same question -- the row, if there is one -- and one
+    owner for it keeps the "iterate once, then check for a row" shape identical everywhere
+    instead of repeated at each call site.
+    """
+
+    row = next(iter(connection.execute(statement, tuple(parameters))), None)
+    return None if row is None else tuple(row)
 
 
 def create_or_validate_schema(connection: apsw.Connection) -> KnowledgeSchemaIdentity:
