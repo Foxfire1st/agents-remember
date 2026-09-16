@@ -1027,3 +1027,40 @@ consumers = [
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
 ]
+
+[[artifact]]
+path = "mcp/tests/_handoff_clock.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "observer-notifier-handoff-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "caller-released virtual deadline clock over the real serving lifespan cadences"
+introduced_by = "260831-LOCR-L04"
+lifetime = "permanent"
+permanence_rationale = "The handoff proof needs one shared virtual cadence owner, so a released deadline is the only thing that advances the timeline instead of two real timers happening to interleave."
+replacement_contract = "node:mcp/tests/test_serving_notifier_handoff.py::ServingNotifierHandoffTests::test_the_default_phase_handoff_stays_inside_the_worst_phase_bound"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_lifecycle_owned_completion_relay.py",
+  "mcp/tests/test_serving_notifier_handoff.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_serving_handoff.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "observer-notifier-handoff-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "real serving lifespan composition around the observer-to-notifier handoff"
+introduced_by = "260831-LOCR-L04"
+lifetime = "permanent"
+permanence_rationale = "One shared composition enters the real serving lifespan with the real observer and notifier loops, so the handoff bound is proven over production wiring rather than a re-implemented loop."
+replacement_contract = "node:mcp/tests/test_serving_notifier_handoff.py::ServingNotifierHandoffTests::test_the_default_phase_handoff_stays_inside_the_worst_phase_bound"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_serving_notifier_handoff.py",
+]
