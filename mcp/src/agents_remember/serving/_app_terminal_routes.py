@@ -143,15 +143,23 @@ def _register_terminal_session_routes(app: FastAPI, runtime: _ServingRuntime) ->
     # body against the model -- the declaration is live enforcement here, not just schema.
     # ``exclude_unset`` reproduces ``TerminalCatalogEntry.to_json``'s conditional key set
     # exactly, instead of back-filling nulls the dashboard has never seen.
+    #
+    # This body is a PROJECTION of stored state and nothing else. Probing adapters, advancing
+    # evidence cursors, rewriting rows, and compacting belong to the liveness owner on its own
+    # clock; read traffic is optional and workload-dependent, so a request that produced state
+    # would make seat progress depend on somebody watching a browser. The handler is a plain
+    # ``def``, so FastAPI runs it in the threadpool: ``list()`` may wait for an in-flight
+    # sweep's batch to commit, but that wait never lands on the event loop, and what it returns
+    # is this process's CURRENT snapshot -- the in-flight batch buffer when this instance owns
+    # one, else the last committed atomic file. A caller may observe a snapshot between two
+    # observer ticks; making a request cannot make that snapshot newer.
     @app.get(
         "/api/terminal/sessions",
         response_model=TerminalSessionsResponse,
         response_model_exclude_unset=True,
     )
     def api_terminal_sessions() -> dict[str, Any]:
-        return {
-            "sessions": [_catalog_payload(entry) for entry in runtime.liveness_sweeper.refresh()]
-        }
+        return {"sessions": [_catalog_payload(entry) for entry in runtime.catalog.list()]}
 
     # The second FastAPI-validated route. Every key is required, so nothing is excluded.
     @app.get("/api/harnesses", response_model=DetectedHarnessesResponse)

@@ -47,6 +47,13 @@ from agents_remember.serving.heap_diag import (
     trim_malloc,
 )
 from agents_remember.serving.relay_death_watch import relay_death_watch_loop
+from agents_remember.serving.terminal_liveness import (
+    DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS,
+)
+from agents_remember.serving.terminal_observer_health import (
+    TerminalObserverHealthPayload,
+    TerminalObserverHealthPhase,
+)
 
 if TYPE_CHECKING:
     from agents_remember.kernel.primitives.runtime_config import (
@@ -68,6 +75,78 @@ async def _to_thread_drained_on_cancel[**Args, Result](
         with contextlib.suppress(Exception):
             await worker
         raise
+
+
+async def _observe_terminal_catalog(
+    runtime: _ServingRuntime, phase: TerminalObserverHealthPhase
+) -> object:
+    """One completed observer call, published to this serving lifetime's health accumulator.
+
+    ``LOCR-R17@v1``: the producer stage's own outcome IS the durable diagnostic, so the transition
+    and its write sit on the observer call itself rather than on any failure boundary. A steady
+    pass that SUCCEEDS has to be as observable as one that fails -- that asymmetry is the whole
+    point of the record -- and R11's ``except Exception`` owns containment only, so it publishes
+    nothing of its own.
+
+    ``phase`` is what separates a startup-prime failure from a steady-pass one, and it is the only
+    input the failure summary is selected from. Cancellation is deliberately not recorded: it
+    leaves the call incomplete, and ``CancelledError`` is not an ``Exception``.
+
+    The completion instant and the duration come from the runtime's serving clock, so one clock
+    answers "when did this attempt finish" for the record and for every age computed from it.
+    """
+
+    started_at = runtime.liveness_clock()
+    try:
+        result = await _to_thread_drained_on_cancel(runtime.liveness_sweeper.refresh)
+    except Exception as error:
+        runtime.observer_health.record_failure(error, phase=phase, started_at=started_at)
+        raise
+    runtime.observer_health.record_success(started_at=started_at)
+    return result
+
+
+async def _terminal_observation_loop(runtime: _ServingRuntime) -> None:
+    """The serving lifetime's steady-state owner of terminal catalog observation.
+
+    Adapter terminal evidence is produced outside the dashboard, so the recurring refresh must
+    not depend on an HTTP request, an open dashboard, or the agent notifier being enabled: the
+    catalog is shared truth for both the routes and the notifier. The sleep is taken AFTER each
+    attempt returns, which is what makes the cadence completion-relative -- a slow sweep delays
+    the next attempt instead of queueing nominal ticks, and two attempts can never overlap. Both
+    the one-second starting-row and the full-sweep rate limits stay inside
+    ``TerminalCatalogLivenessSweeper.refresh``; this loop owns only the attempt cadence.
+    """
+
+    while True:
+        try:
+            await _observe_terminal_catalog(runtime, "steady-state")
+        except Exception:
+            logger.exception("terminal catalog observation failed; retrying next interval")
+        await asyncio.sleep(DEFAULT_STARTING_SWEEP_INTERVAL_SECONDS)
+
+
+async def _prime_terminal_observation(runtime: _ServingRuntime) -> None:
+    """Observe the terminal catalog once BEFORE the projection prime and the recurring loops.
+
+    The catalog is shared truth for the projection, the HTTP routes, and the agent notifier, and
+    the recurring owner is only created later in startup, so without this prime the initial
+    projection could be built from a catalog no sweep has refreshed yet and initial truth would
+    depend on the first scheduled tick. The prime is the same canonical pass that owner runs --
+    same evidence readers, cursor rules, full-sweep rate limit, batch, and lock order, and a fresh
+    sweeper's prime is a due full sweep -- so no startup-only reader or direct catalog mutation
+    exists.
+
+    A raise is contained here because observation degradation must not become a serving outage:
+    the projection prime and every recurring loop still start, and the level-triggered owner
+    retries from the unchanged durable evidence on its first cadence. Cancellation is not
+    contained, so the surrounding drain still owns thread teardown before lifespan exit.
+    """
+
+    try:
+        await _observe_terminal_catalog(runtime, "startup")
+    except Exception:
+        logger.exception("terminal catalog observation prime failed; serving startup continues")
 
 
 async def _metrics_loop(config: McpRuntimeConfig, metrics_store: ProviderMetricsStore) -> None:
@@ -224,9 +303,18 @@ def _serving_lifespan(
         await asyncio.to_thread(
             compact_workspace_river, runtime.observer_root, now=runtime.liveness_clock()
         )
+        # One serving-lifetime health accumulator, and its initial record, BEFORE the prime: the
+        # first observation's own outcome is then the first transition published, and a failed
+        # initial write costs the counters nothing (the file simply stays absent, so the served
+        # key is omitted until a later legitimate observation write succeeds).
+        runtime.observer_health.start_lifetime()
+        # One pre-serve observation prime: it completes (or its recoverable failure is contained)
+        # before the projection is built and before any recurring loop exists.
+        await _prime_terminal_observation(runtime)
         await runtime.projector.prime()
         projection_task = asyncio.create_task(runtime.projector.run())
         metrics_task = asyncio.create_task(_metrics_loop(runtime.config, metrics_store))
+        terminal_observation_task = asyncio.create_task(_terminal_observation_loop(runtime))
         agent_notifier_task = asyncio.create_task(_agent_notifier_loop(runtime))
         relay_death_watch_task = asyncio.create_task(relay_death_watch_loop(runtime))
         river_compaction_task = asyncio.create_task(_workspace_river_compaction_loop(runtime))
@@ -239,6 +327,7 @@ def _serving_lifespan(
         if malloc_trim_enabled():
             optional.append(asyncio.create_task(_malloc_trim_loop()))
         background = [
+            terminal_observation_task,
             river_compaction_task,
             agent_notifier_task,
             relay_death_watch_task,
@@ -281,4 +370,25 @@ def _agent_notifier_heartbeat_payload(runtime: _ServingRuntime) -> AgentNotifier
         lastSweepDurationSeconds=(
             heartbeat.lastSweepDurationSeconds if heartbeat is not None else None
         ),
+    )
+
+
+def _terminal_observer_health_payload(
+    runtime: _ServingRuntime,
+) -> TerminalObserverHealthPayload | None:
+    """The producer stage's freshness at RESPONSE time, or ``None`` to omit the tail key.
+
+    Separate from the notifier heartbeat above because it answers a different question about a
+    different stage: the heartbeat says how recently the consumer swept, this says how recently
+    the producer OBSERVED and what that observation concluded. One combined bit is exactly the
+    ambiguity ``LOCR-R17@v1`` exists to remove.
+
+    The cutoff comes from the configured full-observation cadence, so browser traffic can never
+    refresh health, and the source is the persisted record only -- the read route never rewrites,
+    repairs, or creates it.
+    """
+
+    return runtime.observer_health.served_payload(
+        now=runtime.liveness_clock(),
+        sweep_interval_seconds=runtime.liveness_config.sweep_interval_seconds,
     )

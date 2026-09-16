@@ -140,13 +140,22 @@ def sync_target(target: SkillTarget) -> None:
 
 
 def replace_tree(source: Path, target: Path) -> None:
-    """Copy-then-swap so no crash window leaves a missing or partial target.
+    """Build a complete staged copy, then swap it in with two separate renames.
 
     The previous delete-then-copy left the target gutted when the copy (or the
     delete itself) failed mid-way — a real incident on a Windows host without
-    long-path support. The staged copy is built first; the live target is only
-    renamed aside once a complete replacement exists, and a re-run cleans any
-    leftovers from an earlier crash."""
+    long-path support. Staging first closes that window: a copy that fails before
+    the first rename leaves the live target exactly as it was, and a re-run prunes
+    leftovers from an earlier crash and rebuilds the staging copy from source.
+
+    The window between the two renames remains. The live target is renamed to
+    ``<target>.ar-sync-old`` before ``<target>.ar-sync-new`` is renamed onto the
+    live path, and those renames are separate operations: a failure after the
+    first leaves the live path absent, with the previous copy and the complete
+    replacement both still on disk. A re-run deletes both leftovers before it
+    copies again, so a second failure can consume the last copy of the old bytes.
+    Nothing here is atomic and nothing rolls back; only a later successful run
+    reconstructs the target from source."""
     staging = extended_length(target.parent / f"{target.name}.ar-sync-new")
     retired = extended_length(target.parent / f"{target.name}.ar-sync-old")
     target_ext = extended_length(target)

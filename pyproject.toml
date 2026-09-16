@@ -156,7 +156,14 @@ minversion = "9.0"
 # land; it is a ceiling, not a target. The 1500 figure is the developer's ruling, applied here as the
 # single declaration this file owns -- `mcp/pyproject.toml` carries no budget key.
 unit_case_budget = 1500
-integration_case_budget = 250
+#
+# 2026-09-16 -- integration 250 -> 300, from the merged 260831-LOCR line (its own raise,
+# 250 -> 300, authorized for its 28-requirement campaign), taken as the union of the two lines'
+# ceilings after the source line moved. The unit ceiling above stays this experiment's
+# developer-ruled 1500. Both axes take the higher of the two lines' values because the merged
+# tree carries both populations, and an over-budget population does not run partially:
+# `pytest_collection_finish` raises UsageError and the ENTIRE run executes zero tests.
+integration_case_budget = 300
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this
 # key to build its pytest step, so the wrapper no longer carries a second copy that can

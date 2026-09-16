@@ -96,7 +96,7 @@ def _require_non_blank(value: str, field: str) -> str:
     return value
 
 
-def _require_digest(value: str, field: str) -> str:
+def _require_digest(value: object, field: str) -> str:
     if not isinstance(value, str) or not value.startswith(SHA256_PREFIX):
         raise ValueError(f"{field} must be a {SHA256_PREFIX}<hex> digest")
     digits = value[len(SHA256_PREFIX) :]

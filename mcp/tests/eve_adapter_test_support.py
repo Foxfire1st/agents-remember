@@ -298,6 +298,13 @@ class FakeRuntimeFactory:
         return self.runtime
 
 
+def raw_payload(raw: Mapping[str, object], key: str) -> Mapping[str, object]:
+    """The nested object payload under one ``raw`` key, or an empty mapping when it is absent."""
+
+    value = raw.get(key)
+    return value if isinstance(value, Mapping) else {}
+
+
 def _current_turn_id(session: FakeEveSession) -> str:
     for event in reversed(session.events):
         data = event.get("data")

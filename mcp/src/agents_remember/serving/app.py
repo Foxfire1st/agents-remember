@@ -150,6 +150,7 @@ from agents_remember.serving.terminal_liveness import (
     TerminalLivenessActions,
     utc_now,
 )
+from agents_remember.serving.terminal_observer_health import TerminalObserverHealthPublisher
 from agents_remember.serving.terminal_paste import TerminalPaster
 
 if TYPE_CHECKING:
@@ -191,6 +192,10 @@ def _build_serving_runtime(
         terminal_catalog_path(config.coordination_root)
     )
     liveness_config = TerminalCatalogLivenessConfig()
+    # One serving clock for the sweeper, the runtime, and the observer-health record: a
+    # completion stamp and the age computed from it must come from the same source, and the
+    # replay seam substitutes all three together.
+    serving_clock = replay.now or utc_now
     interaction_synchronizer = HostedInteractionSynchronizer(observer_root(config))
     terminal_execution_registrar = collaborators.register_terminal_execution_evidence
     liveness_sweeper = TerminalCatalogLivenessSweeper(
@@ -221,7 +226,7 @@ def _build_serving_runtime(
         host=host,
         catalog=catalog,
         paster=collaborators.terminal_paster or TerminalPaster(),
-        liveness_clock=replay.now or utc_now,
+        liveness_clock=serving_clock,
         liveness_config=liveness_config,
         liveness_sweeper=liveness_sweeper,
         # Resolved ONCE at boot: the stamp that makes a stale serving process visible.
@@ -231,6 +236,10 @@ def _build_serving_runtime(
         # polling layer": every predicate reads TerminalCatalog/OperatorInboxStore/
         # ExpectationRowStore DIRECTLY, never the projection.
         heartbeat_store=AgentNotifierHeartbeatStore(observer_root(config)),
+        # The observer's own health owner, keyed to the same observer root and the same serving
+        # clock as the sweeper: the lifespan publishes its serving-lifetime accumulator through
+        # this object and the read routes resolve the persisted row through it.
+        observer_health=TerminalObserverHealthPublisher(observer_root(config), serving_clock),
         register_inbox_execution_evidence=collaborators.register_inbox_execution_evidence,
         interval=cadence.interval,
     )

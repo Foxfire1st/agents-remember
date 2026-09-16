@@ -459,6 +459,7 @@ permanence_rationale = "The helper owns reusable enclosure construction for adop
 replacement_contract = "node:mcp/tests/test_task_reopen.py::ReopenResetTests::test_contract_publish_failure_rolls_back_docs_and_landing"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_memory_mode_removal.py",
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
 ]
@@ -612,29 +613,100 @@ permanence_rationale = "The lockfile freezes the portable Node fixture runtime i
 replacement_contract = "node:mcp/tests/test_repository_certification_profiles.py::test_distinct_fixture_adapters_and_decoders_complete_the_declared_protocol"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_activation_admission_registered.py",
+  "mcp/tests/test_active_projector_singleflight.py",
+  "mcp/tests/test_agent_notifier_seat.py",
   "mcp/tests/test_agents_remember_quality.py",
+  "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_capsule_serving.py",
+  "mcp/tests/test_checkpoint_landing_end_to_end.py",
   "mcp/tests/test_clean_quality_executor.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
   "mcp/tests/test_code_certification_execution.py",
+  "mcp/tests/test_codex_capsule_delivery.py",
+  "mcp/tests/test_compact_content.py",
+  "mcp/tests/test_context_packet.py",
+  "mcp/tests/test_conversation_active_service.py",
+  "mcp/tests/test_conversation_authorization.py",
+  "mcp/tests/test_conversation_control_api.py",
+  "mcp/tests/test_conversation_control_attachments.py",
+  "mcp/tests/test_conversation_control_queue.py",
+  "mcp/tests/test_conversation_library_api.py",
+  "mcp/tests/test_conversation_library_cursor.py",
+  "mcp/tests/test_conversation_library_open.py",
+  "mcp/tests/test_conversation_native_ingestion.py",
+  "mcp/tests/test_cross_master_concurrency.py",
+  "mcp/tests/test_cross_store_lock_order.py",
+  "mcp/tests/test_dispatch_agent_ambient.py",
+  "mcp/tests/test_dispatch_brief.py",
   "mcp/tests/test_environment_reconstruction.py",
+  "mcp/tests/test_eve_adapter.py",
+  "mcp/tests/test_eve_product_integration.py",
+  "mcp/tests/test_eve_protocol.py",
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
+  "mcp/tests/test_harness_control_ipc.py",
+  "mcp/tests/test_harness_launch.py",
+  "mcp/tests/test_hosted_readiness.py",
+  "mcp/tests/test_inbox_rebinding_mechanics.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_layering.py",
+  "mcp/tests/test_leaf_doc_master_link_binding.py",
+  "mcp/tests/test_legacy_expectation_kinds_parse_only.py",
   "mcp/tests/test_lifecycle_operations.py",
+  "mcp/tests/test_lifecycle_owned_completion_relay.py",
+  "mcp/tests/test_lifecycle_owned_completion_relay_reviewer.py",
+  "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
   "mcp/tests/test_memory_mode_removal.py",
+  "mcp/tests/test_models.py",
   "mcp/tests/test_operation_certification_selection.py",
+  "mcp/tests/test_parked_external_await_separation.py",
+  "mcp/tests/test_pause_stop_only_end_to_end.py",
+  "mcp/tests/test_provider_containment.py",
+  "mcp/tests/test_provider_degradation.py",
   "mcp/tests/test_quality_gate_public_contract.py",
   "mcp/tests/test_quality_report_publication_security.py",
+  "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_retired_door_publication_fields.py",
+  "mcp/tests/test_serving.py",
+  "mcp/tests/test_serving_files.py",
+  "mcp/tests/test_serving_notifier_handoff.py",
+  "mcp/tests/test_serving_observation_loop.py",
+  "mcp/tests/test_serving_shutdown_drain.py",
+  "mcp/tests/test_serving_startup_prime.py",
+  "mcp/tests/test_serving_terminal_catalog_read.py",
   "mcp/tests/test_source_lineage.py",
+  "mcp/tests/test_spawn_agent_session.py",
+  "mcp/tests/test_state_signal_boundary_delivery.py",
+  "mcp/tests/test_state_signal_curator_wake.py",
+  "mcp/tests/test_state_signal_relay.py",
+  "mcp/tests/test_state_signal_restart_recovery.py",
+  "mcp/tests/test_state_signal_worker_wake.py",
+  "mcp/tests/test_structural_dispatch_recovery.py",
+  "mcp/tests/test_task_doc_review_public.py",
+  "mcp/tests/test_task_doc_structural_publication_l2.py",
+  "mcp/tests/test_task_document.py",
+  "mcp/tests/test_task_document_application_1.py",
+  "mcp/tests/test_task_document_master.py",
+  "mcp/tests/test_task_sprint_linkage.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
+  "mcp/tests/test_terminal_evidence_cursors.py",
+  "mcp/tests/test_terminal_evidence_mapping.py",
+  "mcp/tests/test_terminal_liveness.py",
+  "mcp/tests/test_terminal_liveness_deferred_work.py",
+  "mcp/tests/test_terminal_liveness_pane_authority.py",
+  "mcp/tests/test_terminal_liveness_registration_order.py",
+  "mcp/tests/test_terminal_observer_health.py",
+  "mcp/tests/test_tools.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
+  "mcp/tests/test_wire_vocabulary_exhaustiveness_boundary.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
+  "mcp/tests/test_worktree_status_terminal_next_tool.py",
 ]
 
 [[artifact]]
@@ -1028,4 +1100,133 @@ consumers = [
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_handoff_clock.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "observer-notifier-handoff-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "caller-released virtual deadline clock over the real serving lifespan cadences"
+introduced_by = "260831-LOCR-L04"
+lifetime = "permanent"
+permanence_rationale = "The handoff proof needs one shared virtual cadence owner, so a released deadline is the only thing that advances the timeline instead of two real timers happening to interleave."
+replacement_contract = "node:mcp/tests/test_serving_notifier_handoff.py::ServingNotifierHandoffTests::test_the_default_phase_handoff_stays_inside_the_worst_phase_bound"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_lifecycle_owned_completion_relay.py",
+  "mcp/tests/test_serving_notifier_handoff.py",
+]
+
+[[artifact]]
+path = "mcp/tests/_serving_handoff.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "observer-notifier-handoff-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "real serving lifespan composition around the observer-to-notifier handoff"
+introduced_by = "260831-LOCR-L04"
+lifetime = "permanent"
+permanence_rationale = "One shared composition enters the real serving lifespan with the real observer and notifier loops, so the handoff bound is proven over production wiring rather than a re-implemented loop."
+replacement_contract = "node:mcp/tests/test_serving_notifier_handoff.py::ServingNotifierHandoffTests::test_the_default_phase_handoff_stays_inside_the_worst_phase_bound"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_serving_notifier_handoff.py",
+]
+
+[[artifact]]
+path = "mcp/tests/eve_adapter_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "eve-session-adapter-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "local composition of the native eve session adapter over a fake runtime transport"
+introduced_by = "260915-CAPS-L6"
+lifetime = "permanent"
+permanence_rationale = "One shared fake-runtime composition keeps handshake, submission, queue and cancellation evidence on the real adapter instead of four re-implemented fakes."
+replacement_contract = "node:mcp/tests/test_eve_adapter.py::EveAdapterHandshakeTests::test_start_reports_protocol_readiness_and_settings_identity"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_eve_adapter.py",
+  "mcp/tests/test_eve_product_integration.py",
+]
+
+[[artifact]]
+path = "mcp/tests/eve_fixture_model.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "eve-fixture-model"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "deterministic eve runtime frame model served to the live native fixture"
+introduced_by = "260915-CAPS-L6"
+lifetime = "permanent"
+permanence_rationale = "The live native run needs one scripted vendor runtime whose frames are produced once and shared, so a reproduced failure is the model's and not the vendor's."
+replacement_contract = "node:mcp/tests/eve_fixture_model.py::serve"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/live_eve_native_fixture.py",
+]
+
+[[artifact]]
+path = "mcp/tests/live_eve_native_fixture.py"
+kind = "recording-generator"
+authority = "internal-canonical"
+owner = "eve-native-live-evidence"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "live native eve run over the AR-owned Node runtime, recorded as a JSON report"
+introduced_by = "260915-CAPS-L6"
+lifetime = "permanent"
+permanence_rationale = "The native-runtime claim needs one reproducible live run rather than a mock, and this script is the only surface that performs it. It is run directly and imported by no test module, so no consumer-scoped population exists to declare."
+replacement_contract = "node:mcp/tests/live_eve_native_fixture.py::main"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_eve_adapter.py",
+  "mcp/tests/test_eve_product_integration.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/codex_app_server_instruction_channels.json"
+kind = "recording"
+authority = "external-spec-derived"
+owner = "codex-app-server-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Codex app-server 0.151.0 installed JSON schema: the instruction-channel surface"
+introduced_by = "260915-CAPS-L5"
+lifetime = "versioned"
+permanence_rationale = "Retained while the pinned 0.151.0 instruction-channel schema remains the supported capsule-delivery input."
+replacement_contract = "node:mcp/tests/test_codex_capsule_delivery.py::test_instruction_channel_is_the_schema_supported_thread_open_field"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_codex_capsule_delivery.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/codex_app_server_model_page.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "codex-app-server-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Codex app-server 0.151.0 captured model/list page"
+introduced_by = "260915-CAPS-L5"
+lifetime = "versioned"
+permanence_rationale = "Retained while the pinned 0.151.0 model/list page shape remains the supported discovery input."
+replacement_contract = "node:mcp/tests/test_codex_capsule_delivery.py::test_a_launch_boundary_capsule_reaches_the_adapter_settings"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_codex_capsule_delivery.py",
 ]

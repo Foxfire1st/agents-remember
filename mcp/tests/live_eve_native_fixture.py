@@ -35,6 +35,7 @@ import socket
 import subprocess
 import sys
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -314,10 +315,11 @@ class LiveFixture:
         """Read translated events under one standing subscriber."""
 
         assert self.adapter is not None
+        adapter = self.adapter
         collected: list[AdapterEvent] = []
 
         async def consume() -> None:
-            async for event in self.adapter.subscribe():
+            async for event in adapter.subscribe():
                 collected.append(event)
                 self.native_events.append(
                     {
@@ -359,6 +361,18 @@ class LiveFixture:
         path = self.report_dir / name
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return path
+
+
+def _raw_payload(raw: Mapping[str, object], key: str) -> Mapping[str, object]:
+    """The nested object payload under one ``raw`` key, or an empty mapping when it is absent.
+
+    ``AdapterEvent.raw`` is ``Mapping[str, object]`` by contract, so one level of it is typed and
+    the next is not. Reading the nested level through this function keeps the fixture honest about
+    that: a missing key reads as empty instead of raising, which is what the assertions below want.
+    """
+
+    value = raw.get(key)
+    return value if isinstance(value, Mapping) else {}
 
 
 def _jsonable(value: Any) -> Any:
@@ -506,7 +520,7 @@ async def _run_real_attempt(
 
         await asyncio.wait_for(consume(), timeout=SCENARIO_TIMEOUT_SECONDS)
         transcript = [entry.text for event in events for entry in event.transcript]
-        outcome = events[-1].raw.get("terminalResult", {}).get("outcome") if events else None
+        outcome = _raw_payload(events[-1].raw, "terminalResult").get("outcome") if events else None
         result.update(
             {
                 "sessionId": (await adapter.snapshot()).vendor_session_id,
@@ -793,7 +807,7 @@ async def _scenario_cancel(fixture: LiveFixture) -> ScenarioResult:
     )
     settled = await fixture.pump(until="completed")
     outcomes = [
-        event.raw.get("terminalResult", {}).get("outcome")
+        _raw_payload(event.raw, "terminalResult").get("outcome")
         for event in settled
         if "terminalResult" in event.raw
     ]
@@ -852,6 +866,7 @@ async def _scenario_restart(fixture: LiveFixture, *, runtime_root: Path) -> Scen
     assert fixture.adapter is not None
     before = await fixture.adapter.snapshot()
     session_id = before.vendor_session_id
+    assert session_id is not None, "the stopped epoch must carry the durable session id"
     cursor = before.raw.get("streamCursor")
     await fixture.adapter.stop("graceful")
 

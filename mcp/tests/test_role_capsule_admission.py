@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 
 import pytest
 from agents_remember.application.role_capsules.compilation import compile_admitted_capsule
@@ -836,7 +836,7 @@ def _manifest_with(mutate) -> bytes:
 #: One entry per parser refusal branch: the mutation that triggers it and the status the
 #: parser must answer with. Kept as data so the ablation sweep can name the branch a
 #: disabled guard belongs to, and so a new guard without an entry is visible as a gap.
-MANIFEST_DEFECTS: dict[str, tuple[str, object]] = {
+MANIFEST_DEFECTS: dict[str, dict[str, Callable[[dict[str, Any]], object]]] = {
     "manifest-vocabulary-mismatch": {
         "schema-disagreement": lambda d: d.__setitem__("schema", "ar-role-capsule-composition/v99"),
         "role-order-disagrees-with-roles": lambda d: d["role_order"].pop(),

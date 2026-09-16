@@ -1961,5 +1961,22 @@
       "worktreeGroup": "sim-group"
     }
   ],
+  "terminalObserverHealth": {
+    "activeFailureCategory": "steady-state-refresh-failed",
+    "activeFailureSummary": "steady-state terminal observation failed",
+    "activeFailureType": "TimeoutError",
+    "ageSeconds": 3.0,
+    "attemptCount": 128,
+    "consecutiveFailureCount": 2,
+    "initialObservationSucceeded": true,
+    "lastAttemptAt": "2026-06-14T09:00:57+00:00",
+    "lastDurationSeconds": 12.5,
+    "lastSuccessAgeSeconds": 43.0,
+    "lastSuccessAt": "2026-06-14T09:00:17+00:00",
+    "schemaVersion": "ar-terminal-observer-health/v1",
+    "servingStartedAt": "2026-06-14T08:00:00+00:00",
+    "staleCutoffSeconds": 60.0,
+    "status": "degraded"
+  },
   "version": 1
 }

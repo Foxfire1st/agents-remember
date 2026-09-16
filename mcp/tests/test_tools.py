@@ -310,6 +310,13 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         stop's. The two are separate registered tools, not one verb with two names, and the
         pause's text has to say both things an agent needs: that it publishes nothing, and that
         the publication it must not reach for is named and separate.
+
+        The text also has to stay true about a master holding no selection. The pause used to
+        refuse one with ``atomic-series-activation-selection-missing`` and now reports it as
+        already stopped, so the removed refusal's own identifier is pinned out of the registered
+        description -- advertising a refusal the verb no longer performs describes a tool the
+        caller does not have. The release the description does still advertise is pinned in
+        beside it, so that absence cannot be satisfied by an emptied-out text.
         """
 
         server = FastMCP("pause-surface-probe")
@@ -327,6 +334,11 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         self.assertIn("Publishes NOTHING", pause)
         self.assertIn("separate, explicitly requested PUBLICATION", pause)
         self.assertIn("worktree_checkpoint_landing", pause)
+        # No advertised refusal for the state the pause now answers, beside the release the
+        # pause does still perform.
+        self.assertNotIn("atomic-series-activation-selection-missing", pause)
+        self.assertNotIn("selection-missing", pause)
+        self.assertIn("releases the master's atomic-series activation selection", pause)
 
 
 def _permissive_registration_config() -> McpRuntimeConfig:

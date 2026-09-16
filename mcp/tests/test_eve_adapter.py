@@ -11,6 +11,7 @@ directions: the behavior that must happen and the failure it would otherwise hid
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import contextlib
 import sys
@@ -57,6 +58,7 @@ from eve_adapter_test_support import (
     FakeEveRuntime,
     FakeRuntimeFactory,
     FakeTurn,
+    raw_payload,
 )
 
 REQUIRED_CAPABILITY_COUNT = 7
@@ -281,7 +283,7 @@ class EveAdapterHandshakeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(harness.handshake.snapshot.vendor_session_id)
             self.assertEqual(harness.runtime.health_calls, 1)
             self.assertEqual(
-                harness.handshake.snapshot.raw["eveHealth"]["workflowId"],
+                raw_payload(harness.handshake.snapshot.raw, "eveHealth")["workflowId"],
                 "workflow//eve//workflowEntry",
             )
             self.assertEqual(
@@ -459,7 +461,7 @@ class EveAdapterSubmissionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(results[0].vendor_correlation_id, "call_1")
             self.assertIn("abc", results[0].text)
 
-            terminal = events[-1].raw["terminalResult"]
+            terminal = raw_payload(events[-1].raw, "terminalResult")
             self.assertEqual(terminal["outcome"], "completed")
             snapshot = await harness.snapshot()
             self.assertEqual(snapshot.control, "ready")
@@ -846,7 +848,7 @@ class EveAdapterInterruptTests(unittest.IsolatedAsyncioTestCase):
             )
             events = harness.since(mark)
             outcomes = [
-                event.raw["terminalResult"]["outcome"]
+                raw_payload(event.raw, "terminalResult")["outcome"]
                 for event in events
                 if "terminalResult" in event.raw
             ]
@@ -971,7 +973,7 @@ class EveAdapterSessionCompletionTests(unittest.IsolatedAsyncioTestCase):
                 session_id, FakeTurn(number=0, message="done", boundary="session.completed")
             )
             events = harness.since(mark)
-            self.assertEqual(events[-1].raw["terminalResult"]["outcome"], "completed")
+            self.assertEqual(raw_payload(events[-1].raw, "terminalResult")["outcome"], "completed")
             self.assertIn("session.completed", str(events[-1].raw["eveEvent"]))
             with self.assertRaises(HarnessAdapterBusyError):
                 await harness.prepare("req-2", sequence=2)
@@ -1015,7 +1017,7 @@ class EveAdapterSessionCompletionTests(unittest.IsolatedAsyncioTestCase):
             )
             events = harness.since(mark)
             failures = [event for event in events if event.kind == "failed"]
-            self.assertEqual(failures[-1].raw["terminalResult"]["outcome"], "failed")
+            self.assertEqual(raw_payload(failures[-1].raw, "terminalResult")["outcome"], "failed")
             self.assertEqual(events[-1].kind, "completed")
             receipt = await harness.submit("req-2", "retry", sequence=2)
             self.assertEqual(receipt.acceptance, "immediate")
@@ -1124,6 +1126,24 @@ class EveAdapterIsolationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("never opened", str(events[-1].raw["eveEvent"]))
         finally:
             await harness.aclose()
+
+
+LIVE_EVIDENCE_ENTRY_POINT = Path(__file__).parent / "live_eve_native_fixture.py"
+
+
+def test_the_live_native_evidence_entry_point_keeps_its_documented_surface() -> None:
+    """The only surface that runs the native eve runtime end to end must stay runnable.
+
+    Losing this script would silently remove the live native evidence the adapter's native claims
+    rest on, so the case fails if the entry point disappears, stops parsing as Python, loses its
+    ``main`` entry, or drops the ``--report-dir`` flag the recorded runs are cited with.
+    """
+
+    source = LIVE_EVIDENCE_ENTRY_POINT.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(LIVE_EVIDENCE_ENTRY_POINT))
+    top_level_functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+    assert "main" in top_level_functions
+    assert '"--report-dir"' in source
 
 
 if __name__ == "__main__":
