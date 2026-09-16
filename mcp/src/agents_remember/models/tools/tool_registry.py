@@ -73,6 +73,11 @@ from agents_remember.models.providers import (
 )
 from agents_remember.models.queue.closeout_queue import CloseoutQueueResponse
 from agents_remember.models.read_files import ReadArFilesResponse
+from agents_remember.models.role_capsule_resources import (
+    RoleCapsuleResponse,
+    SkillCatalogListResponse,
+    SkillCatalogReadResponse,
+)
 from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
 from agents_remember.models.skills import SkillsInstallResponse
 from agents_remember.models.structural.agent import (
@@ -228,6 +233,9 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "orchestration_nudge_manager": OrchestrationNudgeManagerResponse,
     "message_parent": MessageParentResponse,
     "message_child": MessageChildResponse,
+    "role_capsule_compile": RoleCapsuleResponse,
+    "skill_catalog_list": SkillCatalogListResponse,
+    "skill_catalog_read": SkillCatalogReadResponse,
 }
 
 PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {

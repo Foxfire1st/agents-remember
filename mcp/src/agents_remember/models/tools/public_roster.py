@@ -83,4 +83,8 @@ PUBLIC_TOOLS = (
     "gate_list",
     "message_parent",
     "message_child",
+    # The capsule operation and the skill discovery/read surface.
+    "role_capsule_compile",
+    "skill_catalog_list",
+    "skill_catalog_read",
 )

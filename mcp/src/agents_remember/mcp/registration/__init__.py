@@ -19,6 +19,7 @@ from mcp.server.fastmcp import FastMCP
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
 from .benchmarks import register_benchmark_tools
+from .capsule_serving import register_capsule_and_skill_tools
 from .closeout import register_closeout_tools
 from .code_search import register_code_search_tools
 from .core import register_core_tools
@@ -46,6 +47,7 @@ TOOL_REGISTRARS: tuple[ToolRegistrar, ...] = (
     register_lifecycle_tools,
     register_gate_tools,
     register_orchestration_tools,
+    register_capsule_and_skill_tools,
 )
 
 __all__ = ["TOOL_REGISTRARS", "ToolRegistrar"]
