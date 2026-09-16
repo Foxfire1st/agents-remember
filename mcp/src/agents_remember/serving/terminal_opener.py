@@ -51,10 +51,12 @@ from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.harnesses import (
     Which,
     find_harness,
+    harness_detection_detail,
     invalid_effort_detail,
     invalid_model_detail,
     is_detected,
     knob_argv,
+    terminal_launch_detail,
     unknown_harness_detail,
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
@@ -140,6 +142,17 @@ class TerminalLaunchRequest:
     """The EFFECTIVE registry ids resolve against; ``None`` means the builtin defaults."""
     env: Mapping[str, str] | None = None
     """Spawn env seeded at creation -- the L2 knob-injection seam, and the carrier of AR_SPAWN_ROLE."""
+    session_backend: bool = False
+    """Whether this open is spawning a session BACKEND rather than launching a terminal program.
+
+    A harness kind always runs behind the control runner, so the process this path spawns is the
+    runner (which starts the harness's own runtime); the harness ``argv`` is data the runner carries
+    to its adapter. For a PATH TUI the two coincide, but for a harness whose runtime is an
+    application -- eve -- there is no program to exec at all, and the launch must refuse rather than
+    report an argv nothing can spawn. The seat-spawning caller states which question it is asking;
+    the dashboard's terminal-open route deliberately does not, so opening eve as a terminal refuses
+    by name instead of silently producing an impossible command.
+    """
     knobs: SpawnKnobs = field(default_factory=SpawnKnobs)
     control: ControlRunnerRequest = field(default_factory=ControlRunnerRequest)
     flag_model: str | None = None
@@ -266,8 +279,7 @@ def resolve_terminal_launch(launch: TerminalLaunchRequest) -> LaunchCommand:
         found = find_harness(harness, registry=launch.harnesses)
         if found is None:
             raise ValueError(unknown_harness_detail(harness, registry=launch.harnesses))
-        if not is_detected(found, which=launch.which):
-            raise ValueError(f"harness not installed: {harness!r}")
+        _require_launchable_harness(found, launch)
         model = launch.flag_model
         effort = launch.flag_effort
         for detail in (
@@ -282,6 +294,29 @@ def resolve_terminal_launch(launch: TerminalLaunchRequest) -> LaunchCommand:
             argv += [str(arg) for arg in launch.knobs.launch_args]
         return LaunchCommand(launch.workspace_root, tuple(argv))
     raise ValueError(f"unknown terminal kind: {launch.kind!r}")
+
+
+def _require_launchable_harness(found: Harness, launch: TerminalLaunchRequest) -> None:
+    """Refuse a harness this launch cannot start, with the reason that belongs to ITS question.
+
+    Two questions, and they are not the same one.
+
+    A terminal OPEN execs ``argv[0]``, so what it needs is a program that exists. A runtime-probed
+    harness is detected -- its runtime can start -- and still has nothing for this path to launch,
+    so it refuses by name instead of resolving to an impossible command.
+
+    A session BACKEND spawn starts the control runner, which owns the harness's own runtime; the
+    harness ``argv`` is data the runner carries to its adapter, so the question there is the
+    detection one: the runtime has to be startable, not be a PATH program.
+    """
+
+    if launch.session_backend:
+        if not is_detected(found, which=launch.which):
+            raise ValueError(harness_detection_detail(found, which=launch.which))
+        return
+    unavailable = terminal_launch_detail(found, which=launch.which)
+    if unavailable is not None:
+        raise ValueError(unavailable)
 
 
 def _terminal_label(kind: TerminalSessionKind, harness: str | None, fallback: str) -> str:

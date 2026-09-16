@@ -146,7 +146,16 @@ minversion = "9.0"
 # Measured cost on this checkout at the raise:
 # integration 206 cases + 31 subtests in 63.9s; unit 833 cases + 155 subtests in 53.9s; combined
 # 1039 cases + 186 subtests in 105.6s, exit 0.
-unit_case_budget = 1000
+#
+# 2026-09-16 -- unit 1000 -> 1500, developer-ruled ("1200 is too few"), superseding the earlier
+# 1200 figure; integration stays 250. The population reached 1119 during the role-capsules
+# experiment (1053 at the experiment's base plus 66 delivered cases in three new leaf modules),
+# which put the DEFAULT selection over the ceiling: `pytest mcp/tests` refused at collection with
+# "unit suite has 1119 cases; budget is 1000", so no leaf in the series could obtain a clean budget
+# signal. The raise restores a working default selection and leaves headroom for the leaves still to
+# land; it is a ceiling, not a target. The 1500 figure is the developer's ruling, applied here as the
+# single declaration this file owns -- `mcp/pyproject.toml` carries no budget key.
+unit_case_budget = 1500
 integration_case_budget = 250
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this

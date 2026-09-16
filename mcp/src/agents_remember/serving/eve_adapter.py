@@ -61,7 +61,6 @@ from agents_remember.serving.eve_runtime_launch import (
 )
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
-    EffortOption,
     ModelCapability,
     SetResult,
 )
@@ -97,11 +96,13 @@ REASONING_EFFORTS = (
     "high",
     "xhigh",
 )
-"""The provider-agnostic reasoning levels eve documents for ``agent.ts``.
+"""The reasoning levels eve documents for ``agent.ts``, used ONLY to validate a LAUNCH selection.
 
-eve resolves which of them the selected model and provider actually honour, so this adapter
-advertises exactly the documented vocabulary and validates a session selection against it rather
-than inventing a per-model menu it cannot observe.
+This is not a catalog. The pinned application reads no effort value, so nothing here is advertised
+as a selectable option: the set exists so that a settings-owned selection naming an undocumented
+level is refused at launch instead of being passed through as if it meant something. A launch that
+names a documented level still runs identically, which is why the capability catalog publishes no
+effort options at all.
 """
 
 EVE_MODEL_UNKNOWN_DETAIL = (
@@ -685,6 +686,18 @@ class EveSessionAdapter:
         return launch_spec_selection(launch)
 
     def _capability_snapshot(self, selection: EveLaunchSelection) -> CapabilitySnapshot:
+        """The catalog this runtime can actually back.
+
+        The model is real: it is the value the runtime compiles into its provider handle. The effort
+        axis is not. The pinned application reads no effort value at all -- no ``AR_EVE_EFFORT``
+        consumer exists under ``eve_runtime/agent``, and the adapter's launch vocabulary carries the
+        selection as environment provenance rather than as a knob the runtime honours -- so an
+        effort menu would advertise a control whose every value produces the same run. The catalog
+        therefore offers no effort options and does not claim effort support; the launch selection
+        is still REPORTED (``selected_effort``) because it is the configuration the runtime was
+        started under, which is a fact rather than a menu.
+        """
+
         return CapabilitySnapshot(
             models=(
                 ModelCapability(
@@ -692,20 +705,9 @@ class EveSessionAdapter:
                     display_name=selection.model_key,
                     description=EVE_MODEL_UNKNOWN_DETAIL,
                     resolved_model=selection.model_key,
-                    supports_effort=True,
-                    effort_options=tuple(
-                        EffortOption(
-                            key=effort,
-                            display_name=effort,
-                            launch_settable=True,
-                            # A live session cannot change either axis on a compiled agent, so
-                            # the catalog tells the truth instead of offering a control that
-                            # silently does nothing.
-                            session_settable=False,
-                        )
-                        for effort in REASONING_EFFORTS
-                    ),
-                    default_effort="provider-default",
+                    supports_effort=False,
+                    effort_options=(),
+                    default_effort=None,
                     is_default=True,
                     selectable=True,
                     provider=selection.provider_name,

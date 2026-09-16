@@ -38,7 +38,6 @@ from agents_remember.models.conversations.control_wire import (
 from agents_remember.serving.eve_adapter import (
     DEFAULT_EVE_ADAPTER_LIMITS,
     EVE_ADAPTER_ID,
-    REASONING_EFFORTS,
     EveAdapterLimits,
     EveSessionAdapter,
 )
@@ -332,7 +331,11 @@ class EveAdapterHandshakeTests(unittest.IsolatedAsyncioTestCase):
 class EveAdapterCapabilityTests(unittest.IsolatedAsyncioTestCase):
     """Model and effort controls report what eve can actually do, without a silent change."""
 
-    async def test_advertise_reports_the_launch_selection_and_the_documented_efforts(self) -> None:
+    async def test_advertise_reports_the_launch_selection_and_no_unbacked_effort_menu(self) -> None:
+        # The catalog publishes the model the runtime compiles and REPORTS the launch's effort as
+        # configuration, but offers no effort option: the pinned application reads no effort value,
+        # so a menu would advertise a control whose every value produces the same run. The launch
+        # vocabulary still validates a settings-named value at the launch boundary.
         harness = await _started(launch=_launch(model="fixture-model-a", effort="high"))
         try:
             catalog = harness.adapter.advertise()
@@ -340,11 +343,10 @@ class EveAdapterCapabilityTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(catalog.selected_effort, "high")
             model = catalog.models[0]
             self.assertEqual(model.key, "fixture-model-a")
-            self.assertEqual(
-                tuple(option.key for option in model.effort_options), REASONING_EFFORTS
-            )
-            self.assertTrue(all(option.launch_settable for option in model.effort_options))
-            self.assertTrue(all(not option.session_settable for option in model.effort_options))
+            self.assertEqual(model.effort_options, ())
+            self.assertFalse(model.supports_effort)
+            self.assertIsNone(model.default_effort)
+            self.assertEqual([option.config_id for option in catalog.config_options], ["model"])
             self.assertEqual(catalog.config_options[0].current_value, "fixture-model-a")
         finally:
             await harness.aclose()

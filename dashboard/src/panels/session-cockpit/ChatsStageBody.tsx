@@ -87,7 +87,8 @@ function harnessOf(session: OpenSession): HarnessId | null {
   if (
     session.harness === "codex" ||
     session.harness === "claude" ||
-    session.harness === "pi"
+    session.harness === "pi" ||
+    session.harness === "eve"
   ) {
     return session.harness;
   }

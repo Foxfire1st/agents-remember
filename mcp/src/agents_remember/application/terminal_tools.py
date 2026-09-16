@@ -44,6 +44,7 @@ from agents_remember.serving.harnesses import (
     Which,
     effort_session_commands,
     find_harness,
+    harness_detection_detail,
     invalid_effort_detail,
     invalid_model_detail,
     is_detected,
@@ -309,7 +310,7 @@ def _requested_harness(
             "harness-not-detected",
             harness,
             "harness",
-            detail=f"harness not installed: {harness!r}",
+            detail=harness_detection_detail(found, which=which),
         )
     return found, None
 
@@ -327,7 +328,7 @@ def _preferred_harness(
             preferred,
             "harness",
             detail=(
-                f"configured spawn harness not installed: {preferred!r} "
+                f"{harness_detection_detail(found, which=which)} "
                 f"(orchestration.spawn.harness in {source})"
             ),
         )
@@ -337,7 +338,7 @@ def _preferred_harness(
 def _first_detected_harness(
     registry: tuple[Harness, ...], which: Which | None
 ) -> tuple[Harness | None, dict[str, Any] | None]:
-    """Nothing asked for and nothing configured: the first registry harness on PATH."""
+    """Nothing asked for and nothing configured: the first registry harness launchable here."""
     for candidate in registry:
         if is_detected(candidate, which=which):
             return candidate, None
@@ -347,8 +348,8 @@ def _first_detected_harness(
         None,
         "harness",
         detail=(
-            "no harness given, none preferred in settings, and none detected on "
-            f"PATH; install one of: {ids} or configure orchestration.roles / orchestration.spawn"
+            "no harness given, none preferred in settings, and none launchable here; install "
+            f"one of: {ids} or configure orchestration.roles / orchestration.spawn"
         ),
     )
 
@@ -742,6 +743,9 @@ def _spawn_launch_request(
     """
     return TerminalLaunchRequest(
         kind=seat.kind,
+        # A seat spawn is a session backend: the runner this path starts owns the harness runtime,
+        # so a harness with no terminal program of its own is still a legitimate target here.
+        session_backend=True,
         workspace_root=config.workspace_root,
         shell=os.environ.get("SHELL") or _DEFAULT_SHELL,
         harness=plan.harness,

@@ -49,6 +49,7 @@ unit-regression = [
   "mcp/tests/test_dispatch_agent_ambient.py",
   "mcp/tests/test_dispatch_brief.py",
   "mcp/tests/test_environment_reconstruction.py",
+  "mcp/tests/test_eve_product_integration.py",
   "mcp/tests/test_final_catalog_plan_attestation.py",
   "mcp/tests/test_final_codex_certificate.py",
   "mcp/tests/test_final_codex_models.py",

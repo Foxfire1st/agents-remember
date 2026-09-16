@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -33,6 +34,9 @@ from importlib.resources.abc import Traversable
 from pathlib import Path
 
 from agents_remember.errors import HarnessControlError
+from agents_remember.kernel.eve_runtime_readiness import (
+    MINIMUM_NODE_MAJOR as KERNEL_MINIMUM_NODE_MAJOR,
+)
 from agents_remember.models.conversations.control_wire import LaunchSpec
 from agents_remember.serving.eve_protocol import EveRuntimeLaunch
 from agents_remember.serving.harness_capabilities import LaunchKnobs
@@ -41,8 +45,12 @@ RUNTIME_ROOT_ENV = "AR_EVE_RUNTIME_ROOT"
 NODE_EXECUTABLE_ENV = "AR_EVE_NODE"
 PACKAGED_RUNTIME_PATH = ("runtime", "eve-agent")
 DEFAULT_NODE_EXECUTABLE = "node"
-MINIMUM_NODE_MAJOR = 24
-"""The oldest Node major the pinned eve release will start under; it refuses below this."""
+MINIMUM_NODE_MAJOR = KERNEL_MINIMUM_NODE_MAJOR
+"""The oldest Node major the pinned eve release will start under; it refuses below this.
+
+Owned by ``kernel/eve_runtime_readiness.py``, which has to answer the same question for detection,
+and re-exported here for the launch path that execs the interpreter. One number, two readers.
+"""
 EVE_PINNED_VERSION = "0.56.0"
 DEFAULT_RUNTIME_PORT = 0
 """Zero means "choose a free loopback port at launch"; a fixed port collides across sessions."""
@@ -84,6 +92,12 @@ surface this adapter already owns and is allowed to write; an operator may overr
 DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000
 
 RUNTIME_ENTRYPOINT = ("node_modules", "eve", "bin", "eve.js")
+
+AGENT_SOURCE = ("agent", "agent.ts")
+"""The authored agent definition whose compiled fallback the runtime uses when no model is set."""
+
+MODEL_FALLBACK_PATTERN = re.compile(r"""process\.env\.AR_EVE_MODEL\s*\?\?\s*["']([^"']+)["']""")
+"""The runtime's own ``?? <literal>`` model fallback, read from the authored application."""
 
 
 @dataclass(frozen=True)
@@ -238,6 +252,30 @@ def stage_runtime_root(source: Path, destination: Path) -> Path:
     return destination
 
 
+def runtime_default_model(env: Mapping[str, str] | None = None) -> str:
+    """The model the pinned runtime application runs with when no launch selection is set.
+
+    A pre-session capability read has no settings-derived launch to read a model from, and inventing
+    a value there would advertise a model no launch would use. The authored application's own
+    fallback is the real answer, so it is read from that file rather than mirrored as a second
+    constant; a runtime whose source no longer declares one refuses instead of guessing.
+    """
+
+    root = resolve_runtime_root(env=env)
+    source = root / AGENT_SOURCE[0] / AGENT_SOURCE[1]
+    try:
+        text = source.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HarnessControlError(f"could not read the eve agent definition at {source}") from exc
+    match = MODEL_FALLBACK_PATTERN.search(text)
+    if match is None:
+        raise HarnessControlError(
+            f"the eve agent definition at {source} declares no {MODEL_ENV} fallback; a pre-session "
+            "capability read cannot name the model this runtime would use"
+        )
+    return match.group(1)
+
+
 def resolve_runtime_spec(
     *,
     selection: EveLaunchSelection,
@@ -334,7 +372,11 @@ def launch_spec_selection(launch: LaunchSpec) -> EveLaunchSelection:
 
     model = launch.env.get(MODEL_ENV)
     if not model:
-        raise HarnessControlError(f"eve launch requires the settings-resolved model in {MODEL_ENV}")
+        # No settings-derived selection reached this launch. The runtime is about to compile its
+        # authored application, whose own fallback is then the model that actually runs -- reading
+        # it here keeps the reported catalog and the running process on one value instead of
+        # refusing a read the dashboard needs or advertising a model nothing would use.
+        model = runtime_default_model(env=launch.env)
     effort = launch.env.get(EFFORT_ENV) or "provider-default"
     context_window = launch.env.get(CONTEXT_WINDOW_ENV)
     try:

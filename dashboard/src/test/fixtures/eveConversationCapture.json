@@ -1,0 +1,284 @@
+{
+  "items": [
+    {
+      "blocks": [
+        {
+          "blockId": "text",
+          "text": "run the fixture tool round-trip",
+          "type": "text"
+        }
+      ],
+      "createdAt": "2026-07-19T08:00:00+00:00",
+      "globalOrdinal": 1,
+      "itemId": "eve:message-received:3",
+      "kind": "message",
+      "lane": "unknown-input",
+      "phase": "completed",
+      "provenance": {
+        "observedAt": "2026-07-19T08:00:00+00:00",
+        "origin": "eve durable session stream",
+        "reason": "input source unavailable",
+        "strength": "native-only"
+      },
+      "revision": 1,
+      "role": "user",
+      "source": "native-history",
+      "turnId": "turn_0"
+    },
+    {
+      "blocks": [
+        {
+          "blockId": "input",
+          "data": {
+            "path": "note.txt",
+            "text": "written-by-eve-fixture"
+          },
+          "summary": "ar_workspace_write",
+          "type": "tool-input"
+        },
+        {
+          "blockId": "output",
+          "data": {
+            "bytes": 22,
+            "path": "note.txt",
+            "sha256": "1731c677e6489156ee79917d8aaa11df659aad53f984d1ba4ea59c89f457edcf"
+          },
+          "type": "tool-output"
+        }
+      ],
+      "correlation": {
+        "vendorCorrelationId": "call_fixture_1"
+      },
+      "createdAt": "2026-07-19T08:00:00+00:00",
+      "globalOrdinal": 2,
+      "itemId": "eve:tool:call_fixture_1",
+      "kind": "tool-call",
+      "lane": "harness",
+      "phase": "completed",
+      "provenance": {
+        "observedAt": "2026-07-19T08:00:00+00:00",
+        "origin": "eve durable session stream",
+        "producer": "harness",
+        "strength": "native-only"
+      },
+      "revision": 2,
+      "role": "tool",
+      "source": "harness-live",
+      "turnId": "turn_0"
+    },
+    {
+      "blocks": [
+        {
+          "blockId": "text",
+          "text": "question: Proceed with the write?",
+          "type": "text"
+        },
+        {
+          "blockId": "choices",
+          "interactionId": "req_input_1",
+          "options": [
+            {
+              "label": "Approve",
+              "optionId": "approve"
+            },
+            {
+              "label": "Deny",
+              "optionId": "deny"
+            }
+          ],
+          "type": "choices"
+        }
+      ],
+      "correlation": {
+        "vendorCorrelationId": "req_input_1"
+      },
+      "createdAt": "2026-07-19T08:00:00+00:00",
+      "globalOrdinal": 3,
+      "itemId": "eve:interaction:req_input_1",
+      "kind": "interaction",
+      "lane": "harness",
+      "phase": "waiting",
+      "provenance": {
+        "observedAt": "2026-07-19T08:00:00+00:00",
+        "origin": "eve durable session stream",
+        "producer": "harness",
+        "strength": "native-only"
+      },
+      "revision": 1,
+      "role": "assistant",
+      "source": "harness-live",
+      "turnId": "turn_0"
+    },
+    {
+      "blocks": [
+        {
+          "blockId": "text",
+          "text": "the runtime asks to write note.txt",
+          "type": "text"
+        }
+      ],
+      "correlation": {
+        "vendorCorrelationId": "authorization:workspace_write"
+      },
+      "createdAt": "2026-07-19T08:00:00+00:00",
+      "globalOrdinal": 4,
+      "itemId": "eve:interaction:authorization:workspace_write",
+      "kind": "interaction",
+      "lane": "harness",
+      "phase": "waiting",
+      "provenance": {
+        "observedAt": "2026-07-19T08:00:00+00:00",
+        "origin": "eve durable session stream",
+        "producer": "harness",
+        "strength": "native-only"
+      },
+      "revision": 1,
+      "role": "assistant",
+      "source": "harness-live",
+      "turnId": "turn_0"
+    },
+    {
+      "blocks": [
+        {
+          "blockId": "text",
+          "text": "note.txt written",
+          "type": "text"
+        }
+      ],
+      "createdAt": "2026-07-19T08:00:00+00:00",
+      "globalOrdinal": 5,
+      "itemId": "eve:turn_0:message",
+      "kind": "message",
+      "lane": "harness",
+      "phase": "completed",
+      "provenance": {
+        "observedAt": "2026-07-19T08:00:00+00:00",
+        "origin": "eve durable session stream",
+        "producer": "harness",
+        "strength": "native-only"
+      },
+      "revision": 3,
+      "role": "assistant",
+      "source": "harness-live",
+      "turnId": "turn_0"
+    },
+    {
+      "blocks": [],
+      "createdAt": "2026-07-19T08:00:00+00:00",
+      "globalOrdinal": 6,
+      "itemId": "eve:turn-result:turn_0",
+      "kind": "turn-result",
+      "lane": "harness",
+      "phase": "completed",
+      "provenance": {
+        "observedAt": "2026-07-19T08:00:00+00:00",
+        "origin": "eve durable session stream",
+        "producer": "harness",
+        "strength": "native-only"
+      },
+      "revision": 1,
+      "role": "system",
+      "source": "harness-live",
+      "turnId": "turn_0"
+    },
+    {
+      "blocks": [
+        {
+          "blockId": "text",
+          "text": "eve session parked and ready for next-user-message",
+          "type": "text"
+        }
+      ],
+      "createdAt": "2026-07-19T08:00:00+00:00",
+      "globalOrdinal": 7,
+      "itemId": "eve:session:parked",
+      "kind": "notice",
+      "lane": "system",
+      "phase": "waiting",
+      "provenance": {
+        "observedAt": "2026-07-19T08:00:00+00:00",
+        "origin": "eve durable session stream",
+        "producer": "harness",
+        "strength": "native-only"
+      },
+      "revision": 1,
+      "role": "system",
+      "source": "harness-live"
+    },
+    {
+      "blocks": [],
+      "createdAt": "2026-07-19T08:00:00+00:00",
+      "globalOrdinal": 8,
+      "itemId": "eve:turn-result:turn_3",
+      "kind": "turn-result",
+      "lane": "harness",
+      "phase": "interrupted",
+      "provenance": {
+        "observedAt": "2026-07-19T08:00:00+00:00",
+        "origin": "eve durable session stream",
+        "producer": "harness",
+        "strength": "native-only"
+      },
+      "revision": 1,
+      "role": "system",
+      "source": "harness-live",
+      "turnId": "turn_3"
+    },
+    {
+      "blocks": [
+        {
+          "blockId": "text",
+          "text": "MODEL_CALL_FAILED: the provider refused the request",
+          "type": "text"
+        }
+      ],
+      "createdAt": "2026-07-19T08:00:00+00:00",
+      "globalOrdinal": 9,
+      "itemId": "eve:step-failed:18",
+      "kind": "error",
+      "lane": "system",
+      "phase": "failed",
+      "provenance": {
+        "observedAt": "2026-07-19T08:00:00+00:00",
+        "origin": "eve durable session stream",
+        "producer": "harness",
+        "strength": "native-only"
+      },
+      "revision": 1,
+      "role": "system",
+      "source": "harness-live",
+      "turnId": "turn_0"
+    }
+  ],
+  "status": {
+    "evidence": {
+      "origin": "adapter-snapshot",
+      "strength": "native-only"
+    },
+    "freshness": {
+      "ageMs": 0,
+      "lastEvidenceAt": "2026-07-19T08:00:00+00:00",
+      "observationBound": "poll",
+      "staleAfterMs": 15000,
+      "state": "fresh"
+    },
+    "identity": {
+      "arSessionId": "ar-1",
+      "bridgeEpoch": "epoch-1",
+      "harnessId": "eve",
+      "identityDigest": "digest-1",
+      "projectScope": "/workspace",
+      "vendorConversationId": "vendor-1"
+    },
+    "observedAt": "2026-07-19T08:00:00+00:00",
+    "process": {
+      "generation": "epoch-1",
+      "state": "connected"
+    },
+    "revision": 2,
+    "turn": {
+      "state": "ready",
+      "stateSince": "2026-07-19T08:00:00+00:00"
+    }
+  }
+}

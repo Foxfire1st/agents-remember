@@ -44,6 +44,7 @@ _CODEX_FIXTURE = "codex-0.144.5-installed-20260718"
 _CLAUDE_FIXTURE = "claude-2.1.211-installed-20260718"
 _CLAUDE_INTERRUPT_FIXTURE = "claude-2.1.217-installed-20260722"
 _PI_FIXTURE = "pi-0.80.7-installed-20260718"
+_EVE_FIXTURE = "eve-0.56.0-native-20260916"
 
 _CODEX_RUNTIME = "0.144.5"
 _CLAUDE_RUNTIME = "2.1.211"
@@ -51,9 +52,11 @@ _CLAUDE_INTERRUPT_RUNTIME = "2.1.217"
 _CLAUDE_HELPER = "0.3.207"
 _PI_RUNTIME = "0.80.7"
 _PI_HELPER = "0.80.7"
+_EVE_RUNTIME = "0.56.0"
 
 _OBSERVED_AT = "2026-07-20T00:00:00+02:00"
 _CLAUDE_INTERRUPT_OBSERVED = "2026-07-22T19:00:00+02:00"
+_EVE_OBSERVED_AT = "2026-09-16T09:43:00+02:00"
 
 _CLAUDE_MISMATCH = (
     "control contract not yet probed through a captured production fixture; unverified until the "
@@ -304,16 +307,70 @@ def _pi_telemetry() -> TelemetryCapabilities:
     )
 
 
+def _eve_controls() -> ControlCapabilities:
+    """eve's control surface: exact-turn interrupt yes, asset-carrying submit no.
+
+    ``interrupt`` is the one supported control, and its evidence is the pinned runtime's own
+    recorded cancel scenario (a ``turn.cancelled`` settlement for the exact observed turn), not a
+    documentation claim. Every other control is ``unavailable`` rather than ``unverified`` because
+    the adapter does not implement the corresponding surface at all: the submission authority
+    refuses an asset-carrying prompt for an adapter without ``submit_with_assets``, so advertising a
+    supported image/file/resource kind here would offer a composer control that can only ever be
+    refused.
+    """
+
+    return ControlCapabilities(
+        interrupt=_fixture(
+            "supported",
+            "installed fixture observed an exact-turn cancel reach the pinned eve runtime and settle "
+            "as a native turn.cancelled record on the durable stream",
+            _fixture_evidence(_EVE_RUNTIME, _EVE_FIXTURE, observed_at=_EVE_OBSERVED_AT),
+        ),
+        steer=_unavailable("not an ordinary submit action"),
+        follow_up=_unavailable("not an ordinary submit action"),
+        attachments=AttachmentCapabilities(
+            image=_no_asset_kind("image"),
+            file=_no_asset_kind("file"),
+            resource=_no_asset_kind("resource"),
+        ),
+        policy_read=_fixture(
+            "supported",
+            "installed fixture observed eve's authorization.required challenge become a pending "
+            "interaction resolved by the caller through the production adapter seam",
+            _fixture_evidence(_EVE_RUNTIME, _EVE_FIXTURE, observed_at=_EVE_OBSERVED_AT),
+        ),
+    )
+
+
+def _eve_telemetry() -> TelemetryCapabilities:
+    """eve carries no usage/cost/context metric on this surface; every field says so."""
+
+    def _absent(feature: str) -> FeatureCapability:
+        return _unavailable(
+            f"eve's session stream carries no {feature} metric; the adapter projects none"
+        )
+
+    return TelemetryCapabilities(
+        context=_absent("context-window"),
+        usage=_absent("token-usage"),
+        cost=_absent("cost"),
+        rate_limit=_absent("rate-limit"),
+        compaction=_absent("compaction"),
+    )
+
+
 _CONTROLS = {
     "codex": _codex_controls,
     "claude": _claude_controls,
     "pi": _pi_controls,
+    "eve": _eve_controls,
 }
 
 _TELEMETRY = {
     "codex": _codex_telemetry,
     "claude": _claude_telemetry,
     "pi": _pi_telemetry,
+    "eve": _eve_telemetry,
 }
 
 

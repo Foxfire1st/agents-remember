@@ -27,6 +27,7 @@ from agents_remember.kernel.agentic_settings import (
     load_agentic_settings,
     merge_settings,
 )
+from agents_remember.kernel.harnesses import HARNESSES
 
 
 def write_settings(root: Path, data: dict) -> Path:
@@ -271,8 +272,26 @@ class HarnessesFamilyTests(unittest.TestCase):
         self.assertEqual(hermes.argv, ("hermes",))
         self.assertEqual(hermes.name, "hermes")
         self.assertEqual(hermes.defined_in, "settings")
-        # Builtin order is preserved; new ids append.
-        self.assertEqual([h.id for h in settings.harnesses], ["claude", "codex", "pi", "hermes"])
+        # Builtin order is preserved; new ids append. The builtin prefix is read from the curated
+        # table rather than transcribed, so the assertion cannot pass after a silent reorder.
+        expected = [harness.id for harness in HARNESSES] + ["hermes"]
+        self.assertEqual([h.id for h in settings.harnesses], expected)
+
+    def test_a_builtin_override_keeps_its_runtime_readiness_probe(self) -> None:
+        # eve is detected through a runtime readiness probe, not a PATH lookup. A settings override
+        # customizes the launch mapping; it must not downgrade detection to ``which`` over a command
+        # that was never a PATH program.
+        settings = self._load({"harnesses": {"eve": {"argv": ["custom-eve", "--flag"]}}})
+        eve = settings.find_harness("eve")
+        assert eve is not None
+        builtin = next(harness for harness in HARNESSES if harness.id == "eve")
+        self.assertIsNotNone(builtin.runtime_probe)
+        self.assertEqual(eve.runtime_probe, builtin.runtime_probe)
+        self.assertEqual(eve.argv, ("custom-eve", "--flag"))
+        # A settings-defined id declares no runtime of its own, so it has no probe to inherit.
+        added = self._load({"harnesses": {"hermes": {"command": "hermes"}}}).find_harness("hermes")
+        assert added is not None
+        self.assertIsNone(added.runtime_probe)
 
     def test_cross_layer_reference_and_partial_override_merge(self) -> None:
         # The GLOBAL layer declares hermes; the LOCAL layer may reference it and override a single

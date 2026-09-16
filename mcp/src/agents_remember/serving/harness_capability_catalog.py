@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from agents_remember.errors import HarnessControlError
-from agents_remember.kernel.harnesses import Harness
+from agents_remember.kernel.harnesses import Harness, harness_runtime_verdict
 from agents_remember.models.conversations.control_wire import (
     ControlIdentity,
     LaunchSpec,
@@ -167,6 +167,19 @@ class HarnessCapabilityCatalog:
                 status_code=409,
             )
         resolver = self._which if self._which is not None else shutil.which
+        env = dict(self._environment())
+        # The readiness question, not a PATH question: a harness whose runtime is not a PATH
+        # program (eve) would otherwise answer "not installed" here even when its runtime is
+        # present, and its own probe explains which component is missing instead.
+        ready, reason, locations = harness_runtime_verdict(harness, which=resolver, env=env)
+        if not ready:
+            raise HarnessCapabilityLookupError(reason, status_code=404)
+        if harness.runtime_probe is not None:
+            # A runtime-probed harness has no command to fingerprint. The probe already resolved
+            # both halves of its readiness, so its interpreter is the install identity the cache
+            # keys on -- a changed interpreter is a different install, exactly as a replaced binary
+            # is for a PATH harness.
+            return _probed_install(harness, locations)
         resolved = resolver(harness.command)
         if resolved is None:
             raise HarnessCapabilityLookupError(
@@ -197,6 +210,50 @@ class HarnessCapabilityCatalog:
         )
         adapter = self._adapter_factory(installed.harness.id, env=env)
         return await adapter.discover(launch)
+
+
+def _probed_install(harness: Harness, locations: tuple[str, ...]) -> _InstalledHarness:
+    """The install identity of a harness whose runtime is an application, not a binary."""
+
+    if not locations:
+        raise HarnessCapabilityLookupError(
+            f"harness {harness.id!r} reported readiness without resolving a runtime",
+            status_code=404,
+        )
+    interpreter = Path(locations[-1])
+    return _InstalledHarness(harness, interpreter, _runtime_fingerprint(harness, interpreter))
+
+
+def _runtime_fingerprint(harness: Harness, executable: Path) -> str:
+    """The install identity of a harness whose runtime is an application, not a binary.
+
+    The interpreter's own stat is used when it is present, because a replaced interpreter is a
+    different install. An interpreter the operator *declared* but that is not on disk still
+    identifies the install: readiness accepted the declaration, the spawn is where a bad path
+    fails naming itself, and refusing to fingerprint here would turn that into a generic lookup
+    error one layer too early.
+    """
+
+    payload: dict[str, object] = {
+        "harness": harness.id,
+        "runtimeProbe": harness.runtime_probe,
+        "executable": str(executable),
+    }
+    try:
+        stat_result = executable.stat()
+    except OSError:
+        payload["stat"] = None
+    else:
+        payload["stat"] = {
+            "device": stat_result.st_dev,
+            "inode": stat_result.st_ino,
+            "mode": stat_result.st_mode,
+            "size": stat_result.st_size,
+            "modifiedNs": stat_result.st_mtime_ns,
+        }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def _matches(entry: _CacheEntry | None, fingerprint: str) -> bool:
