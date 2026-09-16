@@ -65,6 +65,10 @@ KnowledgeOperation = Literal[
     # it asked.
     "export_knowledge_dataset",
     "import_knowledge_dataset",
+    # Selective recorded-scope read. One operation, because a seed and a continuation are two ways
+    # of asking the same question -- "which recorded scope, and which page of it" -- and a caller
+    # branches on the refusal code, not on which of the two it passed.
+    "read_knowledge_scope",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct
@@ -121,6 +125,19 @@ KnowledgeRefusalCode = Literal[
     # field, a missing manifest key, a repeated JSON key or a value the declared column type
     # cannot hold is a defect of the artifact, not of an authored payload.
     "invalid_export",
+    # Selective recorded-scope read. ``unsupported_schema``, ``selected_input_unavailable``,
+    # ``stale_precondition`` and ``candidate_snapshot_unpublished`` are shared with the paths where
+    # the failure is the same fact. The members below are the ones only a bounded, continuable
+    # selection can reach: a seed that names nothing recorded, a one-item page budget that cannot
+    # hold even one item, a continuation presented against another snapshot, and a selection that
+    # reached its declared execution bound. Each is a distinct fact a caller acts on differently,
+    # so none of them is folded into a neighbouring code.
+    "selector_absent",
+    "registration_absent",
+    "page_budget_too_small",
+    "continuation_binding_mismatch",
+    "snapshot_unavailable",
+    "selection_incomplete",
 ]
 
 

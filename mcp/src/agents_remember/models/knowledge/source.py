@@ -21,6 +21,7 @@ from agents_remember.models.knowledge.base import (
     PATH_MAX_LENGTH,
     PROSE_MAX_LENGTH,
     KnowledgeModel,
+    require_plain_git_path,
 )
 
 
@@ -101,8 +102,12 @@ class SourceAnchorDraft(KnowledgeModel):
         """Refuse anything that is not a repository-relative POSIX path.
 
         Resolution against a real filesystem happens at the filesystem boundary; this is the
-        vocabulary-level shape check that keeps an absolute, drive, UNC, backslash or
-        parent-escaping path out of a stored record in the first place.
+        vocabulary-level shape check that keeps an absolute, drive, UNC, backslash, parent-escaping
+        or Git-pathspec spelling out of a stored record in the first place. The pathspec half
+        matters here rather than only at the tree lookup: a stored path is later handed to ``git
+        ls-tree``, and a spelling such as ``:(exclude)src/x.py`` is read by Git as a pathspec and
+        answered with an error -- which the read path would otherwise report as an absent path that
+        Git never looked up.
         """
 
         cleaned = value.strip()
@@ -119,7 +124,7 @@ class SourceAnchorDraft(KnowledgeModel):
             raise ValueError(f"source path must not contain empty, '.' or '..' segments: {value!r}")
         if len(cleaned) > PROSE_MAX_LENGTH:
             raise ValueError("source path is longer than the stored limit")
-        return cleaned
+        return require_plain_git_path(cleaned, what="source path")
 
 
 class SourceAnchor(SourceAnchorDraft):

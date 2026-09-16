@@ -1194,3 +1194,28 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_serving_notifier_handoff.py",
 ]
+
+[[contract]]
+id = "knowledge-read-scope-cases"
+owner = "mcp/tests/read_scope_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_read_scope.py::test_a_path_seed_returns_the_sibling_realizations_and_advertises_the_unreached_family"
+
+[[artifact]]
+path = "mcp/tests/read_scope_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "knowledge-read-scope-cases"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the public knowledge-store operations: repository, four invariant identities with their revisions, three families with their memberships, eight realization claims and a real committed Git tree beside the database"
+introduced_by = "260915-KS-L7"
+lifetime = "permanent"
+permanence_rationale = "The selective read is decided by one exact topology -- I1 in two families, its sibling J1 shared with a second family G1 that reaches a further K1 -- and a per-module copy of that graph would let the unit lane and the integration lane disagree about which records the stopping rule selects, which is exactly the property both lanes assert. The real Git tree is part of the same fixture because an anchor observation is only meaningful against real committed bytes."
+replacement_contract = "contract:knowledge-read-scope-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_read_boundaries.py",
+  "mcp/tests/test_knowledge_read_paths.py",
+  "mcp/tests/test_knowledge_read_scope.py",
+]

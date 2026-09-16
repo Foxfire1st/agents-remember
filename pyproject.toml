@@ -206,8 +206,85 @@ minversion = "9.0"
 # master measured under the filterwarnings override (D-7) now fits inside the LOCR ceiling, so D-7's
 # shortfall is closed by the incoming official line rather than by any KS change.  Both sides'
 # integration entries agree on 300; the two integration accounts above are kept as separate records.
-unit_case_budget = 1100
-integration_case_budget = 300
+# 2026-09-16 -- unit 1100 -> 1250 and integration 300 -> 340, by the 260915-KS master's owning seat,
+# on a measurement that overturned this master's own "the unit lane now has real headroom" note above.
+# **This is a merged-line sizing defect, not a defect of either side.**  Measured under the
+# filterwarnings override this host needs, at `-m "not integration"`: the official line alone at its
+# own tip 8dd62345 collects 1014 unit cases against the 1100 LOCR ceiling, and the 260915-KS parent
+# 7db50f8f collects 1003 against the same 1100 -- **both GREEN, neither side red**.  Their merge
+# 4eb2b199 carries both populations and collects 1138, and `pytest_collection_finish` raises
+# UsageError on an over-budget population, so the ENTIRE unit run executed zero tests: not a slow
+# gate but no gate, which would have left the L9 hardening leaf unable to run the suite at all.
+# `unit_case_budget` was sized per campaign for a per campaign line; this atomic experimental master
+# is the first line that carries both.  Behavior bought: the KS knowledge substrate's own falsifiable
+# behavior, extended this round by L7's 21 unit cases (the recorded-scope selection's finite stopping
+# rule at P/I1/F1, the sibling family advertised and not traversed, an identity's divergent retained
+# revisions grouped without a current pointer, claim identities counted apart from distinct source
+# locations, the declared item order, a truncated page's own arithmetic, the declared selection total
+# and the walk's progress on every page of it, the three typed absences, the execution bound and a
+# refusal's persisted-nothing measurement at a later page as well as at the first) and its 25
+# integration cases (real blob-matched, mismatched, absent, non-blob and unavailable anchor
+# observations, the real snapshot and namespace refusals and the schema-generation refusal, four
+# continuation-binding refusals -- snapshot, context, policy, manifest and cursor position -- with
+# their positive control, a task free baseline read, and the path cases: a Git pathspec-magic
+# spelling refused at both typed path boundaries, a legitimate path holding `*`, `?` or `[` authored,
+# stored, seeded and resolved to its exact recorded blob, an unaddressable stored spelling refused
+# as an unresolvable anchor rather than reported absent, and a Git this process cannot run reported as
+# an unknown entry rather than as an absent path).  Case count delta: unit 1138 -> 1159
+# collected at this raise, integration 279 -> 303 selected when the raise was recorded and **304**
+# after fix round 3's producer case; the new ceilings are 1250 / 340, so the
+# raise is **headroom, not a target** -- the L8 diff leaf and the L9 hardening leaf are admitted
+# inside it and nothing about it licenses filling it.
+#
+# **Every number below carries the command that reproduces it, and that is now this entry's rule.**
+# Round 2 of L7's fix cycle found three load-independent line counts and both module wall times stale
+# here -- measured before the round's own last edit and published as post-freeze values -- so each
+# figure states its command and a successor re-runs it rather than trusting it:
+#   * sizes: `wc -l <the named files>` (load-independent; re-run after ANY edit to them)
+#   * populations: `.venv/bin/python -m pytest -m "not integration" --collect-only -q -o
+#     filterwarnings=ignore -n0`, and the same with `-m integration`
+#   * wall times: `.venv/bin/python -m pytest <the named file(s)> -q -n0` for a module, and
+#     `.venv/bin/python -m pytest -m "not integration" -q -o "filterwarnings=ignore" -n0` for a lane,
+#     each repeated.
+#   Wall-clock values are **ranges over repeated serial runs**, not single measurements: this host
+#   runs other sessions, and one run of a lane can be ~1.2x another.  The range is the honest figure
+#   and the contention is stated rather than smoothed away.
+#   Scenario counts: **46 raw scenarios** in this leaf's three test modules, counted with
+#   `grep -c '^def test_' mcp/tests/test_knowledge_read_{scope,boundaries,paths}.py` (21 / 20 / 5),
+#   consolidated into **46 collected cases** (21 unit + 25 integration), counted with
+#   `.venv/bin/python -m pytest <the three modules> --collect-only -q -m "" -n0`.  Nothing is
+#   parametrized here, so raw and collected agree by construction rather than by coincidence.
+#
+# Size delta, measured with `wc -l`: six production modules for the read (2 867 lines: 602 + 866 + 347
+# + 279 + 177 + 596) plus one shared support module (`mcp/tests/read_scope_test_support.py`, 762
+# lines, registered as `knowledge-read-scope-cases` in `mcp/tests/evidence-lifecycle.toml`) and three
+# test modules (1 163 / 941 / 644 lines: the unit module and the two integration modules, split only by
+# the 1200 line hard limit -- the larger integration file crossed it, so the path cases moved to
+# `mcp/tests/test_knowledge_read_paths.py`; 644 includes fix round 3's producer case).  The 1200-line
+# limit holds with 37 lines of headroom on the larger test module -- **L8 must split it before adding
+# cases**.
+#
+# Runtime cost, measured on this checkout serially (`-n0`, the pinned `-n=4` is unobservable here --
+# see below), one run at a time, and re-issued in fix round 3 as **ranges over the runs that were
+# actually measured** -- the exact run lists are in `notes/reports/260915-KS-L7-fix-report.md`'s fix
+# round 3 section, and a range here is a fact about those runs, never a widened earlier band.  This
+# host is shared: independent re-measurement of the same bytes has produced 12.64s and 13.71s for the
+# same unit module, so the honest figure is the range over a named run list.  This leaf's unit module
+# is 21 cases + 0 subtests in **13.41-13.71s** (five serial runs, all listed); its two integration
+# modules together are 24 cases + 0 subtests in **16.16-17.88s** (five serial runs, all listed); the
+# whole unit lane is **1159 passed, 11 deselected, 254 subtests passed in 215.07-221.98s** (two serial
+# runs); the whole integration lane at this population is **304 passed, 1159 deselected, 52 subtests
+# passed in 246.72-248.09s** for one run begun under another process's CPU load and 214.10s for a
+# contended run -- so the lane's measured span is **214.10-248.09s** over three runs, and the `+36`
+# integration headroom against the 340 ceiling is about 15 per cent at the worst observed run, not a
+# point estimate.  Under the pinned `-n=4` the lane could not be observed on this
+# host: the intermittent xdist worker death recorded as disclosure D-8 fired at
+# `test_active_projector_singleflight.py::test_concurrent_reconnect_replaces_a_retired_projector_once`
+# on every attempt, before the lane reported.  That node passes on its own, the fault reproduces with
+# and without this leaf's modules present, and it is a runner fault rather than a budget fact -- it is
+# re-run, never recorded as a leaf failure.  The serial figures above are the measurements.
+unit_case_budget = 1250
+integration_case_budget = 340
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this
 # key to build its pytest step, so the wrapper no longer carries a second copy that can

@@ -221,6 +221,17 @@ def _rows_of(connection: apsw.Connection, table: str) -> list[dict[str, Any]]:
     ]
 
 
+def cell_value(value: Any, *, is_json: bool) -> Any:
+    """Return one stored cell's canonical logical value, decoding a typed JSON column.
+
+    This is the public spelling of the decoder every reader of a stored row uses, so a read page
+    and this module's digest cannot disagree about what a cell means: there is one function that
+    decides it, and a second reader calls it rather than reimplementing it.
+    """
+
+    return _cell(value, is_json=is_json)
+
+
 def _cell(value: Any, *, is_json: bool) -> Any:
     """Return one cell's canonical logical value, decoding a typed JSON column."""
 

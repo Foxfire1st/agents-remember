@@ -56,6 +56,42 @@ def require_consistent_acceptance(
         raise ValueError("a proposed revision must not carry an acceptance_ref")
 
 
+def require_plain_git_path(value: str, *, what: str) -> str:
+    """Refuse a repository-relative path spelled with Git pathspec *magic*; admit glob characters.
+
+    A recorded path or a path seed is *addressed at a tree object*: it is handed to ``git ls-tree``
+    as an argument. What makes such an argument something other than an address is **pathspec
+    magic**, and Git introduces magic with a leading ``:`` -- ``:(exclude)src/x.py`` and
+    ``:!src/x.py`` make ``ls-tree`` exit non-zero with "pathspec magic not supported by this
+    command", and ``:(top)src/x.py`` and ``:/src/x.py`` are accepted and answer about a *different*
+    location than the confined one the record names. Either way the spelling, not the tree, decides
+    the answer, so the caller would be told the path is absent when Git was never asked about it.
+
+    The characters ``*``, ``?`` and ``[`` are **not** magic to ``ls-tree``: measured against
+    ``git 2.54.0``, ``git ls-tree <tree> -- 'src/a[1].py'`` resolves exactly that entry with
+    ``rc=0`` even when ``src/a1.py`` also exists, and ``src/a?b.py`` and ``src/a*b.py`` behave the
+    same way. (``git ls-files`` *does* glob them, which is where the opposite intuition comes from,
+    but it is not the command this path is handed to.) Refusing them here would make a legitimate
+    anchor un-authorable and un-seedable, and -- through the read path's own confinement check --
+    would report a file the tree really holds as ``path_absent``, which is a false statement about
+    the repository rather than a refusal of a malformed spelling. They are therefore admitted, and
+    only a leading ``:`` is refused as magic.
+
+    This is checkable without Git, so it is checked at the same boundary that already refuses an
+    absolute, drive, UNC, backslash, NUL, empty, ``.`` or ``..`` spelling: a malformed anchor or
+    seed dies in the vocabulary rather than in the tree lookup. ``what`` names the value being
+    refused, so a caller is told which spelling was rejected.
+    """
+
+    if value.startswith(":"):
+        raise ValueError(
+            f"{what} must be a plain tree path, not a Git pathspec: {value!r}. A spelling that "
+            "begins with ':' is read as pathspec magic by Git and answers a different question "
+            "than the recorded path asks."
+        )
+    return value
+
+
 def normalized_uuid(value: uuid.UUID | str) -> str:
     """Return the canonical stored spelling of an identifier.
 

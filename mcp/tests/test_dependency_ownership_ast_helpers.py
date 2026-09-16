@@ -41,18 +41,24 @@ LIFECYCLE_CATALOG = Path("mcp/tests/evidence-lifecycle.toml")
 LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
-LIFECYCLE_CONTRACT_COUNT = 4
-LIFECYCLE_ARTIFACT_COUNT = 45
-LIFECYCLE_CATALOG_SHA256 = "293a187fa91d2ac83909d3ff7517c674b428b29ef777d8e2f7479d7fd86bc771"
+LIFECYCLE_CONTRACT_COUNT = 10
+LIFECYCLE_ARTIFACT_COUNT = 51
+LIFECYCLE_CATALOG_SHA256 = "461121ca16567ab056938b710b19bddb98867581dd4fe3cf7ee2645111d54369"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately once.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
 ``a9d83c375d1bfdcae7d0c46020eba41fbaf305a306fe89bb1b9b479b861c2002``. ``LOCR-R26@v1``'s
 catalog-freeze clause was then amended by explicit developer decision to permit registering
 artifacts that ANOTHER leaf introduced, and the two ``LOCR-L04`` handoff support modules were
-registered, closing the inventory. This value is the post-registration catalog. The proof's own
-artifact delta remains exactly empty, so the freeze still forbids the proof adding or widening
-anything, and any further catalog change must re-pin this digest deliberately.
+registered, closing the inventory. Value ``293a187f...`` was the LOCR post-registration catalog. ``260915-KS``'s
+L1-L7 leaves then registered their own knowledge-substrate support modules against the same
+amended clause, and this value is the catalog after L7's ``knowledge-read-scope-cases`` support
+module joined it: ten contracts and fifty-one artifacts. L7's fix round 2 then split the over-limit
+integration module and added ``mcp/tests/test_knowledge_read_paths.py`` to that support module's
+consumer list -- a consumer change, not a new artifact: the counts stay ten and fifty-one, and this
+value is the catalog after it. The proof's own artifact delta remains exactly empty -- none of these
+rows is the proof's -- so the freeze still forbids the proof adding or widening anything, and any
+further catalog change must re-pin this digest deliberately.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"
