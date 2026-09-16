@@ -13,6 +13,12 @@ Dispatch with `dispatch_agent(task_document_ref=<canonical leaf document>, role=
 brief=<this complete brief>)`. The control plane claims the `(leaf document, curator)` seat and
 privately binds its current occupant; the brief never carries a runtime address.
 
+**This template feeds inputs; it does not author rules.** The curator's duties live in
+`../roles/curator.md`, the coherence procedure in `../operations/curation.md`, and the truth
+boundary in `../core/acceptance.md`. The packet restates the routing rule and the tool surface
+because the curator must apply them without leaving its seat; where wording differs, those files
+win.
+
 ---
 
 ```md

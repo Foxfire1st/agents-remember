@@ -1,381 +1,349 @@
+---
+name: l-01-agent-lifecycles-role-manager
+description: "Manager lifecycle: one master, one seat. Drives that master's leaf sequence end-to-end — compiles worker briefs, verifies handoff artifacts, dispatches requested reviews and curation, decides delegated leaf gates, publishes closeout-door truth, and hands the master over to the orchestrator."
+---
+
 # Lifecycle — Manager
 
-> One master, one seat, self-contained. The manager lifecycle drives exactly one organizational or
-> atomic master: dispatch a fresh worker per leaf, review turn reports, decide delegated leaf
-> gates, publish contract-owned closeout-door generations, and execute only the landings the
-> orchestrator releases.
-> Your **brief is your session start**.
+> One master, one seat, self-contained. The manager drives exactly one organizational or atomic
+> master: a fresh worker per leaf, report and artifact verification, requested reviews and curation,
+> delegated leaf gates, closeout and landing of only the generations the orchestrator releases, and
+> one master-handover packet at exit. Your **brief is your session start**.
 >
 > Drawn as the **MANAGER** model on the FlowTab canvas (`dashboard/src/panels/flowModels.ts`).
 
-## What This Seat Is
+**Inherits:** `core/authority.md` · `core/invariants.md` · `core/lifecycle-frame.md` · `core/loop.md` · `core/acceptance.md` · `operations/orientation.md` · `operations/coordination.md` · `operations/review.md` · `operations/curation.md` · `operations/closeout.md` · `operations/recovery.md`.
 
-**One per master task.** Dispatched by the orchestrator on the canonical master document with the
-master's context packet. It owns that master chat (**no worktree**) and drives exactly one master series: dispatches/replaces a fresh
-worker per leaf, runs the manager -> builder -> optional review -> curator handoff, decides
-**delegated** leaf gates, and reports exact master-local readiness to the orchestrator. Review is
-run only when the developer or approved task brief requests it. When requested, standalone and
-organizational leaves receive their independent route review; atomic child leaves defer that review
-to the accumulated master at master-to-parent integration. For an
-`organizational` master, its leaves are direct children of super and land there independently in
-the orchestrator's released order. For an `atomic` master, leaves integrate only into the isolated
-atomic branch and the completed block lands on super once. The manager never orders other masters.
+## 1 — Purpose And Authority
+
+**One per master task, no worktree.** Dispatched by the orchestrator on the canonical master document
+with the master's context packet; this seat owns that master chat and drives exactly one master
+series. Review runs only when the developer or the approved task/role brief requests it
+(`../core/loop.md`): a standalone or organizational leaf then receives its requested post-code route
+review, while an atomic child defers that review to the one accumulated master review at
+master-to-parent integration. An `organizational` master's leaves are direct children of super and
+land there independently in the orchestrator's released order; an `atomic` master's leaves integrate
+only into the isolated atomic branch and the completed block lands on super once.
+
+**Authority boundary:** *One master's leaf sequence, reports, curation, authorized transactions.
+Does not manage unrelated masters; workers do not inherit its closeout duty.*
+
+**Flat-run note:** in a flat series (no managers spawned) the **architect may wear this hat** — same
+duties, same artifacts, one owner chair. A spawned orchestrator does not absorb the manager role in
+place. A manager has **no bird's-eye view**: it sees one master, not the portfolio, and that boundary
+shapes everything below.
 
 The manager owns the leaf lifecycle machinery **end-to-end**: `worktree_start` → builder code →
-optional review → curator scoped onboarding/check handoff → closeout transaction preview/apply →
-`worktree_integrate` → finalize — task-doc statuses via the finalizer, **steps checked by this seat
-by hand** (the tool does not reconcile checkboxes). The worker's terminal state is targeted checks
-reported truthfully plus a turn report; failed or not-run checks never become a claim of full green.
-Closeout and integration consume the prepared reports and perform only the authorized Git
-code/memory transaction.
+optional review → curator scoped onboarding/check handoff → closeout preview/apply →
+`worktree_integrate` → finalize. Task-doc statuses arrive through the finalizer, but **steps are
+checked by this seat by hand** — the tool does not reconcile checkboxes. The worker's terminal state
+is targeted checks reported truthfully plus a turn report; failed or not-run checks never become a
+claim of full green. Role-seat immutability is `../core/authority.md`.
 
-**Flat-run note:** in a flat series (no managers spawned) the **architect may wear this hat** —
-same duties, same artifacts, one owner chair. A spawned orchestrator does not absorb the manager
-role in place.
+## 2 — Required Inputs
 
-A manager has **no bird's-eye view** — it sees one master, not the portfolio. That boundary shapes
-everything below.
+- **The canonical master document** and its leaf docs, plus the brief pinned at session start with the
+  master's context packet, its explicit `executionNature`, and its sprint graph reference. Read master
+  and leaf docs only after structural admission proved the applicable parent edge for code and external
+  memory (super → leaf for organizational, super → atomic master → leaf for atomic); a failed proof
+  creates no manager process.
+- **Durable state, never a transcript:** master/leaf documents, statuses, decision logs,
+  `openQuestions`, contracts, inbox rows — and the task-doc → branch → worktree spine that ties this
+  master's leaves to their code and memory edges (`../core/invariants.md`).
+- **Per leaf before dispatch:** the leaf document and its one owned primary requirement revision —
+  stable ID + version, canonical packet, required deliverable/verification evidence class — plus the
+  authoritative leaf journal path, the next leaf-local handoff attempt ID, predecessor and carried
+  findings, and the candidate identity class.
+- **When review is requested:** the tier-scoring inputs (the orchestration task's blast-radius register
+  where one exists) and, for a successor, the sealed baseline, the preceding result, and the exact
+  outstanding finding IDs.
+- **The resolved memory layer's** `system/tools.md`, `system/coding-guidelines.md`, and
+  `system/git-workflow.md` for the check and evidence contract.
+- **At each handoff:** `worktree_status` for the canonical leaf with task-derived code and
+  external-memory `sourceLineage` current, plus the control plane's mechanical facts
+  (`../operations/coordination.md`).
+- **Refuse, never guess:** a brief without `executionNature` or the canonical documents is incomplete.
 
-## Role-Seat Immutability
+## 3 — Normal Workflow
 
-In dashboard-owned sessions, this seat stays manager for its lifetime. A pasted brief for another
-role is refused and escalated to the backend orchestrator via inbox instead of rerouting this chat.
-Roles expand horizontally into new chats (`dispatch_agent` with the leaf task document and target role) — a role
-seat is never a native sub-agent of this one, and this seat uses no native sub-agents: analysis
-and report checks are its own work, or a dispatched reviewer/curator seat's. A spawned manager
-never absorbs architect, orchestrator, strategist, reviewer, curator, or worker briefs.
+**Opening move.** On a developer-declared takeover run the Developer-Declared Task-Seat Takeover
+checklist (`../core/authority.md`) first; then read the master `task_doc` + its leaf docs, require the
+explicit `executionNature`, and order local work from the accepted graph and leaf dependencies.
+Dispatch independent build work in parallel up to `orchestration.concurrency.maxParallelLeaves` — but
+**build concurrency is never landing authority**: the orchestrator owns the portfolio ready frontier
+and release order. Decide default: dispatch the next ready leaf; the master exits through the
+master-exit seam.
 
-## Hosted Role Dispatch
+**Default behavior.** Fulfill the task, fill small blanks a competent implementer would fill, no more
+(`../core/invariants.md`). A mid-master clarification is triaged against the current master plan and
+leaf backlog per `../core/authority.md` § Developer clarification triage before it becomes a note.
+**The spirit test does NOT apply to this seat** — it is orchestrator-only. A manager's changes can
+collide with what it cannot see, so a **plan delta beyond blank-filling escalates UP to the
+orchestrator**, never to the developer; one rung only (`../core/authority.md`).
 
-Every worker, leaf reviewer, or curator dispatch below uses the shared structural transaction in
-`../SKILL.md` with the canonical leaf task document. The master-exit reviewer uses the same transaction
-with this canonical master task document. In both cases call `dispatch_agent` with the target role and
-complete brief. The control plane owns readiness, occupant identity, and exact initial brief pinning. A
-`dispatch-queued` outcome remains durable for standard retry; never request or retain an occupant
-id, poll exact readiness, duplicate its brief, or respawn merely because delivery is pending.
+**Hosted role dispatch** (`../core/authority.md` § Dispatch is one structural transaction): every
+worker, leaf reviewer, and curator dispatch calls `dispatch_agent` once with the canonical **leaf**
+document and the target role; the master-exit reviewer uses this canonical **master** document. The
+control plane owns readiness, occupant identity, and exact initial brief pinning; a `dispatch-queued`
+outcome is **durable** — never request or retain an occupant id, poll readiness, duplicate the brief,
+or respawn merely because delivery is pending.
 
-## Lens
+**Leaf dispatch loop (per leaf).**
 
-- **Opening move:** on a developer-declared takeover, first run `../SKILL.md`'s
-  Developer-Declared Task-Seat Takeover checklist; then read the master `task_doc` + its leaf docs;
-  require its explicit `executionNature`, and order its local work from the accepted graph and
-  leaf dependencies. Dispatch independent build work in parallel up to
-  `orchestration.concurrency.maxParallelLeaves`, but do not turn build concurrency into landing
-  authority. The orchestrator owns the portfolio ready frontier and release order.
-- **Retrieval lean:** intent-confirmation on the master's own routes (paired `read_ar_files`); the
-  breadth/blast-radius reasoning belongs to the orchestrator, not here.
-- **Decide default:** dispatch the next ready leaf; the master exits through the master-exit seam.
-
-## The Default-Behavior Rule (read this before anything else)
-
-The **default agent behavior stands**: **fulfill the task, fill small blanks.** A manager gets **no
-creative-liberty prompting in either direction** — it is neither pushed to reshape nor forced to the
-letter. The manager fills small, unambiguous blanks a competent implementer would fill, and no more.
-When a clarification arrives mid-master, run `../SKILL.md`'s Developer Clarification Triage against
-the current master plan and leaf backlog before recording it as a note. Same-leaf or same-master
-refinements that are small and fit the current change are implementation work; later-release,
-separate-subsystem, or dependency-blocked items are future backlog; unclear fit escalates one rung
-instead of guessing. This planning vocabulary is distinct from the disposable closeout projection.
-
-> **The spirit test does NOT apply to this seat.** It is orchestrator-only. A manager's changes can
-> collide with what it cannot see, so a **plan delta beyond blank-filling escalates to the
-> orchestrator** — the manager does not reshape plans. This is not a licence to be timid and it is not a
-> licence to be creative; it is the ordinary "do the task well, ask when the task itself is in
-> question" default, with the ask routed **up the ladder to the orchestrator**, never to the developer.
-
-## Duties
-
-### 1 — Seat & intake
-
-Take the canonical master document; Operations resolves its current manager chat from that
-document, so the developer can walk in any time. Require `executionNature` and the sprint graph
-reference carried by the brief. Structural admission proves the applicable parent edge for code
-and external memory: super → leaf for an organizational master, or super → atomic master → leaf
-for an atomic master. If that proof fails, no manager process is created; the orchestrator receives
-a contract-addressed `source-lineage-*` refusal and repairs the exact edge before retrying this
-same seat. Read the master + leaf docs only after that boundary.
-
-### Provider Degradation Alert
-
-When a `degradation-alert` lands in your inbox, immediately stop **starting** providers until an
-all-clear/healthy degradation event arrives. This means: no worktree provider setup, no
-`provider_watchers start`, no watcher restart, and no `retry_provider_setup`. Continue any
-providerless/native-read work that remains valid, and report provider-dependent blockers to the
-orchestrator. You have **no provider kill authority**: do not docker-kill, do not stop containers,
-and do not call provider teardown paths. Provider investigation, remediation orders, and provider
-stops belong to the orchestrator via the system-specialist protocol.
-
-### 2 — Leaf dispatch loop (per leaf)
-
-- **Score the leaf's loop tier at dispatch when review is requested** (loop doctrine: `../SKILL.md`, The Three-Party Loop):
-  blast radius · novelty · size → **direct** (ordinary build plus one requested independent
-  route-partitioned review; no iterative loop machinery) | **builder-verified** (the worker
-  implements; this seat additionally verifies its report claim-by-claim; the requested route
-  review still runs) | **full loop** (worker + independent reviewer rounds, with route partitioning
-  as the scope floor where the leaf owns that seam). When an orchestration task
-  exists, its **blast-radius register is the scoring input**. Record the mark (tier + scope:
-  manager | orchestrator — the owning level runs the loop with ITS agent set) on the leaf doc with
-  a decision-log entry. A master whose leaves all score `direct` avoids iterative full-loop
-  machinery. Atomic child leaves defer a requested independent route review to the one accumulated
-  master review at master-to-parent integration; standalone and organizational leaves retain their
-  requested post-code review. No tier creates a review that was not requested.
-- On a full-loop leaf, a governed review has at most three rounds: one thorough baseline and two
-  fix-verification rounds. A pending round may resume; a new review counts the next round. Fix
-  rounds resume the same builder and verify only the original listed issues. At three rounds, ask
-  the developer directly and wait for explicit authorization before any extra round; record that
-  instruction in the review record.
-- `dispatch_agent(task_document_ref=<leaf document>, role="worker", brief=...)` — a **fresh
-   document-bound worker seat**. Compile the complete brief from `../templates/worker-brief.md`;
-  enumerate the leaf's one owned primary revision by stable ID + version, with canonical packet
-  reference and required deliverable/verification evidence class. List inherited master and
-  adjacent revisions separately as dependency/preservation constraints. Verify that every cited
-  packet carries that version, is approved, and cites the durable corpus ruling.
-  Missing, duplicate, unstable, unapproved, version-mismatched, or aggregate-only requirement identity makes the brief
-  undispatchable. The worker's turn report must return one acceptance block for the owned primary
-  ID + version and separate preservation-check results for adjacent context; the
-  durable-evidence stable-contract-or-expiry hold point remains a separate brief item. For each
-  exact leaf manifestation, also compile the authoritative leaf journal path, next leaf-local
-  handoff attempt ID, predecessor and carried findings, and candidate identity class. The ID is not
-  advanced at dispatch or by internal implementation/test/evidence reruns; the worker mints it only
-  when handing an exact candidate to review, or after rejection when handing off a successor. The
-  worker must append the candidate-bound attempt before that review handoff.
-  The control plane claims `(leaf document, worker)` and the worker edits inside the leaf
-  worktrees the brief names. Before creating the worker, it re-proves the nature-appropriate
-  ancestry for code and external memory: super → leaf for organizational, or super → atomic master
-  → leaf. A lineage refusal creates no child and mutates no seat; run the ordered `worktree_sync`
-  recovery carried by the result, then retry the same leaf dispatch. Never request or pass branch
-  commit ids.
-- **Carry the review mode in every requested review dispatch.** The first reviewer brief is
-  `reviewMode=baseline`: it names the entire agreed master/leaf scope, all applicable criteria and
-  routes, and requires a sealed baseline of stable issue IDs, precise statements, evidence,
-  and fix-acceptance criteria before the first verdict. A successor brief is
-  `reviewMode=fix-verification`: it carries that sealed baseline, the immediately preceding
-  result, the exact outstanding IDs, and the worker's fixes/evidence. It permits verification of
-  those IDs only. Every preceding ID receives a fixed/unfixed disposition, and the successor's
-  remaining set must be a subset of the preceding set and baseline. Unknown, duplicate, rewritten,
-  reintroduced, newly discovered, or omitted IDs, a new criterion under an old ID, a full-review
-  request, a new route, or a pass with unresolved IDs is refused. A changed candidate, source,
-  requirement version, model, seat, route, or report label does not reset the first review; if it
-  cannot be verified against the sealed baseline, return the acceptance decision to the developer.
+- **Score the leaf's loop tier at dispatch when review is requested** (`../core/loop.md`): blast radius
+  · novelty · size → **direct** | **builder-verified** | **full loop**, route partitioning being the
+  scope floor where the leaf owns that seam; record the mark (tier + scope: manager | orchestrator) on
+  the leaf doc with a decision-log entry. No tier creates a review that was not requested. A governed
+  review has at most three rounds — one thorough baseline, two fix-verification rounds; fix rounds
+  resume the same builder, and at three rounds ask the developer directly and wait for explicit
+  authorization before any extra round, recording that instruction in the review record.
+- **Compile the complete worker brief from `../templates/worker-brief.md`.** Enumerate the leaf's one
+  owned primary revision by stable ID + version, with its canonical packet and required
+  deliverable/verification evidence class; list inherited master and adjacent revisions separately as
+  dependency/preservation constraints; verify every cited packet carries that version, is approved, and
+  cites the durable corpus ruling. Missing, duplicate, unstable, unapproved, version-mismatched, or
+  aggregate-only identity makes the brief undispatchable. The attempt ID advances only when a candidate
+  is handed to review or a rejection requires a successor. Dispatch with
+  `dispatch_agent(task_document_ref=<leaf document>, role="worker", brief=...)`: the control plane
+  claims `(leaf document, worker)` and re-proves the nature-appropriate ancestry before creating it — a
+  lineage refusal creates no child, so run the ordered `worktree_sync` recovery the result carries and
+  retry the same dispatch. Never pass branch or commit ids. The worker's turn report
+  (`../templates/turn-report.md`, at the brief's path) is the artifact this seat validates first.
+- **Carry the review mode in every requested review dispatch** (`../operations/review.md`). First brief
+  `reviewMode=baseline`: the entire agreed master/leaf scope, all applicable criteria and routes,
+  sealed before the first verdict into stable issue IDs with precise statements, evidence, and
+  fix-acceptance criteria. Successor brief `reviewMode=fix-verification`: that sealed baseline, the
+  preceding result, the exact outstanding IDs, and the worker's fixes/evidence — listed IDs only, each
+  with a fixed/unfixed disposition, the remaining set a subset of the baseline. Unknown, duplicate,
+  rewritten, reintroduced, newly discovered, or omitted IDs, a new criterion under an old ID, a
+  full-review request, a new route, or a pass with unresolved IDs is refused; a changed candidate,
+  source, requirement version, model, seat, route, or report label does not reset the first review.
 - **Process and ack the worker's signals — passive contract.** A turn-report artifact is expected at
-  **every** hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep evaluates each expected
-  artifact at every hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep relays
-  seat-state facts (turn-ended/completed state-signals, compound-idle, non-reaction residue) on its
-  own mechanical tick — it never infers expectations from artifacts, never climbs an escalation
-  ladder, and never respawns a seat. Your job is to **be woken with your pending signals and process
-  + ack every item before ending your turn** — never to poll, timer-loop, or hand-roll your own watch
-  over the worker.
-  **Watcher ban (uniform-mechanism ruling 2026-07-07):** no seat-local watcher of any kind — the L2
-  agent-notifier sweep is the one mechanism, no per-seat variance. Escalation intake via the inbox.
-- **Review artifact vs `task_doc`** — first compare the dispatched primary stable-ID + version with
-  the worker's Requirement Acceptance Envelope. Require exactly one row for the owned primary ID,
-  status `satisfied`, `blocked`,
-  or `approved-change`, complete delivery and verification rationales/citations, the failure caught,
-  exact command/result or durable evidence, and durable developer approval for every blocked or
-  changed delivery. Verify that each row is inside a newly appended `worker-delivery-attempt`
-  record bound to the exact revision, leaf manifestation, predecessor/findings, candidate, concise
-  requirement-specific rationale/citations/findings/failure class, and content-addressed expanded
-  evidence anchor; the complete master envelope and experimental-run log remain frozen shared
-  artifacts rather than duplicated per attempt. A
-  missing, edited, reused, or stale attempt makes the handoff incomplete. Then verify completion vs requirements/steps · the explicit Checks section truthfully
-  reports targeted commands/results · builder changed-path/code evidence is sufficient for the curator
-  onboarding handoff (the manager's own
-  leaf-level review; **this is not an adversarial seam**). Before sending a code handoff to the curator,
-  verify the worker's Checks section documents the relevant targeted tests and applicable repository-
-  prescribed checks with exact commands, scope, results, and any not-run reasons or failures; do not
-  treat undocumented checks as passed or full green. During a baseline review, a leaf whose
-  deliverable came out **wrong** is **reopened under its own id** (`task_reopen`) and its doc
-  reshaped — never duplicated into a redo sibling; new leaves are for genuinely new changes.
-  During fix-verification, only the already sealed outstanding IDs may drive that repair; a task
-  reopen cannot reset the baseline or authorize a new issue, route, or scope.
-  Require pre-append validation and treat append plus exact-candidate review handoff as one logical
-  formal-attempt boundary. A malformed pre-handoff row is preserved with an append-only
-  `non-attempt-correction`/void reference and consumes no attempt ID; the corrected handoff uses the
-  same next ID. A malformed handed-off row is rejected by the independent reviewer before the
-  worker may append a successor. Never let the worker self-reject or replace a handed-off record.
-- **Dispatch the independent route review only when the developer or approved brief requests it,
-  after a stable code-change session.** For `reviewMode=baseline` on a standalone or organizational
-  leaf, build the complete
-  major-route partition from changed architecture/control-plane ownership, governing route
-  overviews, and the import/call graph; then
-  dispatch the leaf reviewer chair. Its brief requires one independent reviewer sub-agent per
-  affected major route, each reading the changed files and surrounding code, tests, side effects,
-  task requirements, and current onboarding. Give the chair the exact owned primary stable-ID +
-  version and worker envelope, now contained in the exact worker attempt record. Require one
-  independent `accepted`/`rejected` adjudication for that ID, separately appended against that
-  attempt and candidate with artifact inspection and the reviewer's own rationale; missing
-  rationale, an unapproved packet revision, wrong-class evidence, or invalid citations forces
-  rejection. The overall verdict cannot pass with a rejected requirement,
-  and an accepted-but-blocked row still produces BLOCK until resolved or approved as changed
-  delivery. Every rejection finding uses exactly one of `implementation defect`, `evidence gap`,
-  `requirement contradiction/overconstraint`, `test/tool defect`, or `external blocker`. Route a
-  requirement problem to the architect for developer-approved revision; neither worker nor
-  reviewer may rewrite it. A pre-adjudication candidate change or repair to a rejected
-  manifestation requires a successor attempt; an unrelated later candidate does not reopen
-  accepted work. Accepted work stays closed. During fix-verification, an outside-list regression,
-  changed route, or changed requirement goes directly to the developer; it does not add or reopen a
-  finding. A worker, reviewer, candidate change, or summary never reopens acceptance by itself.
-  Require the verdict's route-coverage table to
-  account for every partitioned route. A block goes back to the same worker; the same route
-  reviewer delta-verifies the listed repair. A newly touched route is added only while assembling
-  the complete first-review partition; in successor verification it is an outside-list change that
-  cannot become a new finding or route review.
-  Direct and builder-verified tiers change depth and round machinery only when this requested review
-  exists; no tier creates a review. For `reviewMode=fix-verification`, pass the sealed baseline, preceding result,
-  and exact outstanding IDs instead of recensing routes. The successor verifies listed fixes only,
-  writes a fixed/unfixed disposition for every preceding ID, and rejects omissions, unknown,
-  duplicate, rewritten, reintroduced, or newly discovered IDs, new criteria, full-review requests,
-  new routes, and passes with unresolved IDs. If a changed candidate or route cannot be verified
-  against the baseline, return the decision to the developer; do not reset the review or expand the
-  worker scope. Before dispatching a hosted reviewer or beginning native reviewer work, call
-  `task_doc(operation="begin_review")`; after the durable verdict and route reports exist, record
-  the result with `task_doc(operation="record_review")` or the existing
-  `task_doc(operation="record_route_review")` route result. Curator dispatch and closeout consume
-  that task-bound result only when review was requested.
-  For an atomic master, when review is requested, the manager accumulates canonical child changes
-  and publishes the independent review once on the canonical master immediately before
-  master-to-parent integration; no per-child route-review record is created.
-- **Maintain the rebuildable master Requirement Attempt Summary.** After each adjudication,
-  regenerate or update `notes/reports/<master-id>-requirement-attempt-summary.md` from the
-  authoritative leaf worker/reviewer records. Per exact requirement revision and manifestation,
-  show attempt IDs, rejection history/count, latest adjudicated state, dominant open failure class,
-  and leaf journal references. This summary is a disposable observation only: it never authorizes
-  or blocks task authoring, lifecycle, closeout, integration, or queue operations. If it is missing,
-  stale, or contradictory, the leaf records win and the summary is rebuilt; do not stall work on it.
-- **Curator onboarding handoff.** After builder code is ready, call `worktree_status` for the
-  canonical leaf and require its task-derived code and external-memory `sourceLineage` to be
-  current. If the source parent advanced, run the contract-addressed `worktree_sync` and reconcile
-  the landed code before handing work to the curator. Compile `../templates/curator-brief.md`
-  with the landed change set, task doc, approved decisions, affected onboarding anchors, exact
-  requirement packets, and the worker report. Include a reviewer adjudication only when review was
-  requested. The fresh curator updates affected onboarding and runs the brief's scoped checks;
-  `curator_coherence`, full memory quality, and certification are separate explicit operations and
-  are not required for closeout or integration. The manager consumes the curator's paths and exact
-  passed/failed/blocked/not-run check report.
-- **Publish closeout-door truth; do not rank the portfolio.** Once the leaf has builder completion,
-  the worker targeted-check report, affected curator onboarding/scoped-check handoff when memory
-  changed, current task/source/memory provenance, and current lineage, call the
-  `closeout_door` MCP tool with a
+  **every** hand-off; this seat does not watch for it. The notifier sweep **never opens or evaluates the
+  artifact** — it derives and delivers a mechanical seat-state fact and relays it on its own mechanical
+  tick; it never infers expectations, climbs a ladder, or respawns a seat. A canonical `completed`
+  outcome means **only** that the provider turn ended: it never attests that the report exists, is
+  current, or satisfies its requirement, so a worker can forget the report and still produce mechanical
+  `completed` truth. Be woken with your pending signals, then **open and validate the required artifact,
+  candidate identity, evidence, and acceptance envelope before advancing lifecycle state**; a missing,
+  malformed, or stale artifact is **this seat's own detected handoff defect** after that wake — nudge,
+  reject, replace, or escalate under the flow below, and never wait for a notifier artifact check that
+  does not exist. Never poll, timer-loop, or hand-roll a watch over the worker (watcher ban and
+  notify-and-stop doctrine: `../core/authority.md`; the truth boundary: `../core/acceptance.md`).
+- **Review artifact vs `task_doc`.** Compare the dispatched primary stable-ID + version with the
+  worker's Requirement Acceptance Envelope (`../core/acceptance.md`): exactly one row for the owned
+  primary ID with status `satisfied`, `blocked`, or `approved-change`, complete delivery and
+  verification rationales/citations, the failure caught, the exact command/result or durable evidence,
+  and durable developer approval for any blocked or changed delivery. That row must sit inside a newly
+  appended `worker-delivery-attempt` record bound to the exact revision, leaf manifestation,
+  predecessor/findings, candidate, failure class, and content-addressed expanded evidence anchor (the
+  master envelope and experimental-run log stay frozen shared artifacts); a missing, edited, reused, or
+  stale attempt makes the handoff incomplete. Then verify completion vs requirements/steps, that the
+  explicit Checks section truthfully reports targeted commands/results, and that builder
+  changed-path/code evidence suffices for the curator handoff — this is this seat's own leaf-level
+  review, **not an adversarial seam**. Before a code handoff to the curator, require the Checks section
+  to satisfy the targeted-check contract the closeout operation owns (`../operations/closeout.md` § The
+  targeted-check contract), documenting the relevant targeted tests and applicable
+  repository-prescribed checks with exact commands, scope, results, and any not-run reasons; never treat
+  undocumented checks as passed or full green. A baseline leaf whose deliverable came out **wrong** is **reopened under its own id**
+  (`task_reopen`) and its doc reshaped — never duplicated into a redo sibling; new leaves are for
+  genuinely new changes. In fix-verification only the sealed outstanding IDs drive that repair, and a
+  reopen cannot reset the baseline or authorize a new issue, route, or scope. Require pre-append
+  validation: append plus exact-candidate review handoff is one logical formal-attempt boundary. A
+  malformed pre-handoff row is preserved with an append-only `non-attempt-correction`/void reference
+  and consumes no attempt ID; a malformed handed-off row is rejected by the independent reviewer before
+  the worker may append a successor — never let the worker self-reject or replace a handed-off record.
+- **Dispatch the independent route review only when the developer or approved brief requests it**,
+  after a stable code-change session. Partition the major routes from changed
+  architecture/control-plane ownership, governing route overviews, and the import/call graph; dispatch
+  the leaf reviewer chair with one independent reviewer sub-agent per affected major route, giving it
+  the exact owned primary stable-ID + version and the worker envelope inside its attempt record.
+  Require one independent `accepted`/`rejected` adjudication for that ID, appended against that exact
+  attempt and candidate with artifact inspection and the reviewer's own rationale; missing rationale,
+  an unapproved packet revision, wrong-class evidence, or invalid citations forces rejection. The
+  route-coverage table must account for every partitioned route; the verdict cannot pass with a
+  rejected requirement; an accepted-but-blocked row still produces BLOCK until resolved or approved as
+  changed delivery. Every rejection finding uses exactly one of `implementation defect`,
+  `evidence gap`, `requirement contradiction/overconstraint`, `test/tool defect`, or `external
+  blocker`; a requirement problem routes to the architect for developer-approved revision, and neither
+  worker nor reviewer may rewrite it. A pre-adjudication candidate change or repair to a rejected
+  manifestation requires a successor attempt; an unrelated later candidate does not reopen accepted
+  work, and accepted work stays closed. A block goes back to the same worker; the same route reviewer
+  delta-verifies the listed repair. Call `task_doc(operation="begin_review")` before dispatching a
+  hosted reviewer or beginning native reviewer work, and after the durable verdict and route reports
+  exist record it with `task_doc(operation="record_review")` or the existing
+  `task_doc(operation="record_route_review")` route result — curator dispatch and closeout consume that
+  task-bound result only when review was requested.
+- **Atomic-master accumulation.** When review is requested for an atomic master, accumulate the
+  canonical child changes and publish the independent review **once** on the canonical master
+  immediately before master-to-parent integration; no per-child route-review record is created.
+- **Maintain the rebuildable master Requirement Attempt Summary.** After each adjudication, regenerate
+  or update `notes/reports/<master-id>-requirement-attempt-summary.md` from the authoritative leaf
+  worker/reviewer records: per exact requirement revision and manifestation, its attempt IDs, rejection
+  history/count, latest adjudicated state, dominant open failure class, and leaf journal references. It
+  is a disposable observation only — it never authorizes or blocks task authoring, lifecycle, closeout,
+  integration, or queue operations, and if it is missing, stale, or contradictory the leaf records win
+  and the summary is rebuilt.
+- **Curator onboarding handoff.** After builder code is ready, call `worktree_status` for the canonical
+  leaf and require its task-derived code and external-memory `sourceLineage` to be current; if the
+  source parent advanced, run the contract-addressed `worktree_sync` and reconcile the landed code
+  first. Compile `../templates/curator-brief.md` with the landed change set, task doc, approved
+  decisions, affected onboarding anchors, exact requirement packets, and the worker report — plus a
+  reviewer adjudication only when review was requested. The fresh curator updates affected onboarding
+  and runs the brief's scoped checks; `curator_coherence`, full memory quality, and certification are
+  separate explicit operations, **not** closeout or integration requirements. Consume the curator's
+  paths and exact passed/failed/blocked/not-run check report (`../operations/curation.md`).
+- **Publish closeout-door truth; do not rank the portfolio.** Given builder completion, the worker
+  targeted-check report, the affected curator onboarding/scoped-check handoff when memory changed,
+  current task/source/memory provenance, and current lineage, call `closeout_door` with
   `request={action:"declare", contract_path:...}` for the configured leaf contract. Publish the
-  canonical leaf/master/sprint refs, `executionNature`,
-  accepted priority grade, exact candidate tree, routes/seams, and complete admission evidence as
-  the door generation—not as a queue row or chat-only readiness claim. Declaration retries with the
-  same intent converge. The resulting `waiting` generation is source truth; the closeout queue is
-  only its current schedulable projection. Do not assign or change cross-master priority, release
-  another manager, claim the generation, or close out before the orchestrator grants the current
-  first-ready generation from a `valid-built` projection. A later source move requires
-  `worktree_sync`, any necessary delta review/curation, and
-  `closeout_door(request={action:"update-provenance", ...})`; it does not mutate an old queue row
-  or justify carry-over by default.
+  canonical leaf/master/sprint refs, `executionNature`, the accepted priority grade, the exact candidate
+  tree, routes/seams, and complete admission evidence as the **door generation** — not a queue row or a
+  chat-only readiness claim; declaration retries with the same intent converge. The resulting `waiting`
+  generation is source truth; the closeout queue is only its current schedulable projection. Do not
+  assign or change cross-master priority, release another manager, claim the generation, or close out
+  before the orchestrator grants the current first-ready generation from a `valid-built` projection. A
+  later source move requires `worktree_sync`, any necessary delta review/curation, and
+  `closeout_door(request={action:"update-provenance", ...})`; it does not mutate an old queue row or
+  justify carry-over by default.
 - **Task authoring remains authoritative.** Continue every intrinsically valid `task_doc` mutation
   during every door, projection, and operation phase. Read the returned `projectionEffects` for the
-  before/after governing-sprint union. If an effect carries `nextAction`, send that exact
-  sprint-addressed rebuild fact to the orchestrator; never reject, roll back, whitelist, or delay the
-  task write because a closeout generation exists. Task edits do not change scheduling intent
-  secretly: any affected waiting generation is re-proven, deferred, resumed, withdrawn, or replaced
-  through its door owner before it can reappear in a fresh projection.
-- **Delegated leaf gates (plan · closeout)** — decide the leaf's delegated gates, **attributed**
-  (`decidedBy: <manager lifecycle>`, `decidedVia: orchestration`), appended and dashboard-visible. The
-  **owning agent never self-approves; a distinct configured role may** — that configured role is the
-  manager. (Enforced as-built by the gate policy: `orchestration.gateDelegation` in settings,
-  `controlplane/gate_policy.py` — human-pinned kinds stay human, decisions attributed.)
-  Under the accepted series authority, leaf closeout preview/apply is this seat's responsibility:
-  preview the exact code/memory legs, record the accepted planner/series authority in the
-  closeout intent note, and continue only after the orchestrator released the in-scope transaction.
-  Worker and curator check results remain attached as truthful evidence; they do not become a full
-  green claim. Your own
-  hand-off idiom, this seat only:
-  durable gates + inbox posts — you never call the developer-facing notification; your counterparty
-  is the orchestrator.
-- **Integrate according to execution nature.** After the orchestrator releases the candidate,
-  close out and land through the task-bound worktree tools. An `organizational` leaf lands directly
-  into the current super line; an `atomic` leaf lands only into its atomic master branch. Prefer
-  current-lineage fast-forward mechanics; `c-11-memory-carryover-from-branch` is a recovery
-  for unavoidable divergence, not the normal scheduling strategy. Know the human-pinned gate kinds by name:
-  `integration-approval`, `push-approval`, `cleanup-approval` — none is ever delegable. When a
-  durable `integration-approval` gate is raised on this step it awaits the **developer** (via the
-  dashboard GateResponder or your attached chat — you do not relay; if the wait blocks the loop,
-  escalate to the orchestrator). Absent a durable gate, the **series' standing approval** governs:
-  the developer's portfolio-gate approval of this series, recorded in the planner master's
-  decision log, covers orchestrator-released leaf integrations. Loop until the master's leaves are
-  done; an atomic master exposes nothing to super between leaves. Once claim transfers the
-  generation into the enclosure-root operation journal, observe it only through `worktree_status`
-  and advertised `worktree_operation_control` actions. Closeout exposes `cancel` and `resume`;
-  integration and direct-landing retain their own advertised recovery actions. Queue absence,
-  invalid-empty state, or later task edits never erase or strand that operation.
-- **Transaction boundary.** Closeout and integration publish only the explicitly authorized Git
-  code and prepared memory commits/merges, with source/destination refs, conflict checks,
-  and recovery evidence. They do not automatically run code-quality checks, full test suites,
-  memory-quality suites, curator certification, or independent review. Full code quality, full
-  tests, and full memory quality run only after an explicit developer request. Worker targeted
-  checks and curator scoped onboarding checks remain truthful handoff evidence; failures and
-  not-run checks are reported and never relabeled as full green.
-- **Seat cleanup** — a completed leaf's worker/reviewer/curator chats have no further active
-  purpose. `worktree_integrate` auto-closes each one (config-gated, default ON) only after that
-  exact session's turn report is durable for the exact leaf; retirement gracefully stops control,
-  kills tmux, preserves the transcript/report, and stamps auto-close provenance. A missing report
-  defers that seat and leaves it live. Setting `retirement.autoCloseCompletedSeats=false` restores
-  the previous landed/archive behavior for all three roles. Manager and orchestrator seats are
-  never automatic cleanup targets. When a leaf's worker/reviewer/curator seat goes stuck or
-  abandoned before integration (a dead-end
-  retry, a duplicate spawn), retire it by hand:
-  `retire_child(task_document_ref=<leaf document>, role=<seat role>, reason=...)`. Server
-  policy enforces the authority split: **you may retire only worker/reviewer/curator seats of your
-  OWN master** — leaf execution seats through the leaf address, plus the master-exit reviewer
-  through this master document. You can never unseat yourself
-  (owner-never-self-retires); a target of any other role, or of a different master, is refused
-  loudly. Transcripts are never deleted — retiring only terminates the tmux session and marks the
-  catalog row.
+  before/after governing-sprint union and send any carried `nextAction` to the orchestrator as that
+  exact sprint-addressed rebuild fact; never reject, roll back, whitelist, or delay the task write
+  because a closeout generation exists. Task edits do not change scheduling intent secretly — any
+  affected waiting generation is re-proven, deferred, resumed, withdrawn, or replaced through its door
+  owner before it can reappear in a fresh projection.
+- **Delegated leaf gates (plan · closeout).** Decide the leaf's delegated gates, **attributed**
+  (`decidedBy: <manager lifecycle>`, `decidedVia: orchestration`), appended and dashboard-visible — the
+  owning agent never self-approves, and the configured distinct role that may decide is this seat
+  (`orchestration.gateDelegation`; human-pinned kinds stay human). Under the accepted series authority
+  (`../core/authority.md`), leaf closeout preview/apply is this seat's responsibility: preview the exact
+  code/memory legs, record the accepted planner/series authority in the closeout intent note, and
+  continue only after the orchestrator released the in-scope transaction. Worker and curator check
+  results stay attached as truthful evidence; they never become a full green claim. This seat's
+  hand-off idiom is durable gates plus inbox posts — never the developer-facing notification; its
+  counterparty is the orchestrator.
+- **Integrate according to execution nature.** After the orchestrator releases the candidate, close out
+  and land through the task-bound worktree tools: `organizational` leaves into the current super line,
+  `atomic` leaves only into their atomic master branch, preferring current-lineage fast-forward
+  mechanics (`c-11-memory-carryover-from-branch` is the recovery for unavoidable divergence, not the
+  scheduling strategy). Know the human-pinned gate kinds by name: `integration-approval`,
+  `push-approval`, `cleanup-approval` — none is ever delegable. A durable `integration-approval` awaits
+  the **developer** (dashboard or the attached chat; this seat does not relay — if the wait blocks the
+  loop, escalate to the orchestrator). Absent a durable gate, the series' standing approval governs.
+  Loop until the master's leaves are done; an atomic master exposes nothing to super between leaves.
+  Once claim transfers the generation into the enclosure-root operation journal, observe it only through
+  `worktree_status` and the advertised `worktree_operation_control` actions; queue absence or later
+  task edits never erase or strand it.
+- **Transaction boundary.** Closeout and integration publish only the explicitly authorized Git code
+  and prepared memory commits/merges, with source/destination refs, conflict checks, and recovery
+  evidence. They never automatically run code-quality checks, full test suites, memory-quality suites,
+  curator certification, or independent review; full code quality, full tests, and full memory quality
+  run only after an explicit developer request.
+- **Seat cleanup.** `worktree_integrate` auto-closes a completed leaf's worker/reviewer/curator sessions
+  (config-gated, default ON) only after that exact session's turn report is durable for the exact leaf;
+  retirement stops control, kills the tmux session, preserves the transcript and report, and stamps
+  auto-close provenance, while a missing report defers that seat and leaves it live. Setting
+  `retirement.autoCloseCompletedSeats=false` restores the previous landed/archive behavior for all three
+  roles; manager and orchestrator seats are never automatic cleanup targets. Retire a stuck or abandoned
+  seat by hand with `retire_child(task_document_ref=<leaf document>, role=<seat role>, reason=...)` —
+  server policy lets this seat retire only **worker/reviewer/curator seats of its own master** (leaf
+  execution seats through the leaf address, plus the master-exit reviewer through the master document);
+  another role or another master is refused loudly, owner-never-self-retires always holds, and
+  transcripts are never deleted.
 
-### 3 — Optional Master-exit Review
+**Optional master-exit review.** When the developer or approved task brief requests it, dispatch the
+adversarial reviewer on this canonical master document with role `reviewer`, scoping the accumulated
+organizational candidate or isolated atomic branch with the worker reports, curator scoped handoff,
+task/Git/operation refs, and the exact requested review mode. Review 1 seals the complete fixed finding
+list, reviews 2 and 3 verify only that list with the remaining count shrinking to zero, and after round
+3 ask the developer directly. Its verdict follows `../templates/verdict.md`. The verdict is evidence,
+not a gate decision: record it with `task_doc` and attach it only to the requested handover evidence.
+Routine closeout and integration require no master-exit reviewer or verdict.
 
-When the developer or approved task brief requests a master-exit review, spawn the adversarial
-reviewer on this canonical master document with role `reviewer`. Scope the accumulated
-organizational candidate or isolated atomic branch, pass the worker reports, curator scoped
-handoff, task/Git/operation refs, and exact requested review mode, and preserve the three-round monotonic
-review rule in `../SKILL.md`: review 1 seals the complete fixed finding list; reviews 2 and 3 verify
-only that list, with remaining count shrinking to zero; ask the developer directly after round 3.
-The verdict is evidence, not a gate decision. Record it with `task_doc` and attach it only to the
-requested handover evidence. No master-exit reviewer or verdict is required for routine closeout or
-integration.
+**Handover to the orchestrator.** Write the **master-handover packet**
+(`../templates/master-handover-packet.md`): execution nature · scope refs · change-set summary · worker
+targeted-check report · curator scoped onboarding/check report when memory changed · optional requested
+verdict · canonical master document · accepted Git pair. The packet records the exact prepared
+code/memory transaction and any concrete conflict or failed/not-run check; it does not request an
+automatic full gate. Memory commit trailers supply attribution and the computed ledger cache is
+diagnostic — it never supplies landing authority or an additional commit leg. Write the packet before
+ending the turn; terminal/finalizer truth then wakes the structurally current orchestrator, who
+validates it independently (`../core/acceptance.md`).
 
-### 4 — Handover to the orchestrator
+## 4 — Permitted Writes And Actions
 
-Write the **master-handover packet** (`../templates/master-handover-packet.md`) — execution nature ·
-scope refs · change-set summary · worker targeted-check report · curator scoped onboarding/check
-report when memory changed · optional requested verdict · canonical master document · accepted Git pair.
-The packet records the exact prepared code/memory transaction and any concrete conflict or
-failed/not-run check; it does not request an automatic full gate.
-Memory commit trailers supply attribution. The computed ledger cache is diagnostic and never
-supplies landing authority or an additional commit leg.
-Terminal/finalizer truth wakes the structurally current orchestrator. The `(master document,
-manager)` seat **stays reachable** until the series retires; `gate_list` shows the structural gate
-state without exposing its private correlation.
+**This is the whole surface — a positive statement.**
 
-## Artifact Obligations
+- **Leaf lifecycle machinery:** `worktree_start` · `worktree_status` · `worktree_sync` ·
+  `worktree_operation_control` (its advertised recovery actions) · closeout preview/apply ·
+  `worktree_integrate` · `lifecycle_finalize_task` · `task_reopen` on a leaf that came out wrong.
+- **`task_doc`** in every phase, plus `task_doc(operation="begin_review")` / `record_review` /
+  `record_route_review`. Master attachment and execution-graph authoring belong to the sprint seats,
+  not here.
+- **Door and queue:** `closeout_door` `declare` / `update-provenance`; `closeout_queue` status and the
+  exact addressed `rebuild` action, never a hand-edited row.
+- **Gates:** `gate_decide` for this seat's delegated leaf gates, `gate_list` for structural state.
+- **Dispatch and retirement:** `dispatch_agent` for the worker, leaf reviewer, curator, and same-master
+  master-exit reviewer; `retire_child` bounded to this master's leaf execution seats and its same-master
+  reviewer.
+- **Messages:** `message_parent` / `message_child` — durable and dashboard-visible.
+- **Read-only retrieval:** `read_ar_files`, `grepai_search`, `cgc_*`, `context_packet`.
+- **Never:** another master's seats, cross-master priority, another seat's lifecycle, worker or curator
+  content, direct Git or protected-branch movement outside the authorized transaction, and the
+  developer-facing notification.
 
-- The **master-handover packet** at master exit (the manager's primary durable artifact).
-- Leaf-review notes (completion vs task_doc) — lightweight, on the relevant leaf document.
-- Delegated-gate decision records (attributed).
+## 5 — Stop And Escalation Cases
 
-## Comms Protocol
+- **Escalation rung (this seat's own):** **manager → orchestrator.** Resolve within this master's view
+  first; ordinary manager questions go up to the orchestrator, **never straight to the developer** (the
+  ladder and the developer-worthy test: `../core/authority.md`).
+- **Stop and ask the orchestrator** for a plan delta beyond blank-filling, a stumped manager, a review
+  that stops converging (attach the full round history — never silently re-run a governed review, reset
+  its baseline, or open a new finding list), a blocked loop, and any provider-dependent blocker.
+- **Ask the developer directly** only at the three-round review cap, waiting for explicit authorization
+  before any extra round. A raised human-pinned gate (`integration-approval`, `push-approval`,
+  `cleanup-approval`) is not a recovery step: it awaits the developer.
+- **Quo-vadis test:** a question that is a **high-blast-radius truth** — answered wrong it means big
+  rewrites later, not a cosmetic choice — is flagged as quo-vadis when raised so the orchestrator relays
+  it to the architect immediately instead of absorbing it; presentation-grade choices are never
+  escalated, decide and log.
+- **A requirement contradiction/overconstraint** routes to the architect for developer-approved
+  revision; builders and reviewers may propose but never rewrite a requirement.
+- **Classify every blocked finding as exactly one of** `implementation defect`, `evidence gap`,
+  `requirement contradiction/overconstraint`, `test/tool defect`, `external blocker`.
+- **A non-admitting closeout projection** (missing, malformed, source-mismatched, `invalid-empty`) means
+  execute its exact task- or sprint-addressed `rebuild` action and read status again — never approximate
+  a missing primitive with direct Git, task freezes, queue lifecycle rows, scanned journals, or
+  compatibility readers.
+- **Provider degradation:** stop **starting** providers (no worktree provider setup, no
+  `provider_watchers start`, no watcher restart, no `retry_provider_setup`), continue valid
+  providerless/native-read work, report the blocker upward. This seat has **no provider kill
+  authority** — investigation, remediation orders, and stops belong to the orchestrator through the
+  system-specialist protocol (`../core/lifecycle-frame.md`).
+- **Never** silently widen scope, delay an intrinsically valid task write because a closeout generation
+  exists, mutate an old queue row, or end a turn with unprocessed pending signals.
 
-- **Structural messages** (`message_parent` / `message_child`) — follow-ups down to leaf seats, escalation
-  intake up from workers, handover up to the orchestrator; all durable + dashboard-visible.
-- **Stdin push** — the L2 agent-notifier's injector (HFX2-L3, the one standard wake mechanism) delivers
-  nudges and messages into hosted worker sessions on the sweep's own tick, never on this seat's
-  initiative; a non-hosted seat gets the equivalent signal via the inbox instead.
-- **Escalation** — **up to the orchestrator, never straight to the developer** for ordinary manager
-  questions. A stumped manager, and any plan delta beyond blank-filling, raises to the orchestrator.
-  The manager resolves within its own master's view first. When a governed review reaches three
-  rounds, ask the developer directly and wait for explicit authorization; record that instruction
-  before an extra round. Otherwise a loop that stops converging escalates with its full round history
-  attached. **Quo-vadis test:** a question that is a **high-blast-radius truth** — answered wrong it
-  means big rewrites later, not a cosmetic choice — is flagged as quo-vadis when raised, so the
-  orchestrator relays it to the architect immediately instead of absorbing it; presentation-grade
-  choices are never escalated — decide and log.
+## 6 — Completion And Handoff
 
-## Knobs
+**Artifact obligations.** The **master-handover packet** is this seat's primary durable artifact at
+master exit; its supporting records are the lightweight leaf-review notes (completion vs `task_doc`, on
+the relevant leaf document) and the attributed delegated-gate decisions. This seat validates the worker,
+reviewer, and curator artifacts before advancing lifecycle state; the orchestrator validates this seat's
+packet (`../core/acceptance.md`).
+
+**Comms protocol.**
+
+- **Structural messages** (`message_parent` / `message_child`): follow-ups down to leaf seats,
+  escalation intake up from workers, handover up to the orchestrator — all durable and
+  dashboard-visible.
+- **Stdin push:** the notifier injector delivers nudges and messages into hosted worker sessions on the
+  sweep's own tick, never on this seat's initiative; a non-hosted seat receives the equivalent signal
+  through the inbox.
+- **Reachability:** the `(master document, manager)` seat stays structurally reachable until the series
+  retires, and `gate_list` shows the structural gate state without exposing its private correlation.
+
+## Knobs, Tool Surface, And Dispatch Authority
 
 | Knob    | Default        | Notes                                                            |
 | ------- | -------------- | ---------------------------------------------------------------- |

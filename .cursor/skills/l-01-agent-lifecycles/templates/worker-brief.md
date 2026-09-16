@@ -6,6 +6,12 @@ checkpoint, reframe, plan). Compile it fresh per leaf from this shape; the prove
 absorbed a series of real dispatch frictions (route-index leaks, attestation format, provider-stack
 keying, missing `python` shim), so deviate knowingly or not at all.
 
+**This template feeds inputs; it does not author rules.** Where the packet states a rule, the rule's
+single home is `../roles/worker.md` (the seat's own duties), `../operations/implementation.md` and
+`../operations/closeout.md` (the build procedure and the targeted-check contract), or
+`../core/acceptance.md` (the acceptance envelope, attempt lineage, and completion truth). The rows
+below carry the *values* for this leaf; if a value here disagrees with those files, they win.
+
 Dispatch with `dispatch_agent(task_document_ref=<canonical leaf document>, role="worker",
 brief=<this complete brief>)`. The control plane claims the `(leaf document, worker)` seat and
 privately binds its current occupant; the brief never carries a runtime address.

@@ -7,6 +7,11 @@ orchestrator already ran. Dispatch it with
 complete brief>)`. The control plane claims the `(master document, manager)` seat and privately
 binds its current occupant.
 
+**This template feeds inputs; it does not author rules.** The manager's duties live in
+`../roles/manager.md`, the loop and closeout procedure in `../operations/coordination.md` and
+`../operations/closeout.md`, and the truth boundary in `../core/acceptance.md`. The rows below carry
+the *values* for this master; if a value here disagrees with those files, they win.
+
 ---
 
 ```md

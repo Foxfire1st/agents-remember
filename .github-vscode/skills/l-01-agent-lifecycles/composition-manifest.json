@@ -1,0 +1,269 @@
+{
+  "schema": "ar-role-capsule-composition/v1",
+  "authority": "skills/l-01-agent-lifecycles/SKILL.md (thin router) · this file is routing metadata only",
+  "entry_router": "skills/l-01-agent-lifecycles/SKILL.md",
+  "authoritative_tree": "skills/",
+
+  "role_order": [
+    "architect",
+    "orchestrator",
+    "designer",
+    "strategist",
+    "manager",
+    "worker",
+    "curator",
+    "reviewer",
+    "system-specialist"
+  ],
+
+  "routing_conditions": [
+    {
+      "id": "spawn-role-env",
+      "condition": "AR_SPAWN_ROLE is set by the hosted-seat control plane",
+      "selects": "role",
+      "role_from": "AR_SPAWN_ROLE",
+      "never_selects": "launcher",
+      "fail_closed_when": "the value has no matching roles/<value>.md, or the role env arrives without its matching plane-injected hosted-session identity"
+    },
+    {
+      "id": "fresh-session-role-brief",
+      "condition": "the first user message is a templates/*-brief.md-shaped dispatch or a first line of the form 'ROLE BRIEF - <role>'",
+      "selects": "role",
+      "role_from": "the brief's named role",
+      "never_selects": "launcher",
+      "fail_closed_when": "the named role has no matching roles/<role>.md"
+    },
+    {
+      "id": "ambient-launcher",
+      "condition": "no spawn-role env, no role brief: a developer opened this session",
+      "selects": "launcher",
+      "never_selects": "role",
+      "is_role": false,
+      "instruction_source": "core/launcher.md",
+      "note": "a distinct routing condition, not a tenth role; the launcher dispatches a real role seat instead of taking one"
+    }
+  ],
+
+  "operations": {
+    "orientation": {
+      "source": "operations/orientation.md",
+      "purpose": "Opening a turn: read the brief and its durable inputs, establish trust facts, state the current state back.",
+      "applies_to_roles": [
+        "architect",
+        "orchestrator",
+        "designer",
+        "strategist",
+        "manager",
+        "worker",
+        "curator",
+        "reviewer",
+        "system-specialist"
+      ]
+    },
+    "planning": {
+      "source": "operations/planning.md",
+      "purpose": "Deciding what will be built: reframing, evidence-backed design, requirement compilation, topology, plan review.",
+      "applies_to_roles": ["architect", "designer", "strategist", "orchestrator"]
+    },
+    "implementation": {
+      "source": "operations/implementation.md",
+      "purpose": "Building the assigned scope inside the leaf worktree and producing the builder artifacts.",
+      "applies_to_roles": ["worker"]
+    },
+    "review": {
+      "source": "operations/review.md",
+      "purpose": "The requested independent review seam and its exact baseline / fix-verification mode contract.",
+      "applies_to_roles": ["reviewer", "manager", "orchestrator", "architect"]
+    },
+    "curation": {
+      "source": "operations/curation.md",
+      "purpose": "The leaf coherence pass: reconcile intended, current, and implemented meaning and write affected onboarding.",
+      "applies_to_roles": ["curator", "manager"]
+    },
+    "coordination": {
+      "source": "operations/coordination.md",
+      "purpose": "Driving a portfolio or master-series from durable state, including the targeted-check contract closeout consumes.",
+      "applies_to_roles": ["architect", "orchestrator", "manager"]
+    },
+    "authorized-closeout": {
+      "source": "operations/closeout.md",
+      "purpose": "The authorized Git code/memory transaction and the targeted-check contract it consumes.",
+      "applies_to_roles": ["manager", "orchestrator"]
+    },
+    "recovery": {
+      "source": "operations/recovery.md",
+      "purpose": "Resuming, resyncing, repairing, or retiring a run whose state moved: the bounded recovery moves.",
+      "applies_to_roles": [
+        "architect",
+        "orchestrator",
+        "manager",
+        "worker",
+        "curator",
+        "system-specialist"
+      ]
+    }
+  },
+
+  "core": {
+    "authority": {
+      "source": "core/authority.md",
+      "purpose": "Seat authority, seat binding, immutability, the dispatch transaction, takeover, the escalation ladder, clarification triage, delegated series authority, the decision relay."
+    },
+    "invariants": {
+      "source": "core/invariants.md",
+      "purpose": "The shared invariants every role can count on, the task-doc/branch/worktree spine, default behavior, knob resolution, instruction-surface boundaries."
+    },
+    "lifecycle-frame": {
+      "source": "core/lifecycle-frame.md",
+      "purpose": "The minimal lifecycle frame: the six signals, which seats run them, the trust checkpoint, provider-degradation handling."
+    },
+    "loop": {
+      "source": "core/loop.md",
+      "purpose": "The three-party loop doctrine, tiers, rounds and convergence, criteria catalogs, per-level agent sets, requirement compilation before topology."
+    },
+    "acceptance": {
+      "source": "core/acceptance.md",
+      "purpose": "Completion truth vs acceptance, the per-seat handoff artifact table, per-ID acceptance envelopes, attempt lineage, the durable-evidence promotion hold point."
+    },
+    "launcher": {
+      "source": "core/launcher.md",
+      "purpose": "The ambient launcher's own obligations, authored here so the role registry stays exactly nine roles."
+    }
+  },
+
+  "roles": {
+    "architect": {
+      "file": "roles/architect.md",
+      "altitude": "sprint",
+      "seat": "developer-facing owner seat; design conversation, decision-item relay, and drawing board",
+      "core": ["authority", "invariants", "lifecycle-frame", "loop", "acceptance"],
+      "operations": ["orientation", "planning", "coordination", "review", "recovery"],
+      "templates": ["architect-brief.md", "conversation-handover-packet.md"],
+      "criteria": ["plan-review.md"]
+    },
+    "orchestrator": {
+      "file": "roles/orchestrator.md",
+      "altitude": "sprint",
+      "seat": "sprint-local spawned backend portfolio and orchestration seat; never developer-facing",
+      "core": ["authority", "invariants", "lifecycle-frame", "loop", "acceptance"],
+      "operations": ["orientation", "planning", "coordination", "review", "authorized-closeout", "recovery"],
+      "templates": ["manager-brief.md", "master-handover-packet.md", "conversation-handover-packet.md", "impact-analysis.md", "onboarding-coherency.md"],
+      "criteria": ["plan-review.md"]
+    },
+    "designer": {
+      "file": "roles/designer.md",
+      "altitude": "sprint",
+      "seat": "a HAT the architect pulls inline, or an optional separate sprint chair; evidence-backed problem framing at the assigned scope",
+      "core": ["authority", "invariants", "loop", "acceptance"],
+      "operations": ["orientation", "planning"],
+      "templates": ["architect-brief.md"],
+      "criteria": []
+    },
+    "strategist": {
+      "file": "roles/strategist.md",
+      "altitude": "sprint",
+      "seat": "the sprint planner, spawn-first under the architect's propose-first question; reader, not mutator",
+      "core": ["authority", "invariants", "loop", "acceptance"],
+      "operations": ["orientation", "planning"],
+      "templates": ["orchestration-task.md"],
+      "criteria": ["plan-review.md"]
+    },
+    "manager": {
+      "file": "roles/manager.md",
+      "altitude": "master",
+      "seat": "sprint-local coordination seat per master; drives exactly one master's leaf loop",
+      "core": ["authority", "invariants", "lifecycle-frame", "loop", "acceptance"],
+      "operations": ["orientation", "coordination", "review", "curation", "authorized-closeout", "recovery"],
+      "templates": ["manager-brief.md", "worker-brief.md", "curator-brief.md", "master-handover-packet.md", "verdict.md", "turn-report.md"],
+      "criteria": ["code-seam.md", "report-verification.md", "onboarding-memory.md", "doctrine.md"]
+    },
+    "worker": {
+      "file": "roles/worker.md",
+      "altitude": "leaf",
+      "seat": "one leaf worktree, short-lived, fresh session; the builder with a no-commit contract",
+      "core": ["authority", "invariants", "lifecycle-frame", "acceptance"],
+      "operations": ["orientation", "implementation", "recovery"],
+      "templates": ["worker-brief.md", "turn-report.md"],
+      "criteria": ["report-verification.md"]
+    },
+    "curator": {
+      "file": "roles/curator.md",
+      "altitude": "leaf",
+      "seat": "fresh per leaf after builder and (when requested) reviewer; writes onboarding only",
+      "core": ["authority", "invariants", "acceptance"],
+      "operations": ["orientation", "curation", "recovery"],
+      "templates": ["curator-brief.md"],
+      "criteria": ["onboarding-memory.md"]
+    },
+    "reviewer": {
+      "file": "roles/reviewer.md",
+      "altitude": "leaf | master | sprint, by seam",
+      "seat": "short-lived adversarial reviewer at the requested seam; verdicts are evidence, not decisions",
+      "core": ["authority", "invariants", "loop", "acceptance"],
+      "operations": ["orientation", "review"],
+      "templates": ["verdict.md", "impact-analysis.md", "onboarding-coherency.md"],
+      "criteria": ["code-seam.md", "doctrine.md", "onboarding-memory.md", "report-verification.md", "plan-review.md"]
+    },
+    "system-specialist": {
+      "file": "roles/system-specialist.md",
+      "altitude": "sprint",
+      "seat": "provider-degradation investigator; report first, fixes only after an explicit orchestrator order",
+      "core": ["authority", "invariants", "acceptance"],
+      "operations": ["orientation", "recovery"],
+      "templates": [],
+      "criteria": []
+    }
+  },
+
+  "launcher": {
+    "is_role": false,
+    "routing_condition": "ambient-launcher",
+    "instruction_source": "core/launcher.md",
+    "core": ["launcher", "authority"],
+    "operations": [],
+    "templates": ["architect-brief.md"],
+    "criteria": []
+  },
+
+  "references": {
+    "rationale": {
+      "source": "reference/rationale.md",
+      "description": "Reference-only: rationale, provenance, and credits consolidated out of the normative path.",
+      "injected": false
+    },
+    "rulings": {
+      "source": "reference/rulings.md",
+      "description": "Reference-only: durable developer rulings and the superseded rules they replace, with citations.",
+      "injected": false
+    },
+    "lenses": {
+      "source": "lenses.md",
+      "description": "The four job lenses the scoping seats read. Reference material for the architect, orchestrator, and designer; a dispatched role never picks a lens.",
+      "injected": false
+    },
+    "criteria": {
+      "source": "criteria/",
+      "description": "The reviewer criteria catalogs, bound per review type by operations/review.md and roles/reviewer.md.",
+      "injected": false
+    },
+    "templates": {
+      "source": "templates/",
+      "description": "Field schemas for dispatch briefs and handoff artifacts, and the plan/report template library for the seats that compile them.",
+      "injected": false
+    }
+  },
+
+  "composition_order": [
+    "core",
+    "role",
+    "operation",
+    "repository-specialization"
+  ],
+
+  "notes": [
+    "Routing metadata only: this file carries no instruction prose and no copies of any source section.",
+    "Exactly one source per instruction. core/ is authored once; a role file states its own seat's side of a shared rule and never restates the whole of it.",
+    "Task facts are a separate context channel and are not part of this manifest.",
+    "The launcher is a routing condition, not a tenth role: the role registry is exactly the nine entries in role_order."
+  ]
+}

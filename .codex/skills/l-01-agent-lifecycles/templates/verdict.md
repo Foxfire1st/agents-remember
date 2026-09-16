@@ -8,6 +8,11 @@ handover gates as **judge evidence**. Variants are **standalone/organizational l
 **super-exit** (before orchestrator → developer), and the loop-review adaptation below. Atomic
 child leaves do not receive a separate route-review verdict.
 
+**This template shapes the artifact; it does not author the rules.** The reviewer's duties and the
+criteria-catalog binding live in `../roles/reviewer.md`, the mode contract in
+`../operations/review.md`, and the adjudication and truth boundary in `../core/acceptance.md`. The
+sections below are the fields a consumer reads; where wording differs, those files win.
+
 ## Rules
 
 1. **A verdict is evidence, not a decision.** State an explicit pass/block **recommendation**; the gate's
