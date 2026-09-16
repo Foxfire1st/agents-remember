@@ -38,8 +38,9 @@ export const seriesSliceDocs = (sliceDocs: TaskDocNode[], seriesDocPath: string)
 
 // The docPath a typed `masterRef` (L14-R1) points at, resolved against the FULL projected pool —
 // a sprint's commanded master lives in another folder, so `sliceDocs` can never answer this.
-// Undefined when the target is not projected (bounded summary limit, another repo's docs), which
-// is the caller's signal to fall back to the row's older behaviors.
+// Undefined when the target is not in the projected pool at all (another repo's docs, or a
+// document the projection withheld), which is the caller's signal to fall back to the row's
+// older behaviors. No document-count bound can hide a master any more (260916-TDPU removed it).
 export const docPathForTaskRef = (
   docs: TaskDocNode[],
   ref: TaskDocumentRef,

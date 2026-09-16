@@ -38,6 +38,10 @@ from agents_remember.serving.terminal_liveness import (
     TerminalCatalogLivenessSweeper,
     observe_terminal_liveness,
 )
+from agents_remember.serving.terminal_observer_health import (
+    TerminalObserverHealthPayload,
+    TerminalObserverHealthPublisher,
+)
 from agents_remember.serving.terminal_paste import TerminalPaster
 from agents_remember.serving.terminal_pty import TerminalSession
 
@@ -118,6 +122,7 @@ async def stream_events(
     *,
     build: ServingBuild | None = None,
     agent_notifier_heartbeat: AgentNotifierHeartbeatPayload | None = None,
+    terminal_observer_health: TerminalObserverHealthPayload | None = None,
 ) -> AsyncGenerator[ServerSentEvent]:
     """The SSE event sequence for one atomic projector subscription.
 
@@ -127,6 +132,8 @@ async def stream_events(
     ``agent_notifier_heartbeat`` rides as ``agentNotifierHeartbeat`` (with the legacy
     ``supervisorHeartbeat`` alias during the rename window) -- the tick age
     at connect time, so a stale agent-notifier is visible in the dashboard header at a glance.
+    ``terminal_observer_health`` rides as ``terminalObserverHealth`` beside it, and the key is
+    OMITTED when the current serving lifetime has no valid persisted record.
 
     The tail rides the ``snapshot`` ONLY: a ``delta`` is one projection node, not a state
     body, so there is nothing there for a whole-workspace stamp to be a field of. That
@@ -143,7 +150,13 @@ async def stream_events(
             else:
                 payload = _encode(delta.data)
             if delta.event == "snapshot":
-                payload.update(served_state_tail(build=build, heartbeat=agent_notifier_heartbeat))
+                payload.update(
+                    served_state_tail(
+                        build=build,
+                        heartbeat=agent_notifier_heartbeat,
+                        observer_health=terminal_observer_health,
+                    )
+                )
             yield ServerSentEvent(data=payload, event=delta.event, id=str(seq), retry=2000)
 
 
@@ -460,6 +473,10 @@ class _ServingRuntime:
     liveness_sweeper: TerminalCatalogLivenessSweeper
     build: ServingBuild
     heartbeat_store: AgentNotifierHeartbeatStore
+    # The producer stage's own health owner: the lifespan WRITES this serving lifetime's
+    # accumulator through it and the read routes read the persisted row through it, so the two
+    # halves of ``LOCR-R17@v1`` cannot drift onto different lifetimes or different files.
+    observer_health: TerminalObserverHealthPublisher
     register_inbox_execution_evidence: (
         Callable[[Path, tuple[OperatorInboxEntry, ...]], frozenset[str]] | None
     )

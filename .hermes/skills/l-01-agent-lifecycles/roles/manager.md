@@ -158,13 +158,19 @@ stops belong to the orchestrator via the system-specialist protocol.
   requirement version, model, seat, route, or report label does not reset the first review; if it
   cannot be verified against the sealed baseline, return the acceptance decision to the developer.
 - **Process and ack the worker's signals — passive contract.** A turn-report artifact is expected at
-  **every** hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep evaluates each expected
-  artifact at every hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep relays
+  **every** hand-off; you do not watch for it. The HFX2-L2 agent-notifier sweep relays
   seat-state facts (turn-ended/completed state-signals, compound-idle, non-reaction residue) on its
-  own mechanical tick — it never infers expectations from artifacts, never climbs an escalation
-  ladder, and never respawns a seat. Your job is to **be woken with your pending signals and process
-  + ack every item before ending your turn** — never to poll, timer-loop, or hand-roll your own watch
-  over the worker.
+  own mechanical tick — it never opens or evaluates the artifact, never infers expectations from
+  artifacts, never climbs an escalation ladder, and never respawns a seat. A canonical `completed`
+  outcome means **only** that the provider turn ended: it never attests that the report exists, is
+  current, or satisfies its requirement, so a worker can forget the report and still produce
+  mechanical `completed` truth (`../SKILL.md`, Completion Truth And Handoff Acceptance). Your job is
+  to **be woken with your pending signals, open and validate the required artifact, candidate
+  identity, evidence, and acceptance envelope, then process + ack every item before advancing
+  lifecycle state or ending your turn** — never to poll, timer-loop, or hand-roll your own watch
+  over the worker. A missing, malformed, or stale artifact is **your** detected handoff defect after
+  that wake: nudge, reject, replace, or escalate under the flow below, and never wait for a notifier
+  artifact check that does not exist.
   **Watcher ban (uniform-mechanism ruling 2026-07-07):** no seat-local watcher of any kind — the L2
   agent-notifier sweep is the one mechanism, no per-seat variance. Escalation intake via the inbox.
 - **Review artifact vs `task_doc`** — first compare the dispatched primary stable-ID + version with

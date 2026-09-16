@@ -118,10 +118,12 @@ DEFAULT_AGENT_NOTIFIER_ESCALATION_BUDGET = 250
 # R2 (260707-HFX2-L1): the expectation-row kinds every dispatch surface writes a durable
 # what-must-happen-by-when row for, and their default SLAs (schema: docs/reference/settings-json.md,
 # Orchestration Expectations). Kept as a plain string set here (not imported from
-# controlplane.expectation_rows) to avoid a kernel<->controlplane import cycle; the two must be kept
-# in sync -- ``ExpectationKind`` in expectation_rows.py is the sole other definition. The record
-# Literal additionally keeps the retired ``ack-by``/``turn-report-by`` values for legacy-row parse
-# compatibility; they are not settable here.
+# controlplane.expectation_rows) to avoid a kernel<->controlplane import cycle. Together with
+# ``ExpectationKind`` in expectation_rows.py it forms the kind vocabulary, and the two are
+# deliberately NOT equal: the active members stay aligned, while the record Literal additionally
+# keeps the retired ``turn-report-by``/``ack-by`` values for legacy-row parse compatibility only.
+# Those two have no membership in this set and no entry in DEFAULT_EXPECTATION_SLA_SECONDS, so a
+# settings write or an SLA lookup for them fails loud instead of resurrecting a retired deadline.
 KNOWN_EXPECTATION_KINDS = frozenset({"briefed-by", "verdict-by"})
 KNOWN_EXPECTATIONS_FIELDS = frozenset({"defaults"})
 DEFAULT_EXPECTATION_SLA_SECONDS: dict[str, float] = {

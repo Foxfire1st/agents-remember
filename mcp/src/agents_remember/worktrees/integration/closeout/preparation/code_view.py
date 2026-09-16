@@ -14,9 +14,6 @@ from agents_remember.kernel.git_preparation import (
     ExistingGitPreparationBinding,
     GitPreparationError,
 )
-from agents_remember.memory_quality.memory_candidate_pair import (
-    resolve_memory_candidate_pair,
-)
 from agents_remember.models.certification.references import CertificateObjectReference
 from agents_remember.models.lifecycles.evidence_dependencies import canonical_sha256
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
@@ -39,6 +36,9 @@ from agents_remember.worktrees.integration.closeout.preparation_selection import
 )
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
+)
+from agents_remember.worktrees.modules.memory_candidate_pair import (
+    resolve_memory_candidate_pair,
 )
 from agents_remember.worktrees.modules.quality.certification_records import certificate_store
 from agents_remember.worktrees.worktree_contract import WorktreeContract

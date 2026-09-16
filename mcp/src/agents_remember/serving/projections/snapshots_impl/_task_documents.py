@@ -47,9 +47,6 @@ from agents_remember.observer.projection_graph import (
     build_execution_graph_view,
 )
 from agents_remember.serving.projections.snapshots_impl._common import (
-    SERIES_DOCUMENT_SUMMARY_LIMIT,
-    TASK_DOCUMENT_SUMMARY_LIMIT,
-    _bounded_task_document_payloads,
     _file_age_seconds,
     _iter_task_document_payloads,
     _read_json,
@@ -141,10 +138,7 @@ def read_task_documents(
     if not tasks_root.is_dir():
         return []
     lifecycle_maps = _task_document_lifecycle_maps(enclosures)
-    docs = _bounded_task_document_payloads(
-        _iter_task_document_payloads(tasks_root, now=now),
-        limit=TASK_DOCUMENT_SUMMARY_LIMIT,
-    )
+    docs = _iter_task_document_payloads(tasks_root, now=now)
     master_docs = _master_docs_by_ref(docs)
     nodes: list[TaskDocNode] = []
     for path, payload in docs:
@@ -192,10 +186,7 @@ def read_task_document_body(  # pragma: no cover
     if doc is None:
         return None
     lifecycle_maps = _task_document_lifecycle_maps(enclosures)
-    docs = _bounded_task_document_payloads(
-        _iter_task_document_payloads(tasks_root, now=now),
-        limit=TASK_DOCUMENT_SUMMARY_LIMIT,
-    )
+    docs = _iter_task_document_payloads(tasks_root, now=now)
     return _task_doc_node(
         doc,
         resolved,
@@ -280,10 +271,7 @@ def read_series_documents(
     if not tasks_root.is_dir():
         return []
     nodes: list[SeriesNode] = []
-    for path, payload in _bounded_task_document_payloads(
-        _iter_task_document_payloads(tasks_root, now=now),
-        limit=SERIES_DOCUMENT_SUMMARY_LIMIT,
-    ):
+    for path, payload in _iter_task_document_payloads(tasks_root, now=now):
         if payload.get("kind") != "master":
             continue
         doc = _projected_document(payload)
@@ -451,8 +439,9 @@ def _master_docs_by_ref(
 
     The render-ready sprint graph view (L12-R4) joins master titles, leaf
     titles, natures, and statuses from the commanded master documents; this map
-    is that join table. Root documents (``task.json``) are never evicted by the
-    bounded payload window, so a sprint's commanded masters are always present.
+    is that join table. No bound evicts any document any more, so every master
+    under ``tasks/<repo>/<task>/`` is present and a sprint's commanded masters
+    are always in the table (see the removal rationale in ``_common.py``).
     """
 
     masters: dict[TaskDocumentRef, TaskDocument] = {}

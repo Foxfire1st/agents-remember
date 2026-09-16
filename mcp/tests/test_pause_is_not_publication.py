@@ -180,8 +180,8 @@ def test_the_pause_cannot_reach_any_publication_module() -> None:
 
     # NON-VACUITY. A walker that marks a module expanded when it is DISCOVERED instead of when it
     # is expanded returns the root plus its direct imports and nothing else -- which is exactly the
-    # answer that makes the assertion above vacuous. Measured on this tree: 60 reachable modules
-    # against 6 direct imports, so these two checks leave the depth-1 regression no room.
+    # answer that makes the assertion above vacuous. Measured on this tree: 60 modules beyond the
+    # pause module's 5 direct imports, so these two checks leave the depth-1 regression no room.
     direct = _runtime_imports_of(PAUSE_MODULE)
     reachable = set(closure)
     assert {PAUSE_MODULE} | direct <= reachable, (

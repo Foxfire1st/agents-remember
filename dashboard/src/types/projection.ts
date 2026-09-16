@@ -799,6 +799,30 @@ export interface TaskSubTaskRefNode {
   status: string;
 }
 
+export interface TerminalObserverHealth {
+  activeFailureCategory: "startup-refresh-failed" | "steady-state-refresh-failed" | null;
+  activeFailureSummary: "startup terminal observation failed" | "steady-state terminal observation failed" | null;
+  activeFailureType: "HarnessControlError" | "TimeoutError" | "ConnectionError" | "OSError" | "RuntimeError" | "ValueError" | "Exception" | null;
+  /** JSON Schema refinements: {"minimum":0} */
+  ageSeconds: number;
+  /** JSON Schema refinements: {"maximum":4294967295,"minimum":0} */
+  attemptCount: number;
+  /** JSON Schema refinements: {"maximum":4294967295,"minimum":0} */
+  consecutiveFailureCount: number;
+  initialObservationSucceeded: boolean;
+  lastAttemptAt: string | null;
+  /** JSON Schema refinements: {"anyOf":[{"minimum":0},{}]} */
+  lastDurationSeconds: number | null;
+  /** JSON Schema refinements: {"anyOf":[{"minimum":0},{}]} */
+  lastSuccessAgeSeconds: number | null;
+  lastSuccessAt: string | null;
+  schemaVersion: "ar-terminal-observer-health/v1";
+  servingStartedAt: string;
+  /** JSON Schema refinements: {"minimum":0} */
+  staleCutoffSeconds: number;
+  status: "initializing" | "degraded" | "healthy" | "stale";
+}
+
 export interface TokenSample {
   cumulative: number;
   ts: string;
@@ -826,4 +850,5 @@ export interface WorkspaceProjection {
   agentNotifierHeartbeat?: AgentNotifierHeartbeat;
   servingBuild?: ServingBuild;
   supervisorHeartbeat?: AgentNotifierHeartbeat;
+  terminalObserverHealth?: TerminalObserverHealth;
 }

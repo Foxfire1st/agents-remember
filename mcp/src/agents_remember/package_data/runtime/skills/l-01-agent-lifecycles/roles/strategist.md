@@ -206,8 +206,8 @@ finding. Flag them unmistakably at the top of the coherence findings.
 
 When the architect accepts the plan, the architect relays it to the orchestrator for adoption; your
 seat's work is done. The artifact write is unconditional and `message_parent` is available for a
-clarification or blocking issue; terminal/finalizer truth after the artifact exists supplies the
-completion fact. Then end.
+clarification or blocking issue; terminal/finalizer truth then attests only that this turn ended and
+wakes the orchestrator, which validates the artifact. Then end.
 The orchestration task remains the sprint's standing scope. Ordinary readiness changes and
 reprioritization belong to the orchestrator. A new dependency, changed atomic boundary, invalidated
 priority model, or multi-master reshape may justify a fresh strategist proposal through the

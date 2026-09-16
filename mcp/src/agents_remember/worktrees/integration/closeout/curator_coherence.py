@@ -16,12 +16,6 @@ from agents_remember.errors import (
     MemoryCandidatePairError,
     TaskIntentError,
 )
-from agents_remember.memory_quality.future_code_candidate import (
-    capture_future_code_candidate,
-)
-from agents_remember.memory_quality.memory_candidate_pair import (
-    resolve_memory_candidate_pair,
-)
 from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceAuthority,
@@ -51,7 +45,13 @@ from agents_remember.tasks.task_intent import (
     require_current_task_intent,
     task_intent_identity,
 )
+from agents_remember.worktrees.modules.future_code_candidate import (
+    capture_future_code_candidate,
+)
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
+from agents_remember.worktrees.modules.memory_candidate_pair import (
+    resolve_memory_candidate_pair,
+)
 from agents_remember.worktrees.queue.closeout_projection_members import (
     candidate_task_topology_fingerprint,
 )

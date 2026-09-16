@@ -88,8 +88,9 @@ The orchestrator owns the final decision: fixable-in-session -> order a targeted
 
 - **Structural parent message** (`message_parent`) — ask the current sprint orchestrator for
   clarification or report an operational blocker without knowing its runtime occupant.
-- **Completion truth** — the report/fix artifact plus terminal/finalizer state is the completion
-  fact; do not author a parallel completion row.
+- **Completion truth** — the report/fix artifact is the durable record; terminal/finalizer state
+  then attests only that this turn ended and wakes the orchestrator, which validates the report. Do
+  not author a parallel completion row.
 - **Escalation** — system-specialist -> orchestrator. Never go straight to the architect or
   developer.
 

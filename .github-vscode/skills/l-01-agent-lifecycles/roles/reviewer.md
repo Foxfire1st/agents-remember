@@ -363,8 +363,9 @@ integrated on super.
 ## Comms Protocol
 
 - **Structural parent message** (`message_parent`) — ask for missing review context or report a
-  blocking routing problem. The verdict artifact plus terminal/finalizer truth is the completion
-  signal; do not author a second completion row or carry the decider's runtime identity.
+  blocking routing problem. The verdict artifact is the durable handoff; terminal/finalizer truth
+  attests only that this turn ended and wakes the decider, who validates the verdict independently.
+  Do not author a second completion row or carry the decider's runtime identity.
 - **Stdin push** — not a driver here; the reviewer is short-lived and reports through its verdict.
 - **Escalation** — the reviewer does not escalate; it **reports a verdict**. If the change set is
   un-reviewable (missing diff, missing task docs), that itself is a **blocking finding** in the verdict,

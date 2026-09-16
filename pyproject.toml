@@ -146,8 +146,26 @@ minversion = "9.0"
 # Measured cost on this checkout at the raise:
 # integration 206 cases + 31 subtests in 63.9s; unit 833 cases + 155 subtests in 53.9s; combined
 # 1039 cases + 186 subtests in 105.6s, exit 0.
-unit_case_budget = 1000
-integration_case_budget = 250
+# 2026-09-15 -- unit 1000 -> 1100 and integration 250 -> 300, authorized by the orchestrator seat
+# under the developer's standing authority for the LOCR campaign's 28 requirements across 39 leaf
+# documents; the developer was consulted and directed the work to continue. Behavior bought: the
+# campaign's falsifiable case per leaf, each pinning one distinct consequential failure of the
+# lifecycle-owned completion relay rather than a coverage line. This raise is what keeps that work
+# landable: in flight at the raise, L16 contributes +1 unit case, L15 +11 unit cases, and this
+# leaf's L24 module +8, which puts the branch unit population at 1008 against the old ceiling of
+# 1000 -- and an over-budget population does not run partially, `pytest_collection_finish` raises
+# UsageError and the ENTIRE run executes zero tests, so the overflow would have broken every
+# subsequent run for every leaf, with the L39 hardening leaf still to come. Case-count delta: unit
+# 988 -> 1100, integration 247 -> 300 (both measured at the current master tip; this worktree's
+# pre-change base measures 925 unit / 247 integration -- 933 unit with this leaf's own 8 new cases
+# -- and the same 1000 / 250 there, so the raise is a no-op for populations already under the old
+# ceiling). Size delta: one test module per contributing leaf, no new shared support module, no new
+# artifact fixture. Runtime cost, measured on this checkout before the raise (unit lane: 933 cases +
+# 189 subtests in 56.2s, 57.5s wall clock with `-n=4`; integration: 247 cases + 52 subtests in
+# 62.1s, 63.4s wall clock). The raise itself adds no cases and therefore no runtime: it admits cases
+# the campaign branches already authored, and it is headroom, not a target -- do not fill it.
+unit_case_budget = 1100
+integration_case_budget = 300
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this
 # key to build its pytest step, so the wrapper no longer carries a second copy that can
