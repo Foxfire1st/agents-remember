@@ -511,3 +511,53 @@ class CapsuleManifestError(CapsuleCompilationError):
 
 class CapsuleSourceError(CapsuleCompilationError):
     """A canonical instruction source was absent, unreadable, or outside its root."""
+
+
+class TaskProjectionSourceError(AgentsRememberError):
+    """An admitted task/worktree binding could not be projected into task context.
+
+    A projection is either complete or refused: there is no partial projection and
+    no fallback to another branch, another task revision or a broader scope.
+    ``status`` is a stable, branchable code; the authoritative vocabulary is the
+    registry in
+    :mod:`agents_remember.application.task_projection.statuses`
+    (``PROJECTION_STATUSES``), which every raise site imports its code from, so a
+    second spelling or an unregistered code is a test failure rather than drift.
+    ``detail`` names the exact defect for an operator who does not know the
+    internals; ``next_action`` names the owner that has to change something. The
+    projection never repairs what it could not resolve, so the current task
+    document is untouched by any of these refusals.
+    """
+
+    def __init__(
+        self,
+        status: str,
+        detail: str,
+        *,
+        next_action: str = "",
+        owner_status: str = "",
+    ) -> None:
+        super().__init__(detail)
+        self.status = status
+        self.detail = detail
+        self.next_action = next_action
+        # The status the existing AR owner raised, when this refusal wraps one, so a
+        # caller can still branch on the owner's own vocabulary instead of matching prose.
+        self.owner_status = owner_status
+
+    def render(self) -> str:
+        """The one-line operator-facing projection of this refusal."""
+
+        if self.next_action:
+            return f"{self.status}: {self.detail} (remedy: {self.next_action})"
+        return f"{self.status}: {self.detail}"
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded refusal facts a transport may publish."""
+
+        fields: dict[str, object] = {"status": self.status, "detail": self.detail}
+        if self.next_action:
+            fields["nextAction"] = self.next_action
+        if self.owner_status:
+            fields["ownerStatus"] = self.owner_status
+        return fields
