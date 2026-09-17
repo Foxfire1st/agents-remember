@@ -8,12 +8,16 @@ from functools import cached_property
 from pathlib import Path, PurePosixPath
 
 from agents_remember.kernel.git_command import run_git
+from agents_remember.memory_quality.style.citations.exclusion_register import excluding_rule
 from agents_remember.memory_quality.style.citations.source_index_state import (
+    EXCLUDED_SAMPLE_LIMIT,
+    CitationIndexCaps,
+    ExclusionRegister,
     Identity,
     SourceFile,
     SourceIndexError,
     TreeState,
-    check_source_bounds,
+    apply_source_bounds,
 )
 
 
@@ -84,7 +88,6 @@ class GitSourceCandidate:
     def verify(self, relatives: list[str]) -> tuple[Identity, ...]:
         """Batch actual Git hashing, retaining stat-checked results only for these bytes."""
         identities = {relative: self._identity(relative) for relative in relatives}
-        check_source_bounds(tuple(identities.values()))
         pending = [
             relative
             for relative in relatives
@@ -112,18 +115,38 @@ class GitSourceCandidate:
         self.verify([relative])
         return self.root / relative
 
-    def state(self, memory: Path, skipped_suffixes: frozenset[str]) -> TreeState:
-        """Git membership supersedes traversal-only directory skips, including build outputs."""
-        relatives = [
+    def state(
+        self,
+        memory: Path,
+        skipped_suffixes: frozenset[str],
+        caps: CitationIndexCaps,
+        exclusions: ExclusionRegister,
+    ) -> TreeState:
+        """Git membership supersedes traversal-only directory skips, including build outputs.
+
+        The explicit candidate route honours the same register and the same caps the default
+        acquisition does: an excluded or oversized member is *reported* on the tree record, never
+        silently absent and never a whole-tree refusal. Membership stays Git's answer; the caps
+        decide only how much of it is read.
+        """
+        members = [
             relative
             for relative in sorted(self.members)
             if Path(relative).suffix.lower() not in skipped_suffixes
             and not (self.root / relative).is_relative_to(memory)
         ]
-        identities = self.verify(relatives)
+        candidates: list[str] = []
+        excluded: list[str] = []
+        for relative in members:
+            if excluding_rule(exclusions, relative) is not None:
+                excluded.append(relative)
+                continue
+            candidates.append(relative)
+        identities = self.verify(candidates)
+        kept, bounds = apply_source_bounds(identities, caps)
         directories = {self.root}
-        for relative in relatives:
-            parent = (self.root / relative).parent
+        for one in kept:
+            parent = (self.root / one.path).parent
             while parent != self.root:
                 directories.add(parent)
                 parent = parent.parent
@@ -132,5 +155,9 @@ class GitSourceCandidate:
                 Identity.read(path, path.relative_to(self.root).as_posix())
                 for path in sorted(directories)
             ),
-            files=tuple(SourceFile(self.root / one.path, one) for one in identities),
+            files=tuple(SourceFile(self.root / one.path, one) for one in kept),
+            exclusions=exclusions,
+            bounds=bounds,
+            excluded_files=len(excluded),
+            excluded_sample=tuple(sorted(excluded)[:EXCLUDED_SAMPLE_LIMIT]),
         )

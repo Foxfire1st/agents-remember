@@ -36,18 +36,35 @@ WHAT DEFENDS WHAT
                                                            refuse the run
     the population is "not ignored", not "tracked"        the untracked case: a fresh, unignored
                                                            working-tree source is still indexed
-    the per-file cap still refuses                        the tracked-oversized case: the same
-                                                           bytes, tracked, still raise by name --
-                                                           and the untracked-oversized case shows
-                                                           the cap is a content bound, not a Git one
-    the aggregate cap still refuses                       the tracked-aggregate case: 17 files each
-                                                           just under the per-file cap cross 64 MiB
-                                                           with no oversized file involved
-    a plain directory still works                         the non-work-tree case: outside Git the
-                                                           documented walk is kept, so an
-                                                           oversized file there still refuses
+    the per-file cap still bites, as a REPORT           the tracked-oversized case: the same bytes,
+                                                           tracked, are skipped with their path and
+                                                           size in the report -- and the
+                                                           untracked-oversized case shows the cap is
+                                                           a content bound, not a Git one
+    the aggregate cap still bites, as a REPORT           the tracked-aggregate case: 17 files each
+                                                           just under the per-file cap cross the
+                                                           aggregate cap with no oversized file
+                                                           involved, and the largest are skipped by
+                                                           name instead of refusing the tree
+    a plain directory still works, and its               the non-work-tree cases: outside Git the
+    .gitignore is honoured by the register               documented walk is kept, an oversized file
+                                                           there is reported, and the root's
+                                                           .gitignore is applied by the register's
+                                                           own bounded matcher
     this checkout can run the mandated check              the tip case: the real population is
                                                            enumerated and passes the same bounds
+
+CHANGED BY LEAF 260915-CAPS-L14 (declared cross-leaf change)
+-----------------------------------------------------------
+This module was landed by leaf 260915-CAPS-L13/L16 to close D18. Its four cap cases asserted the
+pre-ruling behaviour -- ``check_source_bounds`` raising on an oversized file and on an aggregate
+over the 64 MiB cap. The developer's 2026-08-20 ruling (carried verbatim in the CAPS-R14 packet)
+replaced that: an oversized file is **skipped with a report entry naming it and its size**, the
+aggregate cap defaults to 512 MiB and is applied to the post-exclusion/post-skip set, and a hard
+stop remains only past ~2 GiB. So exactly those four cases are re-pointed at the ruled behaviour --
+same fixtures, same subjects, same file names -- and the aggregate-bound case the non-Git fallback
+branch never had is added. Every D18 case is unchanged. The population rule this module exists to
+pin ("Git's own population, not 'tracked only'") is untouched.
 
 WHAT THIS DOES NOT COVER (stated, not implied)
 ----------------------------------------------
@@ -62,6 +79,7 @@ WHAT THIS DOES NOT COVER (stated, not implied)
 
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 import unittest
@@ -72,8 +90,11 @@ from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.memory_quality.style.citations.source_index_state import (
     MAX_SOURCE_BYTES,
     MAX_SOURCE_FILE_BYTES,
-    SourceIndexError,
-    check_source_bounds,
+    SKIP_PER_FILE_CAP,
+    SKIP_TOTAL_CAP,
+    STATUS_CAPPED,
+    SourceSkip,
+    TreeState,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -105,14 +126,39 @@ def sparse(path: Path, size: int) -> None:
         handle.truncate(size)
 
 
-def indexed(code_root: Path) -> tuple[tuple[str, ...], int]:
-    """The default walk's population for ``code_root``, as paths and total bytes."""
+def indexed(code_root: Path, memory_root: Path = _ABSENT_MEMORY_ROOT) -> TreeState:
+    """The default acquisition's tree record for ``code_root``: population, register, report.
 
-    trees = Trees(code_root=code_root, memory_root=_ABSENT_MEMORY_ROOT)
-    state = source_index._tree_state(trees)
-    check_source_bounds(tuple(one.identity for one in state.files))
-    return tuple(one.identity.path for one in state.files), sum(
-        one.identity.size for one in state.files
+    The caps are applied by the acquisition itself and reported on the record, so a case reads
+    what was indexed and what was skipped from one place. Nothing here calls a cap helper with
+    hand-supplied identities -- that would be the seam-plus-caller-supplied-value shape this
+    master forbids.
+    """
+
+    return source_index._tree_state(Trees(code_root=code_root, memory_root=memory_root))
+
+
+def paths_of(state: TreeState) -> tuple[str, ...]:
+    return tuple(one.identity.path for one in state.files)
+
+
+def bytes_of(state: TreeState) -> int:
+    return sum(one.identity.size for one in state.files)
+
+
+def skipped(state: TreeState, path: str) -> SourceSkip | None:
+    """The report entry for ``path``, or ``None`` when the acquisition did not skip it."""
+    for one in state.bounds.skipped:
+        if one.path == path:
+            return one
+    return None
+
+
+def write_citation_settings(memory_root: Path, block: dict[str, object]) -> None:
+    """Author the memory layer's own settings file, the way a user's exclusion review does."""
+    (memory_root / "system").mkdir(parents=True, exist_ok=True)
+    (memory_root / "system" / "settings.json").write_text(
+        json.dumps({"onboarding": block}), encoding="utf-8"
     )
 
 
@@ -139,9 +185,14 @@ class GitMembershipSourceIndexTests(unittest.TestCase):
         self.assertEqual(
             git(self.code, "status", "--porcelain", "--ignored", "scratch").split()[0], "!!"
         )
-        paths, _total = indexed(self.code)
+        state = indexed(self.code)
+        paths = paths_of(state)
         self.assertIn("src/tracked.py", paths)
         self.assertNotIn("scratch/dev-hosts/nitro/index.mjs", paths)
+        # Git applied the ignore rule, and the record says so: the pattern is carried even
+        # though this acquisition did not apply it.
+        self.assertEqual(state.exclusions.gitignore_authority, "git")
+        self.assertIn("/scratch/", state.exclusions.gitignore_patterns)
 
     def test_an_untracked_but_unignored_source_is_still_indexed(self) -> None:
         """The population is Git's "not ignored", NOT "tracked only" -- and this is why.
@@ -158,35 +209,66 @@ class GitMembershipSourceIndexTests(unittest.TestCase):
         self.assertEqual(
             git(self.code, "status", "--porcelain", "--", "src/fresh.py"), "?? src/fresh.py"
         )
-        paths, _total = indexed(self.code)
+        paths = paths_of(indexed(self.code))
         self.assertIn("src/fresh.py", paths)
 
-    def test_a_tracked_oversized_file_still_refuses_the_index(self) -> None:
-        sparse(self.code / "src" / "oversized.bin", PER_FILE_CAP + 1)
-        git(self.code, "add", "--all")
-        with self.assertRaises(SourceIndexError) as caught:
-            indexed(self.code)
-        self.assertIn("per-file", str(caught.exception))
-        self.assertIn("src/oversized.bin", str(caught.exception))
+    def test_a_tracked_oversized_file_is_skipped_and_reported_not_refused(self) -> None:
+        """The cap keeps its teeth: the file is out of the index AND named, with its size.
 
-    def test_an_untracked_oversized_file_still_refuses_the_index(self) -> None:
+        The size on the right is read here from the filesystem, not taken from the report, so
+        the two sides of the assertion do not come from one artifact.
+        """
+
+        oversized = self.code / "src" / "oversized.bin"
+        sparse(oversized, PER_FILE_CAP + 1)
+        measured = oversized.stat().st_size
+        git(self.code, "add", "--all")
+        state = indexed(self.code)
+        self.assertIn("src/tracked.py", paths_of(state))
+        self.assertNotIn("src/oversized.bin", paths_of(state))
+        entry = skipped(state, "src/oversized.bin")
+        self.assertIsNotNone(entry, f"not reported: {state.bounds.to_dict()}")
+        assert entry is not None
+        self.assertEqual(entry.reason, SKIP_PER_FILE_CAP)
+        self.assertEqual(entry.size, measured)
+        self.assertEqual(state.bounds.status, STATUS_CAPPED)
+
+    def test_an_untracked_oversized_file_is_skipped_and_reported(self) -> None:
         """Not ignored is not the same as not oversized: the cap is a content bound, not a Git one."""
 
-        sparse(self.code / "src" / "fresh-oversized.bin", PER_FILE_CAP + 1)
-        with self.assertRaises(SourceIndexError) as caught:
-            indexed(self.code)
-        self.assertIn("src/fresh-oversized.bin", str(caught.exception))
+        oversized = self.code / "src" / "fresh-oversized.bin"
+        sparse(oversized, PER_FILE_CAP + 1)
+        state = indexed(self.code)
+        self.assertNotIn("src/fresh-oversized.bin", paths_of(state))
+        entry = skipped(state, "src/fresh-oversized.bin")
+        self.assertIsNotNone(entry, f"not reported: {state.bounds.to_dict()}")
+        assert entry is not None
+        self.assertEqual(entry.size, oversized.stat().st_size)
 
-    def test_a_tracked_population_above_the_aggregate_cap_still_refuses(self) -> None:
-        each = AGGREGATE_CAP // 16 - 1
-        self.assertLess(each, PER_FILE_CAP)
-        for index in range(17):
-            sparse(self.code / "src" / f"part-{index:02d}.bin", each)
+    def test_a_tracked_population_above_the_aggregate_cap_is_skipped_and_reported(self) -> None:
+        """No oversized file is involved: the aggregate cap alone decides, and it reports.
+
+        ``AGGREGATE_CAP / PER_FILE_CAP`` files sit just under the per-file cap, so the only
+        clause in play is the aggregate one.
+        """
+
+        each = PER_FILE_CAP - 1
+        count = AGGREGATE_CAP // each + 1
+        self.assertGreater(count * each, AGGREGATE_CAP)
+        for index in range(count):
+            sparse(self.code / "src" / f"part-{index:03d}.bin", each)
         git(self.code, "add", "--all")
-        with self.assertRaises(SourceIndexError) as caught:
-            indexed(self.code)
-        self.assertIn("above its", str(caught.exception))
-        self.assertNotIn("per-file", str(caught.exception))
+        state = indexed(self.code)
+        self.assertEqual(state.bounds.status, STATUS_CAPPED)
+        self.assertLessEqual(bytes_of(state), AGGREGATE_CAP)
+        dropped = [one for one in state.bounds.skipped if one.reason == SKIP_TOTAL_CAP]
+        self.assertTrue(dropped, f"no aggregate skip reported: {state.bounds.to_dict()}")
+        for one in dropped:
+            self.assertRegex(one.path, r"^src/part-\d{3}\.bin$")
+            self.assertEqual(one.size, each)
+            self.assertNotIn(one.path, paths_of(state))
+        # The report is bounded, and its count is exact rather than a sample length.
+        self.assertGreaterEqual(state.bounds.skipped_count, len(dropped))
 
     def test_a_root_outside_a_work_tree_keeps_the_git_independent_walk(self) -> None:
         plain = self.tmp / "plain"
@@ -198,16 +280,60 @@ class GitMembershipSourceIndexTests(unittest.TestCase):
             "this case's subject is the non-work-tree fallback; the fixture tree is inside a "
             "repository, so the walk can no longer be reached here",
         )
-        with self.assertRaises(SourceIndexError) as caught:
-            indexed(plain)
-        self.assertIn("nested/oversized.bin", str(caught.exception))
+        state = indexed(plain)
+        self.assertIn("nested/untracked.py", paths_of(state))
+        entry = skipped(state, "nested/oversized.bin")
+        self.assertIsNotNone(entry, f"not reported: {state.bounds.to_dict()}")
+        assert entry is not None
+        self.assertEqual(entry.reason, SKIP_PER_FILE_CAP)
+
+    def test_the_non_git_fallback_applies_the_aggregate_bound_and_reports_it(self) -> None:
+        """The gap L16's curator flagged for this module: the fallback branch had no aggregate case.
+
+        The bound is moved through the memory layer's own settings block rather than by writing
+        512 MiB, because the subject is the *rule*, not the size: ``maxSourceBytes`` is a
+        settings key, and a tree past it must produce a reported skip list on the walk path
+        exactly as it does on the Git path.
+        """
+
+        plain = self.tmp / "plain-aggregate"
+        (plain / "nested").mkdir(parents=True)
+        each = 4096
+        for index in range(6):
+            (plain / "nested" / f"part-{index}.py").write_text("x" * each, encoding="utf-8")
+        memory = self.tmp / "memory-aggregate"
+        write_citation_settings(memory, {"citationIndex": {"maxSourceBytes": 4 * each}})
+        self.assertIsNone(source_index._git_candidate_paths(plain))
+        state = indexed(plain, memory)
+        self.assertEqual(state.bounds.caps.max_source_bytes, 4 * each)
+        self.assertEqual(state.bounds.status, STATUS_CAPPED)
+        self.assertEqual(state.bounds.skipped_count, 2)
+        self.assertLessEqual(bytes_of(state), 4 * each)
+        for one in state.bounds.skipped:
+            self.assertEqual(one.reason, SKIP_TOTAL_CAP)
+            self.assertNotIn(one.path, paths_of(state))
+
+    def test_the_non_git_fallback_honours_the_roots_gitignore_through_the_register(self) -> None:
+        """Outside a work tree nothing applies the ignore file for us, so the register must."""
+
+        plain = self.tmp / "plain-ignored"
+        (plain / "keep").mkdir(parents=True)
+        (plain / "keep" / "kept.py").write_text("k = 1\n", encoding="utf-8")
+        (plain / "generated").mkdir(parents=True)
+        (plain / "generated" / "huge.py").write_text("g" * 8192, encoding="utf-8")
+        (plain / ".gitignore").write_text("generated/\n", encoding="utf-8")
+        state = indexed(plain)
+        self.assertEqual(state.exclusions.gitignore_authority, "register")
+        self.assertIn("keep/kept.py", paths_of(state))
+        self.assertNotIn("generated/huge.py", paths_of(state))
 
 
 class ThisCheckoutsCitationIndexBoundsTests(unittest.TestCase):
     """The mandated memory-quality check has to be able to run HERE, at this checkout's own tip."""
 
     def test_the_code_roots_candidate_population_is_inside_the_citation_caps(self) -> None:
-        paths, total = indexed(REPOSITORY_ROOT)
+        state = indexed(REPOSITORY_ROOT)
+        paths, total = paths_of(state), bytes_of(state)
         self.assertGreater(len(paths), 0, "the walk indexed nothing, so this case proves nothing")
         self.assertLessEqual(
             total,

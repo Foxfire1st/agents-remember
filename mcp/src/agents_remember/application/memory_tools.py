@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,6 +30,9 @@ from agents_remember.memory_quality.style.citations import (
     range_resolution,
     source_index,
 )
+from agents_remember.memory_quality.style.citations.exclusion_register import (
+    validate_caller_excludes,
+)
 from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
@@ -48,17 +52,25 @@ class CitationOperationScope:
 
     document: str | None = None
     expected_snapshot: str | None = None
+    excludes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self.validate()
 
     def validate(self) -> None:
-        """Enforce the indivisible document-plus-generation frozen-wave contract."""
+        """Enforce the indivisible document-plus-generation frozen-wave contract.
+
+        The caller's own excludes ride with the scope because they scope the same acquisition
+        the document and the frozen generation do: which bytes this one operation reads. They
+        are validated here, before any work tree is resolved, so a pattern that cannot mean
+        anything is refused at the call rather than during a tree walk.
+        """
         source_index.validate_operation_scope(
             self.document,
             self.expected_snapshot,
             leased_index=False,
         )
+        validate_caller_excludes(self.excludes)
 
 
 DEFAULT_CITATION_OPERATION_SCOPE = CitationOperationScope()
@@ -125,6 +137,25 @@ def _leaf_memory_writer_scope(
     return scope
 
 
+def _citation_trees(
+    scope: MemoryScope,
+    caller_excludes: Sequence[str] = (),
+) -> Trees:
+    """The citation operation's trees, carrying the caller's own excludes for this call.
+
+    One construction point for all four citation operations, so a caller-supplied exclude
+    cannot be honoured by one of them and silently dropped by another. The settings-derived
+    register and the caps come from the memory layer's ``system/settings.json`` through
+    :class:`Trees` itself.
+    """
+    return Trees(
+        code_root=scope.code_root,
+        memory_root=scope.onboarding_root.parent,
+        cache_authority=scope.cache_authority,
+        caller_excludes=validate_caller_excludes(caller_excludes),
+    )
+
+
 def citation_check_tool(
     config: McpRuntimeConfig,
     *,
@@ -144,11 +175,7 @@ def citation_check_tool(
     """
     operation_scope.validate()
     scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
-    trees = Trees(
-        code_root=scope.code_root,
-        memory_root=scope.onboarding_root.parent,
-        cache_authority=scope.cache_authority,
-    )
+    trees = _citation_trees(scope, operation_scope.excludes)
     return {
         "repoId": scope.repo_id,
         **range_resolution.check_onboarding_root(
@@ -165,18 +192,19 @@ def citation_source_index_build_tool(
     *,
     repo_id: str,
     contract_path: str,
+    operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
 ) -> dict[str, Any]:
-    """Build or validate the reusable source snapshot selected by a leaf contract."""
+    """Build or validate the reusable source snapshot selected by a leaf contract.
+
+    A caller that adds excludes is asserting a *narrower* population than the register alone,
+    because the source is frozen while a curator wave runs and one document may need a tree
+    another document still cites.
+    """
+    operation_scope.validate()
     scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
     return {
         "repoId": scope.repo_id,
-        **source_index.build_repository_index(
-            Trees(
-                code_root=scope.code_root,
-                memory_root=scope.onboarding_root.parent,
-                cache_authority=scope.cache_authority,
-            )
-        ),
+        **source_index.build_repository_index(_citation_trees(scope, operation_scope.excludes)),
     }
 
 
@@ -188,7 +216,12 @@ def citation_fix_tool(
     dry_run: bool = False,
     operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
 ) -> dict[str, Any]:
-    """Regenerate ranges in one leaf, optionally against an explicit frozen generation."""
+    """Regenerate ranges in one leaf, optionally against an explicit frozen generation.
+
+    ``caller_excludes`` narrows the acquisition for THIS call only: a curator repairing one
+    document may need a vendored or generated tree out of the way without editing the shared
+    register every other document reads.
+    """
     operation_scope.validate()
     scope = _leaf_memory_writer_scope(
         config,
@@ -196,11 +229,7 @@ def citation_fix_tool(
         contract_path=contract_path,
         operation="citation_fix",
     )
-    trees = Trees(
-        code_root=scope.code_root,
-        memory_root=scope.onboarding_root.parent,
-        cache_authority=scope.cache_authority,
-    )
+    trees = _citation_trees(scope, operation_scope.excludes)
     return {
         "repoId": scope.repo_id,
         **fixer.fix_onboarding_root(
@@ -234,11 +263,7 @@ def citation_migrate_tool(
         contract_path=contract_path,
         operation="citation_migrate",
     )
-    trees = Trees(
-        code_root=scope.code_root,
-        memory_root=scope.onboarding_root.parent,
-        cache_authority=scope.cache_authority,
-    )
+    trees = _citation_trees(scope, operation_scope.excludes)
     return {
         "repoId": scope.repo_id,
         **migration.migrate_onboarding_root(

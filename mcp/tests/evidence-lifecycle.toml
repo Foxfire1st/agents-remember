@@ -624,6 +624,7 @@ consumers = [
   "mcp/tests/test_capsule_launch_wiring.py",
   "mcp/tests/test_capsule_serving.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
+  "mcp/tests/test_citation_index_resilience.py",
   "mcp/tests/test_clean_quality_executor.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
@@ -650,6 +651,7 @@ consumers = [
   "mcp/tests/test_eve_capsule_runtime.py",
   "mcp/tests/test_eve_product_integration.py",
   "mcp/tests/test_eve_protocol.py",
+  "mcp/tests/test_fresh_user_harness.py",
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
   "mcp/tests/test_harness_control_ipc.py",
@@ -847,7 +849,9 @@ replacement_contract = "node:mcp/tests/test_agents_remember_quality.py::test_gat
 consumer_scope = "exact-source"
 consumers = [
   "mcp/tests/test_agents_remember_quality.py",
+  "scripts/e2e_harness/fresh_user_scenario.py",
   "scripts/e2e_harness/run.py",
+  "scripts/e2e_harness/run_fresh_user.py",
   "scripts/e2e_harness/scenario.py",
   "scripts/e2e_harness/scenario_evidence.py",
 ]
@@ -1256,4 +1260,61 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_capsule_launch_wiring.py",
   "mcp/tests/test_codex_capsule_delivery.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/fresh_user_fixture.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "fresh-user-acceptance"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "deterministic disposable code repositories, memory roots and authority settings created from nothing under one run root"
+introduced_by = "260915-CAPS-L14"
+lifetime = "permanent"
+permanence_rationale = "The fresh-user acceptance needs repositories whose spear branch is not main, whose tree crosses the per-file cap, and whose vendored tree the register excludes; a fixture that read the developer's repositories could not prove the clean-room path and could not be re-run by a successor."
+replacement_contract = "node:mcp/tests/test_fresh_user_harness.py::FreshUserFixtureShapeTests::test_the_over_cap_fixture_really_crosses_the_cap"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_fresh_user_harness.py",
+  "scripts/e2e_harness/fresh_user_scenario.py",
+  "scripts/e2e_harness/run_fresh_user.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/fresh_user_scenario.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "fresh-user-acceptance"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "the product's own install, memory_init, baseline, worktree-start, citation-check and closeout-gate entry points driven in order over the fixtures"
+introduced_by = "260915-CAPS-L14"
+lifetime = "permanent"
+permanence_rationale = "The chain, not its links, is what this master could not previously claim: the scenario records each step's real call and real result, and it reports a step it cannot run as blocked by name instead of as completed."
+replacement_contract = "node:mcp/tests/test_fresh_user_harness.py::FreshUserScenarioContractTests::test_a_step_that_cannot_run_is_blocked_by_name_and_not_completed"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_fresh_user_harness.py",
+  "scripts/e2e_harness/run_fresh_user.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/run_fresh_user.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "fresh-user-acceptance"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "the scenario's transcript writer: environment facts, per-step records, invariants and the blocked list"
+introduced_by = "260915-CAPS-L14"
+lifetime = "permanent"
+permanence_rationale = "A successor must be able to re-run the acceptance from the repository alone and read the same verdict; this entry point fixes the invocation, the transcript path and the exit status that carries the verdict."
+replacement_contract = "node:mcp/tests/test_fresh_user_harness.py::FreshUserScenarioContractTests::test_the_entry_point_requires_reports_and_defaults_the_run_root"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_fresh_user_harness.py",
 ]

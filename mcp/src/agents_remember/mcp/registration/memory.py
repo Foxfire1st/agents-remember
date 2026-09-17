@@ -100,15 +100,20 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
     def citation_fix(
         repo_id: str,
         contract_path: str,
+        *,
         document: str | None = None,
         expected_snapshot: str | None = None,
         dry_run: bool = False,
+        exclude: list[str] | None = None,
     ) -> dict[str, Any]:
         """Regenerate anchored citation ranges inside one leaf memory worktree. The enclosure
         contract is mandatory and the application guard refuses the official memory repo. A
         pure move is repaired; renamed, deleted, or ambiguous anchors remain a curator worklist.
         Preview with dry_run=true. Use document for one onboarding-relative file and
-        expected_snapshot to assert a previously built immutable source generation."""
+        expected_snapshot to assert a previously built immutable source generation. `exclude`
+        adds caller-supplied, code-root-relative path globs for THIS call only, narrowing the
+        acquisition beyond the register every call already honours: the memory layer's
+        settings.json `onboarding.pathRules.exclude` and the code repo's .gitignore."""
         return citation_fix_payload(
             config,
             repo_id,
@@ -116,6 +121,7 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
             operation_scope=CitationOperationScope(
                 document=document,
                 expected_snapshot=expected_snapshot,
+                excludes=tuple(exclude or ()),
             ),
             dry_run=dry_run,
         )

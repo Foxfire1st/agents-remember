@@ -28,7 +28,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from types import TracebackType
 from typing import BinaryIO
@@ -47,7 +47,23 @@ from agents_remember.memory_quality.style.citations import (
     source_index_database,
     source_index_state,
 )
+from agents_remember.memory_quality.style.citations.exclusion_register import (
+    FallbackIgnoreMatcher,
+    excluding_rule,
+    fallback_matcher,
+)
 from agents_remember.memory_quality.style.citations.resolution import Trees
+from agents_remember.memory_quality.style.citations.source_index_state import (
+    EXCLUDED_SAMPLE_LIMIT,
+    GITIGNORE_AUTHORITY_ABSENT,
+    GITIGNORE_AUTHORITY_GIT,
+    GITIGNORE_AUTHORITY_REGISTER,
+    STATUS_NOT_EVALUATED,
+    ExclusionRegister,
+    SourceBoundsReport,
+    SourceSkip,
+    apply_source_bounds,
+)
 
 SCHEMA_VERSION = source_index_state.SCHEMA_VERSION
 CACHE_SLOT_COUNT = 4
@@ -172,6 +188,10 @@ class RepositoryIndex:
     files_indexed: int
     source_bytes: int
     metrics: IndexMetrics
+    exclusions: ExclusionRegister = field(default_factory=ExclusionRegister)
+    bounds: SourceBoundsReport = field(default_factory=SourceBoundsReport)
+    excluded_files: int = 0
+    excluded_sample: tuple[str, ...] = ()
     _closed: bool = False
     _candidate_tree: str | None = None
 
@@ -216,6 +236,15 @@ class RepositoryIndex:
             "filesIndexed": self.files_indexed,
             "sourceBytesIndexed": self.source_bytes,
             "indexBytes": _cache_bytes(self.paths),
+            # The register and the caps report travel with every citation result: a reader can see
+            # which rules produced the population and which files the caps skipped without
+            # re-deriving either from the checkout.
+            "exclusions": self.exclusions.to_dict(),
+            "bounds": self.bounds.to_dict(),
+            # The register's own effect: the exact count and a bounded offender sample, so a run
+            # can show WHICH files the register removed instead of only that it removed some.
+            "excludedFiles": self.excluded_files,
+            "excludedSample": list(self.excluded_sample),
             "sourceFilesRead": self.metrics.source_files_read,
             "sourceBytesRead": self.metrics.source_bytes_read,
             "sourceFilesTokenized": self.metrics.source_files_tokenized,
@@ -363,7 +392,9 @@ def open_repository_index(
         )
         if current is not None and not current[1].metadata_changed:
             connection, validation, manifest = current
-            return _repository_index(connection, handle, paths, manifest, metrics)
+            return _repository_index(
+                LeasedGeneration(connection, handle, paths, manifest, metrics), validation.state
+            )
         if current is not None:
             current[0].close()
         source_index_cache.lock_exclusive(trees.cache_authority, handle)
@@ -391,7 +422,9 @@ def open_repository_index(
                 atomic_write_text(paths.manifest, manifest.to_json())
                 metrics.state = "metadata-refreshed"
         fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
-        return _repository_index(connection, handle, paths, manifest, metrics)
+        return _repository_index(
+            LeasedGeneration(connection, handle, paths, manifest, metrics), None
+        )
     except BaseException:
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         handle.close()
@@ -438,6 +471,17 @@ def _open_expected_generation(trees: Trees, expected_snapshot: str) -> Repositor
             files_indexed=connection.files_indexed,
             source_bytes=connection.source_bytes,
             metrics=metrics,
+            # A frozen lease reads a published generation without inspecting the source tree, so
+            # it reports the caps in force and says plainly that it did not evaluate skips. It
+            # never reports a default that a reader would take for "nothing was skipped".
+            exclusions=trees.exclusions,
+            bounds=SourceBoundsReport(
+                caps=trees.caps,
+                candidate_files=connection.files_indexed,
+                indexed_files=connection.files_indexed,
+                indexed_bytes=connection.source_bytes,
+                status=STATUS_NOT_EVALUATED,
+            ),
             _candidate_tree=readiness.candidate_tree,
         )
     except BaseException as error:
@@ -450,22 +494,37 @@ def _open_expected_generation(trees: Trees, expected_snapshot: str) -> Repositor
         ) from error
 
 
-def _repository_index(
-    connection: source_index_database.Database,
-    handle: BinaryIO,
-    paths: CachePaths,
-    manifest: Manifest,
-    metrics: IndexMetrics,
-) -> RepositoryIndex:
+@dataclass(frozen=True)
+class LeasedGeneration:
+    """The four values one lease is opened from, kept together so a lease is one argument."""
+
+    connection: source_index_database.Database
+    handle: BinaryIO
+    paths: CachePaths
+    manifest: Manifest
+    metrics: IndexMetrics
+
+
+def _repository_index(lease: LeasedGeneration, state: TreeState | None) -> RepositoryIndex:
+    """Lease one generation, reporting the register it was built under and its skip report.
+
+    ``state`` is the just-measured tree record when the acquisition walked the tree; it carries
+    the current skip list. The built and metadata-refreshed arms take theirs from the lease's
+    manifest, which is the record the generation was published with.
+    """
     return RepositoryIndex(
-        database=connection,
-        lock_handle=handle,
-        paths=paths,
-        snapshot_id=manifest.snapshot_id,
-        files_indexed=len(manifest.files),
-        source_bytes=manifest.source_bytes,
-        metrics=metrics,
-        _candidate_tree=manifest.candidate_tree,
+        database=lease.connection,
+        lock_handle=lease.handle,
+        paths=lease.paths,
+        snapshot_id=lease.manifest.snapshot_id,
+        files_indexed=len(lease.manifest.files),
+        source_bytes=lease.manifest.source_bytes,
+        metrics=lease.metrics,
+        exclusions=lease.manifest.exclusions,
+        bounds=lease.manifest.bounds if state is None else state.bounds,
+        excluded_files=lease.manifest.excluded_files if state is None else state.excluded_files,
+        excluded_sample=lease.manifest.excluded_sample if state is None else state.excluded_sample,
+        _candidate_tree=lease.manifest.candidate_tree,
     )
 
 
@@ -594,20 +653,28 @@ def _build_and_publish(paths: CachePaths, trees: Trees, metrics: IndexMetrics) -
 def _build_once(paths: CachePaths, trees: Trees, metrics: IndexMetrics) -> Manifest:
     started = time.perf_counter()
     initial = _tree_state(trees, metrics)
-    source_index_state.check_source_bounds(tuple(one.identity for one in initial.files))
     temp = paths.slot / f".index.sqlite3.{os.getpid()}.{uuid4().hex}.tmp"
     hashes: dict[str, str] = {}
+    unreadable: list[SourceSkip] = []
     generation_id = hashlib.sha256(uuid4().bytes).hexdigest()
     try:
         database = source_index_database.Database.create(temp)
         try:
             for one in initial.files:
                 raw = _stable_read(one.absolute, one.identity)
-                hashes[one.identity.path] = (
-                    _UNREADABLE if raw is None else hashlib.sha256(raw).hexdigest()
-                )
                 if raw is None:
+                    # An unreadable source is REPORTED with its path, never silently absent: a
+                    # citation that resolves to nothing because the file could not be opened is
+                    # exactly the defect the report exists to make visible.
+                    unreadable.append(
+                        SourceSkip(
+                            path=one.identity.path,
+                            size=one.identity.size,
+                            reason=source_index_state.SKIP_UNREADABLE,
+                        )
+                    )
                     continue
+                hashes[one.identity.path] = hashlib.sha256(raw).hexdigest()
                 metrics.source_files_read += 1
                 metrics.source_bytes_read += len(raw)
                 lines = raw.decode("utf-8", errors="replace").splitlines()
@@ -618,14 +685,16 @@ def _build_once(paths: CachePaths, trees: Trees, metrics: IndexMetrics) -> Manif
                     raise SourceIndexError(
                         f"citation source index exceeded {MAX_INDEX_BYTES} bytes while building"
                     )
+            bounds = initial.bounds.with_skips(unreadable)
+            indexed = [one for one in initial.files if one.identity.path in hashes]
             snapshot_id = _snapshot_id(hashes)
             readiness = ReadyGeneration(
                 generation_id=generation_id,
                 snapshot_id=snapshot_id,
                 code_root=trees.code_root.resolve().as_posix(),
                 memory_root=trees.memory_root.resolve().as_posix(),
-                files_indexed=len(initial.files),
-                source_bytes=sum(one.identity.size for one in initial.files),
+                files_indexed=len(indexed),
+                source_bytes=sum(one.identity.size for one in indexed),
                 # Replaced with the closed file's authoritative size before validation.
                 database_bytes=1,
                 candidate_tree=trees.candidate_tree,
@@ -648,6 +717,7 @@ def _build_once(paths: CachePaths, trees: Trees, metrics: IndexMetrics) -> Manif
                 content_sha256=hashes[one.identity.path],
             )
             for one in final.files
+            if one.identity.path in hashes
         )
         manifest = Manifest(
             code_root=trees.code_root.resolve().as_posix(),
@@ -657,6 +727,10 @@ def _build_once(paths: CachePaths, trees: Trees, metrics: IndexMetrics) -> Manif
             directories=final.directories,
             files=files,
             candidate_tree=trees.candidate_tree,
+            exclusions=initial.exclusions,
+            bounds=bounds,
+            excluded_files=initial.excluded_files,
+            excluded_sample=initial.excluded_sample,
         )
         _publish_generation(
             paths,
@@ -786,32 +860,109 @@ def _indexed_file(
     return SourceFile(path, Identity.read(path, relative))
 
 
-def _walkable_directory(
-    directory: Path,
-    root: Path,
-    memory: Path,
-    candidates: frozenset[str] | None,
-    candidate_directories: frozenset[str],
-) -> bool:
+@dataclass(frozen=True)
+class WalkScope:
+    """Everything one walk decides a directory or file against, resolved once per acquisition."""
+
+    root: Path
+    memory: Path
+    candidates: frozenset[str] | None
+    candidate_directories: frozenset[str]
+    register: ExclusionRegister
+    fallback: FallbackIgnoreMatcher | None
+
+    def excluded_directory(self, relative: str) -> bool:
+        """Whether the register (or, outside Git, the ignore file) removes a whole directory."""
+        if relative == ".":
+            return False
+        if excluding_rule(self.register, relative, is_directory=True) is not None:
+            return True
+        if self.fallback is None or self.fallback.has_negation:
+            return False
+        return self.fallback.excludes(relative, is_directory=True)
+
+    def excluded_file(self, relative: str) -> bool:
+        if excluding_rule(self.register, relative) is not None:
+            return True
+        return self.fallback is not None and self.fallback.excludes(relative, is_directory=False)
+
+
+def _walkable_directory(directory: Path, scope: WalkScope) -> bool:
     """Whether the walk descends into ``directory``: not the memory root, and part of the candidate.
 
     D18: a directory with no candidate beneath it is not part of the candidate, and pruning it here
     also keeps an ignored build tree's churning directory identities out of the snapshot, so a
     machine-local scratch tree can neither refuse the caps nor invalidate a published generation.
-    """
 
-    if _under(directory, memory):
+    B1: the shared exclusion register prunes here too, by the same rule that decides a file --
+    a directory named by ``pathRules.exclude`` (or by the caller) is outside the candidate
+    population entirely. A ``.gitignore`` rule prunes only when this register is the authority
+    for it (a root that is not a work tree, where Git did not already apply it) and only when
+    the ignore file carries no negation rule; with a negation present the walk descends and
+    decides per file, because pruning a directory a later ``!`` rule re-includes is exactly the
+    silent omission this register must not make.
+    """
+    if _under(directory, scope.memory):
         return False
-    if candidates is None:
+    relative = directory.relative_to(scope.root).as_posix()
+    if scope.excluded_directory(relative):
+        return False
+    if scope.candidates is None:
         return True
-    return directory.relative_to(root).as_posix() in candidate_directories
+    return relative in scope.candidate_directories
+
+
+def _walked_files(
+    directory: Path,
+    names: list[str],
+    scope: WalkScope,
+) -> tuple[list[SourceFile], list[str]]:
+    """The candidate files under one directory, and the paths the register removed from it."""
+    files: list[SourceFile] = []
+    excluded: list[str] = []
+    for name in sorted(names):
+        one = _indexed_file(directory / name, scope.root, scope.candidates)
+        if one is None:
+            continue
+        if scope.excluded_file(one.identity.path):
+            excluded.append(one.identity.path)
+            continue
+        files.append(one)
+    return files, excluded
+
+
+def _gitignore_authority(register: ExclusionRegister, *, git_aware: bool) -> str:
+    """How this acquisition's ``.gitignore`` was honoured, stated rather than assumed.
+
+    ``git_aware`` is the property that decides it, and **both acquisition routes ask the same
+    question**: the default walk is Git-aware when it has a candidate population, and the
+    explicit candidate route is Git-aware by construction, because the tree it selected came
+    from Git membership in the first place. Deriving the authority from the route rather than
+    from a second ``ls-files`` call is what makes one root give one answer.
+
+    In a Git-aware acquisition Git is the authority: ``ls-files --exclude-standard`` produced the
+    population and already removed every ignored path, so the register records the patterns
+    without re-applying them. Otherwise the register's own bounded matcher applies them. With no
+    ``.gitignore`` at all there is nothing to honour either way.
+    """
+    if not register.gitignore_patterns:
+        return GITIGNORE_AUTHORITY_ABSENT
+    return GITIGNORE_AUTHORITY_GIT if git_aware else GITIGNORE_AUTHORITY_REGISTER
 
 
 def _tree_state(trees: Trees, metrics: IndexMetrics | None = None) -> TreeState:
     root = trees.code_root.resolve()
     memory = trees.memory_root.resolve()
     if trees.source_candidate is not None:
-        state = trees.source_candidate.state(memory, SKIPPED_SUFFIXES)
+        state = trees.source_candidate.state(
+            memory,
+            SKIPPED_SUFFIXES,
+            trees.caps,
+            replace(
+                trees.exclusions,
+                gitignore_authority=_gitignore_authority(trees.exclusions, git_aware=True),
+            ),
+        )
         if metrics is not None:
             metrics.metadata_tree_enumerations += 1
             metrics.metadata_directories_stat += len(state.directories)
@@ -819,14 +970,32 @@ def _tree_state(trees: Trees, metrics: IndexMetrics | None = None) -> TreeState:
             metrics.metadata_entries_enumerated += len(state.directories) + len(state.files)
         return state
     directories: list[Identity] = []
-    files: list[SourceFile] = []
+    kept: list[SourceFile] = []
     if metrics is not None:
         metrics.metadata_tree_enumerations += 1
     candidates = _git_candidate_paths(root)
-    candidate_directories = _candidate_directories(candidates)
+    register = replace(
+        trees.exclusions,
+        gitignore_authority=_gitignore_authority(
+            trees.exclusions, git_aware=candidates is not None
+        ),
+    )
+    scope = WalkScope(
+        root=root,
+        memory=memory,
+        candidates=candidates,
+        candidate_directories=_candidate_directories(candidates),
+        register=register,
+        fallback=(
+            fallback_matcher(register)
+            if register.gitignore_authority == GITIGNORE_AUTHORITY_REGISTER
+            else None
+        ),
+    )
+    excluded: list[str] = []
     for current, raw_dirs, raw_files in os.walk(root, followlinks=False):
         directory = Path(current)
-        if not _walkable_directory(directory, root, memory, candidates, candidate_directories):
+        if not _walkable_directory(directory, scope):
             # D18: a gitignored scratch tree is not part of the candidate, and walking into it makes
             # the mandatory memory-quality check refuse a tree whose own content is inside every cap.
             # Pruning here also keeps its directory identities out of the snapshot, so a build tree
@@ -843,16 +1012,21 @@ def _tree_state(trees: Trees, metrics: IndexMetrics | None = None) -> TreeState:
             for name in sorted(raw_dirs)
             if name not in SKIPPED_DIRECTORIES and not _under(directory / name, memory)
         ]
-        for name in sorted(raw_files):
-            one = _indexed_file(directory / name, root, candidates)
-            if one is None:
-                continue
-            files.append(one)
-            if metrics is not None:
-                metrics.metadata_files_stat += 1
+        admitted, removed = _walked_files(directory, raw_files, scope)
+        kept.extend(admitted)
+        excluded.extend(removed)
+        if metrics is not None:
+            metrics.metadata_files_stat += len(admitted)
+    bounded, bounds = apply_source_bounds([one.identity for one in kept], register.caps)
+    allowed = {one.path for one in bounded}
+    files = [one for one in kept if one.identity.path in allowed]
     return TreeState(
         directories=tuple(sorted(directories, key=lambda one: one.path)),
         files=tuple(sorted(files, key=lambda one: one.identity.path)),
+        exclusions=register,
+        bounds=bounds,
+        excluded_files=len(excluded),
+        excluded_sample=tuple(sorted(excluded)[:EXCLUDED_SAMPLE_LIMIT]),
     )
 
 
@@ -897,6 +1071,10 @@ def _refreshed_manifest(manifest: Manifest, state: TreeState) -> Manifest:
         directories=state.directories,
         files=files,
         candidate_tree=manifest.candidate_tree,
+        exclusions=state.exclusions,
+        bounds=state.bounds,
+        excluded_files=state.excluded_files,
+        excluded_sample=state.excluded_sample,
     )
 
 

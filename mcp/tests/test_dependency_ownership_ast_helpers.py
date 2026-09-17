@@ -42,8 +42,8 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 4
-LIFECYCLE_ARTIFACT_COUNT = 51
-LIFECYCLE_CATALOG_SHA256 = "3342a249fb0b5cf5046783db62b365f39a9fd0ee1a1385e745aa492e0c7dcdcd"
+LIFECYCLE_ARTIFACT_COUNT = 54
+LIFECYCLE_CATALOG_SHA256 = "5e938c85a72eb2fbbd609fe290d80702204f95d8a2a7d3c8cc0a6cc80f0aaea3"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately twice.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
@@ -72,11 +72,24 @@ empty: this leaf registered nothing and added no consumer.
 
 **Third deliberate re-pin (260915-CAPS-L15, 2026-09-17).** ``260915-CAPS-L15`` added **consumer
 rows only** — the three governed artifacts its acceptance module reaches through the shared test
-support it imports — so the populations are unchanged at **4 contracts / 51 artifacts** and the
-catalog is now ``3342a249…``. Nothing was registered, no row was removed and no artifact's
-identity moved: only the consumer proofs of ``curator_coherence_test_support.py``, the Node
-``package-lock.json`` fixture and the Codex ``model_page`` recording gained the new importer, which
-is the same shape L7 used when its own module became a consumer. Re-derived at this leaf's tip.
+support it imports — so the populations stayed at **4 contracts / 51 artifacts** and the catalog
+became ``3342a249…`` at that leaf's tip. Nothing was registered, no row was removed and no
+artifact's identity moved: only the consumer proofs of ``curator_coherence_test_support.py``, the
+Node ``package-lock.json`` fixture and the Codex ``model_page`` recording gained the new importer,
+which is the same shape L7 used when its own module became a consumer.
+
+**Fourth deliberate re-pin (260915-CAPS-L14, 2026-09-17) — the merged value.** ``260915-CAPS-L14``
+added the fresh-user acceptance harness under ``scripts/e2e_harness/`` — a declared permanent
+evidence-support root — so three governed artifacts entered the inventory and the population moved
+51 -> **54**. L15 landed first, so this value is re-derived against the **merged** artifact set:
+L14's three registered rows **plus** L15's consumer rows, over **4 contracts / 54 artifacts**, and
+the catalog is ``5e938c85…`` — which is neither leaf's own figure (L14 measured ``3c7f184e…``
+before L15 landed, L15 measured ``3342a249…`` before L14's rows existed). Unlike the first two
+re-pins this one registers *new* artifacts rather than consumers of existing ones: each row
+declares its exact source-derived consumers and an executable ``node:`` replacement, and
+``mcp/tests/test_fresh_user_harness.py`` is the module that answers for all three (it is the
+literal-path consumer, the shape proof for the fixtures, and the guard that a step which cannot run
+is recorded ``blocked`` and never ``completed``).
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"
