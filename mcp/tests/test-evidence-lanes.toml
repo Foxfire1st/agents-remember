@@ -16,6 +16,7 @@ unit-regression = [
   "mcp/tests/test_catalog_selection.py",
   "mcp/tests/test_causal_failure_localization.py",
   "mcp/tests/test_causal_quality_preflight.py",
+  "mcp/tests/test_capsule_experiment_install.py",
   "mcp/tests/test_capsule_launch_wiring.py",
   "mcp/tests/test_capsule_serving.py",
   "mcp/tests/test_certification_lane_bridge.py",

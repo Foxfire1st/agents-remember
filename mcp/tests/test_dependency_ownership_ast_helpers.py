@@ -43,8 +43,9 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 4
 LIFECYCLE_ARTIFACT_COUNT = 54
-LIFECYCLE_CATALOG_SHA256 = "e3651d6f3ae12a7f52933a0a0e75d3eb3618a0ce18def301467a4138890dcaeb"
-"""``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately five times.
+LIFECYCLE_CATALOG_SHA256 = "31c6983d23b04209c87575f8a3506145c2fb782bb5e58a897a4286d8e8d3b2e3"
+"""``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately eight times since its
+first pin -- the nine records below, one per deliberate value, in file order.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
 ``a9d83c375d1bfdcae7d0c46020eba41fbaf305a306fe89bb1b9b479b861c2002``. ``LOCR-R26@v1``'s
@@ -106,6 +107,29 @@ rows only** (its new runtime module reaches three already-governed artifacts), a
 re-derived against the **merged** catalog: L14's fifty-fourth artifact row plus this leaf's three consumer entries,
 over **4 contracts / 54 artifacts**, giving `e3651d6f…`. Neither L14's `5e938c85…` nor this leaf's pre-sync
 `563582a0…` (measured at 51 artifacts before L14 landed) is correct at this tip.
+
+**Seventh deliberate re-pin (260915-CAPS-L9, 2026-09-17) — this leaf's own branch value.** ``260915-CAPS-L9`` added
+**consumer rows only** — two of them, for the one governed artifact its installer surface reaches:
+``mcp/tests/fixtures/repository_profiles/node/package-lock.json``. Measured at this leaf's own base the
+populations were unchanged at **4 contracts / 51 artifacts** and the catalog stood at ``8764ea1f…``. One row is the
+leaf's new module (``test_capsule_experiment_install.py``), which reads the pinned application's committed lockfile
+through the installer it drives; the other is ``test_install_runtime.py``, which became a consumer of the same
+artifact because the module it imports now reaches the lockfile — the same propagation L7, L14 and L15 recorded when
+their own modules became consumers. Nothing was registered, no row was removed and no artifact's identity moved.
+**This figure and the one below are historical**: each was correct at the first-sync tip it was measured at, and
+neither is correct at the merged tip.
+
+**Eighth deliberate re-pin (260915-CAPS-L9, 2026-09-17) — the first merged value.** ``260915-CAPS-L14`` landed while
+this leaf was in flight, so this value was re-derived after ``worktree_sync`` against the **merged** catalog: L14's
+three registered rows plus this leaf's two consumer entries, over **4 contracts / 54 artifacts**, giving
+``dca9c2f9…``. Neither L14's ``5e938c85…`` nor this leaf's pre-sync ``8764ea1f…`` was correct at that tip.
+
+**Ninth deliberate re-pin (260915-CAPS-L9, 2026-09-17) — the merged value at this leaf's landing.** ``260915-CAPS-L17``
+then landed as well, so the value is re-derived a second time against the **merged** catalog: L14's three registered
+rows, L17's three consumer entries and this leaf's own two consumer entries, over **4 contracts / 54 artifacts**,
+giving ``31c6983d…``. Neither L17's landing figure ``e3651d6f…``, nor the first merged value ``dca9c2f9…``, nor this
+leaf's pre-sync ``8764ea1f…`` is correct here. The measured delta against L17's landed catalog is exactly this leaf's
+two added consumer paths and nothing else, which is why the value could not be taken from either leaf's figure.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"

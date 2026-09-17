@@ -79,26 +79,24 @@ def context_packet_payload(
 
 def runtime_install_payload(
     config: McpRuntimeConfig,
-    *,
-    dry_run: bool = False,
-    include_benchmarks: bool = False,
-    install_provider_deps: bool = True,
-    no_cache: bool = False,
+    request: RuntimeInstallRequest,
 ) -> dict[str, Any]:
-    full = run_runtime_install(
-        config,
-        RuntimeInstallRequest(
-            dry_run=dry_run,
-            include_benchmarks=include_benchmarks,
-            install_provider_deps=install_provider_deps,
-            no_cache=no_cache,
-        ),
-    )
+    """Build the runtime-install payload for one run from that run's own request.
+
+    The tool builds the request and hands it over unchanged, so the knobs the tool exposes and the
+    fields the application entry point reads cannot drift apart. ``request.experiment`` is this
+    run's own selection and the primary input for it; the ``AR_EXPERIMENT`` environment variable of
+    the server process is the documented fallback for a short-lived CLI/developer run. The install
+    payload names which one supplied the mode in its record's ``selectionSource``, so a long-lived
+    server cannot leave an ambient switch behind unnoticed.
+    """
+
+    full = run_runtime_install(config, request)
     report_path = write_tool_report(
         config.coordination_root,
         "runtime_install",
         full,
-        label="dry-run" if dry_run else "install",
+        label="dry-run" if request.dry_run else "install",
     )
     return _tool_payload(
         "runtime_install",
