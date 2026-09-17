@@ -23,8 +23,6 @@ import apsw
 import pytest
 from agents_remember.application.knowledge import (
     admitted_knowledge_destination,
-    initialize_knowledge_namespace,
-    open_admitted_knowledge_store,
     write_authorship,
 )
 from agents_remember.memory.knowledge import logical, merge_validation, routes
@@ -58,7 +56,7 @@ from agents_remember.memory.knowledge.schema_generations import (
 )
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.result import KnowledgeRefusal
-from generation_test_support import create_generation_1_store
+from generation_test_support import create_generation_1_store, create_generation_2_store
 
 MERGE_OPERATION = "merge_knowledge_datasets"
 pytestmark = pytest.mark.evidence_unit
@@ -122,12 +120,11 @@ def test_a_mixed_generation_merge_is_refused_before_any_session_exists(tmp_path:
     base = _v1_dataset(tmp_path, "base", str(uuid4()))
     left = _v1_dataset(tmp_path, "left", str(uuid4()))
     right = tmp_path / "right-v2.sqlite"
-    connection = apsw.Connection(str(right))
-    try:
-        connection.execute("PRAGMA foreign_keys=ON")
-        create_or_validate_schema(connection)
-    finally:
-        connection.close()
+    # A genuine version-2 dataset, not whatever the build happens to create: this case is about the
+    # v1/v2 boundary `KS-R10@v1` §6.1 fixes, and the builder that observes a recorded generation is
+    # what keeps the pair it asserts a real pair rather than a coincidence of the current default.
+    with create_generation_2_store(right, str(uuid4())):
+        pass
 
     refusal = selected_generation({"base": base, "left": left, "right": right}, MERGE_OPERATION)
     assert isinstance(refusal, KnowledgeRefusal)
@@ -338,8 +335,13 @@ def test_validation_reads_generation_two_tables_not_the_pinned_registries(tmp_pa
             origin_refs=("requirement:KS-R10@v1",),
         ),
     )
-    initialize_knowledge_namespace(destination)
-    with open_admitted_knowledge_store(destination) as store:
+    # The dataset is created at generation 2 on purpose. This case's whole claim is that a helper
+    # handed a *recorded* generation reads that generation's tables rather than the pinned
+    # registries, so it needs a dataset that really declares version 2 rather than whichever
+    # generation the build currently creates.
+    with create_generation_2_store(
+        destination.database_path, destination.repository.repository_id
+    ) as store:
         route_id = str(uuid4())
         authored = routes.author_route(
             store.connection,

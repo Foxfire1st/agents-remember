@@ -16,7 +16,14 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
-from agents_remember.memory.knowledge import anchors, families, memberships, realizations, records
+from agents_remember.memory.knowledge import (
+    anchors,
+    facet_records,
+    families,
+    memberships,
+    realizations,
+    records,
+)
 from agents_remember.models.knowledge.candidate import (
     ChangeCommand,
     NewAnchor,
@@ -37,6 +44,12 @@ WRITABLE_TABLES: tuple[str, ...] = (
     "source_anchor",
     "family_member",
     "realization_claim",
+    "knowledge_record",
+    "record_revision",
+    "facet_attachment",
+    "facet_decision_supersession",
+    "explanation",
+    "explanation_revision",
 )
 
 IdentityPairs = tuple[tuple[str, str], ...]
@@ -87,6 +100,9 @@ def _claim_digest(store: OpenedKnowledgeStore, record_id: str) -> str | None:
     return None if claim is None else claim.row_digest
 
 
+# The facet tables' readers all live in :mod:`…facets`, next to the write path that produces the
+# rows: each returns the same value the read projection exposes, so an expectation carried from a
+# read names the row the write path will compare against.
 _RECORD_READERS: dict[str, RecordReader] = {
     "invariant": _invariant_digest,
     "invariant_revision": _invariant_revision_digest,
@@ -95,6 +111,12 @@ _RECORD_READERS: dict[str, RecordReader] = {
     "source_anchor": _anchor_digest,
     "family_member": _member_digest,
     "realization_claim": _claim_digest,
+    "knowledge_record": facet_records.facet_record_digest,
+    "record_revision": facet_records.record_revision_content_digest,
+    "facet_attachment": facet_records.attachment_endpoint_digest,
+    "facet_decision_supersession": facet_records.supersession_digest,
+    "explanation": facet_records.explanation_record_digest,
+    "explanation_revision": facet_records.explanation_revision_payload_digest,
 }
 
 # One record identity per command kind, for the eleven commands that address exactly one. The
@@ -118,6 +140,14 @@ _WRITTEN_IDENTITY: dict[str, Callable[[Any], tuple[str, str]]] = {
         "realization_claim",
         command.claim_id,
     ),
+    # The six authored-judgment commands. Each table's identity is a single column, which is what
+    # lets an expectation, a duplicate check and a receipt all address the row the same way.
+    "add_facet": lambda command: ("knowledge_record", command.record_id),
+    "attach_facet": lambda command: ("facet_attachment", command.attachment_id),
+    "remove_facet_attachment": lambda command: ("facet_attachment", command.attachment_id),
+    "author_explanation": lambda command: ("explanation", command.explanation_id),
+    "add_explanation_revision": lambda command: ("explanation_revision", command.revision_id),
+    "designate_explanation": lambda command: ("explanation", command.explanation_id),
 }
 
 # The commands that create nothing: they address an existing row to edit or remove it, so two of
@@ -128,6 +158,8 @@ _ADDRESSES_EXISTING: tuple[str, ...] = (
     "remove_source_anchor",
     "remove_family_member",
     "remove_realization_claim",
+    "remove_facet_attachment",
+    "designate_explanation",
 )
 
 
@@ -139,6 +171,19 @@ def written_identities(command: ChangeCommand) -> IdentityPairs:
         if isinstance(command.anchor, NewAnchor):
             identities.append(("source_anchor", str(command.anchor.anchor.anchor_id)))
         return tuple(identities)
+    if command.kind == "add_facet":
+        identities = [
+            ("knowledge_record", command.record_id),
+            ("record_revision", command.revision_id),
+        ]
+        if command.supersedes_revision_id is not None:
+            identities.append(("facet_decision_supersession", command.revision_id))
+        return tuple(identities)
+    if command.kind == "author_explanation":
+        return (
+            ("explanation", command.explanation_id),
+            ("explanation_revision", command.revision_id),
+        )
     return (_WRITTEN_IDENTITY[command.kind](command),)
 
 

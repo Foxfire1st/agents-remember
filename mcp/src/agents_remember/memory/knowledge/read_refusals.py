@@ -33,7 +33,11 @@ _OPERATION: KnowledgeOperation = "read_knowledge_scope"
 
 
 def selector_absent_refusal(
-    *, record_id: str, kind: str, observed: str = "<absent in the selected snapshot>"
+    *,
+    record_id: str,
+    kind: str,
+    observed: str = "<absent in the selected snapshot>",
+    operation: KnowledgeOperation = _OPERATION,
 ) -> KnowledgeRefusal:
     """Refuse a seed that names an identity or revision the selected snapshot does not hold.
 
@@ -45,7 +49,7 @@ def selector_absent_refusal(
 
     return refusal(
         "selector_absent",
-        _OPERATION,
+        operation,
         f"the selector names no {kind} in the selected snapshot, so there is no recorded scope to "
         f"select: {record_id}",
         facts=RefusalFacts(record_id=record_id, expected=kind, observed=observed),
@@ -135,7 +139,13 @@ def continuation_binding_mismatch_refusal(
     )
 
 
-def snapshot_unavailable_refusal(*, detail: str, expected: str, observed: str) -> KnowledgeRefusal:
+def snapshot_unavailable_refusal(
+    *,
+    detail: str,
+    expected: str,
+    observed: str,
+    operation: KnowledgeOperation = _OPERATION,
+) -> KnowledgeRefusal:
     """Refuse a read whose selected snapshot cannot be obtained at all.
 
     The mirror of the two absence codes: nothing is known about the recorded graph here because the
@@ -145,7 +155,7 @@ def snapshot_unavailable_refusal(*, detail: str, expected: str, observed: str) -
 
     return refusal(
         "snapshot_unavailable",
-        _OPERATION,
+        operation,
         f"the selected snapshot is unavailable: {detail}",
         facts=RefusalFacts(expected=expected, observed=observed),
         next_action=(
@@ -156,7 +166,9 @@ def snapshot_unavailable_refusal(*, detail: str, expected: str, observed: str) -
     )
 
 
-def selection_incomplete_refusal(*, item_count: int, bound: int) -> KnowledgeRefusal:
+def selection_incomplete_refusal(
+    *, item_count: int, bound: int, operation: KnowledgeOperation = _OPERATION
+) -> KnowledgeRefusal:
     """Refuse a selection that reached its declared execution bound before it was enumerated.
 
     It exists so the alternative -- emitting a partial selection with a total that was never
@@ -166,7 +178,7 @@ def selection_incomplete_refusal(*, item_count: int, bound: int) -> KnowledgeRef
 
     return refusal(
         "selection_incomplete",
-        _OPERATION,
+        operation,
         f"the selected set reached the declared execution bound of {bound} items ({item_count} "
         "counted), so no complete manifest exists for it",
         facts=RefusalFacts(expected=f"at most {bound} items", observed=str(item_count)),

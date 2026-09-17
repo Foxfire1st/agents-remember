@@ -75,6 +75,19 @@ KnowledgeOperation = Literal[
     # is one: a first comparison and a continuation are two ways of asking the same question, and a
     # caller branches on the refusal code rather than on which of the two it passed.
     "diff_knowledge_scope",
+    # Authored judgment facets. Six write operations -- record a facet, attach it, remove one
+    # attachment, author an explanation, edit an explanation, and record a designation -- plus the
+    # facet-specific read. They are separate members rather than one, because a caller branches on
+    # which authored act it performed and each carries its own remedy; the candidate batch that
+    # carries the same commands restates its refusals as ``change_candidate``, so these names belong
+    # to the standalone entry points the two-entry-point rule requires.
+    "add_facet",
+    "attach_facet",
+    "remove_facet_attachment",
+    "author_explanation",
+    "add_explanation_revision",
+    "designate_explanation",
+    "read_facet_scope",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct

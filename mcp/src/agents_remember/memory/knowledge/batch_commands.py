@@ -32,6 +32,8 @@ import apsw
 
 from agents_remember.memory.knowledge import (
     anchors,
+    facet_records,
+    facets,
     families,
     labels,
     lineage,
@@ -46,6 +48,7 @@ from agents_remember.memory.knowledge.refusals import (
     batch_command_refusal,
     batch_lineage_cycle_refusal,
     batch_refusal,
+    facet_supersession_cycle_refusal,
     unknown_family_refusal,
     unknown_invariant_refusal,
 )
@@ -67,6 +70,7 @@ from agents_remember.models.knowledge.candidate import (
     SetFamilyLabel,
     SetInvariantLabel,
 )
+from agents_remember.models.knowledge.facet import FACET_COMMAND_KINDS
 from agents_remember.models.knowledge.family import FamilyRevision, FamilyRevisionDraft
 from agents_remember.models.knowledge.invariant import InvariantRevision
 from agents_remember.models.knowledge.result import (
@@ -197,15 +201,34 @@ def _apply_command(
 ) -> tuple[RecordIdentity, ...]:
     """Apply one validated command.
 
-    The three families are dispatched separately -- insertion, label edit, removal -- so each one
-    reads as the single decision it is rather than as one long ladder over twelve variants.
+    Four families are dispatched separately -- insertion, label edit, removal, and the authored
+    facet commands -- so each one reads as the single decision it is rather than as one long ladder
+    over eighteen variants. The facet commands go to their own module's in-transaction steps, which
+    raise the same typed refusals this batch restates and reports the same kind of touched-row
+    entry.
     """
 
     if command.kind in _INSERTING_KINDS:
         return _apply_insert(store, command, authorship, pending)
     if command.kind in _LABELING_KINDS:
         return _apply_label(store, command)
+    if command.kind in FACET_COMMAND_KINDS:
+        return _apply_facet(store, command, authorship, pending)
     return _apply_removal(store, command)
+
+
+def _apply_facet(
+    store: OpenedKnowledgeStore,
+    command: ChangeCommand,
+    authorship: Authorship,
+    pending: frozenset[tuple[str, str]],
+) -> tuple[RecordIdentity, ...]:
+    """Apply one authored facet command through the facet module's in-transaction step."""
+
+    written = facets.apply_facet_command(store, command, authorship, pending)
+    return tuple(
+        _written_entry(entry.state, entry.table, entry.record_id, entry.digest) for entry in written
+    )
 
 
 _INSERTING_KINDS = frozenset(
@@ -566,8 +589,10 @@ def require_after_integrity(store: OpenedKnowledgeStore) -> None:
 
     store.require_referential_integrity()
     _require_sealed_rows(store)
+    _require_sealed_facet_rows(store)
     _require_acyclic_graph(store, table="invariant_predecessor", family=False)
     _require_acyclic_graph(store, table="family_predecessor", family=True)
+    _require_acyclic_supersessions(store)
 
 
 def _require_sealed_rows(store: OpenedKnowledgeStore) -> None:
@@ -582,6 +607,86 @@ def _require_sealed_rows(store: OpenedKnowledgeStore) -> None:
             )
             if stored is None:  # pragma: no cover - the id came from that same table
                 raise KnowledgeRefused(_vanished_row(table))
+
+
+def _require_sealed_facet_rows(store: OpenedKnowledgeStore) -> None:
+    """Decode every stored facet revision and explanation revision, re-deriving its seal.
+
+    A facet revision's ``content_digest`` and an explanation revision's ``payload_digest`` are seals
+    over content, and the decoder recomputes each from the row as stored. A batch that wrote a row
+    which does not match its own identity is therefore caught here, inside the same transaction,
+    rather than becoming durable.
+
+    Facet aggregates join this pass instead of bypassing it: a facet record whose revision is
+    missing, or whose payload no longer validates against its declared subtype, is not a state this
+    substrate stores.
+    """
+
+    for record_id, revision_id, facet_kind in _facet_revisions(store):
+        row = _row_of(store, "record_revision", revision_id)
+        facet_records.decode_facet_revision_row(row, facet_kind)
+        del record_id
+    for revision_id in _ids_of(store, "explanation_revision"):
+        row = _row_of(store, "explanation_revision", revision_id)
+        facet_records.decode_explanation_revision_row(row)
+
+
+def _facet_revisions(store: OpenedKnowledgeStore) -> tuple[tuple[str, str, str], ...]:
+    """Return every stored facet revision with the kind of record it belongs to."""
+
+    rows = store.connection.execute(
+        "SELECT envelope.record_id, revision.revision_id, envelope.kind "
+        "FROM knowledge_record AS envelope "
+        "JOIN record_revision AS revision ON revision.repository_id = envelope.repository_id "
+        "AND revision.record_id = envelope.record_id "
+        "WHERE envelope.repository_id = ? ORDER BY revision.revision_id",
+        (store.repository_id,),
+    )
+    return tuple((str(row[0]), str(row[1]), str(row[2])) for row in rows)
+
+
+def _ids_of(store: OpenedKnowledgeStore, table: str) -> tuple[str, ...]:
+    rows = store.connection.execute(
+        f"SELECT revision_id FROM {table} WHERE repository_id = ? ORDER BY revision_id",
+        (store.repository_id,),
+    )
+    return tuple(str(row[0]) for row in rows)
+
+
+def _row_of(store: OpenedKnowledgeStore, table: str, revision_id: str) -> tuple[object, ...]:
+    """Return one stored revision row in its declared column order."""
+
+    row = next(
+        iter(
+            store.connection.execute(
+                f"SELECT * FROM {table} WHERE repository_id = ? AND revision_id = ?",
+                (store.repository_id, revision_id),
+            )
+        ),
+        None,
+    )
+    if row is None:  # pragma: no cover - the id came from that same table
+        raise KnowledgeRefused(_vanished_row(table))
+    return row
+
+
+def _require_acyclic_supersessions(store: OpenedKnowledgeStore) -> None:
+    """Refuse when the decision supersession graph holds a cycle after the batch was applied.
+
+    The third graph the shared rule is applied to. It is a whole-graph check like the two above:
+    the batch is finished, so the question is whether the graph it left is acyclic at all.
+    """
+
+    edges = lineage.supersession_edges(store.connection, store.repository_id)
+    graph: dict[str, set[str]] = {}
+    for child, parent in edges:
+        graph.setdefault(child, set()).add(parent)
+        graph.setdefault(parent, set())
+    cycle = lineage.cycle_vertices(graph)
+    if not cycle:
+        return
+    members = tuple(sorted(cycle))
+    raise KnowledgeRefused(facet_supersession_cycle_refusal(members[0], members))
 
 
 def _vanished_row(table: str) -> KnowledgeRefusal:

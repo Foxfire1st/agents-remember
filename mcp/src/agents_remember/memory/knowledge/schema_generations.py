@@ -13,6 +13,10 @@ This module makes a generation one frozen record, and makes *selection* a read o
   structural fingerprint recorded as a constant. Its declarations stay verbatim in
   :mod:`agents_remember.memory.knowledge.schema`; nothing here restates them.
 * :data:`GENERATION_2` is generation 1 plus the tables :mod:`…schema_v2` appends.
+* :data:`GENERATION_3` is generation 2 plus the tables :mod:`…schema_v3` appends -- the facet
+  attachments, the decision supersession edge and the explanation pair. It is the created
+  generation, so a *new* store declares version 3 while a generation-2 dataset that already exists
+  keeps declaring version 2 and is read through generation 2's own record.
 * :func:`require_pinned_generation_1_unchanged` is the gate that fails -- not warns -- when the
   pinned generation no longer recomputes to its constant. Without it the pin is a comment.
 * :func:`generation_of_database` and :func:`generation_of_artifact` select a generation from what
@@ -35,7 +39,7 @@ from dataclasses import dataclass, replace
 import apsw
 
 from agents_remember.kernel.canonical_json import sha256_digest
-from agents_remember.memory.knowledge import schema, schema_v2
+from agents_remember.memory.knowledge import schema, schema_v2, schema_v3
 from agents_remember.memory.knowledge.export_refusals import unsupported_schema_refusal
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.context import KNOWLEDGE_SCHEMA_NAME
@@ -146,6 +150,7 @@ GENERATION_1_FINGERPRINT = "bae805d6443a42ca65f733149cb3dc694ea89d3e40554c56480f
 
 GENERATION_1_SCHEMA_NAME = KNOWLEDGE_SCHEMA_NAME
 GENERATION_2_SCHEMA_NAME = "ar-knowledge-sqlite/v2"
+GENERATION_3_SCHEMA_NAME = "ar-knowledge-sqlite/v3"
 
 GENERATION_1 = SchemaGeneration(
     schema_name=GENERATION_1_SCHEMA_NAME,
@@ -188,9 +193,40 @@ def _compose_generation_2() -> SchemaGeneration:
 
 GENERATION_2 = _compose_generation_2()
 
+
+# Generation 3 is generation 2, unchanged, plus the tables :mod:`…schema_v3` appends -- the facet
+# attachments, the decision supersession edge and the explanation pair. The composition is written
+# as the same explicit append generation 2's is, so
+# ``GENERATION_3.tables[: len(GENERATION_2.tables)] == GENERATION_2.tables`` and generation 3's
+# columns for each of the first sixteen names are generation 2's. That prefix equality is the whole
+# of ``KS-R10@v1`` §1.3's additive rule: a generation appends tables and never retypes, reorders or
+# drops an earlier generation's.
+def _compose_generation_3() -> SchemaGeneration:
+    """Return generation 3: generation 2's declarations, unchanged, with this leaf's tables appended."""
+
+    composed = SchemaGeneration(
+        schema_name=GENERATION_3_SCHEMA_NAME,
+        user_version=3,
+        tables=GENERATION_2.tables + schema_v3.APPENDED_TABLES,
+        columns={**GENERATION_2.columns, **schema_v3.APPENDED_COLUMNS},
+        primary_keys={**GENERATION_2.primary_keys, **schema_v3.APPENDED_PRIMARY_KEYS},
+        json_columns={**GENERATION_2.json_columns, **schema_v3.APPENDED_JSON_COLUMNS},
+        features=GENERATION_2.features + schema_v3.APPENDED_FEATURES,
+        table_ddl={**GENERATION_2.table_ddl, **schema_v3.APPENDED_TABLE_DDL},
+        index_ddl=GENERATION_2.index_ddl + schema_v3.APPENDED_INDEX_DDL,
+        triggers={**GENERATION_2.triggers, **schema_v3.APPENDED_TRIGGERS},
+        fingerprint="",
+    )
+    return replace(composed, fingerprint=structure_fingerprint(composed))
+
+
+GENERATION_3 = _compose_generation_3()
+
 # The registry. Ordered oldest first, so "the newest generation this build supports" is the last
-# entry rather than a second literal that could drift from the tuple.
-GENERATIONS: tuple[SchemaGeneration, ...] = (GENERATION_1, GENERATION_2)
+# entry rather than a second literal that could drift from the tuple -- and so
+# ``generation_of_new_store()`` declares generation 3 while a generation-2 dataset stays
+# generation 2 (``KS-R10@v1`` §5.1).
+GENERATIONS: tuple[SchemaGeneration, ...] = (GENERATION_1, GENERATION_2, GENERATION_3)
 
 GENERATIONS_BY_VERSION: Mapping[int, SchemaGeneration] = {
     generation.user_version: generation for generation in GENERATIONS

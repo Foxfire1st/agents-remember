@@ -229,10 +229,21 @@ def _route_for_path(connection: apsw.Connection, repository_id: str, path: str) 
     return None
 
 
-def _route_exists(connection: apsw.Connection, repository_id: str, route_id: str) -> bool:
+def route_exists(connection: apsw.Connection, repository_id: str, route_id: str) -> bool:
+    """Whether one route identity is authored in this repository.
+
+    Public because a writer that records a *governing* route has to answer this question before it
+    writes the governed row: a named route that does not exist is a dangling reference to refuse,
+    and ``None`` is a different fact -- the explicit ungoverned state requirement 4.4 permits.
+    """
+
     for _ in connection.execute(_ROUTE_BY_ID, (repository_id, route_id)):
         return True
     return False
+
+
+def _route_exists(connection: apsw.Connection, repository_id: str, route_id: str) -> bool:
+    return route_exists(connection, repository_id, route_id)
 
 
 def author_route(

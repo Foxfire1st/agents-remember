@@ -41,9 +41,9 @@ LIFECYCLE_CATALOG = Path("mcp/tests/evidence-lifecycle.toml")
 LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
-LIFECYCLE_CONTRACT_COUNT = 12
-LIFECYCLE_ARTIFACT_COUNT = 53
-LIFECYCLE_CATALOG_SHA256 = "9b057632525c36f7397b97fe2a5afa4a4716a57e6ad8893db6dff19238de60cc"
+LIFECYCLE_CONTRACT_COUNT = 13
+LIFECYCLE_ARTIFACT_COUNT = 54
+LIFECYCLE_CATALOG_SHA256 = "19ed0525cd94b57389052a4e19cf1f0dfe83e9c166783ead2598f6a4e0ce8ffa"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately once.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as

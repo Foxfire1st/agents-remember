@@ -66,7 +66,6 @@ from agents_remember.memory.knowledge.merge_schema import (
 from agents_remember.memory.knowledge.records import encode_authorship
 from agents_remember.memory.knowledge.schema_generations import (
     CURRENT_GENERATION,
-    GENERATION_2,
     generation_of_database,
     registered_version_listing,
 )
@@ -336,10 +335,11 @@ def test_disjoint_edits_from_both_sides_survive_in_a_closed_published_candidate(
     assert [coverage.side for coverage in outcome.coverage] == ["left", "right"]
     for coverage in outcome.coverage:
         # Coverage spans the selected generation's whole table set, not a fixed count. These
-        # datasets are generation 2, whose manifest is generation 1's ten canonical tables plus
-        # the six this increment appends (route, knowledge_record, record_revision and the three
-        # governing-route joins). A bare ``== 10`` encoded the single-generation assumption.
-        assert len(coverage.tables) == len(GENERATION_2.tables)
+        # datasets are created by this build, so the selected generation is ``CURRENT_GENERATION``
+        # -- the ten generation-1 tables, the six generation 2 appends, and whatever the newest
+        # leaf appends after them. A bare ``== 10`` encoded the single-generation assumption, and a
+        # literal generation number would encode the same mistake one generation later.
+        assert len(coverage.tables) == len(CURRENT_GENERATION.tables)
         assert coverage.replayed_digest == coverage.source_digest
         assert coverage.operations == sum(entry.operations for entry in coverage.tables)
     assert set(outcome.changeset_digests) == {"left", "right"}
@@ -450,7 +450,7 @@ def test_a_right_side_change_to_an_appended_table_merges_instead_of_aborting(
     assert outcome.state == "structurally_merged", outcome.refusal
     assert outcome.publication_state == "published"
     right = next(entry for entry in outcome.coverage if entry.side == "right")
-    assert len(right.tables) == len(GENERATION_2.tables)
+    assert len(right.tables) == len(CURRENT_GENERATION.tables)
     assert right.operations >= 1
     reader = open_read_only_database(destination)
     try:

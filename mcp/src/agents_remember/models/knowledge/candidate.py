@@ -34,6 +34,14 @@ from agents_remember.models.knowledge.base import (
     UUID_PATTERN,
     KnowledgeModel,
 )
+from agents_remember.models.knowledge.facet import (
+    AddExplanationRevision,
+    AddFacet,
+    AttachFacet,
+    AuthorExplanation,
+    DesignateExplanation,
+    RemoveFacetAttachment,
+)
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
 from agents_remember.models.knowledge.graph import (
     FamilyMemberDraft,
@@ -50,6 +58,8 @@ from agents_remember.models.knowledge.source import SourceAnchorDraft
 
 __all__ = [
     "CANDIDATE_LANES",
+    "AddExplanationRevision",
+    "AddFacet",
     "AddFamily",
     "AddFamilyMember",
     "AddFamilyRevision",
@@ -59,9 +69,12 @@ __all__ = [
     "AddSourceAnchor",
     "AnchorEndpoint",
     "AnchorReference",
+    "AttachFacet",
+    "AuthorExplanation",
     "CandidateResolution",
     "ChangeBatch",
     "ChangeCommand",
+    "DesignateExplanation",
     "ExactCandidateInput",
     "ExpectedRecord",
     "KnowledgeContext",
@@ -71,6 +84,7 @@ __all__ = [
     "NewAnchor",
     "ProposedCommand",
     "RecordIdentity",
+    "RemoveFacetAttachment",
     "RemoveFamilyMember",
     "RemoveRealizationClaim",
     "RemoveSourceAnchor",
@@ -97,8 +111,14 @@ _MUTABLE_TABLES: tuple[str, ...] = (
 )
 
 # The tables an expectation may address. They are the tables a batch command can write; the
-# repository row and the two predecessor-edge tables are written only as part of the aggregate
-# that owns them, so an expectation about them would name a state no command could produce.
+# repository row, the two predecessor-edge tables and the decision-supersession edge's own parent
+# column are written only as part of the aggregate that owns them, so an expectation about them
+# would name a state no command could produce.
+#
+# The facet generation's six tables are here because facet commands write them: an expectation, a
+# duplicate check and a receipt all address one of these rows by its own primary key, and every
+# facet table has a single-column identity for exactly that reason. A case asserts this literal is
+# the shipped seven plus the facet module's own declared list, so the two cannot drift.
 MutableRecordTable = Literal[
     "invariant",
     "invariant_revision",
@@ -107,6 +127,12 @@ MutableRecordTable = Literal[
     "source_anchor",
     "family_member",
     "realization_claim",
+    "knowledge_record",
+    "record_revision",
+    "facet_attachment",
+    "facet_decision_supersession",
+    "explanation",
+    "explanation_revision",
 ]
 
 
@@ -337,8 +363,12 @@ class RemoveRealizationClaim(KnowledgeModel):
     expected_row_digest: str = Field(pattern=SHA256_PATTERN)
 
 
-# The closed command union. Twelve authored commands, no thirteenth variant, no free-form field,
-# and no member that could promote, approve or execute a statement the caller wrote.
+# The closed command union. The twelve shipped authored commands keep their exact discriminators and
+# shapes, and the authored-judgment generation adds six members beside them -- record a facet,
+# attach it to an exact endpoint, remove one attachment, author an explanation, edit an explanation,
+# and record a designation. There is still no free-form member and still no member that could
+# promote, approve or execute a statement the caller wrote: the widening adds the acts the facet
+# record kind needs, and each has a typed shape of its own.
 ProposedCommand = Annotated[
     AddInvariant
     | AddInvariantRevision
@@ -351,7 +381,13 @@ ProposedCommand = Annotated[
     | AddFamilyMember
     | RemoveFamilyMember
     | AddRealizationClaim
-    | RemoveRealizationClaim,
+    | RemoveRealizationClaim
+    | AddFacet
+    | AttachFacet
+    | RemoveFacetAttachment
+    | AuthorExplanation
+    | AddExplanationRevision
+    | DesignateExplanation,
     Field(discriminator="kind"),
 ]
 

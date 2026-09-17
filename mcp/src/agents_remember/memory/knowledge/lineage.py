@@ -1,11 +1,13 @@
-"""One acyclic-lineage rule, shared by the invariant and the family lineage graphs.
+"""One acyclic-lineage rule, shared by the invariant, family and decision-supersession graphs.
 
-Both lineage graphs are predecessor edges between revisions of one object, and both refuse a
-write that would leave *any* revision of that object on a cycle. The rule therefore lives here
-once and is applied twice, instead of being re-derived per relation:
+All three graphs are typed edges between revisions, and all three refuse a write that would leave
+*any* revision of that graph on a cycle. The rule therefore lives here once and is applied three
+times, instead of being re-derived per relation:
 
 * ``create_invariant_revision`` applies it over the stored ``invariant_predecessor`` edges;
-* ``create_family_revision`` applies it over the stored ``family_predecessor`` edges.
+* ``create_family_revision`` applies it over the stored ``family_predecessor`` edges;
+* a facet command that authors a decision supersession applies it over the stored
+  ``facet_decision_supersession`` edges (``KS-R11@v1`` §5.2).
 
 The reach is deliberately wider than adjacency. A candidate is refused when inserting it would
 leave it on a cycle, **or** when a retained revision reachable from it through predecessors is
@@ -37,6 +39,16 @@ SELECT child_revision_id, parent_revision_id FROM family_predecessor
 WHERE repository_id = ? AND family_id = ?
 """
 
+# The supersession graph is one edge table for the whole repository rather than one per object: a
+# decision supersession relates two revisions of the decision record kind, and the record kind has
+# no per-object table to scope by. The direction is the shipped one -- the superseding decision is
+# the child, the superseded decision is its parent -- so a decision's supersession chain is the same
+# ancestor walk the two predecessor graphs are.
+_SUPERSESSION_EDGES_SQL = """
+SELECT superseding_revision_id, superseded_revision_id FROM facet_decision_supersession
+WHERE repository_id = ?
+"""
+
 
 @dataclass(frozen=True)
 class CycleFinding:
@@ -66,6 +78,20 @@ def family_edges(
     """Return the declared predecessor edges of one family."""
 
     return _edges(connection, _FAMILY_EDGES_SQL, (repository_id, family_id))
+
+
+def supersession_edges(connection: apsw.Connection, repository_id: str) -> tuple[LineageEdge, ...]:
+    """Return the repository's recorded decision-supersession edges, as ``(child, parent)``.
+
+    The edges are returned in the shipped shape -- ``(superseding, superseded)`` -- so the shared
+    rule reads this graph exactly as it reads the two predecessor graphs, and no second walk grows
+    beside the first.
+    """
+
+    return tuple(
+        (str(row[0]), str(row[1]))
+        for row in connection.execute(_SUPERSESSION_EDGES_SQL, (repository_id,))
+    )
 
 
 def declared_cycle(

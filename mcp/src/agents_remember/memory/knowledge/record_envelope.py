@@ -11,12 +11,12 @@ An unknown ``kind``, an unknown ``record_schema``, or a payload that does not va
 resolved model is refused with the shipped code ``invalid_payload``, with no row written and the
 before/after digest unchanged.
 
-**One internal conformance kind, and no product kinds.** The concrete knowledge categories
-(``EvidenceClaim``, ``DetectionSignal``, …) are later leaves. This leaf registers exactly one kind --
-:data:`INTERNAL_CONFORMANCE_KIND` -- with a minimal frozen shape, used only to exercise the seam, so
-the typed half of the envelope has a mechanism rather than a promise. It is marked internal, it is
-not a knowledge category, and the later leaves add the real kinds *beside* it rather than replacing
-it.
+**One internal conformance kind, plus the eight authored facet kinds.** The concrete knowledge
+categories that are *not* facets (``EvidenceClaim``, ``DetectionSignal``, …) are later leaves. This
+leaf registers the eight authored-judgment subtypes beside the internal conformance kind -- one
+registry entry per subtype, whose model is the frozen payload model the facet vocabulary declares --
+so the typed half of the envelope carries the real vocabulary rather than only a promise. The
+internal kind is marked internal and is not a knowledge category.
 
 The registry maps to **frozen** models: a validated payload is a value, and a caller cannot mutate
 what it validated into something the registry would not have accepted.
@@ -31,6 +31,11 @@ from pydantic import BaseModel, Field, ValidationError
 
 from agents_remember.memory.knowledge.refusals import RefusalFacts, refusal
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH, KnowledgeModel
+from agents_remember.models.knowledge.facet import (
+    FACET_KINDS,
+    FACET_RECORD_SCHEMAS,
+    facet_payload_models,
+)
 from agents_remember.models.knowledge.result import KnowledgeOperation, KnowledgeRefusal
 
 # The one kind this leaf registers. It is internal: it carries no knowledge-category meaning and
@@ -54,9 +59,24 @@ class ConformancePayload(KnowledgeModel):
 # ``(kind, record_schema)`` -> exactly one frozen model. The pair is the key rather than the schema
 # alone, because a kind constrains which shapes are admissible for it: a schema that is valid for
 # one kind is not automatically valid for another.
+#
+# The facet entries are generated from the facet vocabulary's own declarations rather than restated,
+# so a subtype cannot exist in the vocabulary without a registered shape here, and the two key sets
+# cannot drift. A ninth subtype has no entry and therefore no admissible payload.
+_FACET_PAYLOAD_MODELS: Mapping[tuple[str, str], type[BaseModel]] = {
+    (facet_kind, FACET_RECORD_SCHEMAS[facet_kind]): facet_payload_models()[facet_kind]
+    for facet_kind in FACET_KINDS
+}
+
 PAYLOAD_MODELS: Mapping[tuple[str, str], type[BaseModel]] = {
     (INTERNAL_CONFORMANCE_KIND, INTERNAL_CONFORMANCE_SCHEMA): ConformancePayload,
+    **_FACET_PAYLOAD_MODELS,
 }
+
+# The facet kinds this registry admits, for a caller that needs the closed vocabulary rather than a
+# lookup. It is derived from the registry, so it answers "which kinds have a shape" rather than
+# "which kinds does the vocabulary name", and the two are equal by construction.
+FACET_RECORD_KINDS: frozenset[str] = frozenset(kind for (kind, _schema) in _FACET_PAYLOAD_MODELS)
 
 # Which shapes each kind admits. Derived from the registry rather than restated, so a kind cannot
 # admit a shape the registry does not hold.
@@ -113,6 +133,36 @@ def validate_record_payload(
             observed=record_schema,
             expected=record_schema,
         )
+
+
+def validate_facet_payload(
+    facet_kind: str,
+    payload: Mapping[str, Any],
+    *,
+    operation: KnowledgeOperation = "add_facet",
+    record_id: str | None = None,
+) -> BaseModel | KnowledgeRefusal:
+    """Validate one authored facet payload against the frozen shape its subtype resolves to.
+
+    The subtype decides the ``record_schema``, so a caller names one value rather than two that
+    could disagree, and an unknown or ninth subtype is refused here -- as the shipped
+    ``invalid_payload``, listing the eight declared subtypes -- rather than stored as a generic
+    facet. Requirement 1.2's "reached through a discriminator" is this resolution: the subtype
+    selects exactly one frozen model, and only that model's fields are admissible.
+    """
+
+    record_schema = FACET_RECORD_SCHEMAS.get(facet_kind)
+    if record_schema is None:
+        return _invalid_payload_refusal(
+            operation,
+            f"the facet kind {facet_kind!r} is not one of the declared authored-judgment subtypes",
+            record_id=record_id,
+            observed=facet_kind,
+            expected=" | ".join(FACET_KINDS),
+        )
+    return validate_record_payload(
+        facet_kind, record_schema, payload, operation=operation, record_id=record_id
+    )
 
 
 def _render_validation_error(error: ValidationError) -> str:

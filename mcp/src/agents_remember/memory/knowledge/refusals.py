@@ -1037,3 +1037,160 @@ def publication_durability_unconfirmed_refusal(
             "new snapshot may already be in place; do not restore the previous file blindly."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Authored judgment facets. Three failures this record group can reach are not any earlier
+# failure's fact, and each reuses the code that already names it rather than coining a new one:
+# accepted origin data in a facet command is the same ``promotion_not_supported`` a proposed-only
+# candidate path refuses, a supersession graph that reaches itself is the same ``lineage_cycle``
+# the two predecessor graphs refuse, and a dataset that predates the tables an operation needs is
+# the same ``unsupported_schema`` the open path and the portable reader already refuse.
+
+
+def facet_promotion_not_supported_refusal(record_id: str) -> KnowledgeRefusal:
+    """Refuse a facet command that would store accepted origin data.
+
+    Requirement 3.2: this leaf authors proposed origin data only and exposes no promotion
+    operation. The code is the shipped ``promotion_not_supported``; the factory is separate
+    because the offending record is a facet envelope and the record group's own table is what a
+    caller has to look at, exactly as the invariant and family duplicates have separate factories
+    under one ``duplicate_identity`` code.
+    """
+
+    return refusal(
+        "promotion_not_supported",
+        "change_candidate",
+        "the batch carries a facet authored as accepted origin data, which this candidate-only "
+        "operation never stores",
+        facts=RefusalFacts(table="knowledge_record", record_id=record_id),
+        next_action=(
+            "Author the facet as proposed. Acceptance is decided by the owner of that process, not "
+            "by a candidate change batch, and no facet command promotes a proposal."
+        ),
+    )
+
+
+def facet_supersession_cycle_refusal(
+    revision_id: str, cycle_members: tuple[str, ...]
+) -> KnowledgeRefusal:
+    """Refuse a batch that leaves the decision supersession graph cyclic after it was applied.
+
+    Requirement 5.2: the edge graph is checked by the same shared lineage rule the invariant and
+    family graphs are, and a cycle refuses the whole batch with the involved decisions named. The
+    code is the shipped ``lineage_cycle``; the table it names is this record kind's own edge table,
+    so a caller knows which graph came out cyclic.
+    """
+
+    return refusal(
+        "lineage_cycle",
+        "change_candidate",
+        "the completed batch leaves the decision supersession graph cyclic at revision "
+        f"{revision_id}",
+        facts=RefusalFacts(
+            table="facet_decision_supersession",
+            record_id=revision_id,
+            observed=", ".join(cycle_members),
+        ),
+        next_action=(
+            "Author a supersession chain that terminates: a decision supersedes an earlier decision, "
+            "so a circular one describes no order at all. The transaction left no row behind, and "
+            "the superseded decisions are unchanged."
+        ),
+    )
+
+
+def batch_supersession_cycle_refusal(
+    revision_id: str, cycle_members: tuple[str, ...]
+) -> KnowledgeRefusal:
+    """Refuse a batch whose own declarations leave the supersession graph cyclic.
+
+    The batch-scoped twin of :func:`facet_supersession_cycle_refusal`: same code, same facts, and
+    the position-naming detail a batch refusal carries, because what a caller has to look at is the
+    declaration it wrote rather than a stored row that already existed.
+    """
+
+    return refusal(
+        "lineage_cycle",
+        "change_candidate",
+        "the completed batch leaves the decision supersession graph cyclic at revision "
+        f"{revision_id}",
+        facts=RefusalFacts(
+            table="facet_decision_supersession",
+            record_id=revision_id,
+            observed=", ".join(cycle_members),
+        ),
+        next_action=(
+            "Author a supersession chain that terminates: a decision supersedes an earlier "
+            "decision, so a circular one describes no order at all. The transaction left no row "
+            "behind, and the superseded decisions are unchanged."
+        ),
+    )
+
+
+def generation_mismatch_refusal(
+    operation: KnowledgeOperation,
+    detail: str,
+    *,
+    required: int,
+    observed: int,
+) -> KnowledgeRefusal:
+    """Refuse an operation that would require a generation the dataset does not declare.
+
+    Requirement 8.4, and the disposition ``KS-R10@v1`` §5 fixes for the same case: a dataset whose
+    recorded generation predates the tables an operation needs is **not** migrated, widened or
+    written through. The observed and required generation travel as the refusal's facts, and
+    nothing was written.
+
+    The code is the shipped ``unsupported_schema``. The factory is separate from the portable
+    reader's because the remedy differs: an artifact is re-imported by a build that implements its
+    generation, while an open dataset is served by the build that declares *its* generation --
+    which this build does, for every generation it registers. What is refused is the write that
+    would need the later one.
+    """
+
+    return refusal(
+        "unsupported_schema",
+        operation,
+        f"the dataset declares a schema generation that does not carry the tables this operation "
+        f"writes: {detail}",
+        facts=RefusalFacts(expected=str(required), observed=str(observed)),
+        next_action=(
+            "Write through a dataset that declares the required generation. This operation performs "
+            "no migration, no implicit upgrade and no partial table set; the dataset is unchanged."
+        ),
+    )
+
+
+def explanation_revision_refusal(
+    operation: KnowledgeOperation,
+    detail: str,
+    *,
+    explanation_id: str,
+    revision_id: str,
+    expected: str,
+) -> KnowledgeRefusal:
+    """Refuse a revision an explanation's own identity does not carry.
+
+    A designation names one exact revision of one exact explanation. A revision of another
+    explanation -- or one that is not stored at all -- is a different fact from a stale digest: the
+    remedy is to author or cite the revision rather than to reread the row, which is why it is
+    ``invalid_reference`` and not ``stale_precondition``.
+    """
+
+    return refusal(
+        "invalid_reference",
+        operation,
+        detail,
+        facts=RefusalFacts(
+            table="explanation_revision",
+            record_id=revision_id,
+            expected=expected,
+            observed=f"{explanation_id}/{revision_id}",
+        ),
+        next_action=(
+            "Author the revision for this explanation, or name a revision this explanation "
+            "carries. An explanation's revisions are append-only, so a successor names its exact "
+            "predecessor and nothing is rewritten in place."
+        ),
+    )

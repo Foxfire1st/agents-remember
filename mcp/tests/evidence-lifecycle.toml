@@ -1171,10 +1171,10 @@ owner = "knowledge-generation-cases"
 category = "unit-regression"
 fidelity = "in-process"
 cadence = "affected"
-source_version_or_generator = "one version-1 knowledge database created through generation 1's own recorded DDL and recorded PRAGMA user_version, then opened through the production open path"
+source_version_or_generator = "one knowledge database per observed generation, created through that generation's own recorded DDL and recorded PRAGMA user_version and then opened through the production open path, plus the ordinary creation path named for the generation it creates"
 introduced_by = "260915-KS-L10"
 lifetime = "permanent"
-permanence_rationale = "Generation 2 makes the created store generation 2, so a case that must observe a generation-1 fact cannot use the ordinary creation path and every such case needs the same thing -- a genuine version-1 dataset rather than a downgraded generation-2 file -- and a per-module copy would let the eight modules disagree about what a version-1 dataset is while all of them assert that generation 1 keeps its own identity."
+permanence_rationale = "Each registered generation makes the created store that newest generation, so a case that must observe an earlier generation's fact cannot use the ordinary creation path and every such case needs the same thing -- a genuine dataset of that generation rather than a downgraded newer file -- and a per-module copy would let the modules disagree about what a version-1 or version-2 dataset is while all of them assert that the earlier generation keeps its own identity."
 replacement_contract = "contract:knowledge-generation-cases"
 consumer_scope = "exact"
 consumers = [
@@ -1186,6 +1186,29 @@ consumers = [
   "mcp/tests/test_knowledge_read_paths.py",
   "mcp/tests/test_knowledge_schema_generations.py",
   "mcp/tests/test_knowledge_store.py",
+]
+
+[[contract]]
+id = "knowledge-facet-cases"
+owner = "mcp/tests/facet_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_facets.py::test_the_seam_registry_is_exactly_the_eight_declared_subtypes"
+
+[[artifact]]
+path = "mcp/tests/facet_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "knowledge-facet-cases"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "one admitted candidate namespace built through the production application seam, plus one recorded generation-2 dataset built through generation 2's own recorded DDL with fixed identities and a fixed authorship instant, so the serialized page it produces is a function of the substrate rather than of a UUID draw"
+introduced_by = "260915-KS-L11"
+lifetime = "permanent"
+permanence_rationale = "The facet cases need two things no single case can own: an admitted candidate whose provenance comes from the admission, and a byte-reproducible dataset whose shipped-seed page can be compared against a digest measured before this leaf existed. A per-module copy would let the copies disagree about what the recorded fixture is, which is exactly what the byte-identity evidence rests on."
+replacement_contract = "contract:knowledge-facet-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_facets.py",
 ]
 
 [[artifact]]
