@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, get_args
@@ -351,6 +352,39 @@ def test_an_unreadable_source_returns_a_refusal_rather_than_raising(
     assert outcome.manifest.task_reference == "agents-remember/tasks/demo/task.json"
     assert outcome.manifest.sources == ()
     assert "source-missing" in outcome.render_explanation()
+
+    # The same "a refusal, not a raise" boundary for an EMPTIED source (defect D25). It needs the
+    # SHIPPED corpus rather than the tiny fixture above, because emptiness is discovered while the
+    # blocks are composed — after admission succeeded and after a real manifest parsed — so the
+    # seed is written into a disposable copy of the shipped tree and the real application boundary
+    # is driven over it. Before the repair this call raised an uncaught ``ValueError`` out of
+    # ``CapsuleSource.text`` instead of returning anything, which is what makes the seed failable.
+    emptied_root = corpus_tree.parent / "shipped-copy" / "l-01-agent-lifecycles"
+    shutil.copytree(LIFECYCLE_ROOT, emptied_root)
+    emptied_path = _shipped_parsed().core["acceptance"].source
+    target = emptied_root / emptied_path
+    assert target.read_text(encoding="utf-8").strip(), (
+        "the seed must empty a source that really carried content"
+    )
+    target.write_text("", encoding="utf-8")
+    shipped = _shipped_request("worker", "implementation")
+    emptied = compile_admitted_capsule(
+        _shipped_binding("worker", "implementation"),
+        CapsuleAdmissionRequest(
+            root=emptied_root,
+            manifest=MANIFEST_RELATIVE,
+            core=shipped.core,
+            role=shipped.role,
+            operation=shipped.operation,
+            skill=shipped.skill,
+        ),
+    )
+
+    assert not emptied.ok, "an emptied required instruction block must not compile"
+    assert emptied.error is not None, "the refusal is a value, not an escaping exception"
+    assert emptied.error.status == "source-empty"
+    assert emptied_path in emptied.error.detail
+    assert "source-empty" in emptied.render_explanation()
 
 
 # --------------------------------------------------------------------------------------

@@ -61,6 +61,57 @@ class RunnerConfig:
     """
 
 
+MAX_ARGV_TOKEN_BYTES = 131072
+"""Linux ``MAX_ARG_STRLEN``: the kernel's limit on ONE ``execve`` argument, in bytes.
+
+The whole launch configuration travels as a single base64 token (``argv[3]`` here), so this --
+not ``ARG_MAX``, which bounds the whole argv and environment together -- is the limit that binds
+this mechanism. Past it ``execve`` fails with ``E2BIG`` **at spawn**, before this process can
+report anything, which is why the bound is checked here where the encoded bytes first exist.
+"""
+
+ARGV_TOKEN_SAFETY_MARGIN_BYTES = 2048
+"""The declared margin held under the kernel limit.
+
+Small on purpose. The check measures the same byte string the kernel counts, so the margin does
+not have to absorb an approximation; it exists so a token at the boundary is refused by name here
+rather than by the kernel at spawn. A larger margin would refuse capsules the kernel accepts --
+the largest shipped capsule is inside this bound -- which would trade a visible refusal for a
+lost capability.
+"""
+
+ARGV_TOKEN_BOUND_BYTES = MAX_ARGV_TOKEN_BYTES - ARGV_TOKEN_SAFETY_MARGIN_BYTES
+"""The enforced bound: the longest encoded launch token this boundary will hand to a spawn."""
+
+
+def _refuse_over_bound_token(encoded: str, config: RunnerConfig) -> None:
+    """Refuse an over-bound launch token by name, before it can reach ``execve``.
+
+    The refusal names the measured size, the bound, the kernel limit it is derived from, and the
+    seat the capsule was compiled for, because "the session did not start" is not an operator
+    message: ``E2BIG`` at spawn is otherwise AR-invisible and indistinguishable from a runtime
+    that crashed on start.
+    """
+
+    measured = len(encoded.encode("utf-8"))
+    if measured <= ARGV_TOKEN_BOUND_BYTES:
+        return
+    delivery = config.capsule_delivery
+    seat = (
+        "no capsule (legacy launch)"
+        if delivery is None
+        else f"role {delivery.binding.role!r} operation {delivery.binding.operation!r}"
+    )
+    raise HarnessControlError(
+        f"the encoded launch configuration is {measured} bytes, over the {ARGV_TOKEN_BOUND_BYTES}-byte "
+        f"bound ({MAX_ARGV_TOKEN_BYTES}-byte MAX_ARG_STRLEN less a "
+        f"{ARGV_TOKEN_SAFETY_MARGIN_BYTES}-byte margin); the launch for {seat} was not spawned, "
+        "because past MAX_ARG_STRLEN execve fails with E2BIG before any AR surface can report it. "
+        "Reduce the compiled capsule's instruction corpus for this seat, or split the delivery "
+        "off argv."
+    )
+
+
 def control_runner_command(config: RunnerConfig) -> tuple[str, ...]:
     payload = {
         "identity": config.identity.to_json(),
@@ -84,6 +135,9 @@ def control_runner_command(config: RunnerConfig) -> tuple[str, ...]:
     encoded = base64.urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":")).encode("utf-8")
     ).decode("ascii")
+    # Checked here, where the encoded token first exists and before any caller can spawn it: an
+    # over-bound token is refused by name rather than handed to an ``execve`` that answers E2BIG.
+    _refuse_over_bound_token(encoded, config)
     return (sys.executable, "-m", "agents_remember.serving.harness_control_runner", encoded)
 
 

@@ -89,6 +89,8 @@ from agents_remember.serving.eve_runtime_launch import (
 )
 from agents_remember.serving.harness_control_models import ShutdownMode
 from agents_remember.serving.harness_control_runner import (
+    ARGV_TOKEN_BOUND_BYTES,
+    MAX_ARGV_TOKEN_BYTES,
     RunnerConfig,
     _prepare_controlled_launch,
     control_runner_command,
@@ -756,6 +758,48 @@ def test_the_delivered_payload_carries_the_capsule_once_and_no_task_context(
     # Measured, not asserted: the capsule's own bytes, base64-expanded once, and no more.
     assert added < len(instructions.encode()) * 2, added
     assert cast(int, launched.report["instructionBytes"]) == len(instructions.encode())
+
+    # D12's bound, on the artifact the spawn actually receives. The token is what ``execve``
+    # measures against MAX_ARG_STRLEN, so the bound is checked on the token rather than on the
+    # instruction text: a delivered capsule that is refused here is refused BEFORE anything is
+    # spawned, instead of surfacing as an unexplained E2BIG at spawn.
+    delivered = len(with_capsule[3].encode("utf-8"))
+    assert delivered <= ARGV_TOKEN_BOUND_BYTES < MAX_ARGV_TOKEN_BYTES, (
+        f"a shipped capsule is at {delivered} bytes, over the {ARGV_TOKEN_BOUND_BYTES}-byte bound"
+    )
+    # The seed: the same carrier, padded past the kernel limit. The refusal must name the measured
+    # size, the bound and the seat — and it must return no argv at all, so no caller can spawn it.
+    oversized = replace(
+        launched.codex_delivery,
+        trusted_instructions=instructions + ("x" * MAX_ARGV_TOKEN_BYTES),
+    )
+    with pytest.raises(HarnessControlError) as refusal:
+        control_runner_command(
+            RunnerConfig(capsule_delivery=oversized, **kwargs)  # type: ignore[arg-type]
+        )
+    named = str(refusal.value)
+    assert str(len(oversized.trusted_instructions)) not in named  # the TOKEN size, not the text
+    assert str(ARGV_TOKEN_BOUND_BYTES) in named, named
+    assert str(MAX_ARGV_TOKEN_BYTES) in named, named
+    assert oversized.binding.role in named, named
+    assert oversized.binding.operation in named, named
+    # The kernel limit is a real one: the padded token really is over MAX_ARG_STRLEN, which is why
+    # the seed is the failure the bound exists to catch rather than a value chosen to trip it.
+    padded_payload = json.dumps(
+        {
+            "identity": kwargs["identity"].to_json(),  # type: ignore[union-attr]
+            "harnessId": "codex",
+            "cwd": str(tmp_path),
+            "argv": ["codex", "app-server"],
+            "endpointRoot": str(tmp_path / "endpoint"),
+            "sessionCommands": [],
+            "resolvedLaunch": None,
+            "resumeThreadId": None,
+            "capsuleDelivery": oversized.to_json(),
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert len(base64.urlsafe_b64encode(padded_payload)) > MAX_ARGV_TOKEN_BYTES
 
 
 def test_every_production_launch_request_site_is_wired_or_declares_its_legacy_chain() -> None:

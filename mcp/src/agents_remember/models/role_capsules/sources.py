@@ -75,7 +75,11 @@ class CapsuleSource:
         """The decoded instruction content, refusing content that decodes to nothing.
 
         Non-UTF-8 bytes are an I/O-boundary defect rather than a selection one, so the
-        refusal is the typed source error the admission boundary already uses.
+        refusal is the typed source error the admission boundary already uses. Empty
+        content is the same class of defect and takes the same shape: an admitted
+        source every compilation of this seat reads was emptied, which is a source
+        defect the operator must see named, not a ``ValueError`` escaping the
+        compiler's own refusal boundary (defect D25).
         """
 
         try:
@@ -87,8 +91,13 @@ class CapsuleSource:
                 next_action="re-author the source as UTF-8 text, or remove it from the admission",
             ) from error
         if not decoded.strip():
-            raise ValueError(
-                f"source {self.path!r} is empty; a required instruction block must carry content"
+            raise CapsuleSourceError(
+                status="source-empty",
+                detail=f"source {self.path!r} is empty; a required instruction block must carry content",
+                next_action=(
+                    f"restore the instruction text in {self.path!r}, or remove it from the "
+                    "composition manifest's declared sources for this seat"
+                ),
             )
         return decoded
 
