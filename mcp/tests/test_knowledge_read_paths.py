@@ -642,3 +642,107 @@ def test_a_git_that_cannot_run_is_unavailable_rather_than_an_absent_path(
     assert recorded not in fixture.git_blobs, (
         "the recorded path is not in the fixture tree, so a served absence would prove nothing"
     )
+
+
+def test_a_lookup_that_answered_non_zero_is_unavailable_rather_than_an_absent_path(
+    fixture: ReadScopeFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The non-zero-exit producer, which no path argument reaches on this host.
+
+    ``_tree_entry`` reports "not an entry" three ways: Git looked and found nothing
+    (``path_absent``), the spelling cannot be addressed (``unsupported_locator``), and the lookup
+    did not answer (``recorded_object_unavailable``) -- and the third has two producers, the
+    ``OSError`` a Git binary this process cannot run raises, and an ``ls-tree`` that **ran and
+    exited non-zero**. The sibling cases pin the unavailable *tree* and the ``OSError``; this one
+    pins the exit status, which no path argument produces here because ``ls-tree`` answers every
+    well-formed confined spelling literally with exit 0 (measured, including spellings that look
+    like patterns).
+
+    The ledger records why this needed a case rather than a mutation row: the published
+    ``L7R2-10`` row attributed a kill to a production-line edit, and a control with the production
+    line **untouched** killed at the same assertion, so the row was a property of the test input
+    and the non-zero-exit branch stayed unasserted (ledger A6, ``L7-X1``). The availability probe
+    is delegated to the real runner and still answers *available*, so the observation can only come
+    from the failing lookup, and the exit status and its number appear in the published ``detail``
+    -- which is what distinguishes this producer from its sibling.
+    """
+
+    recorded = "src/a_lookup_that_exited_badly.py"
+    draft = _admitted(
+        "an ordinary repository-relative path is admitted by the write boundary",
+        SourceAnchorDraft,
+        anchor_id=uuid4(),
+        path=recorded,
+        source_identity=GitBlobIdentity(object_id="0" * 40),
+        locator=FileLocator(),
+    )
+    claim_id = str(uuid4())
+    store = open_knowledge_store(fixture.database_path, fixture.repository_id)
+    try:
+        created = realizations.create_realization_claim(
+            store,
+            RealizationClaimRequest(
+                repository_id=fixture.repository_id,
+                claim=RealizationClaimDraft(
+                    claim_id=claim_id,
+                    invariant_revision_id=fixture.subject_revision_id,
+                    role="support",
+                    rationale="A recorded location whose lookup answered with an error status.",
+                ),
+                anchor=NewAnchor(anchor=draft),
+                provenance=fixture.authorship,
+            ),
+        )
+    finally:
+        store.close()
+    assert created.state == "created", created.refusal
+
+    recorded_commands: list[list[str]] = []
+    real_run_git = read_anchors.run_git
+    exit_status = 128
+
+    def ls_tree_failed(repository_root: Path, args: list[str], **options: object) -> object:
+        """Answer every command but the lookup, which fails the way a Git error status does."""
+
+        recorded_commands.append(list(args))
+        if args[:1] == ["ls-tree"]:
+            return subprocess.CompletedProcess(
+                args=list(args), returncode=exit_status, stdout="", stderr="fatal: bad lookup"
+            )
+        return real_run_git(repository_root, args, **options)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(read_anchors, "run_git", ls_tree_failed)
+    unavailable = read_knowledge_scope(
+        fixture.database_path,
+        KnowledgeReadContext(
+            repository_id=fixture.repository_id,
+            knowledge=SnapshotIdentity(
+                repository_id=fixture.repository_id,
+                logical_digest=fixture.knowledge_digest,
+                schema_version=SCHEMA_NAME,
+            ),
+            repository_root=str(fixture.git_root),
+            code_tree_id=fixture.git_tree_id,
+        ),
+        KnowledgeReadRequest(seed=PathSeed(path=recorded)),
+    )
+    assert unavailable.state == "page", unavailable.refusal
+    assert recorded_commands[0] == ["cat-file", "-e", f"{fixture.git_tree_id}^{{tree}}"], (
+        "the availability probe is delegated and the tree below really is available, so the tree "
+        f"cannot be the producer of this answer: {recorded_commands}"
+    )
+    assert ["ls-tree", "-z", fixture.git_tree_id, "--", recorded] in recorded_commands, (
+        f"the recorded path really is the one that was asked for: {recorded_commands}"
+    )
+    observed = anchors_by_path(unavailable)
+    assert observed[recorded].resolution == "recorded_object_unavailable", (
+        "a lookup that exited non-zero is unknown, not absent"
+    )
+    assert observed[recorded].detail.endswith(
+        f"did not answer (git ls-tree {fixture.git_tree_id} exited {exit_status}), so the entry is "
+        "unknown rather than absent and no working tree or HEAD is substituted for it"
+    ), "the non-zero exit status is the producer that answers here, and its detail names the number"
+    assert recorded not in fixture.git_blobs, (
+        "the recorded path is not in the fixture tree, so a served absence would prove nothing"
+    )

@@ -27,6 +27,7 @@ from agents_remember.application.knowledge_read import (
 from agents_remember.memory.knowledge import realizations
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import logical_digest
+from agents_remember.memory.knowledge.read import _manifest_digest
 from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.graph import RealizationClaimDraft
 from agents_remember.models.knowledge.read import (
@@ -39,6 +40,8 @@ from agents_remember.models.knowledge.read import (
     KnowledgeReadRequest,
     KnowledgeReadResult,
     KnowledgeReadSeed,
+    ReadItem,
+    SelectionReason,
     continue_from_cursor,
 )
 from agents_remember.models.knowledge.result import NewAnchor, RealizationClaimRequest
@@ -925,6 +928,96 @@ def test_a_refused_read_of_a_real_database_leaves_the_file_byte_identical(
 
     assert read_row_counts(fixture.database_path) == before_counts
     assert _digest(fixture) == before_digest
+
+
+def test_the_selection_reasons_are_part_of_the_selected_sets_own_identity(
+    fixture: ReadScopeFixture,
+) -> None:
+    """The manifest digest covers the reasons, so two selections reached differently differ.
+
+    ``_manifest_digest`` covers each primary item's kind, identity **and selection reasons**, and
+    the ledger records why that needed a case: a reviewer measured 42 passing cases with the
+    reasons removed from the digest, so the reasons' contribution to the identity was a reachable
+    line no case asserted (ledger A4, ``L7-V7``). The reason is load-bearing rather than
+    decorative -- it is how a caller tells "this record was the seed" from "this record was
+    reached because it is a member of a selected family" -- so removing it would silently collapse
+    two different walks into one identity.
+
+    The control is the other direction, and it is what keeps the assertion non-vacuous: two items
+    whose reasons are *equal* must digest equally, and an item with no reasons must digest a third
+    way. The real read then supplies the same property through the public boundary, and the
+    assertion there is chosen so it *can* fail: it compares a real page's published
+    ``manifest_digest`` against the digest of the same items **with their reasons stripped**, so a
+    digest that did not cover the reasons would make the two equal and fail the case. Re-deriving
+    the digest with the production helper would reproduce it by construction and prove nothing.
+    """
+
+    identity = "11111111-1111-4111-8111-111111111111"
+    as_seed = _manifest_digest(
+        [
+            ReadItem(
+                kind="invariant_revision",
+                item_id=identity,
+                selection_reasons=(SelectionReason(stage="seed_selected"),),
+            )
+        ]
+    )
+    as_member = _manifest_digest(
+        [
+            ReadItem(
+                kind="invariant_revision",
+                item_id=identity,
+                selection_reasons=(SelectionReason(stage="member_of_selected_family"),),
+            )
+        ]
+    )
+
+    assert as_seed != as_member, (
+        "two items with the same kind and identity but different selection reasons are two "
+        "different facts about the walk, and the manifest digest is where that is recorded"
+    )
+    # The control: equal reasons digest equally, so the inequality above is about the reasons and
+    # not about the digest being arbitrary.
+    assert as_seed == _manifest_digest(
+        [
+            ReadItem(
+                kind="invariant_revision",
+                item_id=identity,
+                selection_reasons=(SelectionReason(stage="seed_selected"),),
+            )
+        ]
+    )
+    # And reasons being *absent* is a third identity, not a failure and not silently the first.
+    assert _manifest_digest([ReadItem(kind="invariant_revision", item_id=identity)]) not in {
+        as_seed,
+        as_member,
+    }
+
+    # The same property through the real boundary: re-deriving the digest from the reasons the
+    # page itself reports reproduces the published digest exactly.
+    result = read(
+        fixture,
+        InvariantRevisionSeed(
+            invariant_id=fixture.retry_invariant_id, revision_id=fixture.base_revision_id
+        ),
+    )
+    assert result.state == "page", result.refusal
+    assert result.manifest_digest is not None
+    assert result.page is not None
+    assert not any(item.selection_reasons == () for item in result.page.items), (
+        "the property is only measured if the real selection actually carries reasons"
+    )
+    # The discriminating public-boundary assertion. Re-deriving the digest with the production
+    # helper would reproduce it by construction and could not fail, so this instead measures the
+    # published digest against the digest of the **same items with their reasons stripped**: if the
+    # reasons were not covered, the two would be equal, and this asserts they are not.
+    reasons_stripped = _manifest_digest(
+        [ReadItem(kind=item.kind, item_id=item.item_id) for item in result.page.items]
+    )
+    assert result.manifest_digest != reasons_stripped, (
+        "the published manifest digest must differ from the digest of the same page items with "
+        "their selection reasons stripped, or the reasons are not part of the identity"
+    )
 
 
 def _encode_cursor(cursor: KnowledgeReadCursor) -> str:

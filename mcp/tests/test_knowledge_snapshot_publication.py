@@ -81,6 +81,19 @@ def test_a_published_snapshot_reopens_to_the_candidate_records_and_is_closed(
 def test_a_wal_resident_batch_is_published_whole_while_a_main_file_copy_is_not(
     candidate: SnapshotCase,
 ) -> None:
+    """The published snapshot holds the *whole* dataset; a main-file copy of it does not.
+
+    The name is the claim: a batch committed into the write-ahead log is part of the candidate's
+    logical dataset, and a copy that takes only the main database file loses it. The case measures
+    that difference on the published destination -- the batch's own statement is present, the
+    destination's logical identity is the candidate's identity, and its per-table rows are the
+    candidate's -- against the same byte copy taken before publication, which is missing the batch
+    and therefore has a different logical identity. Closure of the published file is a **separate**
+    property with its own case below
+    (:func:`test_a_published_snapshot_is_a_closed_database_with_no_peer`); this case asserts only
+    what its name states, so a regression in either property fails the case that names it.
+    """
+
     create(candidate)
     marker = "A committed batch that is still only in the write-ahead log."
     store = live_store(candidate)
@@ -99,14 +112,62 @@ def test_a_wal_resident_batch_is_published_whole_while_a_main_file_copy_is_not(
 
         assert published.state == "published"
         assert published.identity == identity
+        # Wholeness, measured three ways on the destination itself.
         assert statement_present(candidate.destination_path(), marker) is True
-        assert row_counts(candidate.destination_path())["invariant"] == 1
-        assert read_identity(candidate.destination_path()) == identity
-        assert read_journal_mode(candidate.destination_path()) == "delete"
-        assert journal_peer_names(candidate.destination_path()) == []
+        assert logical_identity_of(candidate.destination_path()) == identity.logical_digest, (
+            "the published destination must be the candidate's dataset, batch included"
+        )
+        assert row_counts(candidate.destination_path()) == row_counts(candidate.database_path), (
+            "every table of the published destination must match the candidate it was frozen from"
+        )
+        # And the copy that omits the batch is distinguishable, rather than both looking whole.
+        assert logical_identity_of(main_only) != identity.logical_digest, (
+            "the main-file copy must be observably different, or the assertion above proves nothing"
+        )
         assert live_identity(candidate) == identity
     finally:
         store.connection.close()
+
+
+def test_a_published_snapshot_is_a_closed_database_with_no_peer(
+    candidate: SnapshotCase,
+) -> None:
+    """A published snapshot depends on nothing beside it: delete mode and no journal peer.
+
+    This is the property whose assertion used to sit inside the WAL case above, under a name that
+    claimed content-wholeness. It is measured here on a published destination that carries a
+    WAL-resident batch, because a file published while still in WAL mode is exactly the shape whose
+    completeness would depend on a peer that a copy does not carry -- the L4/D-5 class -- and it is
+    read back through a byte copy so the claim is about the published file and not the process that
+    wrote it.
+    """
+
+    create(candidate)
+    marker = "A committed batch a published snapshot must not depend on a peer to hold."
+    store = live_store(candidate)
+    try:
+        store.connection.execute("PRAGMA journal_mode=WAL")
+        write_label_on_live_store(store, candidate, marker)
+        identity = store.snapshot_identity()
+
+        published = publish(candidate, expected_candidate=identity)
+
+        assert published.state == "published"
+        assert read_journal_mode(candidate.destination_path()) == "delete", (
+            "a published snapshot is a self-contained database, not one that still needs a journal"
+        )
+        assert journal_peer_names(candidate.destination_path()) == []
+    finally:
+        store.connection.close()
+
+    copied = byte_copy(candidate.destination_path(), candidate.root / "closed-copy.sqlite")
+
+    assert read_journal_mode(copied) == "delete"
+    assert journal_peer_names(copied) == []
+    assert logical_identity_of(copied) == identity.logical_digest, (
+        "the closed file alone reproduces the dataset, with no peer carried beside it"
+    )
+    assert statement_present(copied, marker) is True
 
 
 def test_a_failed_replacement_leaves_the_prior_destination_byte_identical(

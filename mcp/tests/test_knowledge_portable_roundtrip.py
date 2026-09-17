@@ -875,6 +875,50 @@ def test_an_artifact_this_build_or_this_namespace_cannot_accept_is_refused(
     assert sqlite_entries(tmp_path) == []
 
 
+def test_an_artifact_declaring_another_namespace_than_its_own_rows_is_refused(
+    fixture: BranchingKnowledgeFixture, tmp_path: Path
+) -> None:
+    """The declared namespace must be the one the artifact's own repository row holds.
+
+    Every other namespace admission compares the artifact against the *destination*; this one
+    compares the artifact against **itself**, and it is the only check that can see the defect:
+    the artifact's rows are a dataset of one namespace, its header declares another, and there is
+    no destination namespace to disagree with. Ablating it therefore does not change a refusal
+    identity -- it lets a foreign artifact **validate and install**, which is cross-namespace
+    contamination through the one path whose whole purpose is safe installation.
+
+    **``repositoryId`` is a header field, and the declared digest covers ``tables`` only**, so
+    changing the namespace leaves the seal valid: a resealed spelling would be byte-identical to
+    the plain one and would measure the same artifact twice. One artifact is therefore measured
+    once, and the assertion below states which check refuses it rather than implying a second one
+    that cannot exist. The ablation is the control: with this guard removed the artifact validates
+    and installs, so no earlier check was standing in its way.
+    """
+
+    other = "22222222-2222-4222-8222-222222222222"
+    envelope = envelope_of(artifact_of(fixture))
+    envelope["repositoryId"] = other
+    text = reseal(envelope)
+
+    assert text == reencode(envelope), (
+        "the namespace sits outside the seal, so resealing must not move a byte: this keeps the "
+        "node honest about measuring one artifact rather than two"
+    )
+    directory = tmp_path / "declared_other"
+    directory.mkdir()
+    outcome = import_into(text, directory / "destination.sqlite")
+    assert outcome.state == "refused", (
+        "the declared digest seals exactly the records the artifact carries, so the namespace "
+        "disagreeing with its own repository row is the only check left to refuse it"
+    )
+    assert _refusal(outcome).code == "invalid_export"
+    assert _refusal(outcome).table == "repository"
+    assert _refusal(outcome).expected == other
+    assert _refusal(outcome).observed == fixture.repository_id
+    assert "namespace" in _refusal(outcome).detail
+    assert sqlite_entries(directory) == []
+
+
 def test_a_dangling_reference_is_refused_at_commit(
     fixture: BranchingKnowledgeFixture, tmp_path: Path
 ) -> None:
