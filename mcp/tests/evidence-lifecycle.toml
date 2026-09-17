@@ -348,6 +348,7 @@ consumers = [
   "mcp/tests/test_atomic_series_landing_l3.py",
   "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_capsule_launch_wiring.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_kept_rules_pins.py",
@@ -620,6 +621,7 @@ consumers = [
   "mcp/tests/test_agents_remember_quality.py",
   "mcp/tests/test_author_execution_graph.py",
   "mcp/tests/test_automatic_post_integration_cleanup.py",
+  "mcp/tests/test_capsule_launch_wiring.py",
   "mcp/tests/test_capsule_serving.py",
   "mcp/tests/test_checkpoint_landing_end_to_end.py",
   "mcp/tests/test_clean_quality_executor.py",
@@ -1252,5 +1254,6 @@ permanence_rationale = "Retained while the pinned 0.151.0 model/list page shape 
 replacement_contract = "node:mcp/tests/test_codex_capsule_delivery.py::test_a_launch_boundary_capsule_reaches_the_adapter_settings"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_capsule_launch_wiring.py",
   "mcp/tests/test_codex_capsule_delivery.py",
 ]

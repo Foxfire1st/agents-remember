@@ -233,12 +233,23 @@ def stage_runtime_root(source: Path, destination: Path) -> Path:
     each owns a directory. The authored surface is copied and the installed dependencies are
     symlinked, so only eve's own generated state is per-epoch.
 
-    Staging the same destination twice is idempotent, which is what lets an epoch restart without
-    rebuilding its tree.
+    Staging the same **complete** destination twice is idempotent, which is what lets an epoch
+    restart without rebuilding its tree. The dependency install is checked **before** anything is
+    copied (defect D20): staging used to copy the application surface first and only then discover
+    that the runtime's dependencies were missing, so a refused launch left a half-staged directory
+    behind and the next staging call in the same process found it populated and passed without the
+    install. A refusal a retry can turn into a pass is not a refusal, so the refusal now happens
+    before the destination is touched and a second call refuses identically and by name.
     """
 
-    if (destination / "agent" / "agent.ts").is_file():
+    if _staged_application(destination):
         return destination
+    installed = source / "node_modules"
+    if not installed.is_dir():
+        raise HarnessControlError(
+            f"the eve application at {source} has no installed dependencies; run its "
+            "documented install before staging a runtime"
+        )
     destination.mkdir(parents=True, exist_ok=True)
     for name in ("package.json", "package-lock.json", "agent", "tsconfig.json"):
         origin = source / name
@@ -253,17 +264,25 @@ def stage_runtime_root(source: Path, destination: Path) -> Path:
             shutil.copy2(origin, target)
     modules = destination / "node_modules"
     if not modules.exists() and not modules.is_symlink():
-        installed = source / "node_modules"
-        if not installed.is_dir():
-            raise HarnessControlError(
-                f"the eve application at {source} has no installed dependencies; run its "
-                "documented install before staging a runtime"
-            )
         with contextlib.suppress(FileExistsError):
             # Another epoch staged the same destination concurrently; the link it created is the
             # one this caller wanted, so the stage is complete rather than failed.
             modules.symlink_to(installed)
     return destination
+
+
+def _staged_application(destination: Path) -> bool:
+    """Whether a destination already carries a **complete** staged application.
+
+    Both halves are required: the authored surface *and* the dependency link. The surface alone is
+    exactly what a refused stage leaves behind, so treating it as "already staged" is the fail-open
+    D20 records.
+    """
+
+    modules = destination / "node_modules"
+    return (destination / "agent" / "agent.ts").is_file() and (
+        modules.exists() or modules.is_symlink()
+    )
 
 
 def runtime_default_model(env: Mapping[str, str] | None = None) -> str:

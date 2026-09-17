@@ -21,10 +21,12 @@ from .capsule import (
     COMPOSITION_MANIFEST,
     CapsuleCompileOutcome,
     CapsuleCompileRequest,
+    CapsuleSeatAddress,
     CapsuleSourceSelectionRequest,
     admitted_tool_policy,
     capsule_payload,
     compile_task_capsule,
+    routed_admission_for,
     routed_admission_request,
 )
 from .catalog import (
@@ -67,6 +69,7 @@ __all__ = [
     "CapsuleCompileOutcome",
     "CapsuleCompileRequest",
     "CapsuleOperationRequest",
+    "CapsuleSeatAddress",
     "CapsuleSourceSelectionRequest",
     "ServedSkillFile",
     "SkillCatalogError",
@@ -84,6 +87,7 @@ __all__ = [
     "require_servable",
     "role_capsule_compile_tool",
     "role_capsule_response",
+    "routed_admission_for",
     "routed_admission_request",
     "shipped_composition_corpus",
     "shipped_skill_tree",

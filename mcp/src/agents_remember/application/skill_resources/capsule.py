@@ -171,11 +171,31 @@ class CapsuleSourceSelectionRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class CapsuleSeatAddress:
+    """One seat, addressed by the two values that decide its composition.
+
+    The role and the operation are what the manifest routes on, so a caller that has no task
+    document — and therefore no :class:`CapsuleCompileRequest` to hand over — can still ask for
+    exactly the routed source set the compiler would admit for that seat.
+    """
+
+    role: str
+    operation: str
+
+
+@dataclass(frozen=True, slots=True)
 class AdmittedEnclosure:
-    """The enclosure an admitted request resolved to, with the roots it implies."""
+    """The enclosure an admitted request resolved to, with the roots it implies.
+
+    ``code_repository_root`` is the repository root this resolution used — the caller's own value
+    when it supplied one, otherwise the one read out of the contract the request named. It travels
+    on the enclosure so the task projection resolves against the same root rather than re-deriving
+    (or failing to derive) one of its own; that second derivation is the other half of D13.
+    """
 
     coordination_root: Path
     contract: WorktreeContract
+    code_repository_root: Path | None = None
 
     @property
     def repository_id(self) -> str:
@@ -259,7 +279,7 @@ def _projection(
         scope_request=ProjectionScopeRequest(
             selector=request.enclosure,
             workspace_root=config.workspace_root,
-            code_repository_root=request.code_repository_root,
+            code_repository_root=enclosure.code_repository_root,
         ),
     )
     # The task-projection request carries no packet locations: the preferred route is
@@ -349,10 +369,11 @@ def _enclosure(config: McpRuntimeConfig, request: CapsuleCompileRequest) -> Admi
     are both anchored to the enclosure that actually owns them.
     """
 
+    declared_root = _declared_repository_root(request)
     try:
         context = resolve_coordination_context(
             workspace_root=config.workspace_root,
-            code_repository_root=request.code_repository_root,
+            code_repository_root=declared_root,
             request=CoordinationRequest(
                 hints=CoordinationHints(
                     topology="external", coordination_root=config.coordination_root
@@ -388,7 +409,38 @@ def _enclosure(config: McpRuntimeConfig, request: CapsuleCompileRequest) -> Admi
             f"worktree contract {contract_path.as_posix()} is unreadable: {error}",
             next_action="re-run worktree_status for this task and admit the contract it reports",
         ) from error
-    return AdmittedEnclosure(coordination_root=context.coordination_root, contract=contract)
+    return AdmittedEnclosure(
+        coordination_root=context.coordination_root,
+        contract=contract,
+        code_repository_root=declared_root,
+    )
+
+
+def _declared_repository_root(request: CapsuleCompileRequest) -> Path | None:
+    """The code repository root this request admits, from the contract it already names.
+
+    Defect D13: the coordination resolver refuses to resolve anything without a repository name or
+    root — ``code_repository_name is required when code_repository_root is not supplied`` — while the
+    *registered* ``role_capsule_compile`` tool exposes ``contract_path`` and no repository field at
+    all. The enclosure contract the caller names already declares the repository and its code path
+    (``repo_name`` / ``code.repo_path``), so that declaration is the authority read here rather than
+    a second value smuggled in beside it. A caller that supplies ``code_repository_root`` keeps
+    supplying it: this only fills the half the tool cannot express.
+    """
+
+    if request.code_repository_root is not None:
+        return request.code_repository_root
+    contract_path = request.enclosure.contract_path
+    if contract_path is None:
+        return None
+    try:
+        return load_contract(contract_path).code_repo_path
+    except (ContractError, OSError) as error:
+        raise TaskProjectionSourceError(
+            "contract-unavailable",
+            f"worktree contract {contract_path.as_posix()} is unreadable: {error}",
+            next_action="re-run worktree_status for this task and admit the contract it reports",
+        ) from error
 
 
 def admitted_tool_policy(config: McpRuntimeConfig) -> CapsuleToolPolicy:
@@ -451,19 +503,44 @@ def routed_admission_request(
     operation's file, and the root file of every skill it declares.
     """
 
+    return routed_admission_for(
+        root,
+        manifest,
+        manifest_bytes,
+        CapsuleSeatAddress(role=request.role, operation=request.operation),
+        origin=origin,
+    )
+
+
+def routed_admission_for(
+    root: Path,
+    manifest: str,
+    manifest_bytes: bytes,
+    seat: CapsuleSeatAddress,
+    *,
+    origin: str = SHIPPED_SKILL_ORIGIN,
+) -> CapsuleAdmissionRequest:
+    """The routed source set for one seat, addressed by its role and operation alone.
+
+    The same selection routine as :func:`routed_admission_request`, taking the two
+    values that actually decide it. A launch that supplies a capsule to a seat with
+    no task document has no enclosure and no task path to hand over, and it must
+    still go through this one routing rule rather than re-deriving a source set.
+    """
+
     parsed = parse_composition_manifest(manifest_bytes)
-    entry = parsed.roles.get(request.role)
+    entry = parsed.roles.get(seat.role)
     if entry is None:
         raise CapsuleCompilationError(
             status="unknown-role",
-            detail=f"the composition manifest declares no role {request.role!r}",
+            detail=f"the composition manifest declares no role {seat.role!r}",
             next_action="name a role the manifest declares",
         )
-    operation_entry = parsed.operations.get(request.operation)
+    operation_entry = parsed.operations.get(seat.operation)
     if operation_entry is None:
         raise CapsuleCompilationError(
             status="unknown-operation",
-            detail=f"the composition manifest declares no operation {request.operation!r}",
+            detail=f"the composition manifest declares no operation {seat.operation!r}",
             next_action="name an operation the manifest declares",
         )
     return CapsuleAdmissionRequest(
@@ -579,9 +656,11 @@ __all__ = [
     "COMPOSITION_MANIFEST",
     "CapsuleCompileOutcome",
     "CapsuleCompileRequest",
+    "CapsuleSeatAddress",
     "CapsuleSourceSelectionRequest",
     "admitted_tool_policy",
     "capsule_payload",
     "compile_task_capsule",
+    "routed_admission_for",
     "routed_admission_request",
 ]

@@ -43,7 +43,7 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 4
 LIFECYCLE_ARTIFACT_COUNT = 51
-LIFECYCLE_CATALOG_SHA256 = "812211e9f93fc3a75c2759126e7605a5998f79d745cd491aeee63348c11c9d6e"
+LIFECYCLE_CATALOG_SHA256 = "3342a249fb0b5cf5046783db62b365f39a9fd0ee1a1385e745aa492e0c7dcdcd"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately twice.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
@@ -69,6 +69,14 @@ fifty-first governed artifact row. The population moved 45 -> 50 (the merged LOC
 that changes the catalog last must pin the value at its own tip; a value correct for someone
 else's base re-reds the moment this one lands. The proof's own artifact delta is still exactly
 empty: this leaf registered nothing and added no consumer.
+
+**Third deliberate re-pin (260915-CAPS-L15, 2026-09-17).** ``260915-CAPS-L15`` added **consumer
+rows only** — the three governed artifacts its acceptance module reaches through the shared test
+support it imports — so the populations are unchanged at **4 contracts / 51 artifacts** and the
+catalog is now ``3342a249…``. Nothing was registered, no row was removed and no artifact's
+identity moved: only the consumer proofs of ``curator_coherence_test_support.py``, the Node
+``package-lock.json`` fixture and the Codex ``model_page`` recording gained the new importer, which
+is the same shape L7 used when its own module became a consumer. Re-derived at this leaf's tip.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"

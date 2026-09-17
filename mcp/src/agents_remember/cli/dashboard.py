@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import os
+from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -24,6 +26,7 @@ from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
 from agents_remember.controlplane.durable_store import declare_process_role
 from agents_remember.kernel.primitives.runtime_config import (
     ConfigError,
+    McpRuntimeConfig,
     load_config,
 )
 from agents_remember.serving import daemon as serving_daemon
@@ -61,6 +64,25 @@ EXECUTION_REGISTRATION_COLLABORATORS = ServingCollaborators(
 )
 
 
+def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
+    """The collaborators one dashboard app is composed with, bound to this configuration.
+
+    The capsule compiler is an ``application``-rank callable and ``serving`` may not import it, so
+    this composition root — the one place that already knows which configuration the app serves —
+    binds it here. Every ``create_app`` call in this module goes through this function, so a
+    dashboard process can never serve a role-configured launch with no compiler behind it.
+    """
+
+    from agents_remember.application.role_capsules.launch import (  # noqa: PLC0415 - composition
+        compile_launch_capsule,
+    )
+
+    return replace(
+        EXECUTION_REGISTRATION_COLLABORATORS,
+        capsule_launch=partial(compile_launch_capsule, config),
+    )
+
+
 def _dev_app():
     """Zero-arg app factory for ``uvicorn --reload`` (live state only; never sim).
 
@@ -90,7 +112,7 @@ def _dev_app():
             interval=float(os.environ.get(_DEV_INTERVAL_ENV, "1.0")),
             heartbeat=float(heartbeat_env) if heartbeat_env else None,
         ),
-        collaborators=EXECUTION_REGISTRATION_COLLABORATORS,
+        collaborators=serving_collaborators(config),
     )
 
 
@@ -265,7 +287,7 @@ def _build_app(
             create_app(
                 config,
                 cadence=ProjectionCadence(interval=args.interval, heartbeat=args.heartbeat),
-                collaborators=EXECUTION_REGISTRATION_COLLABORATORS,
+                collaborators=serving_collaborators(config),
             ),
             None,
         )
@@ -278,7 +300,7 @@ def _build_app(
         sim.config,
         cadence=ProjectionCadence(interval=args.interval),
         replay=ProjectionReplay(now=sim.clock.now, before_tick=sim.feeder.feed),
-        collaborators=EXECUTION_REGISTRATION_COLLABORATORS,
+        collaborators=serving_collaborators(config),
     )
     return _DashboardApp(app, sim)
 

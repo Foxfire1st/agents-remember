@@ -66,6 +66,7 @@ from agents_remember.serving.conversation.library.scope import canonical_library
 from agents_remember.serving.conversation.runtime import ConversationRuntime
 from agents_remember.serving.hosted_readiness import hosted_session_readiness
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.launch_capsule import legacy_launch_capsule
 from agents_remember.serving.retire import SeatClosure, retire_entry
 from agents_remember.serving.terminal import TerminalHost
 from agents_remember.serving.terminal_opener import (
@@ -107,6 +108,21 @@ _TERMINAL_OUTCOMES = frozenset(
         "request-conflict",
     }
 )
+
+
+LIBRARY_REOPEN_LEGACY_REASON = (
+    "this route reopens one exact native conversation and its whole purpose is to prove the vendor "
+    "identity it resumed; a capsule delivered here would be applied to a thread this session did "
+    "not open, which the installed Codex protocol resolves as a bounded FRESH thread (dropping "
+    "threadId) and which would therefore destroy the identity proof the route exists for. The "
+    "launch therefore runs the legacy chain BY DECLARED DECISION (260915-CAPS-L15), not by default"
+)
+"""Why the conversation-library open is the one launch point left on the legacy chain.
+
+Named here rather than left implicit so a reader meets a decision with a reason instead of an
+absent field. Owner of a future capsule-carrying reopen: the final verification leaf, with the
+harness delivery leaves that own the thread lifecycle.
+"""
 
 
 @dataclass
@@ -455,6 +471,10 @@ class ConversationOpenService:
                     harnesses=self._runtime.harness_registry(),
                     env=env,
                     knobs=SpawnKnobs(launch_args=list(record.launch_args)),
+                    # Declared legacy, with the reason: see LIBRARY_REOPEN_LEGACY_REASON.
+                    capsule=legacy_launch_capsule(
+                        env.get("AR_SPAWN_ROLE"), LIBRARY_REOPEN_LEGACY_REASON
+                    ),
                     control=ControlRunnerRequest(
                         resume_thread_id=record.resume_thread_id,
                         endpoint_root=(

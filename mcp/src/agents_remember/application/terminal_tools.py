@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast, get_args
 from uuid import uuid4
@@ -51,6 +52,13 @@ from agents_remember.serving.harnesses import (
     unknown_harness_detail,
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.launch_capsule import (
+    LaunchCapsule,
+    LaunchCapsuleRequest,
+    resolve_launch_capsule,
+    selection_for_workspace,
+    session_workspace,
+)
 from agents_remember.serving.operator_inbox_posts import (
     OperatorInboxPostContext,
     post_operator_inbox_entry,
@@ -734,19 +742,28 @@ def _spawn_launch_request(
     seat: SpawnSeat,
     overrides: SpawnOverrides,
     plan: _SpawnLaunchPlan,
+    capsule: LaunchCapsule,
 ) -> TerminalLaunchRequest:
     """The launch request the terminal opener receives, assembled from the plan.
 
     ``flag_model`` and ``flag_effort`` are populated only when there is no resolved
     launch: with one, the adapter applies model and effort through its native channel and a
     second copy on the request would be a second authority.
+
+    ``capsule`` is the instruction delivery this launch already resolved — the capsule compiled
+    through the one compiler, or the recorded legacy decision. It is a resolved value here, never an
+    intent: the opener performs the launch and never decides what a seat's instructions are.
     """
+    # One workspace authority for this session: the capsule's admitted workspace when it has one,
+    # otherwise the server's own — and the settings selection follows it, because a selection
+    # naming another workspace is refused by the runner.
+    workspace_root = session_workspace(capsule, server_workspace=config.workspace_root)
     return TerminalLaunchRequest(
         kind=seat.kind,
         # A seat spawn is a session backend: the runner this path starts owns the harness runtime,
         # so a harness with no terminal program of its own is still a legitimate target here.
         session_backend=True,
-        workspace_root=config.workspace_root,
+        workspace_root=workspace_root,
         shell=os.environ.get("SHELL") or _DEFAULT_SHELL,
         harness=plan.harness,
         which=overrides.which,
@@ -758,9 +775,10 @@ def _spawn_launch_request(
             session_commands=plan.session_commands or None,
         ),
         control=ControlRunnerRequest(
-            resolved_launch=plan.resolved_launch,
+            resolved_launch=selection_for_workspace(plan.resolved_launch, workspace=workspace_root),
             endpoint_root=config.coordination_root / "runtime" / "harness-control",
         ),
+        capsule=capsule,
         flag_model=plan.model if plan.resolved_launch is None else None,
         flag_effort=plan.effort if plan.resolved_launch is None else None,
     )
@@ -856,13 +874,31 @@ def spawn_agent_session_tool(
         return refusal
     assert plan is not None  # no refusal => a resolved plan
 
+    # The capsule is compiled here — where the launching role and the admitted binding are both in
+    # hand and before any host side effect — through the one compiler. A refusal stops the spawn by
+    # name; a deliberate legacy launch (no agent seat, or a harness with no verified channel) is
+    # recorded as exactly that rather than defaulted into.
+    capsule = resolve_launch_capsule(
+        _launch_capsule_resolver(config),
+        LaunchCapsuleRequest(
+            role=seat_role,
+            workspace_root=config.workspace_root,
+            task_document_ref=task_document_ref or replacement_for_task_document_ref,
+            harness=plan.harness,
+        ),
+    )
+    if capsule.is_refusal:
+        return spawn_refusal(
+            "capsule-unavailable", plan.harness, seat.kind, detail=capsule.explain()
+        )
+
     sid = overrides.session_id or uuid4().hex
     catalog = TerminalCatalog(terminal_catalog_path(config.coordination_root))
     spawn_host = overrides.host if overrides.host is not None else TerminalHost()
     result = open_terminal_session(
         runtime=HostedSessionRuntime(catalog=catalog, host=spawn_host),
         session_id=sid,
-        launch=_spawn_launch_request(config, seat, overrides, plan),
+        launch=_spawn_launch_request(config, seat, overrides, plan, capsule),
         provenance=SpawnProvenance(
             label=seat.label,
             task_document_ref=task_document_ref,
@@ -891,12 +927,33 @@ def spawn_agent_session_tool(
     assert entry is not None  # opened => an upserted row
     delivery = _SpawnDelivery()
 
-    return _result("spawn_agent_session", _spawned_payload(entry, delivery))
+    return _result("spawn_agent_session", _spawned_payload(entry, delivery, capsule))
 
 
-def _spawned_payload(entry: TerminalCatalogEntry, delivery: _SpawnDelivery) -> dict[str, Any]:
+def _launch_capsule_resolver(config: McpRuntimeConfig) -> Any:
+    """The application-tier capsule resolver for this server's configuration.
+
+    The launch point in the application tier calls the compiler directly; the serving-tier launch
+    points take the same callable through the injection port, because ``layers.toml`` ranks
+    ``serving`` below ``application``.
+    """
+
+    from agents_remember.application.role_capsules.launch import (  # noqa: PLC0415 - one seam
+        compile_launch_capsule,
+    )
+
+    return partial(compile_launch_capsule, config)
+
+
+def _spawned_payload(
+    entry: TerminalCatalogEntry, delivery: _SpawnDelivery, capsule: LaunchCapsule
+) -> dict[str, Any]:
     """The spawned-unbriefed row plus settings-owned launch-command outcome."""
     return {
+        # The per-run record of which instruction mode this launch selected. Present in every
+        # outcome, so "ran without instructions" is legible instead of indistinguishable from
+        # "ran correctly".
+        "instructionMode": dict(capsule.report),
         "ok": True,
         "operation": "spawn_agent_session",
         "status": "spawned-unbriefed",

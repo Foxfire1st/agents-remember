@@ -64,6 +64,7 @@ from agents_remember.serving.harnesses import (
     unknown_harness_detail,
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.launch_capsule import LaunchCapsule
 from agents_remember.serving.task_binding import (
     TaskBindingRequest,
     TaskDocumentResolutionFailure,
@@ -145,6 +146,13 @@ class TerminalLaunchRequest:
     kind: str
     workspace_root: Path
     shell: str
+    capsule: LaunchCapsule | None = None
+    """The instruction delivery this launch resolved, or ``None`` for a launch that predates it.
+
+    Resolved by the launch point before the request is built, never inside the opener: the opener
+    performs, it does not decide what a seat's instructions are. A refusal never reaches here — the
+    launch point refuses first — and the opener still refuses one defensively rather than spawning.
+    """
     harness: str | None = None
     which: Which | None = None
     """How installed-ness is probed; ``None`` means :func:`shutil.which`."""
@@ -531,6 +539,28 @@ def _runner_spawn_env(env: Mapping[str, str]) -> dict[str, str]:
     return seeded
 
 
+def _codex_capsule_delivery(launch: TerminalLaunchRequest) -> CodexCapsuleDelivery | None:
+    """The admitted capsule this launch carries to the Codex app-server, or ``None``.
+
+    Read from the resolved capsule, and only for a launch that resolved one: a capsule supplied
+    through ``control.capsule_delivery`` by a caller stays supported (L5's own seam), so the two
+    sources are checked in the order that keeps one authority — the launch point's resolution first,
+    the pre-existing caller field second.
+    """
+
+    if launch.capsule is not None and launch.capsule.codex_delivery is not None:
+        return launch.capsule.codex_delivery
+    return launch.control.capsule_delivery
+
+
+def _eve_capsule_env(launch: TerminalLaunchRequest) -> dict[str, str]:
+    """The eve binding environment this launch carries, or an empty mapping."""
+
+    if launch.capsule is None:
+        return {}
+    return {name: value for name, value in launch.capsule.eve_env.items() if value}
+
+
 def _session_command(
     *,
     identity: ControlIdentity,
@@ -562,7 +592,7 @@ def _session_command(
             session_commands=tuple(launch.knobs.session_commands or ()),
             resolved_launch=launch.control.resolved_launch,
             resume_thread_id=launch.control.resume_thread_id,
-            capsule_delivery=launch.control.capsule_delivery,
+            capsule_delivery=_codex_capsule_delivery(launch),
         )
     )
     return list(runner), endpoint
@@ -693,6 +723,9 @@ def _open_terminal_transaction(
         launch=launch,
     )
     spawn_env = _scrub_daemon_identity_env(launch.env or {})
+    # The eve carrier travels as the launch environment L7's loader already reads; the names come
+    # from the carrier module, so the writer and the reader cannot drift into two spellings.
+    spawn_env.update(_eve_capsule_env(launch))
     # Each harness starts its own MCP child process. Seed the exact hosted identity only into that
     # process environment so structural tools can resolve the caller without any model argument.
     # Scrubbing above guarantees a parent process's identity can never leak into its child.
@@ -810,6 +843,11 @@ def open_terminal_session(
     authority class: it rides the runner payload to the adapter factory, and the opener never
     validates or authorizes the target.
     """
+    if launch.capsule is not None and launch.capsule.is_refusal:
+        # Defensive. Every launch point refuses a capsule it could not supply BEFORE it builds a
+        # request, so a refusal here means a caller bypassed that gate; refusing again is the only
+        # outcome that cannot start a role-configured session with no instructions.
+        return OpenTerminalResult(status="launch-conflict", detail=launch.capsule.explain())
     resume_thread_id = launch.control.resume_thread_id
     if resume_thread_id is not None and (launch.kind != "harness" or launch.harness != "codex"):
         return OpenTerminalResult(
