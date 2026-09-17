@@ -39,6 +39,8 @@ from agents_remember.models.conversations.control_wire import (
 from agents_remember.serving.eve_adapter import (
     DEFAULT_EVE_ADAPTER_LIMITS,
     EVE_ADAPTER_ID,
+    PROVIDER_DEFAULT_EFFORT,
+    REASONING_EFFORTS,
     EveAdapterLimits,
     EveSessionAdapter,
 )
@@ -341,11 +343,13 @@ class EveAdapterHandshakeTests(unittest.IsolatedAsyncioTestCase):
 class EveAdapterCapabilityTests(unittest.IsolatedAsyncioTestCase):
     """Model and effort controls report what eve can actually do, without a silent change."""
 
-    async def test_advertise_reports_the_launch_selection_and_no_unbacked_effort_menu(self) -> None:
-        # The catalog publishes the model the runtime compiles and REPORTS the launch's effort as
-        # configuration, but offers no effort option: the pinned application reads no effort value,
-        # so a menu would advertise a control whose every value produces the same run. The launch
-        # vocabulary still validates a settings-named value at the launch boundary.
+    async def test_advertise_reports_the_launch_selection_and_the_backed_effort_menu(self) -> None:
+        # The catalog publishes the model the runtime compiles and the effort axis the runtime
+        # actually applies (``agent.ts`` reads AR_EVE_EFFORT into defineAgent({ reasoning })), and
+        # it REPORTS the launch's effort as the configuration the run was started under. The menu
+        # is the accepted vocabulary itself, so a published level is one the launch gate accepts.
+        # Every option here is launch-settable and NOT session-settable: the level is compiled into
+        # the running application, which is the launch/live split the sibling case pins.
         harness = await _started(launch=_launch(model="fixture-model-a", effort="high"))
         try:
             catalog = harness.adapter.advertise()
@@ -353,11 +357,47 @@ class EveAdapterCapabilityTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(catalog.selected_effort, "high")
             model = catalog.models[0]
             self.assertEqual(model.key, "fixture-model-a")
-            self.assertEqual(model.effort_options, ())
-            self.assertFalse(model.supports_effort)
-            self.assertIsNone(model.default_effort)
-            self.assertEqual([option.config_id for option in catalog.config_options], ["model"])
+            self.assertEqual(
+                tuple(option.key for option in model.effort_options), REASONING_EFFORTS
+            )
+            self.assertTrue(model.supports_effort)
+            self.assertEqual(model.default_effort, PROVIDER_DEFAULT_EFFORT)
+            for option in model.effort_options:
+                self.assertTrue(option.launch_settable, option.key)
+                self.assertFalse(option.session_settable, option.key)
+            self.assertEqual(
+                [option.config_id for option in catalog.config_options], ["model", "effort"]
+            )
             self.assertEqual(catalog.config_options[0].current_value, "fixture-model-a")
+            self.assertEqual(catalog.config_options[1].current_value, "high")
+        finally:
+            await harness.aclose()
+
+    async def test_the_effort_axis_is_launch_settable_and_never_live_settable(self) -> None:
+        """Packet behaviour 5: the launch/live split stays honest, pinned against the started runtime.
+
+        Neither side is read from the catalog's own menu. The catalog says the axis is a launch-time
+        value; the live setter must therefore refuse every candidate -- including values the catalog
+        itself advertises -- and must keep reporting the model the session is actually running. A
+        setter that began echoing an effort back would make ``selected_effort`` a claim about a run
+        that is not the one in flight.
+        """
+
+        harness = await _started(launch=_launch(model="fixture-model-a", effort="high"))
+        try:
+            catalog = harness.adapter.advertise()
+            self.assertEqual(catalog.selected_effort, "high")
+            (model,) = catalog.models
+            advertised = tuple(option.key for option in model.effort_options)
+            self.assertEqual(advertised, REASONING_EFFORTS)
+            for candidate in (*advertised, "not-an-advertised-effort"):
+                result = await harness.adapter.set_effort(candidate)
+                self.assertFalse(result.ok, candidate)
+                self.assertEqual(result.acceptance, "unsupported", candidate)
+                self.assertEqual(result.requested_value, candidate)
+                # The configuration the runtime was started under is unchanged and still reported.
+                self.assertEqual(result.effective_value, catalog.selected_model_key, candidate)
+                self.assertEqual(harness.adapter.advertise().selected_effort, "high", candidate)
         finally:
             await harness.aclose()
 

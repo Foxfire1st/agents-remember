@@ -647,6 +647,7 @@ consumers = [
   "mcp/tests/test_dispatch_brief.py",
   "mcp/tests/test_environment_reconstruction.py",
   "mcp/tests/test_eve_adapter.py",
+  "mcp/tests/test_eve_effort_runtime.py",
   "mcp/tests/test_eve_capsule_binding.py",
   "mcp/tests/test_eve_capsule_runtime.py",
   "mcp/tests/test_eve_product_integration.py",
@@ -734,6 +735,7 @@ consumers = [
   "mcp/tests/test_eve_adapter.py",
   "mcp/tests/test_eve_capsule_binding.py",
   "mcp/tests/test_eve_capsule_runtime.py",
+  "mcp/tests/test_eve_effort_runtime.py",
   "mcp/tests/test_eve_product_integration.py",
 ]
 
@@ -1185,6 +1187,7 @@ replacement_contract = "node:mcp/tests/test_eve_adapter.py::EveAdapterHandshakeT
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_eve_adapter.py",
+  "mcp/tests/test_eve_effort_runtime.py",
   "mcp/tests/test_eve_product_integration.py",
 ]
 

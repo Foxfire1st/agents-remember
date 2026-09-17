@@ -43,8 +43,8 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 4
 LIFECYCLE_ARTIFACT_COUNT = 54
-LIFECYCLE_CATALOG_SHA256 = "5e938c85a72eb2fbbd609fe290d80702204f95d8a2a7d3c8cc0a6cc80f0aaea3"
-"""``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately twice.
+LIFECYCLE_CATALOG_SHA256 = "e3651d6f3ae12a7f52933a0a0e75d3eb3618a0ce18def301467a4138890dcaeb"
+"""``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately five times.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
 ``a9d83c375d1bfdcae7d0c46020eba41fbaf305a306fe89bb1b9b479b861c2002``. ``LOCR-R26@v1``'s
@@ -90,6 +90,22 @@ declares its exact source-derived consumers and an executable ``node:`` replacem
 ``mcp/tests/test_fresh_user_harness.py`` is the module that answers for all three (it is the
 literal-path consumer, the shape proof for the fixtures, and the guard that a step which cannot run
 is recorded ``blocked`` and never ``completed``).
+
+**Fifth deliberate re-pin (260915-CAPS-L17, 2026-09-17) — its own branch's merged value.** ``260915-CAPS-L17``
+added one real test module (``mcp/tests/test_eve_effort_runtime.py``) which begins the shipped
+runtime and therefore consumes three already-governed artifacts — the eve adapter and capsule
+shared-support modules and the portable Node lockfile fixture — so the census requires its path on
+those three rows. **No artifact was registered and no contract changed**: the population stays at
+**4 contracts / 51 artifacts**, and the only new bytes are three consumer entries on top of L15's.
+L15 landed first, so this value is re-derived against the **merged** catalog rather than carried
+from either leaf's base: ``563582a0…``, which is neither L15's ``3342a249…`` nor the
+``22ce7027…`` this leaf measured before L15 landed.
+
+**Sixth deliberate re-pin (260915-CAPS-L17, 2026-09-17) — the merged value at landing.** `260915-CAPS-L17` added **consumer
+rows only** (its new runtime module reaches three already-governed artifacts), and L14 landed first, so this value is
+re-derived against the **merged** catalog: L14's fifty-fourth artifact row plus this leaf's three consumer entries,
+over **4 contracts / 54 artifacts**, giving `e3651d6f…`. Neither L14's `5e938c85…` nor this leaf's pre-sync
+`563582a0…` (measured at 51 artifacts before L14 landed) is correct at this tip.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"

@@ -172,6 +172,7 @@ integration = [
   "mcp/tests/test_dagger_runtime_authority.py",
   "mcp/tests/test_direct_landing.py",
   "mcp/tests/test_eve_capsule_runtime.py",
+  "mcp/tests/test_eve_effort_runtime.py",
   "mcp/tests/test_git_command.py",
   "mcp/tests/test_harness_control_ipc.py",
   "mcp/tests/test_integration_branch_authority.py",

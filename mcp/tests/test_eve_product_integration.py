@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -65,8 +66,15 @@ from agents_remember.serving.conversation.projectors.common import (
     UnmappableShape,
 )
 from agents_remember.serving.conversation.projectors.eve import SILENT_CONTROL_EVENTS
-from agents_remember.serving.eve_adapter import EVE_ADAPTER_ID, REASONING_EFFORTS, EveSessionAdapter
+from agents_remember.serving.eve_adapter import (
+    EVE_ADAPTER_ID,
+    PROVIDER_DEFAULT_EFFORT,
+    REASONING_EFFORTS,
+    EveSessionAdapter,
+)
 from agents_remember.serving.eve_runtime_launch import (
+    EFFORT_ENV,
+    MODEL_ENV,
     PROVIDER_API_KEY_ENV,
     build_runtime_env,
     launch_spec_binding,
@@ -101,6 +109,7 @@ from agents_remember.serving.terminal_opener import (
     resolve_terminal_launch,
 )
 from eve_adapter_test_support import (
+    EVE_APPLICATION_ROOT,
     FakeEveRuntime,
     FakeRuntimeFactory,
     FakeTurn,
@@ -163,6 +172,108 @@ def _checkout_root() -> Path | None:
         if (parent / "eve_runtime").is_dir():
             return parent
     return None
+
+
+_REASONING_UNION = re.compile(r"^\s*reasoning\?:\s*(.+?);\s*$", re.MULTILINE)
+"""The installed AI SDK's own ``reasoning`` call-setting declaration, as a line to read.
+
+The declaration, not the compiled call path: this is the vocabulary contract the axis has to match.
+A future release that renames or adds a level therefore fails the drift case until the launch tuple
+follows it, which is the point -- the alternative is a tuple maintained by hand against a dependency
+nobody re-reads.
+"""
+
+_REASONING_UNION_AT_PIN = (
+    "provider-default",
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+)
+"""The union as `@ai-sdk/provider`'s own declaration spelled it when this axis was pinned.
+
+Recorded here rather than read from the install so that the case comparing it against
+``REASONING_EFFORTS`` runs in every checkout, including one with no machine-local dependency install
+-- a suite whose verdict depends on which machine ran it is the defect the shared install guard
+exists to remove. This is not the authority: `EveEffortVocabularyDriftTests` re-reads the LIVE
+declaration whenever the install is present and fails if this record has fallen behind it, so a
+stale record is caught on any machine that can run the runtime.
+"""
+
+
+def _installed_reasoning_union(modules: Path) -> tuple[str, ...] | None:
+    """Every token of the installed AI SDK reasoning union, in declaration order.
+
+    The declaration is located by its own prose rather than by a line number or a guessed file
+    offset, so a release that moves it still resolves; the union is then read from the line that
+    follows, and only a declaration made purely of quoted tokens is accepted. A shape this reader
+    does not recognize returns ``None`` and the caller fails loudly rather than quietly comparing
+    against a truncated set -- which is what a first attempt at this reader did, matching only the
+    union's first two members.
+    """
+
+    for declaration in sorted(modules.glob("@ai-sdk/*/dist/index.d.ts")):
+        lines = declaration.read_text(encoding="utf-8").splitlines()
+        for index, line in enumerate(lines):
+            if "Reasoning effort level for the model" not in line:
+                continue
+            for candidate in lines[index : index + 8]:
+                match = _REASONING_UNION.match(candidate)
+                if match is None:
+                    continue
+                tokens = tuple(part.strip() for part in match.group(1).split("|"))
+                if not all(
+                    len(token) > 2 and token.startswith("'") and token.endswith("'")
+                    for token in tokens
+                ):
+                    return None
+                return tuple(token[1:-1] for token in tokens)
+            return None
+    return None
+
+
+_PROPERTY_KEY = re.compile(r"(?<![\w.$?])([A-Za-z_$][\w$]*)\s*:")
+"""Every property key of an authored object literal, as ``name:``.
+
+Read as the SET of keys, not as a search for one name: `reasoning === PROVIDER_DEFAULT_EFFORT ? …`
+mentions the word without being a key, so a pattern that looked for `reasoning:` would match it and
+report a defect that is not there -- and an earlier version of this pin did exactly that. Comments
+are stripped first, because the authored file discusses ``reasoning`` in prose and a match inside a
+comment pins nothing.
+"""
+
+_WITHOUT_COMMENTS = re.compile(r"/\*.*?\*/|//[^\n]*", re.DOTALL)
+
+
+def _code_only(source: str) -> str:
+    """The source with its comments removed, so a shape assertion reads code and not prose."""
+
+    return _WITHOUT_COMMENTS.sub("", source)
+
+
+def _authored_agent_definition(checkout: Path) -> str:
+    """The object literal this repository hands to eve's ``defineAgent``.
+
+    Read from the authored ``agent.ts``, and it must be the call's own argument: a case that matched
+    a ``reasoning:`` elsewhere in the file would pin nothing.
+    """
+
+    source = (checkout / "eve_runtime" / "agent" / "agent.ts").read_text(encoding="utf-8")
+    call = source.find("defineAgent(")
+    if call < 0:
+        raise AssertionError("the authored application does not call defineAgent")
+    opening = source.index("{", call)
+    depth = 0
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening : index + 1]
+    raise AssertionError("the authored defineAgent call has no closing brace")
 
 
 def _stub_interpreter(directory: Path, version: str, *, name: str = "node") -> str:
@@ -714,6 +825,39 @@ class EveTerminalLaunchTests(unittest.TestCase):
         request = replace(self._request(), harnesses=(override,), which=which)
         self.assertEqual(resolve_terminal_launch(request).argv, ("true",))
 
+    def test_the_declared_exclusion_belongs_to_the_route_and_is_owned(self) -> None:
+        """The named exclusion, and who owns it -- recorded where the behaviour is implemented.
+
+        Measured through the real dashboard route (four requests,
+        `notes/reports/260915-CAPS-L17-evidence/s6-s7.json`; CAPS-R17 behaviour 4): a
+        role-configured open of the adapter-owned row, and of an operator-taught row, both answer
+        **400 `capsule-unavailable`** at the capsule gate; a roleless open of the adapter-owned row
+        answers **400 `bad-kind`** naming this very decision; and a roleless open of an
+        operator-taught row answers **200 `running`** with `instructionMode: legacy`, because the
+        route execs the program the row names -- a green `eve` session that is not the AR runtime,
+        which is the taught-a-TUI feature and not this seam.
+
+        **Reason:** eve's runtime is the AR-owned application the session adapter starts itself, so
+        the terminal-open route has nothing to exec; the seat-spawning caller is the one that asks
+        for a session backend (`application/terminal_tools.py`, `session_backend=True`) and the route
+        deliberately does not (`serving/_app_terminal_routes.py`).
+        **Owner:** the serving/route surface -- whichever leaf next owns
+        `serving/_app_terminal_routes.py` -- carried in the master's obligation ledger by the
+        final-verification leaf.
+
+        This case pins the *product's* half of that sentence: the terminal question refuses by this
+        decision and the session-backend question does not, which is the distinction the exclusion
+        rests on. The route's own HTTP answers are the probe's, above.
+        """
+
+        with self.assertRaises(ValueError) as terminal:
+            resolve_terminal_launch(self._request())
+        self.assertIn("not a terminal program", str(terminal.exception))
+        self.assertIsNotNone(
+            resolve_terminal_launch(self._request(session_backend=True)),
+            "the exclusion must not remove eve from the session-backend question",
+        )
+
 
 class EveReadinessProbeTests(unittest.TestCase):
     """Detection names the missing component instead of reporting a generic failure."""
@@ -1004,30 +1148,57 @@ class EveCapabilityHonestyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(catalog.selected_model_key, runtime_default_model())
         self.assertEqual(catalog.selected_effort, "provider-default")
 
-    async def test_the_pinned_runtime_reads_no_effort_value_and_the_catalog_agrees(self) -> None:
-        # Two independent facts that must agree: the authored runtime application consumes no effort
-        # input, and the capability catalog therefore advertises no effort option. If effort
-        # plumbing is ever added to the runtime, this case fails until the catalog offers it again;
-        # if a menu is published without that plumbing, it fails the other way.
+    async def test_the_pinned_runtime_consumes_the_effort_axis_and_the_client_would_read_it(
+        self,
+    ) -> None:
+        # Two independent facts that must agree: the authored runtime application consumes the
+        # effort input through eve's own definition, and the capability catalog therefore publishes
+        # the axis. If the consumer is removed, this case fails on the source half; if a menu is
+        # published without it, the case fails the other way. The READ half is what a dashboard's
+        # capability client would receive, asserted on the serialized envelope rather than on the
+        # dataclass.
         runtime_root = _checkout_root()
         self.assertIsNotNone(runtime_root)
         assert runtime_root is not None
         authored = sorted((runtime_root / "eve_runtime" / "agent").rglob("*.ts"))
         self.assertTrue(authored, "the pinned runtime application must have authored sources")
-        for source in authored:
-            self.assertNotIn("AR_EVE_EFFORT", source.read_text(encoding="utf-8"), source.name)
+        consumer = "".join(source.read_text(encoding="utf-8") for source in authored)
+        self.assertIn(EFFORT_ENV, consumer, "the authored application must read the effort input")
+        self.assertIn("reasoning", consumer, "the authored application must apply it through eve")
         started = await _start_eve()
         try:
             catalog = started.adapter.advertise()
         finally:
             await started.aclose()
         (model,) = catalog.models
-        self.assertFalse(model.supports_effort)
-        self.assertEqual(model.effort_options, ())
-        self.assertIsNone(model.default_effort)
-        # No selectable effort config option is published either: an option with no backing value
-        # would be the same false control in a second shape.
-        self.assertEqual([option.config_id for option in catalog.config_options], ["model"])
+        self.assertTrue(model.supports_effort)
+        self.assertEqual(tuple(option.key for option in model.effort_options), REASONING_EFFORTS)
+        self.assertEqual(model.default_effort, PROVIDER_DEFAULT_EFFORT)
+        envelope = capability_snapshot_json(catalog)
+        (serialized_model,) = envelope["models"]  # type: ignore[misc]
+        self.assertTrue(serialized_model["supportsEffort"])
+        self.assertEqual(
+            [option["key"] for option in serialized_model["effortOptions"]],  # type: ignore[union-attr]
+            list(REASONING_EFFORTS),
+        )
+        # The axis is a real selectable config option now: an option with no backing value would be
+        # the same false control in a second shape, and omitting it would hide a control that works.
+        published = [option.config_id for option in catalog.config_options]
+        self.assertEqual(published, ["model", "effort"])
+        effort_option = catalog.config_options[1]
+        self.assertEqual(effort_option.current_value, catalog.selected_effort)
+        self.assertEqual(tuple(option.value for option in effort_option.options), REASONING_EFFORTS)
+
+    async def test_the_advertised_effort_vocabulary_is_the_installed_union_not_a_copy(self) -> None:
+        # The launch vocabulary's single source is the installed type, so the gate and the menu
+        # cannot drift from the runtime that has to honour a level. Read here from the recorded
+        # declaration in this module -- a committed file, so a checkout with no machine-local
+        # dependency install still runs this case -- and re-confronted with the LIVE installed
+        # declaration in `EveEffortVocabularyDriftTests` when that install exists. Splitting it that
+        # way is deliberate: the drift check needs the install, this case must never be the reason a
+        # clean checkout reds.
+        self.assertEqual(REASONING_EFFORTS, _REASONING_UNION_AT_PIN)
+        self.assertEqual(REASONING_EFFORTS[0], PROVIDER_DEFAULT_EFFORT)
 
     async def test_the_effort_setter_refuses_every_candidate_including_its_own_vocabulary(
         self,
@@ -1049,30 +1220,35 @@ class EveCapabilityHonestyTests(unittest.IsolatedAsyncioTestCase):
             await started.aclose()
 
     async def test_no_advertised_control_lacks_a_runtime_consumer(self) -> None:
-        # The catalog's selectable axes, each checked against what the pinned runtime actually
-        # reads: the model is compiled from AR_EVE_MODEL, and no effort input exists at all. This is
-        # the general shape of the honesty rule the effort finding asked for, so a future axis has
-        # to bring its own consumer before it can be published.
+        # The catalog's selectable axes, each checked against the consumer the pinned runtime reads:
+        # the model is compiled from AR_EVE_MODEL, and the effort is applied from AR_EVE_EFFORT
+        # through eve's own definition. This is the general honesty rule and it stays in force for
+        # every axis -- a future axis has to bring its own consumer before it can be published.
+        #
+        # The axis-to-consumer map is held equal to the published set BOTH ways, so neither a
+        # published axis without a consumer nor a consumer whose axis was retracted can pass on a
+        # mapping that quietly stops covering one. WHAT each consumer does with its input is the
+        # specific case's subject (see the effort case, which reads the application of the value);
+        # this case answers only "is there a runtime reader for every published axis".
         started = await _start_eve()
         try:
             catalog = started.adapter.advertise()
         finally:
             await started.aclose()
         published = sorted(option.config_id for option in catalog.config_options)
-        runtime_consumers = {"model": "AR_EVE_MODEL", "effort": "AR_EVE_EFFORT"}
+        runtime_consumers = {"model": MODEL_ENV, "effort": EFFORT_ENV}
+        self.assertEqual(published, sorted(runtime_consumers))
         runtime_root = _checkout_root()
         assert runtime_root is not None
-        text = "\n".join(
-            source.read_text(encoding="utf-8")
+        sources = {
+            source.name: source.read_text(encoding="utf-8")
             for source in sorted((runtime_root / "eve_runtime" / "agent").rglob("*.ts"))
-        )
+        }
+        self.assertTrue(sources, "the pinned runtime application must have authored sources")
         for axis in published:
-            consumer = runtime_consumers.get(axis)
-            self.assertIsNotNone(
-                consumer, f"published axis {axis!r} has no declared runtime consumer"
-            )
-            assert consumer is not None
-            self.assertIn(consumer, text, f"published axis {axis!r} is unbacked by the runtime")
+            consumer = runtime_consumers[axis]
+            readers = [name for name, text in sources.items() if consumer in text]
+            self.assertTrue(readers, f"published axis {axis!r} is unbacked by the runtime")
 
     async def test_eve_control_capabilities_never_advertise_an_unimplemented_surface(self) -> None:
         controls = control_capabilities_for("eve", _snapshot())
@@ -1109,6 +1285,82 @@ class EveCapabilityHonestyTests(unittest.IsolatedAsyncioTestCase):
             capability = getattr(telemetry, field)
             self.assertEqual(capability.state, "unavailable", field)
             self.assertEqual(capability.evidence_tier, "none", field)
+
+
+class EveEffortVocabularyDriftTests(unittest.TestCase):
+    """The recorded union record against the LIVE installed declaration, when this host has one.
+
+    Split from the case that compares ``REASONING_EFFORTS`` against the record so that the
+    machine-local dependency install decides only whether DRIFT can be observed, never whether the
+    suite is green: without the install this skips by the shared guard's own name, exactly as every
+    other case that needs the runtime does.
+    """
+
+    def test_the_recorded_union_matches_the_installed_declaration(self) -> None:
+        require_installed_eve_application()
+        declared = _installed_reasoning_union(EVE_APPLICATION_ROOT / "node_modules")
+        self.assertIsNotNone(
+            declared,
+            "the installed AI SDK declaration must expose the reasoning union this axis reads",
+        )
+        assert declared is not None
+        self.assertEqual(
+            _REASONING_UNION_AT_PIN,
+            declared,
+            "the vocabulary record has fallen behind the installed declaration; re-read the union "
+            "and move REASONING_EFFORTS with it",
+        )
+
+
+class EveEffortConsumerShapeTests(unittest.TestCase):
+    """Behaviour 1's sentinel rule, pinned in the authored SOURCE shape.
+
+    "The key is omitted rather than passed as a literal" cannot be observed at the provider
+    boundary: the AI SDK maps the exact token ``provider-default`` to an absent key by itself, so an
+    application that forwarded the literal would produce the same request body as one that omits the
+    property. Seed R1 (forward the literal) therefore passed every boundary case. What distinguishes
+    the two is a property that cannot be omitted at runtime -- the presence of a key in the object
+    literal the application hands to ``defineAgent`` -- so that is what this case pins.
+    """
+
+    def test_the_authored_definition_omits_the_reasoning_key_for_the_sentinel(self) -> None:
+        runtime_root = _checkout_root()
+        self.assertIsNotNone(runtime_root)
+        assert runtime_root is not None
+        definition = _code_only(_authored_agent_definition(runtime_root))
+        keys = [match.group(1) for match in _PROPERTY_KEY.finditer(definition)]
+        self.assertNotIn(
+            "reasoning",
+            keys,
+            "the authored definition passes a `reasoning` key into defineAgent, so it cannot omit "
+            "the key the way the AR sentinel requires: the value must be spread from a computed "
+            f"expression instead. Keys the definition declares: {keys}",
+        )
+        # The rule is only real if the computed value is what applies it: the source must read the
+        # input the adapter sets, and must compare it against the sentinel before spreading.
+        code = _code_only(_agent_source(runtime_root))
+        self.assertIn(EFFORT_ENV, code)
+        self.assertIn(
+            "...(",
+            definition,
+            "the authored definition must SPREAD a computed value; a literal key cannot be omitted",
+        )
+        # The spread must DECIDE on the sentinel. A spread that only tests for absence still forwards
+        # the token (the AI SDK then maps it back to an absent key, so the wire cannot tell them
+        # apart) -- which is exactly the reviewer's seed R1, green at the provider boundary and wrong
+        # about the rule. Requiring the sentinel's own name inside the spread is what distinguishes
+        # the two, so the constant must be USED there and not merely declared.
+        spread = definition[definition.index("...(") :]
+        self.assertIn(
+            "PROVIDER_DEFAULT_EFFORT",
+            spread,
+            "the spread that applies the effort does not name the AR sentinel, so it cannot omit the "
+            f"key for it: a launch configured provider-default would forward the token. Spread was:\n{spread}",
+        )
+
+
+def _agent_source(checkout: Path) -> str:
+    return (checkout / "eve_runtime" / "agent" / "agent.ts").read_text(encoding="utf-8")
 
 
 class EveProjectorTests(unittest.TestCase):

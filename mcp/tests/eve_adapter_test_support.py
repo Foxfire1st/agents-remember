@@ -18,8 +18,10 @@ from __future__ import annotations
 import functools
 import json
 import tempfile
+import threading
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -432,3 +434,166 @@ def fixture_launch_binding() -> dict[str, str]:
         workspace_root=workspace,
         binding_ref="ar-binding:leaf-test",
     )
+
+
+@dataclass
+class RecordedModelRequest:
+    """One request body a direct provider received, kept verbatim.
+
+    The value under measurement for the effort axis IS the request body, so this keeps the parsed
+    object rather than a projection of it: a test that asserted on four selected keys could pass
+    while the runtime sent something else in the field it names.
+    """
+
+    index: int
+    body: dict[str, object]
+
+    @property
+    def reasoning_effort(self) -> object:
+        """The ``reasoning_effort`` the provider received, or ``None`` when there was no key.
+
+        ``None`` for "absent" is a deliberate collapse for readable assertions; a case that must
+        distinguish "not sent" from "sent as null" asks ``"reasoning_effort" in body`` directly.
+        """
+
+        return self.body.get("reasoning_effort")
+
+    def top_level_keys(self) -> list[str]:
+        """Every request key except the two large framework fields, in the body's own order."""
+
+        return [key for key in self.body if key not in {"messages", "tools"}]
+
+
+def serve_recording_provider(
+    record: list[RecordedModelRequest],
+    *,
+    drop_reasoning_effort: bool = False,
+) -> tuple[ThreadingHTTPServer, int]:
+    """A direct OpenAI-compatible provider that records every raw request body it receives.
+
+    Not the product's deterministic *fixture model*: that one answers a scripted plan and traces a
+    normalized projection, and the projection is exactly what must not be trusted here. This answers
+    every request with one small streamed completion and keeps the body verbatim.
+
+    ``drop_reasoning_effort`` is the *instrument's* own way to model a boundary that loses the value:
+    the key is removed from the request this provider RECEIVES, so the recorded body and the answer
+    describe a request that never carried it. Substituting the absence in an assertion instead would
+    prove nothing about the boundary -- the recorded bytes are the value under test.
+    """
+
+    lock = threading.Lock()
+
+    class _Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+        def do_GET(self) -> None:
+            payload = {"object": "list", "data": [{"id": "fixture-deterministic-1"}]}
+            body = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self) -> None:
+            length = int(self.headers.get("content-length") or 0)
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                decoded = json.loads(raw)
+            except json.JSONDecodeError:
+                decoded = {"__unparsed__": raw.decode("utf-8", errors="replace")}
+            parsed: dict[str, object] = dict(decoded)
+            if drop_reasoning_effort:
+                del parsed["reasoning_effort"]
+            with lock:
+                index = len(record)
+                record.append(RecordedModelRequest(index=index, body=parsed))
+            model = str(parsed.get("model") or "fixture-deterministic-1")
+            if parsed.get("stream"):
+                frames = [
+                    _sse_frame(
+                        {
+                            "id": f"chatcmpl-recorded-{index}",
+                            "object": "chat.completion.chunk",
+                            "created": 0,
+                            "model": model,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {"role": "assistant", "content": f"recorded {index}"},
+                                    "finish_reason": None,
+                                }
+                            ],
+                        }
+                    ),
+                    _sse_frame(
+                        {
+                            "id": f"chatcmpl-recorded-{index}",
+                            "object": "chat.completion.chunk",
+                            "created": 0,
+                            "model": model,
+                            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                        }
+                    ),
+                    b"data: [DONE]\n\n",
+                ]
+                body = b"".join(frames)
+                self.send_response(200)
+                self.send_header("content-type", "text/event-stream")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            payload = {
+                "id": f"chatcmpl-recorded-{index}",
+                "object": "chat.completion",
+                "created": 0,
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": f"recorded {index}"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            }
+            encoded = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, int(server.server_address[1])
+
+
+def _sse_frame(payload: Mapping[str, object]) -> bytes:
+    return f"data: {json.dumps(dict(payload))}\n\n".encode()
+
+
+def staged_runtime_root(scratch: Path, *, authored: Path | None = None) -> Path:
+    """An application root the production staging path can copy: the authored tree + a link.
+
+    ``eve_runtime/node_modules`` is machine-local and not committed, and the production stager
+    requires the source it copies to have its dependencies installed. This assembles the one
+    combination that keeps the bytes under test the checkout's own: the ``agent`` tree is a link to
+    the authored directory (so a case compiles what the repository ships, recorded edits and all),
+    while ``node_modules`` is a link to the installed one. Nothing is installed and nothing is
+    copied into the worktree.
+    """
+
+    runtime_root = authored if authored is not None else EVE_APPLICATION_ROOT
+    scratch.mkdir(parents=True, exist_ok=True)
+    (scratch / "agent").symlink_to(runtime_root / "agent")
+    (scratch / "node_modules").symlink_to(EVE_APPLICATION_ROOT / "node_modules")
+    for name in ("package.json", "package-lock.json", "tsconfig.json"):
+        origin = EVE_APPLICATION_ROOT / name
+        if origin.exists():
+            (scratch / name).write_bytes(origin.read_bytes())
+    return scratch

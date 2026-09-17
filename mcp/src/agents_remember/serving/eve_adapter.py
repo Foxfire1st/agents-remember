@@ -61,6 +61,7 @@ from agents_remember.serving.eve_runtime_launch import (
 )
 from agents_remember.serving.harness_capabilities import (
     CapabilitySnapshot,
+    EffortOption,
     ModelCapability,
     SetResult,
 )
@@ -87,8 +88,17 @@ eve compiles and boots its host before it serves anything, which is seconds on a
 longer on a cold one; the health route is still the readiness proof, this is only its budget.
 """
 
+PROVIDER_DEFAULT_EFFORT = "provider-default"
+"""The AR sentinel meaning *no explicit reasoning*.
+
+The pinned application applies it by declaring no ``reasoning`` at all
+(``eve_runtime/agent/agent.ts``), never by forwarding the token, so a launch that names it runs at
+the provider's own default rather than at a level spelled like one. One declaration, and the
+authored application names the same token; the invariant case compares the two.
+"""
+
 REASONING_EFFORTS = (
-    "provider-default",
+    PROVIDER_DEFAULT_EFFORT,
     "none",
     "minimal",
     "low",
@@ -96,13 +106,14 @@ REASONING_EFFORTS = (
     "high",
     "xhigh",
 )
-"""The reasoning levels eve documents for ``agent.ts``, used ONLY to validate a LAUNCH selection.
+"""The reasoning levels a launch selection may name, in the order a menu should offer them.
 
-This is not a catalog. The pinned application reads no effort value, so nothing here is advertised
-as a selectable option: the set exists so that a settings-owned selection naming an undocumented
-level is refused at launch instead of being passed through as if it meant something. A launch that
-names a documented level still runs identically, which is why the capability catalog publishes no
-effort options at all.
+The vocabulary is eve's own: ``AgentReasoningDefinition`` is
+``NonNullable<CallSettings["reasoning"]>``, whose union is exactly these tokens, and the runtime
+applies the selected one through its own ``defineAgent({ reasoning })``. This tuple is therefore the
+ONE declaration the launch gate validates against and the capability catalog advertises -- a level
+the runtime does not accept is refused at launch by name, and the published menu cannot drift from
+the accepted set because both read this value.
 """
 
 EVE_MODEL_UNKNOWN_DETAIL = (
@@ -688,14 +699,20 @@ class EveSessionAdapter:
     def _capability_snapshot(self, selection: EveLaunchSelection) -> CapabilitySnapshot:
         """The catalog this runtime can actually back.
 
-        The model is real: it is the value the runtime compiles into its provider handle. The effort
-        axis is not. The pinned application reads no effort value at all -- no ``AR_EVE_EFFORT``
-        consumer exists under ``eve_runtime/agent``, and the adapter's launch vocabulary carries the
-        selection as environment provenance rather than as a knob the runtime honours -- so an
-        effort menu would advertise a control whose every value produces the same run. The catalog
-        therefore offers no effort options and does not claim effort support; the launch selection
-        is still REPORTED (``selected_effort``) because it is the configuration the runtime was
-        started under, which is a fact rather than a menu.
+        Both axes are real. The model is the value the runtime compiles into its provider handle,
+        and the effort axis is applied by the runtime's own definition: ``agent.ts`` reads
+        ``AR_EVE_EFFORT`` and passes it to ``defineAgent({ reasoning })``, which eve forwards to the
+        model call -- measured at the provider boundary, not inferred from documentation.
+
+        The menu is the accepted vocabulary itself (``REASONING_EFFORTS``), so a published option is
+        one a launch can select and the launch gate validates against, never a second list. The
+        options are launch-settable and NOT session-settable: eve compiles the level into the running
+        application, which is why ``set_effort`` reports ``unsupported`` and a change means a new
+        runtime launch.
+
+        ``default_effort`` and ``selected_effort`` are different facts and are not folded together:
+        the default is the level a launch that names none runs at, while the selection is the
+        configuration this runtime was started under -- a fact about the run rather than a menu.
         """
 
         return CapabilitySnapshot(
@@ -705,9 +722,22 @@ class EveSessionAdapter:
                     display_name=selection.model_key,
                     description=EVE_MODEL_UNKNOWN_DETAIL,
                     resolved_model=selection.model_key,
-                    supports_effort=False,
-                    effort_options=(),
-                    default_effort=None,
+                    supports_effort=True,
+                    effort_options=tuple(
+                        EffortOption(
+                            key=level,
+                            display_name=level,
+                            description=(
+                                "Use the provider's own default reasoning level."
+                                if level == PROVIDER_DEFAULT_EFFORT
+                                else None
+                            ),
+                            launch_settable=True,
+                            session_settable=False,
+                        )
+                        for level in REASONING_EFFORTS
+                    ),
+                    default_effort=PROVIDER_DEFAULT_EFFORT,
                     is_default=True,
                     selectable=True,
                     provider=selection.provider_name,
@@ -907,6 +937,7 @@ def _verify_effective_selection(expected: EveLaunchSelection, actual: EveLaunchS
 __all__ = [
     "DEFAULT_EVE_ADAPTER_LIMITS",
     "EVE_ADAPTER_ID",
+    "PROVIDER_DEFAULT_EFFORT",
     "REASONING_EFFORTS",
     "TURN_BOUNDARY_EVENT_TYPES",
     "EveAdapterLimits",
