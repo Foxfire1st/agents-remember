@@ -22,13 +22,17 @@ from agents_remember.application.knowledge_snapshot import (
     open_knowledge_candidate,
 )
 from agents_remember.memory.knowledge import candidate_workspace
-from agents_remember.memory.knowledge.schema import schema_fingerprint
+from agents_remember.memory.knowledge.schema_generations import (
+    CURRENT_GENERATION,
+    GENERATION_1,
+)
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.snapshot import (
     DiscardCandidate,
     PublishedCandidate,
     candidate_receipt_path,
 )
+from generation_test_support import create_generation_1_store, declared_pair
 from snapshot_lifecycle_test_support import (
     SnapshotCase,
     build_case,
@@ -57,14 +61,26 @@ def candidate(tmp_path: Path) -> SnapshotCase:
 def test_a_created_candidate_reopens_with_its_receipt_and_the_declared_schema(
     candidate: SnapshotCase,
 ) -> None:
+    """Re-scoped by `KS-R10` §Shipped Assertions.
+
+    Both of the generation assertions this case shipped with are falsified by requirement 2.7:
+    creation declares the *newest* generation the build supports -- generation 2 after this leaf --
+    rather than the build's generation 1. The replacement fact reads the declared generation's own
+    ``(schema name, user_version)`` pair and that generation's **recorded** fingerprint constant,
+    from its own record, instead of the running build's live ``schema_fingerprint()``. The
+    generation-1 fact stays asserted, as its own case, by
+    :func:`test_a_version_1_candidate_keeps_the_receipt_it_was_written_with` below.
+    """
+
     created = create(candidate)
 
     assert created.state == "created"
     assert created.identity is not None
     assert created.receipt is not None
     assert created.identity.repository_id == candidate.repository.repository_id
-    assert created.identity.schema_version == "ar-knowledge-sqlite/v1"
-    assert created.receipt.schema_fingerprint == schema_fingerprint()
+    assert created.identity.schema_version == CURRENT_GENERATION.schema_name
+    assert created.receipt.schema_version == CURRENT_GENERATION.schema_name
+    assert created.receipt.schema_fingerprint == CURRENT_GENERATION.fingerprint
     assert created.receipt.candidate_ref == candidate.resolution.candidate_ref
     assert created.receipt.memory.tree_id == candidate.resolution.memory_tree_id
 
@@ -76,6 +92,28 @@ def test_a_created_candidate_reopens_with_its_receipt_and_the_declared_schema(
     assert candidate.database_path.exists()
     assert candidate.receipt_path.exists()
     assert row_counts(candidate.database_path)["repository"] == 1
+
+
+def test_a_version_1_candidate_keeps_the_receipt_it_was_written_with(
+    candidate: SnapshotCase,
+) -> None:
+    """The generation-1 half of the re-scoped assertion, on a dataset that really is generation 1.
+
+    A version-1 store opened by generation-2 code reports generation 1's own pair and generation 1's
+    recorded fingerprint, so the receipt written against it carries those facts and the store keeps
+    its version instead of being silently upgraded.
+    """
+
+    repository_id = candidate.repository.repository_id
+    with create_generation_1_store(candidate.database_path, repository_id) as store:
+        assert store.schema.schema_name == GENERATION_1.schema_name
+        assert store.schema.user_version == GENERATION_1.user_version
+        assert store.schema.fingerprint == GENERATION_1.fingerprint
+        assert store.snapshot_identity().schema_version == GENERATION_1.schema_name
+        assert declared_pair(candidate.database_path) == (
+            GENERATION_1.schema_name,
+            GENERATION_1.user_version,
+        )
 
 
 def test_two_candidates_cloned_from_one_baseline_diverge_and_share_no_file_or_row(

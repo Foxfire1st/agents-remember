@@ -36,11 +36,18 @@ from typing import Any
 
 import apsw
 
-from agents_remember.memory.knowledge import schema as declared_schema
 from agents_remember.memory.knowledge.connection import open_read_only_database
+from agents_remember.memory.knowledge.export_refusals import unsupported_schema_refusal
 from agents_remember.memory.knowledge.merge_refusals import (
     missing_required_table_refusal,
     schema_mismatch_refusal,
+)
+from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
+from agents_remember.memory.knowledge.schema_generations import (
+    SchemaGeneration,
+    create_schema_statements,
+    generation_of_database,
+    registered_version_listing,
 )
 from agents_remember.models.knowledge.result import KnowledgeOperation, KnowledgeRefusal
 
@@ -68,28 +75,127 @@ class TableStructure:
 
 @dataclass(frozen=True)
 class DatabaseStructure:
-    """One database's whole declared structure, plus what it declares outside the manifest."""
+    """One database's whole declared structure, plus what it declares outside the manifest.
 
+    ``generation`` is the generation the structure was **read under**: the one the dataset itself
+    declares, selected before anything was classified. It is carried rather than re-derived, because
+    a structure that has already dropped the tables it did not recognise into ``extra_tables`` can no
+    longer describe a foreign generation -- which is exactly the shape a partially threaded preflight
+    produced: a version-1 input validated against generation 2 and then asked for generation 2's
+    tables.
+    """
+
+    generation: SchemaGeneration
     user_version: int
     declared_tables: Mapping[str, TableStructure]
     extra_tables: tuple[str, ...]
 
 
-def declared_structure() -> DatabaseStructure:
-    """Return the structure this package's schema generation actually creates."""
+def declared_generation(database_path: Path) -> SchemaGeneration:
+    """Select the generation one input *declares*, without comparing anything yet.
 
-    connection = apsw.Connection(":memory:")
+    An open database declares its generation through ``PRAGMA user_version`` alone, so this is a
+    registry lookup over that version and nothing else. A version the registry does not contain is
+    refused here as an unsupported generation -- it is never re-read under another generation to
+    obtain a green result.
+    """
+
+    connection = open_read_only_database(database_path)
     try:
-        for statement in declared_schema.create_schema_statements():
-            connection.execute(statement)
-        connection.execute(f"PRAGMA user_version = {declared_schema.SCHEMA_USER_VERSION}")
-        return read_structure(connection)
+        return generation_of_database(connection)
     finally:
         connection.close()
 
 
-def read_structure(connection: apsw.Connection) -> DatabaseStructure:
-    """Return the declared structure of one open database, without writing anything."""
+def selected_generation(
+    databases: Mapping[str, Path], operation: KnowledgeOperation
+) -> SchemaGeneration | KnowledgeRefusal:
+    """Resolve every input's declared generation and require them to agree (requirement 6.1).
+
+    The preflight reads each input's generation **first**, and when the inputs disagree it refuses
+    before any session exists rather than picking one input's generation as the winner, migrating an
+    input, or proceeding. When they agree, that agreed generation is the operation's selected
+    generation: a v1/v1/v1 merge on the generation-2 build therefore proceeds under generation 1,
+    which is what keeps requirement 5.1 true through the mechanism meant to serve it.
+    """
+
+    selected: SchemaGeneration | None = None
+    first_role: str | None = None
+    for role in ("base", "left", "right"):
+        path = Path(databases[role])
+        try:
+            declared = declared_generation(path)
+        except KnowledgeStorageError as error:
+            return unsupported_schema_refusal(
+                operation,
+                f"the {role} input does not declare a schema generation this build supports: "
+                f"{error}",
+                expected=registered_version_listing(),
+                observed=str(_observed_user_version(path)),
+            )
+        except (apsw.Error, OSError) as error:
+            return schema_mismatch_refusal(
+                operation, f"the {role} input could not be read: {error}"
+            )
+        if selected is None:
+            selected, first_role = declared, role
+            continue
+        if declared != selected:
+            return schema_mismatch_refusal(
+                operation,
+                f"the {role} input declares user_version {declared.user_version} while the "
+                f"{first_role} input declares {selected.user_version}. Datasets of different "
+                "generations are not merged: an input is never migrated and one input's generation "
+                "is never chosen as the winner",
+                expected=str(selected.user_version),
+                observed=str(declared.user_version),
+            )
+    if selected is None:  # pragma: no cover - the three roles are always supplied
+        raise KnowledgeStorageError("a merge names three inputs; none was supplied")
+    return selected
+
+
+def _observed_user_version(database_path: Path) -> object:
+    """Return what one file records as its generation, for a refusal's ``observed`` fact."""
+
+    try:
+        connection = open_read_only_database(database_path)
+    except (apsw.Error, OSError):
+        return "<unreadable>"
+    try:
+        return int(next(iter(connection.execute("PRAGMA user_version")))[0])
+    except (apsw.Error, StopIteration):  # pragma: no cover - a readable file always answers
+        return "<unreadable>"
+    finally:
+        connection.close()
+
+
+def declared_structure(generation: SchemaGeneration) -> DatabaseStructure:
+    """Return the structure one schema generation actually creates.
+
+    The structure is derived by creating that generation's DDL in a private in-memory database and
+    introspecting the result, so the comparison runs against the same source of truth that creates a
+    database rather than against a second hand-written description of it.
+    """
+
+    connection = apsw.Connection(":memory:")
+    try:
+        for statement in create_schema_statements(generation):
+            connection.execute(statement)
+        connection.execute(f"PRAGMA user_version = {generation.user_version}")
+        return read_structure(connection, generation)
+    finally:
+        connection.close()
+
+
+def read_structure(connection: apsw.Connection, generation: SchemaGeneration) -> DatabaseStructure:
+    """Return the declared structure of one open database, read under one generation.
+
+    Every table is classified against **the selected generation's** manifest, not against the
+    running build's. That is the whole of requirement 6.2's threading: a version-1 input read under
+    generation 1 has no table it did not recognise, and a generation-2 input read under generation 1
+    reports generation 2's tables as extra rather than silently accepting them.
+    """
 
     user_version = int(next(iter(connection.execute("PRAGMA user_version")))[0])
     names = sorted(
@@ -97,23 +203,22 @@ def read_structure(connection: apsw.Connection) -> DatabaseStructure:
         for row in connection.execute("SELECT name FROM sqlite_schema WHERE type = 'table'")
         if not str(row[0]).startswith(_INTERNAL_TABLE_PREFIX)
     )
-    declared = {
-        name: _read_table(connection, name)
-        for name in names
-        if name in declared_schema.CANONICAL_TABLES
-    }
-    extra = tuple(name for name in names if name not in declared_schema.CANONICAL_TABLES)
+    declared = {name: _read_table(connection, name) for name in names if name in generation.tables}
+    extra = tuple(name for name in names if name not in generation.tables)
     return DatabaseStructure(
-        user_version=user_version, declared_tables=declared, extra_tables=extra
+        generation=generation,
+        user_version=user_version,
+        declared_tables=declared,
+        extra_tables=extra,
     )
 
 
-def read_database_structure(database_path: Path) -> DatabaseStructure:
-    """Return the declared structure of one database file, read-only."""
+def read_database_structure(database_path: Path, generation: SchemaGeneration) -> DatabaseStructure:
+    """Return the declared structure of one database file, read-only, under one generation."""
 
     connection = open_read_only_database(database_path)
     try:
-        return read_structure(connection)
+        return read_structure(connection, generation)
     finally:
         connection.close()
 
@@ -123,20 +228,34 @@ def require_supported_structure(
     operation: KnowledgeOperation,
     *,
     role: str,
-    declared: DatabaseStructure | None = None,
+    generation: SchemaGeneration | None = None,
 ) -> KnowledgeRefusal | None:
     """Return the refusal for one input whose structure is not the supported generation, or None.
 
     ``role`` names which of the merge's three positions the input occupies, so a refusal says which
-    dataset disagreed rather than only that one did.
+    dataset disagreed rather than only that one did. ``generation`` is the operation's **selected**
+    generation; when it is omitted the input's own declared generation is selected here, which is
+    the same read requirement 6.1 performs, and keeps a single-input caller honest.
     """
 
-    expected = declared if declared is not None else declared_structure()
     try:
-        observed = read_database_structure(database_path)
+        selected = generation if generation is not None else declared_generation(database_path)
+    except KnowledgeStorageError as error:
+        return unsupported_schema_refusal(
+            operation,
+            f"the {role} input does not declare a schema generation this build supports: {error}",
+            expected=registered_version_listing(),
+            observed=str(_observed_user_version(database_path)),
+        )
     except (apsw.Error, OSError) as error:
         return schema_mismatch_refusal(operation, f"the {role} input could not be read: {error}")
-    return compare_structures(expected, observed, operation, role=role)
+    try:
+        observed = read_database_structure(database_path, selected)
+    except (apsw.Error, OSError) as error:
+        return schema_mismatch_refusal(operation, f"the {role} input could not be read: {error}")
+    return compare_structures(
+        declared_structure(selected), observed, operation, role=role, generation=selected
+    )
 
 
 def compare_structures(
@@ -145,6 +264,7 @@ def compare_structures(
     operation: KnowledgeOperation,
     *,
     role: str,
+    generation: SchemaGeneration | None = None,
 ) -> KnowledgeRefusal | None:
     """Return the first structural difference between two declared structures, or None.
 
@@ -152,8 +272,12 @@ def compare_structures(
     generation does not declare, then the per-table column, key, index and trigger comparison. The
     first difference is returned rather than a list, because a caller acts on the reason the merge
     did not start and a later difference in the same input would not change that.
+
+    The manifest and the column map come from the **selected generation** -- the one both structures
+    were read under -- rather than from the running build.
     """
 
+    selected = generation if generation is not None else expected.generation
     if observed.user_version != expected.user_version:
         return schema_mismatch_refusal(
             operation,
@@ -161,9 +285,7 @@ def compare_structures(
             expected=str(expected.user_version),
             observed=str(observed.user_version),
         )
-    missing = [
-        table for table in declared_schema.CANONICAL_TABLES if table not in observed.declared_tables
-    ]
+    missing = [table for table in selected.tables if table not in observed.declared_tables]
     if missing:
         return missing_required_table_refusal(
             operation, missing[0], observed=f"absent from the {role} input"
@@ -173,11 +295,11 @@ def compare_structures(
             operation,
             f"the {role} input carries a table the supported schema does not declare",
             table=table,
-            expected="|".join(declared_schema.CANONICAL_TABLES),
+            expected="|".join(selected.tables),
             observed=table,
         )
-    for table in declared_schema.CANONICAL_TABLES:
-        difference = _compare_table(operation, role, table, expected, observed)
+    for table in selected.tables:
+        difference = _compare_table(operation, role, table, (expected, observed), selected)
         if difference is not None:
             return difference
     return None
@@ -187,14 +309,20 @@ def _compare_table(
     operation: KnowledgeOperation,
     role: str,
     table: str,
-    expected: DatabaseStructure,
-    observed: DatabaseStructure,
+    pair: tuple[DatabaseStructure, DatabaseStructure],
+    generation: SchemaGeneration,
 ) -> KnowledgeRefusal | None:
-    """Return the first difference inside one canonical table, or None."""
+    """Return the first difference inside one canonical table, or None.
 
+    ``pair`` is ``(expected, observed)``. They travel together because every check below compares
+    one against the other, and passing them as one value keeps this function inside the argument
+    limit the structural rules enforce.
+    """
+
+    expected, observed = pair
     want = expected.declared_tables[table]
     have = observed.declared_tables[table]
-    expected_columns = declared_schema.CANONICAL_COLUMNS[table]
+    expected_columns = generation.columns[table]
     observed_columns = tuple(column[0] for column in have.columns)
     if observed_columns != expected_columns:
         return schema_mismatch_refusal(

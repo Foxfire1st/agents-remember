@@ -40,6 +40,8 @@ KnowledgeOperation = Literal[
     "create_family",
     "create_family_revision",
     "create_source_anchor",
+    "author_route",
+    "set_governing_route",
     "remove_source_anchor",
     "create_family_member",
     "remove_family_member",

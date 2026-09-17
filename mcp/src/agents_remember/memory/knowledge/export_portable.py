@@ -91,14 +91,22 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.kernel.canonical_json import CANONICAL_JSON_KWARGS
-from agents_remember.memory.knowledge import logical, schema
+from agents_remember.memory.knowledge import logical
 from agents_remember.memory.knowledge.export_refusals import (
     invalid_export_refusal,
     non_canonical_export_refusal,
     unsupported_schema_refusal,
 )
 from agents_remember.memory.knowledge.refusals import RefusalFacts
-from agents_remember.models.knowledge.context import KNOWLEDGE_SCHEMA_NAME
+from agents_remember.memory.knowledge.schema_generations import (
+    SchemaGeneration,
+    declared_columns_for,
+    declared_json_columns_for,
+    declared_version_string,
+    generation_for_key,
+    generation_for_name,
+    registered_key_listing,
+)
 from agents_remember.models.knowledge.portable import PortableValidation
 from agents_remember.models.knowledge.result import KnowledgeRefusal
 
@@ -160,6 +168,10 @@ class ExportDocument:
     schema_fingerprint: str
     logical_digest: str
     tables: dict[str, Any]
+    # The generation the artifact **declares**, selected from the artifact and carried from here on.
+    # Every table list, column order, key registry and JSON-column registry below reads it, so an
+    # artifact is never read under the running build's generation.
+    generation: SchemaGeneration
 
 
 @dataclass(frozen=True)
@@ -188,6 +200,7 @@ def export_envelope(
     tables: Mapping[str, list[dict[str, Any]]],
     repository_id: str,
     *,
+    generation: SchemaGeneration,
     logical_digest: str | None = None,
     schema_fingerprint: str | None = None,
 ) -> dict[str, Any]:
@@ -206,20 +219,30 @@ def export_envelope(
     computed it from the live dataset and must not compute a second, differently-scoped value.
     """
 
-    ordered = {table: _ordered_rows(table, tables[table]) for table in schema.CANONICAL_TABLES}
+    ordered = {
+        table: _ordered_rows(
+            tables[table],
+            generation.columns[table],
+            generation.json_columns.get(table, frozenset()),
+        )
+        for table in generation.tables
+    }
     return {
         "format": EXPORT_FORMAT,
-        "schema": KNOWLEDGE_SCHEMA_NAME,
-        "userVersion": schema.SCHEMA_USER_VERSION,
-        "schemaFingerprint": schema_fingerprint or schema.schema_fingerprint(),
+        "schema": generation.schema_name,
+        "userVersion": generation.user_version,
+        "schemaFingerprint": schema_fingerprint or generation.fingerprint,
         "repositoryId": repository_id,
-        "logicalDigest": logical_digest
-        or logical.logical_digest_of_tables(KNOWLEDGE_SCHEMA_NAME, ordered),
+        "logicalDigest": logical_digest or logical.logical_digest_of_tables(generation, ordered),
         "tables": ordered,
     }
 
 
-def _ordered_rows(table: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _ordered_rows(
+    rows: list[dict[str, Any]],
+    columns: tuple[str, ...],
+    json_columns: frozenset[str],
+) -> list[dict[str, Any]]:
     """Return one table's rows keyed in declared column order, with typed values canonicalised.
 
     Two orders are at stake and only one of them is the source's. The *columns* are re-keyed into
@@ -231,8 +254,6 @@ def _ordered_rows(table: str, rows: list[dict[str, Any]]) -> list[dict[str, Any]
     this package's own reader refuses.
     """
 
-    columns = schema.CANONICAL_COLUMNS[table]
-    json_columns = logical.JSON_COLUMNS.get(table, frozenset())
     return [
         {
             column: _canonical_json_value(row[column]) if column in json_columns else row[column]
@@ -284,20 +305,41 @@ def _validated_header(envelope: Mapping[str, Any]) -> dict[str, Any]:
     """Return one envelope with its header scalars spelled the way this build validates them.
 
     The rule is deliberately narrow. It rewrites exactly the values a *loose* comparison would call
-    this build's generation -- ``1.0``, ``true`` -- into the integer the header check validates, and
-    it leaves every other declaration untouched, including a different generation and a
-    differently-typed string. The reader applies the same rule's strict half: the rendering it
+    the declared generation -- ``1.0``, ``true`` -- into the integer the header check validates, and
+    it leaves every other declaration untouched, including a different generation, a differently
+    typed string, and a number that is not the declared version at all. A boolean is always
+    rewritten, because no JSON boolean is ever a version this store writes. The reader applies the same rule's strict half: the rendering it
     compares an artifact against keeps the declared type, and the header check then refuses a
     respelled generation by name. Between them, neither the reader accepts the form nor the encoder
     emits it.
     """
 
+    # The frame is the generation the envelope's **schema name** declares, rather than the
+    # ``(schema, userVersion)`` pair: the respelling this repairs is precisely the version's JSON
+    # type, so the pair does not resolve and a pair-based frame would leave the respelling in place.
+    # For a generation-1 envelope this is generation 1 and the behaviour is the shipped one.
+    declared = generation_for_name(envelope.get("schema"))
     return {
-        key: schema.SCHEMA_USER_VERSION
-        if key == "userVersion" and value == schema.SCHEMA_USER_VERSION
+        key: declared.user_version
+        if key == "userVersion"
+        and declared is not None
+        and type(value) is not int
+        and (isinstance(value, bool) or value == declared.user_version)
         else value
         for key, value in envelope.items()
     }
+
+
+def document_generation(document: Mapping[str, Any]) -> SchemaGeneration | None:
+    """Return the generation one document's header declares, or ``None`` when none is registered.
+
+    A document whose generation is unregistered is refused one step later by the header check, so
+    this returning ``None`` is not a silent fallback to another generation: it means the rendering
+    below has no declared table order to impose and keeps the document's own key order, which is
+    exactly what an artifact of an unknown shape is rendered as before it is refused.
+    """
+
+    return generation_for_key(document.get("schema"), document.get("userVersion"))
 
 
 def _render_document(envelope: Mapping[str, Any]) -> str:
@@ -396,23 +438,35 @@ def _plain_tables(document: Mapping[str, Any]) -> dict[str, Any]:
     tables = document["tables"]
     if not isinstance(tables, Mapping):
         return _plain_document_value(tables)
-    declared = [table for table in schema.CANONICAL_TABLES if table in tables]
-    undeclared = [table for table in tables if table not in schema.CANONICAL_TABLES]
+    generation = document_generation(document)
+    declared_tables = generation.tables if generation is not None else ()
+    declared = [table for table in declared_tables if table in tables]
+    undeclared = [table for table in tables if table not in declared_tables]
     return {table: _canonical_rows(table, tables[table]) for table in (*declared, *undeclared)}
 
 
 def _canonical_rows(table: str, rows: Any) -> Any:
-    """Return one table's rows with declared column order and canonical typed values."""
+    """Return one table's rows with declared column order and canonical typed values.
 
-    if table not in schema.CANONICAL_COLUMNS or not isinstance(rows, list):
+    The column frame comes from the document's own generation when it declares a registered one, and
+    otherwise from the registry as a whole. The fallback is not a fallback *between generations*: the
+    gate this rendering serves runs before the header check, and it is deciding whether the text is
+    the canonical spelling of the document it holds. Without the registry frame a document whose
+    header is about to be refused would be rendered with its own nested spellings intact, so a
+    respelling inside it would be invisible and the artifact would be refused for the wrong reason.
+    """
+
+    if not isinstance(rows, list):
         return _plain_document_value(rows)
     plain = _plain_document_value(rows)
     if not all(isinstance(row, Mapping) for row in plain):
         return plain
-    columns = schema.CANONICAL_COLUMNS[table]
+    columns = declared_columns_for(table)
+    if columns is None:
+        return plain
     if not all([key for key in row] == list(columns) for row in plain):
         return plain
-    return _ordered_rows(table, plain)
+    return _ordered_rows(plain, columns, declared_json_columns_for(table) or frozenset())
 
 
 def _plain_document_value(value: Any) -> Any:
@@ -480,7 +534,7 @@ def parse_export(text: str) -> ExportDocument | KnowledgeRefusal:
     shaped = _shape_refusal(document)
     if shaped is not None:
         return shaped
-    incomplete = _manifest_refusal(document)
+    incomplete = _manifest_refusal(document, document_generation(document))
     if incomplete is not None:
         return incomplete
     misrendered = _non_canonical_refusal(text, document)
@@ -516,7 +570,9 @@ def _shape_refusal(document: Any) -> KnowledgeRefusal | None:
     return None
 
 
-def _manifest_refusal(document: Mapping[str, Any]) -> KnowledgeRefusal | None:
+def _manifest_refusal(
+    document: Mapping[str, Any], generation: SchemaGeneration | None
+) -> KnowledgeRefusal | None:
     """Refuse a document whose table set is not this schema generation's manifest.
 
     This runs *before* the canonical-form gate, which is a decision rather than an accident: a
@@ -529,14 +585,19 @@ def _manifest_refusal(document: Mapping[str, Any]) -> KnowledgeRefusal | None:
     tables = document["tables"]
     if not isinstance(tables, Mapping):
         return _row_refusal("the artifact's tables are not a JSON object", table="tables")
-    unknown = [name for name in tables if name not in schema.CANONICAL_TABLES]
+    # A document whose declared generation is unregistered has no table manifest to compare against,
+    # and is refused by the header check one step later; comparing it against a *different*
+    # generation's manifest here would name the wrong failure.
+    if generation is None:
+        return None
+    unknown = [name for name in tables if name not in generation.tables]
     if unknown:
         return _row_refusal(
             f"the artifact carries table(s) {', '.join(sorted(unknown))} which this schema "
             "generation does not declare",
             table=_short(unknown[0]),
         )
-    missing = [name for name in schema.CANONICAL_TABLES if name not in tables]
+    missing = [name for name in generation.tables if name not in tables]
     if missing:
         return _row_refusal(
             f"the artifact does not carry {', '.join(missing)}; a complete export includes every "
@@ -640,11 +701,11 @@ def validate_export(
 
     tables = document.tables
     decoded: dict[str, list[dict[str, Any]]] = {}
-    for table in schema.CANONICAL_TABLES:
+    for table in document.generation.tables:
         rows = tables[table]
         if not isinstance(rows, list):
             return _invalid("the artifact's rows for this table are not a JSON array", table=table)
-        checked = _validate_table_rows(table, rows)
+        checked = _validate_table_rows(table, rows, document.generation)
         if isinstance(checked, KnowledgeRefusal):
             return ValidatedExport(refusal=checked)
         decoded[table] = checked
@@ -654,7 +715,7 @@ def validate_export(
 def body_of(document: ExportDocument) -> dict[str, Any]:
     """Return the canonical logical body one artifact carries, through the one encoder."""
 
-    return logical.logical_body_from_tables(KNOWLEDGE_SCHEMA_NAME, document.tables)
+    return logical.logical_body_from_tables(document.generation, document.tables)
 
 
 def logical_body_of_artifact(text: str) -> dict[str, Any]:
@@ -688,10 +749,10 @@ def _read_envelope(document: _Document) -> ExportDocument | KnowledgeRefusal:
     header = _validate_header(document)
     if isinstance(header, KnowledgeRefusal):
         return header
-    return _read_tables(document)
+    return _read_tables(document, header)
 
 
-def _validate_header(document: _Document) -> KnowledgeRefusal | None:
+def _validate_header(document: _Document) -> SchemaGeneration | KnowledgeRefusal:
     """Refuse a header that does not declare this format and this schema generation.
 
     Four declarations are compared against the manifest this build implements. A version string
@@ -716,37 +777,44 @@ def _validate_header(document: _Document) -> KnowledgeRefusal | None:
             record_id=_short(declared_format),
         )
     declared_schema = document["schema"]
-    if declared_schema != KNOWLEDGE_SCHEMA_NAME:
-        return unsupported_schema_refusal(
-            "import_knowledge_dataset",
-            f"the artifact declares schema {declared_schema!r}; this store implements "
-            f"{KNOWLEDGE_SCHEMA_NAME!r}",
-            expected=KNOWLEDGE_SCHEMA_NAME,
-            observed=_short(declared_schema),
-        )
     declared_version = document["userVersion"]
-    if type(declared_version) is not int or declared_version != schema.SCHEMA_USER_VERSION:
+    # Dispatch selects the generation **from the artifact**, type-strictly on ``userVersion``. The
+    # type strictness is preserved rather than re-derived: in Python ``1 == 1.0 == True`` and all
+    # three hash alike, so a lookup that was not type-strict would resolve the spellings ``1.0`` and
+    # ``true`` to generation 1 -- which the reader deliberately refuses.
+    generation = generation_for_key(declared_schema, declared_version)
+    if generation is None:
+        if generation_for_name(declared_schema) is None:
+            return unsupported_schema_refusal(
+                "import_knowledge_dataset",
+                f"the artifact declares schema {declared_schema!r}; this store implements one of "
+                f"{registered_key_listing()}",
+                expected=registered_key_listing(),
+                observed=_short(declared_schema),
+            )
         return unsupported_schema_refusal(
             "import_knowledge_dataset",
-            f"the artifact declares user version {declared_version!r}; the supported generation is "
-            f"{schema.SCHEMA_USER_VERSION}, spelled as the JSON integer "
-            f"{schema.SCHEMA_USER_VERSION}",
-            expected=str(schema.SCHEMA_USER_VERSION),
+            f"the artifact declares user version {declared_version!r}; the generation "
+            f"{declared_schema!r} is spelled as the JSON integer "
+            f"{declared_version_string(declared_schema)}, not {declared_version!r}",
+            expected=declared_version_string(declared_schema),
             observed=_short(declared_version),
         )
     fingerprint = document["schemaFingerprint"]
-    if fingerprint != schema.schema_fingerprint():
+    if fingerprint != generation.fingerprint:
         return unsupported_schema_refusal(
             "import_knowledge_dataset",
             "the artifact was written for a different schema generation: its fingerprint is not "
-            "this build's",
-            expected=schema.schema_fingerprint(),
+            "the declared generation's",
+            expected=generation.fingerprint,
             observed=_short(fingerprint),
         )
-    return None
+    return generation
 
 
-def _read_tables(document: _Document) -> ExportDocument | KnowledgeRefusal:
+def _read_tables(
+    document: _Document, generation: SchemaGeneration
+) -> ExportDocument | KnowledgeRefusal:
     """Read the digest, the declared namespace and the table mapping out of one checked header."""
 
     digest = document["logicalDigest"]
@@ -764,15 +832,18 @@ def _read_tables(document: _Document) -> ExportDocument | KnowledgeRefusal:
         schema_fingerprint=str(document["schemaFingerprint"]),
         logical_digest=digest,
         tables=document["tables"],
+        generation=generation,
     )
 
 
-def _validate_table_rows(table: str, rows: list[Any]) -> list[dict[str, Any]] | KnowledgeRefusal:
+def _validate_table_rows(
+    table: str, rows: list[Any], generation: SchemaGeneration
+) -> list[dict[str, Any]] | KnowledgeRefusal:
     """Check one table's rows for declared column order, declared types and unique primary keys."""
 
-    columns = schema.CANONICAL_COLUMNS[table]
-    keys = logical.PRIMARY_KEYS[table]
-    json_columns = logical.JSON_COLUMNS.get(table, frozenset())
+    columns = generation.columns[table]
+    keys = generation.primary_keys[table]
+    json_columns = generation.json_columns.get(table, frozenset())
     seen: set[tuple[Any, ...]] = set()
     checked: list[dict[str, Any]] = []
     for position, row in enumerate(rows):
@@ -929,7 +1000,7 @@ def _validate_dataset(
                 observed=bound,
             )
         )
-    recomputed = logical.logical_digest_of_tables(KNOWLEDGE_SCHEMA_NAME, tables)
+    recomputed = logical.logical_digest_of_tables(document.generation, tables)
     if recomputed != document.logical_digest:
         return ValidatedExport(
             refusal=_row_refusal(
@@ -946,9 +1017,9 @@ def _validate_dataset(
             schema_fingerprint=document.schema_fingerprint,
             logical_digest=recomputed,
             declared_digest=document.logical_digest,
-            row_counts={table: len(tables[table]) for table in schema.CANONICAL_TABLES},
+            row_counts={table: len(tables[table]) for table in document.generation.tables},
         ),
-        tables={table: list(tables[table]) for table in schema.CANONICAL_TABLES},
+        tables={table: list(tables[table]) for table in document.generation.tables},
     )
 
 

@@ -37,6 +37,7 @@ from agents_remember.memory.knowledge.merge_validation import (
     require_applied_changes,
     require_immutable_revisions_preserved,
 )
+from agents_remember.memory.knowledge.schema_generations import CURRENT_GENERATION
 from agents_remember.models.knowledge.merge import (
     MergeBaseRequest,
     MergeRequest,
@@ -145,7 +146,12 @@ def test_a_table_carrying_an_insert_and_a_conflicting_update_names_the_conflicti
         authored.append(add_invariant(states["right"], case, "the right side's own obligation"))
 
     case = build_case(tmp_path, diverging_revisions=False, diverging_identities=False, shape=shape)
-    delta = build_delta(case.state_path("right"), case.state_path("base"), side="right")
+    delta = build_delta(
+        case.state_path("right"),
+        case.state_path("base"),
+        side="right",
+        generation=CURRENT_GENERATION,
+    )
     operations = [(change.table, change.operation) for change in delta.operations]
     expected = f"{case.repository.repository_id}/{BASE_INVARIANT_ID}"
 
@@ -234,7 +240,12 @@ def test_a_candidate_that_dropped_an_intended_change_is_refused(case: MergeCase)
     which reported success while dropping an operation would leave behind.
     """
 
-    delta = build_delta(case.state_path("right"), case.state_path("base"), side="right")
+    delta = build_delta(
+        case.state_path("right"),
+        case.state_path("base"),
+        side="right",
+        generation=CURRENT_GENERATION,
+    )
     lacking = copy_closed(
         case.state_path("left"), case.state_path("left").parent / "lacking.sqlite"
     )

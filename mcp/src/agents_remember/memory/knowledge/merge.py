@@ -50,7 +50,6 @@ import apsw
 
 from agents_remember.errors import LockCapabilityError
 from agents_remember.kernel.file_lock import exclusive_file_lock
-from agents_remember.memory.knowledge import schema
 from agents_remember.memory.knowledge.closed_snapshot import freeze_closed_snapshot
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import dataset_identity
@@ -72,8 +71,8 @@ from agents_remember.memory.knowledge.merge_refusals import (
     duplicate_relationship_refusal,
 )
 from agents_remember.memory.knowledge.merge_schema import (
-    declared_structure,
     require_supported_structure,
+    selected_generation,
 )
 from agents_remember.memory.knowledge.merge_validation import (
     MergeInputs,
@@ -88,6 +87,7 @@ from agents_remember.memory.knowledge.refusals import (
     lock_capability_refusal,
     refusal,
 )
+from agents_remember.memory.knowledge.schema_generations import SchemaGeneration
 from agents_remember.memory.knowledge.store import open_existing_knowledge_store
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.merge import (
@@ -177,6 +177,20 @@ class MergeRun:
     databases: dict[str, Path] | None = None
     deltas: dict[str, Delta] = field(default_factory=dict)
     coverage: list[MergeCoverage] = field(default_factory=list)
+    # The generation the three inputs agreed on, selected once by the preflight and used by every
+    # later step in this operation: the structural comparison, the session's attachment set, the
+    # delta's table list and the merged dataset's own digest (requirements 2.3, 6.1, 6.2). It is
+    # ``None`` only before the preflight has run, and a step that needs it before then is a defect.
+    generation: SchemaGeneration | None = None
+
+    def selected_generation(self) -> SchemaGeneration:
+        """Return the operation's selected generation, or the defect that it was never selected."""
+
+        if self.generation is None:
+            raise KnowledgeMergeDefect(
+                "a merge run reached a step before selecting the generation its inputs agree on"
+            )
+        return self.generation
 
     @property
     def resolution(self) -> MergeBaseResolution:
@@ -241,7 +255,7 @@ def _run_merge(run: MergeRun) -> MergeOutcome:
     moved = require_admitted_identities(run)
     if moved is not None:
         return run.refused(moved)
-    preflight = _preflight(run.paths())
+    preflight = _preflight(run)
     if preflight is not None:
         return run.refused(preflight)
     # Integrity is checked before any delta is derived. A side that rewrote a sealed revision is not
@@ -395,20 +409,37 @@ def require_distinct_roles(databases: dict[str, Path]) -> KnowledgeRefusal | Non
     return None
 
 
-def _preflight(databases: dict[str, Path]) -> KnowledgeRefusal | None:
-    """Compare every input against the supported manifest, before any session exists.
+def _preflight(run: MergeRun) -> KnowledgeRefusal | None:
+    """Compare every input against the generation the inputs agree on, before any session exists.
 
-    The comparison is against the *declared* generation rather than input against input, and that is
+    Requirement 6.1 runs first: each input's declared generation is read, and when the inputs
+    disagree the refusal happens here -- before a session exists, with no input migrated and no
+    input's generation chosen as the winner. When they agree, that agreed generation is recorded on
+    the run as the operation's selected generation, and everything downstream uses it.
+
+    Requirement 6.2 then compares each input structurally against **that** generation rather than
+    against the running build's. Leaving the live globals in place is the failure this exists to
+    prevent: a v1/v1/v1 merge on the generation-2 build would be asked for ``route``,
+    ``knowledge_record`` and ``record_revision`` and refused, which is requirement 5.1 broken by the
+    mechanism meant to serve it.
+
+    The comparison is against the selected generation rather than input against input, and that is
     the stronger check rather than a weaker one: every accepted input is structurally identical to
-    the one manifest, so two accepted inputs cannot disagree with each other. A separate pairwise
-    pass would be unreachable code describing an enforcement no caller performs, which is why there
-    is not one.
+    the one generation, so two accepted inputs cannot disagree with each other. A separate pairwise
+    structural pass would be unreachable code describing an enforcement no caller performs -- the
+    pairwise clause requirement 6.1 restores is the *generation* comparison above.
     """
 
-    declared = declared_structure()
+    selected = selected_generation(run.paths(), MERGE_OPERATION)
+    if isinstance(selected, KnowledgeRefusal):
+        return selected
+    run.generation = selected
     for role in ("base", "left", "right"):
         deny = require_supported_structure(
-            databases[role], MERGE_OPERATION, role=role, declared=declared
+            run.paths()[role],
+            MERGE_OPERATION,
+            role=role,
+            generation=selected,
         )
         if deny is not None:
             return deny
@@ -419,21 +450,24 @@ def _build_covered_deltas(run: MergeRun) -> KnowledgeRefusal | None:
     """Produce one delta at a time, replay it, and record the coverage it proved."""
 
     databases = run.paths()
+    selected = run.selected_generation()
     for side, replay_name in (("left", REPLAY_LEFT_NAME), ("right", REPLAY_RIGHT_NAME)):
-        delta = build_delta(databases[side], databases["base"], side=side)
+        delta = build_delta(databases[side], databases["base"], side=side, generation=selected)
         run.deltas[side] = delta
-        difference = _coverage_refusal(delta, databases)
+        difference = _coverage_refusal(delta, databases, selected)
         if difference is not None:
-            run.coverage.append(_coverage_of(delta, replayed=None))
+            run.coverage.append(_coverage_of(delta, replayed=None, generation=selected))
             return difference
         replayed, denial = replay_delta(delta, run.workspace / replay_name, MERGE_OPERATION)
-        run.coverage.append(_coverage_of(delta, replayed=replayed))
+        run.coverage.append(_coverage_of(delta, replayed=replayed, generation=selected))
         if denial is not None:
             return denial
     return None
 
 
-def _coverage_refusal(delta: Delta, databases: dict[str, Path]) -> KnowledgeRefusal | None:
+def _coverage_refusal(
+    delta: Delta, databases: dict[str, Path], generation: SchemaGeneration
+) -> KnowledgeRefusal | None:
     """Refuse a delta whose operation coverage disagrees with the rows the side changed.
 
     A table whose rows differ between the base and the side must contribute at least one operation.
@@ -441,7 +475,7 @@ def _coverage_refusal(delta: Delta, databases: dict[str, Path]) -> KnowledgeRefu
     operation refuses here rather than discovering it later as an unexplained unequal dataset.
     """
 
-    changed = _changed_tables(databases["base"], databases[delta.side])
+    changed = _changed_tables(databases["base"], databases[delta.side], generation)
     omitted = [table for table in changed if delta.operation_counts[table] == 0]
     if omitted:
         return changeset_incomplete_refusal(
@@ -454,15 +488,21 @@ def _coverage_refusal(delta: Delta, databases: dict[str, Path]) -> KnowledgeRefu
     return None
 
 
-def _changed_tables(base: Path, side: Path) -> tuple[str, ...]:
-    """Return the tables whose rows differ between two datasets, read from the datasets."""
+def _changed_tables(base: Path, side: Path, generation: SchemaGeneration) -> tuple[str, ...]:
+    """Return the tables whose rows differ between two datasets, read from the datasets.
+
+    The table set and the column order come from the **selected generation**, not from the build's
+    pinned generation-1 manifest: a generation-2 merge whose comparison looped generation 1's ten
+    tables would omit the tables generation 2 appends, so a change in one of them would go unseen
+    and the coverage would report a table set the merge never actually compared.
+    """
 
     base_reader = _open(base)
     side_reader = _open(side)
     try:
         changed: list[str] = []
-        for table in schema.CANONICAL_TABLES:
-            columns = ", ".join(schema.CANONICAL_COLUMNS[table])
+        for table in generation.tables:
+            columns = ", ".join(generation.columns[table])
             base_rows = sorted(
                 tuple(row) for row in base_reader.execute(f"SELECT {columns} FROM {table}")
             )
@@ -477,7 +517,9 @@ def _changed_tables(base: Path, side: Path) -> tuple[str, ...]:
         side_reader.close()
 
 
-def _coverage_of(delta: Delta, *, replayed: str | None) -> MergeCoverage:
+def _coverage_of(
+    delta: Delta, *, replayed: str | None, generation: SchemaGeneration
+) -> MergeCoverage:
     """Build the coverage fact for one delta, with or without a successful replay."""
 
     changed = delta.changed_tables
@@ -488,7 +530,7 @@ def _coverage_of(delta: Delta, *, replayed: str | None) -> MergeCoverage:
             operations=delta.operation_counts[table],
             replayed=replayed is not None,
         )
-        for table in schema.CANONICAL_TABLES
+        for table in generation.tables
     )
     return MergeCoverage(
         side=delta.side,  # type: ignore[arg-type]

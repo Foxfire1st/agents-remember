@@ -22,16 +22,17 @@ from agents_remember.application.knowledge import (
     write_authorship,
 )
 from agents_remember.memory.knowledge import (
-    CANONICAL_COLUMNS,
-    CANONICAL_TABLES,
-    SCHEMA_USER_VERSION,
+    logical,
     open_existing_knowledge_store,
     open_knowledge_store,
 )
 from agents_remember.memory.knowledge.records import revision_row, sealed_revision_from_draft
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError, lineage_cycle_refusal
+from agents_remember.memory.knowledge.schema_generations import (
+    CURRENT_GENERATION,
+    GENERATION_1,
+)
 from agents_remember.models.knowledge.authorship import Authorship
-from agents_remember.models.knowledge.context import KNOWLEDGE_SCHEMA_NAME
 from agents_remember.models.knowledge.invariant import InvariantRevision
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.result import (
@@ -39,6 +40,7 @@ from agents_remember.models.knowledge.result import (
     RevisionDraft,
     RevisionRequest,
 )
+from generation_test_support import create_generation_1_store, declared_pair
 from knowledge_fixture_test_support import (
     BASE_DISPLAY_VERSION,
     BASE_STATEMENT,
@@ -114,7 +116,15 @@ def test_two_same_label_successors_reopen_as_separate_revisions(
 def test_reopening_the_same_path_keeps_identity_and_schema(
     fixture: BranchingKnowledgeFixture,
 ) -> None:
-    """A reopen resolves the same identities, digests and schema generation."""
+    """A reopen resolves the same identities, digests and schema generation.
+
+    Re-scoped by `KS-R10` §Shipped Assertions: a created store reports the generation *creation
+    declared* (requirement 2.7), which is the newest generation this build supports -- generation 2
+    after this leaf -- rather than the build's own generation 1. The assertion therefore reads the
+    created generation's recorded pair and fingerprint. The generation-1 fact is asserted by
+    :func:`test_a_version_1_candidate_stays_version_1_when_generation_2_code_opens_it`, which
+    brings a version-1 dataset into being and opens it.
+    """
 
     with fixture.reopen() as first:
         digests = {
@@ -128,12 +138,43 @@ def test_reopening_the_same_path_keeps_identity_and_schema(
         fingerprint = first.schema.fingerprint
     with open_existing_knowledge_store(fixture.database_path, fixture.repository_id) as second:
         assert second.schema.fingerprint == fingerprint
-        assert second.schema.schema_name == KNOWLEDGE_SCHEMA_NAME
-        assert second.schema.user_version == SCHEMA_USER_VERSION
+        assert second.schema.schema_name == CURRENT_GENERATION.schema_name
+        assert second.schema.user_version == CURRENT_GENERATION.user_version
+        assert second.schema.fingerprint == CURRENT_GENERATION.fingerprint
         for revision_id, digest in digests.items():
             stored = second.get_revision(revision_id)
             assert stored is not None
             assert stored.revision.payload_digest == digest
+
+
+def test_a_version_1_candidate_stays_version_1_when_generation_2_code_opens_it(
+    tmp_path: Path,
+) -> None:
+    """Requirement 5.1: an in-flight version-1 dataset keeps its own generation and its identity.
+
+    The store is created through generation 1's own recorded DDL, so it is a genuine version-1
+    dataset: its recorded version is not rewritten, it validates against generation 1's tables,
+    columns and triggers, and it reports generation 1's recorded fingerprint rather than the running
+    build's.
+    """
+
+    repository_id = str(uuid4())
+    with create_generation_1_store(tmp_path / "in-flight-v1.db", repository_id) as store:
+        assert store.schema.schema_name == GENERATION_1.schema_name
+        assert store.schema.user_version == GENERATION_1.user_version
+        assert store.schema.fingerprint == GENERATION_1.fingerprint
+        assert declared_pair(store.database_path) == (
+            GENERATION_1.schema_name,
+            GENERATION_1.user_version,
+        )
+        assert store.snapshot_identity().schema_version == GENERATION_1.schema_name
+        # The dataset digests under generation 1, including the fields that would otherwise move
+        # with the build: its own schema name, its own user_version and its own fingerprint.
+        body = logical.logical_body(store.connection, GENERATION_1)
+        assert body["schema"] == GENERATION_1.schema_name
+        assert body["user_version"] == GENERATION_1.user_version
+        assert body["schema_fingerprint"] == GENERATION_1.fingerprint
+        assert tuple(body["tables"]) == GENERATION_1.tables
 
 
 def test_a_repeated_identical_invariant_is_no_change_and_a_relabel_refuses(
@@ -687,8 +728,16 @@ def test_payload_digest_seals_more_than_the_statement(
 
 
 def test_schema_carries_the_declared_manifest_and_generation(tmp_path: Path) -> None:
-    """The created database carries every canonical table with its declared column order."""
+    """The created database carries the created generation's own manifest and column order.
 
+    Re-scoped by `KS-R10` §Shipped Assertions: the created generation is the one creation declared
+    (requirement 2.7), so the manifest, the column order and the ``user_version`` compared here are
+    read from **that generation's own record** rather than from the build's generation-1 globals.
+    The created table set is a superset check against the selected generation's tables, which is the
+    stronger fact now that a generation appends tables the previous one did not declare.
+    """
+
+    declared = CURRENT_GENERATION
     path = tmp_path / "manifest.db"
     with open_knowledge_store(path, str(uuid4())) as store:
         tables = {
@@ -702,11 +751,11 @@ def test_schema_carries_the_declared_manifest_and_generation(tmp_path: Path) -> 
             table: tuple(
                 str(row[1]) for row in store.connection.execute(f"PRAGMA table_info({table})")
             )
-            for table in CANONICAL_TABLES
+            for table in declared.tables
         }
-    assert set(CANONICAL_TABLES) <= tables
-    assert user_version == SCHEMA_USER_VERSION
-    assert columns == {table: tuple(declared) for table, declared in CANONICAL_COLUMNS.items()}
+    assert set(declared.tables) <= tables
+    assert user_version == declared.user_version
+    assert columns == {table: tuple(declared.columns[table]) for table in declared.tables}
 
 
 def test_partial_schema_is_refused_instead_of_written_through(tmp_path: Path) -> None:

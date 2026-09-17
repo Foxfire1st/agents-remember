@@ -54,6 +54,12 @@ from agents_remember.memory.knowledge.export_portable import (
     canonical_document,
     encode_export,
 )
+from agents_remember.memory.knowledge.schema_generations import (
+    CURRENT_GENERATION,
+    GENERATION_1,
+    generation_for_key,
+    generation_of_database,
+)
 from agents_remember.models.knowledge.candidate import CandidateResolution
 from agents_remember.models.knowledge.context import KNOWLEDGE_SCHEMA_NAME
 from agents_remember.models.knowledge.digest import sealed_revision
@@ -77,7 +83,10 @@ from merge_case_test_support import MergeCase, build_case, copy_closed, file_dig
 
 pytestmark = pytest.mark.integration
 
-TABLE_COUNT = len(schema.CANONICAL_TABLES)
+# The ten tables generation 1 declares. It is a named constant rather than a live manifest read:
+# the datasets these cases build are created as the *newest* generation (requirement 2.7), and a
+# case asserting a generation-1 fact says so by name.
+TABLE_COUNT = len(GENERATION_1.tables)
 
 # The fixture authors one claim whose recorded path resolves nowhere. It is the row the preservation
 # case reads back, and it exists in the shared fixture precisely because storage never resolves a
@@ -134,9 +143,23 @@ def reseal(envelope: dict) -> str:
     """
 
     envelope["logicalDigest"] = logical.logical_digest_of_tables(
-        KNOWLEDGE_SCHEMA_NAME, envelope["tables"]
+        declared_generation_of(envelope), envelope["tables"]
     )
     return reencode(envelope)
+
+
+def declared_generation_of(envelope: dict):
+    """Return the generation one envelope's header declares.
+
+    A case that reseals a mutated artifact must seal it under the generation the artifact itself
+    declares. Sealing it under generation 1 is not a smaller version of the same thing: the digest
+    would cover ten of the sixteen tables the document carries, and the reader would refuse the
+    artifact for a digest mismatch rather than for the content the case mutated.
+    """
+
+    generation = generation_for_key(envelope.get("schema"), envelope.get("userVersion"))
+    assert generation is not None, f"the envelope declares no registered generation: {envelope!r}"
+    return generation
 
 
 def import_into(artifact: str, destination: Path, **kwargs):
@@ -156,9 +179,25 @@ def sqlite_entries(directory: Path) -> list[str]:
 
 
 def row_counts_of(path: Path) -> dict[str, int]:
-    """Return one dataset's row count per canonical table, including the empty ones."""
+    """Return one dataset's row count per declared table, including the empty ones.
 
-    return {table: len(table_rows(path, table)) for table in schema.CANONICAL_TABLES}
+    The table list is the **dataset's own** declared generation's (re-scoped with `KS-R10`: the
+    created generation is generation 2, so a comparison against generation 1's ten names would
+    report a row count for a dataset that also has generation 2's tables).
+    """
+
+    return {table: len(table_rows(path, table)) for table in declared_tables_of(path)}
+
+
+def declared_tables_of(path: Path) -> tuple[str, ...]:
+    """Return the tables one dataset declares, from the generation its own version resolves to."""
+
+    connection = open_read_only_database(path)
+    try:
+        generation = generation_of_database(connection)
+    finally:
+        connection.close()
+    return generation.tables
 
 
 def table_rows(path: Path, table: str) -> list[tuple]:
@@ -292,10 +331,13 @@ def test_the_artifact_is_one_deterministic_document_of_the_declared_shape(
 
     assert tuple(body) == ENVELOPE_KEYS
     assert body["format"] == EXPORT_FORMAT
-    assert body["schema"] == KNOWLEDGE_SCHEMA_NAME
-    assert body["userVersion"] == schema.SCHEMA_USER_VERSION
-    assert body["schemaFingerprint"] == schema.schema_fingerprint()
-    assert len(body["tables"]) == TABLE_COUNT
+    # Re-scoped with `KS-R10` requirement 2.7: the dataset is created as the newest generation the
+    # build supports, so the artifact declares *that* generation's pair and *that* generation's
+    # recorded fingerprint rather than the build's generation-1 constants.
+    assert body["schema"] == CURRENT_GENERATION.schema_name
+    assert body["userVersion"] == CURRENT_GENERATION.user_version
+    assert body["schemaFingerprint"] == CURRENT_GENERATION.fingerprint
+    assert len(body["tables"]) == len(CURRENT_GENERATION.tables)
     assert first.artifact == second.artifact
     assert first.artifact_digest == second.artifact_digest
 
@@ -314,14 +356,16 @@ def test_the_artifact_holds_every_collection_and_the_datasets_own_identity(
     result = exported(fixture)
     body = envelope_of(result.artifact or "")
     fresh = envelope_of(artifact_of(_empty_dataset(tmp_path / "empty")))
-    empty_collections = [table for table in schema.CANONICAL_TABLES if fresh["tables"][table] == []]
+    empty_collections = [
+        table for table in CURRENT_GENERATION.tables if fresh["tables"][table] == []
+    ]
 
     assert body["logicalDigest"] == identity_of(fixture.database_path).logical_digest
     assert result.identity is not None and result.identity.logical_digest == body["logicalDigest"]
-    assert set(body["tables"]) == set(schema.CANONICAL_TABLES)
-    assert all(body["tables"][table] for table in schema.CANONICAL_TABLES)
+    assert set(body["tables"]) == set(CURRENT_GENERATION.tables)
+    assert all(body["tables"][table] for table in GENERATION_1.tables)
     assert fresh["tables"]["repository"] != []
-    assert len(empty_collections) == TABLE_COUNT - 1
+    assert len(empty_collections) == len(CURRENT_GENERATION.tables) - 1
 
 
 def test_rows_and_strings_cross_the_boundary_exactly(
@@ -384,7 +428,7 @@ def test_a_populated_dataset_round_trips_to_an_equal_logical_dataset(
     connection = open_read_only_database(destination)
     try:
         repository = logical.bound_repository(connection)
-        restored_body = logical.logical_body(connection, KNOWLEDGE_SCHEMA_NAME)
+        restored_body = logical.logical_body(connection, generation_of_database(connection))
     finally:
         connection.close()
     recovered_body = canonical_body_of_artifact(result.artifact or "")
@@ -706,7 +750,7 @@ def test_a_complete_projection_of_the_source_tables_still_validates(
 
     body = envelope_of(artifact_of(fixture))
     rebuilt = {key: body[key] for key in ENVELOPE_KEYS}
-    rebuilt["tables"] = {table: body["tables"][table] for table in schema.CANONICAL_TABLES}
+    rebuilt["tables"] = {table: body["tables"][table] for table in CURRENT_GENERATION.tables}
 
     verdict = validate_knowledge_artifact(reencode(rebuilt))
 
@@ -762,9 +806,13 @@ def test_a_document_that_is_not_a_well_formed_artifact_is_refused(
     assert codes == {"invalid_export"}
 
     artifact = artifact_of(fixture)
-    assert '"userVersion":1,' in artifact
+    # Re-scoped with `KS-R10` §Shipped Assertions: the artifact declares **its own** generation's
+    # pair, which is the created generation's -- generation 2 after this leaf -- not the literal
+    # generation-1 rendering.
+    declared_pair_text = f'"userVersion":{CURRENT_GENERATION.user_version},'
+    assert declared_pair_text in artifact
     unrenderable = {
-        name: artifact.replace('"userVersion":1,', f'"userVersion":{spelling},', 1)
+        name: artifact.replace(declared_pair_text, f'"userVersion":{spelling},', 1)
         for name, spelling in (
             ("not_a_json_constant_nan", "NaN"),
             ("not_a_json_constant_infinity", "Infinity"),
@@ -823,7 +871,11 @@ def test_an_artifact_this_build_or_this_namespace_cannot_accept_is_refused(
     """
 
     future = envelope_of(artifact_of(fixture))
-    future["userVersion"] = schema.SCHEMA_USER_VERSION + 1
+    # Re-scoped with `KS-R10` §Shipped Assertions: the mutation is expressed against the fixture's
+    # *own* declared pair. `SCHEMA_USER_VERSION + 1` is generation 2's own version now, so the pair
+    # `(ar-knowledge-sqlite/v2, 2)` is registered and supported; one past the fixture's own version
+    # is the unregistered pair this case is about.
+    future["userVersion"] = CURRENT_GENERATION.user_version + 1
     other_schema = envelope_of(artifact_of(fixture))
     other_schema["schemaFingerprint"] = "a" * 64
     other_format = envelope_of(artifact_of(fixture))

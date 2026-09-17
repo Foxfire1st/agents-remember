@@ -111,6 +111,56 @@ CANONICAL_COLUMNS: Mapping[str, tuple[str, ...]] = {
     ),
 }
 
+# The declared primary key of each canonical table, as the DDL declares it. Row order inside a
+# table is this key's order, so two databases compared by the logical encoder agree on ordering
+# without either of them being asked how it happened to store its rows.
+#
+# These are the DDL's ``PRIMARY KEY`` column lists, which are not always the tables' leading
+# columns: ``invariant_revision`` keys ``(repository_id, revision_id)`` while ``invariant_id`` sits
+# between those two columns. A row is ordered by its key, not by the order its columns were
+# declared in, and ``logical._require_declared_keys`` is what keeps this table honest against the
+# column manifest rather than against an assumption about column order.
+#
+# They are declared here, beside the rest of generation 1's pinned structure, because they are
+# part of what a generation *is*: a generation record carries its own key tuple per table, and a
+# record cannot be assembled from a module that has to import the registry back to exist.
+PRIMARY_KEYS: Mapping[str, tuple[str, ...]] = {
+    "repository": ("repository_id",),
+    "invariant": ("repository_id", "invariant_id"),
+    "invariant_revision": ("repository_id", "revision_id"),
+    "invariant_predecessor": (
+        "repository_id",
+        "invariant_id",
+        "child_revision_id",
+        "parent_revision_id",
+    ),
+    "family": ("repository_id", "family_id"),
+    "family_revision": ("repository_id", "revision_id"),
+    "family_predecessor": (
+        "repository_id",
+        "family_id",
+        "child_revision_id",
+        "parent_revision_id",
+    ),
+    "source_anchor": ("repository_id", "anchor_id"),
+    "family_member": ("repository_id", "member_id"),
+    "realization_claim": ("repository_id", "claim_id"),
+}
+
+# The columns whose stored text is a typed JSON value. They are decoded at the portable boundary;
+# everything else is compared as the exact stored text. ``json_valid`` appears nowhere in the
+# generation-1 DDL, so this registry is declared data rather than something the DDL could be read
+# for -- which is why a generation record carries it and a reader cannot derive it.
+JSON_COLUMNS: Mapping[str, frozenset[str]] = {
+    "invariant": frozenset({"label_provenance"}),
+    "invariant_revision": frozenset({"conditions", "exclusions", "provenance"}),
+    "family": frozenset({"label_provenance"}),
+    "family_revision": frozenset({"provenance"}),
+    "source_anchor": frozenset({"source_identity", "locator", "provenance"}),
+    "family_member": frozenset({"provenance"}),
+    "realization_claim": frozenset({"provenance"}),
+}
+
 # Every primary-key column is declared NOT NULL in SQLite because ``STRICT`` tables do not
 # inherit rowid-key behaviour for a composite key, but a *nullable* key in an ordinary rowid
 # table is a documented SQLite quirk and would silently defeat primary-key identity.

@@ -1158,6 +1158,36 @@ consumers = [
   "mcp/tests/test_knowledge_portable_roundtrip.py",
 ]
 
+[[contract]]
+id = "knowledge-generation-cases"
+owner = "mcp/tests/generation_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_schema_generations.py::test_a_generation_1_dataset_keeps_its_own_body_under_generation_1"
+
+[[artifact]]
+path = "mcp/tests/generation_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "knowledge-generation-cases"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "one version-1 knowledge database created through generation 1's own recorded DDL and recorded PRAGMA user_version, then opened through the production open path"
+introduced_by = "260915-KS-L10"
+lifetime = "permanent"
+permanence_rationale = "Generation 2 makes the created store generation 2, so a case that must observe a generation-1 fact cannot use the ordinary creation path and every such case needs the same thing -- a genuine version-1 dataset rather than a downgraded generation-2 file -- and a per-module copy would let the eight modules disagree about what a version-1 dataset is while all of them assert that generation 1 keeps its own identity."
+replacement_contract = "contract:knowledge-generation-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_candidate_workspace.py",
+  "mcp/tests/test_knowledge_guarded_merge.py",
+  "mcp/tests/test_knowledge_merge_generations_and_envelope.py",
+  "mcp/tests/test_knowledge_portable_boundaries.py",
+  "mcp/tests/test_knowledge_read_boundaries.py",
+  "mcp/tests/test_knowledge_read_paths.py",
+  "mcp/tests/test_knowledge_schema_generations.py",
+  "mcp/tests/test_knowledge_store.py",
+]
+
 [[artifact]]
 path = "mcp/tests/_handoff_clock.py"
 kind = "shared-support"

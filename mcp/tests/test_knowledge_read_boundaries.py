@@ -28,6 +28,7 @@ from agents_remember.memory.knowledge import realizations
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import logical_digest
 from agents_remember.memory.knowledge.read import _manifest_digest
+from agents_remember.memory.knowledge.schema_generations import generation_of_database
 from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.graph import RealizationClaimDraft
 from agents_remember.models.knowledge.read import (
@@ -51,6 +52,7 @@ from agents_remember.models.knowledge.source import (
     SourceAnchorDraft,
     SymbolLocator,
 )
+from generation_test_support import declared_schema_name
 from read_scope_test_support import (
     ABSENT_PATH,
     ABSENT_RECORDED_BLOB,
@@ -67,6 +69,9 @@ from read_scope_test_support import (
 
 pytestmark = pytest.mark.integration
 
+# The declared generation's name *prefix*. The fixtures' stores are created by the build, which
+# declares the newest generation it supports (requirement 2.7), so a digest computed under a
+# hardcoded generation name would be the digest of a dataset these fixtures do not hold.
 SCHEMA_NAME = "ar-knowledge-sqlite/v1"
 EVERY_RECORDED_PATH = {
     INTEGRATION_PATH,
@@ -778,7 +783,7 @@ def test_a_context_declaring_another_schema_generation_is_refused_before_a_page_
     """
 
     resolved = anchored_context(fixture)
-    assert resolved.knowledge.schema_version == SCHEMA_NAME
+    assert resolved.knowledge.schema_version == declared_schema_name(fixture.database_path)
     assert resolved.knowledge.logical_digest == fixture.knowledge_digest, (
         "the declared digest is the one the file really holds"
     )
@@ -803,7 +808,9 @@ def test_a_context_declaring_another_schema_generation_is_refused_before_a_page_
         "the selected database declares another schema generation"
     )
     assert result.refusal.expected == "ar-knowledge-sqlite/v9"
-    assert result.refusal.observed == SCHEMA_NAME
+    # The observed generation is the one the *file* declares, which is the created generation
+    # (requirement 2.7) rather than generation 1's hardcoded name.
+    assert result.refusal.observed == declared_schema_name(fixture.database_path)
     assert result.page is None
 
     # The digest half of the pair: the same request with the schema left honest and only the digest
@@ -1029,6 +1036,6 @@ def _encode_cursor(cursor: KnowledgeReadCursor) -> str:
 def _digest(fixture: ReadScopeFixture) -> str:
     connection = open_read_only_database(fixture.database_path)
     try:
-        return logical_digest(connection, SCHEMA_NAME)
+        return logical_digest(connection, generation_of_database(connection))
     finally:
         connection.close()

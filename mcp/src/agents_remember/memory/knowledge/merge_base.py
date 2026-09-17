@@ -33,8 +33,8 @@ import apsw
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge import logical
 from agents_remember.memory.knowledge.merge_schema import (
-    declared_structure,
     require_supported_structure,
+    selected_generation,
 )
 from agents_remember.memory.knowledge.refusals import RefusalFacts, refusal
 from agents_remember.models.knowledge.merge import (
@@ -83,10 +83,14 @@ def resolve_merge_base(request: MergeBaseRequest) -> BaseResolution:
     materialized = _materialize_inputs(request)
     if isinstance(materialized, KnowledgeRefusal):
         return BaseResolution(state="refused", refusal=materialized)
-    declared = declared_structure()
+    selected = selected_generation(
+        {role: item.database_path for role, item in materialized.items()}, RESOLVE_OPERATION
+    )
+    if isinstance(selected, KnowledgeRefusal):
+        return BaseResolution(state="refused", refusal=selected)
     for role, item in materialized.items():
         structure_refusal = require_supported_structure(
-            item.database_path, RESOLVE_OPERATION, role=role, declared=declared
+            item.database_path, RESOLVE_OPERATION, role=role, generation=selected
         )
         if structure_refusal is not None:
             return BaseResolution(state="refused", refusal=structure_refusal)

@@ -63,6 +63,14 @@ from agents_remember.memory.knowledge.merge_schema import (
     read_database_structure,
     require_supported_structure,
 )
+from agents_remember.memory.knowledge.records import encode_authorship
+from agents_remember.memory.knowledge.schema_generations import (
+    CURRENT_GENERATION,
+    GENERATION_2,
+    generation_of_database,
+    registered_version_listing,
+)
+from agents_remember.memory.knowledge.schema_v2 import APPENDED_TABLES
 from agents_remember.models.knowledge.merge import (
     MergeBaseRequest,
     MergeBaseResolution,
@@ -73,6 +81,7 @@ from agents_remember.models.knowledge.merge import (
 )
 from agents_remember.models.knowledge.result import KnowledgeRefusal
 from agents_remember.models.knowledge.snapshot import SnapshotDestinationRequest
+from generation_test_support import create_generation_1_store
 from merge_case_test_support import (
     BASE_INVARIANT_ID,
     BASE_REVISION_ID,
@@ -98,6 +107,9 @@ OPERATION = "merge_knowledge_datasets"
 CLAIM_ID = "88888888-8888-4888-8888-888888888888"
 ANCHOR_ID = "44444444-4444-4444-8444-444444444444"
 SHARED_REVISION_ID = "77777777-7777-4777-8777-777777777777"
+APPENDED_ROUTE_ID = "99999999-9999-4999-8999-999999999999"
+APPENDED_ROUTE_PATH = "src/generation-two-scope"
+APPENDED_RECORD_ID = "12121212-1212-4212-8212-121212121212"
 
 
 @pytest.fixture
@@ -114,7 +126,7 @@ def test_every_structural_violation_is_refused_before_a_session_exists(
     """Every structural difference refuses, and none of them modifies the input it refuses."""
 
     base_before = file_digest(case.state_path("base"))
-    declared = declared_structure()
+    declared = declared_structure(CURRENT_GENERATION)
     assert refusal_for(case.state_path("base")) is None
     assert refusal_for(case.state_path("left"), role="left") is None
 
@@ -127,10 +139,10 @@ def test_every_structural_violation_is_refused_before_a_session_exists(
         assert refusal.table == expected_table, label
         assert refusal.code in {"schema_mismatch", "missing_required_table"}, label
         assert file_digest(case.state_path("base")) == base_before, label
-        damaged_structure = read_database_structure(damaged)
+        damaged_structure = read_database_structure(damaged, CURRENT_GENERATION)
         if label == "dropped-trigger":
             damaged_triggers = damaged_structure.declared_tables["invariant_revision"].triggers
-            intact = read_database_structure(case.state_path("base"))
+            intact = read_database_structure(case.state_path("base"), CURRENT_GENERATION)
             assert damaged_triggers != intact.declared_tables["invariant_revision"].triggers
 
     reordered = _edited(tmp_path, case, "reordered", _reorder_invariant_columns)
@@ -163,12 +175,36 @@ def test_every_structural_violation_is_refused_before_a_session_exists(
     )
     weakened_refusal = refusal_for(weakened_trigger)
     assert weakened_refusal is not None and weakened_refusal.table == "invariant"
-    versioned = _edited(
-        tmp_path, case, "user-version", lambda path: _mutate(path, ("PRAGMA user_version = 2", ()))
-    )
-    version_refusal = refusal_for(versioned)
+    # Re-scoped by `KS-R10` §Shipped Assertions. A base copy mutated to ``PRAGMA user_version = 2``
+    # used to be refused with ``(expected, observed) == ("1", "2")``. It is not refused that way any
+    # more, and must not be: version 2 is a *supported* generation, so the input resolves to
+    # generation 2 and is refused instead by the generation-2 table it does not have. The dataset
+    # this is asserted on is a genuine version-1 dataset -- the fixture's own store is created as
+    # generation 2 now, so mutating its version to 2 would change nothing.
+    version_2_input = tmp_path / "version-2-input.sqlite"
+    with create_generation_1_store(version_2_input, case.repository.repository_id):
+        pass
+    _mutate(version_2_input, ("PRAGMA user_version = 2", ()))
+    version_refusal = refusal_for(version_2_input)
     assert version_refusal is not None
-    assert (version_refusal.expected, version_refusal.observed) == ("1", "2")
+    assert version_refusal.code == "missing_required_table"
+    # The first generation-2 table the version-1 dataset does not have, in manifest order.
+    assert version_refusal.table == APPENDED_TABLES[0]
+    assert version_refusal.observed == "absent from the base input"
+
+    # The second case the replacement fact requires: "unsupported generation" stays asserted by
+    # something other than a structurally incomplete generation 2.
+    unregistered = _edited(
+        tmp_path,
+        case,
+        "unregistered-version",
+        lambda path: _mutate(path, ("PRAGMA user_version = 99", ())),
+    )
+    unregistered_refusal = refusal_for(unregistered)
+    assert unregistered_refusal is not None
+    assert unregistered_refusal.code == "unsupported_schema"
+    assert unregistered_refusal.expected == registered_version_listing()
+    assert unregistered_refusal.observed == "99"
 
     absent = refusal_for(tmp_path / "absent.sqlite")
     junk = tmp_path / "junk.sqlite"
@@ -187,7 +223,12 @@ def test_an_incomplete_delta_applies_silently_and_is_caught_by_coverage_and_repl
     measures of completeness. The named guard for the silent-omission class."""
 
     case = build_case(tmp_path)
-    complete = build_delta(case.state_path("right"), case.state_path("base"), side="right")
+    complete = build_delta(
+        case.state_path("right"),
+        case.state_path("base"),
+        side="right",
+        generation=CURRENT_GENERATION,
+    )
     partial = _partial_delta(case, "right", ("invariant_revision",))
     target = copy_closed(case.state_path("base"), tmp_path / "partial-target.sqlite")
 
@@ -197,8 +238,17 @@ def test_an_incomplete_delta_applies_silently_and_is_caught_by_coverage_and_repl
     assert applied.conflicted is False and applied.detail == ""
     assert file_digest(target) != file_digest(case.state_path("base"))
 
+    # Coverage is measured over the generation the datasets themselves declare, so the test
+    # resolves it the way the production path does rather than assuming the build's generation.
+    base_connection = open_read_only_database(case.state_path("base"))
+    try:
+        generation = generation_of_database(base_connection)
+    finally:
+        base_connection.close()
     refusal = _coverage_refusal(
-        partial, {"base": case.state_path("base"), "right": case.state_path("right")}
+        partial,
+        {"base": case.state_path("base"), "right": case.state_path("right")},
+        generation,
     )
 
     assert refusal is not None
@@ -218,12 +268,22 @@ def test_an_incomplete_delta_applies_silently_and_is_caught_by_coverage_and_repl
         file_digest(case.state_path("base")),
         file_digest(case.state_path("left")),
     )
-    delta = build_delta(case.state_path("left"), case.state_path("base"), side="left")
+    delta = build_delta(
+        case.state_path("left"),
+        case.state_path("base"),
+        side="left",
+        generation=CURRENT_GENERATION,
+    )
     edited = copy_closed(case.state_path("base"), tmp_path / "labelled.sqlite")
     set_label(edited, "a changed label")
     updates = [
         change
-        for change in build_delta(edited, case.state_path("base"), side="left").operations
+        for change in build_delta(
+            edited,
+            case.state_path("base"),
+            side="left",
+            generation=CURRENT_GENERATION,
+        ).operations
         if change.operation == "UPDATE"
     ]
     landed, landed_refusal = replay_delta(delta, tmp_path / "replay.sqlite", OPERATION)
@@ -275,7 +335,11 @@ def test_disjoint_edits_from_both_sides_survive_in_a_closed_published_candidate(
     assert dataset_identity(destination).logical_digest == outcome.merged_identity.logical_digest
     assert [coverage.side for coverage in outcome.coverage] == ["left", "right"]
     for coverage in outcome.coverage:
-        assert len(coverage.tables) == 10
+        # Coverage spans the selected generation's whole table set, not a fixed count. These
+        # datasets are generation 2, whose manifest is generation 1's ten canonical tables plus
+        # the six this increment appends (route, knowledge_record, record_revision and the three
+        # governing-route joins). A bare ``== 10`` encoded the single-generation assumption.
+        assert len(coverage.tables) == len(GENERATION_2.tables)
         assert coverage.replayed_digest == coverage.source_digest
         assert coverage.operations == sum(entry.operations for entry in coverage.tables)
     assert set(outcome.changeset_digests) == {"left", "right"}
@@ -313,6 +377,92 @@ def test_disjoint_edits_from_both_sides_survive_in_a_closed_published_candidate(
 
 
 # -- 3. the refusal taxonomy --------------------------------------------------------------------
+
+
+def _appended_table_shape(case: MergeCase, states: dict[str, Path]) -> None:
+    """Author two generation-2 rows into the right side's state before it is committed.
+
+    One ``route`` and one ``knowledge_record``, which the record's own ``governing_route_id``
+    references: two of the six tables the running build appends, so the comparison has to resolve
+    generation 2 for a table with a foreign key into another appended table as well as for a leaf
+    table. No ``record_revision`` row is invented here -- this leaf has no production writer for a
+    sealed revision (see the fix report's `L10-R4`), so a hand-written one would exercise this
+    case's own digest recipe rather than the merge.
+    """
+
+    connection = apsw.Connection(str(states["right"]))
+    try:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(
+            "INSERT INTO route (repository_id, route_id, parent_route_id, path, provenance) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                case.repository.repository_id,
+                APPENDED_ROUTE_ID,
+                None,
+                APPENDED_ROUTE_PATH,
+                encode_authorship(case.authorship),
+            ),
+        )
+        connection.execute(
+            "INSERT INTO knowledge_record (repository_id, record_id, kind, authority_home, "
+            "lifecycle, governing_route_id, record_schema, provenance) VALUES (?, ?, ?, ?, ?, ?, "
+            "?, ?)",
+            (
+                case.repository.repository_id,
+                APPENDED_RECORD_ID,
+                "finding",
+                "agents-remember",
+                "draft",
+                APPENDED_ROUTE_ID,
+                "finding/v1",
+                encode_authorship(case.authorship),
+            ),
+        )
+    finally:
+        connection.close()
+
+
+def test_a_right_side_change_to_an_appended_table_merges_instead_of_aborting(
+    tmp_path: Path,
+) -> None:
+    """`L10-R2`: a change to a generation-2 table is compared against the *selected* generation.
+
+    ``route`` is generation 2's own table, so a right-side change to it is a change to a table the
+    pinned generation-1 registries do not describe. Before the repair, the structural comparison's
+    row helpers read those pinned registries, so this merge aborted with an unhandled ``KeyError``
+    where a typed outcome belongs. The case drives the public entry point rather than the helpers,
+    because a case that calls ``_row_of`` directly can pass while the operation's own call path is
+    wrong -- and because the coverage record, not the row read, is what says the appended table was
+    actually replayed.
+    """
+
+    appended = build_case(
+        tmp_path / "appended-table",
+        diverging_revisions=False,
+        diverging_identities=False,
+        shape=_appended_table_shape,
+    )
+    destination = tmp_path / "appended-table" / "memory" / "merged.sqlite"
+
+    outcome = run(appended, destination=destination)
+
+    assert outcome.state == "structurally_merged", outcome.refusal
+    assert outcome.publication_state == "published"
+    right = next(entry for entry in outcome.coverage if entry.side == "right")
+    assert len(right.tables) == len(GENERATION_2.tables)
+    assert right.operations >= 1
+    reader = open_read_only_database(destination)
+    try:
+        assert [str(row[0]) for row in reader.execute("SELECT path FROM route")] == [
+            APPENDED_ROUTE_PATH
+        ]
+        assert [
+            tuple(str(value) for value in row)
+            for row in reader.execute("SELECT record_id, governing_route_id FROM knowledge_record")
+        ] == [(APPENDED_RECORD_ID, APPENDED_ROUTE_ID)]
+    finally:
+        reader.close()
 
 
 def test_both_conflicting_edits_refuse_whole_and_preserve_every_input(tmp_path: Path) -> None:
@@ -661,11 +811,16 @@ def assert_removal_orientation(case: MergeCase, removing: str) -> None:
 
 
 def refusal_for(database: Path, *, role: str = "base") -> KnowledgeRefusal | None:
-    """Run the declared-manifest preflight for one input."""
+    """Run the preflight for one input, under the generation **that input declares**.
 
-    return require_supported_structure(
-        database, OPERATION, role=role, declared=declared_structure()
-    )
+    Re-scoped by `KS-R10` §Shipped Assertions: this helper used to pass
+    ``declared=declared_structure()`` -- the *build's* generation -- which is the same defect
+    requirement 6.2 removes from ``merge.py`` and ``merge_base.py``. It now passes no generation at
+    all, so ``require_supported_structure`` selects the input's own declared generation exactly as
+    the production preflight does.
+    """
+
+    return require_supported_structure(database, OPERATION, role=role)
 
 
 def _structural_violations(

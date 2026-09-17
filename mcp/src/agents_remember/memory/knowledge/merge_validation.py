@@ -35,7 +35,7 @@ from typing import Any
 
 import apsw
 
-from agents_remember.memory.knowledge import logical, records, schema
+from agents_remember.memory.knowledge import logical, records
 from agents_remember.memory.knowledge.connection import fetch_one, open_read_only_database
 from agents_remember.memory.knowledge.merge_changeset import (
     NOT_SUPPLIED,
@@ -46,6 +46,10 @@ from agents_remember.memory.knowledge.merge_refusals import (
     immutable_revision_changed_refusal,
 )
 from agents_remember.memory.knowledge.refusals import RefusalFacts
+from agents_remember.memory.knowledge.schema_generations import (
+    SchemaGeneration,
+    generation_of_database,
+)
 from agents_remember.models.knowledge.context import KNOWLEDGE_SCHEMA_NAME
 from agents_remember.models.knowledge.result import (
     KnowledgeOperation,
@@ -219,8 +223,9 @@ def _first_unapplied_change(
 ) -> KnowledgeRefusal | None:
     """Return the refusal for one operation the result does not carry, or None."""
 
+    generation = generation_of_database(merged_reader)
     key = change.primary_key()
-    record_id = _render_key(change.table, key)
+    record_id = _render_key(change.table, key, generation)
     observed_row = _row_of(merged_reader, change.table, key)
     if change.operation == "DELETE":
         if observed_row is None:
@@ -244,23 +249,33 @@ def _first_unapplied_change(
             f"{change.operation} row in {change.table}",
             facts=RefusalFacts(table=change.table, record_id=record_id),
         )
-    return _first_differing_column(operation, change, record_id, expected_row, observed_row)
+    return _first_differing_column(
+        operation, change, record_id, _RowPair(expected_row, observed_row), generation
+    )
+
+
+@dataclass(frozen=True)
+class _RowPair:
+    """The side's row and the result's row for one key, kept together as one argument."""
+
+    expected: tuple[Any, ...]
+    observed: tuple[Any, ...]
 
 
 def _first_differing_column(
     operation: KnowledgeOperation,
     change: MaterializedChange,
     record_id: str,
-    expected_row: tuple[Any, ...],
-    observed_row: tuple[Any, ...],
+    rows: _RowPair,
+    generation: SchemaGeneration,
 ) -> KnowledgeRefusal | None:
     """Return the refusal for the first supplied column the result does not match, or None."""
 
-    columns = schema.CANONICAL_COLUMNS[change.table]
+    columns = generation.columns[change.table]
     for column in sorted(change.supplied):
         position = columns.index(column)
-        expected = expected_row[position]
-        observed = observed_row[position]
+        expected = rows.expected[position]
+        observed = rows.observed[position]
         if expected == observed:
             continue
         return changeset_postcondition_failed_refusal(
@@ -374,7 +389,8 @@ def _edge_set(connection: apsw.Connection, edge_table: str) -> set[tuple[str, st
 def _revision_rows(connection: apsw.Connection, table: str) -> list[tuple[str, tuple[Any, ...]]]:
     """Return each revision row of one aggregate table, paired with its identity."""
 
-    columns = ", ".join(schema.CANONICAL_COLUMNS[table])
+    generation = generation_of_database(connection)
+    columns = ", ".join(generation.columns[table])
     return [
         (str(row[2]), tuple(row)) for row in connection.execute(f"SELECT {columns} FROM {table}")
     ]
@@ -396,8 +412,12 @@ def _row_of(
 ) -> tuple[Any, ...] | None:
     """Return one row of one canonical table by its declared primary key, or None."""
 
-    keys = logical.PRIMARY_KEYS[table]
-    columns = schema.CANONICAL_COLUMNS[table]
+    # The dataset's own generation, not this build's: a generation-2 table has no entry in the
+    # pinned generation-1 registries, so reading them here raised ``KeyError`` for exactly the
+    # tables this leaf added.
+    generation = generation_of_database(connection)
+    keys = generation.primary_keys[table]
+    columns = generation.columns[table]
     where = " AND ".join(f"{column} IS ?" for column in keys)
     row = fetch_one(
         connection,
@@ -407,10 +427,10 @@ def _row_of(
     return None if row is None else tuple(row)
 
 
-def _render_key(table: str, key: tuple[Any, ...]) -> str:
+def _render_key(table: str, key: tuple[Any, ...], generation: SchemaGeneration) -> str:
     """Render one operation's key as the readable identity a refusal carries."""
 
-    keys = logical.PRIMARY_KEYS[table]
+    keys = generation.primary_keys[table]
     return "/".join(f"{column}={value}" for column, value in zip(keys, key, strict=False))
 
 

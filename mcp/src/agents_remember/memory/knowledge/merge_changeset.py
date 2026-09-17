@@ -34,12 +34,13 @@ from typing import Any
 
 import apsw
 
-from agents_remember.memory.knowledge import logical, schema
+from agents_remember.memory.knowledge import logical
 from agents_remember.memory.knowledge.connection import BUSY_TIMEOUT_MILLISECONDS
 from agents_remember.memory.knowledge.merge_refusals import (
     changeset_incomplete_refusal,
     session_unavailable_refusal,
 )
+from agents_remember.memory.knowledge.schema_generations import SchemaGeneration
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.merge import ChangeOperationKind
 from agents_remember.models.knowledge.result import KnowledgeOperation, KnowledgeRefusal
@@ -86,6 +87,10 @@ class MaterializedChange:
     old: tuple[Any, ...] | None
     new: tuple[Any, ...] | None
     supplied: frozenset[str]
+    # The selected generation's declared column order for this table. SQLite reports a changed
+    # column by position, so reading one back needs the order of the generation the operation was
+    # materialized under, not the running build's.
+    columns: tuple[str, ...] = ()
 
     def primary_key(self) -> tuple[Any, ...]:
         """Return the operation's key values, read from whichever side carries them."""
@@ -101,7 +106,7 @@ class MaterializedChange:
         values = self.new if side == "new" else self.old
         if values is None:
             return NOT_SUPPLIED
-        return values[schema.CANONICAL_COLUMNS[self.table].index(column)]
+        return values[self.columns.index(column)]
 
 
 @dataclass(frozen=True)
@@ -182,13 +187,22 @@ def require_session_capability(operation: KnowledgeOperation) -> KnowledgeRefusa
     )
 
 
-def build_delta(side_database: Path, base_database: Path, *, side: str) -> Delta:
+def build_delta(
+    side_database: Path,
+    base_database: Path,
+    *,
+    side: str,
+    generation: SchemaGeneration,
+) -> Delta:
     """Produce the complete base-to-side changeset and materialise every operation in it.
 
     The session runs on a connection whose main database is the *side* and which has the validated
-    base attached as :data:`BASE_SCHEMA_NAME`; every canonical table is attached and diffed before
-    the changeset is read, so a table the session does not know about cannot be skipped silently.
-    The side connection is opened read-only: a diff reads both databases and never writes either.
+    base attached as :data:`BASE_SCHEMA_NAME`; every table of **the selected generation** is attached
+    and diffed before the changeset is read, so a table the session does not know about cannot be
+    skipped silently. Attaching the running build's manifest instead is the failure requirement 6.2
+    names: a v1/v1/v1 merge would attach generation 2's tables, and the version-1 tables' operations
+    would never be diffed. The side connection is opened read-only: a diff reads both databases and
+    never writes either.
     """
 
     connection = apsw.Connection(str(side_database), flags=apsw.SQLITE_OPEN_READONLY)
@@ -197,7 +211,7 @@ def build_delta(side_database: Path, base_database: Path, *, side: str) -> Delta
         connection.execute(f"ATTACH DATABASE ? AS {BASE_SCHEMA_NAME}", (str(base_database),))
         session = apsw.Session(connection, "main")
         try:
-            for table in schema.CANONICAL_TABLES:
+            for table in generation.tables:
                 session.attach(table)
                 session.diff(BASE_SCHEMA_NAME, table)
             changeset = session.changeset()
@@ -205,8 +219,8 @@ def build_delta(side_database: Path, base_database: Path, *, side: str) -> Delta
             session.close()
     finally:
         connection.close()
-    operations = tuple(_materialize(changeset))
-    counts: dict[str, int] = {table: 0 for table in schema.CANONICAL_TABLES}
+    operations = tuple(_materialize(changeset, generation))
+    counts: dict[str, int] = {table: 0 for table in generation.tables}
     for change in operations:
         counts[change.table] += 1
     return Delta(
@@ -215,7 +229,7 @@ def build_delta(side_database: Path, base_database: Path, *, side: str) -> Delta
         base_path=Path(base_database),
         changeset=changeset,
         operations=operations,
-        changed_tables=tuple(table for table in schema.CANONICAL_TABLES if counts[table] > 0),
+        changed_tables=tuple(table for table in generation.tables if counts[table] > 0),
         operation_counts=counts,
     )
 
@@ -351,17 +365,22 @@ def _read_side_identity(
         )
 
 
-def _materialize(changeset: bytes) -> list[MaterializedChange]:
-    """Copy every operation out of a changeset cursor before it advances."""
+def _materialize(changeset: bytes, generation: SchemaGeneration) -> list[MaterializedChange]:
+    """Copy every operation out of a changeset cursor before it advances.
 
-    return [_copy_change(change) for change in apsw.Changeset.iter(changeset)]
+    The generation is threaded through because a changed column is reported **by position**, so
+    reading one back needs the selected generation's declared column order rather than the running
+    build's -- which is what ``MaterializedChange.value_of`` uses too.
+    """
+
+    return [_copy_change(change, generation) for change in apsw.Changeset.iter(changeset)]
 
 
-def _copy_change(change: object) -> MaterializedChange:
+def _copy_change(change: object, generation: SchemaGeneration) -> MaterializedChange:
     """Copy one ``TableChange`` into an owned value with the not-supplied marker translated."""
 
     table = str(change.name)  # type: ignore[attr-defined]
-    columns = schema.CANONICAL_COLUMNS[table]
+    columns = generation.columns[table]
     old = _copy_side(change.old)  # type: ignore[attr-defined]
     new = _copy_side(change.new)  # type: ignore[attr-defined]
     carrying = new if new is not None else old
@@ -374,6 +393,7 @@ def _copy_change(change: object) -> MaterializedChange:
         ),
         old=old,
         new=new,
+        columns=tuple(columns),
         supplied=frozenset(
             column
             for column, value in zip(columns, carrying or (), strict=True)

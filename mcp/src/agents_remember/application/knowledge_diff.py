@@ -74,7 +74,7 @@ from agents_remember.memory.knowledge.refusals import (
     KnowledgeStorageError,
     selected_input_unavailable_refusal,
 )
-from agents_remember.memory.knowledge.schema import CANONICAL_TABLES
+from agents_remember.memory.knowledge.schema_generations import generation_of_database
 from agents_remember.models.knowledge.context import KnowledgeSchemaIdentity
 from agents_remember.models.knowledge.diff import (
     DIFF_POLICY_VERSION,
@@ -833,9 +833,10 @@ def diff_row_counts(database_path: Path) -> Mapping[str, int]:
 
     connection = open_read_only_database(Path(database_path))
     try:
+        generation = generation_of_database(connection)
         return {
             table: _count(connection, ROW_COUNT_TEMPLATE.format(table=table), ())
-            for table in CANONICAL_TABLES
+            for table in generation.tables
         }
     finally:
         connection.close()

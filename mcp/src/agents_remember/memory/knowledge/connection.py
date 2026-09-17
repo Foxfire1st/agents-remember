@@ -14,12 +14,9 @@ from pathlib import Path
 
 import apsw
 
-from agents_remember.memory.knowledge import schema
+from agents_remember.memory.knowledge import schema_generations
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
-from agents_remember.models.knowledge.context import (
-    KNOWLEDGE_SCHEMA_NAME,
-    KnowledgeSchemaIdentity,
-)
+from agents_remember.models.knowledge.context import KnowledgeSchemaIdentity
 
 # The bounded lock policy: wait this long for a competing writer, then refuse as busy rather
 # than block indefinitely. The operation never retries against a re-read snapshot.
@@ -89,35 +86,45 @@ def fetch_one(
 
 
 def create_or_validate_schema(connection: apsw.Connection) -> KnowledgeSchemaIdentity:
-    """Create the declared schema on an empty database, else validate what is there."""
+    """Create the newest supported generation on an empty database, else validate what is there.
+
+    Initialization **declares** a generation; it does not select one. An empty database has no
+    version to read, so "never from the running build" cannot govern this path: creating a store
+    declares the newest generation this build supports, through one explicit constant. Validation
+    is registry-driven thereafter, so an existing database of any registered generation is accepted
+    and checked against *its own* tables, columns and triggers.
+    """
 
     if next(iter(connection.execute("SELECT count(*) FROM sqlite_schema WHERE type = 'table'")))[0]:
         return inspect_schema(connection)
+    declared = schema_generations.generation_of_new_store()
     with immediate_transaction(connection):
-        for statement in schema.create_schema_statements():
+        for statement in schema_generations.create_schema_statements(declared):
             connection.execute(statement)
     # The version marker is written after the DDL commits. A crash between the two leaves a
     # complete but unversioned database, which the next open refuses instead of guessing -- the
     # opposite order could leave a database that claims a generation it does not have.
-    connection.execute(f"PRAGMA user_version = {schema.SCHEMA_USER_VERSION}")
+    connection.execute(f"PRAGMA user_version = {declared.user_version}")
     return inspect_schema(connection)
 
 
 def inspect_schema(connection: apsw.Connection) -> KnowledgeSchemaIdentity:
-    """Validate an existing database against the declared generation."""
+    """Validate an existing database against the generation the database itself declares.
 
-    user_version = int(next(iter(connection.execute("PRAGMA user_version")))[0])
-    if user_version != schema.SCHEMA_USER_VERSION:
-        raise KnowledgeStorageError(
-            f"unsupported schema: user_version is {user_version}, expected "
-            f"{schema.SCHEMA_USER_VERSION} ({KNOWLEDGE_SCHEMA_NAME})"
-        )
-    _require_declared_tables(connection)
-    _require_declared_triggers(connection)
+    The generation is selected from ``PRAGMA user_version`` and resolved against the registry --
+    never against the running build. A dataset whose version is not registered is refused as an
+    unsupported schema; it is not migrated, repaired or re-read under another generation. A dataset
+    that resolves to a registered generation whose structure it does not match is refused by the
+    structural checks below, not by a fallback to a different generation.
+    """
+
+    declared = schema_generations.generation_of_database(connection)
+    _require_declared_tables(connection, declared)
+    _require_declared_triggers(connection, declared)
     return KnowledgeSchemaIdentity(
-        schema_name=KNOWLEDGE_SCHEMA_NAME,
-        user_version=user_version,
-        fingerprint=schema.schema_fingerprint(),
+        schema_name=declared.schema_name,
+        user_version=declared.user_version,
+        fingerprint=declared.fingerprint,
     )
 
 
@@ -171,32 +178,36 @@ def discard_closed_wal_peers(database_path: Path) -> None:
             peer.unlink()
 
 
-def _require_declared_tables(connection: apsw.Connection) -> None:
+def _require_declared_tables(
+    connection: apsw.Connection, declared: schema_generations.SchemaGeneration
+) -> None:
     present = {
         str(row[0])
         for row in connection.execute("SELECT name FROM sqlite_schema WHERE type = 'table'")
     }
-    missing = [name for name in schema.CANONICAL_TABLES if name not in present]
+    missing = [name for name in declared.tables if name not in present]
     if missing:
         raise KnowledgeStorageError(
             f"unsupported schema: missing canonical table(s) {', '.join(missing)}. Session "
             "changesets can silently omit a table that exists on only one side, so a partial "
             "schema is refused rather than written through."
         )
-    for table, declared in schema.CANONICAL_COLUMNS.items():
+    for table, columns in declared.columns.items():
         actual = tuple(str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})"))
-        if actual != declared:
+        if actual != columns:
             raise KnowledgeStorageError(
-                f"unsupported schema: table {table} declares columns {actual}, expected {declared}"
+                f"unsupported schema: table {table} declares columns {actual}, expected {columns}"
             )
 
 
-def _require_declared_triggers(connection: apsw.Connection) -> None:
+def _require_declared_triggers(
+    connection: apsw.Connection, declared: schema_generations.SchemaGeneration
+) -> None:
     present = {
         str(row[0])
         for row in connection.execute("SELECT name FROM sqlite_schema WHERE type = 'trigger'")
     }
-    missing = sorted(set(schema.IMMUTABILITY_TRIGGERS) - present)
+    missing = sorted(set(declared.triggers) - present)
     if missing:
         raise KnowledgeStorageError(
             f"unsupported schema: missing immutability trigger(s) {', '.join(missing)}. A "

@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import apsw
 import pytest
@@ -26,7 +27,7 @@ from agents_remember.application.knowledge_export import (
     read_knowledge_artifact,
     validate_knowledge_artifact,
 )
-from agents_remember.memory.knowledge import export_import, logical, schema
+from agents_remember.memory.knowledge import export_import, logical
 from agents_remember.memory.knowledge.connection import journal_mode, open_read_only_database
 from agents_remember.memory.knowledge.export_portable import (
     EXPORT_FORMAT,
@@ -34,8 +35,14 @@ from agents_remember.memory.knowledge.export_portable import (
     canonical_document,
     encode_export,
 )
+from agents_remember.memory.knowledge.schema_generations import (
+    CURRENT_GENERATION,
+    GENERATION_1,
+    generation_for_key,
+)
 from agents_remember.models.knowledge.context import KNOWLEDGE_SCHEMA_NAME
 from agents_remember.models.knowledge.result import KnowledgeRefusal
+from generation_test_support import create_generation_1_store
 from knowledge_fixture_test_support import (
     BranchingKnowledgeFixture,
     build_branching_knowledge_fixture,
@@ -227,7 +234,7 @@ def test_the_canonical_form_of_the_whole_document_is_the_only_form_the_reader_ac
     # The eighth axis, and the only one the *header* refuses rather than the gate; then the per-key
     # measurement the digest-coverage statement rests on. Both are driven by helpers below, so the
     # axes stay readable as the two properties they are.
-    _assert_the_header_types_are_pinned(artifact, declared, destination)
+    _assert_the_header_types_are_pinned(artifact, declared, destination, tmp_path)
 
     # The published seam's own contract, asserted where the artifacts it renders already exist. Every
     # accepted artifact is its own canonical document and a respelling of one is not, so these
@@ -257,7 +264,9 @@ def test_the_canonical_form_of_the_whole_document_is_the_only_form_the_reader_ac
     assert _out_of_canonical_order({"outer": {"z": 1, "a": 2}}) == "outer ['z', 'a']"
 
 
-def _assert_the_header_types_are_pinned(artifact: str, declared: str, destination: Path) -> None:
+def _assert_the_header_types_are_pinned(
+    artifact: str, declared: str, destination: Path, tmp_path: Path
+) -> None:
     """Assert the two header-type properties the canonical-form case's name rests on.
 
     **The declared generation.** ``userVersion`` is the envelope's one non-string scalar and the one
@@ -281,13 +290,29 @@ def _assert_the_header_types_are_pinned(artifact: str, declared: str, destinatio
     no other JSON value equals.
     """
 
-    for name, (value, spelling) in {
-        "float_one": (1.0, "1.0"),
+    # Re-scoped with `KS-R10` §Shipped Assertions. The two loose spellings are driven against the
+    # artifact's **own declared generation** -- the created generation, which is generation 2 after
+    # this leaf. Both must be refused as an unsupported generation, with the observed spelling
+    # rendered and the expected version being the *selected* generation's own.
+    #
+    # The boolean spelling is the one place generation 2 changes the property rather than its
+    # operands: `True == 1` in Python, so ``true`` is a spelling the comparison can lose only where
+    # the version is 1. That hazard is asserted where it lives, on generation 1 (below the loop),
+    # rather than being silently dropped for the generation whose version is 2.
+    loose = {
+        "float_spelling": (
+            float(CURRENT_GENERATION.user_version),
+            f"{CURRENT_GENERATION.user_version}.0",
+        ),
         "json_true": (True, "true"),
-    }.items():
-        assert value == schema.SCHEMA_USER_VERSION, name
+    }
+    for name, (value, spelling) in loose.items():
         assert repr(value).lower() == spelling, name
-        text = artifact.replace('"userVersion":1,', f'"userVersion":{spelling},', 1)
+        text = artifact.replace(
+            f'"userVersion":{CURRENT_GENERATION.user_version},',
+            f'"userVersion":{spelling},',
+            1,
+        )
         assert text != artifact, name
         assert _declared_digest(text) == declared, name
         refused = validate_knowledge_artifact(text)
@@ -295,11 +320,47 @@ def _assert_the_header_types_are_pinned(artifact: str, declared: str, destinatio
         assert refused.refusal is not None, name
         assert refused.refusal.code == "unsupported_schema", name
         assert refused.refusal.observed == repr(value), name
-        assert refused.refusal.expected == "1", name
+        assert refused.refusal.expected == str(CURRENT_GENERATION.user_version), name
         assert "user version" in _refusal(import_into(text, destination)).detail, name
         assert not destination.exists(), name
         assert encode_export(envelope_of(text)) == artifact, name
         assert canonical_document(text) == artifact, name
+
+    # The loose comparison Python can lose, stated where it is reachable: generation 1's version is
+    # 1, and both spellings compare equal to it while hashing alike, which is the whole reason the
+    # registry lookup is type-strict rather than equality-based.
+    loose_boolean: object = True
+    loose_float: object = 1.0
+    assert loose_boolean == GENERATION_1.user_version
+    assert loose_float == GENERATION_1.user_version
+    assert generation_for_key(GENERATION_1.schema_name, True) is None
+    assert generation_for_key(GENERATION_1.schema_name, 1.0) is None
+
+    # The same refusal on a **genuine generation-1 artifact**, because the loop above drives the
+    # artifact's own declared generation -- the created generation, which is generation 2 after this
+    # leaf -- while the packet's re-scope row for this case requires generation 1's own rendering
+    # (`expected == "1"`) to stay asserted. The registry-level assertions just above keep the
+    # comparison hazard; this keeps the *refusal*, on an artifact whose ten tables and version come
+    # from generation 1's own record. The string spelling is driven here too: `"1"` is refused for
+    # the same reason as the two loose spellings, and generation 1 is the version it is spelled
+    # against.
+    version_one = tmp_path / "generation-one-artifact.db"
+    with create_generation_1_store(version_one, str(uuid4())):
+        pass
+    version_one_artifact = exported(version_one).artifact or ""
+    assert envelope_of(version_one_artifact)["schema"] == GENERATION_1.schema_name
+    for spelling in ("1.0", "true", '"1"'):
+        text = version_one_artifact.replace(
+            f'"userVersion":{GENERATION_1.user_version},',
+            f'"userVersion":{spelling},',
+            1,
+        )
+        assert text != version_one_artifact, spelling
+        version_one_refusal = validate_knowledge_artifact(text)
+        assert version_one_refusal.state == "refused", spelling
+        assert version_one_refusal.refusal is not None, spelling
+        assert version_one_refusal.refusal.code == "unsupported_schema", spelling
+        assert version_one_refusal.refusal.expected == str(GENERATION_1.user_version), spelling
 
     for name, (key, value, code, record_id) in _header_type_respellings().items():
         respelled = envelope_of(artifact)
@@ -327,11 +388,25 @@ def _header_type_respellings() -> dict[str, tuple[str, Any, str, str | None]]:
 
     return {
         "format_as_array": ("format", [EXPORT_FORMAT], "invalid_export", f"['{EXPORT_FORMAT}']"),
-        "schema_as_array": ("schema", [KNOWLEDGE_SCHEMA_NAME], "unsupported_schema", None),
-        "user_version_as_string": ("userVersion", "1", "unsupported_schema", None),
+        # The three declared facts are respelled against the *selected* generation's own values
+        # (KS-R10 §Shipped Assertions, the `user_version_as_string` row): a string is still not an
+        # `int`, and the expected value rendered in the refusal is the selected generation's own
+        # version string rather than generation 1's.
+        "schema_as_array": (
+            "schema",
+            [CURRENT_GENERATION.schema_name],
+            "unsupported_schema",
+            None,
+        ),
+        "user_version_as_string": (
+            "userVersion",
+            str(CURRENT_GENERATION.user_version),
+            "unsupported_schema",
+            None,
+        ),
         "fingerprint_as_array": (
             "schemaFingerprint",
-            [schema.schema_fingerprint()],
+            [CURRENT_GENERATION.fingerprint],
             "unsupported_schema",
             None,
         ),
@@ -339,6 +414,11 @@ def _header_type_respellings() -> dict[str, tuple[str, Any, str, str | None]]:
         "logical_digest_as_integer": ("logicalDigest", 12345, "invalid_export", "12345"),
         "tables_as_string": ("tables", "none", "invalid_export", None),
     }
+
+
+# The schema name the datasets these cases build declare. They are created as the newest generation
+# the build supports (requirement 2.7), so this is that generation's name and not generation 1's.
+DECLARED_SCHEMA_NAME = CURRENT_GENERATION.schema_name
 
 
 def _non_canonical_axes(artifact: str, provenance: dict) -> dict[str, str]:
@@ -362,8 +442,12 @@ def _non_canonical_axes(artifact: str, provenance: dict) -> dict[str, str]:
         "table_mapping_order": _reordered_document(artifact, envelope=False, tables=True),
         "depth_two_key_order": depth_two,
         "list_of_objects_key_order": listed,
+        # Re-scoped with `KS-R10`: the artifact declares its **own** generation's schema name, which
+        # is the created generation's -- so the literal is read from the artifact rather than spelled
+        # here, and a generation-1 literal would leave this axis identical to ``depth_two_key_order``
+        # and collapse two independent refusals into one.
         "non_canonical_and_unsupported": depth_two.replace(
-            '"schema":"ar-knowledge-sqlite/v1"', '"schema":"ar-knowledge-sqlite/v9"', 1
+            f'"schema":"{DECLARED_SCHEMA_NAME}"', '"schema":"ar-knowledge-sqlite/v9"', 1
         ),
         "encoder_direction_marker": artifact,
     }

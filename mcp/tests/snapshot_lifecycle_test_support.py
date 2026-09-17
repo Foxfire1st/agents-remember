@@ -48,6 +48,7 @@ from agents_remember.application.knowledge_snapshot import (
 from agents_remember.memory.knowledge.connection import journal_mode, open_read_only_database
 from agents_remember.memory.knowledge.logical import dataset_identity, logical_digest
 from agents_remember.memory.knowledge.schema import CANONICAL_TABLES
+from agents_remember.memory.knowledge.schema_generations import generation_of_database
 from agents_remember.memory.knowledge.store import (
     OpenedKnowledgeStore,
     open_existing_knowledge_store,
@@ -445,7 +446,7 @@ def logical_identity_of(database_path: Path) -> str:
 
     connection = open_read_only_database(database_path)
     try:
-        return logical_digest(connection, "ar-knowledge-sqlite/v1")
+        return logical_digest(connection, generation_of_database(connection))
     finally:
         connection.close()
 

@@ -58,7 +58,6 @@ from agents_remember.memory.knowledge.closed_snapshot import (
     require_closed_database,
 )
 from agents_remember.memory.knowledge.connection import (
-    create_or_validate_schema,
     immediate_transaction,
     open_database,
     open_read_only_database,
@@ -94,9 +93,13 @@ from agents_remember.memory.knowledge.refusals import (
     refusal,
     selected_input_unavailable_refusal,
 )
+from agents_remember.memory.knowledge.schema_generations import (
+    SchemaGeneration,
+    create_schema_statements,
+    generation_of_database,
+)
 from agents_remember.memory.knowledge.store import open_existing_knowledge_store
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
-from agents_remember.models.knowledge.context import KNOWLEDGE_SCHEMA_NAME
 from agents_remember.models.knowledge.portable import (
     ExportRequest,
     ExportResult,
@@ -175,6 +178,7 @@ def export_knowledge_dataset(request: ExportRequest) -> ExportResult:
             export_envelope(
                 body["tables"],
                 repository.repository_id,
+                generation=store.generation,
                 logical_digest=observed.logical_digest,
                 schema_fingerprint=body["schema_fingerprint"],
             )
@@ -187,7 +191,7 @@ def export_knowledge_dataset(request: ExportRequest) -> ExportResult:
         format=EXPORT_FORMAT,
         identity=observed,
         artifact_digest=artifact_digest(artifact),
-        row_counts={table: len(body["tables"][table]) for table in schema.CANONICAL_TABLES},
+        row_counts={table: len(body["tables"][table]) for table in store.generation.tables},
         notes=PORTABLE_NOTES,
     )
 
@@ -212,14 +216,16 @@ def import_knowledge_dataset(request: ImportRequest) -> ImportResult:
         authority_home=str(tables["repository"][0]["authority_home"]),
     )
     identity = _identity(
-        repository.repository_id, KNOWLEDGE_SCHEMA_NAME, str(report.logical_digest)
+        repository.repository_id, parsed.generation.schema_name, str(report.logical_digest)
     )
     blocked = _destination_refusal(request)
     if blocked is not None:
         return ImportResult(state="refused", validation=report, refusal=blocked)
     stage_directory = _private_stage_directory()
     try:
-        staged = _stage_imported_dataset(stage_directory / _STAGE_FILE_NAME, tables, identity)
+        staged = _stage_imported_dataset(
+            stage_directory / _STAGE_FILE_NAME, tables, identity, parsed.generation
+        )
         if isinstance(staged, KnowledgeRefusal):
             return ImportResult(state="refused", validation=report, refusal=staged)
         publication = publish_prepared_snapshot(
@@ -365,6 +371,7 @@ def _stage_imported_dataset(
     stage: Path,
     tables: dict[str, list[dict[str, object]]],
     identity: SnapshotIdentity,
+    generation: SchemaGeneration,
 ) -> PreparedKnowledgeSnapshot | KnowledgeRefusal:
     """Build, load and verify one private staging database, or refuse what it turned out to be.
 
@@ -380,10 +387,18 @@ def _stage_imported_dataset(
     stage.parent.mkdir(parents=True, exist_ok=True)
     connection = open_database(stage)
     try:
-        create_or_validate_schema(connection)
+        # The stage is created at the generation the ARTIFACT declares, not at the newest this build
+        # supports. Creating it at the newest made a genuine version-1 artifact stage as version 2
+        # holding only version 1's tables, so it digested differently from the artifact it came from
+        # and every version-1 import was refused -- a preservation-boundary break. The artifact's
+        # declared pair was already resolved and checked by `validate_export`, so this trusts the
+        # same fact the rest of the import does.
+        for statement in create_schema_statements(generation):
+            connection.execute(statement)
+        connection.execute(f"PRAGMA user_version = {generation.user_version}")
         try:
             with immediate_transaction(connection):
-                _load_tables(connection, tables)
+                _load_tables(connection, tables, generation)
         except (apsw.Error, ValueError) as error:
             return import_validation_failed_refusal(
                 IMPORT_OPERATION,
@@ -441,7 +456,7 @@ def _verify_staged_dataset(stage: Path, identity: SnapshotIdentity) -> Knowledge
         if sealed is not None:
             return sealed
         try:
-            observed = logical.logical_digest(connection, KNOWLEDGE_SCHEMA_NAME)
+            observed = logical.logical_digest(connection, generation_of_database(connection))
         except (apsw.Error, ValueError) as error:
             return import_validation_failed_refusal(
                 IMPORT_OPERATION,
@@ -507,7 +522,11 @@ def _revision_rows(connection: apsw.Connection, table: str) -> list[tuple[str, t
     ]
 
 
-def _load_tables(connection: apsw.Connection, tables: dict[str, list[dict[str, object]]]) -> None:
+def _load_tables(
+    connection: apsw.Connection,
+    tables: dict[str, list[dict[str, object]]],
+    generation: SchemaGeneration,
+) -> None:
     """Insert every canonical row inside the caller's one transaction.
 
     Rows are inserted in declared manifest order and the declared foreign keys are deferred to
@@ -522,12 +541,12 @@ def _load_tables(connection: apsw.Connection, tables: dict[str, list[dict[str, o
     store would then have to accept.
     """
 
-    for table in schema.CANONICAL_TABLES:
-        rows = tables[table]
+    for table in generation.tables:
+        rows = tables.get(table) or []
         if not rows:
             continue
-        columns = schema.CANONICAL_COLUMNS[table]
-        json_columns = logical.JSON_COLUMNS.get(table, frozenset())
+        columns = generation.columns[table]
+        json_columns = generation.json_columns.get(table, frozenset())
         placeholders = ", ".join("?" for _ in columns)
         connection.executemany(
             f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",

@@ -29,63 +29,55 @@ from agents_remember.memory.knowledge.connection import (
     open_read_only_database,
 )
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
+from agents_remember.memory.knowledge.schema_generations import (
+    SchemaGeneration,
+    generation_for_name,
+    generation_of_database,
+)
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 
-# The declared primary key of each canonical table, as the DDL declares it. Row order inside a
-# table is this key's order, so two databases compared here agree on ordering without either of
-# them being asked how it happened to store its rows.
-#
-# These are the DDL's ``PRIMARY KEY`` column lists, which are not always the tables' leading
-# columns: ``invariant_revision`` keys ``(repository_id, revision_id)`` while ``invariant_id`` sits
-# between those two columns. A row is ordered by its key, not by the order its columns were
-# declared in, and :func:`_require_declared_keys` is what keeps this table honest against the
-# manifest rather than against an assumption about column order.
-PRIMARY_KEYS: Mapping[str, tuple[str, ...]] = {
-    "repository": ("repository_id",),
-    "invariant": ("repository_id", "invariant_id"),
-    "invariant_revision": ("repository_id", "revision_id"),
-    "invariant_predecessor": (
-        "repository_id",
-        "invariant_id",
-        "child_revision_id",
-        "parent_revision_id",
-    ),
-    "family": ("repository_id", "family_id"),
-    "family_revision": ("repository_id", "revision_id"),
-    "family_predecessor": (
-        "repository_id",
-        "family_id",
-        "child_revision_id",
-        "parent_revision_id",
-    ),
-    "source_anchor": ("repository_id", "anchor_id"),
-    "family_member": ("repository_id", "member_id"),
-    "realization_claim": ("repository_id", "claim_id"),
-}
-
-# The columns whose stored text is a typed JSON value. They are decoded at this portable
-# boundary; everything else is compared as the exact stored text.
-JSON_COLUMNS: Mapping[str, frozenset[str]] = {
-    "invariant": frozenset({"label_provenance"}),
-    "invariant_revision": frozenset({"conditions", "exclusions", "provenance"}),
-    "family": frozenset({"label_provenance"}),
-    "family_revision": frozenset({"provenance"}),
-    "source_anchor": frozenset({"source_identity", "locator", "provenance"}),
-    "family_member": frozenset({"provenance"}),
-    "realization_claim": frozenset({"provenance"}),
-}
+# Generation 1's declared primary keys and typed-JSON columns, kept importable under this module's
+# shipped names so existing readers do not break. They are **generation 1's** data, re-exported
+# from the module that owns generation 1's pinned structure; a generation-aware reader reads
+# ``generation.primary_keys`` / ``generation.json_columns`` instead, which is what the encoder now
+# does. The distinction matters: a site that keeps reading these globals for a table generation 2
+# added would find no entry at all, and a site that reads them for one of the first ten names gets
+# the right answer only because generation 2 appends without altering them.
+PRIMARY_KEYS: Mapping[str, tuple[str, ...]] = schema.PRIMARY_KEYS
+JSON_COLUMNS: Mapping[str, frozenset[str]] = schema.JSON_COLUMNS
 
 _BODY_VERSION = "ar-knowledge-logical-body/v1"
 
 
-def logical_digest(connection: apsw.Connection, schema_name: str) -> str:
+def resolve_generation(generation: SchemaGeneration | str) -> SchemaGeneration:
+    """Return the generation record an encoder caller selected, however it spelled it.
+
+    Dispatch -- deciding *which* generation a dataset is -- happens in
+    :mod:`…schema_generations` and reads the dataset. This function does not decide anything: it
+    resolves a caller's already-selected generation to the record the encoder needs. A name that
+    no registered generation declares is refused rather than approximated, so a caller cannot
+    obtain a digest under a generation the registry does not contain.
+    """
+
+    if isinstance(generation, SchemaGeneration):
+        return generation
+    resolved = generation_for_name(generation)
+    if resolved is None:
+        raise KnowledgeStorageError(
+            f"{generation!r} is not a schema generation this build supports, so no logical body "
+            "can be assembled under it"
+        )
+    return resolved
+
+
+def logical_digest(connection: apsw.Connection, generation: SchemaGeneration | str) -> str:
     """Return the canonical logical digest of the dataset this connection holds open."""
 
-    return sha256_digest(logical_body(connection, schema_name))
+    return sha256_digest(logical_body(connection, generation))
 
 
-def logical_body(connection: apsw.Connection, schema_name: str) -> dict[str, Any]:
+def logical_body(connection: apsw.Connection, generation: SchemaGeneration | str) -> dict[str, Any]:
     """Return the canonical logical body: the exact structure the digest seals.
 
     Reading it is a plain scan inside whatever transaction the caller holds, so a mutation can
@@ -93,14 +85,17 @@ def logical_body(connection: apsw.Connection, schema_name: str) -> dict[str, Any
     a value it computed earlier.
     """
 
-    _require_declared_keys()
+    selected = resolve_generation(generation)
+    _require_declared_keys(selected)
     return logical_body_from_tables(
-        schema_name, {table: _rows_of(connection, table) for table in schema.CANONICAL_TABLES}
+        selected, {table: _rows_of(connection, selected, table) for table in selected.tables}
     )
 
 
-def logical_body_from_tables(schema_name: str, tables: Mapping[str, Any]) -> dict[str, Any]:
-    """Wrap an already-encoded table mapping in the canonical logical body around it.
+def logical_body_from_tables(
+    generation: SchemaGeneration | str, tables: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Wrap an already-encoded table mapping in the canonical logical body of ITS OWN generation.
 
     The body is one structure with one encoder, and this is that structure stated once. The
     portable export needs to seal a table mapping it decoded from an artifact rather than scanned
@@ -108,55 +103,74 @@ def logical_body_from_tables(schema_name: str, tables: Mapping[str, Any]) -> dic
     same body through the same function -- a second assembly of ``body_version``/``schema``/
     ``user_version``/``schema_fingerprint`` is a second digest definition, and a difference between
     the two would make an export that cannot be re-imported.
+
+    Every field that used to come from this module's build-time globals now comes from the selected
+    generation, and the table mapping is projected into **that** generation's declared table order.
+    That projection is what keeps a version-1 dataset's ten-table body -- including its empty
+    tables -- byte-identical after a generation 2 exists, and what makes a generation-2 dataset
+    serialize generation 2's own tables instead of silently omitting them.
     """
 
-    _require_declared_keys()
+    selected = resolve_generation(generation)
+    _require_declared_keys(selected)
+    absent = [table for table in selected.tables if table not in tables]
+    if absent:
+        raise KnowledgeStorageError(
+            f"the table mapping does not carry {', '.join(absent)}, which generation "
+            f"{selected.schema_name} declares. A body that omits part of its own manifest is a "
+            "weaker check wearing this one's name, so it is refused rather than digested."
+        )
     return {
         "body_version": _BODY_VERSION,
-        "schema": schema_name,
-        "user_version": schema.SCHEMA_USER_VERSION,
-        "schema_fingerprint": schema.schema_fingerprint(),
-        "tables": dict(tables),
+        "schema": selected.schema_name,
+        "user_version": selected.user_version,
+        "schema_fingerprint": selected.fingerprint,
+        "tables": {table: tables[table] for table in selected.tables},
     }
 
 
-def logical_digest_of_tables(schema_name: str, tables: Mapping[str, Any]) -> str:
+def logical_digest_of_tables(generation: SchemaGeneration | str, tables: Mapping[str, Any]) -> str:
     """Return the canonical logical digest of an already-encoded table mapping."""
 
-    return sha256_digest(logical_body_from_tables(schema_name, tables))
+    return sha256_digest(logical_body_from_tables(generation, tables))
 
 
 def snapshot_identity(
-    connection: apsw.Connection, repository: RepositoryIdentity, schema_name: str
+    connection: apsw.Connection,
+    repository: RepositoryIdentity,
+    generation: SchemaGeneration | str,
 ) -> SnapshotIdentity:
     """Return the logical identity of the dataset for one bound namespace."""
 
+    selected = resolve_generation(generation)
     return SnapshotIdentity(
         repository_id=repository.repository_id,
-        schema_version=schema_name,
-        logical_digest=logical_digest(connection, schema_name),
+        schema_version=selected.schema_name,
+        logical_digest=logical_digest(connection, selected),
     )
 
 
 def dataset_identity(database_path: Path) -> SnapshotIdentity:
     """Read one database file's logical identity through a connection that cannot write it.
 
-    A file at a path is not a dataset until it is read as one: this opens it read-only, validates
-    the declared schema generation and the bound namespace, and returns the identity those two
-    facts scope. Every failure is a storage error rather than a returned value, so a caller that
-    is comparing identities can name the path it could not read instead of treating it as empty.
+    A file at a path is not a dataset until it is read as one: this opens it read-only, selects the
+    declared schema generation *from the dataset*, validates the bound namespace, and returns the
+    identity those two facts scope. Every failure is a storage error rather than a returned value,
+    so a caller that is comparing identities can name the path it could not read instead of treating
+    it as empty.
     """
 
     connection = open_read_only_database(database_path)
     try:
-        schema = inspect_schema(connection)
+        generation = generation_of_database(connection)
+        inspect_schema(connection)
         repository = bound_repository(connection)
         if repository is None:
             raise KnowledgeStorageError(
                 f"the database {database_path} holds no repository namespace row, so it is not a "
                 "knowledge dataset this code can address"
             )
-        return snapshot_identity(connection, repository, schema.schema_name)
+        return snapshot_identity(connection, repository, generation)
     finally:
         connection.close()
 
@@ -204,14 +218,16 @@ def require_bound_repository(connection: apsw.Connection, repository_id: str) ->
     return RepositoryIdentity(repository_id=str(row[0]), authority_home=str(row[1]))
 
 
-def _rows_of(connection: apsw.Connection, table: str) -> list[dict[str, Any]]:
+def _rows_of(
+    connection: apsw.Connection, generation: SchemaGeneration, table: str
+) -> list[dict[str, Any]]:
     """Return every row of ``table`` in primary-key order, keyed by declared column name."""
 
-    columns = schema.CANONICAL_COLUMNS[table]
-    keys = PRIMARY_KEYS[table]
+    columns = generation.columns[table]
+    keys = generation.primary_keys[table]
     rows = [tuple(row) for row in connection.execute(f"SELECT {', '.join(columns)} FROM {table}")]
     rows.sort(key=lambda row: tuple(row[columns.index(key)] for key in keys))
-    json_columns = JSON_COLUMNS.get(table, frozenset())
+    json_columns = generation.json_columns.get(table, frozenset())
     return [
         {
             column: _cell(value, is_json=column in json_columns)
@@ -247,22 +263,24 @@ def _cell(value: Any, *, is_json: bool) -> Any:
         ) from error
 
 
-def _require_declared_keys() -> None:
+def _require_declared_keys(generation: SchemaGeneration) -> None:
     """Refuse a manifest whose declared key names a column the table does not have.
 
-    The keys above and the DDL's ``PRIMARY KEY`` lists are two statements of one fact, and only the
-    DDL can be checked from here. What this verifies is the weaker property the encoder actually
-    depends on -- every key column exists in the table's declared column list -- so a future schema
-    edit cannot leave this module sorting by a column the manifest no longer carries.
+    The generation's key tuples and its DDL's ``PRIMARY KEY`` lists are two statements of one fact,
+    and only the DDL can be checked from here. What this verifies is the weaker property the encoder
+    actually depends on -- every key column exists in the table's declared column list -- so a
+    future schema edit cannot leave this module sorting by a column the manifest no longer carries.
+    It is checked against the **selected** generation, so a generation whose own key registry
+    disagrees with its own columns is refused rather than silently encoded.
     """
 
-    for table in schema.CANONICAL_TABLES:
-        declared = schema.CANONICAL_COLUMNS[table]
-        unknown = [key for key in PRIMARY_KEYS[table] if key not in declared]
+    for table in generation.tables:
+        declared = generation.columns[table]
+        unknown = [key for key in generation.primary_keys[table] if key not in declared]
         if unknown:
             raise KnowledgeStorageError(
                 f"the row order declared for {table} names {unknown}, which its column manifest "
                 f"{declared} does not carry"
             )
-        if len(set(PRIMARY_KEYS[table])) != len(PRIMARY_KEYS[table]):
+        if len(set(generation.primary_keys[table])) != len(generation.primary_keys[table]):
             raise KnowledgeStorageError(f"the row order declared for {table} repeats a column")

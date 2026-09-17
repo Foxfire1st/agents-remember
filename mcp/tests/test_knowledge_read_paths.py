@@ -52,6 +52,7 @@ from agents_remember.models.knowledge.source import (
     GitBlobIdentity,
     SourceAnchorDraft,
 )
+from generation_test_support import declared_schema_name
 from pydantic import ValidationError
 from read_scope_test_support import (
     INTEGRATION_PATH,
@@ -61,6 +62,11 @@ from read_scope_test_support import (
 
 pytestmark = pytest.mark.integration
 
+# The dataset's own declared generation is what a digest must be taken under; the fixtures
+# are created by the build, which declares the newest generation it supports (requirement 2.7).
+# Generation 1's name, kept for the cases that assert a *generation-1* fact. The fixtures'
+# stores are created by the build, which declares the newest generation it supports
+# (requirement 2.7), so a context that must match the file reads `declared_schema_name`.
 SCHEMA_NAME = "ar-knowledge-sqlite/v1"
 GIT_ENVIRONMENT = {
     "PATH": "/usr/bin:/bin:/usr/local/bin",
@@ -353,7 +359,7 @@ def test_a_path_holding_glob_characters_is_authorable_seedable_and_observed_as_i
             knowledge=SnapshotIdentity(
                 repository_id=fixture.repository_id,
                 logical_digest=fixture.knowledge_digest,
-                schema_version=SCHEMA_NAME,
+                schema_version=declared_schema_name(fixture.database_path),
             ),
             repository_root=str(tree_root),
             code_tree_id=tree_id,
@@ -507,7 +513,7 @@ def test_a_failed_tree_lookup_is_unavailable_rather_than_an_absent_path(
             knowledge=SnapshotIdentity(
                 repository_id=fixture.repository_id,
                 logical_digest=fixture.knowledge_digest,
-                schema_version=SCHEMA_NAME,
+                schema_version=declared_schema_name(fixture.database_path),
             ),
             repository_root=str(fixture.git_root),
             code_tree_id=absent_tree,
@@ -610,7 +616,7 @@ def test_a_git_that_cannot_run_is_unavailable_rather_than_an_absent_path(
             knowledge=SnapshotIdentity(
                 repository_id=fixture.repository_id,
                 logical_digest=fixture.knowledge_digest,
-                schema_version=SCHEMA_NAME,
+                schema_version=declared_schema_name(fixture.database_path),
             ),
             repository_root=str(fixture.git_root),
             code_tree_id=fixture.git_tree_id,
@@ -720,7 +726,7 @@ def test_a_lookup_that_answered_non_zero_is_unavailable_rather_than_an_absent_pa
             knowledge=SnapshotIdentity(
                 repository_id=fixture.repository_id,
                 logical_digest=fixture.knowledge_digest,
-                schema_version=SCHEMA_NAME,
+                schema_version=declared_schema_name(fixture.database_path),
             ),
             repository_root=str(fixture.git_root),
             code_tree_id=fixture.git_tree_id,

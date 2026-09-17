@@ -59,6 +59,10 @@ from agents_remember.memory.knowledge.refusals import (
     scope_refusal,
     unknown_invariant_refusal,
 )
+from agents_remember.memory.knowledge.schema_generations import (
+    SchemaGeneration,
+    generation_for_name,
+)
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.context import KnowledgeSchemaIdentity
@@ -97,6 +101,25 @@ class OpenedKnowledgeStore:
     schema: KnowledgeSchemaIdentity
     connection: apsw.Connection
     resource_lock_path: Path
+
+    @property
+    def generation(self) -> SchemaGeneration:
+        """Return the schema generation this dataset declares, as a registry record.
+
+        ``schema`` names the generation the dataset itself declares -- ``inspect_schema`` selects it
+        from the file's recorded version rather than reporting the running build's -- so this is a
+        resolution of an already-made selection rather than a second decision. Every operation that
+        needs a table manifest, a column order, a key tuple or a JSON-column registry reads it from
+        here, so a version-1 candidate stays version 1 while a newly created store is generation 2.
+        """
+
+        resolved = generation_for_name(self.schema.schema_name)
+        if resolved is None:
+            raise KnowledgeStorageError(
+                f"the store is open under schema {self.schema.schema_name!r}, which is not a "
+                "generation this build supports"
+            )
+        return resolved
 
     def __enter__(self) -> OpenedKnowledgeStore:
         return self
@@ -314,7 +337,7 @@ class OpenedKnowledgeStore:
             raise KnowledgeStorageError(
                 f"the candidate database is not bound to repository namespace {self.repository_id}"
             )
-        return logical.snapshot_identity(self.connection, repository, self.schema.schema_name)
+        return logical.snapshot_identity(self.connection, repository, self.generation)
 
     # -- internals ------------------------------------------------------------------
 
