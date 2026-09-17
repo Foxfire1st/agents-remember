@@ -76,8 +76,11 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    `memory_quality_check` operation. Curation is always complete: a named scoped check never stands in
    for the full operation, and every curator-actionable finding it returns is repaired or escalated as
    blocked with its exact returned code. Run it at intake and after every repair until
-   `curatorActionableCount=0` and `checklistStatus=ready-for-closeout`; when it then reports
-   `coherence-required`, publish the `curator_coherence` authority before handoff.
+   `curatorActionableCount=0` and the **raw** `qualityChecklistStatus` reads `ready-for-closeout`. The
+   combined `checklistStatus` is rewritten to `coherence-required` only when the coherence record is then
+   missing or stale: that is the coherence gate, not another repair — clear it by publishing the
+   `curator_coherence` authority with `prepare` → `publish` → `validate`, because `closeoutReady` becomes
+   true only once that validation passes.
 6. **Repair, then republish.** After each repair, re-run the full operation before handoff.
 
 ## Authority gates

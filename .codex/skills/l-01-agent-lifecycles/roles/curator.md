@@ -75,8 +75,11 @@ brief names**, repair, re-run, and record each as passed, failed, blocked, or no
 command and scope; then **hand off** (§ 6). Curation is always complete: a named scoped check never
 stands in for the full `memory_quality_check` operation, and every curator-actionable finding it
 returns is repaired or escalated as blocked with its exact returned code. Run it at intake and after
-every repair until `curatorActionableCount=0` and `checklistStatus=ready-for-closeout`; when it then
-reports `coherence-required`, publish the `curator_coherence` authority before handoff.
+every repair until `curatorActionableCount=0` and the **raw** `qualityChecklistStatus` reads
+`ready-for-closeout`; the combined `checklistStatus` is rewritten to `coherence-required` only when
+the coherence record is then missing or stale — that is the coherence gate, cleared by publishing the
+`curator_coherence` authority with `prepare` → `publish` → `validate` — and `closeoutReady` becomes
+true only once that validation passes.
 
 Writing stays exactly this: file-level sidecars, route overviews when genuinely affected, generated
 route indexes, and the repo entity catalog when a real load-bearing entity changed. For each affected

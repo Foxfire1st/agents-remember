@@ -129,9 +129,12 @@ code-quality checks may be scoped to the change set; curation may not.
 
 Repair the affected onboarding files named by the brief. Run `git diff --check` in the memory
 worktree and the full `memory_quality_check` operation after repairs and before handoff. Run it at
-intake and after every repair until `curatorActionableCount=0` and
-`checklistStatus=ready-for-closeout`; when it then reports `coherence-required`, publish the
-coherence authority before handoff. Record the exact commands, scope, and
+intake and after every repair until `curatorActionableCount=0` and the **raw**
+`qualityChecklistStatus` reads `ready-for-closeout`; the combined `checklistStatus` is rewritten to
+`coherence-required` only when the coherence record is then missing or stale, which is the coherence
+gate — clear it by publishing the coherence authority with `prepare` → `publish` → `validate`, because
+`closeoutReady` becomes true only once that validation passes. Record the
+exact commands, scope, and
 passed/failed/blocked/not-run result. No subset result may stand in for the full operation, and
 closeout and integration carry this evidence as a prerequisite.
 

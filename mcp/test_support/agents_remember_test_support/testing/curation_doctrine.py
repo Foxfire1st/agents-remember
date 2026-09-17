@@ -21,6 +21,17 @@ regression. A statement is reported only on the files that shipped it.
 This is not a semantic check. A corpus that denied the rule in fresh vocabulary this registry has
 never seen would pass; what it buys is that the exact retired sentences cannot come back, and
 that the shipped corpus keeps the sentence stating the rule.
+
+A second, independent registry covers the loop gate's **field names**, which are facts about the
+shipped tool rather than matters of doctrine. The memory-quality result publishes the raw checklist
+status as ``qualityChecklistStatus`` and the combined status as ``checklistStatus``, so a sentence
+that gates the repair loop on ``checklistStatus=ready-for-closeout`` names a condition the repair
+loop never reaches. The combined field is rewritten to ``coherence-required`` only when the raw
+status is ready and the coherence record is then missing or stale; while any repair remains it
+carries the raw actionable status, and when the record is already current it keeps the incoming
+``ready-for-closeout`` with ``closeoutReady`` true. That registry is matched as the exact field
+pairing rather than as a sentence, because the carriers phrase the gate differently from each other
+-- see :data:`RETIRED_LOOP_GATE_FIELD_PAIRING`.
 """
 
 from __future__ import annotations
@@ -202,6 +213,39 @@ RETIRED_CURATION_STATEMENTS: tuple[RetiredCurationStatement, ...] = (
     ),
 )
 
+#: The loop-gate field pairing the shipped tool retired from its own instruction prose. The
+#: memory-quality result publishes the RAW checklist status as ``qualityChecklistStatus`` and the
+#: COMBINED status as ``checklistStatus``, which is rewritten to ``coherence-required`` only on the
+#: path where the raw status is ready and the coherence record is missing or stale. A sentence gating
+#: the repair loop on the combined field with the raw value therefore names a condition the repair
+#: loop does not reach, and sends a curator seat back to repair work that is already finished.
+RETIRED_LOOP_GATE_FIELD_PAIRING = "checklistStatus=ready-for-closeout"
+
+#: The field names the corrected gate states, and the reason a carrier must carry both: the
+#: measured precision gap this registry closes was that ``qualityChecklistStatus`` and
+#: ``closeoutReady`` appeared in zero shipped files while the retired pairing appeared in
+#: thirty-one across the canonical tree, all nine copies, and the reference documents -- plus one
+#: more in this module, which is the base fragment the registry itself has to name.
+LOOP_GATE_CORRECTED_FIELDS = ("qualityChecklistStatus", "closeoutReady")
+
+#: Canonical documents outside the skill surfaces that state the same loop, mapped to the corrected
+#: field names each must carry. Membership is the census -- the retired pairing must never return to
+#: one of these -- and the positive half is asserted with the same reader the skill carriers use, so
+#: a document that drops a field name is caught rather than silently leaving the census.
+#: ``drift-c02.md`` documents the ``c-02-memory-quality-control`` operation, and ``mcp-tools.md``
+#: documents the tool surface itself; both are read by seats that may never open a skill file.
+LOOP_GATE_DOCUMENTS: dict[str, tuple[str, ...]] = {
+    "docs/reference/drift-c02.md": LOOP_GATE_CORRECTED_FIELDS,
+    "docs/reference/mcp-tools.md": LOOP_GATE_CORRECTED_FIELDS,
+}
+
+#: The finding a surface carries while it still states the retired pairing.
+LOOP_GATE_REASON = (
+    f"gates the repair loop on the combined status field with the raw status value "
+    f"({RETIRED_LOOP_GATE_FIELD_PAIRING}); the repair gate is the raw qualityChecklistStatus "
+    f"with curatorActionableCount"
+)
+
 #: Every canonical source that must state the rule, and the exact form it states it in. A row
 #: exists because that sentence is the shipped answer to the retired wording in that file.
 CURATION_COMPLETENESS_STATEMENTS: dict[str, tuple[str, ...]] = {
@@ -216,11 +260,12 @@ CURATION_COMPLETENESS_STATEMENTS: dict[str, tuple[str, ...]] = {
     "skills/l-01-agent-lifecycles/operations/closeout.md": ("Curation is never deferred that way",),
     "skills/l-01-agent-lifecycles/operations/curation.md": (
         f"{COMPLETE_CURATION_RULE}: a named scoped check never",
+        *LOOP_GATE_CORRECTED_FIELDS,
     ),
     "skills/l-01-agent-lifecycles/roles/curator.md": (
         f"{COMPLETE_CURATION_RULE}: a named scoped check never",
         "curatorActionableCount=0",
-        "checklistStatus=ready-for-closeout",
+        *LOOP_GATE_CORRECTED_FIELDS,
     ),
     "skills/l-01-agent-lifecycles/roles/manager.md": ("runs the brief's complete check set",),
     "skills/l-01-agent-lifecycles/roles/orchestrator.md": (
@@ -232,6 +277,7 @@ CURATION_COMPLETENESS_STATEMENTS: dict[str, tuple[str, ...]] = {
     "skills/l-01-agent-lifecycles/roles/worker.md": ("curation is the one exception",),
     "skills/l-01-agent-lifecycles/templates/curator-brief.md": (
         f"{COMPLETE_CURATION_RULE}: run the full memory-quality operation",
+        *LOOP_GATE_CORRECTED_FIELDS,
     ),
     "skills/l-01-agent-lifecycles/templates/manager-brief.md": (
         "Curation is never deferred that way",
@@ -300,6 +346,62 @@ def retired_curation_findings(root: Path) -> list[str]:
     return findings
 
 
+def gates_the_retired_loop_gate_pairing(text: str) -> bool:
+    """Whether one reading still names the combined status field with the raw status value."""
+
+    return normalize_statement(RETIRED_LOOP_GATE_FIELD_PAIRING) in normalize_statement(text)
+
+
+def retired_loop_gate_findings(root: Path) -> list[str]:
+    """Every shipped surface still gating the repair loop on the retired field pairing.
+
+    The match is the exact field pairing rather than a whole sentence, and that is deliberate where
+    :func:`retired_statement_findings` is not: the carriers phrase the gate differently from each
+    other, so no single sentence is the defect while the pairing is. No surviving doctrine quotes
+    the pairing either -- the raw value it names belongs to a different published field, so a
+    carrier cannot state it correctly by accident, which is what makes a fragment match safe here.
+
+    Scope is the canonical ``skills/**`` tree, the nine generated copies, and the reference
+    documents in :data:`LOOP_GATE_DOCUMENTS`. What it does NOT cover, stated rather than implied: a
+    restatement of the wrong gate in fresh vocabulary that never writes the pairing (for example
+    "repair until the combined status reads ready") passes, and it does not read the tool.
+    """
+
+    findings: list[str] = []
+    for surface in CURATION_DOCTRINE_SURFACES:
+        for path in doctrine_files(root, surface):
+            if gates_the_retired_loop_gate_pairing(path.read_text(encoding="utf-8")):
+                findings.append(f"{path.relative_to(root).as_posix()}: {LOOP_GATE_REASON}")
+    for relative in LOOP_GATE_DOCUMENTS:
+        path = root / relative
+        if path.is_file() and gates_the_retired_loop_gate_pairing(path.read_text(encoding="utf-8")):
+            findings.append(f"{relative}: {LOOP_GATE_REASON}")
+    return findings
+
+
+def missing_loop_gate_statements(root: Path) -> list[str]:
+    """Every declared loop-gate document under ``root`` whose corrected field names are absent.
+
+    The positive half of the document census, mirroring :func:`missing_completeness_statements`:
+    membership in :data:`LOOP_GATE_DOCUMENTS` is a promise that the document states the corrected
+    gate, so a document that loses a field name is reported here instead of quietly leaving the set.
+    """
+
+    missing: list[str] = []
+    for relative, statements in LOOP_GATE_DOCUMENTS.items():
+        target = root / relative
+        if not target.is_file():
+            missing.append(f"{relative} is missing")
+            continue
+        reading = normalize_statement(target.read_text(encoding="utf-8"))
+        missing.extend(
+            f"{relative} -> {statement}"
+            for statement in statements
+            if normalize_statement(statement) not in reading
+        )
+    return missing
+
+
 def missing_completeness_statements(root: Path, surface: str) -> list[str]:
     """Every declared canonical source under ``root`` whose completeness statement is absent."""
 
@@ -323,11 +425,17 @@ __all__ = [
     "CURATION_COMPLETENESS_STATEMENTS",
     "CURATION_DOCTRINE_SURFACES",
     "GENERATED_SKILL_COPIES",
+    "LOOP_GATE_CORRECTED_FIELDS",
+    "LOOP_GATE_DOCUMENTS",
     "RETIRED_CURATION_STATEMENTS",
+    "RETIRED_LOOP_GATE_FIELD_PAIRING",
     "RetiredCurationStatement",
     "doctrine_files",
+    "gates_the_retired_loop_gate_pairing",
     "missing_completeness_statements",
+    "missing_loop_gate_statements",
     "normalize_statement",
     "retired_curation_findings",
+    "retired_loop_gate_findings",
     "retired_statement_findings",
 ]

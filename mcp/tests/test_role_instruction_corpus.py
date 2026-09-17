@@ -609,30 +609,41 @@ def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: 
 # Curation is complete on every leaf — the retired optional-curation doctrine
 # --------------------------------------------------------------------------------------
 #
-# The registry of retired sentences and the two readers live in
-# `agents_remember_test_support.testing.curation_doctrine`; these cases are the assertions over
-# the real tree. The defect they exist for is not a typo: a sentence that presents the
-# memory-quality operation as a developer-request-only diagnostic, or as something a named
-# scoped check may stand in for, tells a curator seat that complete curation is somebody else's
-# decision. No per-file case can see it, because every individual sentence is plausible alone --
-# what has to hold is the agreement of the whole shipped corpus with the rule.
+# The registry of retired sentences, the registry of the retired loop-gate field pairing, and the
+# readers for both live in `agents_remember_test_support.testing.curation_doctrine`; these cases are
+# the assertions over the real tree. The defect they exist for is not a typo: a sentence that
+# presents the memory-quality operation as a developer-request-only diagnostic, or as something a
+# named scoped check may stand in for, tells a curator seat that complete curation is somebody
+# else's decision. No per-file case can see it, because every individual sentence is plausible
+# alone -- what has to hold is the agreement of the whole shipped corpus with the rule.
 #
-# WHAT THIS DOES NOT COVER (stated, not implied). It is not a semantic check: a corpus that
-# denied the rule in fresh vocabulary the registry has never seen would pass. Scope is the
-# canonical `skills/**` tree plus the nine generated copies `scripts/sync-skills.py` owns; the
-# copies' byte-identity with their originals is that generator's own contract
-# (`scripts/sync-skills.py --check`), while what is asserted here is that every copy carries the
-# rule at all, so a stale copy cannot ship.
+# The loop-gate registry is the same shape of defect in a different material: the memory-quality
+# result publishes the raw checklist status as `qualityChecklistStatus` and the combined status as
+# `checklistStatus`, so a carrier instructing a curator to iterate repairs until
+# `checklistStatus=ready-for-closeout` names a condition the repair loop does not reach. That one is
+# a fact about the shipped tool, verified against its controller rather than ruled as doctrine.
+#
+# WHAT THIS DOES NOT COVER (stated, not implied). Neither registry is a semantic check: a corpus
+# that denied the rule, or restated the wrong gate, in fresh vocabulary the registries have never
+# seen would pass. Scope is the canonical `skills/**` tree plus the nine generated copies
+# `scripts/sync-skills.py` owns, and for the loop gate the reference documents named in
+# `LOOP_GATE_DOCUMENTS`; the copies' byte-identity with their originals is that generator's own
+# contract (`scripts/sync-skills.py --check`), while what is asserted here is that every copy
+# carries the rule at all, so a stale copy cannot ship.
 
 from agents_remember_test_support.testing.curation_doctrine import (
     CURATION_COMPLETENESS_STATEMENTS,
     CURATION_DOCTRINE_SURFACES,
     GENERATED_SKILL_COPIES,
     RETIRED_CURATION_STATEMENTS,
+    RETIRED_LOOP_GATE_FIELD_PAIRING,
     doctrine_files,
+    gates_the_retired_loop_gate_pairing,
     missing_completeness_statements,
+    missing_loop_gate_statements,
     normalize_statement,
     retired_curation_findings,
+    retired_loop_gate_findings,
     retired_statement_findings,
 )
 
@@ -647,6 +658,15 @@ class CurationIsCompleteOnEveryLeafTests:
             + "\n  ".join(findings)
         )
 
+        # The second, independent registry: the loop gate's field names are facts about the shipped
+        # tool, so a carrier that gates the repair loop on the combined status field with the raw
+        # status value sends its seat back to repair work that is already finished.
+        gate_findings = retired_loop_gate_findings(REPOSITORY_ROOT)
+        assert gate_findings == [], (
+            "a shipped instruction surface still gates the repair loop on the wrong field:\n  "
+            + "\n  ".join(gate_findings)
+        )
+
     def test_the_census_ranges_over_the_canonical_tree_and_every_generated_copy(self) -> None:
         """A census that quietly examined nothing is the one way this check can lie."""
 
@@ -657,6 +677,16 @@ class CurationIsCompleteOnEveryLeafTests:
         for copy_root in GENERATED_SKILL_COPIES:
             assert doctrine_files(REPOSITORY_ROOT, copy_root), f"{copy_root} produced no surfaces"
         assert set(CURATION_DOCTRINE_SURFACES) == {"skills", *GENERATED_SKILL_COPIES}
+
+        # The loop-gate census ranges over those same ten surfaces plus the reference documents
+        # outside the skill tree that state the loop, so its coverage boundary is asserted rather
+        # than assumed: a document that dropped a corrected field name is reported here, and one
+        # that moved away is reported as missing, instead of silently leaving the census.
+        gate_documents = missing_loop_gate_statements(REPOSITORY_ROOT)
+        assert gate_documents == [], (
+            "declared loop-gate documents no longer state the corrected gate:\n  "
+            + "\n  ".join(gate_documents)
+        )
 
     def test_every_canonical_source_states_the_complete_curation_rule(self) -> None:
         missing: list[str] = []
@@ -698,7 +728,9 @@ class CurationGuardTeethTests:
     rather than an assertion about a fragment that never matched anything.
     """
 
-    def test_reinserting_each_retired_statement_is_detected_on_its_own_surface(self) -> None:
+    def test_reinserting_each_retired_statement_is_detected_on_its_own_surface(
+        self, tmp_path: Path
+    ) -> None:
         """For every registered sentence: the seed is reported, and the SHIPPED text is clean.
 
         The shipped side is read from the corpus, so no side of this pair is a restatement of
@@ -722,6 +754,34 @@ class CurationGuardTeethTests:
                 assert not retired_statement_findings(shipped, relative), (
                     f"{source} still reads as carrying the retired statement: {retired.probe!r}"
                 )
+
+        # The loop-gate pairing is retired as a *field pairing*, not as a sentence: the carriers
+        # phrase the gate differently from each other, so the pairing is what has to be absent. The
+        # shipped half is the corpus and the seed is written into a staged copy of it, so again
+        # neither half is a restatement of the other.
+        assert retired_loop_gate_findings(REPOSITORY_ROOT) == [], (
+            "the corpus must read clean of the retired loop-gate pairing before a seed is meaningful"
+        )
+        staged = tmp_path / "skills"
+        shutil.copytree(SKILLS_ROOT, staged)
+        seeded = staged / "l-01-agent-lifecycles" / "roles" / "curator.md"
+        original = seeded.read_text(encoding="utf-8")
+        mutated = original.replace("qualityChecklistStatus", RETIRED_LOOP_GATE_FIELD_PAIRING, 1)
+        assert mutated != original, "seed site not found in the staged role file"
+        # Both sides of the matcher, on two texts: the corrected carrier must not read as the
+        # pairing while the one-token seed must, so the reader is not vacuously reporting.
+        assert not gates_the_retired_loop_gate_pairing(original), (
+            "the corrected carrier text reads as the retired pairing"
+        )
+        assert gates_the_retired_loop_gate_pairing(mutated), (
+            "the seeded carrier text does not read as the retired pairing"
+        )
+        seeded.write_text(mutated, encoding="utf-8")
+        gate_findings = retired_loop_gate_findings(tmp_path)
+        assert any(
+            finding.startswith("skills/l-01-agent-lifecycles/roles/curator.md:")
+            for finding in gate_findings
+        ), gate_findings
 
     def test_one_seeded_old_sentence_is_observed_to_fail_the_guard(self) -> None:
         """The seed is applied to the REAL file's text, and the guard's reader must red it."""
