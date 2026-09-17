@@ -153,11 +153,26 @@ class SelectionQuery:
     The three travel together because a selection is meaningless without its namespace, and the
     anchor resolver is the only part of source resolution this layer owns: it observes a recorded
     anchor against the tree the caller named, and everything else about the source stays outside.
+
+    ``seed_override`` is the one field a two-snapshot comparison adds, and it exists so that a
+    comparison does **not** need a second selection rule. A comparison runs this same policy twice,
+    once per snapshot, and the two sides may name *different exact revisions* of one identity; the
+    override lets a side address its own revision without the policy learning a diff-shaped branch.
+    It replaces ``seed`` for this one selection and is otherwise invisible: every step below --
+    the seed's own revisions, the frozen directly-containing families, the closed member union, the
+    advertised frontier -- is computed from the effective seed exactly as it is for a plain read.
     """
 
     repository_id: str
     seed: KnowledgeReadSeed
     resolve_anchor: AnchorResolver | None = None
+    seed_override: KnowledgeReadSeed | None = None
+
+    @property
+    def effective_seed(self) -> KnowledgeReadSeed:
+        """Return the seed this selection actually uses."""
+
+        return self.seed if self.seed_override is None else self.seed_override
 
 
 @dataclass(frozen=True)
@@ -182,9 +197,13 @@ def select_recorded_scope(connection: apsw.Connection, query: SelectionQuery) ->
     snapshot. ``query.resolve_anchor`` is the source-resolution seam: the caller supplies the
     function that observes a recorded anchor against the requested code tree, and this function
     only decides *which* anchors the selection exposes.
+
+    ``query.effective_seed`` is what is selected. It is ``query.seed`` unless the caller named a
+    ``seed_override``, which is how one comparison addresses a different exact revision on each of
+    its two snapshots while running this one policy on both.
     """
 
-    seed = query.seed
+    seed = query.effective_seed
     seed_revisions = _seed_invariant_revisions(connection, query.repository_id, seed)
     families = _directly_containing_families(connection, query.repository_id, seed, seed_revisions)
     if isinstance(seed, PathSeed) and not seed_revisions:

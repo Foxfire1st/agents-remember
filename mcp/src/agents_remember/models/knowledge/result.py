@@ -69,6 +69,10 @@ KnowledgeOperation = Literal[
     # of asking the same question -- "which recorded scope, and which page of it" -- and a caller
     # branches on the refusal code, not on which of the two it passed.
     "read_knowledge_scope",
+    # Baseline-to-candidate comparison. One operation rather than two, for the reason the read pair
+    # is one: a first comparison and a continuation are two ways of asking the same question, and a
+    # caller branches on the refusal code rather than on which of the two it passed.
+    "diff_knowledge_scope",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct

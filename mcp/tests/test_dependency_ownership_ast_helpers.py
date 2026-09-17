@@ -41,9 +41,9 @@ LIFECYCLE_CATALOG = Path("mcp/tests/evidence-lifecycle.toml")
 LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
-LIFECYCLE_CONTRACT_COUNT = 10
-LIFECYCLE_ARTIFACT_COUNT = 51
-LIFECYCLE_CATALOG_SHA256 = "461121ca16567ab056938b710b19bddb98867581dd4fe3cf7ee2645111d54369"
+LIFECYCLE_CONTRACT_COUNT = 11
+LIFECYCLE_ARTIFACT_COUNT = 52
+LIFECYCLE_CATALOG_SHA256 = "4cf81f10dbbd6b941c50887dca45154612e5e46b7135465823af3e6604db3747"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately once.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
@@ -56,9 +56,12 @@ amended clause, and this value is the catalog after L7's ``knowledge-read-scope-
 module joined it: ten contracts and fifty-one artifacts. L7's fix round 2 then split the over-limit
 integration module and added ``mcp/tests/test_knowledge_read_paths.py`` to that support module's
 consumer list -- a consumer change, not a new artifact: the counts stay ten and fifty-one, and this
-value is the catalog after it. The proof's own artifact delta remains exactly empty -- none of these
-rows is the proof's -- so the freeze still forbids the proof adding or widening anything, and any
-further catalog change must re-pin this digest deliberately.
+value is the catalog after it. ``260915-KS``'s L8 leaf then registered its own
+``knowledge-diff-cases`` support module against the same amended clause -- a new artifact, and the
+two new diff modules joined the read-scope support module's consumer list because they build on it --
+which is what this value pins: eleven contracts and fifty-two artifacts. The proof's own artifact delta remains exactly empty
+-- none of these rows is the proof's -- so the freeze still forbids the proof adding or widening
+anything, and any further catalog change must re-pin this digest deliberately.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"

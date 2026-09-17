@@ -1196,9 +1196,33 @@ consumers = [
 ]
 
 [[contract]]
+id = "knowledge-diff-cases"
+owner = "mcp/tests/diff_scope_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_diff_scope.py::test_a_realization_the_candidate_removed_keeps_its_baseline_source_in_the_union"
+
+[[contract]]
 id = "knowledge-read-scope-cases"
 owner = "mcp/tests/read_scope_test_support.py"
 evidence_node = "mcp/tests/test_knowledge_read_scope.py::test_a_path_seed_returns_the_sibling_realizations_and_advertises_the_unreached_family"
+
+[[artifact]]
+path = "mcp/tests/diff_scope_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "knowledge-diff-cases"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "the public knowledge-store operations over the shared read-scope fixture: a baseline snapshot, a candidate snapshot copied from it and then curated through the store, and two real committed Git trees that borrow each other's object store so one repository names both"
+introduced_by = "260915-KS-L8"
+lifetime = "permanent"
+permanence_rationale = "The comparison is decided by what changed between two snapshots -- a revised revision pair, a source-only change, a removed and an added realization, a record present but outside the other side's selection, and a changed code path no claim attributes -- and no single-snapshot fixture can carry those. Building the candidate from the shared baseline fixture is also what keeps the two leaves from disagreeing about which records the R07 stopping rule selects."
+replacement_contract = "contract:knowledge-diff-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_diff_scope.py",
+  "mcp/tests/test_knowledge_diff_boundaries.py",
+]
 
 [[artifact]]
 path = "mcp/tests/read_scope_test_support.py"
@@ -1215,6 +1239,8 @@ permanence_rationale = "The selective read is decided by one exact topology -- I
 replacement_contract = "contract:knowledge-read-scope-cases"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_knowledge_diff_boundaries.py",
+  "mcp/tests/test_knowledge_diff_scope.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
   "mcp/tests/test_knowledge_read_paths.py",
   "mcp/tests/test_knowledge_read_scope.py",

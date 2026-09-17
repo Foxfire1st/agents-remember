@@ -277,3 +277,93 @@ def fetch_realizations_for_invariants(
         }
         for row in rows
     ]
+
+
+# --- existence, for the two-snapshot comparison ---------------------------------------------
+#
+# A comparison has to distinguish three states that a single read never needs to tell apart: a
+# record the other snapshot **does not hold**, a record it holds but the other side's declared
+# selection **did not reach**, and a record both sides selected. Only the first is absence; the
+# second is a fact about the selection, and reporting it as a deletion is the design's own named
+# misreading ("present-but-outside-the-other-selected-scope is not deletion"). These lookups answer
+# the first question and nothing else, by exact identity, one statement each; the caller already
+# holds the selected set that answers the second.
+
+
+def _row_exists(connection: apsw.Connection, statement: str, parameters: tuple[Any, ...]) -> bool:
+    """Return whether one existence statement selects any row."""
+
+    return next(iter(connection.execute(statement, parameters)), None) is not None
+
+
+def invariant_revision_is_recorded(
+    connection: apsw.Connection, repository_id: str, invariant_revision_id: str
+) -> bool:
+    """Return whether one snapshot holds the named invariant revision."""
+
+    return _row_exists(
+        connection,
+        "SELECT 1 FROM invariant_revision WHERE repository_id = ? AND revision_id = ?",
+        (repository_id, invariant_revision_id),
+    )
+
+
+def family_revision_is_recorded(
+    connection: apsw.Connection, repository_id: str, family_revision_id: str
+) -> bool:
+    """Return whether one snapshot holds the named family revision."""
+
+    return _row_exists(
+        connection,
+        "SELECT 1 FROM family_revision WHERE repository_id = ? AND revision_id = ?",
+        (repository_id, family_revision_id),
+    )
+
+
+def membership_is_recorded(connection: apsw.Connection, repository_id: str, member_id: str) -> bool:
+    """Return whether one snapshot holds the named membership row."""
+
+    return _row_exists(
+        connection,
+        "SELECT 1 FROM family_member WHERE repository_id = ? AND member_id = ?",
+        (repository_id, member_id),
+    )
+
+
+def fetch_predecessor_edges(
+    connection: apsw.Connection, repository_id: str
+) -> tuple[tuple[str, str], ...]:
+    """Return every ``(successor_revision_id, predecessor_revision_id)`` edge one snapshot records.
+
+    Each revision kind records its own authored old/new relation in its own table, and both are read
+    here because a comparison asks the same question of either. The edges are *authored*: they are
+    what an author declared when they wrote the successor, so a comparison can pair two revisions
+    without comparing labels, versions or insertion order -- none of which an author guarantees.
+    """
+
+    rows = connection.execute(
+        "SELECT child_revision_id, parent_revision_id FROM invariant_predecessor "
+        "WHERE repository_id = ? "
+        "UNION ALL "
+        "SELECT child_revision_id, parent_revision_id FROM family_predecessor "
+        "WHERE repository_id = ? "
+        "ORDER BY 1, 2",
+        (repository_id, repository_id),
+    )
+    return tuple((str(row[0]), str(row[1])) for row in rows)
+
+
+def realization_claim_is_recorded(
+    connection: apsw.Connection, repository_id: str, claim_id: str
+) -> bool:
+    """Return whether one snapshot holds the named realization claim.
+
+    The claim is looked up without its anchor: a comparison asks whether the *relationship* is
+    still recorded, and a claim whose anchor is a separate row is still that relationship.
+    """
+
+    return _row_exists(
+        connection,
+        "SELECT 1 FROM realization_claim WHERE repository_id = ? AND claim_id = ?",
+        (repository_id, claim_id),
+    )
