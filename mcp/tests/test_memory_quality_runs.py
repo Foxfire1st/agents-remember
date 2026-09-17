@@ -352,6 +352,111 @@ class MemoryQualityControllerTests(unittest.TestCase):
         validate_sidecars.assert_called_once()
         validate_overviews.assert_called_once()
 
+    def test_a_dead_governing_overview_reaches_the_gated_repair_set(self) -> None:
+        """D3/D16's actual defect was the product's SILENCE, so the wiring is what gets pinned.
+
+        A correct checker whose findings never reach `repair_findings` still produces a clean
+        `curatorActionableCount` — which is exactly how 41 dead declarations passed every gate.
+        This drives `_attach_curator_checklist` with a real onboarding tree holding one card whose
+        body link resolves to nothing, and asserts the finding arrives in the checklist the
+        curator's completion loop gates on.
+        """
+
+        with TemporaryDirectory() as temporary:
+            memory_root = Path(temporary)
+            onboarding_root = memory_root / "onboarding"
+            package = onboarding_root / "pkg" / "nested"
+            package.mkdir(parents=True)
+            (onboarding_root / "overview.md").write_text("# overview\n", encoding="utf-8")
+            (package / "dead.md").write_text(
+                "# dead\n\n"
+                "| Field | Value |\n| --- | --- |\n"
+                "| governingOverview | `../../overview.md` |\n\n"
+                "## Governing Overview\n\n"
+                "[Overview](../../../overview.md)\n\n"
+                "## Purpose\n\nSeeded dead link.\n",
+                encoding="utf-8",
+            )
+            pair = _pair()
+            scope = MemoryScope(
+                repo_id="canonical-repo",
+                identity=MemoryScopeIdentity(
+                    authority="leaf",
+                    authority_path=pair.contractPath,
+                    code_root=pair.codeRoot,
+                    onboarding_root=onboarding_root.as_posix(),
+                    pair_identity=pair,
+                ),
+                code_root=Path(pair.codeRoot),
+                onboarding_root=onboarding_root,
+                context=mock.Mock(),
+                curator_report_path=memory_root / "reports" / "curator-memory-quality.md",
+                contract=mock.Mock(),
+                pair_identity=pair,
+            )
+            execution = controller.MemoryQualityExecution(
+                config=mock.Mock(),
+                scope=scope,
+                checks=tuple(sorted(AVAILABLE_CHECKS)),
+                detail_limit=50,
+                publish_curator_report=True,
+            )
+            candidate_inputs = controller._CuratorCandidateInputs("a" * 40, "b" * 40)
+            census = SimpleNamespace(
+                scope=SimpleNamespace(pair_identity=pair, working_paths=(), committed_paths=()),
+                result=SimpleNamespace(rows=[], blockers=[]),
+            )
+            response: dict[str, object] = {"checks": {}}
+            with (
+                mock.patch.object(
+                    controller, "revalidate_memory_candidate_scope", return_value=scope
+                ),
+                mock.patch.object(
+                    controller, "_curator_candidate_inputs", return_value=candidate_inputs
+                ),
+                mock.patch.object(
+                    controller,
+                    "check_missing_onboarding",
+                    return_value={"missingCount": 0, "missing": []},
+                ),
+                mock.patch.object(
+                    controller,
+                    "build_route_indexes",
+                    return_value=mock.Mock(stale_indexes=[]),
+                ),
+                mock.patch.object(controller, "split_commit_owned_findings", return_value=([], [])),
+                mock.patch.object(controller, "write_curator_checklist") as publish,
+                mock.patch.object(controller, "_attach_coherence_readiness"),
+                mock.patch.object(controller, "_catalog_checks", return_value={}),
+            ):
+                controller._attach_curator_checklist(
+                    execution,
+                    {"checks": {}},
+                    response,
+                    candidate_inputs=candidate_inputs,
+                    census=cast(Any, census),
+                )
+
+        published = publish.call_args.args[0]
+        codes = [
+            row["code"]
+            for row in published.repair_findings
+            if row["check"] == "integrity.governing_overview_resolution"
+        ]
+        self.assertEqual(codes, ["governing-overview-link-unresolved"])
+        self.assertEqual(
+            [
+                row["path"]
+                for row in published.repair_findings
+                if row["check"] == "integrity.governing_overview_resolution"
+            ],
+            ["pkg/nested/dead.md"],
+        )
+        self.assertEqual(
+            response["governingOverviewResolution"]["unresolvedLinkCount"],  # type: ignore[index]
+            1,
+        )
+
     def test_curator_refresh_keeps_deleted_history_out_of_current_working_targets(self) -> None:
         sidecar_plan = {
             "required": [],

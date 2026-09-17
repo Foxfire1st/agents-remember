@@ -66,6 +66,7 @@ unit-regression = [
   "mcp/tests/test_gate_certificate_authority.py",
   "mcp/tests/test_gate_certification_evidence.py",
   "mcp/tests/test_global_state_isolation.py",
+  "mcp/tests/test_governing_overview_resolution.py",
   "mcp/tests/test_harness_control.py",
   "mcp/tests/test_harness_launch.py",
   "mcp/tests/test_harness_submission_authority.py",
