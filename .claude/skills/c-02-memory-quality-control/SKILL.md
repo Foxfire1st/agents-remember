@@ -1,18 +1,20 @@
 ---
 name: c-02-memory-quality-control
-description: "Provide on-demand Agents Remember memory-quality diagnostics and scoped onboarding checks without making closeout or integration a quality gate."
+description: "Run the complete Agents Remember memory-quality operation as part of curation, plus scoped diagnostics, and carry its result into closeout and integration."
 ---
 
 # c-02-memory-quality-control Memory Quality Control
 
-Use this skill when the developer explicitly requests memory-quality evidence or
-when an approved workflow asks for a scoped diagnostic. Closeout and integration
-consume prepared code/memory/ledger Git inputs and do not invoke this skill as a
-quality prerequisite.
+Use this skill when a curator runs the memory-quality operation as part of
+curation, or when an approved workflow asks for a scoped diagnostic. A curator
+always runs the full operation; closeout and integration consume its result
+together with the prepared code/memory/ledger Git inputs rather than invoking
+this skill again.
 
 The skill owns the diagnostic procedure. Drift detection can qualify task-start
-context, and curators can run scoped onboarding checks before handoff. Full
-memory quality remains an explicit developer-requested operation.
+context. Curation is always complete: the curator's full memory-quality result
+travels with the handoff as a closeout and integration prerequisite, while tests
+and code-quality checks may still be scoped.
 
 ## Inputs
 
@@ -23,21 +25,23 @@ resolved by `c-08-ar-coordination-context-resolver` or MCP `resolve_context`.
 
 1. task-start trust guidance from repo-wide drift classification
 2. a concrete onboarding maintenance worklist for `c-05-create-or-update-onboarding-files`
-3. a scoped missing-onboarding report when a curator requests it
-4. an on-demand memory-quality report covering the requested scope
-5. explicit next actions when the requested diagnostic is not clean
+3. a missing-onboarding report scoped to the curator's change set
+4. the complete memory-quality operation a curator runs as part of curation
+5. the `curator_coherence` authority when the checklist requires it, plus explicit next actions with the exact returned code for every finding that is not clean
 
 ## Quality Control Phases
 
 | Phase | Check | Purpose |
 | --- | --- | --- |
 | Task start (when requested) | `drift_check` | Qualify existing onboarding before planning against it. |
-| Curator handoff | scoped `c-05-create-or-update-onboarding-files` checks | Maintain affected sidecars, overviews, indexes, and entity entries for this change. |
-| Explicit developer request | `memory_quality_check` | Run the requested memory-quality scope and report every passed, failed, blocked, and not-run check. |
-| Targeted style repair | `history_order_fix.py` | Fix an identified ordering issue only after the requested report names it. |
+| Curator handoff | complete `c-05-create-or-update-onboarding-files` checks + `memory_quality_check` | Maintain affected sidecars, overviews, indexes, and entity entries for this change, then run the full memory-quality operation and repair or escalate every curator-actionable finding. |
+| Checklist requires it | `curator_coherence` | Publish the coherence authority for the exact checklist result the curator produced. |
+| Targeted style repair | `history_order_fix.py` | Fix an identified ordering issue only after the report names it. |
 
-Diagnostics are evidence only. They should not become an automatic closeout or
-integration gate.
+Diagnostics are evidence. A code-quality or test diagnostic does not become an
+automatic closeout or integration gate, while the curator's complete
+memory-quality result is part of the curation handoff that closeout and
+integration carry.
 
 ## Boundaries
 
@@ -52,8 +56,9 @@ integration gate.
 6. It must not treat implementation approval as commit approval; closeout
    commits remain owned by the `c-09-git-worktree-manager` skill transaction and
    authority controls.
-7. It must not make a memory-quality, curator, or review result a closeout or
-   integration prerequisite.
+7. It must not make a code-quality, test, or independent-review result a
+   closeout or integration prerequisite; the curator's complete memory-quality
+   result is a curation output and does travel with the handoff.
 
 ## Procedure
 
@@ -164,7 +169,7 @@ handoff.
 
 ### 5. Run Pre-Code-Commit Missing-Onboarding Control
 
-When a curator's scoped handoff needs a missing-onboarding report, run the
+When a curator's handoff needs a missing-onboarding report, run the
 package-local check for task additions, copies, renames, or untracked source
 files:
 
@@ -181,39 +186,45 @@ onboarding through the `c-05-create-or-update-onboarding-files` skill before the
 curator handoff. The closeout transaction consumes the resulting memory content
 without rerunning this report.
 
-### 6. Run Scoped Curator Checks
+### 6. Run the Complete Curation Check
 
-The curator maintains only the onboarding affected by the fed change set. Use
+The curator maintains the onboarding affected by the fed change set. Use
 `c-05-create-or-update-onboarding-files` for sidecars, governing overviews,
 route indexes, and entity entries, then run `git diff --check` in the memory
-worktree plus any narrowly scoped check named by the curator brief. Record the
-exact command, scope, result, and every failed or not-run check. A scoped check
-does not establish full memory quality and is not a closeout or integration
-gate.
-
-If the owning role explicitly requests an MCP diagnostic, scope it to the leaf:
-
-```text
-memory_quality_check(request={"mode":"sync", "repo_id":"<repo-id>", "contract_path":"<enclosure-contract-path>", "checks":["<named-check>"]})
-```
-
-Use the returned report only to repair the named affected onboarding or to
-report a blocker. Do not require a complete checklist, `finalFullCatalog`,
-`curator_coherence`, or a quality certificate for handoff.
-
-### 7. Run Full Memory Quality Only On Explicit Developer Request
-
-When the developer explicitly requests full memory-quality evidence, run the
-existing tool against the requested repository or contract path:
+worktree and the full memory-quality operation scoped to the leaf. Curation is
+always complete: a named scoped check never stands in for the full operation, and
+every curator-actionable finding it returns is either repaired or escalated as
+blocked with its exact returned code. Record the exact command, scope, result,
+and every finding. Closeout and integration carry this result as a prerequisite.
 
 ```text
 memory_quality_check(request={"mode":"sync", "repo_id":"<repo-id>", "contract_path":"<enclosure-contract-path>"})
 ```
 
-Report every applicable check as passed, failed, blocked, or not-run. Repair
-findings through the existing onboarding workflow and rerun only as the
-developer-requested operation directs. This evidence remains separate from
-closeout/integration authority and never becomes an automatic prerequisite.
+A curator-actionable finding count that looks implausible for this change set is a
+measurement problem to investigate, never permission to pass incomplete
+onboarding. Tests and code-quality checks may be scoped to the change set;
+curation may not.
+
+### 7. Publish the Curator Coherence Authority When the Checklist Requires It
+
+`curator_coherence` is the authority a curator produces when the full operation
+returns `checklistStatus=coherence-required` — the ordinary outcome for a healthy
+memory, which reports a successful `prepare` with `candidateCount 0` and still
+requires the record to be published. Carry the leaf's `contract_path` through
+`status` → `prepare` → `publish` → `validate`, and supply one
+curator/architect-authored disposition, rationale, and evidence reference for
+every candidate `prepare` names:
+
+```text
+curator_coherence(request={"action":"prepare", "contract_path":"<enclosure-contract-path>"})
+```
+
+Publish only the exact identities `prepare` returned, then `validate`. A refusal,
+a missing or extra candidate, or a validator failure is a blocked curation finding
+with its exact returned code, reported to the owning seat. A hand-written
+certification file is never a substitute for this record, and the record never
+replaces the closeout transaction that owns the real code and memory commits.
 
 ### 8. Use Targeted Style Fixers Only After Findings
 
@@ -231,8 +242,9 @@ check.
 ## Rules
 
 1. Task-start memory diagnostics begin with `c-08-ar-coordination-context-resolver` skill context and the `drift_check` MCP tool when that diagnostic is requested by the workflow.
-2. Closeout and integration do not invoke memory-quality tools; they consume
-   the prepared memory-content and ledger Git legs.
+2. Closeout and integration do not rerun memory-quality tools; they consume
+   the curator's complete memory-quality result together with the prepared
+   memory-content and ledger Git legs.
 3. New files created by the current task may be checked before curator handoff
    with `check_missing_onboarding`.
 4. The `c-02-memory-quality-control` skill hands maintenance work to the `c-05-create-or-update-onboarding-files` skill instead of writing onboarding content.
@@ -245,5 +257,7 @@ check.
    not inside durable memory unless the developer explicitly asks.
 9. A requested diagnostic report belongs under the resolved coordination/temp
    root unless the developer explicitly requests another artifact location.
-10. Curator scoped checks and any explicitly requested full memory-quality run
-    are evidence; neither is a closeout-readiness or integration authority.
+10. The curator's complete memory-quality result is the curation evidence that
+    closeout and integration carry; tests, code-quality checks, and independent
+    review remain separately scoped and are not closeout-readiness or
+    integration authority.

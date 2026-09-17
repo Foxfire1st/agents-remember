@@ -200,8 +200,10 @@ signals; process and ack every item before ending your turn again.
   or overconstraint is diagnosed and proposed, never self-approved, and never silently rewritten.
 - **Git code/memory transactions** are closeout/integration work owned by the owning seat. They
   publish only the explicitly authorized code and prepared memory commits/merges. Closeout and
-  integration do **not** launch automatic code-quality, full-suite, memory-quality,
-  curator-certification, or independent-review operations; full code quality, full tests, and full
-  memory quality run only after an explicit developer request. Worker targeted checks and curator
-  scoped onboarding checks remain truthful handoff evidence — failed or not-run checks are reported
-  and never relabeled as full green.
+  integration do **not** launch automatic code-quality, full-suite, or independent-review
+  operations; full code quality, full tests, and independent review run only after an explicit
+  developer request. Curation is never deferred that way: the curator runs the complete
+  memory-quality operation as part of curation, and closeout and integration carry that result as a
+  prerequisite instead of rerunning it. Worker targeted checks and the curator's complete onboarding
+  result remain truthful handoff evidence — failed or not-run checks are reported and never
+  relabeled as full green.

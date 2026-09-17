@@ -34,7 +34,7 @@ place. A manager has **no bird's-eye view**: it sees one master, not the portfol
 shapes everything below.
 
 The manager owns the leaf lifecycle machinery **end-to-end**: `worktree_start` → builder code →
-optional review → curator scoped onboarding/check handoff → closeout preview/apply →
+optional review → curator's complete onboarding/check handoff → closeout preview/apply →
 `worktree_integrate` → finalize. Task-doc statuses arrive through the finalizer, but **steps are
 checked by this seat by hand** — the tool does not reconcile checkboxes. The worker's terminal state
 is targeted checks reported truthfully plus a turn report; failed or not-run checks never become a
@@ -190,11 +190,13 @@ or respawn merely because delivery is pending.
   first. Compile `../templates/curator-brief.md` with the landed change set, task doc, approved
   decisions, affected onboarding anchors, exact requirement packets, and the worker report — plus a
   reviewer adjudication only when review was requested. The fresh curator updates affected onboarding
-  and runs the brief's scoped checks; `curator_coherence`, full memory quality, and certification are
-  separate explicit operations, **not** closeout or integration requirements. Consume the curator's
-  paths and exact passed/failed/blocked/not-run check report (`../operations/curation.md`).
+  and runs the brief's complete check set, including the full memory-quality operation;
+  `curator_coherence` is published when the checklist requires it. Closeout and integration carry that
+  full-memory-quality evidence as a prerequisite. Consume the curator's paths and exact
+  passed/failed/blocked/not-run check report (`../operations/curation.md`); a curator-actionable
+  finding neither repaired nor escalated as blocked keeps the leaf open.
 - **Publish closeout-door truth; do not rank the portfolio.** Given builder completion, the worker
-  targeted-check report, the affected curator onboarding/scoped-check handoff when memory changed,
+  targeted-check report, the curator's complete onboarding/check handoff when memory changed,
   current task/source/memory provenance, and current lineage, call `closeout_door` with
   `request={action:"declare", contract_path:...}` for the configured leaf contract. Publish the
   canonical leaf/master/sprint refs, `executionNature`, the accepted priority grade, the exact candidate
@@ -237,9 +239,12 @@ or respawn merely because delivery is pending.
   task edits never erase or strand it.
 - **Transaction boundary.** Closeout and integration publish only the explicitly authorized Git code
   and prepared memory commits/merges, with source/destination refs, conflict checks, and recovery
-  evidence. They never automatically run code-quality checks, full test suites, memory-quality suites,
-  curator certification, or independent review; full code quality, full tests, and full memory quality
-  run only after an explicit developer request.
+  evidence. They never automatically run code-quality checks, full test suites, or independent review,
+  and full code quality, full tests, and independent review run only after an explicit developer
+  request. Curation is never deferred that way: the curator runs the complete memory-quality operation
+  as part of curation, and closeout and integration carry that result as a prerequisite instead of
+  rerunning it. Worker targeted checks and the curator's complete onboarding result remain truthful
+  handoff evidence; failures and not-run checks are reported and never relabeled as full green.
 - **Seat cleanup.** `worktree_integrate` auto-closes a completed leaf's worker/reviewer/curator sessions
   (config-gated, default ON) only after that exact session's turn report is durable for the exact leaf;
   retirement stops control, kills the tmux session, preserves the transcript and report, and stamps
@@ -254,8 +259,8 @@ or respawn merely because delivery is pending.
 
 **Optional master-exit review.** When the developer or approved task brief requests it, dispatch the
 adversarial reviewer on this canonical master document with role `reviewer`, scoping the accumulated
-organizational candidate or isolated atomic branch with the worker reports, curator scoped handoff,
-task/Git/operation refs, and the exact requested review mode. Review 1 seals the complete fixed finding
+organizational candidate or isolated atomic branch with the worker reports, the curator's complete
+handoff, task/Git/operation refs, and the exact requested review mode. Review 1 seals the complete fixed finding
 list, reviews 2 and 3 verify only that list with the remaining count shrinking to zero, and after round
 3 ask the developer directly. Its verdict follows `../templates/verdict.md`. The verdict is evidence,
 not a gate decision: record it with `task_doc` and attach it only to the requested handover evidence.
@@ -263,7 +268,7 @@ Routine closeout and integration require no master-exit reviewer or verdict.
 
 **Handover to the orchestrator.** Write the **master-handover packet**
 (`../templates/master-handover-packet.md`): execution nature · scope refs · change-set summary · worker
-targeted-check report · curator scoped onboarding/check report when memory changed · optional requested
+targeted-check report · the curator's complete onboarding/check report when memory changed · optional requested
 verdict · canonical master document · accepted Git pair. The packet records the exact prepared
 code/memory transaction and any concrete conflict or failed/not-run check; it does not request an
 automatic full gate. Memory commit trailers supply attribution and the computed ledger cache is

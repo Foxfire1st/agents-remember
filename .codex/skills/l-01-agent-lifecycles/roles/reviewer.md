@@ -111,8 +111,11 @@ on projection-only evidence).
    routes, and the exploratory mandate, each writing a **durable sub-agent report**; every standing
    criterion is reported, even to say it found nothing. Posture: **refute-or-confirm**. In scope are
    the worker's targeted checks, `system/tools.md` guidance, and regressions **vs the past** for the
-   requested scope; full suites, `drift_check`, and `memory_quality_check` run only on an explicit
-   developer request, and closeout and integration never require them.
+   requested scope; full suites and `drift_check` run only on an explicit
+   developer request, and closeout and integration never require them. Curation is the exception and
+   is never a developer-request-only operation: the curator always runs the full `memory_quality_check`
+   operation, and its complete result is what this lens verifies — a subset result never stands in for
+   it, and a curator-actionable finding neither repaired nor escalated as blocked is a block.
 5. **Baseline only — seal the baseline** (stable issue IDs, precise problem statements, evidence, and observable
    fix-acceptance criteria); an empty first-pass issue list is a valid terminating baseline (`../operations/review.md`).
 6. **Fix-verification — reuse the sealed evidence and only the listed IDs**: no exploratory mandate,
@@ -152,7 +155,8 @@ requested review.
   append-only, never rewriting the worker record or earlier bytes.
 - **Fix-leaf descriptors** when the verdict blocks — ready for the decider to turn into `task_doc` leaves.
 - **Read-only retrieval:** `read_ar_files` · `grepai_search` · `cgc_*` · scoped `system/tools.md`
-  checks · report templates · optional scoped `memory_quality_check`/`drift_check` on request · inbox.
+  checks · report templates · full `memory_quality_check` curation evidence · `drift_check` when
+  requested · inbox.
 - **Structural parent message** (`message_parent`) for missing review context or a blocking routing
   problem; stdin push is not a driver here, since this seat reports through its verdict.
 
@@ -250,7 +254,7 @@ decider's runtime identity.
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
 | dispatch | target-only role; ambient takeover target | This seat has no `dispatch_agent` caller authority. The owning manager dispatches leaf and master-exit reviewers, the architect dispatches the sprint plan reviewer, and the orchestrator dispatches the sprint super-exit reviewer. An identity-free developer launcher may target an altitude-valid reviewer only for an explicit task-seat takeover; leaf/master parentage remains structurally unambiguous, while an ambient sprint reviewer has no basis to choose architect versus orchestrator and parent operations fail closed. |
-| tools   | review surface   | `read_ar_files` · optional scoped `memory_quality_check`/`drift_check` on explicit request · `grepai_search` · `cgc_*` · scoped `system/tools.md` checks · report templates · inbox |
+| tools   | review surface   | `read_ar_files` · full `memory_quality_check` curation evidence · `drift_check` when requested · `grepai_search` · `cgc_*` · scoped `system/tools.md` checks · report templates · inbox |
 
 Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, and
 `promptKeywords`) participate in Settings.json `orchestration.roles.reviewer` and

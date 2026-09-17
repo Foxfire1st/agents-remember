@@ -107,7 +107,9 @@ gaps remaining).
   the brief supplies them for context.
 - **Read-only AR retrieval:** `read_ar_files`, `grepai_search`, `cgc_*`, `context_packet`.
 - **Shell** for the prescribed checks — use the interpreter paths the brief names; do not assume a
-  `python` shim exists.
+  `python` shim exists. Do not run or claim a full suite/full quality result unless the developer or
+  the task brief explicitly requests that operation — curation is the one exception, because the
+  curator always runs the full memory-quality operation.
 - **Your two artifacts:** the turn report at the brief's path, and the Requirement Attempt Journal
   records.
 - **Structural parent message** (`message_parent`) for a clarification or escalation.

@@ -2,8 +2,9 @@
 
 A durable report a curator writes for the affected onboarding handoff and, when review is explicitly
 requested, the reviewer's onboarding-vs-code lens. It records c-05 sidecar/overview/index/entity
-changes and scoped checks for the affected paths. Full memory-quality or drift suites are separate
-developer-requested operations and are not routine closeout or integration gates.
+changes and the complete curation checks for the affected paths: the full memory-quality operation is
+part of curation and its result travels with this handoff as a closeout and integration prerequisite.
+Drift suites are separate developer-requested operations.
 
 ## Rules
 
@@ -34,11 +35,13 @@ developer-requested operations and are not routine closeout or integration gates
 | New source file | Sidecar created? | check_missing_onboarding clean? | Finding |
 | --------------- | ---------------- | ------------------------------- | ------- |
 
-## Scoped Checks
+## Checks — curation is complete
+- Full `memory_quality_check` operation: pass | failed | blocked | not-run — <command/result/finding codes>
+- `curator_coherence` when the checklist requires it: published | blocked | not-required — <result>
 - c-05 affected-onboarding check: pass | failed | blocked | not-run — <scope/command/result>
 - git diff --check: pass | failed | blocked | not-run — <command/result>
-- Other named scoped checks: pass | failed | blocked | not-run — <scope/command/result>
-- Full memory-quality/drift suite: not run unless explicitly requested — <request/result if any>
+- Other named checks: pass | failed | blocked | not-run — <scope/command/result>
+- drift suite when the workflow requests it: pass | failed | blocked | not-run — <request/result if any>
 - Ledger maps code HEAD: yes | <gap>
 
 ## Overviews

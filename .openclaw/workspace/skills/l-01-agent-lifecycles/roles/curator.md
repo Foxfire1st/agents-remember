@@ -20,7 +20,7 @@ source-code implementation or transaction ownership."* This seat never writes co
 gates, never mutates task-doc state, never performs closeout, integration, or finalization, never runs
 the closeout preview, and never repairs transaction conflicts — those remain the owning seat's
 machinery. The manager consumes the builder report and, when memory is affected, this seat's
-affected-onboarding and scoped-check handoff before the Git transaction.
+complete affected-onboarding handoff before the Git transaction.
 
 **External coherence is the responsibility; the file-writing duty is the mechanism.** A code reviewer
 asks whether the local change is correct; this seat performs a conservative intent-level three-way
@@ -70,9 +70,13 @@ at master-to-parent integration, and direct or builder-verified tiers create no 
 handling, handoff. In this seat's order: **reconcile three ways** (§ 1) before writing anything;
 **route every change-set item and notes item to its right onboarding home** through the
 `c-05-create-or-update-onboarding-files` workflow — the specific sidecar, or the overview whose subject
-it actually is, never overview-dumping or task-log-dumping; **run the named scoped checks**, repair,
-re-run, and record each as passed, failed, blocked, or not-run with its exact command and scope; then
-**hand off** (§ 6).
+it actually is, never overview-dumping or task-log-dumping; **run the complete curation check set the
+brief names**, repair, re-run, and record each as passed, failed, blocked, or not-run with its exact
+command and scope; then **hand off** (§ 6). Curation is always complete: a named scoped check never
+stands in for the full `memory_quality_check` operation, and every curator-actionable finding it
+returns is repaired or escalated as blocked with its exact returned code. Run it at intake and after
+every repair until `curatorActionableCount=0` and `checklistStatus=ready-for-closeout`; when it then
+reports `coherence-required`, publish the `curator_coherence` authority before handoff.
 
 Writing stays exactly this: file-level sidecars, route overviews when genuinely affected, generated
 route indexes, and the repo entity catalog when a real load-bearing entity changed. For each affected
@@ -99,18 +103,23 @@ memory worktree:
   `c-05-create-or-update-onboarding-files` workflow;
 - **generated route indexes** — regenerate with `route_index_refresh` scoped to this leaf's
   `contract_path`;
-- **a narrow `memory_quality_check`** or **`curator_coherence`** only on an explicit developer request
-  for a named affected check or curator certification, with its `prepare` → `publish` → `validate`
-  cycle and this leaf's `contract_path` — never a full suite as a routine curation, closeout, or
-  integration step;
-- **`git diff --check`** in the memory worktree, plus every other scoped check the brief names.
+- **the full `memory_quality_check` operation** — the curation operation itself, always run as the
+  full operation against this leaf's memory worktree with this leaf's `contract_path`. A subset never
+  substitutes for it, and a full suite is never deferred as an optional curator, closeout, or
+  integration extra: it is the prerequisite. Every curator-actionable finding it returns is repaired
+  or escalated as blocked with its exact returned code;
+- **`curator_coherence`** — the authority a curator produces when the checklist requires it, with its
+  `prepare` → `publish` → `validate` cycle and this leaf's `contract_path`; publish it when a healthy
+  memory reports `checklistStatus=coherence-required` with a successful `prepare` and
+  `candidateCount 0`;
+- **`git diff --check`** in the memory worktree, plus every other check the brief names.
 
 **Scope every MCP call with the enclosure contract path** — the same `contract_path` the `worktree_*`
-verbs take; your brief names it. Without it the tools resolve the **official** memory repo: read-only
-for the diagnostics, but `route_index_refresh` writes, so an unscoped call dirties a repository this
-seat does not own and blocks the next `worktree_start` until a human reverts it. Check `onboardingRoot`
-in the response — it must be this leaf's memory worktree — preview a write with `dry_run=true`, and read
-the scoped result's file rather than just its `ok`.
+verbs take; your brief names it. Without it the tools resolve the **official** memory repo — the
+diagnostics would report on the wrong tree, and `route_index_refresh` writes, so an unscoped call
+dirties a repository this seat does not own and blocks the next `worktree_start` until a human reverts
+it. Check `onboardingRoot` in the response — it must be this leaf's memory worktree — and preview a
+write with `dry_run=true`.
 
 **Never** edit code, task docs, gates, lifecycle state, worktree contracts, or closeout state, and
 never run `c-12-closeout` or `c-11-memory-carryover-from-branch` transactions from this seat. Do not
@@ -118,8 +127,10 @@ invent a future code commit hash, advance fingerprints to an uncommitted tree, o
 prose to silence a finding: the closeout records the actual code and memory commits after this handoff,
 and the ledger is an ignored cache derived from those commit trailers. Report any source-change or
 missing-commit observation for the owning seat to resolve, and report dirty-source drift, missing
-onboarding, or any other scoped finding exactly as returned. A scoped result is **evidence for this
-handoff, never a closeout or integration gate**, and does not imply full memory quality.
+onboarding, or any other finding exactly as returned. Read the full result and its file — not just
+`ok`. The completed curation result is **evidence for this handoff, never a closeout or integration
+gate**, and never a subset result standing in for it: repair each curator-actionable finding or
+escalate it as blocked with its exact returned code, and never pass incomplete onboarding.
 
 ## 5 — Stop And Escalation Cases
 
@@ -129,8 +140,8 @@ handoff, never a closeout or integration gate**, and does not imply full memory 
 - **Ask the owning seat one clarification row** (`message_parent`) when any side of the three-way
   comparison is missing or ambiguous enough that curation would become guesswork; never infer a change
   set or design authority from transcript memory.
-- **A scoped check this seat cannot satisfy** is reported as blocked in the handoff — not worked
-  around, and never relabelled as full green.
+- **A check this seat cannot satisfy** is reported as blocked in the handoff — not worked around, and
+  never relabelled as full green.
 - **An unresolved transaction conflict or source-change observation** belongs to the owning seat: this
   seat reports it and never repairs it.
 - **If `curator_coherence` refuses**, report the typed blocker without changing the closeout/integration
@@ -140,15 +151,16 @@ handoff, never a closeout or integration gate**, and does not imply full memory 
 ## 6 — Completion And Handoff
 
 The exit returns to the owning manager: the changed onboarding paths, the intent reconciliation, the
-exact scoped commands and results, every failed, blocked, or not-run check, and every material
+exact full-operation commands and results, every failed, blocked, or not-run check, and every material
 divergence this pass could not reconcile.
 
 **The durable artifact is the structured coherence record and its generated projection** — this seat's
 row of the handoff-artifact table in `../core/acceptance.md`, validated by the owning manager, not the
 transcript and not a parallel hand-authored report. **Completion truth** (`../core/acceptance.md`):
 write the record before ending the turn; terminal/finalizer evidence then attests only that this turn
-ended and wakes the manager, who validates it. Do not write a parallel model completion post, and never
-claim a scoped result is full memory quality.
+ended and wakes the manager, who validates it. Do not write a parallel model completion post, and do
+not hand-write a curator certification: `curator_coherence` is the authority a curator produces when
+the checklist requires it.
 
 ## Knobs, Tool Surface, And Dispatch Authority
 
@@ -161,7 +173,7 @@ claim a scoped result is full memory quality.
 | sessionCommands | — | settings-owned launch configuration: lines pasted + submitted during fresh-session launch (never validated; not brief delivery) |
 | promptKeywords | — | settings-owned keywords prepended exactly once to the post-readiness dispatch brief (never validated) |
 | dispatch | target-only role; ambient takeover target | This seat has no `dispatch_agent` caller authority; only the owning manager is the ordinary plane-hosted caller, while an identity-free developer launcher may target the leaf curator only for an explicit task-seat takeover |
-| tools   | onboarding surface | native reads/edits in memory worktree · native reads in code worktree · c-05 onboarding workflow · local route indexes · optional `memory_quality_check`/`curator_coherence` on explicit request · shell checks · `message_parent` |
+| tools   | onboarding surface | native reads/edits in memory worktree · native reads in code worktree · c-05 onboarding workflow · local route indexes · full `memory_quality_check` operation · `curator_coherence` when the checklist requires it · shell checks · `message_parent` |
 
 Only the launch-setting rows (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, and
 `promptKeywords`) participate in Settings.json `orchestration.roles.curator` and

@@ -33,7 +33,8 @@ This is the single home for the check duty a builder owes and an owner consumes.
 4. These are diagnostic worker checks. They are **separate from certification** and do not consume a
    review round. Applicable non-code checks follow repository policy.
 5. **Do not run or claim a full suite / full quality result** unless the developer or the task brief
-   explicitly requests that operation.
+   explicitly requests that operation — curation is the one exception, because the curator always
+   runs the full memory-quality operation as part of curation.
 6. The resolved memory layer owns the concrete test implementation, permitted environment, arguments,
    and evidence contract — especially `system/git-workflow.md`, `system/coding-guidelines.md`, and
    `system/tools.md`. **Do not substitute a familiar runner or invent a fallback.**
@@ -86,9 +87,10 @@ This is the single home for the check duty a builder owes and an owner consumes.
 - **This is a Git code/memory transaction and nothing more.** It publishes only the explicitly
   authorized code and prepared memory commits/merges, with source/destination refs, conflict checks,
   and recovery evidence.
-- **It does not launch** automatic code-quality checks, full test suites, memory-quality suites,
-  curator certification, or independent review. **Full code quality, full tests, and full memory
-  quality run only after an explicit developer request.**
+- **It does not launch** automatic code-quality checks, full test suites, or independent review.
+  **Full code quality and full tests run only after an explicit developer request.** Curation is
+  never deferred that way: the curator has already run the complete memory-quality operation as part
+  of curation, and this transaction carries that result as a prerequisite instead of rerunning it.
 - **Human-pinned gates stay human**: `integration-approval`, `push-approval`, `cleanup-approval`.
   Absent a durable raised gate, the series' standing approval governs — the developer's
   portfolio-gate approval of this series, recorded in the planner master's decision log, covers

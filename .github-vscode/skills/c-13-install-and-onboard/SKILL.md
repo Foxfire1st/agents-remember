@@ -54,8 +54,12 @@ Run this sequence in order:
 1. Runtime scaffold: run or verify `runtime_install()`.
 2. Agentic settings: walk the developer through the orchestration defaults in
    the seeded global settings file.
-3. Optional repository certification: only on an explicit developer request, author, validate, and
-   register one repository-owned Gate 1-4 profile for the requested repository.
+3. Repository certification profile: author, validate, and register one repository-owned Gate 1-4
+   profile for the requested repository when the developer asks for repository certification or the
+   full code-quality operation. This profile is not curation, so the curator's complete
+   memory-quality result neither waits on it nor substitutes for it: curation is always complete,
+   while a certification profile is authored only as that requested operation and routine closeout
+   and master integration do not enter this stage.
 4. Memory repo: ask scaffold-new vs use-existing, unless memory already exists.
 5. Bootstrap: when a new memory repo was scaffolded, hand off to
    `c-03-repo-bootstrap`.
@@ -229,7 +233,8 @@ field and authoring procedure are documented in
    suite or clean-room scenarios merely as install diagnostics.
 6. If the authority settings changed, tell the developer that the MCP/harness must restart before
    the new boot-time repository authority is live. This affects the requested certification
-   operation only; it is not a routine closeout/integration prerequisite.
+   operation only; it is not a curation step, and routine closeout and integration do not enter
+   this stage.
 
 Make progress autonomously from durable repository contracts. Ask the developer only when the
 repository's intended rail, posture, or clean-room boundary is genuinely ambiguous. Never copy the

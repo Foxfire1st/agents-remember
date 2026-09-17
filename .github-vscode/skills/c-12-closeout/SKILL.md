@@ -14,12 +14,14 @@ The `c-12-closeout` skill owns closeout sequencing for worktree-backed tasks.
 direct-checkout closeout path. Use the `c-09-git-worktree-manager` skill for
 worktree start, attach, status, integration, lifecycle finalization, and cleanup;
 use this skill for the explicit closeout authority and code-then-memory commit order. Closeout is a
-Git transaction; it does not run or require code-quality checks, test suites, memory-quality checks,
-curator certification, or independent review.
+Git transaction; it runs no code-quality checks, test suites, or independent review itself, and
+curation is already complete before it starts — the curator's full memory-quality result travels with
+the handoff as a prerequisite.
 
 **Handoff note:** the worker reports targeted checks and the curator maintains affected onboarding
 before handoff. The closeout seat consumes the prepared code and memory content; it does not author
-onboarding or rerun the worker/curator checks. An independent review may be requested by the
+onboarding or rerun the worker's or curator's checks, because curation already ran the full
+memory-quality operation. An independent review may be requested by the
 developer or the task's approved plan, but its record is an input for context only and is never an
 automatic closeout prerequisite. When a review is requested, the `l-01-agent-lifecycles` skill's
 three-round monotonic rule applies: review 1 fixes the complete finding list, reviews 2 and 3 verify
@@ -61,8 +63,9 @@ planner/series task and the owning seat's review of the preview.
 Closeout still stops for the developer when the work reaches the final completed super branch /
 PR-carryover gate, when a `closeout-approval` gate has been deliberately raised, when the change is
 outside the accepted scope, when Git inputs/conflicts prevent the transaction, or when a quo-vadis
-decision is required. Worker or curator check failures remain reported evidence for the owning role;
-they are not an automatic closeout quality gate.
+decision is required. A curator-actionable finding that was neither repaired nor escalated as blocked
+is not closable; worker targeted-check failures remain reported evidence for the owning role rather
+than an automatic closeout quality gate.
 
 Real closeout uses the matching apply tool with an `intent_note`. The note records the applicable
 authority: either explicit developer commit approval or delegated accepted-series authority. Agents
@@ -78,8 +81,11 @@ Approval remains outside and before apply: preview, relay, and the applicable ex
 authority must be complete before `worktree_closeout_apply`. Apply validates the immutable
 transaction input, stages and commits the enabled code and memory-content legs through the
 existing transaction owner, and records each resulting commit. It does not run or demand a
-certification profile, code-quality check, test suite, memory-quality check, curator certificate, or
-review record. Full quality or full-suite tools run only when the developer explicitly requests
+certification profile, code-quality check, test suite, or review record — curation is carried, never
+invoked — and it does not re-derive the curator's full memory-quality result, which is already
+complete before apply: the coherence authority the curator produced when the checklist required it
+is validated at admission, so a record that is missing or stale refuses there with `publish` as the
+remedy rather than being produced here. Full code-quality or full-suite tools run only when the developer explicitly requests
 them through their existing tools; their absence does not block this transaction.
 
 The transaction owner may use only the existing bounded retry/recovery behavior. It must preserve
@@ -102,8 +108,11 @@ in force at that moment, and `--mixed` is index-only, so no file content is touc
 Two refusals guard the transaction before staging or ref movement. Closeout refuses when the code
 checkout is **not** the declared task worktree (unless the declared transaction route is a sanctioned
 branch-direct landing) or when code or memory content has unresolved merge conflicts. A missing
-quality profile, certificate, review record, or suite result never creates a compatibility route and
-never blocks an otherwise authorized transaction. Older tasks without code changes remain valid and
+quality profile, review record, or suite result never creates a compatibility route and never blocks
+an otherwise authorized transaction. Curation is not a third such refusal for the same reason it is
+not a route: it is mechanical. The coherence authority the curator produces when the checklist
+requires it is validated at admission, so a missing or stale record refuses there with `publish` as
+its remedy — and nothing here runs the operation. Older tasks without code changes remain valid and
 do not need a profile merely to be read or resumed.
 
 For a developer-gated closeout, the relay follows the `l-01-agent-lifecycles` orchestrator hand-off protocol: run the
@@ -158,11 +167,11 @@ Keep it outside staging and commits. Missing, stale, or malformed cache bytes or
 closeout or recovery. Cache regeneration does not rewrite Git history; historical attribution
 rewrites require a separately authorized deployment operation.
 
-The transaction consumes the worker's targeted-check report and any curator
+The transaction consumes the worker's targeted-check report and the curator's
 onboarding handoff as context; it does not rerun either one. The curator owns
-affected onboarding and scoped memory checks before handoff. Full memory
-quality is an explicit developer-requested operation through
-`c-02-memory-quality-control`, not a closeout precondition.
+affected onboarding and runs the complete memory-quality operation before
+handoff, so that full result is a closeout precondition rather than a separate
+explicitly requested operation.
 
 The transaction does not inspect coding guidelines, certification profiles, or
 historical quality artifacts. Those concerns remain available through their
@@ -174,7 +183,7 @@ code-and-memory transaction or refuses before mutation.
 
 External-memory closeout order is:
 
-1. Confirm the worker's targeted-check report and the curator's scoped onboarding
+1. Confirm the worker's targeted-check report and the curator's complete onboarding
    handoff when those roles are present. Record failed or not-run checks as
    reported; do not reinterpret a subset as full green.
 2. Preview the exact enabled code and memory-content commit legs with
@@ -247,9 +256,12 @@ Closeout refuses before mutation when external memory is unresolved, the
 declared code and memory checkouts do not identify the same transaction, a
 required commit message is blank, a declared
 source/destination ref moved, or a Git index contains unresolved code or memory-content conflicts.
-The refusal names the exact input and corrective action. Missing quality
-profiles, certificates, review records, and full-suite results are not refusal
-reasons.
+The refusal names the exact input and corrective action. Missing certification
+profiles, code-quality results, review records, and full-test results are not
+refusal reasons. Curation is not one of them, and it is not an exemption either: the curator's
+complete memory-quality result and the coherence authority it produced travel with the handoff this
+transaction records, and admission validates that authority, so a record that is missing or stale
+refuses there with `publish` as its remedy while this transaction never runs the operation.
 
 The code worktree must be the contract's task worktree unless the declared
 route is the sanctioned branch-direct landing. Refuse before staging when it
@@ -267,7 +279,9 @@ live Git evidence and expose only evidence-safe task-addressed controls.
 
 Worker and curator reports may identify missing onboarding or failed/not-run
 checks. Route those reports to the owning role for repair or developer
-direction; closeout does not rerun a full memory suite or certify the handoff.
+direction; closeout does not rerun the memory-quality operation or certify the
+handoff, because curation already ran it completely and its result is the
+handoff evidence this transaction records.
 
 ## Boundaries
 
@@ -280,9 +294,11 @@ direction; closeout does not rerun a full memory suite or certify the handoff.
 5. The `c-12-closeout` skill must publish only the explicitly enabled code and
    memory-content legs through their existing transaction owners.
 6. The `c-12-closeout` skill must not invoke or require code-quality checks,
-   test suites, memory-quality checks, curator certification, or independent
-   review as a closeout prerequisite. Full checks run only after an explicit
-   developer request through their existing tools.
+   test suites, or independent review as a closeout prerequisite. Curation is
+   the exception: the curator's full memory-quality result is complete before
+   closeout starts and is carried as that prerequisite, while full code quality
+   and full tests run only after an explicit developer request through their
+   existing tools.
 7. The `c-12-closeout` skill must preserve the accepted code/memory pair,
    source/destination identity, commit messages, and recoverable per-leg journal
    evidence.

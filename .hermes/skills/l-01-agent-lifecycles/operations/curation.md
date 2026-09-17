@@ -70,10 +70,15 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    correctness, non-obvious, and expensive to rediscover. Omit code narration, temporary branch
    facts, raw test totals, generic implementation-round chronology, and facts obvious from code and
    tests.
-5. **Run the named scoped checks** and report each as passed, failed, blocked, or not-run with its
-   exact command and scope. At minimum inspect the changed sidecars and the affected
-   overviews/indexes/entities and run `git diff --check` in the memory worktree.
-6. **Repair, then republish.** After each repair, re-run the named scoped checks before handoff.
+5. **Run the complete curation check set** and report each as passed, failed, blocked, or not-run with
+   its exact command and scope. At minimum inspect the changed sidecars and the affected
+   overviews/indexes/entities, run `git diff --check` in the memory worktree, and run the full
+   `memory_quality_check` operation. Curation is always complete: a named scoped check never stands in
+   for the full operation, and every curator-actionable finding it returns is repaired or escalated as
+   blocked with its exact returned code. Run it at intake and after every repair until
+   `curatorActionableCount=0` and `checklistStatus=ready-for-closeout`; when it then reports
+   `coherence-required`, publish the `curator_coherence` authority before handoff.
+6. **Repair, then republish.** After each repair, re-run the full operation before handoff.
 
 ## Authority gates
 
@@ -88,10 +93,13 @@ their accumulated change is reviewed on the canonical master at master-to-parent
 - **Do not invent a future code commit hash**, advance fingerprints to an uncommitted tree, or add
   attestation prose to silence a finding. The closeout transaction records the actual code and
   memory commits after this handoff.
-- **A scoped result is evidence for the curator handoff, not a closeout or integration gate**, and it
-  does not imply full repository or memory quality. Do not substitute a subset for a full suite, and
-  do not invoke a full suite as an automatic curator, closeout, or integration requirement.
-- **`curator_coherence` runs only when the developer explicitly requests that separate diagnostic.**
+- **The completed curation result is evidence for the curator handoff, not a closeout or integration
+  gate**, and it is not a claim about the whole repository. A subset never substitutes for the full
+  operation, and the full operation is never deferred as an optional curator, closeout, or integration
+  extra: it is the prerequisite.
+- **`curator_coherence` is the authority a curator produces when the checklist requires it** — run
+  `prepare` → `publish` → `validate` and publish when a healthy memory reports
+  `checklistStatus=coherence-required` with a successful `prepare` and `candidateCount 0`.
   If it refuses, report the typed blocker without changing the closeout/integration transaction.
 - **A discovered incident, opportunity, alternative frame, or forward-learning hypothesis is not
   automatically current intent.** Use the `capture-candidate` disposition with an explicit evidence

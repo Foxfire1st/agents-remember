@@ -211,6 +211,8 @@ log — so a skipped Job P never blocks Job O.
   closes out direct work when it wears the manager/worker hat, releases organizational leaf candidates,
   finalizes/cleans up subordinate edges, and lands completed atomic masters under the accepted-series authority,
   previewing the exact code/memory legs and recording the authority source in the intent note or decision log;
+  worker targeted checks and the curator's complete memory-quality result travel with the edge as its
+  prerequisite evidence, while closeout launches no automatic code-quality or test suite;
   do not stop merely because the next operation creates a commit, advances a lifecycle, cleans up a spent
   worktree, or fast-forwards a subordinate branch — § 5 names what still stops.
 - **Master exit.** Read the manager's handover packet (`../templates/master-handover-packet.md`), check a
@@ -224,7 +226,7 @@ log — so a skipped Job P never blocks Job O.
   decide escalates to the architect.
 - **Landing duty — one super line, two execution natures** (`../operations/closeout.md`). Consume the manager's
   readiness or handover packet (execution nature, canonical refs, waiting door generation, change set, worker
-  targeted-check report, curator scoped onboarding/check report, verdict, lineage, accepted Git pair, blockers,
+  targeted-check report, the curator's complete onboarding/check report, verdict, lineage, accepted Git pair, blockers,
   risks, dependent nodes); recompute the graph frontier and current valid-built projection; release only its
   exact first-ready generation, claimed by a short task/door CAS inside `worktree_closeout_apply` that binds all
   later attempt/worker/commit/recovery evidence to the operation journal. **`organizational`** leaves land one
@@ -245,9 +247,9 @@ log — so a skipped Job P never blocks Job O.
   only restores landed/archive behavior for the three automatic leaf-altitude roles.
 - **Transaction boundary, conflicts, mechanization** (`../operations/closeout.md`,
   `../operations/coordination.md`). The transaction publishes only the explicitly authorized Git code and
-  prepared memory commits/merges and launches no automatic code-quality, full-suite, memory-quality, curation,
-  or review work; worker targeted checks and curator scoped onboarding checks stay truthful handoff evidence
-  that is never relabeled as full green. Integration branches are not workbenches: an overlap becomes a cited
+  prepared memory commits/merges and launches no automatic code-quality, full-suite, curation, or review
+  work; worker targeted checks and the curator's complete memory-quality result travel with the edge as
+  its prerequisite evidence and are never relabeled as full green. Integration branches are not workbenches: an overlap becomes a cited
   predecessor edge up front or returns to the owning leaf — a scoped fix leaf only for genuinely new work, with
   new proven provenance — and under `reviewMode=fix-verification` only sealed outstanding-ID repairs return to
   their existing owner, while direct feature/fix commits on main, super, or an atomic integration branch are

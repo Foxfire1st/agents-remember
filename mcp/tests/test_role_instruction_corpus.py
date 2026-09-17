@@ -12,8 +12,11 @@ the properties a consumer depends on:
   rather than a role;
 * the manifest shares no prose (it is a metadata plane);
 * EVERY relative path the corpus cites resolves, so a consolidation cannot leave a dangling
-  reference; and
-* a manifest that points at a missing source is reported rather than silently accepted.
+  reference;
+* a manifest that points at a missing source is reported rather than silently accepted; and
+* curation is complete on every leaf: the retired optional/narrow-curation sentences are gone
+  from the canonical tree and from all nine generated copies, and every source that must state
+  the rule still states it.
 """
 
 from __future__ import annotations
@@ -600,3 +603,171 @@ def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: 
     # A coordination-root anchor is skipped by design, not reported as a false alarm.
     healthy.write_text(original + "\nSee `system/tools.md`.\n", encoding="utf-8")
     assert unresolved_references(staged_root) == []
+
+
+# --------------------------------------------------------------------------------------
+# Curation is complete on every leaf — the retired optional-curation doctrine
+# --------------------------------------------------------------------------------------
+#
+# The registry of retired sentences and the two readers live in
+# `agents_remember_test_support.testing.curation_doctrine`; these cases are the assertions over
+# the real tree. The defect they exist for is not a typo: a sentence that presents the
+# memory-quality operation as a developer-request-only diagnostic, or as something a named
+# scoped check may stand in for, tells a curator seat that complete curation is somebody else's
+# decision. No per-file case can see it, because every individual sentence is plausible alone --
+# what has to hold is the agreement of the whole shipped corpus with the rule.
+#
+# WHAT THIS DOES NOT COVER (stated, not implied). It is not a semantic check: a corpus that
+# denied the rule in fresh vocabulary the registry has never seen would pass. Scope is the
+# canonical `skills/**` tree plus the nine generated copies `scripts/sync-skills.py` owns; the
+# copies' byte-identity with their originals is that generator's own contract
+# (`scripts/sync-skills.py --check`), while what is asserted here is that every copy carries the
+# rule at all, so a stale copy cannot ship.
+
+from agents_remember_test_support.testing.curation_doctrine import (
+    CURATION_COMPLETENESS_STATEMENTS,
+    CURATION_DOCTRINE_SURFACES,
+    GENERATED_SKILL_COPIES,
+    RETIRED_CURATION_STATEMENTS,
+    doctrine_files,
+    missing_completeness_statements,
+    normalize_statement,
+    retired_curation_findings,
+    retired_statement_findings,
+)
+
+
+class CurationIsCompleteOnEveryLeafTests:
+    """The shipped corpus states the rule, and no copy still ships a sentence that denied it."""
+
+    def test_no_shipped_surface_still_carries_a_retired_curation_statement(self) -> None:
+        findings = retired_curation_findings(REPOSITORY_ROOT)
+        assert findings == [], (
+            "a shipped instruction surface still presents curation as optional or narrow:\n  "
+            + "\n  ".join(findings)
+        )
+
+    def test_the_census_ranges_over_the_canonical_tree_and_every_generated_copy(self) -> None:
+        """A census that quietly examined nothing is the one way this check can lie."""
+
+        canonical = doctrine_files(REPOSITORY_ROOT, "skills")
+        assert len(canonical) > len(CURATION_COMPLETENESS_STATEMENTS), (
+            "the canonical scan examined no more surfaces than the declared statements"
+        )
+        for copy_root in GENERATED_SKILL_COPIES:
+            assert doctrine_files(REPOSITORY_ROOT, copy_root), f"{copy_root} produced no surfaces"
+        assert set(CURATION_DOCTRINE_SURFACES) == {"skills", *GENERATED_SKILL_COPIES}
+
+    def test_every_canonical_source_states_the_complete_curation_rule(self) -> None:
+        missing: list[str] = []
+        for relative, statements in CURATION_COMPLETENESS_STATEMENTS.items():
+            path = REPOSITORY_ROOT / relative
+            assert path.is_file(), f"declared curation-doctrine source is missing: {relative}"
+            reading = normalize_statement(path.read_text(encoding="utf-8"))
+            missing.extend(
+                f"{relative} -> {statement}"
+                for statement in statements
+                if normalize_statement(statement) not in reading
+            )
+        assert missing == [], (
+            "a canonical source that must state complete curation no longer does:\n  "
+            + "\n  ".join(missing)
+        )
+
+    def test_every_generated_copy_carries_the_rule_its_canonical_original_states(self) -> None:
+        """A stale copy is a real defect: a seat on that harness reads the old sentence."""
+
+        missing: list[str] = []
+        for copy_root in GENERATED_SKILL_COPIES:
+            root = REPOSITORY_ROOT / copy_root
+            assert root.is_dir(), f"generated skill copy is missing: {copy_root}"
+            missing.extend(missing_completeness_statements(root, copy_root))
+        assert missing == [], (
+            "generated skill copies do not carry the complete-curation rule:\n  "
+            + "\n  ".join(missing)
+        )
+
+
+class CurationGuardTeethTests:
+    """The guard can fail. A guard that cannot fail is not evidence.
+
+    The shipped side is READ from the corpus rather than pasted here, so the two halves cannot
+    agree with each other by construction; only the seed is synthetic. Each retired statement is
+    asserted to be reported on the surface that shipped it, and the shipped corpus is asserted
+    clean first -- which is what makes "re-inserting it fails" a measurement over this tree
+    rather than an assertion about a fragment that never matched anything.
+    """
+
+    def test_reinserting_each_retired_statement_is_detected_on_its_own_surface(self) -> None:
+        """For every registered sentence: the seed is reported, and the SHIPPED text is clean.
+
+        The shipped side is read from the corpus, so no side of this pair is a restatement of
+        the other. A registry row whose seed is not reported is a row that guards nothing, which
+        is the failure this case exists to make impossible.
+        """
+
+        assert retired_curation_findings(REPOSITORY_ROOT) == [], (
+            "the corpus must read clean before a seed is meaningful"
+        )
+        for retired in RETIRED_CURATION_STATEMENTS:
+            reading = normalize_statement(retired.statement)
+            for source in retired.sources:
+                relative = source.removeprefix("skills/")
+                shipped = normalize_statement(
+                    (REPOSITORY_ROOT / source).read_text(encoding="utf-8")
+                )
+                assert retired_statement_findings(reading, relative), (
+                    f"{source} would not report the retired statement it shipped: {retired.probe!r}"
+                )
+                assert not retired_statement_findings(shipped, relative), (
+                    f"{source} still reads as carrying the retired statement: {retired.probe!r}"
+                )
+
+    def test_one_seeded_old_sentence_is_observed_to_fail_the_guard(self) -> None:
+        """The seed is applied to the REAL file's text, and the guard's reader must red it."""
+
+        relative = "l-01-agent-lifecycles/roles/curator.md"
+        shipped = (REPOSITORY_ROOT / "skills" / relative).read_text(encoding="utf-8")
+        assert retired_statement_findings(normalize_statement(shipped), relative) == []
+
+        seed = (
+            "\n- **a narrow `memory_quality_check`** or **`curator_coherence`** only on an "
+            "explicit developer request\n  for a named affected check or curator certification.\n"
+        )
+        findings = retired_statement_findings(normalize_statement(shipped + seed), relative)
+        assert len(findings) == 1, findings
+        assert "fragment 3" in findings[0], findings
+
+        # The seed is removed again and the same reader is green: the guard reports the
+        # difference, not a constant.
+        assert retired_statement_findings(normalize_statement(shipped), relative) == []
+
+    def test_the_preserved_developer_request_doctrine_does_not_trip_the_guard(self) -> None:
+        """Full code quality and full tests stay developer-requested and must read clean.
+
+        The replacement sentences KEEP this clause deliberately, so a guard that fired on the
+        phrase would fire on the shipped answer rather than on the defect.
+        """
+
+        preserved = (
+            "They do not automatically run code-quality checks or full test suites, and full "
+            "code quality, full tests, and independent review run only after an explicit "
+            "developer request."
+        )
+        for retired in RETIRED_CURATION_STATEMENTS:
+            for source in retired.sources:
+                assert not retired_statement_findings(
+                    normalize_statement(preserved), source.removeprefix("skills/")
+                ), f"{retired.probe!r} fires on doctrine this ruling preserves"
+
+    def test_a_statement_is_reported_only_on_a_surface_that_shipped_it(self) -> None:
+        """The registry is a census of surfaces, not a single-file check."""
+
+        fragment_one = RETIRED_CURATION_STATEMENTS[0]
+        assert retired_statement_findings(
+            normalize_statement(fragment_one.statement),
+            "l-01-agent-lifecycles/templates/curator-brief.md",
+        ), "the curator brief must be a declared surface for fragment 1"
+        assert not retired_statement_findings(
+            normalize_statement(fragment_one.statement), "c-02-memory-quality-control/SKILL.md"
+        ), "an undeclared surface must not be reported for a statement it never shipped"

@@ -113,23 +113,30 @@ forward learning into repository truth.
 - Native reads in the code worktree; native reads/edits in the memory worktree.
 - `c-05-create-or-update-onboarding-files` skill workflows for affected sidecars, overviews,
   indexes, and entity catalogs.
-- `git diff --check` and any scoped checks named by the manager brief.
-- An explicitly requested narrow `memory_quality_check` or `curator_coherence` diagnostic, always
-  with `contract_path="<enclosure-contract-path>"`; these are never routine closeout/integration
-  prerequisites.
+- `git diff --check`, the full `memory_quality_check` operation for this leaf, and any other check the
+  manager brief names — all scoped with `contract_path="<enclosure-contract-path>"`.
+- `curator_coherence` whenever the checklist requires it, always with
+  `contract_path="<enclosure-contract-path>"`.
 - Inbox for one clarification row back to <owning-seat contact> if the fed change set is missing or
   ambiguous — never invent a change set from memory.
 - No `worktree_*`, `lifecycle_*`, `task_doc`, `gate_*` tools, no code edits.
 
-## Scoped checks (before you report)
+## Checks — curation is complete
+Curation is always complete: run the full memory-quality operation as part of curation — never a
+subset, and never a named scoped check standing in for it. Every curator-actionable finding the
+operation returns is either repaired or escalated as blocked with its exact returned code. Tests and
+code-quality checks may be scoped to the change set; curation may not.
+
 Repair the affected onboarding files named by the brief. Run `git diff --check` in the memory
-worktree and every other named scoped check after repairs and before handoff. Record the exact
-commands, scope, and passed/failed/blocked/not-run result. Do not run a full memory suite or create
-a curator certification for routine curation. Full memory quality is a separate operation only on
-explicit developer request.
+worktree and the full `memory_quality_check` operation after repairs and before handoff. Run it at
+intake and after every repair until `curatorActionableCount=0` and
+`checklistStatus=ready-for-closeout`; when it then reports `coherence-required`, publish the
+coherence authority before handoff. Record the exact commands, scope, and
+passed/failed/blocked/not-run result. No subset result may stand in for the full operation, and
+closeout and integration carry this evidence as a prerequisite.
 
 The actual code commit, memory commit, and any commit-derived fingerprints belong to
-the closeout transaction. The ledger cache is derived from those commits and is never a third output. Never fabricate a future hash or call a scoped result full green.
+the closeout transaction. The ledger cache is derived from those commits and is never a third output. Never fabricate a future hash or call a subset result full green.
 
 A `cit:(...)` wrapped in backticks is read as a QUOTATION of the citation grammar — which is how
 these documents document it — so it is not checked; write a real citation unbackticked.
@@ -138,16 +145,18 @@ Drop `contract_path` and both resolve the OFFICIAL memory repo instead: `route_i
 WRITES, so an unscoped call dirties a repo you do not own and blocks the next `worktree_start`.
 Confirm `onboardingRoot` in each response is `<memory-worktree-path>/onboarding` and `reportPath`
 is inside this leaf's enclosure `reports/` directory. A finding count
-implausible for this change set is a measurement problem to investigate and escalate, not permission
-to pass incomplete onboarding. The closeout transaction consumes this scoped handoff and does not
-rerun a full memory suite automatically.
+implausible for this change set is a measurement problem to investigate and escalate, never
+permission to pass incomplete onboarding. Closeout and integration carry this full-memory-quality
+handoff as a prerequisite; the closeout transaction owns the real code and memory commits and does
+not rerun the operation automatically.
 
 ## Curator handoff (last act)
-Return the changed onboarding paths, current-intent reconciliation, exact scoped commands/results,
-and any failed, blocked, or not-run checks. Do not write a hand-versioned certification file or
-claim that a scoped result is full memory quality. `curator_coherence` may run only when the
-developer explicitly requests that separate diagnostic; report its typed result without making it
-a closeout/integration gate.
+Return the changed onboarding paths, current-intent reconciliation, exact full-operation
+commands/results, and every finding with its repair or blocked-escalation code. Do not write a
+hand-versioned certification file: `curator_coherence` is the authority a curator produces when the
+checklist requires it. A healthy memory reports `checklistStatus=coherence-required` and a
+successful `prepare` with `candidateCount 0`; publish the coherence record then, and expect closeout
+and integration to carry it.
 ```
 
 ---
@@ -160,7 +169,7 @@ a closeout/integration gate.
   curator dispatch. `dispatch_agent` repeats the proof and refuses before process creation if the
   lineage moves between the manager's check and the dispatch transaction.
 - `<enclosure-contract-path>` is the leaf's `series-contract.md` under the master's
-  `enclosures/<leaf-id>/`. Use it to scope any explicitly requested diagnostic; an unscoped
+  `enclosures/<leaf-id>/`. Use it to scope every memory-quality and coherence call; an unscoped
   `route_index_refresh` writes into the official memory repo.
 - Pull the change-set counters/paths from the leaf's actual landed range (the leaf contract's
   recorded base commit through the builder's current HEAD/worktree state) — do not hand the curator
