@@ -5,6 +5,25 @@ directory is persistent: one lock plus one bounded state record per triple, rewr
 across lifecycles rather than leaking one marker per lifecycle.  Ordinary operations
 take only their leaf lock plus a brief admission-root lock, so a terminal fence for one
 leaf never serializes its neighbours.
+
+CAPACITY IS A SHARED WORKSPACE RESOURCE AND EVERY LEAF HAS TO BE ABLE TO GET ONE.
+Two rules keep that true, and they are the two halves of one decision:
+
+* the resource is bounded by BYTES, not by a slot count.  ``MANAGED_NAMESPACE_LIMIT``
+  is only a hard ceiling on how many namespaces one operation may consider; the figure
+  that decides admission is :data:`MANAGED_NAMESPACE_BYTES_LIMIT`, because what a
+  namespace costs is disk and the same source tree can cost 40 MB or 130 MB.
+* ADMISSION RECLAIMS, AND ONLY FROM THE DEAD.  Before refusing, admission reclaims
+  namespaces that are provably terminal -- their owning contract is gone, or its
+  lifecycle fence says terminal, or its contract parses and says it is terminal, or
+  its contract parses and neither stated worktree exists any more.  The reclaimed set
+  is drawn only from those positive verdicts, and every other occupant -- including one
+  whose control record or whose CONTRACT cannot be read -- is left exactly where it is.
+  THE GUARANTEE IS FAIL-CLOSED, NOT OMNISCIENT: it is "nothing is evicted that is not
+  proved dead", not "no live leaf can be evicted under any circumstances".  A live
+  occupant can still be reclaimed if it presents a positive terminal verdict, which is
+  the intended trade: a contract that PARSES and declares a terminal cleanup, or whose
+  worktrees are both gone, is the leaf's own statement about itself.
 """
 
 from __future__ import annotations
@@ -19,14 +38,26 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Literal, Protocol
+from typing import BinaryIO, Literal, Protocol, TypedDict
 from uuid import uuid4
 
 from agents_remember.errors import CitationCacheError
 from agents_remember.kernel.atomic_write import atomic_replace, atomic_write_text
-from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
 MANAGED_NAMESPACE_LIMIT = 4
+"""Hard ceiling on namespaces an admission pass may examine, so one call cannot walk a tree."""
+
+MANAGED_NAMESPACE_BYTES_LIMIT = 512 * 1024 * 1024
+"""The figure admission actually decides on: total bytes the managed cache may hold.
+
+Measured 2026-09-17 on this coordination root: one fully warm namespace for
+``agents-remember`` is 122-130 MB, and four occupants held 375 MB. The slot ceiling of
+four was therefore a byte ceiling of roughly half a gigabyte expressed as a count that
+happened to fit one repository. Two repositories whose source trees differ by 3x would
+have had the same four slots and a 1.5 GB cache; this is the honest unit.
+"""
+
 LOCK_TIMEOUT_SECONDS = 30.0
 MANAGED_ROOT_RELATIVE = Path("temp/citation-source-index/managed")
 ROOT_LOCK_NAME = "managed.lock"
@@ -197,6 +228,11 @@ def open_shared_namespace(
     """Open one persistent same-leaf lease and perform brief root-locked admission."""
     root = authority.managed_root
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # Reclaim BEFORE taking this leaf's own exclusive lease. The reclamation pass takes each
+    # occupant's control lock and then the root lock -- the same order this function uses --
+    # so running it after the flock below would hold one leaf's lock while taking others'.
+    if create:
+        admit_managed_namespace(authority)
     handle = _control_handle(authority)
     try:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
@@ -209,13 +245,7 @@ def open_shared_namespace(
                     raise CitationCacheError(
                         f"managed citation cache namespace {authority.namespace_id} is not published"
                     )
-                occupants = _namespace_ids(root)
-                if len(occupants) >= MANAGED_NAMESPACE_LIMIT:
-                    raise CitationCacheError(
-                        "managed citation cache capacity is full; active namespaces are "
-                        f"{occupants}. Complete worktree cleanup or abandon for an inactive leaf "
-                        "before admitting another namespace; no active leaf was evicted"
-                    )
+                _refuse_when_nothing_can_be_admitted(root)
                 namespace.mkdir(mode=0o700)
             elif not namespace.is_dir() or namespace.is_symlink():
                 raise CitationCacheError(
@@ -229,6 +259,291 @@ def open_shared_namespace(
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         handle.close()
         raise
+
+
+def _refuse_when_nothing_can_be_admitted(root: Path) -> None:
+    """Refuse a new namespace out of room, and say what the ROOM is and who owns it.
+
+    ``admit_managed_namespace`` has already run, so every occupant that could be proved dead
+    is gone: what is left is live (or unprovable), and no leaf may take another master's live
+    namespace. The refusal therefore states the measured resource and points at the OWNERS --
+    it never instructs the blocked leaf to go and clean up somebody else's enclosure, which is
+    the sentence the recorded four-occupant block printed and the one thing the blocked leaf
+    cannot do.
+    """
+    occupants = _namespace_ids(root)
+    footprint = _managed_bytes(root)
+    over_count = len(occupants) >= MANAGED_NAMESPACE_LIMIT
+    over_bytes = footprint > MANAGED_NAMESPACE_BYTES_LIMIT
+    if not over_count and not over_bytes:
+        return
+    owners = [
+        _occupant_description(root / CONTROL_DIR_NAME / namespace_id / "state.json")
+        for namespace_id in occupants
+    ]
+    raise CitationCacheError(
+        "managed citation cache has no reclaimable room for a new namespace: "
+        f"{len(occupants)} namespace(s) holding {footprint} bytes "
+        f"(count ceiling {MANAGED_NAMESPACE_LIMIT}, byte ceiling {MANAGED_NAMESPACE_BYTES_LIMIT}). "
+        f"Every occupant is live or cannot be proved dead, and none was evicted. Owners: "
+        f"{'; '.join(owners) or '<none>'}. This is a workspace-wide resource: it is released "
+        "automatically when each of those leaves reaches its terminal cleanup, so retry after "
+        "their closeouts land rather than deleting another leaf's namespace."
+    )
+
+
+def _occupant_description(state_path: Path) -> str:
+    record = _control_record(state_path) if state_path.is_file() else None
+    if record is None:
+        return "<unreadable control record>"
+    contract = record.get("contract")
+    lifecycle = record.get("lifecycleId")
+    return f"contract={contract} lifecycle={lifecycle} phase={record.get('phase')}"
+
+
+def admit_managed_namespace(authority: ManagedCacheAuthority) -> NamespaceAdmission:
+    """Reclaim what is provably dead and report the cache's byte footprint.
+
+    Runs OUTSIDE the root lock and before ``open_shared_namespace``, because reclaiming has
+    to take each occupant's own lease lock and that lock is taken BEFORE the root lock
+    everywhere else in this module. A shorter critical section that also has a consistent
+    order is worth the second pass over the root.
+
+    Two reclamations, in this order:
+
+    1. the caller's own namespace when its contract is already terminal. A leaf that
+       reaches its terminal cleanup normally releases its namespace at that boundary; this
+       catches the one whose owner could not (an interrupted cleanup, or a contract finished
+       by a route that never held the guard). It is the caller's OWN namespace, so reclaiming
+       it cannot take anything another leaf is using.
+    2. other occupants that are provably terminal, when the cache is over its byte bound or
+       at its count ceiling. Never on an unproved occupant: see :func:`_prove_terminal` for
+       the exact verdicts that license eviction and the fail-closed rule for everything else.
+    """
+    root = authority.managed_root
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    result: NamespaceAdmission = {
+        "bytesBefore": _managed_bytes(root),
+        "bytesAfter": 0,
+        "bytesLimit": MANAGED_NAMESPACE_BYTES_LIMIT,
+        "namespacesBefore": _namespace_ids(root),
+        "namespacesAfter": [],
+        "reclaimed": [],
+    }
+    reclaimed: list[str] = []
+    own = _own_terminal_authority(authority)
+    if own is not None and authority.namespace.exists() and _reclaim_under_lease(own):
+        reclaimed.append(authority.namespace_id)
+    if _over_bound(root):
+        for candidate in _eviction_candidates(root, keep=authority.namespace_id):
+            if _reclaim_under_lease(candidate):
+                reclaimed.append(candidate.namespace_id)
+            if not _over_bound(root):
+                break
+    result["reclaimed"] = reclaimed
+    result["bytesAfter"] = _managed_bytes(root)
+    result["namespacesAfter"] = _namespace_ids(root)
+    return result
+
+
+def _managed_bytes(root: Path) -> int:
+    """Bytes the occupant namespaces occupy -- the same population :func:`_occupant_paths` names.
+
+    This used to walk the WHOLE managed root, which also summed ``.control/<id>/state.json`` and
+    the lock files. Those are per-triple bookkeeping that is never pruned, so the figure drifted
+    upward for reasons no namespace caused -- 131 control directories already sit in the live
+    root -- and it contradicted this function's own docstring, which said control state is not
+    counted. Count and bytes now come from ONE enumeration, so the two can never describe
+    different populations, and a byte bound means what it says.
+    """
+    total = 0
+    for occupant in _occupant_paths(root):
+        for path in occupant.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                total += path.stat().st_size
+            except OSError:  # pragma: no cover - a file removed under the walk
+                continue
+    return total
+
+
+def _over_bound(root: Path) -> bool:
+    return len(_namespace_ids(root)) >= MANAGED_NAMESPACE_LIMIT or (
+        _managed_bytes(root) > MANAGED_NAMESPACE_BYTES_LIMIT
+    )
+
+
+class NamespaceAdmission(TypedDict):
+    """What one admission pass measured and reclaimed, as a typed record.
+
+    A plain ``dict[str, object]`` return made every caller narrow by hand -- and one caller
+    did not, which is what turned a stricter annotation on the reclamation report into a
+    pyright `reportArgumentType` rather than a compile-time fact anyone could act on.
+    """
+
+    bytesBefore: int
+    bytesAfter: int
+    bytesLimit: int
+    namespacesBefore: list[str]
+    namespacesAfter: list[str]
+    reclaimed: list[str]
+
+
+@dataclass(frozen=True)
+class _TerminalOccupant:
+    """One published namespace with positive evidence that no live operation owns it."""
+
+    namespace_id: str
+    control_dir: Path
+    evidence: str
+
+    @property
+    def namespace(self) -> Path:
+        return self.control_dir.parent.parent / self.namespace_id
+
+
+def _own_terminal_authority(authority: ManagedCacheAuthority) -> ManagedCacheAuthority | None:
+    """The caller's own authority, but only when the contract it names proves terminal."""
+    return authority if _prove_terminal(authority.control_state) is not None else None
+
+
+def _eviction_candidates(root: Path, *, keep: str) -> list[_TerminalOccupant]:
+    """EVERY provably-terminal occupant of ``root``, oldest evidence first.
+
+    THE WHOLE ROOT IS EXAMINED. An earlier version truncated the enumeration at
+    :data:`MANAGED_NAMESPACE_LIMIT`, which made the reclamation capacity-only under exactly the
+    condition it was written for: a provably-terminal occupant whose id sorted beyond the first
+    ``MANAGED_NAMESPACE_LIMIT`` names was never examined, so admission still refused at
+    capacity with a dead leaf sitting in the root. Recorded as D45 of `260915-CAPS-L21` from
+    observation 4 of the round-2 fix verification. What counts as proved-dead is unchanged;
+    only WHICH occupants get examined widened.
+
+    Truncation was never a real bound anyway: :func:`_namespace_ids` already performs the one
+    ``iterdir`` over the root, so the slice saved no directory walk -- it only hid occupants.
+    The per-candidate cost is one control-record read plus, for a terminal one, a lease probe,
+    and the population is self-limiting: admission reclaims whenever the root is over its
+    bound, and a leaf that finishes normally releases its namespace at its terminal boundary.
+    Ordering stays by the control record's mtime, so a long-dead occupant is reclaimed before a
+    freshly finished one.
+    """
+    occupants: list[_TerminalOccupant] = []
+    for namespace_id in _namespace_ids(root):
+        if namespace_id == keep:
+            continue
+        control_dir = root / CONTROL_DIR_NAME / namespace_id
+        evidence = _prove_terminal(control_dir / "state.json")
+        if evidence is None:
+            continue
+        occupants.append(_TerminalOccupant(namespace_id, control_dir, evidence))
+    occupants.sort(key=lambda one: _mtime(one.control_dir / "state.json"))
+    return occupants
+
+
+def _mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:  # pragma: no cover - a record removed under the walk
+        return 0.0
+
+
+def _prove_terminal(state_path: Path) -> str | None:
+    """Why this namespace's owner cannot be running, or None when that cannot be proved.
+
+    FOUR POSITIVE FACTS, and nothing inferred from silence:
+
+    ``terminal-fence``
+        the control record says ``phase: terminal``. The exact-leaf fence was published by a
+        completed or abandoned lifecycle and every later acquisition is refused for it.
+    ``contract-gone``
+        the contract file the record names no longer exists. The record carries the contract
+        path, so this is checkable without the contract: an operation addresses a leaf
+        THROUGH its contract, and there is nothing left to address.
+    ``contract-terminal``
+        the contract still parses and its own ``cleanup`` cell is a terminal value.
+    ``worktrees-gone``
+        the contract still parses but neither of its worktrees exists. This is the recorded
+        stuck shape: the enclosure locator was already removed while the control record kept
+        ``phase: active``, so no operation can start and none can be in flight.
+
+    An unreadable or foreign record returns None and the occupant is left where it is. That
+    is the "never a live leaf" guarantee: eviction is drawn only from positive terminal
+    evidence, so an occupant nothing can be proved about is never the one reclaimed.
+    """
+    if not state_path.is_file():
+        return None
+    record = _control_record(state_path)
+    if record is None:
+        return None
+    if record.get("phase") == "terminal":
+        return "terminal-fence"
+    contract = record.get("contract")
+    if not isinstance(contract, str) or not contract:
+        return None
+    if not Path(contract).exists():
+        return "contract-gone"
+    return _terminal_contract_evidence(Path(contract))
+
+
+def _control_record(state_path: Path) -> dict[str, object] | None:
+    """The raw control record, or None when it is absent, unreadable, or not an object."""
+    try:
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _terminal_contract_evidence(contract_path: Path) -> str | None:
+    """Whether the contract itself proves its leaf cannot still be running.
+
+    A CONTRACT THAT CANNOT BE READ PROVES NOTHING AND EVICTS NOTHING. An earlier version of
+    this function returned a ``contract-unreadable`` verdict here, treating bytes that fail to
+    parse as equivalent to bytes that are absent -- which reclaimed a LIVE occupant whose
+    contract happened to be corrupt, mid-write, or written under a schema this reader does not
+    know. Failure to read is not evidence of a terminal lifecycle: it is the ABSENCE of
+    evidence, and an occupant nothing can be proved about is left exactly where it is. Only a
+    contract that parses AND says it is terminal, or whose stated worktrees are both gone,
+    licenses eviction.
+    """
+    try:
+        current = load_contract(contract_path)
+    except (ContractError, OSError, UnicodeError, ValueError):
+        return None
+    if current.cleanup in TERMINAL_CLEANUP_STATES:
+        return "contract-terminal"
+    memory_gone = current.memory_worktree is None or not current.memory_worktree.exists()
+    if memory_gone and not current.code_worktree.exists():
+        return "worktrees-gone"
+    return None
+
+
+def _reclaim_under_lease(occupant: _TerminalOccupant | ManagedCacheAuthority) -> bool:
+    """Remove one namespace while holding its own lease lock. False when the lease is held.
+
+    The lock is the second, independent half of the liveness proof: a terminal record and a
+    held lease cannot both be true, so a namespace whose lease answers is left alone whatever
+    its record says. The removal itself is the same tombstone-then-delete sequence
+    :func:`reclaim_managed_namespace` performs, under the same root lock.
+    """
+    control_lock = occupant.control_dir / "lease.lock"
+    namespace = occupant.namespace
+    control_lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with control_lock.open("a+b") as handle:
+        if not _try_exclusive(handle):
+            return False
+        try:
+            if not namespace.exists():
+                return False
+            tombstone = namespace.parent / (
+                f".{namespace.name}.reclaim.{os.getpid()}.{uuid4().hex}"
+            )
+            with _root_lock(namespace.parent, exclusive=True):
+                atomic_replace(namespace, tombstone)
+            _remove_tree(tombstone)
+            return True
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def open_index_lock(
@@ -310,7 +625,31 @@ class TerminalNamespaceGuard:
         # rmtree can damage only retired garbage and can never be rolled back into service.
         self.completed = True
         self._cleanup_retired_namespace(retired, result)
+        self._confirm_lease_released(authority, result)
         return result
+
+    def _confirm_lease_released(
+        self,
+        authority: ManagedCacheAuthority,
+        result: dict[str, object],
+    ) -> None:
+        """Confirm the reservation is gone, and name the attempt when it is not.
+
+        ``_cleanup_retired_namespace`` normally leaves nothing behind, so this is a no-op on
+        the ordinary path. It is NOT a second reclaim: this call still holds ``authority``'s
+        own exclusive lease through :func:`terminal_namespace_guard`, so reclaiming here would
+        take a lock this process already holds. What it does is make a FAILED unlink visible --
+        a retired tree that could not be removed would otherwise keep occupying the cache with
+        nothing in the payload saying so, which is the silent-full state this module grew the
+        reclamation pass to end.
+        """
+        still_there = authority.namespace.exists() or any(
+            path.name.startswith(f".{authority.namespace_id}.")
+            for path in authority.managed_root.iterdir()
+        )
+        if still_there:
+            result["lease_still_reserved"] = True
+            result["lease_release_owner"] = "the next admission pass will reclaim this namespace"
 
     def _complete_without_namespace(
         self,
@@ -699,13 +1038,22 @@ def _exclusive_before_deadline(handle: BinaryIO) -> bool:
         time.sleep(0.05)
 
 
-def _namespace_ids(root: Path) -> list[str]:
-    occupants: set[str] = set()
+def _occupant_paths(root: Path) -> list[Path]:
+    """Every directory the managed root counts as an occupant, in sorted order.
+
+    ONE enumeration for the count, the byte total, and the eviction scan. A published namespace
+    counts; so does the dot-prefixed ``.terminal.`` tombstone of an id, because the reservation
+    is not released until that rename completes and a leaf that finished must not hold a slot
+    for good. ``.retired.`` leftovers and the ``.control`` tree are deliberately NOT occupants:
+    the first is post-commit garbage the same operation deletes, the second is per-triple
+    bookkeeping that is never pruned.
+    """
+    occupants: dict[str, Path] = {}
     for path in root.iterdir():
         if not path.is_dir() or path.is_symlink():
             continue
         if not path.name.startswith("."):
-            occupants.add(path.name)
+            occupants.setdefault(path.name, path)
             continue
         namespace, separator, _suffix = path.name[1:].partition(".terminal.")
         if (
@@ -713,8 +1061,16 @@ def _namespace_ids(root: Path) -> list[str]:
             and len(namespace) == 64
             and all(character in "0123456789abcdef" for character in namespace)
         ):
-            occupants.add(namespace)
-    return sorted(occupants)
+            occupants.setdefault(namespace, path)
+    return [occupants[key] for key in sorted(occupants)]
+
+
+def _namespace_ids(root: Path) -> list[str]:
+    """The occupant ids, derived from the one enumeration :func:`_occupant_paths` performs."""
+    return sorted(
+        path.name if not path.name.startswith(".") else path.name[1:].partition(".terminal.")[0]
+        for path in _occupant_paths(root)
+    )
 
 
 @contextmanager

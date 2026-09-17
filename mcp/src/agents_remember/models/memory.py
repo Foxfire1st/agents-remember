@@ -134,6 +134,25 @@ class CitationFixResponse(FlexibleToolResponse):
     dryRun: bool | None = None
 
 
+class CitationMigrateResponse(FlexibleToolResponse):
+    """The superseded-format conversion: what it rewrote and what it would not.
+
+    ``declinedCount`` is the complete decline list, never a sample, and ``findingsRemaining``
+    is re-measured from the tree by the migration's own checker rather than reported from the
+    migration's arithmetic -- a migration that reports success off its own count is how this
+    format change went half-applied once already.
+    """
+
+    operation: Literal["citation_migrate"] = "citation_migrate"
+    repoId: str | None = None
+    dryRun: bool | None = None
+    onboardingRoot: str | None = None
+    supersededTables: int | None = Field(default=None, ge=0)
+    tablesConverted: int | None = Field(default=None, ge=0)
+    declinedCount: int | None = Field(default=None, ge=0)
+    findingsRemaining: int | None = Field(default=None, ge=0)
+
+
 class RouteIndexRefreshResponse(FlexibleToolResponse):
     operation: Literal["route_index_refresh"] = "route_index_refresh"
     repoId: str | None = None

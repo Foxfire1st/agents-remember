@@ -45,6 +45,7 @@ from .lifecycle import (
 from .lifecycle_finalize import lifecycle_finalize_task_payload
 from .memory import (
     citation_fix_payload,
+    citation_migrate_payload,
     drift_check_payload,
     memory_baseline_adopt_payload,
     memory_baseline_status_payload,
@@ -124,6 +125,7 @@ __all__ = [
     "cgc_symbol_search_payload",
     "cgc_visualize_payload",
     "citation_fix_payload",
+    "citation_migrate_payload",
     "closeout_queue_payload",
     "codex_benchmark_prepare_payload",
     "codex_benchmark_run_payload",

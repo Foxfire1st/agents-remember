@@ -74,13 +74,13 @@ Subsections under `## Code Commentary`:
 
 Citation requirements for reference sections:
 
-1. `## Docs References` must include a concise prose summary when there is meaningful domain context to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
-2. `## Repo-Internal References` must include a concise prose summary when there is meaningful same-repository context to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
-3. `## Cross-Repo References` must include a concise prose summary when there is meaningful system-boundary behavior to explain, followed by a markdown table with columns `Finding`, `Citations`, and `Source Path`.
-4. In `## Docs References`, `Source Path` must link to the canonical online document URL. Read local mirrors if needed, but do not link to them.
-5. In `## Repo-Internal References`, `Source Path` must use a workspace-relative markdown link to the cited same-repository code, onboarding, config, test, or generated artifact. Do not use absolute filesystem paths.
-6. In `## Cross-Repo References`, `Source Path` must use a workspace-relative markdown link when the cited boundary evidence exists in the workspace; otherwise link to the canonical external document or system reference.
-7. `Citations` must list exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.
+1. `## Docs References` must include a concise prose summary when there is meaningful domain context to explain, followed by a markdown table with columns `Finding`, `Anchor`, and `Source`.
+2. `## Repo-Internal References` must include a concise prose summary when there is meaningful same-repository context to explain, followed by a markdown table with columns `Finding`, `Anchor`, and `Source`.
+3. `## Cross-Repo References` must include a concise prose summary when there is meaningful system-boundary behavior to explain, followed by a markdown table with columns `Finding`, `Anchor`, and `Source`.
+4. `Anchor` names what the cited lines must contain: a backticked code identifier, a backticked `#`-prefixed markdown heading, or a double-quoted literal string, and its text must occur inside the cited range.
+5. `Source` is plain `path:start-end`, repo-relative to the code repository or to the memory repository -- never a markdown link, never absolute, never with `../`. Separate several with `;`. A row with nothing to cite carries the table's no-citation marker in both `Anchor` and `Source`.
+6. The column pair is the ONLY citation form. `Finding | Citations | Source Path` with an `L10-L18` range is the superseded shape: a table still in it fails the citation check as `citation_table_columns_wrong`, and an `L` range is never rewritten into a `Source` cell -- the range is regenerated from the anchor.
+7. For a row whose evidence is a canonical external URL rather than lines in a file, put the quoted literal the URL's section states in `Anchor` (or the table's no-citation marker when there is nothing to anchor) and cite the file that carries it; never write the URL into `Source`.
 8. `Finding` must be a concise summary of what those cited lines establish.
 9. Do not rely on uncited prose alone in any reference section. Investigate and preserve useful explanation, then support it with the citation table. If nothing relevant exists after checking the live documentation source, or live retrieval is blocked, keep the table and note what was checked and any blocker.
 10. Do not cite source registries, search pages, or “where to look” files as evidence. They are allowed only as discovery inputs before reading the actual source.
@@ -98,7 +98,7 @@ Before creating file-level onboarding, confirm the target is one concrete source
    - latest source-file commit via `git log --oneline -1 --format="%H %ci" -- <source-file>`
 6. fill the template from `../templates/file-level-onboarding-template.md`, including `governingOverview` and the `## Governing Overview` backlink
 7. update the repo-level or route-local overview index if the file should be indexed or cross-referenced there
-8. cross-check all reference sections before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via the resolved `system/sources.md` rather than the registry itself, ensure docs rows link to the canonical online reference, ensure repo-internal rows use same-repository workspace-relative links, ensure cross-repo rows still represent a real external or sibling boundary, health-check the cited targets when retrieval tools are available, and ensure every table row has exact line ranges plus a concise finding summary
+8. cross-check all reference sections before finishing: preserve any load-bearing explanation, ensure the cited material is the actual evidence source selected via the resolved `system/sources.md` rather than the registry itself, ensure every cited target still exists (health-check the paths), ensure cross-repo rows still represent a real external or sibling boundary, and ensure every table row carries an anchor plus a `path:start-end` source. The `memory-citations` CLI (`--fix` / `--migrate`) is the tool for a table still in the superseded shape
 
 ## Maintain Workflow
 

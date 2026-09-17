@@ -142,15 +142,30 @@ class ApplicationTests1(ApplicationTests):
             self.assertEqual({path: path.read_bytes() for path in before}, before)
 
     def test_leaf_sync_demotes_completed_master_when_work_becomes_unresolved(self) -> None:
+        """A leaf whose document is not ``Completed`` cannot hold a ``Completed`` row.
+
+        Measured change (S6b of `260915-CAPS-L21`). The row used to stay ``Completed`` by
+        DERIVATION from step state, so a leaf whose document had already left ``Completed`` --
+        the state a leaf is in between finishing its steps and landing its closeout -- kept a
+        ``Completed`` row, and the master could not be terminal over it. The row now follows
+        the document, so the master leaves ``Completed`` on the same mutation and the step
+        edit that follows has no row change left to make.
+        """
         self._create_parent_master(status="Completed")
         self._create(
             master="task.md",
             status="Completed",
             steps=[{"id": "S1", "title": "One", "status": "done"}],
         )
-        self._call("set_field", fields={"status": "inProgress"})
         master_path = self.coord / "tasks" / "agents-remember" / "3c-x" / "task.json"
         self.assertEqual(read_task_doc(master_path).status, "Completed")
+        self.assertEqual(read_task_doc(master_path).subTasks[0].status, "Completed")
+
+        self._call("set_field", fields={"status": "inProgress"})
+
+        demoted = read_task_doc(master_path)
+        self.assertEqual(demoted.status, "inProgress")
+        self.assertEqual(demoted.subTasks[0].status, "inProgress")
 
         preview = self._call(
             "set_step",
@@ -158,9 +173,8 @@ class ApplicationTests1(ApplicationTests):
             dry_run=True,
         )
 
-        self.assertEqual(preview["masterSync"]["status"], "would-update")
-        self.assertIn("**Status:** inProgress", preview["masterSync"]["rendered"])
-        self.assertEqual(read_task_doc(master_path).status, "Completed")
+        self.assertEqual(preview["masterSync"]["status"], "unchanged")
+        self.assertEqual(read_task_doc(master_path).status, "inProgress")
 
         self._call("set_step", step={"id": "S1", "status": "pending"})
         master = read_task_doc(master_path)

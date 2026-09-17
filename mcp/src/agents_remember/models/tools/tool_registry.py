@@ -42,6 +42,7 @@ from agents_remember.models.lifecycles.responses import (
 )
 from agents_remember.models.memory import (
     CitationFixResponse,
+    CitationMigrateResponse,
     DriftCheckResponse,
     MemoryBaselineAdoptResponse,
     MemoryBaselineStatusResponse,
@@ -171,6 +172,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "drift_check": DriftCheckResponse,
     "memory_quality_check": MemoryQualityCheckResponse,
     "citation_fix": CitationFixResponse,
+    "citation_migrate": CitationMigrateResponse,
     "route_index_refresh": RouteIndexRefreshResponse,
     "memory_init": MemoryInitResponse,
     "skills_install": SkillsInstallResponse,

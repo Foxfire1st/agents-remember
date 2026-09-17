@@ -43,9 +43,9 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 4
 LIFECYCLE_ARTIFACT_COUNT = 54
-LIFECYCLE_CATALOG_SHA256 = "31c6983d23b04209c87575f8a3506145c2fb782bb5e58a897a4286d8e8d3b2e3"
-"""``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately eight times since its
-first pin -- the nine records below, one per deliberate value, in file order.
+LIFECYCLE_CATALOG_SHA256 = "0bf0a2beda972a1757aa50b6afbcc599fac0beb87ba1e87c798c7c7e16c92687"
+"""``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately nine times since its
+first pin -- the ten records below, one per deliberate value, in file order.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
 ``a9d83c375d1bfdcae7d0c46020eba41fbaf305a306fe89bb1b9b479b861c2002``. ``LOCR-R26@v1``'s
@@ -130,6 +130,15 @@ rows, L17's three consumer entries and this leaf's own two consumer entries, ove
 giving ``31c6983d…``. Neither L17's landing figure ``e3651d6f…``, nor the first merged value ``dca9c2f9…``, nor this
 leaf's pre-sync ``8764ea1f…`` is correct here. The measured delta against L17's landed catalog is exactly this leaf's
 two added consumer paths and nothing else, which is why the value could not be taken from either leaf's figure.
+
+**Tenth deliberate re-pin (260915-CAPS-L21, 2026-09-17) — consumer rows only.** ``260915-CAPS-L21`` added one real
+test module, ``mcp/tests/test_citation_migrate_registration.py``, which drives the MCP tool registration through the
+shared test support and therefore consumes the portable Node lockfile fixture: the census requires its path on that
+row. **Nothing was registered, no row was removed and no artifact's identity moved**, so the populations stay at
+**4 contracts / 54 artifacts** and the only new bytes are one consumer entry. The value is re-derived at this leaf's
+own tip (L9 landed first and its ninth re-pin is the base), giving ``0bf0a2be…``, and the measured delta against
+L9's landed catalog is exactly that one consumer path and nothing else. The proof's own artifact delta remains
+exactly empty.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"

@@ -390,17 +390,17 @@ Use explicit templates instead of inferring artifact shape from prior examples:
 Required table columns:
 
 ```markdown
-| Finding | Citations | Source Path |
-| ------- | --------- | ----------- |
+| Finding | Anchor | Source |
+| ------- | ------ | ------ |
 ```
 
 Rules:
 
 1. `Finding` is a concise summary of what the cited lines establish.
-2. `Citations` records exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.
-3. `Docs References` uses canonical documentation links, even when a local mirror was read for line access.
+2. `Anchor` names what the cited lines must contain: a backticked identifier, a backticked `#`-heading, or a double-quoted literal that occurs inside the range. `Source` is plain `path:start-end`, never a markdown link and never a bare `L10-L18` range.
+3. `Docs References` still names the canonical documentation URL in its prose summary; the row itself cites the file that carries the quoted text. A canonical URL belongs in the summary, not in a `Source` cell.
 4. `Repo-Internal References` uses same-repo source, test, config, generated artifact, or onboarding evidence.
-5. `Cross-Repo References` uses workspace-relative links to adjacent repo code/onboarding or external boundary proof.
+5. `Cross-Repo References` cites adjacent-repo code or onboarding as `path:start-end`; external boundary proof is named in the prose summary and anchored to the quoted text it states.
 6. Never emit absolute filesystem paths in onboarding output.
 7. Treat `system/sources.md`, search registries, embedding hits, and source lists as routing inputs only. Never cite them as proof.
 8. If no relevant source exists, keep the section and record what was checked plus that no relevant evidence was found.

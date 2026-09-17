@@ -153,14 +153,24 @@ minversion = "9.0"
 # which put the DEFAULT selection over the ceiling: `pytest mcp/tests` refused at collection with
 # "unit suite has 1119 cases; budget is 1000", so no leaf in the series could obtain a clean budget
 # signal. The raise restores a working default selection and leaves headroom for the leaves still to
-# land; it is a ceiling, not a target. The 1500 figure is the developer's ruling, applied here as the
-# single declaration this file owns -- `mcp/pyproject.toml` carries no budget key.
-unit_case_budget = 1500
+# land; it is a ceiling, not a target. The value in force is the developer's ruling, applied here as
+# the single declaration this file owns -- `mcp/pyproject.toml` carries no budget key.
+#
+# 2026-09-17 -- unit 1500 -> 2000 (260915-CAPS-L21). The developer ruled the raise after seeing the
+# base population at 1498/1500 and this leaf's protections at 1514: the previous value could not
+# absorb ANY honest protection, because the base sat two cases from the wall and a leaf that had to
+# protect eleven defects could otherwise land them only by deleting protection that already existed.
+# The per-leaf growth-budget alternative (each leaf declaring and justifying its own allowance) was
+# offered and NOT adopted; the single declared ceiling stands instead, so this file keeps exactly one
+# budget declaration and one place to read it. It remains a ceiling, not a target: 1516 collected
+# against 2000 is headroom the series is not asked to fill, and the consolidation check still applies
+# before any leaf grows the population.
+unit_case_budget = 2000
 #
 # 2026-09-16 -- integration 250 -> 300, from the merged 260831-LOCR line (its own raise,
 # 250 -> 300, authorized for its 28-requirement campaign), taken as the union of the two lines'
-# ceilings after the source line moved. The unit ceiling above stays this experiment's
-# developer-ruled 1500. Both axes take the higher of the two lines' values because the merged
+# ceilings after the source line moved. The unit ceiling above is the 2026-09-17 developer ruling of
+# 2000. Both axes take the higher of the two lines' values because the merged
 # tree carries both populations, and an over-budget population does not run partially:
 # `pytest_collection_finish` raises UsageError and the ENTIRE run executes zero tests.
 integration_case_budget = 300

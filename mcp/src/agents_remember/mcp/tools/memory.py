@@ -18,6 +18,7 @@ from agents_remember.application.memory_tools import (
     CitationOperationScope,
     MemoryBranches,
     citation_fix_tool,
+    citation_migrate_tool,
     drift_check_tool,
     memory_baseline_adopt_tool,
     memory_baseline_status_tool,
@@ -100,6 +101,26 @@ def citation_fix_payload(
     return _tool_payload(
         "citation_fix",
         citation_fix_tool(
+            config,
+            repo_id=repo_id,
+            contract_path=contract_path,
+            dry_run=dry_run,
+            operation_scope=operation_scope,
+        ),
+    )
+
+
+def citation_migrate_payload(
+    config: McpRuntimeConfig,
+    repo_id: str,
+    *,
+    contract_path: str,
+    operation_scope: CitationOperationScope = DEFAULT_CITATION_OPERATION_SCOPE,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    return _tool_payload(
+        "citation_migrate",
+        citation_migrate_tool(
             config,
             repo_id=repo_id,
             contract_path=contract_path,

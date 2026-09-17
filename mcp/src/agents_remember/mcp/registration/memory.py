@@ -19,6 +19,7 @@ from agents_remember.models.memory import (
 
 from ..tools import (
     citation_fix_payload,
+    citation_migrate_payload,
     drift_check_payload,
     memory_baseline_adopt_payload,
     memory_baseline_status_payload,
@@ -115,6 +116,41 @@ def _register_memory_health_tools(server: FastMCP, config: McpRuntimeConfig) -> 
         acquisition beyond the register every call already honours: the memory layer's
         settings.json `onboarding.pathRules.exclude` and the code repo's .gitignore."""
         return citation_fix_payload(
+            config,
+            repo_id,
+            contract_path=contract_path,
+            operation_scope=CitationOperationScope(
+                document=document,
+                expected_snapshot=expected_snapshot,
+                excludes=tuple(exclude or ()),
+            ),
+            dry_run=dry_run,
+        )
+
+    @server.tool()
+    def citation_migrate(
+        repo_id: str,
+        contract_path: str,
+        *,
+        document: str | None = None,
+        expected_snapshot: str | None = None,
+        dry_run: bool = False,
+        exclude: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Convert a leaf memory worktree from the superseded citation-table format to the
+        anchored one: add the Anchor column, widen the delimiter, turn markdown links into
+        `path:start-end`, and rewrite the old prose spelling into `cit:`. The enclosure contract
+        is mandatory and the application guard refuses the official memory repo. Run this ONCE
+        per repository adopting the format, and again after a curator wave supplies anchors an
+        earlier pass had to decline. `declinedCount` is the complete decline list rather than a
+        sample, and each declined row KEEPS its original evidence verbatim so nothing is lost;
+        `findingsRemaining` is re-measured from the tree after a write and is what `ok` is read
+        off. Preview with dry_run=true. Use document for one onboarding-relative file and
+        expected_snapshot to assert a previously built immutable source generation. `exclude`
+        adds caller-supplied, code-root-relative path globs for THIS call only, narrowing the
+        acquisition beyond the register every call already honours: the memory layer's
+        settings.json `onboarding.pathRules.exclude` and the code repo's .gitignore."""
+        return citation_migrate_payload(
             config,
             repo_id,
             contract_path=contract_path,
