@@ -229,6 +229,7 @@ architecture-fitness = [
   "mcp/tests/test_dependency_ownership_ast_helpers.py",
   "mcp/tests/test_evidence_lanes.py",
   "mcp/tests/test_file_size_detector.py",
+  "mcp/tests/test_instrument_discipline.py",
   "mcp/tests/test_layering.py",
   "mcp/tests/test_lifecycle_turn_truth_doctrine.py",
   "mcp/tests/test_memory_quality_is_independent_of_the_closeout_plane.py",
