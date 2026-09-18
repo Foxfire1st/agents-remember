@@ -11,12 +11,19 @@ An unknown ``kind``, an unknown ``record_schema``, or a payload that does not va
 resolved model is refused with the shipped code ``invalid_payload``, with no row written and the
 before/after digest unchanged.
 
-**One internal conformance kind, plus the eight authored facet kinds.** The concrete knowledge
-categories that are *not* facets (``EvidenceClaim``, ``DetectionSignal``, …) are later leaves. This
-leaf registers the eight authored-judgment subtypes beside the internal conformance kind -- one
-registry entry per subtype, whose model is the frozen payload model the facet vocabulary declares --
-so the typed half of the envelope carries the real vocabulary rather than only a promise. The
-internal kind is marked internal and is not a knowledge category.
+**One internal conformance kind, plus the eight authored facet kinds, plus the two
+mechanical-detection kinds.** The concrete knowledge categories that are *not* facets
+(``EvidenceClaim``, …) are later leaves. This leaf registers the eight authored-judgment subtypes
+beside the internal conformance kind -- one registry entry per subtype, whose model is the frozen
+payload model the facet vocabulary declares -- so the typed half of the envelope carries the real
+vocabulary rather than only a promise. The internal kind is marked internal and is not a knowledge
+category.
+
+The detection leaf registers the two kinds this docstring used to defer: ``detection_signal`` and
+``detection_run`` resolve to the frozen payload models
+:mod:`agents_remember.models.knowledge.detection` declares, so a detection record's required field
+set, its closed vocabularies and its construction refusals are enforced by the same seam every other
+typed record passes through rather than by a second one beside it.
 
 The registry maps to **frozen** models: a validated payload is a value, and a caller cannot mutate
 what it validated into something the registry would not have accepted.
@@ -31,6 +38,14 @@ from pydantic import BaseModel, Field, ValidationError
 
 from agents_remember.memory.knowledge.refusals import RefusalFacts, refusal
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH, KnowledgeModel
+from agents_remember.models.knowledge.detection import (
+    DETECTION_RUN_KIND,
+    DETECTION_RUN_SCHEMA,
+    DETECTION_SIGNAL_KIND,
+    DETECTION_SIGNAL_SCHEMA,
+    DetectionRunPayload,
+    DetectionSignalPayload,
+)
 from agents_remember.models.knowledge.facet import (
     FACET_KINDS,
     FACET_RECORD_SCHEMAS,
@@ -71,12 +86,27 @@ _FACET_PAYLOAD_MODELS: Mapping[tuple[str, str], type[BaseModel]] = {
 PAYLOAD_MODELS: Mapping[tuple[str, str], type[BaseModel]] = {
     (INTERNAL_CONFORMANCE_KIND, INTERNAL_CONFORMANCE_SCHEMA): ConformancePayload,
     **_FACET_PAYLOAD_MODELS,
+    # The mechanical-detection record group. It is the pair of kinds this envelope's own docstring
+    # named as "later leaves", and they register here rather than as generation-4 columns because
+    # the frozen payload model *is* the shape: a signal's required field set, its closed
+    # vocabularies and its construction refusals are declared once, in
+    # :mod:`agents_remember.models.knowledge.detection`, and a second declaration as SQL columns
+    # would be a second place for the same field set to drift. Generation 4 appends only what the
+    # envelope cannot express -- the run's recorded signal order.
+    (DETECTION_SIGNAL_KIND, DETECTION_SIGNAL_SCHEMA): DetectionSignalPayload,
+    (DETECTION_RUN_KIND, DETECTION_RUN_SCHEMA): DetectionRunPayload,
 }
 
 # The facet kinds this registry admits, for a caller that needs the closed vocabulary rather than a
 # lookup. It is derived from the registry, so it answers "which kinds have a shape" rather than
 # "which kinds does the vocabulary name", and the two are equal by construction.
 FACET_RECORD_KINDS: frozenset[str] = frozenset(kind for (kind, _schema) in _FACET_PAYLOAD_MODELS)
+
+# The mechanical-detection kinds this registry admits, derived from the same declarations the entries
+# above are built from rather than restated. A caller that needs to say what the registry holds names
+# all three groups -- the internal conformance kind, the eight facet kinds and these two -- and the
+# three sets are disjoint by construction because a kind is one string.
+DETECTION_RECORD_KINDS: frozenset[str] = frozenset({DETECTION_SIGNAL_KIND, DETECTION_RUN_KIND})
 
 # Which shapes each kind admits. Derived from the registry rather than restated, so a kind cannot
 # admit a shape the registry does not hold.

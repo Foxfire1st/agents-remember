@@ -17,6 +17,12 @@ This module makes a generation one frozen record, and makes *selection* a read o
   attachments, the decision supersession edge and the explanation pair. It is the created
   generation, so a *new* store declares version 3 while a generation-2 dataset that already exists
   keeps declaring version 2 and is read through generation 2's own record.
+* :data:`GENERATION_4` is generation 3 plus the table :mod:`…schema_v4` appends -- the recorded
+  order of one detection run's signals. It is the created generation now, so a *new* store declares
+  version 4 while a generation-3 dataset that already exists keeps declaring version 3 and is read
+  through generation 3's own record. The detection record group's own payload shapes are registered
+  in the record envelope rather than appended as columns, which is why this generation adds one
+  table and not a record group.
 * :func:`require_pinned_generation_1_unchanged` is the gate that fails -- not warns -- when the
   pinned generation no longer recomputes to its constant. Without it the pin is a comment.
 * :func:`generation_of_database` and :func:`generation_of_artifact` select a generation from what
@@ -39,7 +45,7 @@ from dataclasses import dataclass, replace
 import apsw
 
 from agents_remember.kernel.canonical_json import sha256_digest
-from agents_remember.memory.knowledge import schema, schema_v2, schema_v3
+from agents_remember.memory.knowledge import schema, schema_v2, schema_v3, schema_v4
 from agents_remember.memory.knowledge.export_refusals import unsupported_schema_refusal
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.context import KNOWLEDGE_SCHEMA_NAME
@@ -151,6 +157,7 @@ GENERATION_1_FINGERPRINT = "bae805d6443a42ca65f733149cb3dc694ea89d3e40554c56480f
 GENERATION_1_SCHEMA_NAME = KNOWLEDGE_SCHEMA_NAME
 GENERATION_2_SCHEMA_NAME = "ar-knowledge-sqlite/v2"
 GENERATION_3_SCHEMA_NAME = "ar-knowledge-sqlite/v3"
+GENERATION_4_SCHEMA_NAME = "ar-knowledge-sqlite/v4"
 
 GENERATION_1 = SchemaGeneration(
     schema_name=GENERATION_1_SCHEMA_NAME,
@@ -222,11 +229,44 @@ def _compose_generation_3() -> SchemaGeneration:
 
 GENERATION_3 = _compose_generation_3()
 
+
+# Generation 4 is generation 3, unchanged, plus the table :mod:`…schema_v4` appends -- the recorded
+# order of one detection run's signals. The composition is written as the same explicit append
+# generations 2 and 3 are, so ``GENERATION_4.tables[: len(GENERATION_3.tables)] ==
+# GENERATION_3.tables`` and generation 4's columns for each of the first twenty names are generation
+# 3's. That prefix equality is the whole of ``KS-R10@v1`` §1.3's additive rule: a generation appends
+# tables and never retypes, reorders or drops an earlier generation's.
+def _compose_generation_4() -> SchemaGeneration:
+    """Return generation 4: generation 3's declarations, unchanged, with this leaf's table appended."""
+
+    composed = SchemaGeneration(
+        schema_name=GENERATION_4_SCHEMA_NAME,
+        user_version=4,
+        tables=GENERATION_3.tables + schema_v4.APPENDED_TABLES,
+        columns={**GENERATION_3.columns, **schema_v4.APPENDED_COLUMNS},
+        primary_keys={**GENERATION_3.primary_keys, **schema_v4.APPENDED_PRIMARY_KEYS},
+        json_columns={**GENERATION_3.json_columns, **schema_v4.APPENDED_JSON_COLUMNS},
+        features=GENERATION_3.features + schema_v4.APPENDED_FEATURES,
+        table_ddl={**GENERATION_3.table_ddl, **schema_v4.APPENDED_TABLE_DDL},
+        index_ddl=GENERATION_3.index_ddl + schema_v4.APPENDED_INDEX_DDL,
+        triggers={**GENERATION_3.triggers, **schema_v4.APPENDED_TRIGGERS},
+        fingerprint="",
+    )
+    return replace(composed, fingerprint=structure_fingerprint(composed))
+
+
+GENERATION_4 = _compose_generation_4()
+
 # The registry. Ordered oldest first, so "the newest generation this build supports" is the last
 # entry rather than a second literal that could drift from the tuple -- and so
-# ``generation_of_new_store()`` declares generation 3 while a generation-2 dataset stays
-# generation 2 (``KS-R10@v1`` §5.1).
-GENERATIONS: tuple[SchemaGeneration, ...] = (GENERATION_1, GENERATION_2, GENERATION_3)
+# ``generation_of_new_store()`` declares generation 4 while a generation-3 dataset stays
+# generation 3 (``KS-R10@v1`` §5.1).
+GENERATIONS: tuple[SchemaGeneration, ...] = (
+    GENERATION_1,
+    GENERATION_2,
+    GENERATION_3,
+    GENERATION_4,
+)
 
 GENERATIONS_BY_VERSION: Mapping[int, SchemaGeneration] = {
     generation.user_version: generation for generation in GENERATIONS

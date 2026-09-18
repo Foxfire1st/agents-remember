@@ -43,7 +43,7 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 13
 LIFECYCLE_ARTIFACT_COUNT = 54
-LIFECYCLE_CATALOG_SHA256 = "19ed0525cd94b57389052a4e19cf1f0dfe83e9c166783ead2598f6a4e0ce8ffa"
+LIFECYCLE_CATALOG_SHA256 = "c6956899947b0435e5cdd8cd77ba3121db77e3dbf4676bee11406c3baf03ec68"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately once.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
@@ -59,9 +59,16 @@ consumer list -- a consumer change, not a new artifact: the counts stay ten and 
 value is the catalog after it. ``260915-KS``'s L8 leaf then registered its own
 ``knowledge-diff-cases`` support module against the same amended clause -- a new artifact, and the
 two new diff modules joined the read-scope support module's consumer list because they build on it --
-which is what this value pins: eleven contracts and fifty-two artifacts. The proof's own artifact delta remains exactly empty
--- none of these rows is the proof's -- so the freeze still forbids the proof adding or widening
-anything, and any further catalog change must re-pin this digest deliberately.
+which is what this value pins: eleven contracts and fifty-two artifacts. ``260915-KS``'s L9-L11
+leaves then registered their own knowledge-substrate support modules and raised the populations to
+thirteen contracts and fifty-four artifacts, which is the value L24 left in place. ``260915-KS``'s
+L14 leaf added no artifact and no contract of its own -- its two detection test modules use the
+existing ``diff_scope_test_support`` and ``read_scope_test_support`` fixtures rather than a third
+one -- so its catalog change is a *consumer* change only: both of those support modules' consumer
+lists gained ``mcp/tests/test_knowledge_detection_runs.py``, the counts stay thirteen and fifty-four,
+and this value is the catalog after that consumer registration. The proof's own artifact delta
+remains exactly empty -- none of these rows is the proof's -- so the freeze still forbids the proof
+adding or widening anything, and any further catalog change must re-pin this digest deliberately.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"

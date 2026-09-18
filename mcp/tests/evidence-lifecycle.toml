@@ -1275,6 +1275,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_diff_scope.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
+  "mcp/tests/test_knowledge_detection_runs.py",
 ]
 
 [[artifact]]
@@ -1294,6 +1295,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_diff_scope.py",
+  "mcp/tests/test_knowledge_detection_runs.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
   "mcp/tests/test_knowledge_read_paths.py",
   "mcp/tests/test_knowledge_read_scope.py",

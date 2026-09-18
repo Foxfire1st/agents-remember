@@ -88,6 +88,12 @@ KnowledgeOperation = Literal[
     "add_explanation_revision",
     "designate_explanation",
     "read_facet_scope",
+    # Mechanical detection. Two members rather than one, for the reason the read pair and the diff
+    # pair are one each: recording a run and reading one back are different acts, and the read is the
+    # one that has to answer with the recorded order rather than with whatever order the rows happen
+    # to come back in. Neither member can carry a conclusion, and neither mints a new gate.
+    "record_detection_run",
+    "read_detection_run",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct
@@ -157,6 +163,12 @@ KnowledgeRefusalCode = Literal[
     "continuation_binding_mismatch",
     "snapshot_unavailable",
     "selection_incomplete",
+    # Mechanical detection. The one member only a detection write can reach: a signal or a run is a
+    # measurement of an already-existing dataset, so a write that would enter that dataset's own
+    # measurement transaction -- and move the identity of the dataset it just digested -- is refused
+    # with its own name rather than folded into a neighbouring storage code. Requirement 7.1 states
+    # the refusal, and ``detection_self_reference`` is the fact a caller branches on.
+    "detection_self_reference",
 ]
 
 

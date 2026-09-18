@@ -49,6 +49,7 @@ from agents_remember.memory.knowledge.facet_records import FacetEnvelopeDraft, f
 from agents_remember.memory.knowledge.facets import _STEPS
 from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.record_envelope import (
+    DETECTION_RECORD_KINDS,
     FACET_RECORD_KINDS,
     KIND_SCHEMAS,
     PAYLOAD_MODELS,
@@ -182,13 +183,25 @@ def test_the_seam_registry_is_exactly_the_eight_declared_subtypes() -> None:
     """Requirements 1.1, 1.2, 6.6 and 6.7: the vocabulary is closed -- the eight subtypes, the two
     explanation subject kinds, and the six tables a facet command may write -- and each subtype is
     reached through a discriminator over one frozen shape.
+
+    RE-SCOPED for ``KS-R14@v1``. The registry this asserts against is the *shared* envelope seam, and
+    ``260915-KS-L10``'s own docstring named the concrete non-facet knowledge categories as later
+    leaves; ``260915-KS-L14`` registers the mechanical-detection pair through it. The facet half of
+    the claim is unchanged and is stated more precisely than before: the kinds *this vocabulary*
+    admits are exactly the eight (``FACET_RECORD_KINDS``), and the seam's whole membership is the
+    three groups it now declares -- the internal conformance kind, the eight facet kinds and the two
+    detection kinds -- with the facet kinds' admissible schemas still exactly their declared ones.
     """
 
     assert len(FACET_KINDS) == 8
     assert payload_kinds() == set(FACET_KINDS)
     assert set(FACET_RECORD_SCHEMAS) == set(FACET_KINDS)
     assert frozenset(FACET_KINDS) == FACET_RECORD_KINDS
-    assert set(KIND_SCHEMAS) == set(FACET_KINDS) | {"internal_conformance"}
+    assert set(KIND_SCHEMAS) == (
+        set(FACET_KINDS) | {"internal_conformance"} | set(DETECTION_RECORD_KINDS)
+    )
+    for kind in FACET_KINDS:
+        assert KIND_SCHEMAS[kind] == frozenset({FACET_RECORD_SCHEMAS[kind]}), kind
     for kind in FACET_KINDS:
         model = facet_payload_model(kind)
         assert model is not None, kind
@@ -886,15 +899,29 @@ def first_record_revision(store: Any) -> str:
 
 
 def test_the_registered_generation_appends_only_and_the_preceding_ones_are_unchanged() -> None:
-    """Requirements 8.1, 8.2, 8.3 and 8.5: the observed number, the prefix, and the idiom."""
+    """Requirements 8.1, 8.2, 8.3 and 8.5: the observed number, the prefix, and the idiom.
 
-    assert [generation.user_version for generation in GENERATIONS] == [1, 2, 3]
+    RE-SCOPED for ``KS-R14@v1``. This case's protected property is that *this leaf's* generation
+    appends and that the generations before it are unchanged; the registry has since grown the
+    mechanical-detection generation (``KS-R14@v1``), so the two assertions that spelled the registry's
+    membership as a closed list of three are replaced by the fact they were standing in for: the
+    registry is the generations in order, generation 3 is still exactly this leaf's generation with
+    the same schema name, fingerprint-bearing declarations and appended table list, and the created
+    generation is the newest registered one rather than a pinned literal. Every generation-3-specific
+    assertion below is unchanged.
+    """
+
+    assert [generation.user_version for generation in GENERATIONS] == [1, 2, 3, 4]
     assert [generation.schema_name for generation in GENERATIONS] == [
         "ar-knowledge-sqlite/v1",
         "ar-knowledge-sqlite/v2",
         "ar-knowledge-sqlite/v3",
+        "ar-knowledge-sqlite/v4",
     ]
-    assert CURRENT_GENERATION is GENERATION_3
+    assert GENERATION_3 in GENERATIONS
+    assert GENERATION_3.user_version == 3
+    assert CURRENT_GENERATION is GENERATIONS[-1]
+    assert CURRENT_GENERATION.user_version >= GENERATION_3.user_version
     assert GENERATION_1.fingerprint == GENERATION_1_FINGERPRINT
     assert GENERATION_2.fingerprint == PRE_LEAF_GENERATION_2_FINGERPRINT
     assert len(GENERATION_2.tables) == 16
