@@ -51,6 +51,7 @@ from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.record_envelope import (
     CITATION_BINDING_RECORD_KINDS,
     DETECTION_RECORD_KINDS,
+    EVIDENCE_RECORD_KINDS,
     FACET_RECORD_KINDS,
     KIND_SCHEMAS,
     PAYLOAD_MODELS,
@@ -75,6 +76,10 @@ from agents_remember.models.knowledge.candidate import (
 from agents_remember.models.knowledge.composition import (
     COMPOSITION_COMMAND_KINDS,
     COMPOSITION_WRITABLE_TABLES,
+)
+from agents_remember.models.knowledge.evidence import (
+    EVIDENCE_COMMAND_KINDS,
+    EVIDENCE_WRITABLE_TABLES,
 )
 from agents_remember.models.knowledge.facet import (
     ATTACHMENT_ENDPOINT_KINDS,
@@ -190,18 +195,20 @@ def test_the_seam_registry_is_exactly_the_eight_declared_subtypes() -> None:
     explanation subject kinds, and the six tables a facet command may write -- and each subtype is
     reached through a discriminator over one frozen shape.
 
-    RE-SCOPED for ``KS-R14@v1``, again for ``KS-R19@v1`` and again for ``KS-R18@v1``. The registry this
-    asserts against is the *shared* envelope seam, and ``260915-KS-L10``'s own docstring named the
-    concrete non-facet knowledge categories as later leaves; ``260915-KS-L14`` registers the
-    mechanical-detection pair through it, ``260915-KS-L19`` registers the requirement-revision kind and
-    ``260915-KS-L18`` registers the citation-binding kind. The claim is unchanged in strength and is
-    stated as the union it now is: the kinds *this vocabulary* admits are exactly the eight
-    (``FACET_RECORD_KINDS``), and the seam's whole membership is exactly the union of the groups the
-    registry declares -- the internal conformance kind, the eight facet kinds, the two detection kinds,
-    the requirement-revision kinds and the citation-binding kind -- so a further group still cannot be
-    admitted without this line changing, with the facet kinds' admissible schemas still exactly their
-    declared ones.
-
+    RE-SCOPED for ``KS-R14@v1``, again for ``KS-R19@v1``, again for ``KS-R18@v1`` and again for
+    ``KS-R12@v1``. The registry this asserts against is the *shared* envelope seam, and
+    ``260915-KS-L10``'s own docstring named the concrete non-facet knowledge categories as later
+    leaves; ``260915-KS-L14`` registers the mechanical-detection pair through it,
+    ``260915-KS-L19`` registers the requirement-revision kind, ``260915-KS-L18`` registers the
+    citation-binding kind and ``260915-KS-L12`` registers the supporting-record pair. The claim is
+    unchanged in strength and is stated as the union it now is: the kinds *this vocabulary* admits are
+    exactly the eight (``FACET_RECORD_KINDS``), and the seam's whole membership is exactly the union of
+    the groups the registry declares -- the internal conformance kind, the eight facet kinds, the two
+    detection kinds, the requirement-revision kinds, the citation-binding kind and the two
+    supporting-record kinds -- so a further group still cannot be admitted without this line changing,
+    with the facet kinds' admissible schemas still exactly their declared ones. The membership is
+    written as a union of the groups' own derived sets rather than as a literal, so a later record
+    group's registration is answered by that group's constant instead of by an edit here.
     """
 
     assert len(FACET_KINDS) == 8
@@ -214,6 +221,7 @@ def test_the_seam_registry_is_exactly_the_eight_declared_subtypes() -> None:
         | set(DETECTION_RECORD_KINDS)
         | set(REQUIREMENT_RECORD_KINDS)
         | set(CITATION_BINDING_RECORD_KINDS)
+        | set(EVIDENCE_RECORD_KINDS)
     )
     for kind in FACET_KINDS:
         assert KIND_SCHEMAS[kind] == frozenset({FACET_RECORD_SCHEMAS[kind]}), kind
@@ -816,36 +824,43 @@ def test_an_explanation_is_separable_and_editing_it_never_rewrites_the_statement
 def test_the_facet_commands_join_the_closed_union_and_its_dispatch_tables() -> None:
     """Requirements 7.3 and 7.5: one union, one set of dispatch tables, one set of tables.
 
-    RE-SCOPED for ``KS-R17@v1``. This case's protected property is that the union is *closed* over
-    the declarations that are in it and that every dispatch table agrees with the union -- not that
-    the union holds exactly eighteen members. The composition generation (``KS-R17@v1``) appended
-    four commands and six record tables beside this leaf's six and six, so the two assertions that
-    spelled the membership as one leaf's own sum are replaced by the fact they stood in for: the
-    union is exactly the shipped kinds plus the facet leaf's declaration plus the composition
-    leaf's, and the writable-table literal is exactly the base seven plus both leaves' declared
-    sets. The stronger half is unchanged and still checked -- ``_TARGET_CHECKS`` is exactly the
-    union, so a command added without a target check still fails here rather than at a caller's
-    expense.
+    RE-SCOPED for ``KS-R17@v1`` and again for ``KS-R12@v1``. This case's protected property is that the
+    union is *closed* over the declarations that are in it and that every dispatch table agrees with
+    the union -- not that the union holds exactly eighteen members. The composition generation
+    (``KS-R17@v1``) appended four commands and six record tables beside this leaf's six and six, and the
+    supporting-record generation (``KS-R12@v1``) appends two more commands and five more record tables,
+    so the assertions that spelled the membership as one leaf's own sum are replaced by the fact they
+    stood in for: the union is exactly the shipped kinds plus each record group's own declaration, and
+    the writable-table literal is exactly the shipped seven plus every group's declared set. The
+    stronger half is unchanged and still checked -- ``_TARGET_CHECKS`` is exactly the union, so a
+    command added without a target check still fails here rather than at a caller's expense.
     """
 
     kinds = command_kinds()
     assert kinds >= SHIPPED_COMMAND_KINDS
-    assert kinds == SHIPPED_COMMAND_KINDS | set(FACET_COMMAND_KINDS) | set(
-        COMPOSITION_COMMAND_KINDS
+    assert kinds == (
+        SHIPPED_COMMAND_KINDS
+        | set(FACET_COMMAND_KINDS)
+        | set(COMPOSITION_COMMAND_KINDS)
+        | set(EVIDENCE_COMMAND_KINDS)
     )
-    assert len(kinds) == 18 + len(COMPOSITION_COMMAND_KINDS)
     assert set(_TARGET_CHECKS) == kinds
     assert set(_STEPS) == set(FACET_COMMAND_KINDS)
     assert set(FACET_COMMAND_KINDS) <= (kinds | set(_INSERTING_KINDS))
-    assert set(get_args(MutableRecordTable)) == {
-        "invariant",
-        "invariant_revision",
-        "family",
-        "family_revision",
-        "source_anchor",
-        "family_member",
-        "realization_claim",
-    } | set(FACET_WRITABLE_TABLES) | set(COMPOSITION_WRITABLE_TABLES)
+    assert set(get_args(MutableRecordTable)) == (
+        {
+            "invariant",
+            "invariant_revision",
+            "family",
+            "family_revision",
+            "source_anchor",
+            "family_member",
+            "realization_claim",
+        }
+        | set(FACET_WRITABLE_TABLES)
+        | set(EVIDENCE_WRITABLE_TABLES)
+        | set(COMPOSITION_WRITABLE_TABLES)
+    )
 
 
 def test_the_two_entry_points_agree_and_a_refused_write_writes_nothing(admitted: Any) -> None:
@@ -930,29 +945,29 @@ def first_record_revision(store: Any) -> str:
 def test_the_registered_generation_appends_only_and_the_preceding_ones_are_unchanged() -> None:
     """Requirements 8.1, 8.2, 8.3 and 8.5: the observed number, the prefix, and the idiom.
 
-    RE-SCOPED for ``KS-R14@v1``. This case's protected property is that *this leaf's* generation
-    appends and that the generations before it are unchanged; the registry has since grown the
-    mechanical-detection generation (``KS-R14@v1``), so the two assertions that spelled the registry's
-    membership as a closed list of three are replaced by the fact they were standing in for: the
-    registry is the generations in order, generation 3 is still exactly this leaf's generation with
-    the same schema name, fingerprint-bearing declarations and appended table list, and the created
-    generation is the newest registered one rather than a pinned literal. Every generation-3-specific
-    assertion below is unchanged.
-
-    RE-SCOPED AGAIN for ``KS-R18@v1``, and *strengthened* rather than trimmed: the membership is now
-    checked as the structural fact itself -- one contiguous version sequence from 1 to the newest
-    registered generation, each declaring its own ``ar-knowledge-sqlite/vN`` name, in register order
-    -- instead of as a literal list. A hand-edited list of versions would still be green the day a
-    generation was registered out of order or skipped; these assertions redden on exactly that, so
-    re-scoping to the fact that now holds buys a property the enumeration never had.
+    RE-SCOPED for ``KS-R14@v1``, again for ``KS-R18@v1`` and again for ``KS-R12@v1``. This case's
+    protected property is that *this leaf's* generation appends and that the generations before it are
+    unchanged; the registry has since grown the mechanical-detection generation (``KS-R14@v1``), the
+    citation-binding generation, the composition generation (``KS-R17@v1``) and the supporting-record
+    generation (``KS-R12@v1``), so the assertions that spelled the registry's membership as a closed
+    list are replaced by the fact they were standing in for. For ``KS-R18@v1`` that fact was
+    *strengthened* rather than trimmed: the membership is checked as the structural property itself --
+    one contiguous version sequence from 1 to the newest registered generation, each declaring its own
+    ``ar-knowledge-sqlite/vN`` name, in register order -- instead of as a literal list. A hand-edited
+    list of versions would still be green the day a generation was registered out of order or skipped;
+    these assertions redden on exactly that, so re-scoping to the fact that now holds buys a property
+    the enumeration never had. Generation 3 is still exactly this leaf's generation with the same
+    schema name, fingerprint-bearing declarations and appended table list, and the created generation
+    is the newest registered one rather than a pinned literal. Every generation-3-specific assertion
+    below is unchanged.
     """
 
     # RE-SCOPED again for ``KS-R17@v1``, on the same reasoning the paragraph above records for
-    # ``KS-R14@v1``: a registry membership spelled as a closed list of four is a claim about how
-    # many generations happen to exist, not about this leaf's generation. What is asserted instead
-    # is what the closed list was standing in for -- the registry is the generations in *order*,
-    # each one's schema name is its own version's name, and generation 3 is still exactly this
-    # leaf's generation. Every generation-3-specific assertion below is unchanged.
+    # ``KS-R14@v1``: a registry membership spelled as a closed list of generations is a claim about how
+    # many generations happen to exist, not about this leaf's generation. What is asserted instead is
+    # what the closed list was standing in for -- the registry is the generations in *order*, each
+    # one's schema name is its own version's name, and generation 3 is still exactly this leaf's
+    # generation.
     versions = [generation.user_version for generation in GENERATIONS]
     assert versions == list(range(1, len(GENERATIONS) + 1)), versions
     assert [generation.schema_name for generation in GENERATIONS] == [

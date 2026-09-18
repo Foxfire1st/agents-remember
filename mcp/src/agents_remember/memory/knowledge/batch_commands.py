@@ -34,6 +34,7 @@ from agents_remember.memory.knowledge import (
     anchors,
     composition_policies,
     compositions,
+    evidence,
     facet_records,
     facets,
     families,
@@ -84,7 +85,8 @@ from agents_remember.models.knowledge.composition import (
     FamilyCompositionPolicyVersion,
     FamilyExplanationContext,
 )
-from agents_remember.models.knowledge.facet import FACET_COMMAND_KINDS
+from agents_remember.models.knowledge.evidence import EVIDENCE_COMMAND_KINDS
+from agents_remember.models.knowledge.facet import FACET_COMMAND_KINDS, FACET_KINDS
 from agents_remember.models.knowledge.family import FamilyRevision, FamilyRevisionDraft
 from agents_remember.models.knowledge.invariant import InvariantRevision
 from agents_remember.models.knowledge.result import (
@@ -215,11 +217,11 @@ def _apply_command(
 ) -> tuple[RecordIdentity, ...]:
     """Apply one validated command.
 
-    Four families are dispatched separately -- insertion, label edit, removal, and the authored
-    facet commands -- so each one reads as the single decision it is rather than as one long ladder
-    over eighteen variants. The facet commands go to their own module's in-transaction steps, which
-    raise the same typed refusals this batch restates and reports the same kind of touched-row
-    entry.
+    Five families are dispatched separately -- insertion, label edit, removal, the authored facet
+    commands, and the supporting-record commands -- so each one reads as the single decision it is
+    rather than as one long ladder over twenty variants. The facet and supporting-record commands go
+    to their own modules' in-transaction steps, which raise the same typed refusals this batch
+    restates and report the same kind of touched-row entry.
     """
 
     if command.kind in _INSERTING_KINDS:
@@ -230,6 +232,8 @@ def _apply_command(
         return _apply_composition(store, command, authorship)
     if command.kind in FACET_COMMAND_KINDS:
         return _apply_facet(store, command, authorship, pending)
+    if command.kind in EVIDENCE_COMMAND_KINDS:
+        return _apply_evidence(store, command, authorship)
     return _apply_removal(store, command)
 
 
@@ -242,6 +246,25 @@ def _apply_facet(
     """Apply one authored facet command through the facet module's in-transaction step."""
 
     written = facets.apply_facet_command(store, command, authorship, pending)
+    return tuple(
+        _written_entry(entry.state, entry.table, entry.record_id, entry.digest) for entry in written
+    )
+
+
+def _apply_evidence(
+    store: OpenedKnowledgeStore,
+    command: ChangeCommand,
+    authorship: Authorship,
+) -> tuple[RecordIdentity, ...]:
+    """Apply one supporting-record command through its own module's in-transaction step.
+
+    The evidence step resolves every link the command declares -- subject, evidence anchor and every
+    claimed-coverage endpoint -- against the stored rows, and refuses before it writes anything. That
+    is why the batch's completed-graph pass asks only that the *command* be declared, while the step
+    asks whether the referenced rows exist.
+    """
+
+    written = evidence.apply_evidence_command(store, command, authorship)  # type: ignore[arg-type]
     return tuple(
         _written_entry(entry.state, entry.table, entry.record_id, entry.digest) for entry in written
     )
@@ -783,15 +806,24 @@ def _require_sealed_facet_rows(store: OpenedKnowledgeStore) -> None:
 
 
 def _facet_revisions(store: OpenedKnowledgeStore) -> tuple[tuple[str, str, str], ...]:
-    """Return every stored facet revision with the kind of record it belongs to."""
+    """Return every stored facet revision with the kind of record it belongs to.
 
+    The pass is scoped to the facet kinds, because the decoder it drives is the *facet* revision
+    decoder: it refuses a record whose kind and stored schema disagree, and a record group that is
+    not the facet vocabulary has its own decoder and its own shape. ``knowledge_record`` is shared by
+    every record group, so "which revisions does this pass own" is a question about the kind the
+    envelope carries rather than about the table.
+    """
+
+    placeholders = ", ".join("?" for _ in FACET_KINDS)
     rows = store.connection.execute(
         "SELECT envelope.record_id, revision.revision_id, envelope.kind "
         "FROM knowledge_record AS envelope "
         "JOIN record_revision AS revision ON revision.repository_id = envelope.repository_id "
         "AND revision.record_id = envelope.record_id "
-        "WHERE envelope.repository_id = ? ORDER BY revision.revision_id",
-        (store.repository_id,),
+        f"WHERE envelope.repository_id = ? AND envelope.kind IN ({placeholders}) "
+        "ORDER BY revision.revision_id",
+        (store.repository_id, *FACET_KINDS),
     )
     return tuple((str(row[0]), str(row[1]), str(row[2])) for row in rows)
 

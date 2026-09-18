@@ -1,14 +1,24 @@
 """Endpoint existence checks shared by the relation writes.
 
-A membership, a realization claim and a facet attachment all name an exact endpoint, and all must
-refuse a missing endpoint with the offending identity named before any row is written. One module
-answers that question so the operations cannot drift into reporting different codes for the same
-failure, and so "the endpoint does not exist" stays a single definition per endpoint kind.
+A membership, a realization claim, a facet attachment and an evidence claim all name an exact
+endpoint, and all must refuse a missing endpoint with the offending identity named before any row is
+written. One module answers that question so the operations cannot drift into reporting different
+codes for the same failure, and so "the endpoint does not exist" stays a single definition per
+endpoint kind.
 
-The endpoint kinds a facet attachment may name are checked the same way as the shipped relation
+The endpoint kinds a relation write may name are checked the same way as the shipped relation
 endpoints, and the enumeration below is the one place that says which kinds a relation write can
 name. Adding a kind here is how a new relation joins the rule; growing a parallel check beside this
 module is what the shipped doctrine forbids.
+
+``KS-R12@v1``'s finding ``CR12-3`` recorded that this vocabulary was closed at two members. It is
+closed at six now, and every widening was a leaf naming a kind its own relation needed:
+``KS-R11@v1`` added ``attach_facet`` and ``add_facet``, and ``KS-R12@v1`` adds
+``add_evidence_claim`` -- the one operation that resolves a claim's subject, its evidence anchor and
+every claimed-coverage endpoint. The two *endpoint kinds* the subject adds are
+``invariant_revision``, which this module already checked, and ``knowledge facet revision``, which
+is the new one and is the stricter of the two: naming any record revision is not enough, because the
+subject is a ``KnowledgeFacet`` revision specifically.
 """
 
 from __future__ import annotations
@@ -22,6 +32,7 @@ from agents_remember.memory.knowledge.refusals import (
     missing_relation_endpoint_refusal,
 )
 from agents_remember.models.knowledge.facet import (
+    FACET_KINDS,
     FAMILY_REVISION_ENDPOINT_KIND,
     INVARIANT_REVISION_ENDPOINT_KIND,
     REALIZATION_CLAIM_ENDPOINT_KIND,
@@ -37,6 +48,15 @@ if TYPE_CHECKING:
 # than a call into the claim reader for the reason that function's docstring records.
 _CLAIM_EXISTS = "SELECT claim_id FROM realization_claim WHERE repository_id = ? AND claim_id = ?"
 
+# The lookup behind the facet-revision endpoint kind: which record kind the envelope owning one
+# stored revision carries.
+_KIND_OF_REVISION = (
+    "SELECT envelope.kind FROM knowledge_record AS envelope "
+    "JOIN record_revision AS revision ON revision.repository_id = envelope.repository_id "
+    "AND revision.record_id = envelope.record_id "
+    "WHERE envelope.repository_id = ? AND revision.revision_id = ?"
+)
+
 RelationWrite = Literal[
     "create_family_member",
     "create_realization_claim",
@@ -44,6 +64,7 @@ RelationWrite = Literal[
     "add_facet",
     "create_composition",
     "set_family_revision_route",
+    "add_evidence_claim",
 ]
 
 
@@ -149,6 +170,34 @@ def require_realization_claim_endpoint(
         )
 
 
+def require_facet_revision_endpoint(
+    store: OpenedKnowledgeStore, revision_id: str, relation_id: str, operation: RelationWrite
+) -> None:
+    """Refuse when the knowledge facet revision a relation names is not stored in this namespace.
+
+    This is the endpoint kind ``KS-R12@v1`` adds: the subject of an evidence claim may be a
+    ``KnowledgeFacet`` revision owned by ``KS-R11@v1``. The check is deliberately stricter than the
+    revision-table lookups beside it. A facet revision is a ``record_revision`` row whose owning
+    record envelope carries one of the eight authored-judgment kinds, so a stored revision of a
+    *detection* record or of another evidence claim is not a facet revision and is refused as the
+    missing endpoint it is -- naming the kind the caller asked for and the identity it named, rather
+    than resolving to "some revision exists".
+    """
+
+    kind = fetch_one(store.connection, _KIND_OF_REVISION, (store.repository_id, revision_id))
+    if kind is not None and str(kind[0]) in FACET_KINDS:
+        return
+    raise KnowledgeRefused(
+        missing_relation_endpoint_refusal(
+            operation=operation,
+            table="record_revision",
+            relation_id=relation_id,
+            endpoint_id=revision_id,
+            endpoint_kind="knowledge facet revision",
+        )
+    )
+
+
 def require_attachment_endpoint(
     store: OpenedKnowledgeStore, endpoint: AttachmentEndpoint, relation_id: str
 ) -> None:
@@ -186,6 +235,7 @@ def require_attachment_endpoint(
 __all__ = [
     "RelationWrite",
     "require_attachment_endpoint",
+    "require_facet_revision_endpoint",
     "require_family_revision_endpoint",
     "require_invariant_revision_endpoint",
     "require_realization_claim_endpoint",

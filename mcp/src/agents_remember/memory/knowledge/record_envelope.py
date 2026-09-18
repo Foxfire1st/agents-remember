@@ -30,6 +30,13 @@ resolve to the frozen payload model :mod:`agents_remember.models.knowledge.citat
 "a binding is authored, not inferred" is enforced by the one payload seam rather than restated at
 the write path.
 
+The supporting-records leaf registers the two remaining kinds this docstring deferred:
+``evidence_claim`` and ``verification_observation`` resolve to the frozen payload models
+:mod:`agents_remember.models.knowledge.evidence` declares. The claim's *subject* and its *claimed
+coverage* are deliberately not payload fields -- they are resolved relations, so they live in the
+typed join tables the supporting-records leaf's own generation appends, where endpoint-kind
+compatibility is a constraint of the schema rather than a value this seam validates.
+
 The registry maps to **frozen** models: a validated payload is a value, and a caller cannot mutate
 what it validated into something the registry would not have accepted.
 
@@ -61,6 +68,14 @@ from agents_remember.models.knowledge.detection import (
     DETECTION_SIGNAL_SCHEMA,
     DetectionRunPayload,
     DetectionSignalPayload,
+)
+from agents_remember.models.knowledge.evidence import (
+    EVIDENCE_CLAIM_KIND,
+    EVIDENCE_CLAIM_SCHEMA,
+    VERIFICATION_OBSERVATION_KIND,
+    VERIFICATION_OBSERVATION_SCHEMA,
+    EvidenceClaimPayload,
+    VerificationObservationPayload,
 )
 from agents_remember.models.knowledge.facet import (
     FACET_KINDS,
@@ -128,6 +143,17 @@ PAYLOAD_MODELS: Mapping[tuple[str, str], type[BaseModel]] = {
     # refusal, raised at this one seam before any row exists. The binding's owner-revision/key
     # identity pair and its governing route are columns, because the envelope cannot express them.
     (BINDING_RECORD_KIND, BINDING_RECORD_SCHEMA): CitationBindingPayload,
+    # The supporting-record pair. A claim's required authored content -- the explanation, the
+    # limitations field that is never re-read as "unknown", the opaque assessment references and the
+    # lifecycle -- and an observation's recorded candidate, command identity, artifact reference,
+    # closed execution result, run environment and publication reference are each declared once, in
+    # :mod:`agents_remember.models.knowledge.evidence`, and reached through this seam like every
+    # other typed record rather than through a second decision point beside it.
+    (EVIDENCE_CLAIM_KIND, EVIDENCE_CLAIM_SCHEMA): EvidenceClaimPayload,
+    (
+        VERIFICATION_OBSERVATION_KIND,
+        VERIFICATION_OBSERVATION_SCHEMA,
+    ): VerificationObservationPayload,
 }
 
 # The facet kinds this registry admits, for a caller that needs the closed vocabulary rather than a
@@ -154,6 +180,14 @@ REQUIREMENT_RECORD_KINDS: frozenset[str] = frozenset(
 # requirement-revision kinds and this one -- and the four sets are disjoint by construction because a kind is one string.
 CITATION_BINDING_RECORD_KINDS: frozenset[str] = frozenset({BINDING_RECORD_KIND})
 
+# The supporting-record kinds, derived from the same declarations the entries above are built from.
+# A caller that needs to say what the registry holds names every group -- the internal conformance
+# kind, the eight facet kinds, the two detection kinds, the requirement-revision kinds, the
+# citation-binding kind and these two -- and the sets are disjoint by construction because a kind is
+# one string.
+EVIDENCE_RECORD_KINDS: frozenset[str] = frozenset(
+    {EVIDENCE_CLAIM_KIND, VERIFICATION_OBSERVATION_KIND}
+)
 
 # Which shapes each kind admits. Derived from the registry rather than restated, so a kind cannot
 # admit a shape the registry does not hold.

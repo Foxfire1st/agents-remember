@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from agents_remember.memory.knowledge import (
     anchors,
     compositions,
+    evidence_records,
     facet_records,
     families,
     memberships,
@@ -36,6 +37,12 @@ from agents_remember.models.knowledge.candidate import (
     NewAnchor,
 )
 from agents_remember.models.knowledge.composition import COMPOSITION_WRITABLE_TABLES
+from agents_remember.models.knowledge.evidence import (
+    EVIDENCE_WRITABLE_TABLES,
+    InvariantRevisionSubject,
+    claimed_coverage_row_identity,
+)
+from agents_remember.models.knowledge.facet import FACET_WRITABLE_TABLES
 
 if TYPE_CHECKING:
     from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
@@ -44,7 +51,14 @@ if TYPE_CHECKING:
 # The tables a batch command writes directly. The repository row and the two predecessor-edge
 # tables are written only as part of the aggregate that owns them, so an identity outside this set
 # is a caller mistake rather than a record this operation can address.
-_BASE_WRITABLE_TABLES: tuple[str, ...] = (
+# The tuple is the union of the declarations that own the commands writing these tables, spelled
+# per record group so each leaf's addition is its own named constant rather than an edit inside
+# another leaf's list: the shipped seven are written out here, ``FACET_WRITABLE_TABLES`` is imported
+# from the facet vocabulary beside its own commands, ``EVIDENCE_WRITABLE_TABLES`` from the
+# supporting-record vocabulary beside its own, and the composition generation's six from
+# ``COMPOSITION_WRITABLE_TABLES`` beside theirs. A case asserts the declarations agree with the
+# union, so a command cannot write a table this list does not name.
+SHIPPED_WRITABLE_TABLES: tuple[str, ...] = (
     "invariant",
     "invariant_revision",
     "family",
@@ -52,19 +66,32 @@ _BASE_WRITABLE_TABLES: tuple[str, ...] = (
     "source_anchor",
     "family_member",
     "realization_claim",
-    "knowledge_record",
-    "record_revision",
-    "facet_attachment",
-    "facet_decision_supersession",
-    "explanation",
-    "explanation_revision",
 )
 
-# The composition generation's six tables are appended to the base list rather than merged into it,
-# so the union a case pins is ``base | this leaf's declaration``: a later leaf appends its own named
-# set and nothing here has to be re-derived from a count.
-WRITABLE_TABLES: tuple[str, ...] = _BASE_WRITABLE_TABLES + tuple(
-    sorted(COMPOSITION_WRITABLE_TABLES)
+# The envelope tables every record group writes. They are named once here rather than repeated in
+# each group's own list, so the union below has no duplicate and a group that writes the envelope is
+# not thereby claiming the table for itself.
+ENVELOPE_WRITABLE_TABLES: tuple[str, ...] = ("knowledge_record", "record_revision")
+
+# This leaf's own group, minus the two envelope tables named above.
+EVIDENCE_ONLY_WRITABLE_TABLES: tuple[str, ...] = tuple(
+    table for table in EVIDENCE_WRITABLE_TABLES if table not in ENVELOPE_WRITABLE_TABLES
+)
+
+# The composition generation's six tables are appended to the union rather than merged into another
+# leaf's list, and they are declared in sorted order so the union a case pins is stable. The
+# declaration names no envelope table, but it is subtracted as well so the union below cannot carry a
+# duplicate whichever way a later group spells its own set.
+COMPOSITION_ONLY_WRITABLE_TABLES: tuple[str, ...] = tuple(
+    table for table in sorted(COMPOSITION_WRITABLE_TABLES) if table not in ENVELOPE_WRITABLE_TABLES
+)
+
+WRITABLE_TABLES: tuple[str, ...] = (
+    *SHIPPED_WRITABLE_TABLES,
+    *ENVELOPE_WRITABLE_TABLES,
+    *(table for table in FACET_WRITABLE_TABLES if table not in ENVELOPE_WRITABLE_TABLES),
+    *EVIDENCE_ONLY_WRITABLE_TABLES,
+    *COMPOSITION_ONLY_WRITABLE_TABLES,
 )
 
 IdentityPairs = tuple[tuple[str, str], ...]
@@ -200,6 +227,26 @@ def _context_revision_digest(store: OpenedKnowledgeStore, record_id: str) -> str
     return compositions.context_row_digest(store.repository_id, context)
 
 
+def _envelope_record_digest(store: OpenedKnowledgeStore, record_id: str) -> str | None:
+    """Return one envelope row's digest, for whichever record group wrote it.
+
+    ``knowledge_record`` is the one table four record groups write, and its digest covers only the
+    row's own stored fields -- the namespace, the record identity, the kind and schema the row
+    carries, the recorded lifecycle, the authority home, the governing route and the provenance. So
+    the question is the same one for a facet, a detection record, an evidence claim and an
+    observation, and it is answered once, kind-agnostically, rather than by a reader that would have
+    to know every vocabulary: a row whose kind this build does not register still digests as itself.
+    """
+
+    return evidence_records.record_digest(store, record_id)
+
+
+def _envelope_revision_digest(store: OpenedKnowledgeStore, revision_id: str) -> str | None:
+    """Return one sealed record revision's digest, for whichever record group wrote it."""
+
+    return evidence_records.revision_content_digest(store, revision_id)
+
+
 # The facet tables' readers all live in :mod:`…facets`, next to the write path that produces the
 # rows: each returns the same value the read projection exposes, so an expectation carried from a
 # read names the row the write path will compare against.
@@ -211,8 +258,8 @@ _RECORD_READERS: dict[str, RecordReader] = {
     "source_anchor": _anchor_digest,
     "family_member": _member_digest,
     "realization_claim": _claim_digest,
-    "knowledge_record": facet_records.facet_record_digest,
-    "record_revision": facet_records.record_revision_content_digest,
+    "knowledge_record": _envelope_record_digest,
+    "record_revision": _envelope_revision_digest,
     "facet_attachment": facet_records.attachment_endpoint_digest,
     "facet_decision_supersession": facet_records.supersession_digest,
     "explanation": facet_records.explanation_record_digest,
@@ -223,6 +270,14 @@ _RECORD_READERS: dict[str, RecordReader] = {
     "family_revision_route": _family_revision_route_digest,
     "family_revision_context": _context_digest,
     "family_revision_context_revision": _context_revision_digest,
+    # The ``knowledge_record`` and ``record_revision`` readers above are kind-agnostic, so an
+    # expectation about one of those two tables is answered the same way whichever record group wrote
+    # the row. The remaining entries are this leaf's own tables.
+    "evidence_claim": evidence_records.claim_digest,
+    "evidence_claim_invariant_subject": evidence_records.subject_digest,
+    "evidence_claim_facet_subject": evidence_records.subject_digest,
+    "evidence_claim_coverage": evidence_records.coverage_digest,
+    "verification_observation": evidence_records.observation_digest,
 }
 
 # One record identity per command kind, for the eleven commands that address exactly one. The
@@ -271,6 +326,13 @@ _WRITTEN_IDENTITY: dict[str, Callable[[Any], tuple[str, str]]] = {
         "family_revision_context_revision",
         command.context.revision_id,
     ),
+    # The supporting-record commands. A claim addresses four rows -- its ledger row, its subject edge
+    # and its sealed revision -- and a variable number of coverage edges, so its own branch in
+    # ``written_identities`` handles it; an observation addresses its own row and its revision.
+    "add_verification_observation": lambda command: (
+        "verification_observation",
+        command.observation_id,
+    ),
 }
 
 # The commands that create nothing: they address an existing row to edit or remove it, so two of
@@ -294,6 +356,9 @@ _ADDRESSES_EXISTING: tuple[str, ...] = (
 def written_identities(command: ChangeCommand) -> IdentityPairs:
     """Return every record identity one command addresses, as ``(table, record_id)`` pairs."""
 
+    supporting = _supporting_record_identities(command)
+    if supporting is not None:
+        return supporting
     if command.kind == "add_realization_claim":
         identities = [("realization_claim", command.claim.claim_id)]
         if isinstance(command.anchor, NewAnchor):
@@ -319,6 +384,42 @@ def written_identities(command: ChangeCommand) -> IdentityPairs:
         # successor revision's own insertion collide with the record the first revision created.
         return (("family_revision_context_revision", command.context.revision_id),)
     return (_WRITTEN_IDENTITY[command.kind](command),)
+
+
+def _supporting_record_identities(command: ChangeCommand) -> IdentityPairs | None:
+    """Return the identities a supporting-record command addresses, or ``None``.
+
+    The pair :mod:`…models.knowledge.evidence` declares is read here rather than through
+    ``_WRITTEN_IDENTITY`` because each command addresses more than one row: a claim's own ledger row,
+    its sealed revision, one subject edge whose table depends on the subject's kind, and one coverage
+    edge per claimed endpoint. Keeping them together is also what keeps the one-identity table a
+    table of *one-identity* commands.
+    """
+
+    if command.kind == "add_evidence_claim":
+        identities = [
+            ("evidence_claim", command.claim_id),
+            (
+                "evidence_claim_invariant_subject"
+                if isinstance(command.subject, InvariantRevisionSubject)
+                else "evidence_claim_facet_subject",
+                command.claim_id,
+            ),
+            ("knowledge_record", command.claim_id),
+            ("record_revision", command.revision_id),
+        ]
+        identities.extend(
+            ("evidence_claim_coverage", claimed_coverage_row_identity(command.claim_id, endpoint))
+            for endpoint in command.coverage
+        )
+        return tuple(identities)
+    if command.kind == "add_verification_observation":
+        return (
+            ("verification_observation", command.observation_id),
+            ("knowledge_record", command.observation_id),
+            ("record_revision", command.revision_id),
+        )
+    return None
 
 
 def inserted_identities(command: ChangeCommand) -> IdentityPairs:

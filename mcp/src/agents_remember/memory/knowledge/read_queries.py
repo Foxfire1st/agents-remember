@@ -29,6 +29,12 @@ from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 # same edges must report the same links in the same order, and a revision's links must not move when
 # an unrelated row is written. Each entry is the primary key's distinguishing column, so the order is
 # the row's own identity rather than the order a write happened to produce.
+#
+# The supporting-record generation's five tables are declared here for the same reason, and the
+# identity column named for them is the *second* column of every key below, because the first is the
+# namespace: a table keyed ``(repository_id, identity)`` is ordered by its identity. The coverage
+# table's key is the pair of endpoint columns, so it is declared in the order the DDL names them --
+# which is also why the read orders a relation's rows by the pair rather than by either half.
 _ORDER_COLUMNS: Mapping[str, str] = {
     "invariant": "invariant_id",
     "invariant_revision": "revision_id",
@@ -37,12 +43,12 @@ _ORDER_COLUMNS: Mapping[str, str] = {
     "family_member": "member_id",
     "realization_claim": "claim_id",
     "source_anchor": "anchor_id",
-    "family_composition": "composition_id",
-    "family_composition_policy": "policy_id",
-    "family_composition_policy_version": "policy_version_id",
-    "family_revision_route": "family_revision_id",
-    "family_revision_context": "context_id",
     "family_revision_context_revision": "revision_id",
+    "evidence_claim": "claim_id",
+    "evidence_claim_invariant_subject": "claim_id",
+    "evidence_claim_facet_subject": "claim_id",
+    "evidence_claim_coverage": "claim_id_endpoint",
+    "verification_observation": "observation_id",
 }
 
 

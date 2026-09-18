@@ -17,7 +17,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
-from agents_remember.memory.knowledge import anchors, families, labels, memberships, realizations
+from agents_remember.memory.knowledge import (
+    anchors,
+    evidence,
+    families,
+    labels,
+    memberships,
+    realizations,
+)
 from agents_remember.memory.knowledge.candidate import change_candidate
 from agents_remember.memory.knowledge.refusals import RefusalFacts, refusal
 from agents_remember.memory.knowledge.store import (
@@ -36,6 +43,12 @@ from agents_remember.models.knowledge.candidate import (
     context_digest,
 )
 from agents_remember.models.knowledge.context import AdmittedKnowledgeDestination
+from agents_remember.models.knowledge.evidence import (
+    AddEvidenceClaim,
+    EvidenceCommand,
+    EvidenceWriteRequest,
+    EvidenceWriteResult,
+)
 from agents_remember.models.knowledge.family import FamilyDraft, FamilyRevisionDraft
 from agents_remember.models.knowledge.graph import FamilyMemberDraft, RealizationClaimDraft
 from agents_remember.models.knowledge.repository import RepositoryIdentity
@@ -73,6 +86,7 @@ __all__ = [
     "admitted_anchor_request",
     "admitted_claim_removal",
     "admitted_claim_request",
+    "admitted_evidence_request",
     "admitted_family_request",
     "admitted_family_revision_request",
     "admitted_knowledge_destination",
@@ -96,6 +110,7 @@ __all__ = [
     "set_knowledge_family_label",
     "set_knowledge_invariant_label",
     "write_authorship",
+    "write_knowledge_evidence",
 ]
 
 
@@ -512,5 +527,50 @@ def remove_knowledge_realization_claim(
     store = open_admitted_knowledge_store(destination)
     try:
         return realizations.remove_realization_claim(store, request)
+    finally:
+        store.close()
+
+
+# -- the supporting-record half --------------------------------------------------------------
+#
+# One write wrapper and one request builder, on the same shape as the family, anchor and relation
+# half above: the caller supplies what was authored, the admitted destination supplies the namespace
+# and the provenance envelope, and this module opens the admitted store, runs one atomic operation
+# and closes the handle. Nothing here decides authority, and nothing here writes a row directly.
+#
+# The artifact root is the one field that is neither authored content nor identity: it is local
+# environment configuration, carried on the command so the write path can compare the recorded digest
+# against the bytes at the recorded path. It is not stored, it is not inside any digest, and a command
+# that carries none records an asserted digest rather than a checked one -- which the record itself
+# then states.
+
+
+def admitted_evidence_request(
+    destination: AdmittedKnowledgeDestination, command: EvidenceCommand
+) -> EvidenceWriteRequest:
+    """Attach one authored supporting-record command to its admitted destination."""
+
+    return EvidenceWriteRequest(
+        repository_id=destination.repository.repository_id,
+        command=command,
+        provenance=destination.authorship,
+    )
+
+
+def write_knowledge_evidence(
+    destination: AdmittedKnowledgeDestination, request: EvidenceWriteRequest
+) -> EvidenceWriteResult:
+    """Write one authored supporting record into the admitted destination.
+
+    The operation is dispatched from the command the request carries, so a caller cannot ask for one
+    act and submit another: the two entry points each check the command they were built for and refuse
+    the mismatch rather than performing a different act under the requested name.
+    """
+
+    store = open_admitted_knowledge_store(destination)
+    try:
+        if isinstance(request.command, AddEvidenceClaim):
+            return evidence.add_evidence_claim(store, request)
+        return evidence.add_verification_observation(store, request)
     finally:
         store.close()

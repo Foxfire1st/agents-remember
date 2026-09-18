@@ -41,9 +41,9 @@ LIFECYCLE_CATALOG = Path("mcp/tests/evidence-lifecycle.toml")
 LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
-LIFECYCLE_CONTRACT_COUNT = 13
-LIFECYCLE_ARTIFACT_COUNT = 54
-LIFECYCLE_CATALOG_SHA256 = "562eebfb22fcfe1fba3a4d3bc022e90593c21f11dce6b4815868359c486082cd"
+LIFECYCLE_CONTRACT_COUNT = 14
+LIFECYCLE_ARTIFACT_COUNT = 55
+LIFECYCLE_CATALOG_SHA256 = "96347b54548828d285516877997e13335864c142e14c573e808c15fffcc0eb02"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately once.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
@@ -94,25 +94,22 @@ thirteen and fifty-four, and this value is the catalog after that consumer regis
 own artifact delta remains exactly empty -- none of these rows is the proof's -- so the freeze still
 forbids the proof adding or widening anything, and any further catalog change must re-pin this digest
 deliberately.
-remains exactly empty -- none of these rows is the proof's -- so the freeze still forbids the proof
-adding or widening anything, and any further catalog change must re-pin this digest deliberately.
-and this value is the catalog after that consumer registration. ``260915-KS``'s L19 leaf likewise
-added no artifact and no contract of its own -- its two requirement-revision test modules use the
-existing ``knowledge_fixture_test_support`` and ``generation_test_support`` fixtures rather than a
-third one -- so its catalog change is again a *consumer* change only: both of those support modules'
-consumer lists gained ``mcp/tests/test_knowledge_requirement_revisions.py`` and
+``260915-KS``'s L19 leaf likewise added no artifact and no contract of its own -- its two
+requirement-revision test modules use the existing ``knowledge_fixture_test_support`` and
+``generation_test_support`` fixtures rather than a third one -- so its catalog change is again a
+*consumer* change only: both of those support modules' consumer lists gained
+``mcp/tests/test_knowledge_requirement_revisions.py`` and
 ``mcp/tests/test_knowledge_requirement_reference_contract.py``, the counts stay thirteen and
-fifty-four, and this value is the catalog after that consumer registration. The proof's own artifact
-delta remains exactly empty -- none of these rows is the proof's -- so the freeze still forbids the
-proof adding or widening anything, and any further catalog change must re-pin this digest
-deliberately.
-and this value is the catalog after that consumer registration. ``260915-KS``'s L17 leaf then
-added further *consumers* -- its two composition modules build their admitted candidate through the
-facet leaf's ``knowledge-facet-cases`` helpers rather than through a third fixture of their own, and
-they read their graphs through the ``knowledge-generation-cases`` and ``knowledge-read-scope-cases``
-support modules the earlier leaves registered -- so the counts stay thirteen and fifty-four and this
-value is the catalog after L17's consumer registration. The proof's own artifact delta remains exactly empty --
-none of these rows is the proof's -- so the freeze still forbids the proof adding or widening
+fifty-four, and this value is the catalog after that consumer registration.
+``260915-KS``'s L17 leaf then added further *consumers* -- its two composition modules build their
+admitted candidate through the facet leaf's ``knowledge-facet-cases`` helpers rather than through a
+third fixture of their own, and they read their graphs through the ``knowledge-generation-cases`` and
+``knowledge-read-scope-cases`` support modules the earlier leaves registered -- so the counts stay
+thirteen and fifty-four and this value is the catalog after L17's consumer registration.
+``260915-KS``'s L12 leaf then registered its own supporting-record support module --
+``mcp/tests/evidence_test_support.py``, a new contract and a new artifact -- which is what this value
+pins: fourteen contracts and fifty-five artifacts. The proof's own artifact delta remains exactly
+empty -- none of these rows is the proof's -- so the freeze still forbids the proof adding or widening
 anything, and any further catalog change must re-pin this digest deliberately.
 """
 

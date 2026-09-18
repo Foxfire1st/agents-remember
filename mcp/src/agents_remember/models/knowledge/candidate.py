@@ -62,6 +62,7 @@ from agents_remember.models.knowledge.source import SourceAnchorDraft
 
 __all__ = [
     "CANDIDATE_LANES",
+    "AddEvidenceClaim",
     "AddExplanationRevision",
     "AddFacet",
     "AddFamily",
@@ -73,6 +74,7 @@ __all__ = [
     "AddInvariantRevision",
     "AddRealizationClaim",
     "AddSourceAnchor",
+    "AddVerificationObservation",
     "AnchorEndpoint",
     "AnchorReference",
     "AttachFacet",
@@ -152,6 +154,15 @@ MutableRecordTable = Literal[
     "family_revision_route",
     "family_revision_context",
     "family_revision_context_revision",
+    # The supporting-record generation's five tables, here for the same reason: a claim, its two
+    # subject join tables, its claimed coverage and an observation are each written by a batch
+    # command, so an expectation, a duplicate check and a receipt all address one of these rows by its
+    # own primary key.
+    "evidence_claim",
+    "evidence_claim_invariant_subject",
+    "evidence_claim_facet_subject",
+    "evidence_claim_coverage",
+    "verification_observation",
 ]
 
 
@@ -165,6 +176,18 @@ class SnapshotIdentity(KnowledgeModel):
     repository_id: str = Field(pattern=UUID_PATTERN)
     schema_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     logical_digest: str = Field(pattern=SHA256_PATTERN)
+
+
+# The two supporting-record commands are imported here rather than at the top of the module because
+# one of their payloads records a :class:`SnapshotIdentity`, which is declared below: the pair is a
+# genuine two-way reference between the operation's own vocabulary and the record kinds it writes,
+# and an import at this position resolves it in one direction while the other side's own annotation
+# resolves it in the other. Nothing else is imported late -- every other command module is a leaf
+# that does not reach back into this one.
+from agents_remember.models.knowledge.evidence import (  # noqa: E402
+    AddEvidenceClaim,
+    AddVerificationObservation,
+)
 
 
 class ExactCandidateInput(KnowledgeModel):
@@ -459,13 +482,19 @@ class AuthorFamilyExplanationContext(KnowledgeModel):
     context: FamilyExplanationContextDraft
 
 
-# The closed command union. The twelve shipped authored commands and the six facet commands keep
-# their exact discriminators and shapes, and the composition generation adds four members beside
-# them -- declare a policy version, author an edge, record a revision's owning route, and author a
-# context revision. There is still no free-form member and still no member that could promote,
+# The closed command union. The twelve shipped authored commands, the six facet commands and the four
+# composition commands keep their exact discriminators and shapes: the composition generation adds
+# declare-a-policy-version, author-an-edge, record-a-revision's-owning-route and author-a-context-
+# revision, and the supporting-record generation adds two more -- record an evidence claim and record a
+# verification observation. There is still no free-form member and still no member that could promote,
 # approve or execute a statement the caller wrote, and deliberately **no** removal member: a
 # composition edge is immutable in the same sense a revision row is, so a correction is a new edge
-# with its own identity rather than a deletion of an earlier dataset's recorded relationship.
+# with its own identity rather than a deletion of an earlier dataset's recorded relationship. Each
+# widening added exactly the acts one record kind needs, and each of those acts has a typed shape of
+# its own: an evidence claim's subject, evidence anchor and claimed coverage are typed endpoint values
+# the write path must resolve, and an observation's payload is a frozen shape whose execution result is
+# a closed vocabulary. Nothing here can address an arbitrary table or column, and no member can infer
+# anything the caller did not write.
 ProposedCommand = Annotated[
     AddInvariant
     | AddInvariantRevision
@@ -488,7 +517,9 @@ ProposedCommand = Annotated[
     | AddFamilyCompositionPolicy
     | AddFamilyComposition
     | SetFamilyRevisionRoute
-    | AuthorFamilyExplanationContext,
+    | AuthorFamilyExplanationContext
+    | AddEvidenceClaim
+    | AddVerificationObservation,
     Field(discriminator="kind"),
 ]
 

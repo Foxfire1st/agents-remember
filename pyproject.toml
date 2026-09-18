@@ -301,7 +301,25 @@ minversion = "9.0"
 # per-case cost of this increment's additions has been uniformly small (the L11 module is 17 cases in
 # 4.30s serial).  Nothing about this raise licenses a weaker case: it pays for cases the increment's
 # requirements already owe.
-unit_case_budget = 1500
+# 2026-09-18 -- unit 1500 -> 1600, by the 260915-KS master's owning seat, on the L12 candidate's
+# measurement and for the reason the L11 raise above records.  Measured with the pinned interpreter
+# (`mcp/.venv`, anyio 4.14.2) at `-m "not integration"`: the merged base **without** L12 (`66f8b9f0`,
+# L17's landing) collects **1466** unit cases against the 1500 ceiling, and the merged candidate with
+# L12 collects **1506** -- so the raise L11 sized for thirteen remaining leaves was consumed by ten of
+# them, and `pytest_collection_finish` refused the ENTIRE unit population with `ERROR: unit suite has
+# 1506 cases; budget is 1500`, i.e. the lane executed zero tests rather than a slow gate.  Integration
+# is unchanged at **355** against 400 (L12 adds no integration case; 45 under).  Behavior bought:
+# L12's own 40 unit cases plus the cases the remaining leaves of this increment already owe, so that
+# the unit lane can run at all; the ceiling is headroom, never a target, and L23 re-measures both
+# populations over the frozen accumulation and states what was actually consumed.  Case count delta:
+# unit 1500 -> 1600 (+100, of which 40 is consumed at this raise, leaving 60 for the leaves still to
+# land -- L13, L16 and the terminal pair measure themselves against it rather than against the
+# consumed count).  Runtime cost: the L12 leaf's own module is 40 cases whose measured wall time is
+# recorded in `notes/reports/260915-KS-L12-renumber-verification.md` §4-§5; the merged candidate's
+# combined population is 1861 cases (1506 unit + 355 integration) against the two ceilings.  Nothing
+# about this raise licenses a weaker case, and no case was consolidated away to avoid it: the
+# crossing is the accumulation's, not this leaf's overshoot.
+unit_case_budget = 1600
 integration_case_budget = 400
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this

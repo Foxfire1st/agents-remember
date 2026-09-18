@@ -84,6 +84,7 @@ from agents_remember.models.knowledge.composition import (
     FamilyCompositionPolicyVersion,
     FamilyExplanationContextDraft,
 )
+from agents_remember.models.knowledge.evidence import EVIDENCE_WRITABLE_TABLES
 from agents_remember.models.knowledge.facet import FACET_COMMAND_KINDS, FACET_WRITABLE_TABLES
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
 from facet_test_support import (
@@ -243,35 +244,38 @@ def _insert_raw_edge(store: Any, from_revision_id: str, to_revision_id: str) -> 
 def test_the_composition_commands_are_the_closed_unions_own_members() -> None:
     """Requirements 1.1, 2.3 and 9.1: one union, one dispatch set, one generation's tables.
 
-    The union is *closed*: it is exactly the shipped kinds plus the authored-judgment leaf's
-    declaration plus this leaf's, every command has a target check, every composition command has an
-    apply step, and the writable-table literal is the base tables plus both authored generations'
-    named declarations. A command added without a check or a step fails here rather than at a
-    caller's expense -- which is the property the earlier leaves' equivalent case protects, kept by
-    unioning each leaf's own published constant instead of restating a count.
+    The union is *closed*: it is exactly the shipped kinds plus every authored record group's own
+    declaration, every command has a target check, every composition command has an apply step, and
+    the writable-table literal is the base tables plus each group's named declaration. A command added
+    without a check or a step fails here rather than at a caller's expense -- which is the property the
+    earlier leaves' equivalent case protects, kept by unioning each leaf's own published constant
+    instead of restating a count.
+
+    RE-SCOPED by L12's landing, and *not* weakened. This case asserted the union as an equality over
+    the three groups that existed when L17 landed; the next leaf to append its own two commands to the
+    same closed union (``KS-R12@v1``) falsifies that spelling while leaving the property this case
+    owns intact. So the union is stated as it is: the containment of every group's own constant, plus
+    the whole-union fact that the dispatch table is exactly the union (``set(_TARGET_CHECKS) == kinds``
+    below, unchanged). A command added to the union without a check still reddens here, which is what
+    the equality was standing in for.
     """
 
     kinds = command_kinds()
-    assert kinds == (SHIPPED_COMMAND_KINDS | set(FACET_COMMAND_KINDS) | COMPOSITION_COMMAND_KINDS)
+    assert kinds >= SHIPPED_COMMAND_KINDS | set(FACET_COMMAND_KINDS) | COMPOSITION_COMMAND_KINDS
     assert set(_TARGET_CHECKS) == kinds
     assert set(_COMPOSITION_KINDS) == COMPOSITION_COMMAND_KINDS
     assert set(APPLY_COMPOSITION_KINDS) == COMPOSITION_COMMAND_KINDS
     assert (kinds | set(_INSERTING_KINDS)) >= COMPOSITION_COMMAND_KINDS
     declared_tables = set(get_args(MutableRecordTable))
-    assert (
-        declared_tables
-        == {
-            "invariant",
-            "invariant_revision",
-            "family",
-            "family_revision",
-            "source_anchor",
-            "family_member",
-            "realization_claim",
-        }
-        | set(FACET_WRITABLE_TABLES)
-        | COMPOSITION_WRITABLE_TABLES
-    )
+    assert declared_tables == {
+        "invariant",
+        "invariant_revision",
+        "family",
+        "family_revision",
+        "source_anchor",
+        "family_member",
+        "realization_claim",
+    } | set(FACET_WRITABLE_TABLES) | COMPOSITION_WRITABLE_TABLES | set(EVIDENCE_WRITABLE_TABLES)
     assert set(GENERATION_6.tables[len(GENERATION_5.tables) :]) == COMPOSITION_WRITABLE_TABLES
 
 
@@ -359,7 +363,10 @@ def test_the_registered_generation_appends_the_six_tables_to_the_generation_it_d
     """
 
     assert CURRENT_GENERATION is GENERATIONS[-1]
-    assert CURRENT_GENERATION is GENERATION_6
+    # RE-SCOPED by L12's landing: this read ``CURRENT_GENERATION is GENERATION_6``, which is a claim
+    # about *how many generations exist* rather than about this leaf's generation, and the next leaf's
+    # append falsifies it. ``CURRENT_GENERATION is GENERATIONS[-1]`` above already asserts the property
+    # the literal stood for, and the two lines below still state L17's own generation in full.
     assert descends_from(GENERATION_6, GENERATION_5, GENERATION_5.tables)
     assert GENERATION_6.tables[: len(GENERATION_5.tables)] == GENERATION_5.tables
     assert GENERATION_6.tables[len(GENERATION_5.tables) :] == (
@@ -404,7 +411,11 @@ def test_a_dataset_predating_the_composition_tables_refuses_a_composition_write(
             store.close()
     created = create_current_generation_store(tmp_path / "current", repository_id)
     try:
-        assert created.generation.user_version == GENERATION_6.user_version
+        # RE-SCOPED by L12's landing: a *new* store declares the newest registered generation, so the
+        # literal ``GENERATION_6.user_version`` was a claim that goes stale with the next append. What
+        # the case owns is that a store created now carries this leaf's tables, which the line below
+        # still asserts.
+        assert created.generation.user_version == CURRENT_GENERATION.user_version
         assert "family_composition" in created.generation.tables
     finally:
         created.close()

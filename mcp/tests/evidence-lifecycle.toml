@@ -1315,3 +1315,27 @@ consumers = [
   "mcp/tests/test_knowledge_read_paths.py",
   "mcp/tests/test_knowledge_read_scope.py",
 ]
+
+[[contract]]
+id = "knowledge-evidence-cases"
+owner = "mcp/tests/evidence_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_evidence_claims.py::test_a_claim_reads_back_with_every_field_including_an_empty_limitations"
+
+[[artifact]]
+path = "mcp/tests/evidence_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "knowledge-evidence-cases"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "one admitted candidate namespace built through the production application seam, holding two invariant revisions, a standalone source anchor, two realization claims, one decision facet with its revision, and a local artifact directory with a real file under it"
+introduced_by = "260915-KS-L12"
+lifetime = "permanent"
+permanence_rationale = "An evidence claim resolves four links -- a subject, an evidence anchor and every claimed-coverage endpoint -- and the refusal cases assert which identity is which; there are two subject kinds and two claimed-coverage kinds, so a per-module copy would let the two modules disagree about which identity is the facet revision and which is the invariant revision, which is exactly the property those assertions protect. The artifact file is part of the same fixture because a digest checked against bytes at write time is only meaningful against real bytes."
+replacement_contract = "contract:knowledge-evidence-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_evidence_claims.py",
+  "mcp/tests/test_knowledge_evidence_observations.py",
+]

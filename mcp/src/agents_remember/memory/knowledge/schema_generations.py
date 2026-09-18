@@ -31,9 +31,15 @@ This module makes a generation one frozen record, and makes *selection* a read o
 * :data:`GENERATION_6` is generation 5 plus the six tables :mod:`…schema_v6` appends -- authored
   family composition between two exact family revisions, its declared traversal policy and version
   set, the family revision's canonical owning route, and the two tables of its authored explanatory
-  context. It is the created generation now, so a *new* store declares version 6, while a
-  generation-4 or generation-5 dataset that already exists keeps declaring its own version and is
-  read through that generation's record.
+  context. A generation-5 dataset that already exists keeps declaring version 5 and is read through
+  generation 5's own record.
+* :data:`GENERATION_7` is generation 6 plus the five tables :mod:`…schema_v7` appends -- the evidence
+  claim, its two subject join tables, its claimed coverage and the verification observation. It is the
+  created generation now, so a *new* store declares version 7, while a generation-4, generation-5 or
+  generation-6 dataset that already exists keeps declaring its own version and is read through that
+  generation's record. Both record groups' payload shapes are registered in the record envelope; the
+  appended tables are the relations an evidence claim resolves and the observation's own recorded
+  columns.
 
 * :func:`require_pinned_generation_1_unchanged` is the gate that fails -- not warns -- when the
   pinned generation no longer recomputes to its constant. Without it the pin is a comment.
@@ -65,6 +71,7 @@ from agents_remember.memory.knowledge import (
     schema_v4,
     schema_v5,
     schema_v6,
+    schema_v7,
 )
 from agents_remember.memory.knowledge.export_refusals import unsupported_schema_refusal
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
@@ -76,7 +83,7 @@ class _AppendedGeneration(Protocol):
     """The declarations one appended-table module must expose for a generation to compose it.
 
     A protocol rather than a base class, so a generation module stays a module of plain declared
-    data: ``schema_v2`` … ``schema_v6`` each publish exactly these names, and the single composition
+    data: ``schema_v2`` … ``schema_v7`` each publish exactly these names, and the single composition
     function above reads them without any of them importing the registry back.
     """
 
@@ -198,6 +205,7 @@ GENERATION_3_SCHEMA_NAME = "ar-knowledge-sqlite/v3"
 GENERATION_4_SCHEMA_NAME = "ar-knowledge-sqlite/v4"
 GENERATION_5_SCHEMA_NAME = "ar-knowledge-sqlite/v5"
 GENERATION_6_SCHEMA_NAME = "ar-knowledge-sqlite/v6"
+GENERATION_7_SCHEMA_NAME = "ar-knowledge-sqlite/v7"
 
 GENERATION_1 = SchemaGeneration(
     schema_name=GENERATION_1_SCHEMA_NAME,
@@ -358,10 +366,32 @@ GENERATION_5 = _compose_generation_5()
 GENERATION_6 = _compose_generation_6()
 
 
+# Generation 7 is generation 6, unchanged, plus the five tables :mod:`…schema_v7` appends -- the
+# evidence claim, its two subject join tables, its claimed coverage and the verification observation.
+# The composition is written as the same generic append generations 2 to 6 are, so
+# ``GENERATION_7.tables[: len(GENERATION_6.tables)] == GENERATION_6.tables`` and generation 7's
+# columns for each earlier name are the generation it descends from. That prefix equality is the
+# whole of ``KS-R10@v1`` §1.3's additive rule: a generation appends tables and never retypes,
+# reorders or drops an earlier generation's. This leaf's module was authored against generation 4 and
+# renumbered to 7 at its sync, because two leaves landed generations 5 and 6 first: the renumber moved
+# a module name, a constant, a schema name and a base argument, never the append's content.
+def _compose_generation_7() -> SchemaGeneration:
+    """Return generation 7: generation 6's declarations with this leaf's five tables appended."""
+
+    return _append_generation(
+        base=GENERATION_6,
+        schema_name=GENERATION_7_SCHEMA_NAME,
+        user_version=7,
+        appended=schema_v7,
+    )
+
+
+GENERATION_7 = _compose_generation_7()
+
 # The registry. Ordered oldest first, so "the newest generation this build supports" is the last
 # entry rather than a second literal that could drift from the tuple -- and so
-# ``generation_of_new_store()`` declares generation 6 while a generation-5 dataset stays
-# generation 5 (``KS-R10@v1`` §5.1).
+# ``generation_of_new_store()`` declares generation 7 while a generation-6 dataset stays
+# generation 6 (``KS-R10@v1`` §5.1).
 GENERATIONS: tuple[SchemaGeneration, ...] = (
     GENERATION_1,
     GENERATION_2,
@@ -369,6 +399,7 @@ GENERATIONS: tuple[SchemaGeneration, ...] = (
     GENERATION_4,
     GENERATION_5,
     GENERATION_6,
+    GENERATION_7,
 )
 
 GENERATIONS_BY_VERSION: Mapping[int, SchemaGeneration] = {

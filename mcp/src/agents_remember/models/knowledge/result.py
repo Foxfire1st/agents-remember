@@ -126,6 +126,16 @@ KnowledgeOperation = Literal[
     # composition edges under a versioned traversal policy -- because it is a different operation
     # from ``read_knowledge_scope``'s retrieval selection rather than a variant of it (R17 §7.3).
     "follow_family_composition",
+    # Supporting records. Three members: two authored writes and one read. The two writes are
+    # separate members rather than one because a caller branches on which authored act it performed
+    # and each carries its own remedy -- recording a claim about what evidence covers is a different
+    # act from recording that a command ran -- and the batch that carries either command restates its
+    # refusals as ``change_candidate``. The read is its own member for the reason the facet read and
+    # the detection read are: it is a question rather than an act, and its refusals are about the
+    # snapshot rather than about a payload.
+    "add_evidence_claim",
+    "add_verification_observation",
+    "read_evidence_scope",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct

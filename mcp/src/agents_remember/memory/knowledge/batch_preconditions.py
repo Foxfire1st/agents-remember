@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 from agents_remember.memory.knowledge import (
     anchors,
     compositions,
+    evidence,
     facets,
     families,
     lineage,
@@ -63,7 +64,7 @@ from agents_remember.memory.knowledge.refusals import (
     unknown_family_refusal,
     unknown_invariant_refusal,
 )
-from agents_remember.memory.knowledge.schema_generations import GENERATION_5
+from agents_remember.memory.knowledge.schema_generations import GENERATION_6
 from agents_remember.models.knowledge.authorship import PROPOSED_STATE
 from agents_remember.models.knowledge.candidate import (
     AddExplanationRevision,
@@ -91,6 +92,12 @@ from agents_remember.models.knowledge.candidate import (
     SetInvariantLabel,
 )
 from agents_remember.models.knowledge.composition import COMPOSITION_COMMAND_KINDS
+from agents_remember.models.knowledge.evidence import (
+    EVIDENCE_COMMAND_KINDS,
+    AddEvidenceClaim,
+    KnowledgeFacetRevisionSubject,
+    coverage_identity,
+)
 from agents_remember.models.knowledge.facet import (
     AttachFacet,
     AuthorExplanation,
@@ -105,7 +112,13 @@ _AGGREGATE_KINDS = (AddInvariantRevision, AddFamilyRevision)
 # The generation the composition tables are registered by. Recorded as the generation *record*
 # rather than as the integer, so a leaf that renumbers its own generation updates this one name and
 # the guard keeps comparing against the tables that actually carry the commands.
-REQUIRED_COMPOSITION_GENERATION = GENERATION_5
+#
+# CORRECTED by L12's landing: this read ``GENERATION_5`` while the six composition tables are
+# registered by generation **6** (L18's citation binding kept generation 5 at the sync), so the guard
+# admitted a version-5 dataset that does not carry the tables these commands write. The name now
+# points at the generation the tables are actually in; the refusal it raises is unchanged, and
+# L17's own case still proves a predating dataset is refused.
+REQUIRED_COMPOSITION_GENERATION = GENERATION_6
 
 # The facet commands whose declared references may be satisfied by the batch itself rather than by
 # stored rows. A batch validates the *completed* graph, so these cite `pending`, and the apply step
@@ -144,6 +157,7 @@ def require_preconditions(store: OpenedKnowledgeStore, batch: ChangeBatch) -> No
     require_no_accepted_origin(batch.commands)
     require_facet_generation(store, batch.commands)
     require_composition_generation(store, batch.commands)
+    require_evidence_generation(store, batch.commands)
     require_insertions_absent(store, batch.commands)
     require_command_targets(store, batch.commands)
 
@@ -253,6 +267,28 @@ def require_composition_generation(
             observed=observed,
         )
     )
+
+
+def require_evidence_generation(
+    store: OpenedKnowledgeStore, commands: Sequence[ChangeCommand]
+) -> None:
+    """Refuse a supporting-record command against a dataset that predates its tables.
+
+    ``KS-R12@v1`` §6.5, checked before any row is written: the dataset's own generation is compared
+    with the one that registers the evidence tables, and the refusal carries both as facts. A
+    version-1 dataset -- or any dataset older than this leaf's tables -- is not migrated, not
+    repaired and not extended in place.
+    """
+
+    if not evidence_commands(commands):
+        return
+    evidence.require_evidence_generation(store, "change_candidate")
+
+
+def evidence_commands(commands: Sequence[ChangeCommand]) -> tuple[ChangeCommand, ...]:
+    """Return the supporting-record commands one batch declares, in order."""
+
+    return tuple(command for command in commands if command.kind in EVIDENCE_COMMAND_KINDS)
 
 
 def require_insertions_absent(
@@ -876,6 +912,98 @@ def _require_declared_policy_reference(
         ) from refused
 
 
+def _evidence_check(
+    store: OpenedKnowledgeStore,
+    index: int,
+    command: ChangeCommand,
+    pending: set[tuple[str, str]],
+) -> None:
+    _require_evidence(store, index, command, pending)
+
+
+def _require_evidence(
+    store: OpenedKnowledgeStore,
+    index: int,
+    command: ChangeCommand,
+    pending: set[tuple[str, str]],
+) -> None:
+    """Check one supporting-record command's declared references against the completed batch.
+
+    A claim's subject, its evidence anchor and each claimed-coverage endpoint may be satisfied by the
+    batch itself rather than by stored rows -- a batch validates the *completed* graph, so an anchor
+    one command creates and a claim another cites in the same batch is well formed. The observation
+    command declares no reference at all: its candidate is a recorded identity of something already
+    established, and its artifact is a reference checked at write time against bytes, not a row.
+    """
+
+    if not isinstance(command, AddEvidenceClaim):
+        return
+    if isinstance(command.subject, KnowledgeFacetRevisionSubject):
+        _require_endpoint(
+            store, index, command, pending, ("record_revision", command.subject.revision_id)
+        )
+        _require_facet_revision(store, index, command)
+    else:
+        _require_endpoint(
+            store, index, command, pending, ("invariant_revision", command.subject.revision_id)
+        )
+    if not _pending_source_anchor(pending, command.evidence_anchor_id):
+        _require_endpoint(
+            store, index, command, pending, ("source_anchor", command.evidence_anchor_id)
+        )
+    for endpoint in command.coverage:
+        if endpoint.kind == "realization_claim":
+            _require_endpoint(
+                store, index, command, pending, ("realization_claim", coverage_identity(endpoint))
+            )
+            continue
+        if not _pending_source_anchor(pending, coverage_identity(endpoint)):
+            _require_endpoint(
+                store, index, command, pending, ("source_anchor", coverage_identity(endpoint))
+            )
+
+
+def _pending_source_anchor(pending: set[tuple[str, str]], anchor_id: str) -> bool:
+    """Whether a batch whose own commands create this anchor also has a check to offer.
+
+    A ``NewAnchor`` realization claim in the same batch creates an anchor row, so a claim that cites
+    it has nothing further to prove; the endpoint module's own check still runs in the apply step,
+    where the row exists.
+    """
+
+    return ("source_anchor", anchor_id) in pending
+
+
+def _require_facet_revision(
+    store: OpenedKnowledgeStore, index: int, command: AddEvidenceClaim
+) -> None:
+    """Refuse a facet subject that is not a stored knowledge facet revision.
+
+    The kind question belongs to the shared endpoint module; this wrapper only restates its refusal
+    as one of the batch that carried the command, naming the position and the command kind exactly
+    as every other batch reference refusal does.
+    """
+
+    subject = command.subject
+    try:
+        evidence.require_evidence_subject(store, subject, command.claim_id)
+    except KnowledgeRefused as refused:
+        raise KnowledgeRefused(
+            batch_command_refusal(
+                refused.refusal.code,
+                f"{index}:{command.kind}",
+                detail=refused.refusal.detail,
+                next_action=refused.refusal.next_action,
+                facts=RefusalFacts(
+                    table=refused.refusal.table,
+                    record_id=refused.refusal.record_id,
+                    expected=refused.refusal.expected,
+                    observed=refused.refusal.observed,
+                ),
+            )
+        ) from refused
+
+
 def _require_route_reference(
     store: OpenedKnowledgeStore, index: int, command: SetFamilyRevisionRoute
 ) -> None:
@@ -1086,4 +1214,6 @@ _TARGET_CHECKS: Mapping[str, TargetCheck] = {
     "add_family_composition": _composition_check,
     "set_family_revision_route": _composition_check,
     "author_family_explanation_context": _composition_check,
+    "add_evidence_claim": _evidence_check,
+    "add_verification_observation": _evidence_check,
 }
