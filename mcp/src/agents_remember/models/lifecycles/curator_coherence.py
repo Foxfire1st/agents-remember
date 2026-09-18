@@ -293,23 +293,36 @@ class CuratorCoherenceRequest(_StrictModel):
 
     @model_validator(mode="after")
     def _action_has_one_input_shape(self) -> Self:
+        # Each entry is the request field a caller supplies by that exact name. Naming the absent
+        # ones is the whole diagnosis: this is a model-level validator, so pydantic reports
+        # ``loc: ()`` and this message is the caller's only route to the field that is missing.
         publication_fields = (
-            self.semantic_requirement_revision,
-            self.delivery_attempt,
-            self.expected_predecessor_digest,
-            self.expected_code_candidate_tree,
-            self.expected_memory_candidate_tree,
-            self.expected_task_topology_fingerprint,
-            self.expected_task_intent,
-            self.expected_attestation_sha256,
-            self.caller,
+            ("semantic_requirement_revision", self.semantic_requirement_revision),
+            ("delivery_attempt", self.delivery_attempt),
+            ("expected_predecessor_digest", self.expected_predecessor_digest),
+            ("expected_code_candidate_tree", self.expected_code_candidate_tree),
+            ("expected_memory_candidate_tree", self.expected_memory_candidate_tree),
+            ("expected_task_topology_fingerprint", self.expected_task_topology_fingerprint),
+            ("expected_task_intent", self.expected_task_intent),
+            ("expected_attestation_sha256", self.expected_attestation_sha256),
+            ("caller", self.caller),
         )
+        missing = [name for name, value in publication_fields if value is None]
         if self.action == "publish":
-            if any(value is None for value in publication_fields):
-                raise ValueError("publish requires every identity, predecessor, and caller field")
+            if missing:
+                raise ValueError(
+                    "publish requires every identity, predecessor, and caller field; "
+                    f"missing: {', '.join(missing)}"
+                )
             return self
-        if any(value is not None for value in publication_fields) or self.judgments:
-            raise ValueError("status/prepare/validate forbid publication-only fields")
+        if len(missing) != len(publication_fields) or self.judgments:
+            supplied = [name for name, value in publication_fields if value is not None]
+            if self.judgments:
+                supplied.append("judgments")
+            raise ValueError(
+                "status/prepare/validate forbid publication-only fields; "
+                f"supplied: {', '.join(supplied)}"
+            )
         if self.freeze_snapshot:
             raise ValueError("only publish may freeze an immutable attempt snapshot")
         return self

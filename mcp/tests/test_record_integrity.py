@@ -13,10 +13,13 @@ in each case:
   document still `planning` or `inProgress`, and a master whose rows read `Completed` over them.
   This is the historical case for requirement 4 and for `D42`'s class.
 * `260918_tool-surface-and-process-integrity` — this master, whose contracts and documents agree.
-  Its register is read through a frozen snapshot rather than the live file, because a case whose
-  expected disagreement count is the live file's defect count dies the moment that defect is
-  repaired — which is exactly what happened to `R11`'s six `→ L20` arrows between the first run of
-  this suite and its review.
+  Every growing part of it is read through a frozen snapshot rather than the live file. The register
+  was the first: a case whose expected disagreement count is the live file's defect count dies the
+  moment that defect is repaired — which is exactly what happened to `R11`'s six `→ L20` arrows
+  between the first run of this suite and its review. The leaf population, the leaf statuses and the
+  master's rows were the same fault one class over (`T51`): a sibling leaf opening adds an enclosure,
+  a document and a row, and a sibling document moving moves a status, so a case asserting any of
+  those was asserting the world. `_frozen_leaf_snapshot` writes them instead.
 * `260915-CAPS-L1`'s own memory prose (`T45`) — the two route documents that stated
   `instrument_discipline.py` at 361 lines and `test_instrument_discipline.py` at 350 lines / 16
   cases while the repaired sources carried 432 / 537 / 27. They are read **by Git object** at
@@ -46,6 +49,15 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 HISTORICAL_MASTER = "260712_task-reader-body-priority-rc5"
 # This master: contracts and documents agree, and its register is read as a frozen snapshot.
 CURRENT_MASTER = "260918_tool-surface-and-process-integrity"
+# The leaf population `_frozen_leaf_snapshot` declares for the three "this master is clean" cases,
+# as (leaf id, document stem, the status the fixture writes for the document and its row alike).
+# The live master is a *growing* record, so these numbers are the case's own rather than the
+# world's: the next leaf to open adds a fourth enclosure and the ninth row, and nothing here moves.
+DECLARED_LEAVES: tuple[tuple[str, str, str], ...] = (
+    ("260918-TSIP-L1", "1_instrument-integrity", "Completed"),
+    ("260918-TSIP-L2", "2_record-integrity", "Completed"),
+)
+DECLARED_LEAF_COUNT = len(DECLARED_LEAVES)
 # The historical case for the prose-figure comparison: L1's two route documents at the revision
 # that recorded the stale figures, and the sources they describe.
 T45_FREEZE = "e116e5ee"
@@ -150,6 +162,93 @@ def _frozen_register_snapshot(world: pathlib.Path) -> pathlib.Path:
     return register
 
 
+def _write_declared_document(path: pathlib.Path, status: str) -> None:
+    """Write one copied leaf document's status and step states, so its own row is justified."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["status"] = status
+    for step in payload.get("steps") or ():
+        if not isinstance(step, dict):
+            continue
+        step["status"] = "done"
+        for substep in step.get("substeps") or ():
+            if isinstance(substep, dict):
+                substep["status"] = "done"
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _prune_to_declared_leaves(
+    task_root: pathlib.Path, declared: dict[str, tuple[str, str]]
+) -> set[str]:
+    """Drop every enclosure and leaf document the fixture did not declare; return the ids kept."""
+    keep = {integrity.leaf_key(leaf_id) for leaf_id in declared}
+    enclosures = task_root / "enclosures"
+    if enclosures.is_dir():
+        for enclosure in sorted(entry for entry in enclosures.iterdir() if entry.is_dir()):
+            if integrity.leaf_key(enclosure.name) not in keep:
+                shutil.rmtree(enclosure)
+    present: set[str] = set()
+    for path in sorted(task_root.glob("*.json")):
+        if path.name == "task.json":  # the master document is an ar-task-document/v1 too
+            continue
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict) or payload.get("schema") != "ar-task-document/v1":
+            continue
+        document_id = str(payload.get("id", ""))
+        if document_id not in declared:
+            path.unlink()
+            continue
+        _write_declared_document(path, declared[document_id][1])
+        present.add(document_id)
+    return present
+
+
+def _reduce_to_declared_rows(
+    master_json: pathlib.Path, declared: dict[str, tuple[str, str]]
+) -> int:
+    """Reduce the copied master's ``subTasks[]`` to the declared rows, with the declared status."""
+    master = json.loads(master_json.read_text(encoding="utf-8"))
+    rows = [row for row in master.get("subTasks") or () if str(row.get("number")) in declared]
+    for row in rows:
+        row["status"] = declared[str(row["number"])][1]
+    master["subTasks"] = rows
+    master_json.write_text(json.dumps(master, indent=2) + "\n", encoding="utf-8")
+    return len(rows)
+
+
+def _frozen_leaf_snapshot(world: pathlib.Path) -> pathlib.Path:
+    """Freeze the copied master's leaf record to `DECLARED_LEAVES`, by construction.
+
+    This is `T51`'s class, one case-set over from `_frozen_register_snapshot`. Three things in the
+    live master move without a case's knowledge, and each of the three cases below asserted one of
+    them: the enclosure population gains a leaf, every sibling leaf document's status moves as its
+    work moves, and the master's ``subTasks[]`` gains a row. A case asserting any of those is
+    asserting the world, so it goes red when a sibling leaf opens — which is not a fact about the
+    check it protects.
+
+    The fixture therefore writes all three: it prunes the enclosures and the leaf documents the case
+    did not declare, writes each declared document's status and step states, and reduces the
+    master's rows to the declared set with the declared status. Every number and every verdict
+    below is then one this case produced. The contracts that remain are the real artifacts' own
+    bytes; the documents' statuses are the fixture's.
+
+    A copy that cannot supply the declared population is skipped with the reason named, rather than
+    asserting a count it did not build.
+    """
+    task_root = world / "tasks" / "agents-remember" / CURRENT_MASTER
+    declared = {leaf_id: (stem, status) for leaf_id, stem, status in DECLARED_LEAVES}
+    present = _prune_to_declared_leaves(task_root, declared)
+    rows = _reduce_to_declared_rows(task_root / "task.json", declared)
+    enclosures = task_root / "enclosures"
+    remaining = [entry for entry in enclosures.iterdir() if entry.is_dir()]
+    if len(remaining) != DECLARED_LEAF_COUNT or rows != DECLARED_LEAF_COUNT:
+        pytest.skip(
+            f"the {CURRENT_MASTER} copy cannot supply the declared leaf population "
+            f"({DECLARED_LEAF_COUNT} enclosures and rows, found {len(remaining)} and {rows}; "
+            f"documents present: {sorted(present)})"
+        )
+    return task_root
+
+
 # --------------------------------------------------------------------------------------------
 # Check 1 — leaf document status against its own contract's cells (requirement 4)
 # --------------------------------------------------------------------------------------------
@@ -177,14 +276,20 @@ class LeafDocumentAgainstContractTests:
     def test_the_current_master_passes_and_says_what_it_compared(
         self, tmp_path: pathlib.Path
     ) -> None:
-        """The corrected side: this master's contracts and documents agree, and the count is visible."""
+        """The corrected side: this master's contracts and documents agree, and the count is visible.
+
+        The world is the live master copied and then frozen to `DECLARED_LEAVES`: the population and
+        the statuses are the fixture's, so the sibling leaf that opened its own enclosure cannot
+        move the numbers asserted here (`T51`).
+        """
         world = _control_world(tmp_path, CURRENT_MASTER)
+        _frozen_leaf_snapshot(world)
         result = integrity.check_leaf_document_against_contract(world)
 
         assert result.ok, [finding.message for finding in result.findings]
-        assert result.subjects == 2, "this master has two leaf contracts at the base"
-        assert result.authority == 2
-        assert "matched a leaf document" in result.detail
+        assert result.subjects == DECLARED_LEAF_COUNT, "the fixture declares two leaf contracts"
+        assert result.authority == DECLARED_LEAF_COUNT
+        assert f"{DECLARED_LEAF_COUNT} enclosure contracts matched a leaf document" in result.detail
 
     def test_a_strict_spelling_match_under_reports_by_the_keyed_cases(
         self, tmp_path: pathlib.Path
@@ -270,12 +375,22 @@ class MasterRowAgainstLeafDocumentTests:
     def test_the_current_master_rows_agree_with_their_documents(
         self, tmp_path: pathlib.Path
     ) -> None:
+        """The corrected side for `D42`: the rows this fixture declares agree with their documents.
+
+        Both live halves of this case move under it — a sibling document's status moves
+        `result.ok`, and a sibling leaf's new row moves the "rows name no document" count — so the
+        fixture writes both (`T51`).
+        """
         world = _control_world(tmp_path, CURRENT_MASTER)
+        _frozen_leaf_snapshot(world)
         result = integrity.check_master_rows_against_leaf_documents(world)
 
         assert result.ok, [finding.message for finding in result.findings]
-        assert result.subjects == 8, "this master declares eight leaves"
-        assert "0 rows name no document" in result.detail
+        assert result.subjects == DECLARED_LEAF_COUNT, "the fixture declares two leaves"
+        assert "0 rows name no document" in result.detail, (
+            "every row the fixture wrote names its own document, so an unmatched row is a fault "
+            "the fixture did not write"
+        )
 
     def test_a_row_is_never_completed_on_step_state_alone(self) -> None:
         """The rule itself, at the boundary `D42` crossed: all steps done, document not landed."""
@@ -452,15 +567,18 @@ class RegisterOwnerArrowTests:
         """`R11` on the frozen artifact: five State cells still point at the previous master's L20.
 
         Only the master is copied from the live tree — its leaf set is what makes the arrows
-        unresolved. The register rows come from a snapshot, so this case tests the check rather than
-        the current state of the register: `R11` has since been repaired, and a case that pinned the
-        live file's five disagreements went red the moment it was.
+        unresolved — and that set is frozen to `DECLARED_LEAVES` like the sibling cases', because
+        the ninth row the next leaf adds moves the count this case asserts (`T51`). The register rows
+        come from a snapshot, so this case tests the check rather than the current state of the
+        register: `R11` has since been repaired, and a case that pinned the live file's five
+        disagreements went red the moment it was.
         """
         world = _control_world(tmp_path, CURRENT_MASTER)
+        _frozen_leaf_snapshot(world)
         register = _frozen_register_snapshot(world)
         result = integrity.check_register_row_ownership(register)
 
-        assert result.authority == 8, "the master declares eight leaves"
+        assert result.authority == DECLARED_LEAF_COUNT, "the fixture declares two leaves"
         assert result.subjects == 5, "every State-cell arrow is compared, not only the failures"
         assert result.disagreements == 5
         assert {finding.declared for finding in result.findings} == {"L20"}
@@ -949,12 +1067,34 @@ class RecordIntegrityReportTests:
         assert exit_code == 1, "the historical world disagrees, so the check must exit non-zero"
         assert before == after, "the check wrote to the tree it measured"
 
-    def test_a_clean_world_exits_zero(self, tmp_path: pathlib.Path) -> None:
+    def test_a_clean_world_exits_zero(
+        self, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A clean world exits zero, over the population the run itself reports.
+
+        The exit code alone is not evidence that the selected check ran: a `--check` that selects
+        nothing also prints nothing and exits zero. The payload is read back and the comparison's
+        own population asserted, so the zero is licensed by what it was drawn from — the fixture's
+        declared leaves, not the live master's (`T51`).
+        """
         world = _control_world(tmp_path, CURRENT_MASTER)
+        _frozen_leaf_snapshot(world)
         exit_code = integrity.main(
-            ["--coordination-root", str(world), "--check", "leaf-document-vs-contract"]
+            [
+                "--coordination-root",
+                str(world),
+                "--check",
+                "leaf-document-vs-contract",
+                "--format",
+                "json",
+            ]
         )
+        payload = json.loads(capsys.readouterr().out)
+
         assert exit_code == 0
+        assert [row["check"] for row in payload] == ["leaf-document-vs-contract"]
+        assert payload[0]["subjects"] == DECLARED_LEAF_COUNT
+        assert payload[0]["disagreements"] == 0
 
     def test_the_cli_runs_the_prose_figure_check_from_the_task_root_and_writes_nothing(
         self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch

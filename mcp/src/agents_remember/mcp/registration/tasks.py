@@ -45,13 +45,18 @@ def _register_curator_coherence_tools(server: FastMCP, config: McpRuntimeConfig)
         `prepare` returns the exact code, memory, task-topology, attestation, predecessor, and
         source-candidate identities. `publish` requires those unchanged identities plus one
         curator/architect-authored disposition, rationale, and evidenceRef for every candidate.
-        It rejects missing, extra, duplicate, malformed, or stale judgments, publishes atomically,
-        and may freeze an immutable delivery-attempt snapshot. Evidence references use one explicit
-        authority namespace—`code:`, `memory:`, or `task:`—and the lifecycle records and later
-        revalidates the referenced bytes' digest. A semantic requirement revision, delivery
-        attempt, and content digest are separate fields. `validate` is the same validator
-        used by memory preflight and closeout admission. Historical files are never searched as
-        fallbacks."""
+        `publish` also requires every one of `semantic_requirement_revision`, `delivery_attempt`,
+        `expected_predecessor_digest`, `expected_code_candidate_tree`,
+        `expected_memory_candidate_tree`, `expected_task_topology_fingerprint`,
+        `expected_task_intent`, `expected_attestation_sha256` and `caller` to be supplied and
+        non-null: the request carries one action's input shape at a time, so `status`, `prepare`
+        and `validate` forbid all nine. It rejects missing, extra, duplicate, malformed, or stale
+        judgments, publishes atomically, and may freeze an immutable delivery-attempt snapshot.
+        Evidence references use one explicit authority namespace—`code:`, `memory:`, or `task:`—and
+        the lifecycle records and later revalidates the referenced bytes' digest. A semantic
+        requirement revision, delivery attempt, and content digest are separate fields. `validate`
+        is the same validator used by memory preflight and closeout admission. Historical files
+        are never searched as fallbacks."""
         return curator_coherence_payload(config, request)
 
 

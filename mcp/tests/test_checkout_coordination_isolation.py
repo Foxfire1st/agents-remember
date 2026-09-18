@@ -12,6 +12,7 @@ import pytest
 from agents_remember.controlplane.durable_store import (
     OPERATOR_INBOX_OWNERSHIP,
     append_line,
+    declared_process_role,
     exclusive_access,
     rewrite_lines,
 )
@@ -52,12 +53,13 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
             marker.mkdir()
         return checkout, source
 
-    def _settings(self, path: Path) -> None:
+    def _settings(self, path: Path, *, direct_execution_enabled: bool = False) -> None:
         payload = {
             "coordinationRoot": str(self.root / "live-ar-coordination"),
             "workspaceRoot": str(self.root / "workspace"),
             "repositories": {"agents-remember": {}},
             "providers": {},
+            "directExecutionEnabled": direct_execution_enabled,
         }
         path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -178,3 +180,62 @@ class CheckoutCoordinationIsolationTests(unittest.TestCase):
         append_line(target, "test-row")
 
         self.assertEqual(target.read_text(encoding="utf-8"), "test-row\n")
+
+    def test_any_mode_declaration_lifts_the_primary_refusal_and_confinement(self) -> None:
+        """PIN (260918-TSIP-L3, `T30`): the boundary asks *was any mode declared*, never *who*.
+
+        This case asserts today's behaviour on purpose, and it is the only case here that does.
+        `declare_execution_mode` is one assignment (`kernel/primitives/checkout_coordination.py:59-61`):
+        no caller identity, no PID or parent check, no environment proof, no signature, and no
+        operation record. The two predicates that decide everything test `is not None`
+        (`:118` `checkout_cli_location`, `:142-143` `require_durable_write_target`), and
+        `runtime_config._config_for_execution` (`:757-769`) then loads the LIVE authority settings
+        instead of the synthetic non-authority config (`:803` `direct_execution_enabled=False`).
+
+        Arm A is the plane's real refusal and is the positive control: without it, a case that
+        "passes" after the declaration could be passing because the refusal never fired at all.
+        Arm B is the finding. If arm B ever fails, someone has made the declaration
+        authenticated, which is a product and security decision this leaf deliberately did not
+        take -- so read `notes/defect-index.md` (`T28`/`T30`/`T41`) and the developer's ruling
+        before repairing this case rather than deleting it.
+        """
+        _checkout, source = self._checkout(linked=False)
+        self._undeclared_checkout(source)
+        settings = self.root / "live-settings.json"
+        self._settings(settings, direct_execution_enabled=True)
+        outside = self.root / "outside-any-checkout" / "rows.jsonl"
+
+        with self.assertRaisesRegex(ConfigError, "primary checkout is refused"):
+            load_config(settings)
+        with self.assertRaises(CheckoutCoordinationError):
+            checkout_coordination.require_durable_write_target(outside)
+
+        checkout_coordination.declare_execution_mode("mcp")
+
+        config = load_config(settings)
+        self.assertEqual(config.coordination_root, self.root / "live-ar-coordination")
+        self.assertTrue(config.direct_execution_enabled)
+        checkout_coordination.require_durable_write_target(outside)
+
+    def test_the_reserved_lifecycle_operation_mode_is_declarable_by_any_caller(self) -> None:
+        """PIN (260918-TSIP-L3, `T30`): a mode the plane reserves in words is nobody's to grant.
+
+        `declare_lifecycle_operation_process` (`checkout_coordination.py:69-76`) says the worker
+        "is launched only from a durable plane-owned operation record" -- and it has **zero
+        callers** in `mcp/src` or `mcp/tests`, so nothing in the product ever proves that claim.
+        The call is a bare `declare_execution_mode("lifecycle-operation")`, and
+        `durable_store.declared_process_role` (`:91-95`) reports it as a declared writer of every
+        store `mcp` owns -- including the gate log (`:144-147`).
+
+        Asserting today's behaviour here turns an unexamined invariant into a stated one: the
+        entry point that is *supposed* to be reachable only from a plane-owned operation record is
+        reachable from anywhere. This case fails the day that becomes true, which is the point.
+        """
+        _checkout, source = self._checkout(linked=False)
+        self._undeclared_checkout(source)
+
+        checkout_coordination.declare_lifecycle_operation_process()
+
+        self.assertEqual(checkout_coordination.declared_execution_mode(), "lifecycle-operation")
+        self.assertEqual(declared_process_role(), "lifecycle-operation")
+        self.assertIsNone(checkout_coordination.checkout_cli_location())
