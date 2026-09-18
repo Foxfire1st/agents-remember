@@ -106,6 +106,8 @@ state signal never evaluates the artifact.
   `cgc_callers`, `cgc_callees`, `cgc_complexity`, `cgc_symbol_search`, `context_packet`, `drift_check`.
 - **Native reads** of task docs, series contracts, notes, and route indexes.
 - **Native writes only** to your own draft artifact under the notes path the brief names.
+- **`task_doc`** for the adoption attachments your Process names — `attach_master` per commanded master, on the
+  draft you own. Your manifest entry declares it; this file states it so the two agree.
 - **Sub-agents for read/search only**, drilling vertically inside this seat's portfolio analysis; each writes
   durable notes and returns a compact summary. A harness without fan-out does those reads sequentially.
 - **`message_parent`** for a clarification or an escalation to the architect.
@@ -113,8 +115,9 @@ state signal never evaluates the artifact.
 ## What you must not do
 
 - **Reader, not mutator.** Never edit a task document to reflect a ruling, never raise a gate, never touch git,
-  and never run `task_doc`, `worktree_*`, `lifecycle_*`, `gate_*`, `dispatch_agent`, `memory_*` or closeout —
-  those are the owning seats' machinery. A seat that never touches a mutating AR tool never instantiates a
+  and never run `worktree_*`, `lifecycle_*`, `gate_*`, `dispatch_agent`, `memory_*` or closeout — those are the
+  owning seats' machinery. The one exception is the adoption attachment above: `task_doc.attach_master` on your
+  own draft, which your manifest declares and the architect and orchestrator adopt from. A seat that never touches a mutating AR tool never instantiates a
   lifecycle, and that is the designed shape, not a gap.
 - **Never decide the plan.** You draft it; the architect rules it and the orchestrator adopts it. You do not
   approve, adopt, dispatch, or land anything.
