@@ -101,6 +101,46 @@ class CapsuleSource:
             )
         return decoded
 
+    def instruction_text(self) -> str:
+        """The content a capsule actually carries: the same text, without its frontmatter.
+
+        A canonical role file opens with a YAML frontmatter block. That block is the
+        **skill registry's** metadata — the skill's name and the one-line description a
+        catalogue reads — and it is not an instruction: it changes no behavior and
+        obliges the seat to nothing. Shipping it into the instruction channel would send
+        a seat its own filing label, so it is dropped here and the delivered payload is
+        exactly the instructions.
+
+        ``revision`` still covers the file's **whole** bytes, because the revision is the
+        address of the file on disk; only the delivered text is trimmed.
+        """
+
+        return strip_frontmatter(self.text())
+
+
+FRONTMATTER_DELIMITER = "---"
+"""The line that opens and closes a canonical document's YAML frontmatter block."""
+
+
+def strip_frontmatter(text: str) -> str:
+    """``text`` without a leading YAML frontmatter block, or ``text`` unchanged.
+
+    Only a block that **opens on the first line** and is closed by a later line of
+    exactly ``---`` is removed, which is the one shape the corpus authors. A document
+    with no frontmatter, a horizontal rule further down, or an unterminated opening
+    delimiter is returned untouched: guessing where a malformed block ends would delete
+    instruction text, and a missing block is a stylistic defect rather than a reason to
+    refuse a source that has content.
+    """
+
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != FRONTMATTER_DELIMITER:
+        return text
+    for index in range(1, len(lines)):
+        if lines[index].strip() == FRONTMATTER_DELIMITER:
+            return "".join(lines[index + 1 :]).lstrip("\n")
+    return text
+
 
 def instruction_identity(composition_root: CapsuleCompositionRoot, name: str) -> str:
     """The canonical instruction identity for one block name inside a root."""
@@ -169,6 +209,7 @@ def shared_core_reference(name: str) -> str:
 
 
 __all__ = [
+    "FRONTMATTER_DELIMITER",
     "INSTRUCTION_FILE_SUFFIX",
     "SPECIALIZATION_ROOT_DIRECTORY",
     "CapsuleDeclaredInstruction",
@@ -178,4 +219,5 @@ __all__ = [
     "shared_core_reference",
     "skills_declared_identity",
     "specializations_declared_identity",
+    "strip_frontmatter",
 ]

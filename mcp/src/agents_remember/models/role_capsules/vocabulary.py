@@ -117,11 +117,49 @@ CAPSULE_COMPOSITION_ORDER: tuple[CapsuleCompositionRoot, ...] = (
     "specialization",
 )
 
+#: What a **dispatched role seat's** capsule is composed of, in composition order.
+#:
+#: ``role + operation``, and nothing else (developer ruling 2026-09-17: *"the compiler
+#: stops prepending the four ``Core —`` blocks. A capsule's unit set is exactly
+#: ``{role, operation, task}``"*). ``task`` is the capsule's separate task-context
+#: channel, not an instruction block, so the instruction unit set is these two.
+#:
+#: The shared ``core/…`` blocks are deliberately absent. They are authored doctrine the
+#: corpus keeps on disk and every seat may read there; they are not part of what a seat
+#: is *sent*, because a 4,000-token shared preamble is what made a worker capsule
+#: 11,407 tokens, and every obligation that genuinely binds one seat now lives in that
+#: seat's own ``roles/<role>.md`` where the seat acts on it.
+CAPSULE_ROLE_COMPOSITION_ORDER: tuple[CapsuleCompositionRoot, ...] = ("role", "operation")
+
+#: What the **ambient launcher's** capsule is composed of: its own routing-condition
+#: block plus the operation it runs.
+#:
+#: The launcher is a routing condition rather than a role, so it has no ``roles/…``
+#: block to compose — ``core/launcher.md`` **is** its own instruction file. It carries no
+#: shared ``Core —`` block either, for the same reason a role does not: the launcher's
+#: own page is the whole of what it has to act on, and the takeover contract it points at
+#: is doctrine it reads rather than doctrine it is sent.
+CAPSULE_LAUNCHER_COMPOSITION_ORDER: tuple[CapsuleCompositionRoot, ...] = ("core", "operation")
+
 
 def is_capsule_role(value: str) -> bool:
     """Whether ``value`` is one of the ten frozen roles (exact, not normalized)."""
 
     return value in CAPSULE_ROLES
+
+
+def role_composition_order(seat_kind: CapsuleSeatKind) -> tuple[CapsuleCompositionRoot, ...]:
+    """The instruction roots one seat kind's capsule actually composes, in order.
+
+    This is the one answer to "what is in a capsule", and it is derived from the seat kind
+    rather than declared per role: a dispatched role seat composes its own block and the
+    operation it runs; the ambient launcher composes its own routing-condition block and
+    the operation it runs. Neither composes a shared ``Core —`` block.
+    """
+
+    if seat_kind == CAPSULE_LAUNCHER_MODE:
+        return CAPSULE_LAUNCHER_COMPOSITION_ORDER
+    return CAPSULE_ROLE_COMPOSITION_ORDER
 
 
 def is_capsule_operation(value: str) -> bool:
@@ -155,9 +193,11 @@ def capsule_operation_or_none(value: str) -> CapsuleOperation | None:
 
 __all__ = [
     "CAPSULE_COMPOSITION_ORDER",
+    "CAPSULE_LAUNCHER_COMPOSITION_ORDER",
     "CAPSULE_LAUNCHER_MODE",
     "CAPSULE_OPERATIONS",
     "CAPSULE_ROLES",
+    "CAPSULE_ROLE_COMPOSITION_ORDER",
     "CAPSULE_ROLE_MODE",
     "CAPSULE_SEAT_KINDS",
     "CapsuleCompositionRoot",
@@ -168,4 +208,5 @@ __all__ = [
     "capsule_role_or_none",
     "is_capsule_operation",
     "is_capsule_role",
+    "role_composition_order",
 ]

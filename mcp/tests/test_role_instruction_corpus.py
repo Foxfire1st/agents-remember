@@ -45,15 +45,19 @@ ROLE_ORDER = (
     "bootstrap",
 )
 
+# The approved capsule shape, in order (developer ruling 2026-09-17; the developer-approved
+# worker file `notes/briefs/worker-role-approved.md` is the exemplar). Each entry is the prefix a
+# role file's H2 must begin with; the fourth and sixth carry the seat's own suffix after the dash.
 REQUIRED_SECTIONS = (
-    "## 1 — Purpose And Authority",
-    "## 2 — Required Inputs",
-    "## 3 — Normal Workflow",
-    "## 4 — Permitted Writes And Actions",
-    "## 5 — Stop And Escalation Cases",
-    "## 6 — Completion And Handoff",
+    "## Inputs",
+    "## Process",
+    "## Outputs",
+    "## What you may do",
+    "## What you must not do",
+    "## Stop and ",
 )
 
+#: The retired machine-readable block. Knobs are settings, not role-file content.
 MACHINE_SECTION = "## Knobs, Tool Surface, And Dispatch Authority"
 
 # The nine frozen operations: the architecture's eight, plus the one deliberate extension
@@ -103,14 +107,12 @@ CORPUS_LOCATIONS = (
     "SKILL.md",
 )
 
-# A role may name a sibling role file only for a sanctioned reason. The architecture requires two:
-# the architect may wear the designer hat, and a coordinating seat names the seat it dispatches.
-# The allowlist is exact, not speculative: an entry that no path in the suite currently exercises is
-# removed rather than kept "just in case", because a stale allowance silently weakens the check.
+# A role is self-contained: naming a sibling role file is the amalgamation the developer's ruling
+# forbids, because a seat learns its duties from its own file and nowhere else. The one sanctioned
+# case is hat-collapse, which genuinely requires running another seat's file: the architect may
+# wear the designer hat inline. Entries elsewhere are removed rather than kept "just in case".
 SANCTIONED_SIBLING_REFERENCES = {
     "architect": ("roles/designer.md",),
-    "orchestrator": ("roles/strategist.md", "roles/designer.md"),
-    "strategist": ("roles/manager.md",),
 }
 
 # A coordination-root anchor names a file in the coordination tree this checkout does not contain
@@ -404,8 +406,24 @@ def test_manifest_carries_routing_metadata_not_copied_payloads(tmp_path: Path) -
     )
 
 
-def test_every_role_source_carries_the_readable_order_and_knob_block() -> None:
-    """Each role file exists, parses as the agreed shape, and declares its own sources."""
+def test_every_role_source_is_a_capsule_shaped_function() -> None:
+    """Each role file is the developer-approved capsule shape, and nothing else.
+
+    The shape a role file ships in was ruled by the developer on 2026-09-17 and the worker file
+    (``notes/briefs/worker-role-approved.md``, sha256 ``a07e92e1…``) is the approved exemplar:
+
+    * frontmatter declaring the canonical skill-scoped name and a description;
+    * a heading and a one-line statement of what the seat is;
+    * ``Inputs`` · ``Process`` · ``Outputs`` in that order, then the seat's own may/must-not and
+      stop-and-escalate sections;
+    * **no ``Inherits:`` line** — a capsule composes no shared ``Core —`` block, so a role file
+      that inherited one would state obligations nothing delivers;
+    * **no operator-knob table** — ``harness``/``model``/``effort``/``launchArgs``/
+      ``sessionCommands``/``promptKeywords`` live in settings and the seat cannot set them;
+    * no sibling role file cited to learn a duty from, which is the amalgamation the same ruling
+      forbids. One sanctioned case exists and is named below: the architect may wear the designer
+      hat inline, which requires naming that file.
+    """
 
     manifest = _manifest()
     assert list(manifest["roles"]) == list(ROLE_ORDER), (
@@ -431,32 +449,38 @@ def test_every_role_source_carries_the_readable_order_and_knob_block() -> None:
             f"{path} frontmatter must declare a description"
         )
 
-        # Every role states the shared sources it composes with.
-        assert "**Inherits:**" in text, f"{path} does not declare its inherited sources"
-        for core_key in entry["core"]:
-            source = manifest["core"][core_key]["source"]
-            assert f"`{source}`" in text, f"{path} does not declare inherited source {source}"
+        # The retired inheritance line and the retired machine block are gone.
+        assert "**Inherits:**" not in text, (
+            f"{path} still declares inherited sources; a capsule composes no shared Core block"
+        )
+        assert MACHINE_SECTION not in text, f"{path} still carries the operator knob block"
+        # The defect is a **table row** that presents a knob as this seat's configuration. A prose
+        # mention that says the knobs are settings and not the seat's to set is the corrected
+        # statement the cut leaves in place, so it is not reported.
+        for knob in (
+            "harness",
+            "model",
+            "effort",
+            "launchArgs",
+            "sessionCommands",
+            "promptKeywords",
+        ):
+            assert f"| {knob} " not in text, f"{path} still carries a `{knob}` knob-table row"
+        assert "orchestration.rolesPerLevel" not in text, (
+            f"{path} still documents its own settings override keys"
+        )
 
-        # The agreed readable order, in order.
+        # The approved order, in order: every required section is present, and the positions
+        # are ascending. A section may carry its own suffix after the em dash (``## Stop and
+        # report — …``), and an extra seat-specific section may sit between two required ones.
         positions = []
         for heading in REQUIRED_SECTIONS:
-            assert heading in text, f"{path} is missing '{heading}'"
+            assert heading in text, f"{path} is missing a section beginning '{heading}'"
             positions.append(text.index(heading))
-        assert positions == sorted(positions), f"{path} headings are out of the agreed order"
+        assert positions == sorted(positions), f"{path} headings are out of the approved order"
 
-        # The machine-readable knob block, after the readable order.
-        assert MACHINE_SECTION in text, f"{path} is missing '{MACHINE_SECTION}'"
-        assert text.index(MACHINE_SECTION) > positions[-1], (
-            f"{path} must place its knob block after the handoff section"
-        )
-        for knob in ("harness", "model", "effort", "dispatch", "tools"):
-            assert f"| {knob}" in text, f"{path} knob table is missing the `{knob}` row"
-        assert "orchestration.rolesPerLevel" in text, (
-            f"{path} must state its settings override keys"
-        )
-
-        # A role is self-contained: it may name a sibling role file only for a sanctioned reason —
-        # wearing that hat, or dispatching that seat — never to learn its own duties.
+        # A role is self-contained: naming a sibling role file is the amalgamation the ruling
+        # forbids, except where the seat genuinely runs that file as a hat.
         allowed = SANCTIONED_SIBLING_REFERENCES.get(role, ())
         for other in ROLE_ORDER:
             if other == role:
@@ -578,7 +602,14 @@ def unresolved_references(lifecycle_root: Path) -> list[str]:
 
 
 def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: Path) -> None:
-    """The link check catches a repository-relative anchor whose file does not exist."""
+    """The link check catches a repository-relative anchor whose file does not exist.
+
+    The mutation is **seeded**, not carried by the shipped corpus. The previous version of this
+    case rewrote a repository-relative anchor that one role file happened to cite, so when the
+    260915-CAPS-L22 cut made the corpus cite none, the case failed on a missing seed instead of
+    measuring the resolver. Writing the healthy anchor in and then breaking it is the same
+    measurement and it cannot be disarmed by an edit elsewhere in the tree.
+    """
 
     staged = tmp_path / "skills"
     shutil.copytree(SKILLS_ROOT, staged)
@@ -589,14 +620,15 @@ def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: 
     # The healthy corpus resolves.
     assert unresolved_references(staged_root) == []
 
-    # Seed one mutation: point a repository-relative anchor at a file that does not exist.
-    mutated = original.replace(
-        "mcp/src/agents_remember/controlplane/gate_policy.py",
-        "controlplane/gate_policy.py",
-        1,
+    anchor = "mcp/src/agents_remember/controlplane/gate_policy.py"
+    assert (REPOSITORY_ROOT / anchor).is_file(), "the healthy anchor must be a real file"
+    healthy.write_text(original + f"\nSee `{anchor}`.\n", encoding="utf-8")
+    assert unresolved_references(staged_root) == [], (
+        "a real repository-relative anchor must resolve"
     )
-    assert mutated != original, "seed anchor not found in the staged role file"
-    healthy.write_text(mutated, encoding="utf-8")
+
+    # Seed one mutation: the same anchor, no longer a resolvable repository-relative path.
+    healthy.write_text(original + "\nSee `controlplane/gate_policy.py`.\n", encoding="utf-8")
     problems = unresolved_references(staged_root)
     assert any("controlplane/gate_policy.py" in problem for problem in problems), problems
 

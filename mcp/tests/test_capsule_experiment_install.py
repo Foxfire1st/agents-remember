@@ -43,14 +43,36 @@ CANONICAL_SKILLS = REPOSITORY_ROOT / "skills"
 CANONICAL_EVE_APPLICATION = REPOSITORY_ROOT / "eve_runtime"
 CANONICAL_PROVIDER_REQUIREMENTS = REPOSITORY_ROOT / "providers" / "requirements"
 
-CORPUS_FINGERPRINT = "# Core — Completion Truth And Handoff Acceptance"
-"""A canonical block identity: the first heading of ``core/acceptance.md``.
+CORPUS_FINGERPRINT = "**You set one repository up and report what actually happened.**"
+"""A canonical block identity: the opening statement of ``roles/bootstrap.md``.
+
+The seat's own first obligation-bearing sentence, and the selector has to be **unique in the
+installed tree**: the short ``# Bootstrap`` heading occurs twice (the role file and the router's
+mention), which would make the "reaches the run exactly once" count meaningless.
 
 Counted in the compiled capsule (the one delivery path an opted-in run has) and in the
 installed startup surfaces (which must not carry it a second time).
+
+A **role** block is the right anchor for "did the canonical corpus reach the run", because a role
+block is the substance of what a capsule delivers. The anchor used before 260915-CAPS-L22 was a
+shared ``core/…`` heading; the developer's ruling of 2026-09-17 made a capsule exactly
+``{role, operation}``, so a core heading would now be measuring a delivery path that deliberately
+no longer exists.
 """
 
-CORPUS_FINGERPRINT_SOURCE = CANONICAL_SKILLS / "l-01-agent-lifecycles" / "core" / "acceptance.md"
+CORPUS_FINGERPRINT_SOURCE = CANONICAL_SKILLS / "l-01-agent-lifecycles" / "roles" / "bootstrap.md"
+
+RETIRED_CORE_FINGERPRINT = "# Core — Completion Truth And Handoff Acceptance"
+"""A shared core block's first heading, which the capsule must **not** carry.
+
+The negative half of the same ruling: the shared blocks stay on disk in the corpus, and no capsule
+composes one. Asserted absent rather than merely dropped, so a core block leaking back into the
+instruction stream is visible here as well as in the compiler's own unit-set cases.
+"""
+
+RETIRED_CORE_FINGERPRINT_SOURCE = (
+    CANONICAL_SKILLS / "l-01-agent-lifecycles" / "core" / "acceptance.md"
+)
 
 LEGACY_FINGERPRINT = "## Start Here — Route By Role"
 """The legacy AR startup chain's own routing heading, from the coordinator ``AGENTS.md``.
@@ -232,6 +254,9 @@ def test_the_two_fingerprints_resolve_in_their_canonical_sources() -> None:
     assert CORPUS_FINGERPRINT in CORPUS_FINGERPRINT_SOURCE.read_text(encoding="utf-8")
     assert LEGACY_FINGERPRINT in LEGACY_FINGERPRINT_SOURCE.read_text(encoding="utf-8")
     assert CORPUS_FINGERPRINT not in LEGACY_FINGERPRINT_SOURCE.read_text(encoding="utf-8")
+    # The retired core anchor is still real corpus text: it is on disk in the corpus and it is
+    # simply not delivered, so absence from a capsule is a composition fact rather than drift.
+    assert RETIRED_CORE_FINGERPRINT in RETIRED_CORE_FINGERPRINT_SOURCE.read_text(encoding="utf-8")
 
 
 def test_an_unselected_run_installs_the_legacy_startup_chain(tmp_path: Path) -> None:
@@ -401,10 +426,17 @@ def test_the_legacy_fingerprint_is_present_when_disabled_and_absent_when_opted_i
 
 
 def test_the_canonical_corpus_reaches_an_opted_in_run_once_through_the_capsule() -> None:
-    """Counted over the real effective material, from two different producers."""
+    """Counted over the real effective material, from two different producers.
+
+    Both halves of the 260915-CAPS-L22 ruling are measured on the ONE delivery path an opted-in run
+    has: the seat's own canonical block arrives exactly once, and no shared ``Core —`` block arrives
+    at all. A capsule that shipped both would fail the second assertion; a run that shipped neither
+    would fail the first.
+    """
 
     capsule_text = compiled_capsule_text()
     assert capsule_text.count(CORPUS_FINGERPRINT) == 1
+    assert capsule_text.count(RETIRED_CORE_FINGERPRINT) == 0
 
     # Side B is the authored source the compiler read; the capsule carries its block, and the
     # legacy startup chain (side A) carries none of it.
@@ -530,9 +562,15 @@ def test_the_installed_root_carries_the_canonical_corpus_only_as_authored_source
 
     run_install(source, coordination_root, experiment="role-capsules")
 
-    authored = coordination_root / "skills" / "l-01-agent-lifecycles" / "core" / "acceptance.md"
+    authored = coordination_root / "skills" / "l-01-agent-lifecycles" / "roles" / "bootstrap.md"
     assert CORPUS_FINGERPRINT in authored.read_text(encoding="utf-8")
     assert material_text(coordination_root / "skills").count(CORPUS_FINGERPRINT) == 1
+    # The shared core block is carried into the installed root as authored corpus too, and it is
+    # asserted present there so the capsule-side absence above cannot be a missing file.
+    installed_core = (
+        coordination_root / "skills" / "l-01-agent-lifecycles" / "core" / "acceptance.md"
+    )
+    assert RETIRED_CORE_FINGERPRINT in installed_core.read_text(encoding="utf-8")
     startup_material = [
         coordination_root / target for target in install_experiment.WITHHELD_STARTUP_TARGETS
     ]

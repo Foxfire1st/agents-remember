@@ -163,6 +163,9 @@
       "file": "roles/architect.md",
       "altitude": "sprint",
       "tools": [
+        "read_ar_files",
+        "grepai_search",
+        "cgc_symbol_search",
         "task_doc",
         "dispatch_agent",
         "lifecycle_gate",
@@ -198,6 +201,9 @@
       "file": "roles/orchestrator.md",
       "altitude": "sprint",
       "tools": [
+        "read_ar_files",
+        "grepai_search",
+        "cgc_symbol_search",
         "task_doc",
         "dispatch_agent",
         "lifecycle_gate",
@@ -264,6 +270,8 @@
       "file": "roles/strategist.md",
       "altitude": "sprint",
       "tools": [
+        "grepai_search",
+        "cgc_symbol_search",
         "read_ar_files",
         "task_doc"
       ],
@@ -292,6 +300,9 @@
       "file": "roles/manager.md",
       "altitude": "master",
       "tools": [
+        "read_ar_files",
+        "grepai_search",
+        "cgc_symbol_search",
         "task_doc",
         "dispatch_agent",
         "lifecycle_gate",
@@ -336,6 +347,8 @@
       "file": "roles/worker.md",
       "altitude": "leaf",
       "tools": [
+        "grepai_search",
+        "cgc_symbol_search",
         "read_ar_files",
         "message_parent"
       ],
@@ -395,6 +408,8 @@
       "file": "roles/reviewer.md",
       "altitude": "leaf | master | sprint, by seam",
       "tools": [
+        "grepai_search",
+        "cgc_symbol_search",
         "read_ar_files",
         "message_parent"
       ],
@@ -488,8 +503,7 @@
     "routing_condition": "ambient-launcher",
     "instruction_source": "core/launcher.md",
     "core": [
-      "launcher",
-      "authority"
+      "launcher"
     ],
     "operations": [
       "orientation",
@@ -528,7 +542,6 @@
     }
   },
   "composition_order": [
-    "core",
     "role",
     "operation",
     "repository-specialization"

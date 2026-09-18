@@ -81,9 +81,13 @@ def test_carrier_carries_the_compiled_capsule_verbatim(world: FixtureWorld) -> N
     assert carrier.identity.role == "worker"
     assert carrier.identity.operation == "implementation"
     assert carrier.identity.task_reference.startswith(f"{REPOSITORY}/")
-    # The corpus this fixture authored, matched by content rather than by position.
-    assert "AUTHORITY RULE authored by the L7 fixture." in carrier.instruction_text
+    # The corpus this fixture authored, matched by content rather than by position. Only the two
+    # blocks a role capsule composes are carried; the shared core block the fixture also writes is
+    # asserted absent, because a capsule that still shipped it would be the defect this case is
+    # here to see (developer ruling 2026-09-17).
     assert "WORKER SEAT RULE authored by the L7 fixture." in carrier.instruction_text
+    assert "IMPLEMENTATION RULE authored by the L7 fixture." in carrier.instruction_text
+    assert "AUTHORITY RULE authored by the L7 fixture." not in carrier.instruction_text
 
 
 def test_carrier_identities_and_digests_match_the_compilation_manifest(world: FixtureWorld) -> None:

@@ -141,12 +141,14 @@ reviewed requirement:
   outcome as the observed one.
 - **A surface that refuses for a reason the developer must decide** stops the operation at that step
   and states the decision required.
-- **A capability that does not exist yet is named as absent.** One is known today and must be stated
-  rather than papered over: the capsule that is this agent's only instruction source is not yet
-  delivered to a launch, so a session opened with this role reaches the runtime and then waits with no
-  instructions. The call itself works — the role is admitted by name as a taskless seat, and the
-  session opens — so say precisely which half is missing instead of describing the whole route as
-  unexercised or the whole route as done.
+- **A capability that does not exist yet is named as absent.** Say precisely which half of a route is
+  unexercised instead of describing the whole route as done or the whole route as missing. This agent's
+  own instruction channel is the worked case, and the note that the capsule had not yet reached a launch
+  is **superseded**: the instructed-session route is wired end to end and covered by
+  `mcp/tests/test_capsule_launch_wiring.py` (`test_a_free_agent_reads_its_compiled_capsule_out_of_its_own_first_prompt`),
+  which opens this role through the dashboard's own route and reads the compiled capsule back out of the
+  session's first prompt; a launch that cannot compile a capsule refuses by name rather than starting a
+  blind session. State the current fact, and report any surface that still states the old one.
 - **A contradiction between this agent's instruction and the system it is setting up** is reported as a
   finding about the instruction, not worked around silently.
 

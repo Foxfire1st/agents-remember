@@ -38,6 +38,7 @@ from agents_remember.models.role_capsules.types import (
     SELECTION_REPOSITORY_SPECIALIZATION,
     SELECTION_ROLE_BLOCK,
     CapsuleBinding,
+    CapsuleCompositionRoot,
     CapsuleLauncherSeat,
     CapsuleOperation,
     CapsuleRole,
@@ -49,6 +50,7 @@ from agents_remember.models.role_capsules.vocabulary import (
     CAPSULE_ROLES,
     is_capsule_operation,
     is_capsule_role,
+    role_composition_order,
 )
 
 
@@ -58,6 +60,11 @@ class CapsuleScope:
 
     Constructed only by :func:`select_scope`, so a caller cannot assemble a scope
     that skipped the vocabulary and applicability checks.
+
+    ``core_blocks`` is populated for the ambient launcher only. A dispatched role
+    seat composes **none**: its instruction unit set is exactly the role block and
+    the operation block it runs. See
+    :data:`~agents_remember.models.role_capsules.vocabulary.CAPSULE_ROLE_COMPOSITION_ORDER`.
     """
 
     seat_kind: CapsuleSeatKind
@@ -66,6 +73,12 @@ class CapsuleScope:
     operation: CapsuleOperation
     core_blocks: tuple[str, ...]
     allowed_operations: tuple[CapsuleOperation, ...]
+
+    @property
+    def composition_order(self) -> tuple[CapsuleCompositionRoot, ...]:
+        """The composition roots this scope actually composes, in composition order."""
+
+        return role_composition_order(self.seat_kind)
 
     def declared(self, binding: CapsuleBinding) -> tuple[CapsuleDeclaredInstruction, ...]:
         """The locked plan: exactly the identities this scope must resolve.
@@ -141,7 +154,12 @@ def _role_scope(
         role=role,
         role_entry=entry,
         operation=operation,
-        core_blocks=entry.core,
+        # A dispatched role seat composes **no shared core block** (developer ruling
+        # 2026-09-17). The manifest still declares which core blocks the corpus holds
+        # for this role, and that declaration is what a reader consults to find the
+        # doctrine; it is not what the seat is sent. The role file states every
+        # obligation that binds the seat, so nothing is lost by not prepending them.
+        core_blocks=(),
         allowed_operations=entry.operations,
     )
 

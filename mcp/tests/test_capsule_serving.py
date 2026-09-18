@@ -613,21 +613,24 @@ def test_the_capsule_carries_routed_blocks_with_the_bytes_this_fixture_wrote(wor
     capsule = result.capsule
 
     composed = {unit.block.source_path: unit.block for unit in capsule.instruction_units}
-    expected_paths = {
-        *(f"core/{block}.md" for block in CORE_BLOCKS),
-        "roles/worker.md",
-        "operations/implementation.md",
-    }
+    # A dispatched role seat's capsule is exactly its own two blocks. The fixture still WRITES and
+    # DECLARES the shared core sources, so their absence here is a composition fact rather than a
+    # fixture that stopped producing them (developer ruling 2026-09-17). The precondition is read
+    # from the fixture's own manifest, not asserted about a module constant: `assert CORE_BLOCKS`
+    # would be a statement about a literal in this file and could never fail.
+    manifest = json.loads((world.corpus / "composition-manifest.json").read_text(encoding="utf-8"))
+    assert set(manifest["roles"]["worker"]["core"]) == set(CORE_BLOCKS)
+    for core_block in CORE_BLOCKS:
+        assert (world.corpus / f"core/{core_block}.md").read_text(encoding="utf-8").strip()
+    expected_paths = {"roles/worker.md", "operations/implementation.md"}
     assert set(composed) == expected_paths
     # Both sides are independent: the served content against the file this fixture wrote.
     for relative, block in composed.items():
         on_disk = (world.corpus / relative).read_bytes()
         assert block.content.encode("utf-8") == on_disk
         assert block.revision == _sha256_bytes(on_disk)
-        assert block.content_digest == _sha256_bytes(block.content.encode("utf-8"))
+        assert block.content_digest == block.revision
     assert [unit.block.composition_root for unit in capsule.instruction_units] == [
-        "core",
-        "core",
         "role",
         "operation",
     ]

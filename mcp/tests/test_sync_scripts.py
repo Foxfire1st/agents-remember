@@ -135,10 +135,13 @@ def normalize(text: str) -> str:
 
     The shipped text wraps and emphasizes these clauses, and one of them spans a line break, so a raw
     substring search reports a present clause as missing. Emphasis and link syntax are removed and
-    whitespace is collapsed before matching.
+    whitespace is collapsed before matching. Case is folded as well, for the reason
+    `test_lifecycle_turn_truth_doctrine.normalize` records: the same clause is capitalized where a
+    surface begins its sentence and lower-cased mid-sentence, so a case-sensitive reader makes the
+    projected wording depend on typography.
     """
 
-    return " ".join(re.sub(r"[*`]", "", _MARKDOWN_LINK.sub(r"\1", text)).split())
+    return " ".join(re.sub(r"[*`]", "", _MARKDOWN_LINK.sub(r"\1", text)).split()).casefold()
 
 
 def repo_relative(path: Path) -> str:

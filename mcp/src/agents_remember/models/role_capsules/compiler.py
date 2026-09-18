@@ -61,7 +61,6 @@ from agents_remember.models.role_capsules.sources import (
 from agents_remember.models.role_capsules.statuses import STATUS_TASK_CONTEXT_DIGEST_MISMATCH
 from agents_remember.models.role_capsules.tools import narrow_tool_requests
 from agents_remember.models.role_capsules.types import (
-    CAPSULE_COMPOSITION_ORDER,
     SUPERSEDE_DUPLICATE_IDENTITY,
     CapsuleBinding,
     CapsuleBlockIdentity,
@@ -407,7 +406,7 @@ def compiled_manifest(
         work_branch=binding.admitted.work_branch,
         requirements=binding.admitted.requirement_identities,
         granted_tools=tuple(sorted(binding.admitted.tool_policy.granted)),
-        composition_order=CAPSULE_COMPOSITION_ORDER,
+        composition_order=scope.composition_order,
         instruction_identities=identities,
         sources=records,
         semantic_digest=digest,

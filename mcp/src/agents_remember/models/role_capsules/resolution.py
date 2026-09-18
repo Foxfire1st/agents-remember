@@ -77,7 +77,12 @@ class ResolvedInstruction:
         return _TIER[self.composition_root]
 
     def block(self) -> CapsuleInstructionBlock:
-        """The composed instruction block this resolution produces."""
+        """The composed instruction block this resolution produces.
+
+        ``content`` is the source's **instruction** text — its frontmatter removed —
+        while ``content_digest`` stays the digest of the whole file, so the delivered
+        bytes and the addressed bytes are each what they claim to be.
+        """
 
         return CapsuleInstructionBlock(
             identity=self.identity,
@@ -86,7 +91,7 @@ class ResolvedInstruction:
             source_path=self.source.path,
             revision=self.source.revision,
             content_digest=self.source.revision,
-            content=self.source.text(),
+            content=self.source.instruction_text(),
         )
 
 

@@ -18,7 +18,6 @@ own fixture so a failure names one boundary instead of a whole corpus.
 from __future__ import annotations
 
 import json
-import re
 import shutil
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -44,6 +43,7 @@ from agents_remember.models.role_capsules.sources import (
     CapsuleSource,
     instruction_identity,
     skills_declared_identity,
+    strip_frontmatter,
 )
 from agents_remember.models.role_capsules.statuses import CAPSULE_STATUSES
 from agents_remember.models.role_capsules.types import (
@@ -61,6 +61,7 @@ from agents_remember.models.role_capsules.vocabulary import (
     CAPSULE_COMPOSITION_ORDER,
     CAPSULE_LAUNCHER_MODE,
     CAPSULE_OPERATIONS,
+    CAPSULE_ROLE_COMPOSITION_ORDER,
     CAPSULE_ROLES,
     CapsuleOperation,
     CapsuleRole,
@@ -359,9 +360,14 @@ def test_an_unreadable_source_returns_a_refusal_rather_than_raising(
     # seed is written into a disposable copy of the shipped tree and the real application boundary
     # is driven over it. Before the repair this call raised an uncaught ``ValueError`` out of
     # ``CapsuleSource.text`` instead of returning anything, which is what makes the seed failable.
+    #
+    # The seed empties the WORKER ROLE BLOCK, not a core block: since 260915-CAPS-L22 a capsule
+    # composes no shared core, so an emptied core source is admitted and inert by design. The
+    # property under test — an emptied *required* block refuses rather than composing nothing — is
+    # unchanged; only the source that is required changed.
     emptied_root = corpus_tree.parent / "shipped-copy" / "l-01-agent-lifecycles"
     shutil.copytree(LIFECYCLE_ROOT, emptied_root)
-    emptied_path = _shipped_parsed().core["acceptance"].source
+    emptied_path = _shipped_parsed().roles["worker"].file
     target = emptied_root / emptied_path
     assert target.read_text(encoding="utf-8").strip(), (
         "the seed must empty a source that really carried content"
@@ -437,118 +443,78 @@ def _shipped_binding(role: str, operation: str) -> CapsuleBinding:
     )
 
 
-# The role files declare their shared inputs on their own `**Inherits:**` line. That is a
-# genuinely independent source for the expected routing: the manifest does not feed it, so a
-# routing block dropped from the manifest moves only one side of the comparison. Deriving the
-# expectation from the manifest instead made the case tautological — the round-1 seed that
-# dropped `core:acceptance` from architect's routing left every case green.
-ROLE_FILE_ROOT = LIFECYCLE_ROOT / "roles"
-INHERITS_TOKEN = re.compile(r"`((?:core|operations)/[a-z0-9._-]+\.md)`")
-
-#: The one place the manifest's operation vocabulary and the corpus's file names differ:
-#: the operation id is `authorized-closeout`, the block is `operations/closeout.md`.
+# The retired independent side of the routing comparison was the role files' own `**Inherits:**`
+# line. A capsule no longer composes shared core at all, so the declaration that carried it is gone
+# by ruling, and the routing it was compared against is now the whole of what a capsule contains.
+# The replacement keeps the property that motivated the case — a caller-controlled string can never
+# acquire a role or a neighbouring operation — and asserts it against the shipped corpus rather
+# than against a fixture, over the full role x operation product.
 OPERATION_BLOCK_ALIASES = {"authorized-closeout": "closeout"}
 
 
-def declared_inherits(role: str) -> tuple[set[str], set[str]]:
-    """The core blocks and operations one role file declares on its own `Inherits:` line."""
+def test_every_operation_a_role_declares_resolves_to_one_corpus_block() -> None:
+    """The manifest's role → operation routing names real, distinct corpus blocks.
 
-    text = (ROLE_FILE_ROOT / f"{role}.md").read_text(encoding="utf-8")
-    start = text.index("**Inherits:**")
-    block = text[start : text.index("\n\n", start)]
-    tokens = INHERITS_TOKEN.findall(block)
-    core = {token.split("/", 1)[1][: -len(".md")] for token in tokens if token.startswith("core/")}
-    operations = {
-        token.split("/", 1)[1][: -len(".md")] for token in tokens if token.startswith("operations/")
-    }
-    return core, operations
-
-
-def test_every_role_file_declares_the_core_blocks_and_operations_it_inherits() -> None:
-    """The corpus's own statement of each role's inputs, read without the manifest.
-
-    Asserted first and separately so a failure names the *declaration* rather than a
-    compilation: this is the independent side of the routing comparison below.
+    The two halves are read from independent places: the operation ids and their sources come
+    from the manifest's ``operations`` plane, and each source's existence and readability come
+    from the tree. A role pointed at an operation with no block, or two operation ids sharing one
+    file (so the "which operation is this seat running" answer would be ambiguous), is reported.
     """
 
-    declared = {role: declared_inherits(role) for role in SHIPPED_ROLES}
+    manifest = json.loads((LIFECYCLE_ROOT / MANIFEST_RELATIVE).read_text(encoding="utf-8"))
+    operations = manifest["operations"]
+    sources = {key: entry["source"] for key, entry in operations.items()}
 
-    for role, (core, operations) in declared.items():
-        assert core, f"{role} declares no core block on its Inherits: line"
-        assert operations, f"{role} declares no operation on its Inherits: line"
+    assert len(set(sources.values())) == len(sources), "two operations share one corpus block"
+    for key, source in sources.items():
+        path = LIFECYCLE_ROOT / source
+        assert path.is_file(), f"operation {key!r} names a missing block: {source}"
+        assert path.read_text(encoding="utf-8").strip(), f"operation {key!r} block is empty"
 
-    assert declared["architect"][0] == {
-        "authority",
-        "invariants",
-        "lifecycle-frame",
-        "loop",
-        "acceptance",
-    }
-    assert declared["worker"][1] == {"orientation", "implementation", "recovery"}
-    assert declared["architect"][1] == {
-        "orientation",
-        "planning",
-        "coordination",
-        "review",
-        "recovery",
-    }
-    assert declared["orchestrator"][1] == {
-        "orientation",
-        "planning",
-        "coordination",
-        "review",
-        "closeout",
-        "recovery",
-    }
+    for role, entry in manifest["roles"].items():
+        declared = entry["operations"]
+        assert declared, f"{role} declares no operation"
+        assert len(set(declared)) == len(declared), f"{role} declares a duplicate operation"
+        assert set(declared) <= set(operations), f"{role} names an unknown operation"
+        assert set(declared) == set(operations_by_role(operations, role)), (
+            f"{role}: the operations plane disagrees with the role's own routing"
+        )
 
 
-def test_every_shipped_role_compiles_to_the_routing_its_own_role_file_declares() -> None:
-    """The composed routing is checked against the role FILE, not against the manifest.
+def operations_by_role(operations: dict, role: str) -> list[str]:
+    """The operations whose ``applies_to_roles`` names ``role``, in the manifest's order."""
 
-    The expected set comes from `roles/<role>.md`'s `Inherits:` line and the composed set
-    from the compiler. Both the manifest's declared routing and the compilation are
-    compared to that independent statement, so either a manifest routing loss or a
-    composition defect moves exactly one side and fails here — for all nine roles.
+    return [key for key, entry in operations.items() if role in entry["applies_to_roles"]]
 
-    What this case does **not** claim: it checks the two independently-declared sets, so a
-    change made consistently to both the manifest and the role file is a corpus edit, not a
-    regression, and is correctly invisible.
+
+@pytest.mark.parametrize("role", SHIPPED_ROLES)
+def test_a_role_capsule_composes_only_operations_the_role_declares(role: str) -> None:
+    """The compiled capsule's operation is the one admitted, never a neighbouring block.
+
+    The property the retired declaration-based case protected, kept and strengthened: the
+    expected identities come from the manifest's own declared routing for the role, and the
+    composed identities come from the compiler, so a manifest routing loss or a composition
+    defect moves exactly one side for every role.
     """
 
     parsed = _shipped_parsed()
+    declared = [*parsed.roles[role].operations]
+    assert declared
 
-    for role in SHIPPED_ROLES:
-        declared_core, declared_operations = declared_inherits(role)
-        expected_operations = {
-            OPERATION_BLOCK_ALIASES.get(name, name) for name in parsed.roles[role].operations
-        }
-        manifest_core = set(parsed.roles[role].core)
-
-        assert manifest_core == declared_core, (
-            f"{role}: the manifest routes {sorted(manifest_core)} but the role file "
-            f"declares {sorted(declared_core)}"
+    for operation in declared:
+        composed = compile_admitted_capsule(
+            _shipped_binding(role, operation), _shipped_request(role, operation)
         )
-        assert expected_operations == declared_operations, (
-            f"{role}: the manifest routes operations {sorted(expected_operations)} but the "
-            f"role file declares {sorted(declared_operations)}"
-        )
-
-        for operation in parsed.roles[role].operations:
-            composed = compile_admitted_capsule(
-                _shipped_binding(role, operation), _shipped_request(role, operation)
-            )
-            assert composed.ok, f"{role}/{operation}: {composed.render_explanation()}"
-            assert composed.result is not None
-            identities = {block.identity for block in composed.result.capsule.instructions}
-            assert identities == {
-                *(f"core:{name}" for name in declared_core),
-                f"role:{role}",
-                f"operation:{operation}",
-            }, f"{role}/{operation}"
-            assert not any(
-                identity.startswith("operation:") and identity != f"operation:{operation}"
-                for identity in identities
-            ), f"{role}/{operation} composed a foreign operation block"
+        assert composed.ok, f"{role}/{operation}: {composed.render_explanation()}"
+        assert composed.result is not None
+        identities = [block.identity for block in composed.result.capsule.instructions]
+        assert identities == [f"role:{role}", f"operation:{operation}"], f"{role}/{operation}"
+        foreign = [
+            identity
+            for identity in identities
+            if identity.startswith("operation:") and identity != f"operation:{operation}"
+        ]
+        assert not foreign, f"{role}/{operation} composed a foreign operation block: {foreign}"
 
 
 def test_every_shipped_role_compiles_deterministically_under_every_declared_operation() -> None:
@@ -577,10 +543,11 @@ def test_every_shipped_role_compiles_deterministically_under_every_declared_oper
 def test_a_worker_capsule_composes_only_its_own_role_block() -> None:
     """The delivered result is self-contained: no sibling role BLOCK is composed in.
 
-    A sibling role's file may legitimately be *named* by shared or worker text (the
-    escalation ladder names the owning seat). What must not happen is another role's
-    instruction BODY being composed into this capsule, which is what the block
-    identities prove.
+    A sibling role's file may legitimately be *named* by this seat's text (an escalation
+    target, a handoff receiver, the seat that owns a ruling). What must not happen is
+    another role's instruction BODY being composed into this capsule, which is what the
+    block identities prove — and since a capsule is exactly ``{role, operation}``, the
+    identity list is now also the whole of what it carries.
     """
 
     outcome = compile_admitted_capsule(
@@ -590,14 +557,7 @@ def test_a_worker_capsule_composes_only_its_own_role_block() -> None:
     assert outcome.ok
     assert outcome.result is not None
     identities = [block.identity for block in outcome.result.capsule.instructions]
-    assert identities == [
-        "core:acceptance",
-        "core:authority",
-        "core:invariants",
-        "core:lifecycle-frame",
-        "role:worker",
-        "operation:implementation",
-    ]
+    assert identities == ["role:worker", "operation:implementation"]
     role_blocks = [
         block for block in outcome.result.capsule.instructions if block.composition_root == "role"
     ]
@@ -607,7 +567,7 @@ def test_a_worker_capsule_composes_only_its_own_role_block() -> None:
         if sibling == "worker":
             continue
         sibling_text = (LIFECYCLE_ROOT / "roles" / f"{sibling}.md").read_text(encoding="utf-8")
-        body = sibling_text.split("\n", 1)[1][:200]
+        body = strip_frontmatter(sibling_text).split("\n", 1)[1][:200]
         assert body not in rendered
 
 
@@ -729,34 +689,139 @@ def test_the_skill_revision_follows_the_admitted_skill_bytes() -> None:
 
 
 @pytest.mark.parametrize("role", SHIPPED_ROLES)
-def test_every_shipped_role_composes_exactly_its_manifest_declared_routing(role: str) -> None:
-    """The composed identity list is asserted against the manifest's declared set.
+def test_every_shipped_role_composes_exactly_its_declared_unit_set(role: str) -> None:
+    """A role capsule's unit set is exactly ``{role, operation}`` and nothing else.
 
-    This case does NOT derive its expectation from the compiled result: the expected
-    set is read from the manifest's routing metadata and compared to what the compiler
-    composed. Dropping a block from a role's routing therefore fails here, for every
-    role, which the compile-twice case cannot see because it builds its own request.
+    The expected side is derived from the shipped manifest's own declared operations and
+    from :data:`CAPSULE_ROLE_COMPOSITION_ORDER`, not from the compiled result, so a block
+    that leaked into (or out of) the composition moves exactly one side and fails here for
+    the affected role.
+
+    The developer ruling this case enforces (2026-09-17): *"The compiler stops prepending
+    the four ``Core —`` blocks. A capsule's unit set is exactly ``{role, operation,
+    task}``"*. ``task`` is the capsule's separate task-context channel rather than an
+    instruction block, so the **instruction** unit set is the two identities asserted
+    here, and the task channel is asserted separately.
     """
 
     parsed = _shipped_parsed()
     entry = parsed.roles[role]
     operation = entry.operations[0]
 
-    expected = sorted(
-        [
-            *(f"core:{name}" for name in entry.core),
-            f"role:{role}",
-            f"operation:{operation}",
-        ]
-    )
+    assert CAPSULE_ROLE_COMPOSITION_ORDER == ("role", "operation")
+    expected = sorted([f"role:{role}", f"operation:{operation}"])
     outcome = compile_admitted_capsule(
         _shipped_binding(role, operation), _shipped_request(role, operation)
     )
 
     assert outcome.ok, outcome.render_explanation()
     assert outcome.result is not None
-    composed = sorted(block.identity for block in outcome.result.capsule.instructions)
+    capsule = outcome.result.capsule
+    composed = sorted(block.identity for block in capsule.instructions)
     assert composed == expected
+    assert not [block for block in capsule.instructions if block.composition_root == "core"], (
+        f"{role}/{operation}: a shared Core block must not enter a role capsule"
+    )
+    assert all(block.content.strip() for block in capsule.instructions)
+    assert outcome.result.manifest.composition_order == CAPSULE_ROLE_COMPOSITION_ORDER
+
+
+@pytest.mark.parametrize("role", SHIPPED_ROLES)
+def test_no_core_unit_can_enter_any_shipped_role_capsule(role: str) -> None:
+    """The refusal is per *declared operation*, not only the first one this role carries.
+
+    The ruling is a property of every capsule the corpus can compile, so it is asserted over
+    the full ``role x operation`` product rather than sampled. The expected unit set is built
+    from the manifest's own operation list for the role and the frozen role composition order.
+    """
+
+    parsed = _shipped_parsed()
+    entry = parsed.roles[role]
+    assert entry.operations, f"{role} declares no operation"
+
+    for operation in entry.operations:
+        outcome = compile_admitted_capsule(
+            _shipped_binding(role, operation), _shipped_request(role, operation)
+        )
+        assert outcome.ok, f"{role}/{operation}: {outcome.render_explanation()}"
+        assert outcome.result is not None
+        identities = [block.identity for block in outcome.result.capsule.instructions]
+        assert identities == [f"role:{role}", f"operation:{operation}"], f"{role}/{operation}"
+        assert not any(identity.startswith("core:") for identity in identities), (
+            f"{role}/{operation} composed a shared Core block"
+        )
+
+
+def test_an_admitted_core_source_is_inert_for_a_role_capsule() -> None:
+    """Core bytes may still be *admitted*; they must not be *composed*.
+
+    The admission request still carries the manifest's declared core sources — that is a fact
+    about the corpus, and refusing to admit them would be a different change. What the ruling
+    fixes is the composition: the delivered capsule must be byte-identical to one compiled
+    without any core source at all, so a reader can see that the shared material contributes
+    nothing to the instruction stream.
+    """
+
+    request = _shipped_request("worker", "implementation")
+    assert request.core, "the corpus still declares core sources; this case needs them admitted"
+
+    with_core = compile_admitted_capsule(_shipped_binding("worker", "implementation"), request)
+    without_core = compile_admitted_capsule(
+        _shipped_binding("worker", "implementation"),
+        _shipped_request("worker", "implementation", core=()),
+    )
+
+    assert with_core.ok and without_core.ok
+    assert with_core.result is not None and without_core.result is not None
+    assert with_core.result.render_instructions() == without_core.result.render_instructions(), (
+        "an admitted core source changed the delivered instructions"
+    )
+    assert with_core.semantic_digest == without_core.semantic_digest
+
+
+def test_a_role_capsule_carries_no_frontmatter_from_any_composed_source() -> None:
+    """A delivered block is instruction text: the skill registry's frontmatter is not sent.
+
+    Every canonical source opens with a ``---`` YAML block declaring the skill's name and
+    description. It is catalogue metadata, not an instruction, so the compiler strips it from
+    the delivered content while the block's ``revision`` keeps addressing the whole file.
+    """
+
+    outcome = compile_admitted_capsule(
+        _shipped_binding("architect", "planning"), _shipped_request("architect", "planning")
+    )
+
+    assert outcome.ok, outcome.render_explanation()
+    assert outcome.result is not None
+    rendered = outcome.result.render_instructions()
+    assert not rendered.startswith("---"), "the capsule opens with a frontmatter block"
+    assert "l-01-agent-lifecycles-role-" not in rendered, (
+        "the skill registry's own name reached the instruction stream"
+    )
+    for block in outcome.result.capsule.instructions:
+        assert block.content.lstrip().startswith("#"), (
+            f"{block.identity} does not open on its own heading after the frontmatter strip"
+        )
+        without_frontmatter = strip_frontmatter(
+            (LIFECYCLE_ROOT / block.source_path).read_text(encoding="utf-8")
+        )
+        assert block.content == without_frontmatter
+        assert block.revision == compute_content_digest(
+            (LIFECYCLE_ROOT / block.source_path).read_bytes()
+        ), "the revision must still address the whole file"
+
+
+def test_the_frontmatter_strip_only_removes_a_closed_leading_block() -> None:
+    """The strip is bounded: an unterminated or absent block leaves the text alone.
+
+    Guessing where a malformed block ends would delete instruction text, so the reader is
+    asserted on the shapes it must refuse to touch, not only on the one it removes.
+    """
+
+    assert strip_frontmatter("---\nname: x\n---\n\n# Body\n") == "# Body\n"
+    assert strip_frontmatter("# Body\n\n---\n\nmore\n") == "# Body\n\n---\n\nmore\n"
+    assert strip_frontmatter("---\nname: x\n\n# Body\n") == "---\nname: x\n\n# Body\n"
+    assert strip_frontmatter("") == ""
 
 
 def test_the_launcher_seat_compiles_from_the_shipped_manifest() -> None:
@@ -1141,7 +1206,12 @@ def test_the_specializations_field_must_be_an_array_when_present() -> None:
 
 
 def test_an_override_whose_replacement_file_is_absent_is_refused() -> None:
-    """The second unknown-supersession branch: no admitted source carries the winner."""
+    """The second unknown-supersession branch: no admitted source carries the winner.
+
+    The superseded identity is the seat's own **role** block rather than a shared core block:
+    a role capsule composes no core, so ``core:authority`` is now not selected for this
+    capsule and the case would exercise the first branch instead of the second.
+    """
 
     parsed = _shipped_parsed()
     entry = parsed.roles["worker"]
@@ -1156,7 +1226,7 @@ def test_an_override_whose_replacement_file_is_absent_is_refused() -> None:
         ),
         overrides=(
             CapsuleOverride(
-                superseded_identity="core:authority",
+                superseded_identity="role:worker",
                 superseding_identity="specialization:absent",
                 authority="developer-ruling-2026-09-16",
                 rationale="names a replacement nothing carries",

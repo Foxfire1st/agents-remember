@@ -390,15 +390,25 @@ def test_identical_input_compiles_to_identical_ordered_content_and_digest() -> N
     assert first.capsule.instruction_units == second.capsule.instruction_units
 
 
-def test_instruction_order_is_shared_core_then_role_then_operation() -> None:
+def test_instruction_order_is_role_then_operation() -> None:
+    """A role capsule is exactly two blocks, in one order: the seat, then its operation.
+
+    The shared ``Core —`` blocks the fixture still declares are asserted **absent**, so this
+    case fails both when the order is violated and when a core block leaks back into the
+    composition (developer ruling 2026-09-17).
+    """
+
     result = compile_worker()
 
     roots = [block.composition_root for block in result.capsule.instructions]
-    expected_core = sorted(FIXTURE_ROLE_CORE["worker"])
-    assert roots == ["core"] * len(expected_core) + ["role", "operation"]
-    assert [block.identity for block in result.capsule.instructions][: len(expected_core)] == [
-        instruction_identity("core", name) for name in expected_core
+    assert roots == ["role", "operation"]
+    assert [block.identity for block in result.capsule.instructions] == [
+        instruction_identity("role", "worker"),
+        instruction_identity("operation", "implementation"),
     ]
+    assert FIXTURE_ROLE_CORE["worker"], (
+        "the fixture must still declare core blocks, or this case proves nothing about them"
+    )
 
 
 def test_a_declared_but_unselected_specialization_changes_diagnostics_not_identity() -> None:
@@ -485,15 +495,27 @@ def test_changing_an_applicable_operation_block_changes_that_capsule() -> None:
     assert mutated.render_instructions() != baseline.render_instructions()
 
 
-def test_a_shared_core_change_reaches_the_capsule_that_composes_it() -> None:
-    baseline = compile_worker()
-    mutated = compile_worker(
-        sources=replaced(all_sources(), "core:authority", content="# authority, revised\n")
-    )
+def test_a_shared_core_change_does_not_reach_a_role_capsule() -> None:
+    """An admitted shared core block is inert for a dispatched role seat.
 
-    assert mutated.semantic_digest != baseline.semantic_digest
-    authority = next(b for b in mutated.capsule.instructions if b.identity == "core:authority")
-    assert authority.content == "# authority, revised\n"
+    This is the retired case's expectation, inverted by the developer's ruling of 2026-09-17:
+    shared core used to be composed, so editing it moved the capsule; now it is admitted and
+    composed by nothing, so the capsule must be byte-identical. Asserting only the *absence* of
+    a ``core:`` identity would also pass a compiler that silently dropped the source, so this
+    case edits the source and asserts the delivered bytes did not move.
+    """
+
+    baseline = compile_worker()
+    edited = replaced(all_sources(), "core:authority", content="# authority, revised\n")
+    mutated = compile_worker(sources=edited)
+
+    assert mutated.semantic_digest == baseline.semantic_digest
+    assert mutated.render_instructions() == baseline.render_instructions()
+    # The edited source was genuinely admitted: the compilation succeeded over a set that carries
+    # different core bytes, so "inert" is a composition fact and not a missing source.
+    revised = next(source for source in edited if source.identity == "core:authority")
+    assert revised.content == b"# authority, revised\n"
+    assert not [b for b in mutated.capsule.instructions if b.composition_root == "core"]
 
 
 # --------------------------------------------------------------------------------------
@@ -559,13 +581,29 @@ def test_launcher_is_refused_an_operation_no_role_inherits_to_it() -> None:
 
 
 def test_missing_mandatory_material_is_refused_rather_than_omitted() -> None:
+    """The required blocks are now the seat's own two, and dropping either still refuses.
+
+    The old seed removed a shared core block. That block is no longer required, so the seed
+    moved to a block that is: the case keeps its property — a required obligation is never
+    dropped to fit a size target — and now measures it against the composition a capsule
+    actually has.
+    """
+
     error = failure(
-        sources=tuple(source for source in all_sources() if source.identity != "core:acceptance")
+        sources=tuple(source for source in all_sources() if source.identity != "role:worker")
     )
 
     assert error.status == "missing-required-instruction"
-    assert "core:acceptance" in error.detail
+    assert "role:worker" in error.detail
     assert "never dropped to fit a size target" in error.next_action
+
+    operation_error = failure(
+        sources=tuple(
+            source for source in all_sources() if source.identity != "operation:implementation"
+        )
+    )
+    assert operation_error.status == "missing-required-instruction"
+    assert "operation:implementation" in operation_error.detail
 
 
 def test_a_source_the_manifest_does_not_declare_is_refused() -> None:

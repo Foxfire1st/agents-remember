@@ -119,6 +119,7 @@ COMPLETION_TRUTH_ROSTER = (
     "skills/l-01-agent-lifecycles/roles/curator.md",
     "skills/l-01-agent-lifecycles/roles/designer.md",
     "skills/l-01-agent-lifecycles/roles/manager.md",
+    "skills/l-01-agent-lifecycles/roles/orchestrator.md",
     "skills/l-01-agent-lifecycles/roles/reviewer.md",
     "skills/l-01-agent-lifecycles/roles/strategist.md",
     "skills/l-01-agent-lifecycles/roles/system-specialist.md",
@@ -148,9 +149,17 @@ MECHANICAL_READING = re.compile(
 
 
 def normalize(text: str) -> str:
-    """Strip markdown emphasis and collapse whitespace so a clause is matched by its words."""
+    """Strip markdown emphasis, collapse whitespace and fold case, so a clause reads by its words.
 
-    return " ".join(re.sub(r"[*`]", "", text).split())
+    Case folding was added at 260915-CAPS-L22, and the reason is worth stating: the same sentence is
+    capitalized where a surface begins it and lower-cased where it sits mid-sentence, so a
+    case-sensitive reader of an excerpt made the *wording* of the roster depend on where in a
+    paragraph each role file happens to state it. That is a property of typography, not of the
+    boundary the roster defends, and it silently broke four surfaces when their handoff paragraphs
+    were rewritten. Folding case makes the roster read clauses rather than capital letters.
+    """
+
+    return " ".join(re.sub(r"[*`]", "", text).split()).casefold()
 
 
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")
@@ -487,6 +496,10 @@ OWED_STATEMENTS: dict[str, tuple[str, ...]] = {
         "nudges, rejects, replaces, or escalates",
         "needs no second model-authored completion post",
     ),
+    "skills/l-01-agent-lifecycles/roles/orchestrator.md": (
+        "Terminal/finalizer truth then attests only that this turn ended",
+        "wakes the architect, who validates the super-exit packet",
+    ),
     "skills/l-01-agent-lifecycles/roles/manager.md": (
         "never opens or evaluates the artifact",
         "only that the provider turn ended",
@@ -511,11 +524,11 @@ OWED_STATEMENTS: dict[str, tuple[str, ...]] = {
         "wakes the manager, who validates it",
     ),
     "skills/l-01-agent-lifecycles/roles/system-specialist.md": (
-        "terminal/finalizer state then attests only that this turn ended",
+        "Terminal/finalizer state then attests only that this turn ended",
         "wakes the orchestrator, which validates the report",
     ),
     "skills/l-01-agent-lifecycles/roles/strategist.md": (
-        "Terminal/finalizer truth attests only that this turn ended",
+        "Terminal/finalizer truth then attests only that this turn ended",
         "wakes the architect, who validates the artifact",
     ),
     "skills/l-01-agent-lifecycles/templates/master-handover-packet.md": (
@@ -668,7 +681,9 @@ class AgreementAcrossTheRoleSetTests(unittest.TestCase):
         raw = read_surface(relative)
         text = _flatten(raw)
         missing = [
-            statement for statement in OWED_STATEMENTS[relative] if normalize(statement) not in text
+            statement
+            for statement in OWED_STATEMENTS[relative]
+            if normalize(statement) not in text.casefold()
         ]
         self.assertEqual(
             missing,
