@@ -33,6 +33,7 @@ from agents_remember.serving.launch_capsule import (
 )
 from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.projector import ProjectionReplay, Projector
+from agents_remember.serving.review import KnowledgeReviewPort
 from agents_remember.serving.served_state import served_state_tail
 from agents_remember.serving.terminal import TerminalHost, TerminalSessionSpec
 from agents_remember.serving.terminal_liveness import (
@@ -452,6 +453,17 @@ class ServingCollaborators:
     register_inbox_execution_evidence: (
         Callable[[Path, tuple[OperatorInboxEntry, ...]], frozenset[str]] | None
     ) = None
+    knowledge_review: KnowledgeReviewPort | None = None
+    """The application-tier reviewer adapter, supplied by the composition root.
+
+    ``serving`` ranks below ``application`` in ``layers.toml``, so the reviewer route cannot import
+    the read/diff/view operations the adapter composes; it takes this port instead, exactly as the
+    launch route takes the capsule compiler above. Production wires it in
+    :mod:`agents_remember.cli.dashboard`; a process that omits it refuses the review route by name
+    rather than serving an empty surface, because an empty pane and an unreachable adapter are
+    different facts and only one of them is true.
+    """
+
     capsule_launch: LaunchCapsuleResolverPort | None = None
     """The application-tier capsule compiler, supplied by the composition root.
 

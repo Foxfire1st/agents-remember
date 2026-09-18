@@ -26,6 +26,7 @@ import {
 } from "../../data/changeset";
 import { FilesApiError } from "../../data/files";
 import { EmptyStateBackdrop } from "../EmptyStateBackdrop";
+import type { ReviewSelectorKind } from "../../data/review";
 import { ChangeSetPane } from "./ChangeSetPane";
 
 export interface ChangeSetTarget {
@@ -34,6 +35,10 @@ export interface ChangeSetTarget {
   master?: string; // a series master (net base->tip); also QUALIFIES a `leaf`
   leaf?: string; // a single leaf (committed/working), resolved by leaf-id; needs `master` + `mode`
   mode?: LeafMode; // committed = landed delta (base->code_commit), working = uncommitted delta (live)
+  // The Intent Reviewer's own selector: the reviewed subject's recorded identity. Present only on a
+  // review target, and the cockpit's takeover dispatch is what reads it -- the change-set viewer is
+  // never mounted for one, so no change-set request is made from a review.
+  review?: { selectorKind: ReviewSelectorKind; selectorId: string };
 }
 
 const screen = css({

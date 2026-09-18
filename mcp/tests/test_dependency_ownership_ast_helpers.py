@@ -43,11 +43,11 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 15
 LIFECYCLE_ARTIFACT_COUNT = 65
-LIFECYCLE_CATALOG_SHA256 = "633b03ee16893ce3d0e838659d52f2bc609903f5c75b142eb41ca8c4fdabf5e6"
+LIFECYCLE_CATALOG_SHA256 = "68a64207bd808eafd31f8c6b23856302c5ef2d150a604aa8177427e5906a1012"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
 The value this line carries is the **merged** catalog's own digest, re-measured after the master synced onto
-its moved super line: fourteen contracts and sixty-four artifacts, of which the super line contributed nine
+its moved super line: fifteen contracts and sixty-five artifacts, of which the super line contributed nine
 artifacts (the eve adapter/capsule/fixture rows, the two codex app-server recordings and the three
 `scripts/e2e_harness/fresh_user_*` rows) and this master contributed ten (its KS knowledge-substrate support
 modules). Both sides' records below are kept in file order, and the five shared rows whose `consumers` lists
@@ -111,14 +111,14 @@ registered, closing the inventory. This value is the post-registration catalog. 
 artifact delta remains exactly empty, so the freeze still forbids the proof adding or widening
 ``260915-KS``'s L12 leaf then registered its own supporting-record support module --
 ``mcp/tests/evidence_test_support.py``, a new contract and a new artifact -- which was what the
-pre-merge value pinned: fourteen contracts and fifty-five artifacts. ``260915-KS``'s L13 leaf likewise
+pre-merge value pinned: fifteen contracts and fifty-five artifacts. ``260915-KS``'s L13 leaf likewise
 adds no artifact and no contract of its own -- its two authored-effect test modules use the existing
 ``candidate_batch_test_support``, ``knowledge_fixture_test_support`` and ``generation_test_support``
 fixtures rather than a fourth one -- so its catalog change is again a *consumer* change only:
 ``candidate_batch_test_support``'s consumer list gained ``mcp/tests/test_knowledge_change_sets.py``
 and ``mcp/tests/test_knowledge_effect_claims.py``, and ``generation_test_support``'s gained
 ``mcp/tests/test_knowledge_effect_claims.py``. Those consumer registrations are in the merged catalog,
-so this leaf's rows are counted in the fourteen and sixty-four this pin carries. The proof's own
+so this leaf's rows are counted in the fifteen and sixty-five this pin carries. The proof's own
 artifact delta remains exactly empty -- none of these rows is the proof's -- so the freeze still
 forbids the proof adding or widening
 anything, and any further catalog change must re-pin this digest deliberately.
@@ -232,7 +232,7 @@ exactly empty.
 ``mcp/tests/evidence_test_support.py``, a new contract and a new artifact -- which is what that
 line's own value pinned as fourteen contracts and fifty-five artifacts on its own branch. **This is
 the pin in force, and it is the merge's**: at the merge of the two lines the measured merged
-population is **fourteen contracts and sixty-four artifacts** -- this master's ten
+population is **fifteen contracts and sixty-five artifacts** -- this master's ten
 knowledge-substrate rows plus the ias line's nine rows, on top of the forty-five rows both sides
 already carried -- with this master's consumer additions retained alongside the ias line's. Five rows
 both sides touched carry the union of both sides' consumer entries rather than either side's list:

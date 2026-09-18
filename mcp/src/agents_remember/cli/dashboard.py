@@ -73,13 +73,29 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     dashboard process can never serve a role-configured launch with no compiler behind it.
     """
 
+    from agents_remember.application.knowledge_review import (  # noqa: PLC0415 - composition
+        read_knowledge_review,
+        review_records_for,
+    )
     from agents_remember.application.role_capsules.launch import (  # noqa: PLC0415 - composition
         compile_launch_capsule,
     )
 
+    def review_port(request):
+        """Render one review through the application adapter, with its published records.
+
+        The assessment collection is read from the curator authority's own publication for the
+        candidate the request resolves to. A candidate with no published assessment supplies an
+        empty collection, which the surface displays as ``unassessed`` -- the honest state, and the
+        one a reviewer needs to see.
+        """
+
+        return read_knowledge_review(config, request, review_records_for(config, request))
+
     return replace(
         EXECUTION_REGISTRATION_COLLABORATORS,
         capsule_launch=partial(compile_launch_capsule, config),
+        knowledge_review=review_port,
     )
 
 
