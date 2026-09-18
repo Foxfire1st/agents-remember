@@ -16,6 +16,11 @@ from typing import Any
 
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import run_git
+from agents_remember.memory_quality.knowledge_review import (
+    AssessmentSummary,
+    KnowledgeReview,
+    knowledge_review_section,
+)
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorSourceCandidate,
     memory_quality_attestation_dependencies,
@@ -45,6 +50,13 @@ class CuratorChecklist:
     source_candidates: tuple[CuratorSourceCandidate, ...]
     drift_rows: list[dict[str, Any]]
     report_only_findings: list[dict[str, Any]]
+    # ``KS-R15@v1`` §8.2's factual section input: what the curator-coherence authority currently
+    # holds. It defaults to nothing recorded, so every existing caller is unchanged and the section
+    # renders the explicit "none recorded" state rather than an absent heading. It is NOT an input to
+    # ``actionable_count`` below -- that arithmetic reads repairable findings, missing onboarding and
+    # stale route indexes only, which is §8.2's "does not fold into curatorActionableCount" enforced
+    # by the shape of the function rather than by a comment.
+    knowledge_review: tuple[AssessmentSummary, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -56,6 +68,7 @@ class _ChecklistSections:
     source_candidates: list[dict[str, Any]]
     commit_owned: list[dict[str, Any]]
     report_only: list[dict[str, Any]]
+    knowledge_review: KnowledgeReview
 
 
 def report_path_for(worktree_group: Path) -> Path:
@@ -115,6 +128,7 @@ def write_curator_checklist(checklist: CuratorChecklist) -> dict[str, Any]:
         source_candidates=source_candidates,
         commit_owned=commit_owned,
         report_only=report_only,
+        knowledge_review=knowledge_review_section(checklist.knowledge_review),
     )
     report = _render(checklist, sections)
     report_path = checklist.report_path.resolve()
@@ -235,6 +249,7 @@ def _render(checklist: CuratorChecklist, sections: _ChecklistSections) -> str:
     )
     _append_findings(lines, "Closeout-owned real-commit provenance", sections.commit_owned)
     _append_findings(lines, "Noteworthy report-only findings", sections.report_only)
+    lines.extend(sections.knowledge_review.lines)
     lines.extend(
         [
             "## Completion Rule",

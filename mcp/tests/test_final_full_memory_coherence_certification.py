@@ -116,7 +116,9 @@ from agents_remember.models.certification.base import GateId, RailIdentity
 from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles import curator_coherence as coherence_models
 from agents_remember.models.lifecycles.curator_coherence import (
+    JUDGMENTS_MEMBER,
     PUBLICATION_MEMBERS,
+    REVIEW_ASSESSMENTS_MEMBER,
     CuratorCoherenceRecord,
     CuratorCoherenceRequest,
     PublicationMember,
@@ -1094,14 +1096,21 @@ def test_publish_with_every_publication_member_validates() -> None:
 
     The declaration is also asserted to be the request model's own field order, which 1.2 makes
     the ordering authority, so a field added to the model without the declaration fails here.
+
+    ``judgments`` and ``review_assessments`` are the two *content* members: a leaf with nothing to
+    reconcile or nothing to review supplies neither, which is why neither is one of the nine. They
+    are named from the module's own constants rather than spelled here, so the exclusion set and the
+    shape validator that refuses them on ``status``/``prepare``/``validate`` cannot drift apart --
+    and a field added to the model that is neither declared nor named in that set still fails here.
     """
 
     request = CuratorCoherenceRequest.model_validate(_publication_request())
     declared = tuple(member.name for member in PUBLICATION_MEMBERS)
+    content_members = {JUDGMENTS_MEMBER, REVIEW_ASSESSMENTS_MEMBER}
+    excluded = {"action", "contract_path", "freeze_snapshot"} | content_members
+    assert content_members.isdisjoint(declared)
     model_order = tuple(
-        name
-        for name in CuratorCoherenceRequest.model_fields
-        if name not in {"action", "contract_path", "judgments", "freeze_snapshot"}
+        name for name in CuratorCoherenceRequest.model_fields if name not in excluded
     )
 
     assert request.action == "publish" and request.caller is not None

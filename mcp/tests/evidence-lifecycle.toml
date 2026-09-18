@@ -357,6 +357,7 @@ consumers = [
   "mcp/tests/test_config.py",
   "mcp/tests/test_context_packet.py",
   "mcp/tests/test_cross_master_concurrency.py",
+  "mcp/tests/test_curator_review_assessment_publication.py",
   "mcp/tests/test_direct_landing.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_leaf_doc_master_link_binding.py",

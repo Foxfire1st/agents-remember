@@ -53,14 +53,23 @@ from agents_remember.memory_quality.final_certification.catalog import (
 from agents_remember.memory_quality.integrity.check_missing_onboarding import (
     check_missing_onboarding,
 )
+from agents_remember.memory_quality.knowledge_review import (
+    AssessmentSummary,
+    AssessmentSummaryInput,
+    summarise_assessment_state,
+)
+from agents_remember.models.lifecycles.review_assessment import assessment_subject_id
 from agents_remember.models.memory import (
     MemoryQualityPollRequest,
     MemoryQualityStartRequest,
     MemoryQualitySyncRequest,
 )
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
+    ValidatedCuratorCoherence,
+    all_assessment_subject_ids,
     curator_coherence_no_impact,
     curator_coherence_paths,
+    curator_coherence_subject_assessment_state,
     require_current_curator_coherence,
 )
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
@@ -475,6 +484,7 @@ def _attach_curator_checklist(
         current_working_paths = _current_working_code_paths(scope, census.scope.working_paths)
         accepted_no_impact = frozenset()
         accepted_route_no_impact = frozenset()
+        knowledge_review: tuple[AssessmentSummary, ...] = ()
         try:
             coherence = require_current_curator_coherence(scope.contract)
         except CuratorCoherenceError:
@@ -483,6 +493,7 @@ def _attach_curator_checklist(
             no_impact = curator_coherence_no_impact(coherence)
             accepted_no_impact = no_impact.content_sources
             accepted_route_no_impact = no_impact.source_routes
+            knowledge_review = curator_knowledge_review_summaries(coherence)
         try:
             validate_memory_refresh_attestations(
                 scope.quality_context,
@@ -536,6 +547,7 @@ def _attach_curator_checklist(
             source_candidates=source_candidates,
             drift_rows=drift_rows,
             report_only_findings=report_only,
+            knowledge_review=knowledge_review,
         )
     )
     response.pop("reportOnlyFindings", None)
@@ -655,6 +667,48 @@ def _require_same_curator_candidate(
             ),
         ),
     )
+
+
+def curator_knowledge_review_summaries(
+    coherence: ValidatedCuratorCoherence,
+) -> tuple[AssessmentSummary, ...]:
+    """Summarise the stored assessment collection for the checklist's factual section.
+
+    This reads the *already published* authority and decides nothing about it. It is deliberately not
+    an input to ``curatorActionableCount`` (see ``CuratorChecklist.knowledge_review``), and a subject
+    with no stored assessment produces no row at all -- it is not rendered as a disposition, which is
+    ``Doc13:104``'s "missing assessments stay missing" expressed at the last place a projection could
+    break it.
+
+    Currentness is not measured here. The checklist is written from the curator's own memory-quality
+    run, which is not a read of the current candidate inputs, so the summary reports the recorded
+    collection and its counted limitations without claiming that any binding still matches. The
+    stale/unresolved limitation counts come from the projection, which is where a measurement of the
+    current world belongs.
+    """
+
+    summaries: list[AssessmentSummary] = []
+    for subject_id in all_assessment_subject_ids(coherence):
+        state = curator_coherence_subject_assessment_state(coherence, subject_id)
+        records = [
+            assessment
+            for assessment in coherence.record.assessments
+            if assessment_subject_id(assessment) == subject_id
+        ]
+        summaries.append(
+            summarise_assessment_state(
+                AssessmentSummaryInput(
+                    subjectId=subject_id,
+                    assessmentCount=state.assessmentCount,
+                    dispositions=tuple(entry.disposition for entry in state.assessments),
+                    comparisonRefs=tuple(dict.fromkeys(item.comparisonRef for item in records)),
+                    scopeRefs=tuple(dict.fromkeys(item.scopeManifestRef for item in records)),
+                    unresolvedCount=state.unresolvedCount,
+                    staleCount=state.staleCount,
+                )
+            )
+        )
+    return tuple(summaries)
 
 
 def _attach_coherence_readiness(scope: MemoryScope, response: dict[str, object]) -> None:

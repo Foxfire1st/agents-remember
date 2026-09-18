@@ -152,6 +152,7 @@ unit-regression = [
   "mcp/tests/test_tool_response_budgets.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
+  "mcp/tests/test_review_assessments.py",
 ]
 public-contract = [
   "mcp/tests/test_durable_store_contract.py",
@@ -226,6 +227,7 @@ integration = [
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
   "mcp/tests/test_worktree_sync.py",
+  "mcp/tests/test_curator_review_assessment_publication.py",
 ]
 architecture-fitness = [
   "mcp/tests/test_atomic_write.py",

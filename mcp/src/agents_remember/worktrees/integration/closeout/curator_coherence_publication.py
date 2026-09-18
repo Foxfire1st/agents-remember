@@ -7,7 +7,7 @@ import json
 import os
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -27,9 +27,26 @@ from agents_remember.models.lifecycles.evidence_dependencies import (
     canonical_sha256,
     dependency,
 )
+from agents_remember.models.lifecycles.review_assessment import (
+    AssessmentEvidenceByte,
+    ReviewAssessment,
+    ReviewAssessmentRevision,
+)
+from agents_remember.models.lifecycles.review_assessment_store import (
+    AssessmentInputs,
+    ReviewAssessmentError,
+    bind_assessment,
+    require_assessments_are_identified,
+    review_record_edges,
+    reviewed_bytes,
+)
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
+from .curator_assessment_evidence import (
+    AssessmentEvidenceBlockedError,
+    publish_assessment_evidence_bytes,
+)
 from .curator_coherence import (
     CuratorCoherenceObservation,
     curator_coherence_paths,
@@ -44,10 +61,17 @@ from .curator_coherence_judgments import (
 )
 from .curator_coherence_render import render_curator_coherence
 
+# The resolver and policy versions one assessment's binding declares. They are named as versioned
+# constants rather than spelled inline at the one call site so a change to either is a visible change
+# to this module's own contract, and so a stored assessment's declared resolver version is greppable.
+ASSESSMENT_RESOLVER_VERSION = "curator-evidence-resolver/v1"
+ASSESSMENT_POLICY_VERSION = "review-assessment-policy/v1"
+
 
 @dataclass(frozen=True)
 class _RecordPublication:
     judgments: list[CuratorCoherenceRecordedJudgment]
+    assessments: list[ReviewAssessment]
     fingerprint: str
     predecessor: str
 
@@ -146,7 +170,8 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
     _require_expected_observation(request, observation)
     judgments = exact_curator_judgments(contract, observation.source_candidates, request.judgments)
     _authorize_publisher(contract, observation, request)
-    publication_fingerprint = _publication_fingerprint(request, observation, judgments)
+    assessments = _exact_review_assessments(contract, request, observation)
+    publication_fingerprint = _publication_fingerprint(request, observation, judgments, assessments)
     predecessor = current_curator_coherence_predecessor(contract)
     replay = _idempotent_replay(contract, publication_fingerprint)
     if replay is not None:
@@ -165,6 +190,7 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
         observation,
         _RecordPublication(
             judgments=judgments,
+            assessments=assessments,
             fingerprint=publication_fingerprint,
             predecessor=predecessor,
         ),
@@ -219,6 +245,110 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
     return payload
 
 
+def _exact_review_assessments(
+    contract: WorktreeContract,
+    request: CuratorCoherenceRequest,
+    observation: CuratorCoherenceObservation,
+) -> list[ReviewAssessment]:
+    """Bind each submitted assessment to the authenticated caller and the exact examined inputs.
+
+    Three things happen here and each one is a refusal under ``KS-R15@v1``:
+
+    * the author identity and role are taken from ``request.caller`` -- the authenticated publication
+      path -- and never from the submission, so a caller cannot author an assessment under another
+      identity (requirement 2.1);
+    * the examined-input binding is rebuilt from the *same* observation the coherence record binds, so
+      an assessment and the record it lives in are two statements about one candidate rather than two
+      statements that happen to agree;
+    * each cited evidence byte is published to the 6.6 destination and read back before the record is
+      written, so a byte that cannot be held there is a **blocked** publication rather than a claim of
+      survival (``KS-R15@v1`` §6.7).
+    """
+
+    assessments = list(request.review_assessments)
+    if not assessments:
+        return []
+    try:
+        require_assessments_are_identified(assessments)
+    except ReviewAssessmentError as error:
+        raise CuratorCoherenceError(
+            error.status,
+            error.detail,
+            next_action=error.next_action,
+        ) from error
+    caller = request.caller
+    assert caller is not None
+    bound: list[ReviewAssessment] = []
+    for authorized in assessments:
+        inputs = _assessment_inputs(contract, observation)
+        if authorized.evidenceRefs:
+            inputs = replace(inputs, evidenceBytes=_published_evidence_bytes(contract, authorized))
+        try:
+            bound.append(
+                bind_assessment(
+                    authorized=authorized,
+                    inputs=inputs,
+                    author_ref=f"{caller.role}@{caller.task_document_ref.key}",
+                    author_role=caller.role,
+                    publication_ref=f"curator-coherence/v1:{contract.leaf_id}",
+                )
+            )
+        except ReviewAssessmentError as error:
+            raise CuratorCoherenceError(
+                error.status,
+                error.detail,
+                next_action=error.next_action,
+            ) from error
+    return bound
+
+
+def _published_evidence_bytes(
+    contract: WorktreeContract,
+    authorized: ReviewAssessmentRevision,
+) -> tuple[AssessmentEvidenceByte, ...]:
+    """Publish one assessment's cited bytes to the 6.6 destination and return their recorded facts.
+
+    The binding is built from this function's return value rather than from a separate measurement,
+    which is what keeps the record describing bytes that were actually written and read back. A
+    destination that cannot hold them, or a read-back whose digest differs, becomes a typed refusal
+    carrying the exact destination, the expected digest and the observed state -- ``KS-R15@v1``
+    §6.7's blocked item, never a claim of survival and never a second store.
+    """
+
+    try:
+        publication = publish_assessment_evidence_bytes(
+            contract, authorized.assessmentId, authorized.evidenceRefs
+        )
+    except AssessmentEvidenceBlockedError as error:
+        raise CuratorCoherenceError(
+            error.status,
+            error.detail,
+            expected=error.expected,
+            observed=error.observed,
+            next_action="developer-decision",
+        ) from error
+    return reviewed_bytes(authorized.evidenceRefs, publication.published)
+
+
+def _assessment_inputs(
+    contract: WorktreeContract,
+    observation: CuratorCoherenceObservation,
+) -> AssessmentInputs:
+    """Return the exact inputs an assessment on this publication examined."""
+
+    return AssessmentInputs(
+        scopeManifestRef=contract.leaf_id,
+        comparisonRef=contract.contract_path.as_posix(),
+        codeCandidateTree=observation.code_candidate_tree,
+        memoryCandidateTree=observation.memory_candidate_tree,
+        pairIdentityDigest=observation.pair_identity.contractDigest,
+        taskTopologyFingerprint=observation.task_topology_fingerprint,
+        taskIntentDigest=observation.task_intent.digest,
+        resolverVersion=ASSESSMENT_RESOLVER_VERSION,
+        policyVersion=ASSESSMENT_POLICY_VERSION,
+    )
+
+
 def _record(
     contract: WorktreeContract,
     request: CuratorCoherenceRequest,
@@ -266,6 +396,12 @@ def _record(
                 dependency("evidence-bytes", path, digest)
                 for path, digest in sorted(evidence_edges.items())
             ),
+            # The record's own edge to each assessment it stores. This is the ONE direction the
+            # ``review-record`` kind is used on this route: an assessment declares the inputs it
+            # examined, and the coherence record declares an edge to the assessment. Requiring the
+            # kind inside the assessment would be a record citing itself -- the self-invalidating
+            # sequence ``design/retrieval-review-design.md:368`` exists to avoid.
+            *review_record_edges(publication.assessments),
             dependency(
                 "validator",
                 EVIDENCE_DEPENDENCY_VALIDATOR,
@@ -300,6 +436,7 @@ def _record(
         attestationReportSha256=observation.attestation.reportSha256,
         sourceCandidates=observation.source_candidates,
         judgments=publication.judgments,
+        assessments=publication.assessments,
         dependencies=dependencies,
         predecessorAuthorityDigest=publication.predecessor,
         publicationFingerprint=publication.fingerprint,
@@ -405,6 +542,7 @@ def _publication_fingerprint(
     request: CuratorCoherenceRequest,
     observation: CuratorCoherenceObservation,
     judgments: list[CuratorCoherenceRecordedJudgment],
+    assessments: list[ReviewAssessment],
 ) -> str:
     assert request.caller is not None
     return _digest(
@@ -417,6 +555,9 @@ def _publication_fingerprint(
                 "predecessorAuthorityDigest": request.expected_predecessor_digest,
                 "source": _observation_identity(observation),
                 "judgments": [judgment.model_dump(mode="json") for judgment in judgments],
+                "assessments": [
+                    assessment.model_dump(mode="json", by_alias=True) for assessment in assessments
+                ],
                 "caller": request.caller.model_dump(mode="json"),
                 "freezeSnapshot": request.freeze_snapshot,
             }
@@ -583,6 +724,9 @@ def _validated_payload(request, contract, validated, *, state: str) -> dict[str,
         reportDigest=record.reportSha256,
         candidateCount=len(record.sourceCandidates),
         candidates=[candidate.model_dump(mode="json") for candidate in record.sourceCandidates],
+        reviewAssessments=[
+            assessment.model_dump(mode="json", by_alias=True) for assessment in record.assessments
+        ],
         validationResult={
             "state": "valid",
             "candidateCount": len(record.sourceCandidates),
@@ -596,6 +740,7 @@ def _validated_payload(request, contract, validated, *, state: str) -> dict[str,
                 "candidate-judgments",
                 "authority-record",
                 "generated-projection",
+                *(["review-assessments"] if record.assessments else []),
             ],
         },
     )

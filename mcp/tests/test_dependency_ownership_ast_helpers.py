@@ -43,7 +43,7 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 13
 LIFECYCLE_ARTIFACT_COUNT = 54
-LIFECYCLE_CATALOG_SHA256 = "c6956899947b0435e5cdd8cd77ba3121db77e3dbf4676bee11406c3baf03ec68"
+LIFECYCLE_CATALOG_SHA256 = "9ff8a75f17c87b8db87e7fb560b93e8481a2ecd6ba4be652fcaa7918a0044d79"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately once.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
@@ -66,6 +66,12 @@ L14 leaf added no artifact and no contract of its own -- its two detection test 
 existing ``diff_scope_test_support`` and ``read_scope_test_support`` fixtures rather than a third
 one -- so its catalog change is a *consumer* change only: both of those support modules' consumer
 lists gained ``mcp/tests/test_knowledge_detection_runs.py``, the counts stay thirteen and fifty-four,
+and this value is the catalog after that consumer registration. ``260915-KS``'s L15 leaf likewise
+adds no artifact and no contract of its own -- its unit module is ordinary test source and its
+integration module composes the existing ``curator_coherence_test_support`` and
+``test_worktree_support`` fixtures rather than introducing a third shared module -- so its change is
+also a *consumer* change only: ``curator_coherence_test_support``'s consumer list gained
+``mcp/tests/test_curator_review_assessment_publication.py``, the counts stay thirteen and fifty-four,
 and this value is the catalog after that consumer registration. The proof's own artifact delta
 remains exactly empty -- none of these rows is the proof's -- so the freeze still forbids the proof
 adding or widening anything, and any further catalog change must re-pin this digest deliberately.

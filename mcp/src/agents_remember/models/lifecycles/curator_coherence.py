@@ -22,6 +22,10 @@ from agents_remember.models.lifecycles.evidence_dependencies import (
     require_evidence_dependencies,
 )
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
+from agents_remember.models.lifecycles.review_assessment import (
+    ReviewAssessment,
+    ReviewAssessmentRevision,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import TaskIntentIdentity, TaskIntentState
 
@@ -38,6 +42,10 @@ CuratorDisposition = Literal[
     "capture-candidate",
 ]
 MAX_CURATOR_SOURCE_CANDIDATES = 2048
+# The assessment collection's own bound. It is deliberately far below the candidate bound: an
+# assessment is an authored act a human writes, not a machine-produced row per changed file, so a
+# thousand of them on one leaf is already a defect rather than a workload.
+MAX_CURATOR_REVIEW_ASSESSMENTS = 256
 MEMORY_QUALITY_ATTESTATION_VALIDATOR = "curator-memory-quality-attestation/v1"
 
 
@@ -208,6 +216,20 @@ class CuratorCoherenceRecord(_StrictModel):
     judgments: list[CuratorCoherenceRecordedJudgment] = Field(
         max_length=MAX_CURATOR_SOURCE_CANDIDATES
     )
+    # ``KS-R15@v1`` §8.1's extension: the typed assessment collection on this same authority. It is a
+    # SEPARATE collection from ``judgments`` and that separation is the whole point. A judgment's
+    # identity is the ``(sourceFile, onboardingFile, classification)`` triple at
+    # ``CuratorCoherenceJudgment.identity`` and ``_judgments_cover_candidates_exactly`` refuses a
+    # record whose judgment set is not exactly its source-candidate set; a knowledge review's subject
+    # is a family, an invariant revision or a comparison, none of which is a source-file pair.
+    # Appending one to ``judgments`` would therefore either break exact coverage or fabricate a
+    # source-candidate tuple for a family, and ``design/retrieval-review-design.md:30`` forbids
+    # exactly that. The coverage obligation below is untouched by this field, and the default keeps
+    # every already-published generation valid: an assessment is optional content, and its ABSENCE is
+    # reported as the ``none-recorded`` state rather than as an empty favourable disposition.
+    assessments: list[ReviewAssessment] = Field(
+        default_factory=list, max_length=MAX_CURATOR_REVIEW_ASSESSMENTS
+    )
     dependencies: EvidenceDependencies | None = None
     predecessorAuthorityDigest: Digest = Field(default="", pattern=r"^$|^[0-9a-f]{64}$")
     publicationFingerprint: Digest = Field(pattern=r"^[0-9a-f]{64}$")
@@ -231,6 +253,22 @@ class CuratorCoherenceRecord(_StrictModel):
             raise ValueError("coherence record judgments must be unique")
         if set(candidates) != set(judgments):
             raise ValueError("coherence record judgments must exactly cover source candidates")
+        return self
+
+    @model_validator(mode="after")
+    def _assessments_are_uniquely_identified(self) -> Self:
+        """One assessment identity may appear once, and the collection stays outside coverage.
+
+        The uniqueness rule is the collection's own; it says nothing about the source candidates,
+        which is what keeps ``_judgments_cover_candidates_exactly`` above the only rule relating
+        judgments to candidates. An assessment whose identity repeated would make "which assessment
+        covers this item" ambiguous, and requirement 5.5's per-examined-item rule has no meaning once
+        coverage is ambiguous.
+        """
+
+        identities = [assessment.assessmentId for assessment in self.assessments]
+        if len(identities) != len(set(identities)):
+            raise ValueError("coherence record assessment identities must be unique")
         return self
 
 
@@ -290,6 +328,12 @@ PUBLICATION_MEMBERS: tuple[PublicationMember, ...] = (
 # A publication input too, but not one of the nine the `None` check covers: a leaf with no source
 # candidates publishes with an empty judgment list.
 JUDGMENTS_MEMBER = "judgments"
+
+# And likewise for the assessment collection: a leaf with nothing to review publishes with an empty
+# list. It is named here rather than added to `PUBLICATION_MEMBERS` so the nine-member refusal keeps
+# its exact meaning -- every one of those nine is an identity `publish` must be told, while this one
+# is content a leaf may legitimately have none of.
+REVIEW_ASSESSMENTS_MEMBER = "review_assessments"
 
 
 def _declared_publication_members(
@@ -375,6 +419,21 @@ class CuratorCoherenceRequest(_StrictModel):
     judgments: list[CuratorCoherenceJudgment] = Field(
         default_factory=list, max_length=MAX_CURATOR_SOURCE_CANDIDATES
     )
+    # ``KS-R15@v1`` §8.1's collection, as a publish input. It is deliberately *not* a member of
+    # ``PUBLICATION_MEMBERS``: a leaf with nothing to review publishes no assessment, and making the
+    # field required would force every existing caller to supply an empty list to say so. Like
+    # ``judgments`` it is refused on ``status``/``prepare``/``validate`` by the shape validator below,
+    # so the four actions keep one input shape each.
+    #
+    # The element type is ``ReviewAssessmentRevision``, not ``ReviewAssessment``, and the difference
+    # is the point: the revision carries only what a caller authors -- the finding, its rationale, its
+    # assumptions, its disposition and its citations. It has no ``provenance``, no ``authorRef``, no
+    # ``authorRole`` and no ``examinedInputs``, so a caller cannot author an assessment under another
+    # identity and cannot claim inputs it did not examine (requirement 2.1). The publication path
+    # stamps those fields from its own authenticated caller and its own observation.
+    review_assessments: list[ReviewAssessmentRevision] = Field(
+        default_factory=list, max_length=MAX_CURATOR_REVIEW_ASSESSMENTS
+    )
     expected_predecessor_digest: str | None = Field(default=None, pattern=r"^$|^[0-9a-f]{64}$")
     expected_code_candidate_tree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
     expected_memory_candidate_tree: str | None = Field(default=None, pattern=r"^[0-9a-f]{40,64}$")
@@ -405,16 +464,17 @@ class CuratorCoherenceRequest(_StrictModel):
     def _publication_inputs_supplied(self) -> tuple[str, ...]:
         """The publication-only request fields this request actually supplied, in model order.
 
-        ``judgments`` is included when it is non-empty so the sibling refusal can name it too;
-        it is not one of the nine members ``publish`` requires to be non-``None``.
+        ``judgments`` and ``review_assessments`` are included when non-empty so the sibling refusal
+        can name them too; neither is one of the nine members ``publish`` requires to be non-``None``.
         """
 
         declared = {member.name for member in PUBLICATION_MEMBERS}
+        content = (JUDGMENTS_MEMBER, REVIEW_ASSESSMENTS_MEMBER)
         return tuple(
             name
             for name in type(self).model_fields
             if (name in declared and getattr(self, name) is not None)
-            or (name == JUDGMENTS_MEMBER and bool(self.judgments))
+            or (name in content and bool(getattr(self, name)))
         )
 
     @model_validator(mode="after")
@@ -467,6 +527,9 @@ class CuratorCoherenceResponse(ToolResponse):
     candidateCount: int | None = Field(default=None, ge=0)
     candidates: list[CuratorSourceCandidate] | None = Field(
         default=None, max_length=MAX_CURATOR_SOURCE_CANDIDATES
+    )
+    reviewAssessments: list[ReviewAssessment] | None = Field(
+        default=None, max_length=MAX_CURATOR_REVIEW_ASSESSMENTS
     )
     validationResult: CuratorCoherenceValidationResult | None = None
     status: str | None = Field(default=None, max_length=256)
