@@ -77,6 +77,11 @@ from agents_remember.models.knowledge.candidate import (
     ExpectedRecord,
     MutableRecordTable,
 )
+from agents_remember.models.knowledge.census import (
+    CENSUS_COMMAND_KINDS,
+    CENSUS_RECORD_KINDS,
+    CENSUS_WRITABLE_TABLES,
+)
 from agents_remember.models.knowledge.composition import (
     COMPOSITION_COMMAND_KINDS,
     COMPOSITION_WRITABLE_TABLES,
@@ -241,8 +246,11 @@ def test_the_seam_registry_is_exactly_the_eight_declared_subtypes() -> None:
     group's registration is answered by that group's constant instead of by an edit here.
 
     RE-SCOPED again for ``KS-R13@v1``, which registers the authored-effect group -- three member
-    kinds and the change-set kind -- through the same seam. Two edits, both strengthening rather than
-    weakening. First, the group's own two derived sets (``EFFECT_MEMBER_RECORD_KINDS`` and
+    kinds and the change-set kind -- through the same seam. RE-SCOPED once more for ``KS-R21@v1``,
+    which registers the truth-coverage census's three record kinds: the group joins the union as its
+    own derived set, so the subset, disjointness and partition assertions all cover it without an
+    edit, and a fourth census kind is answered by the census's vocabulary rather than here. Two
+    edits, both strengthening rather than weakening. First, the group's own two derived sets (``EFFECT_MEMBER_RECORD_KINDS`` and
     ``CHANGE_SET_RECORD_KINDS``) join the union as terms, so the vocabulary answers for them exactly
     as it answers for every earlier group. Second, the enumerated-union line became a *union over a
     tuple of groups* with two facts beside it that the enumeration could only imply: every named group
@@ -277,6 +285,10 @@ def test_the_seam_registry_is_exactly_the_eight_declared_subtypes() -> None:
         # the vocabulary instead of by an edit here.
         set(EFFECT_MEMBER_RECORD_KINDS),
         set(CHANGE_SET_RECORD_KINDS),
+        # The truth-coverage census's record group, registered by ``260915-KS-L21``: the inventory row,
+        # the assessable claim and the migration disposition. Named as the group's own derived set
+        # rather than as three literals, so the census's vocabulary answers for its own membership.
+        set(CENSUS_RECORD_KINDS),
     )
     # Every named group is a subset of the registry: a group constant that named a kind the registry
     # does not hold would otherwise be absorbed by the equality below without failing.
@@ -935,6 +947,10 @@ def test_the_facet_commands_join_the_closed_union_and_its_dispatch_tables() -> N
         | set(COMPOSITION_COMMAND_KINDS)
         | set(EVIDENCE_COMMAND_KINDS)
         | set(EFFECT_COMMAND_KINDS)
+        # The census group's own declared kinds, registered by ``260915-KS-L21``. Named as the
+        # vocabulary's set rather than as three literals, so the group answers for its own membership
+        # and the union stays closed over declared groups rather than over a count.
+        | set(CENSUS_COMMAND_KINDS)
     )
     assert set(_TARGET_CHECKS) == kinds
     assert set(_STEPS) == set(FACET_COMMAND_KINDS)
@@ -959,6 +975,10 @@ def test_the_facet_commands_join_the_closed_union_and_its_dispatch_tables() -> N
         | set(EVIDENCE_WRITABLE_TABLES)
         | set(COMPOSITION_WRITABLE_TABLES)
         | set(EFFECT_ONLY_WRITABLE_TABLES)
+        # The census group's own declared table set, registered by ``260915-KS-L21``: its three record
+        # tables and the three relations they resolve through. Named as the vocabulary's set, so a
+        # table added to the group is answered there rather than by an edit here.
+        | set(CENSUS_WRITABLE_TABLES)
     )
 
 

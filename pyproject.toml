@@ -211,7 +211,37 @@ minversion = "9.0"
 #     sides' ceilings alone could not have been reported as sufficient without this measurement.
 #   * 2200 / 400 are ceilings, not targets.  A successor measures both populations again rather than
 #     filling them, and L23 states what was actually consumed over the frozen accumulation.
-unit_case_budget = 2200
+#
+# 2026-09-18 -- the unit ceiling raised 2200 -> 2300 by the truth-coverage census and staged-migration
+# leaf, MEASURED on its own candidate with the pinned interpreter (`.venv/bin/python -m pytest mcp/tests
+# -m "not integration" -q --collect-only`, i.e. `mcp/.venv/bin/python`):
+#   * the line's population before this leaf, measured the same way at the base it was cut from
+#     (`a7076008`): **2158 collected**.  The 2200 ceiling therefore carried 42 cases of headroom.
+#   * this leaf's own delta: **48 unit cases** in one new module, `mcp/tests/test_migration_census.py`,
+#     each protecting a distinct property of the census's apparatus -- the inventory over the scope
+#     rather than over the corpus, the declared-doc-type authority, the metadata-table boundary that
+#     stops a body table becoming front matter, the three reference states, the fact-only mismatch
+#     report, the four-cell accounting and its eligibility rule, both unique and occurrence counts,
+#     all four slice axes, the unmeasured coverage denominator, the record kinds' generation, and the
+#     cutover's prepared-and-not-executed boundary.  It adds **no** integration case: the census is a
+#     read over records the shipped batch operation wrote, and the fixture composes it in-process, so
+#     there is no boundary the small integration lane would add protection for.
+#   * measured on the candidate: **2206 collected** against 2200, i.e. **six cases over**.  An
+#     over-budget population executes ZERO tests -- `pytest_collection_finish` raises `UsageError`, so
+#     the whole unit lane refuses rather than running 2200 of them -- which is exactly the consequence
+#     this ceiling exists to keep visible and exactly why the overage is not left to the next leaf.
+#   * the raise is to **2300**, which admits the measured 2206 plus 94 of headroom for the two
+#     requirement leaves of this increment that have not landed (L22, L23), at the ten-to-fifteen unit
+#     cases per leaf the increment's landed leaves have measured, with a margin for the coverage
+#     reviews' own cases.  Raise only as far as the projection needs: 2300 is the next hundred, and
+#     the per-leaf growth the projection rests on is the measured 48 and the landed leaves' measured
+#     ten-to-fifteen.
+#   * no case, module, registration or lane member was deleted, deselected, consolidated away or
+#     weakened to fit 2200, and no rail was lowered: the 48 cases were added first and the ceiling was
+#     raised afterwards, from the measurement rather than from the plan.
+#   * integration is **not** raised: measured **394 collected** against 400, unchanged by this leaf,
+#     which adds no integration case.  The six cases of headroom are reported rather than consumed.
+unit_case_budget = 2300
 integration_case_budget = 400
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this

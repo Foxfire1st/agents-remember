@@ -68,6 +68,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from agents_remember.memory.knowledge.refusals import RefusalFacts, refusal
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH, KnowledgeModel
+from agents_remember.models.knowledge.census import CENSUS_PAYLOAD_MODELS
 from agents_remember.models.knowledge.change_set import CHANGE_SET_PAYLOAD_MODELS
 from agents_remember.models.knowledge.citation import (
     BINDING_RECORD_KIND,
@@ -175,6 +176,14 @@ PAYLOAD_MODELS: Mapping[tuple[str, str], type[BaseModel]] = {
     # and the record group's write path builds its typed refusal from the same function.
     **MEMBER_PAYLOAD_MODELS,
     **CHANGE_SET_PAYLOAD_MODELS,
+    # The truth-coverage census's record group. Its three kinds register the same way every family
+    # above does, and the mapping is unpacked from :mod:`agents_remember.models.knowledge.census`
+    # rather than restated here, so the inventory row's parse outcome, the claim's closed claim-kind
+    # and applicability vocabularies and the disposition's closed kind are enforced by the one payload
+    # seam rather than by a second decision point beside it. Nothing in that vocabulary can hold a
+    # semantic verdict: a category, a status derived from import success and a mismatch class are all
+    # "this payload does not validate", because no field of these three shapes could carry one.
+    **CENSUS_PAYLOAD_MODELS,
 }
 
 # The facet kinds this registry admits, for a caller that needs the closed vocabulary rather than a

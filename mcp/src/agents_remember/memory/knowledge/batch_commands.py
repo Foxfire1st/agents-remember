@@ -32,6 +32,7 @@ import apsw
 
 from agents_remember.memory.knowledge import (
     anchors,
+    census_records,
     composition_policies,
     compositions,
     effects,
@@ -87,6 +88,12 @@ from agents_remember.models.knowledge.candidate import (
 )
 from agents_remember.models.knowledge.candidate import (
     EffectCommand as _EffectCommand,
+)
+from agents_remember.models.knowledge.census import (
+    CENSUS_COMMAND_KINDS,
+    CensusClaimCommand,
+    CensusDispositionCommand,
+    CensusInventoryRowCommand,
 )
 from agents_remember.models.knowledge.composition import (
     COMPOSITION_COMMAND_KINDS,
@@ -318,6 +325,30 @@ def _apply_command(
     return _apply_removal(store, command)
 
 
+def _apply_family_census(
+    store: OpenedKnowledgeStore,
+    command: ChangeCommand,
+    authorship: Authorship,
+    pending: frozenset[tuple[str, str]],
+) -> tuple[RecordIdentity, ...]:
+    """Apply one census command through the census record group's in-transaction step.
+
+    The step is handed no ``pending`` set, for the reason the authored-effect step is not: every
+    relation a census command declares is resolved against the rows as they stand, and the batch
+    applies commands in the order the author wrote them, so a disposition that links to a claim the
+    same batch creates resolves once that claim's command has run.
+    """
+
+    del pending
+    if not isinstance(
+        command, (CensusInventoryRowCommand, CensusClaimCommand, CensusDispositionCommand)
+    ):  # pragma: no cover - the dispatch set is closed
+        raise KnowledgeStorageError(
+            f"no census apply step for candidate command kind {command.kind!r}"
+        )
+    return census_records.apply_census_command(store, command, authorship)
+
+
 def _apply_effect(
     store: OpenedKnowledgeStore,
     command: ChangeCommand,
@@ -547,6 +578,7 @@ _APPLY_FAMILIES: tuple[tuple[frozenset[str], ApplyFamily], ...] = (
     (frozenset(FACET_COMMAND_KINDS), _apply_family_facet),
     (frozenset(EVIDENCE_COMMAND_KINDS), _apply_family_evidence),
     (frozenset(EFFECT_COMMAND_KINDS), _apply_family_effect),
+    (frozenset(CENSUS_COMMAND_KINDS), _apply_family_census),
 )
 
 

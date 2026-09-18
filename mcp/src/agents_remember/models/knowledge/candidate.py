@@ -179,6 +179,16 @@ MutableRecordTable = Literal[
     # produce. ``models.knowledge.effect``'s own ``EFFECT_WRITABLE_TABLES`` declares that set beside
     # the commands, and ``candidate_records.EFFECT_ONLY_WRITABLE_TABLES`` is its envelope-subtracted
     # remainder -- empty, and asserted empty rather than left to a reader to notice.
+    # The census generation's six tables, here for the same reason the supporting-record generation's
+    # five are: an inventory row, an assessment-free claim, a migration disposition and the three
+    # relations they resolve through are each written by a batch command, so an expectation, a
+    # duplicate check and a receipt all address one of these rows by its own primary key.
+    "census_inventory_row",
+    "census_claim",
+    "census_disposition",
+    "census_claim_evidence",
+    "census_claim_realization",
+    "census_disposition_link",
 ]
 
 
@@ -200,6 +210,11 @@ class SnapshotIdentity(KnowledgeModel):
 # and an import at this position resolves it in one direction while the other side's own annotation
 # resolves it in the other. Nothing else is imported late -- every other command module is a leaf
 # that does not reach back into this one.
+from agents_remember.models.knowledge.census import (  # noqa: E402
+    CensusClaimCommand,
+    CensusDispositionCommand,
+    CensusInventoryRowCommand,
+)
 from agents_remember.models.knowledge.evidence import (  # noqa: E402
     AddEvidenceClaim,
     AddVerificationObservation,
@@ -621,7 +636,10 @@ ProposedCommand = Annotated[
     | AddInvariantEffectClaim
     | AddPreservationClaim
     | AddUnresolvedQuestion
-    | AddSemanticChangeSet,
+    | AddSemanticChangeSet
+    | CensusInventoryRowCommand
+    | CensusClaimCommand
+    | CensusDispositionCommand,
     Field(discriminator="kind"),
 ]
 

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from agents_remember.memory.knowledge import (
     anchors,
+    census_records,
     compositions,
     effects,
     evidence,
@@ -45,6 +46,7 @@ from agents_remember.memory.knowledge.candidate_records import (
     present,
     stored_record_digest,
 )
+from agents_remember.memory.knowledge.record_envelope import validate_record_payload
 from agents_remember.memory.knowledge.refusals import (
     KnowledgeRefused,
     RefusalFacts,
@@ -93,6 +95,18 @@ from agents_remember.models.knowledge.candidate import (
     SetFamilyLabel,
     SetFamilyRevisionRoute,
     SetInvariantLabel,
+)
+from agents_remember.models.knowledge.census import (
+    CENSUS_CLAIM_KIND,
+    CENSUS_CLAIM_SCHEMA,
+    CENSUS_COMMAND_KINDS,
+    CENSUS_DISPOSITION_KIND,
+    CENSUS_DISPOSITION_SCHEMA,
+    CENSUS_INVENTORY_ROW_KIND,
+    CENSUS_INVENTORY_ROW_SCHEMA,
+    CensusClaimCommand,
+    CensusDispositionCommand,
+    CensusInventoryRowCommand,
 )
 from agents_remember.models.knowledge.composition import COMPOSITION_COMMAND_KINDS
 from agents_remember.models.knowledge.effect import EFFECT_COMMAND_KINDS
@@ -163,6 +177,7 @@ def require_preconditions(store: OpenedKnowledgeStore, batch: ChangeBatch) -> No
     require_composition_generation(store, batch.commands)
     require_evidence_generation(store, batch.commands)
     require_effect_generation(store, batch.commands)
+    require_census_generation(store, batch.commands)
     require_insertions_absent(store, batch.commands)
     require_command_targets(store, batch.commands)
 
@@ -322,6 +337,32 @@ def effect_commands(commands: Sequence[ChangeCommand]) -> tuple[ChangeCommand, .
 
 
 _EFFECT_KINDS = frozenset(EFFECT_COMMAND_KINDS)
+
+
+def require_census_generation(
+    store: OpenedKnowledgeStore, commands: Sequence[ChangeCommand]
+) -> None:
+    """Refuse a census command against a dataset that predates the census's tables.
+
+    The same disposition the authoured-effect generation takes, for the same reason: this record
+    group is registered by the generation that declares its three record tables and their three
+    relations, and a dataset whose recorded generation predates that is neither migrated nor widened
+    nor written through. The dataset's own generation is read from the open store, so the refusal
+    carries both numbers as facts.
+    """
+
+    if not census_commands(commands):
+        return
+    census_records.require_census_generation(store)
+
+
+def census_commands(commands: Sequence[ChangeCommand]) -> tuple[ChangeCommand, ...]:
+    """Return the census commands one batch declares, in order."""
+
+    return tuple(command for command in commands if command.kind in _CENSUS_KINDS)
+
+
+_CENSUS_KINDS = frozenset(CENSUS_COMMAND_KINDS)
 
 
 def require_insertions_absent(
@@ -1276,6 +1317,47 @@ def _require_endpoint(
 
 # Declared after the checks it names, so a reader sees every definition before the table that
 # selects between them.
+def _census_check(
+    store: OpenedKnowledgeStore,
+    index: int,
+    command: ChangeCommand,
+    pending: frozenset[tuple[str, str]],
+) -> None:
+    """Check one census command against its record group's own shape rules.
+
+    The generation, the closed record kind and the declared shape are checked here, before any row
+    exists, and the payload is validated through the envelope seam so an unregistered kind or a
+    payload carrying an undeclared field is the shipped ``invalid_payload`` refusal rather than a
+    storage error. Reference resolution is deliberately **not** here: it belongs to the record
+    group's own write step, which runs in command order, so a disposition that links to a claim the
+    same batch creates resolves once that claim's command has run.
+    """
+
+    del index, pending
+    if not isinstance(
+        command, (CensusInventoryRowCommand, CensusClaimCommand, CensusDispositionCommand)
+    ):  # pragma: no cover - the dispatch set is closed
+        return
+    census_records.require_census_generation(store)
+    payload = command.payload
+    kind = _CENSUS_DECLARATIONS[command.kind][0]
+    schema = _CENSUS_DECLARATIONS[command.kind][1]
+    admitted = validate_record_payload(
+        kind, schema, payload.model_dump(mode="json"), record_id=command.revision_id
+    )
+    if isinstance(admitted, KnowledgeRefusal):
+        raise KnowledgeRefused(admitted)
+
+
+# The record kind and frozen schema each census command declares, named once beside the check so a
+# command whose payload shape moved is refused by the seam rather than stored under a stale pair.
+_CENSUS_DECLARATIONS: Mapping[str, tuple[str, str]] = {
+    "add_census_inventory_row": (CENSUS_INVENTORY_ROW_KIND, CENSUS_INVENTORY_ROW_SCHEMA),
+    "add_census_claim": (CENSUS_CLAIM_KIND, CENSUS_CLAIM_SCHEMA),
+    "add_census_disposition": (CENSUS_DISPOSITION_KIND, CENSUS_DISPOSITION_SCHEMA),
+}
+
+
 _TARGET_CHECKS: Mapping[str, TargetCheck] = {
     "add_invariant": _identity_check("invariant"),
     "set_invariant_label": _identity_check("invariant"),
@@ -1305,4 +1387,7 @@ _TARGET_CHECKS: Mapping[str, TargetCheck] = {
     "add_preservation_claim": _effect_check,
     "add_unresolved_question": _effect_check,
     "add_semantic_change_set": _effect_check,
+    "add_census_inventory_row": _census_check,
+    "add_census_claim": _census_check,
+    "add_census_disposition": _census_check,
 }

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from agents_remember.memory.knowledge import (
     anchors,
+    census_records,
     compositions,
     evidence_records,
     facet_records,
@@ -37,6 +38,7 @@ from agents_remember.models.knowledge.candidate import (
     EffectCommand,
     NewAnchor,
 )
+from agents_remember.models.knowledge.census import CENSUS_WRITABLE_TABLES
 from agents_remember.models.knowledge.composition import COMPOSITION_WRITABLE_TABLES
 from agents_remember.models.knowledge.effect import EFFECT_WRITABLE_TABLES
 from agents_remember.models.knowledge.evidence import (
@@ -101,6 +103,14 @@ COMPOSITION_ONLY_WRITABLE_TABLES: tuple[str, ...] = tuple(
     table for table in sorted(COMPOSITION_WRITABLE_TABLES) if table not in ENVELOPE_WRITABLE_TABLES
 )
 
+# The census record group's own declared table set, minus the same two envelope tables. Its three
+# record tables and three relations are declared beside its commands in
+# :mod:`agents_remember.models.knowledge.census`, so the union below names one declaration rather
+# than a second copy of it.
+CENSUS_ONLY_WRITABLE_TABLES: tuple[str, ...] = tuple(
+    table for table in CENSUS_WRITABLE_TABLES if table not in ENVELOPE_WRITABLE_TABLES
+)
+
 WRITABLE_TABLES: tuple[str, ...] = (
     *SHIPPED_WRITABLE_TABLES,
     *ENVELOPE_WRITABLE_TABLES,
@@ -108,6 +118,7 @@ WRITABLE_TABLES: tuple[str, ...] = (
     *EVIDENCE_ONLY_WRITABLE_TABLES,
     *COMPOSITION_ONLY_WRITABLE_TABLES,
     *EFFECT_ONLY_WRITABLE_TABLES,
+    *CENSUS_ONLY_WRITABLE_TABLES,
 )
 
 IdentityPairs = tuple[tuple[str, str], ...]
@@ -294,6 +305,13 @@ _RECORD_READERS: dict[str, RecordReader] = {
     "evidence_claim_facet_subject": evidence_records.subject_digest,
     "evidence_claim_coverage": evidence_records.coverage_digest,
     "verification_observation": evidence_records.observation_digest,
+    # The census record group's three record tables. Its three relation tables are deliberately absent
+    # for the same reason the authored-effect succession edge is: each is written only as part of the
+    # aggregate that owns it, so no command addresses one and no expectation could name a state a
+    # command could produce.
+    "census_inventory_row": census_records.inventory_row_digest,
+    "census_claim": census_records.claim_digest,
+    "census_disposition": census_records.disposition_digest,
 }
 
 # One record identity per command kind, for the eleven commands that address exactly one. The
@@ -342,6 +360,15 @@ _WRITTEN_IDENTITY: dict[str, Callable[[Any], tuple[str, str]]] = {
         "family_revision_context_revision",
         command.context.revision_id,
     ),
+    # The census commands. Each writes one record table's row plus its envelope and revision, and each
+    # record table's identity is a single column, so the table above names the row a duplicate check
+    # and a receipt address. The relations a claim or a disposition declares are keyed by their own
+    # parent and are written only as part of the aggregate that owns them, so an expectation about one
+    # would name a state no command could produce -- the same disposition the authored-effect group's
+    # succession edge takes.
+    "add_census_inventory_row": lambda command: ("census_inventory_row", command.record_id),
+    "add_census_claim": lambda command: ("census_claim", command.record_id),
+    "add_census_disposition": lambda command: ("census_disposition", command.record_id),
     # The supporting-record commands. A claim addresses four rows -- its ledger row, its subject edge
     # and its sealed revision -- and a variable number of coverage edges, so its own branch in
     # ``written_identities`` handles it; an observation addresses its own row and its revision.

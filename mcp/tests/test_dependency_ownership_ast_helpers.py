@@ -41,9 +41,9 @@ LIFECYCLE_CATALOG = Path("mcp/tests/evidence-lifecycle.toml")
 LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
-LIFECYCLE_CONTRACT_COUNT = 14
-LIFECYCLE_ARTIFACT_COUNT = 64
-LIFECYCLE_CATALOG_SHA256 = "1aef5f9b928055d3762df13d8042f1719d8614de8c0141c71bd0e0209bc91df7"
+LIFECYCLE_CONTRACT_COUNT = 15
+LIFECYCLE_ARTIFACT_COUNT = 65
+LIFECYCLE_CATALOG_SHA256 = "633b03ee16893ce3d0e838659d52f2bc609903f5c75b142eb41ca8c4fdabf5e6"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
 The value this line carries is the **merged** catalog's own digest, re-measured after the master synced onto

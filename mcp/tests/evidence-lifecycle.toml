@@ -71,6 +71,10 @@ id = "knowledge-evidence-cases"
 owner = "mcp/tests/evidence_test_support.py"
 evidence_node = "mcp/tests/test_knowledge_evidence_claims.py::test_a_claim_reads_back_with_every_field_including_an_empty_limitations"
 
+[[contract]]
+id = "migration-census-cases"
+owner = "mcp/tests/migration_census_test_support.py"
+evidence_node = "mcp/tests/test_migration_census.py::test_the_seed_writes_every_census_record_kind_through_the_shipped_batch_operation"
 [[artifact]]
 path = "mcp/tests/_control_plane.py"
 kind = "shared-support"
@@ -1605,4 +1609,22 @@ replacement_contract = "node:mcp/tests/test_fresh_user_harness.py::FreshUserScen
 consumer_scope = "exact-source"
 consumers = [
   "mcp/tests/test_fresh_user_harness.py",
+]
+
+[[artifact]]
+path = "mcp/tests/migration_census_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "migration-census-cases"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "the shipped candidate batch operation over one initialized candidate dataset: the route writer for the fixture's recorded scope, and census inventory-row, claim and disposition commands written through change_knowledge_candidate so every identity is one the real write path produced"
+introduced_by = "260915-KS-L21"
+lifetime = "permanent"
+permanence_rationale = "The census is a read over records the one candidate write path produced, and the states its accounting has to separate -- a claim with no assessment, a curator's recorded verdict, a piece outside the cohort, one claim text recorded twice, an artifact that did not parse and a card whose declared source is absent -- cannot be produced by inserting rows: a fixture that did would test arithmetic against a state the real write path refuses. It is shared rather than local because the census record kinds, their relations and the cutover artifacts are asserted from more than one module."
+replacement_contract = "contract:migration-census-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_migration_census.py",
 ]

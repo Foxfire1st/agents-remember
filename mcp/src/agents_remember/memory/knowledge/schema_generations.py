@@ -39,7 +39,16 @@ This module makes a generation one frozen record, and makes *selection* a read o
   6's own record. Both record groups' payload shapes are registered in the record envelope; the
   appended tables are the relations an evidence claim resolves and the observation's own recorded
   columns.
-* :data:`GENERATION_8` is generation 7 plus the table :mod:`…schema_v8` appends -- the edge by which
+* :data:`GENERATION_9` is generation 8 plus the six tables :mod:`…schema_v9` appends -- the
+  truth-coverage census's three record kinds (the inventory row, the assessable claim with its
+  kind/applicability/disposition, and the migration disposition) and the three relations they
+  resolve through (a claim's evidence, a claim's realization attribution, and the records a
+  disposition links to). It is the created generation now, so a *new* store declares version 9
+  while a generation-8 dataset that already exists keeps declaring version 8 and is read through
+  generation 8's own record. The census's payload shapes are registered in the record envelope for
+  the same reason the authored-effect group's are: what the envelope cannot express is a relation
+  between records, which is why this generation appends relations and not a wide table.
+* :data:`GENERATION_8` was generation 7 plus the table :mod:`…schema_v8` appended -- the edge by which
   one semantic change set supersedes another. It is the created generation now, so a *new* store
   declares version 8 while a generation-7 dataset that already exists keeps declaring version 7 and is
   read through generation 7's own record. The authored-effect record group's own payload shapes --
@@ -78,6 +87,7 @@ from agents_remember.memory.knowledge import (
     schema_v6,
     schema_v7,
     schema_v8,
+    schema_v9,
 )
 from agents_remember.memory.knowledge.export_refusals import unsupported_schema_refusal
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
@@ -213,6 +223,7 @@ GENERATION_5_SCHEMA_NAME = "ar-knowledge-sqlite/v5"
 GENERATION_6_SCHEMA_NAME = "ar-knowledge-sqlite/v6"
 GENERATION_7_SCHEMA_NAME = "ar-knowledge-sqlite/v7"
 GENERATION_8_SCHEMA_NAME = "ar-knowledge-sqlite/v8"
+GENERATION_9_SCHEMA_NAME = "ar-knowledge-sqlite/v9"
 
 GENERATION_1 = SchemaGeneration(
     schema_name=GENERATION_1_SCHEMA_NAME,
@@ -418,10 +429,30 @@ def _compose_generation_8() -> SchemaGeneration:
 
 GENERATION_8 = _compose_generation_8()
 
+
+# Generation 9 is generation 8, unchanged, plus the six tables :mod:`…schema_v9` appends -- the
+# truth-coverage census's three record kinds and the three relations they resolve through. The
+# composition is written as the same generic append generations 2 to 8 are, so
+# ``GENERATION_9.tables[: len(GENERATION_8.tables)] == GENERATION_8.tables`` and generation 9's
+# columns for each earlier name are the generation it descends from. That prefix equality is the
+# whole of ``KS-R10@v1`` §1.3's additive rule.
+def _compose_generation_9() -> SchemaGeneration:
+    """Return generation 9: generation 8's declarations with this leaf's tables appended."""
+
+    return _append_generation(
+        base=GENERATION_8,
+        schema_name=GENERATION_9_SCHEMA_NAME,
+        user_version=9,
+        appended=schema_v9,
+    )
+
+
+GENERATION_9 = _compose_generation_9()
+
 # The registry. Ordered oldest first, so "the newest generation this build supports" is the last
 # entry rather than a second literal that could drift from the tuple -- and so
-# ``generation_of_new_store()`` declares generation 8 while a generation-7 dataset stays
-# generation 7 (``KS-R10@v1`` §5.1).
+# ``generation_of_new_store()`` declares generation 9 while a generation-8 dataset stays
+# generation 8 (``KS-R10@v1`` §5.1).
 GENERATIONS: tuple[SchemaGeneration, ...] = (
     GENERATION_1,
     GENERATION_2,
@@ -431,6 +462,7 @@ GENERATIONS: tuple[SchemaGeneration, ...] = (
     GENERATION_6,
     GENERATION_7,
     GENERATION_8,
+    GENERATION_9,
 )
 
 GENERATIONS_BY_VERSION: Mapping[int, SchemaGeneration] = {
