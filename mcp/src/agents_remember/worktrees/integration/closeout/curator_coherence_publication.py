@@ -19,6 +19,7 @@ from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceRecordedJudgment,
     CuratorCoherenceRequest,
     CuratorCoherenceSnapshot,
+    publication_input_statement,
 )
 from agents_remember.models.lifecycles.evidence_dependencies import (
     EVIDENCE_DEPENDENCY_VALIDATOR,
@@ -128,7 +129,7 @@ def _prepare(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
             state="prepared",
             summary=(
                 "Exact source candidates and optimistic-concurrency identities are prepared; "
-                "supply one agent-owned judgment per candidate to publish."
+                + publication_input_statement()
             ),
             predecessor=predecessor,
         ),

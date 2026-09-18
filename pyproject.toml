@@ -283,8 +283,26 @@ minversion = "9.0"
 # on every attempt, before the lane reported.  That node passes on its own, the fault reproduces with
 # and without this leaf's modules present, and it is a runner fault rather than a budget fact -- it is
 # re-run, never recorded as a leaf failure.  The serial figures above are the measurements.
-unit_case_budget = 1250
-integration_case_budget = 340
+# 2026-09-18 -- unit 1250 -> 1500 and integration 340 -> 400, by the 260915-KS master's owning seat,
+# because the increment's own leaves had filled the ceiling.  Measured at the L11 candidate, before
+# this raise: unit 1250 collected against the 1250 ceiling and integration 322 against 340 -- L11
+# landed exactly ON the unit ceiling and its worker correctly refused to raise it, consolidating the
+# whole KS-R11 evidence into 17 cases with the loss of per-variant failure attribution recorded rather
+# than hidden.  Behavior bought: the remaining requirement leaves of this increment (L12-L23, each
+# owning one new packet with its own typed evidence) can collect their cases at all; without this raise
+# `pytest_collection_finish` refuses the ENTIRE unit population with `unit suite has N cases; budget is
+# 1250`, so the next leaf could not run a unit case, let alone add one.  Case count delta: unit
+# 1250 -> 1500 (+250, of which 0 is consumed at this raise) and integration 340 -> 400 (+60, 0
+# consumed).  The raise is headroom sized for thirteen remaining leaves at roughly fifteen cases each
+# plus integration cases, NOT a target: the doctrine's own rule is that the ceiling is headroom and
+# must not be filled, and L23 re-measures both populations over the frozen accumulation and states what
+# was actually consumed.  Runtime cost: unmeasured for the future cases by construction; the L11 unit
+# population of 1250 cases ran the combined population in 490.73s under the pinned -n=4, and the
+# per-case cost of this increment's additions has been uniformly small (the L11 module is 17 cases in
+# 4.30s serial).  Nothing about this raise licenses a weaker case: it pays for cases the increment's
+# requirements already owe.
+unit_case_budget = 1500
+integration_case_budget = 400
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this
 # key to build its pytest step, so the wrapper no longer carries a second copy that can

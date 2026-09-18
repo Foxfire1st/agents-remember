@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Self
@@ -256,6 +257,116 @@ class CuratorCoherenceSnapshot(_StrictModel):
     reportPath: str = Field(min_length=1, max_length=8192)
 
 
+@dataclass(frozen=True)
+class PublicationMember:
+    """One request member ``publish`` requires, under its caller-written field name.
+
+    ``caller_supplied`` marks the members ``prepare`` does not derive from the observation it
+    returns: a statement about the delivery attempt that stays the caller's to author. The
+    publication validator, the ``publish`` refusal and the ``prepare`` summary all read
+    ``PUBLICATION_MEMBERS``, so no reader can name a member the others do not know about, and a
+    member appended there needs no second edit anywhere -- which is the whole defect this removes.
+    """
+
+    name: str
+    caller_supplied: bool = False
+
+
+# The publication members, in the request model's declaration order. This single declaration is
+# the authority for what `publish` requires: the validator refuses on it, the refusal names what
+# is missing from it, and the `prepare` text states all of it.
+PUBLICATION_MEMBERS: tuple[PublicationMember, ...] = (
+    PublicationMember("semantic_requirement_revision", caller_supplied=True),
+    PublicationMember("delivery_attempt", caller_supplied=True),
+    PublicationMember("expected_predecessor_digest"),
+    PublicationMember("expected_code_candidate_tree"),
+    PublicationMember("expected_memory_candidate_tree"),
+    PublicationMember("expected_task_topology_fingerprint"),
+    PublicationMember("expected_task_intent"),
+    PublicationMember("expected_attestation_sha256"),
+    PublicationMember("caller"),
+)
+
+# A publication input too, but not one of the nine the `None` check covers: a leaf with no source
+# candidates publishes with an empty judgment list.
+JUDGMENTS_MEMBER = "judgments"
+
+
+def _declared_publication_members(
+    members: tuple[PublicationMember, ...] | None,
+) -> tuple[PublicationMember, ...]:
+    """Read the declaration at call time so one extended declaration drives every reader."""
+
+    return PUBLICATION_MEMBERS if members is None else members
+
+
+def _names_in_english(names: Sequence[str]) -> str:
+    if len(names) < 2:
+        return "".join(names)
+    return ", ".join(names[:-1]) + f" and {names[-1]}"
+
+
+def publication_refusal(missing: Sequence[str]) -> str:
+    """Name every missing publication member, in declaration order.
+
+    The shipped opening sentence stays, so a reader who already knows the rule still recognizes
+    it. The callout names only the *missing* members that are the caller's own delivery
+    identities: a refusal that named a member the caller did supply would be the very defect this
+    text exists to remove.
+    """
+
+    text = "publish requires every identity, predecessor, and caller field; missing " + ", ".join(
+        missing
+    )
+    caller_supplied = {member.name for member in PUBLICATION_MEMBERS if member.caller_supplied}
+    identities = [name for name in missing if name in caller_supplied]
+    if len(identities) == 1:
+        text += (
+            f"; {identities[0]} is a caller-supplied delivery identity prepare does not derive"
+            " -- supply it in the request"
+        )
+    elif identities:
+        text += (
+            f"; {_names_in_english(identities)} are caller-supplied delivery identities prepare"
+            " does not derive -- supply them in the request"
+        )
+    return text + "."
+
+
+def forbidden_publication_refusal(supplied: Sequence[str]) -> str:
+    """Name the publication-only request fields a ``status``/``prepare``/``validate`` received."""
+
+    return "status/prepare/validate forbid publication-only fields; supplied " + ", ".join(supplied)
+
+
+def publication_input_statement(
+    members: tuple[PublicationMember, ...] | None = None,
+) -> str:
+    """State every input ``publish`` requires, derived from the one member declaration.
+
+    A member appended to the declaration appears here with no edit to this text, and the members
+    ``prepare`` does not derive are called out as caller-supplied delivery identities.
+    """
+
+    declared = _declared_publication_members(members)
+    statement = (
+        "to publish, supply one agent-owned judgment per source candidate and every request "
+        "member publish requires: " + ", ".join(member.name for member in declared)
+    )
+    identities = [member.name for member in declared if member.caller_supplied]
+    if len(identities) == 1:
+        statement += (
+            f"; {identities[0]} is a caller-supplied delivery identity prepare does not derive"
+            " from the observation it returns"
+        )
+    elif identities:
+        statement += (
+            f"; {_names_in_english(identities)} are caller-supplied delivery identities prepare"
+            " does not derive from the observation it returns"
+        )
+    return statement + "."
+
+
 class CuratorCoherenceRequest(_StrictModel):
     action: CuratorCoherenceAction
     contract_path: str = Field(min_length=1, max_length=8192)
@@ -291,25 +402,33 @@ class CuratorCoherenceRequest(_StrictModel):
             raise ValueError("semantic requirement revision and delivery attempt must not be blank")
         return cleaned
 
+    def _publication_inputs_supplied(self) -> tuple[str, ...]:
+        """The publication-only request fields this request actually supplied, in model order.
+
+        ``judgments`` is included when it is non-empty so the sibling refusal can name it too;
+        it is not one of the nine members ``publish`` requires to be non-``None``.
+        """
+
+        declared = {member.name for member in PUBLICATION_MEMBERS}
+        return tuple(
+            name
+            for name in type(self).model_fields
+            if (name in declared and getattr(self, name) is not None)
+            or (name == JUDGMENTS_MEMBER and bool(self.judgments))
+        )
+
     @model_validator(mode="after")
     def _action_has_one_input_shape(self) -> Self:
-        publication_fields = (
-            self.semantic_requirement_revision,
-            self.delivery_attempt,
-            self.expected_predecessor_digest,
-            self.expected_code_candidate_tree,
-            self.expected_memory_candidate_tree,
-            self.expected_task_topology_fingerprint,
-            self.expected_task_intent,
-            self.expected_attestation_sha256,
-            self.caller,
-        )
+        supplied = self._publication_inputs_supplied()
         if self.action == "publish":
-            if any(value is None for value in publication_fields):
-                raise ValueError("publish requires every identity, predecessor, and caller field")
+            missing = tuple(
+                member.name for member in PUBLICATION_MEMBERS if member.name not in supplied
+            )
+            if missing:
+                raise ValueError(publication_refusal(missing))
             return self
-        if any(value is not None for value in publication_fields) or self.judgments:
-            raise ValueError("status/prepare/validate forbid publication-only fields")
+        if supplied:
+            raise ValueError(forbidden_publication_refusal(supplied))
         if self.freeze_snapshot:
             raise ValueError("only publish may freeze an immutable attempt snapshot")
         return self
