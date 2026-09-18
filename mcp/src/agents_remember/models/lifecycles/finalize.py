@@ -9,6 +9,10 @@ from pydantic import Field
 from agents_remember.models.base import ToolResponse
 from agents_remember.models.closeout.projection import TaskDocProjectionEffect
 from agents_remember.models.task_document import CompletionBlocker
+from agents_remember.models.worktree import (
+    AtomicSeriesActivationFact,
+    AtomicSeriesActivationReleaseFact,
+)
 
 
 class LifecycleFinalizeTaskResponse(ToolResponse):
@@ -37,3 +41,14 @@ class LifecycleFinalizeTaskResponse(ToolResponse):
     autoCloseDeferredSeats: list[str] = Field(default_factory=list)
     autoCloseFailedSeats: list[str] = Field(default_factory=list)
     autoLandedSeats: list[str] = Field(default_factory=list)
+    # The atomic-series terminal release projection (D53). ``_finalized_result`` copies both
+    # keys straight out of ``with_terminal_atomic_series_release``'s payload
+    # (``worktrees/modules/finalize.py:209-210``), and the ``activation-release-blocked`` arm
+    # (``:161-177``) spreads that payload whole, so both keys arrive on either terminal arm.
+    # The projection is already declared on ``WorktreeSummary`` and on
+    # ``WorktreeCommandResponse`` (``models/worktree.py``), which every worktree tool response
+    # inherits; this model was the ONLY strict consumer of it and the only one that did not
+    # declare it -- which is why the transaction completed and the caller got a validation
+    # error instead of the payload that would have told it so.
+    atomicSeriesActivation: AtomicSeriesActivationFact | None = None
+    atomicSeriesActivationRelease: AtomicSeriesActivationReleaseFact | None = None

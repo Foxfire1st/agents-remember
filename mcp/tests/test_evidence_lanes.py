@@ -13,7 +13,7 @@ from agents_remember_test_support.testing.evidence_lanes import (
     validate_lane_registry,
 )
 from agents_remember_test_support.testing.evidence_lifecycle import EvidenceCategory
-from agents_remember_test_support.testing.lane_manifest import LaneManifest
+from agents_remember_test_support.testing.lane_manifest import LaneManifest, load_lane_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = LaneManifest(
@@ -72,3 +72,35 @@ class EvidenceLaneRegistryTests(unittest.TestCase):
         duplicate_marker = replace(EVIDENCE_LANES[-1], marker=EVIDENCE_LANES[1].marker)
         with self.assertRaisesRegex(pytest.UsageError, "markers must be unique"):
             validate_lane_registry((*EVIDENCE_LANES[:-1], duplicate_marker))
+
+
+def test_the_enforcing_hook_is_registered_and_armed(pytestconfig: pytest.Config) -> None:
+    """The lane registry's enforcement hook must be *registered*, not merely defined.
+
+    ``evidence_lanes.pytest_collection_modifyitems`` loads the manifest and raises when it
+    refuses, but it was absent from ``conftest.pytest_plugins``, so no run had ever asked
+    the loader its verdict while the manifest was in fact refusing -- the hook existed and
+    the registry was decorative. This asserts the armed state rather than the source text:
+    the module is on the plugin manager, and its collection hook is one of the implementations
+    pytest will actually call.
+    """
+
+    plugin = "agents_remember_test_support.testing.evidence_lanes"
+    assert pytestconfig.pluginmanager.hasplugin(plugin)
+    armed = {
+        impl.function.__module__
+        for impl in pytestconfig.hook.pytest_collection_modifyitems.get_hookimpls()
+    }
+    assert plugin in armed
+
+
+def test_the_checked_in_manifest_accepts_the_checked_in_population() -> None:
+    """Every test module on disk has a lane row, asserted against the population itself.
+
+    ``load_lane_manifest`` refuses ``expected - declared``, so this is the loader's own
+    verdict on this worktree rather than a restatement of it. It pins no count: a leaf that
+    adds a module without a row fails here, and a leaf that adds both passes.
+    """
+
+    manifest = load_lane_manifest(REPO_ROOT)
+    assert manifest.digest

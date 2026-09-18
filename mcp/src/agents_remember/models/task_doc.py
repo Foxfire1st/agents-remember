@@ -124,6 +124,14 @@ class TaskDocResponse(ToolResponse):
     renderedPath: str
     stepsDone: int = 0
     stepsTotal: int = 0
+    # The focused checklist read (``operation="read_steps"``) returns the authored units
+    # themselves, not a count of them: ``_read_steps`` sets ``result["steps"]`` from
+    # ``task_doc_steps.step_payloads``. Without this declaration the extra=forbid envelope
+    # REJECTED that payload on every call, so the one operation the tool publishes as *the*
+    # way to read a checklist could never return it -- present only on ``read_steps``; every
+    # other operation leaves it None (excluded by exclude_none). Same bug class as
+    # ``removedSubtask`` above and ``documents`` below.
+    steps: list[dict[str, Any]] | None = None
     # dry-run / preview (R5): set only when dry_run=True; a real op leaves these at their defaults.
     dryRun: bool = False
     rendered: str | None = None

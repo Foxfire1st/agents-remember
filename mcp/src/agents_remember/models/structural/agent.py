@@ -75,6 +75,16 @@ class StructuralTargetResponse(ToolResponse):
     taskDocumentRef: TaskDocumentRef | None = None
     role: str
     detail: str | None = None
+    # The shared ``structural_payload`` projection (application/structural/outcomes.py:36-39):
+    # the producer adds these two keys whenever the outcome carries a delivery state, so every
+    # consumer of that producer declares them here rather than per model. ``dispatch_agent``,
+    # ``message_parent`` and ``message_child`` are the three call sites that populate them
+    # today; ``retire_child``, ``rename_child`` and ``rename_self`` pass no delivery state, so
+    # both keys stay None there (excluded by ``exclude_none``). Declaring them on the shared
+    # base keeps the projection's declaration total: a strict consumer that omits a key its
+    # own producer can emit is the D53 shape, and there is no fourth consumer to fall through.
+    deliveryState: InboxDeliveryState | None = None
+    adapterDeliveryState: AdapterDeliveryState | None = None
 
 
 class DispatchAgentResponse(StructuralTargetResponse):

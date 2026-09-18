@@ -178,6 +178,29 @@ class AtomicSeriesActivationFact(StrictResponseModel):
     detail: str | None = Field(default=None, max_length=8192)
 
 
+class AtomicSeriesActivationReleaseFact(StrictResponseModel):
+    """Terminal release evidence for the exact selected series, or its refusal.
+
+    Produced by ``with_terminal_atomic_series_release``
+    (``worktrees/activation/atomic_series_activation_terminal.py:36,64``) on every
+    terminal series operation: ``state`` names the release outcome, and the error
+    triple is present only on a failed release. The success path of
+    ``lifecycle_finalize_task`` copies it through; the ``activation-release-blocked``
+    arm spreads the bridge payload whole, so declaring it here is what keeps the
+    terminal response inside its own contract instead of raising after the work.
+    """
+
+    state: Literal[
+        "vacant",
+        "already-vacant",
+        "different-selection-preserved",
+        "unreadable-preserved",
+        "release-failed",
+    ]
+    errorType: str | None = Field(default=None, max_length=256)
+    detail: str | None = Field(default=None, max_length=8192)
+
+
 class AtomicSeriesAdmissionActivation(StrictResponseModel):
     """Activation snapshot nested in an admission refusal."""
 
@@ -489,7 +512,13 @@ class WorktreeOperationControlResponse(WorktreeCommandResponse):
     observed: dict[str, object] = Field(default_factory=dict)
     nextAction: str = ""
     nextTool: (
-        Literal["worktree_operation_control", "worktree_integrate", "direct_landing"] | None
+        Literal[
+            "worktree_operation_control",
+            "worktree_integrate",
+            "direct_landing",
+            "worktree_closeout_preview",
+        ]
+        | None
     ) = None
     nextArgs: dict[str, object] | None = None
     developerDecisionRequired: bool = False

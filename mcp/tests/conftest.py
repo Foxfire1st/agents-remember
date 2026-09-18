@@ -65,7 +65,23 @@ for name in tuple(os.environ):
     ):
         os.environ.pop(name, None)
 
-pytest_plugins = ("agents_remember_test_support.testing.pytest_bootstrap",)
+# The lane manifest is the registry every module must appear in, and `evidence_lanes`
+# carries the hook that enforces it: `pytest_collection_modifyitems` calls
+# `load_lane_manifest` and raises `pytest.UsageError` when it refuses. That hook was
+# defined but never registered, so no run on this repository had ever asked the loader
+# its verdict -- the suite passed while the manifest refused (T48/T49). Registering it
+# here is what makes the registry load-bearing; `test_evidence_lanes.py` asserts the
+# registration so it cannot be dropped again silently.
+#
+# Consequence, accepted: with this hook armed, collection requires a Git checkout -- the loader
+# enumerates the population through `git ls-files`, so an exported (`git archive`/tarball) tree
+# fails collection with `ScopeError ... fatal: not a git repository` rather than running. Git is
+# already a prerequisite of the delivery path (`code_quality/scope.py` scopes by index and diff,
+# `quality_plan.py` runs in a worktree), and `git init && git add -A` restores an exported tree.
+pytest_plugins = (
+    "agents_remember_test_support.testing.pytest_bootstrap",
+    "agents_remember_test_support.testing.evidence_lanes",
+)
 _INTEGRATION_FILES = pytest.StashKey[frozenset[Path]]()
 
 

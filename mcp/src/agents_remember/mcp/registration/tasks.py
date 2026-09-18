@@ -123,7 +123,8 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         'set_field' | 'get'. Locate the doc by task_name (also resolves the
         contract for the lifecycle key) or contract_path; pass slug for a series sub-task
         ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
-        title, kind ['light'|'subTask'|'master'], repo, type, createdAt, objective, requirements,
+        title, kind ['subTask'|'master'] (the former 'light' kind is refused), repo, type,
+        createdAt, objective, requirements,
         steps, ... — a master takes subTasks + ordered sections instead of steps, and an
         orchestration sprint is scaffolded with empty canonical Judgment and Priority Register
         sections); 'replace' takes a
