@@ -102,6 +102,13 @@ KnowledgeOperation = Literal[
     # approval: the owner's recorded acceptance is carried as data here and never produced.
     "record_requirement_revision",
     "read_requirement_revisions",
+    # Citation bindings. Two members rather than one, for the reason the read pair and the detection
+    # pair are one each: authoring a binding and reading a selected prose view's citation closure are
+    # different acts, and the read is the one that has to answer with a per-state enumeration rather
+    # than with whatever rows happen to come back. Neither member can carry a verdict, and neither
+    # mints a new gate.
+    "author_citation_binding",
+    "read_citation_closure",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct

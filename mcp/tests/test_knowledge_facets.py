@@ -49,6 +49,7 @@ from agents_remember.memory.knowledge.facet_records import FacetEnvelopeDraft, f
 from agents_remember.memory.knowledge.facets import _STEPS
 from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.record_envelope import (
+    CITATION_BINDING_RECORD_KINDS,
     DETECTION_RECORD_KINDS,
     FACET_RECORD_KINDS,
     KIND_SCHEMAS,
@@ -185,15 +186,18 @@ def test_the_seam_registry_is_exactly_the_eight_declared_subtypes() -> None:
     explanation subject kinds, and the six tables a facet command may write -- and each subtype is
     reached through a discriminator over one frozen shape.
 
-    RE-SCOPED for ``KS-R14@v1`` and again for ``KS-R19@v1``. The registry this asserts against is the
-    *shared* envelope seam, and ``260915-KS-L10``'s own docstring named the concrete non-facet
-    knowledge categories as later leaves; ``260915-KS-L14`` registers the mechanical-detection pair
-    through it and ``260915-KS-L19`` registers the requirement-revision kind. The claim is unchanged
-    in strength and is stated as the union it now is: the kinds *this vocabulary* admits are exactly
-    the eight (``FACET_RECORD_KINDS``), and the seam's whole membership is exactly the four groups the
-    registry declares -- the internal conformance kind, the eight facet kinds, the two detection kinds
-    and the requirement kind -- so a fifth group still cannot be admitted without this line changing,
-    with the facet kinds' admissible schemas still exactly their declared ones.
+    RE-SCOPED for ``KS-R14@v1``, again for ``KS-R19@v1`` and again for ``KS-R18@v1``. The registry this
+    asserts against is the *shared* envelope seam, and ``260915-KS-L10``'s own docstring named the
+    concrete non-facet knowledge categories as later leaves; ``260915-KS-L14`` registers the
+    mechanical-detection pair through it, ``260915-KS-L19`` registers the requirement-revision kind and
+    ``260915-KS-L18`` registers the citation-binding kind. The claim is unchanged in strength and is
+    stated as the union it now is: the kinds *this vocabulary* admits are exactly the eight
+    (``FACET_RECORD_KINDS``), and the seam's whole membership is exactly the union of the groups the
+    registry declares -- the internal conformance kind, the eight facet kinds, the two detection kinds,
+    the requirement-revision kinds and the citation-binding kind -- so a further group still cannot be
+    admitted without this line changing, with the facet kinds' admissible schemas still exactly their
+    declared ones.
+
     """
 
     assert len(FACET_KINDS) == 8
@@ -205,6 +209,8 @@ def test_the_seam_registry_is_exactly_the_eight_declared_subtypes() -> None:
         | {"internal_conformance"}
         | set(DETECTION_RECORD_KINDS)
         | set(REQUIREMENT_RECORD_KINDS)
+        | set(CITATION_BINDING_RECORD_KINDS)
+
     )
     for kind in FACET_KINDS:
         assert KIND_SCHEMAS[kind] == frozenset({FACET_RECORD_SCHEMAS[kind]}), kind
@@ -915,14 +921,19 @@ def test_the_registered_generation_appends_only_and_the_preceding_ones_are_uncha
     the same schema name, fingerprint-bearing declarations and appended table list, and the created
     generation is the newest registered one rather than a pinned literal. Every generation-3-specific
     assertion below is unchanged.
+
+    RE-SCOPED AGAIN for ``KS-R18@v1``, and *strengthened* rather than trimmed: the membership is now
+    checked as the structural fact itself -- one contiguous version sequence from 1 to the newest
+    registered generation, each declaring its own ``ar-knowledge-sqlite/vN`` name, in register order
+    -- instead of as a literal list. A hand-edited list of versions would still be green the day a
+    generation was registered out of order or skipped; these assertions redden on exactly that, so
+    re-scoping to the fact that now holds buys a property the enumeration never had.
     """
 
-    assert [generation.user_version for generation in GENERATIONS] == [1, 2, 3, 4]
+    versions = [generation.user_version for generation in GENERATIONS]
+    assert versions == list(range(1, len(GENERATIONS) + 1)), versions
     assert [generation.schema_name for generation in GENERATIONS] == [
-        "ar-knowledge-sqlite/v1",
-        "ar-knowledge-sqlite/v2",
-        "ar-knowledge-sqlite/v3",
-        "ar-knowledge-sqlite/v4",
+        f"ar-knowledge-sqlite/v{version}" for version in versions
     ]
     assert GENERATION_3 in GENERATIONS
     assert GENERATION_3.user_version == 3

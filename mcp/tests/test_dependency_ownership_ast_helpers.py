@@ -43,7 +43,7 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 13
 LIFECYCLE_ARTIFACT_COUNT = 54
-LIFECYCLE_CATALOG_SHA256 = "8ef45cc4a9e98aaf4cf5c2952731b2098912a182ec46a329ec0734b4a3241b46"
+LIFECYCLE_CATALOG_SHA256 = "c6c41f54d169938098d63063b97835db54301fe6446b49c617c45e255f1196c1"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately once.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
@@ -72,7 +72,28 @@ integration module composes the existing ``curator_coherence_test_support`` and
 ``test_worktree_support`` fixtures rather than introducing a third shared module -- so its change is
 also a *consumer* change only: ``curator_coherence_test_support``'s consumer list gained
 ``mcp/tests/test_curator_review_assessment_publication.py``, the counts stay thirteen and fifty-four,
-and this value is the catalog after that consumer registration. The proof's own artifact delta
+and this value is the catalog after that consumer registration. ``260915-KS``'s L19 leaf likewise
+added no artifact and no contract of its own -- its two requirement-revision test modules use the
+existing ``knowledge_fixture_test_support`` and ``generation_test_support`` fixtures rather than a
+third one -- so its catalog change is again a *consumer* change only: both of those support modules'
+consumer lists gained ``mcp/tests/test_knowledge_requirement_revisions.py`` and
+``mcp/tests/test_knowledge_requirement_reference_contract.py``, the counts stay thirteen and
+fifty-four, and this value is the catalog after that consumer registration. ``260915-KS``'s L18 leaf
+added no artifact and no contract of its own either -- its two citation-binding test modules use the
+existing ``knowledge_fixture_test_support``, ``generation_test_support`` and
+``read_scope_test_support`` fixtures rather than a fourth one -- so its catalog change is likewise a
+*consumer* change only: the first two of those support modules' consumer lists gained
+``test_knowledge_citation_bindings.py`` and ``test_knowledge_citation_boundaries.py``, and the
+ambient-role-chat e2e generator's own ``exact-source`` consumer list gained both modules because each
+quotes the real corpus key that generator's run report is written about -- a path-string edge the
+census derives rather than one any import creates, which is also why the repository-owned
+``REPOSITORY_TEST_INPUT_CONSUMERS[AMBIENT_ROLE_RUNNER_PATH]`` entry gained the same two modules: that
+constant overrides the catalog for the *selection* graph while the catalog serves the *census*, so
+both derivations have to be satisfied rather than one standing in for the other. The counts stay
+thirteen and fifty-four, and this value is the catalog after that consumer registration. The proof's
+own artifact delta remains exactly empty -- none of these rows is the proof's -- so the freeze still
+forbids the proof adding or widening anything, and any further catalog change must re-pin this digest
+deliberately.
 remains exactly empty -- none of these rows is the proof's -- so the freeze still forbids the proof
 adding or widening anything, and any further catalog change must re-pin this digest deliberately.
 and this value is the catalog after that consumer registration. ``260915-KS``'s L19 leaf likewise

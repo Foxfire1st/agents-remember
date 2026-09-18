@@ -12,18 +12,23 @@ resolved model is refused with the shipped code ``invalid_payload``, with no row
 before/after digest unchanged.
 
 **One internal conformance kind, plus the eight authored facet kinds, plus the two
-mechanical-detection kinds.** The concrete knowledge categories that are *not* facets
-(``EvidenceClaim``, …) are later leaves. This leaf registers the eight authored-judgment subtypes
-beside the internal conformance kind -- one registry entry per subtype, whose model is the frozen
-payload model the facet vocabulary declares -- so the typed half of the envelope carries the real
-vocabulary rather than only a promise. The internal kind is marked internal and is not a knowledge
-category.
+mechanical-detection kinds, plus the citation-binding kind.** The concrete knowledge categories that
+are *not* facets (``EvidenceClaim``, …) are later leaves. This leaf registers the eight
+authored-judgment subtypes beside the internal conformance kind -- one registry entry per subtype,
+whose model is the frozen payload model the facet vocabulary declares -- so the typed half of the
+envelope carries the real vocabulary rather than only a promise. The internal kind is marked internal
+and is not a knowledge category.
 
 The detection leaf registers the two kinds this docstring used to defer: ``detection_signal`` and
 ``detection_run`` resolve to the frozen payload models
 :mod:`agents_remember.models.knowledge.detection` declares, so a detection record's required field
 set, its closed vocabularies and its construction refusals are enforced by the same seam every other
 typed record passes through rather than by a second one beside it.
+
+The citation-binding leaf registers ``citation_binding`` the same way: the binding's authored facts
+resolve to the frozen payload model :mod:`agents_remember.models.knowledge.citation` declares, so
+"a binding is authored, not inferred" is enforced by the one payload seam rather than restated at
+the write path.
 
 The registry maps to **frozen** models: a validated payload is a value, and a caller cannot mutate
 what it validated into something the registry would not have accepted.
@@ -44,6 +49,11 @@ from pydantic import BaseModel, Field, ValidationError
 
 from agents_remember.memory.knowledge.refusals import RefusalFacts, refusal
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH, KnowledgeModel
+from agents_remember.models.knowledge.citation import (
+    BINDING_RECORD_KIND,
+    BINDING_RECORD_SCHEMA,
+    CitationBindingPayload,
+)
 from agents_remember.models.knowledge.detection import (
     DETECTION_RUN_KIND,
     DETECTION_RUN_SCHEMA,
@@ -110,6 +120,15 @@ PAYLOAD_MODELS: Mapping[tuple[str, str], type[BaseModel]] = {
     # is unpacked from that module rather than restated here, so the registry and the vocabulary
     # cannot drift and a requirement kind cannot exist without a registered shape.
     **REQUIREMENT_PAYLOAD_MODELS,
+    # The citation-binding record group. Its payload is the three authored facts that belong to the
+    # record -- the prose owner revision, the local key as written, and the typed target reference
+    # with its locator -- and it registers here for the same reason the detection kinds do: the
+    # frozen payload model *is* the shape, so an unregistered kind, a schema inadmissible for its
+    # kind and a payload carrying an undeclared field are all the shipped ``invalid_payload``
+    # refusal, raised at this one seam before any row exists. The binding's owner-revision/key
+    # identity pair and its governing route are columns, because the envelope cannot express them.
+    (BINDING_RECORD_KIND, BINDING_RECORD_SCHEMA): CitationBindingPayload,
+
 }
 
 # The facet kinds this registry admits, for a caller that needs the closed vocabulary rather than a
@@ -125,11 +144,17 @@ DETECTION_RECORD_KINDS: frozenset[str] = frozenset({DETECTION_SIGNAL_KIND, DETEC
 
 # The requirement-revision kinds this registry admits, derived from the same declaration the entry
 # above is built from rather than restated. A caller that needs to say what the registry holds names
-# every group -- the internal conformance kind, the eight facet kinds, the two detection kinds and
-# this one -- and the groups are disjoint by construction because a kind is one string.
+# every group -- the internal conformance kind, the eight facet kinds, the two detection kinds, the
+# citation-binding kind and this one -- and the groups are disjoint by construction because a kind is one string.
 REQUIREMENT_RECORD_KINDS: frozenset[str] = frozenset(
     kind for (kind, _schema) in REQUIREMENT_PAYLOAD_MODELS
 )
+# The citation-binding kinds this registry admits, derived from the declarations the entry above is
+# built from rather than restated. A caller that needs to say what the registry holds names every
+# group -- the internal conformance kind, the eight facet kinds, the two detection kinds, the
+# requirement-revision kinds and this one -- and the four sets are disjoint by construction because a kind is one string.
+CITATION_BINDING_RECORD_KINDS: frozenset[str] = frozenset({BINDING_RECORD_KIND})
+
 
 # Which shapes each kind admits. Derived from the registry rather than restated, so a kind cannot
 # admit a shape the registry does not hold.

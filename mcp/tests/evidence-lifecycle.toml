@@ -816,6 +816,8 @@ consumers = [
   "mcp/tests/repository_profile_test_support.py",
   "mcp/tests/source_selection_test_support.py",
   "mcp/tests/test_agents_remember_quality.py",
+  "mcp/tests/test_knowledge_citation_bindings.py",
+  "mcp/tests/test_knowledge_citation_boundaries.py",
 ]
 
 [[artifact]]
@@ -1059,6 +1061,8 @@ consumers = [
   "mcp/tests/test_knowledge_store.py",
   "mcp/tests/test_knowledge_portable_boundaries.py",
   "mcp/tests/test_knowledge_portable_roundtrip.py",
+  "mcp/tests/test_knowledge_citation_bindings.py",
+  "mcp/tests/test_knowledge_citation_boundaries.py",
 ]
 
 [[contract]]
@@ -1191,6 +1195,7 @@ consumers = [
   "mcp/tests/test_knowledge_requirement_revisions.py",
   "mcp/tests/test_knowledge_schema_generations.py",
   "mcp/tests/test_knowledge_store.py",
+  "mcp/tests/test_knowledge_citation_boundaries.py",
 ]
 
 [[contract]]
