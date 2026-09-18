@@ -243,6 +243,7 @@ architecture-fitness = [
   "mcp/tests/test_wire_contract.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness_boundary.py",
+  "mcp/tests/test_record_integrity.py",
 ]
 provider-conformance = [
   "mcp/tests/test_codex_adapter_thread_demux.py",
