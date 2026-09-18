@@ -45,6 +45,7 @@ from agents_remember.models.knowledge.view import (
     ViewRefusal,
     ViewRequest,
     rebuild_continuation,
+    require_admitted_ordering_input,
 )
 
 __all__ = [
@@ -154,6 +155,16 @@ def knowledge_read_payload(request: ReadToolRequest) -> dict[str, Any]:
             "unknown_view",
             f"{view!r} is not one of the five named query views",
         )
+    # The admitted-ordering closure is checked **before** the dataset is opened, because the view
+    # layer's own refusal is the answer the caller needs and the request model cannot carry the
+    # unadmitted spelling to it: ``ViewRequest.ordering_input`` is a ``Literal``, so constructing the
+    # request with a fifth ordering raises instead of refusing, and the caller received a tool error
+    # where §2.5 promises ``unadmitted_ordering_input`` with the offending input. Asking the view
+    # module's one closure check first is what keeps the ordering refusal reachable from this surface
+    # (adversarial coverage review finding ``A-2``; the refusal itself is L20's, unchanged).
+    ordering_refusal = require_admitted_ordering_input(request.ordering_input)
+    if ordering_refusal is not None:
+        return _refused_read(view, repositoryId, ordering_refusal.code, ordering_refusal.detail)
     context = open_read_context(
         path,
         repositoryId,
@@ -249,7 +260,7 @@ def knowledge_diff_payload(request: DiffToolRequest) -> dict[str, Any]:
     repositoryId = request.repository_id
     supplied = _supplied_effect_labels(request.body)
     result = diff_knowledge_scope(
-        _diff_request(repositoryId, request.body),
+        _diff_request(request.body),
         before_path=Path(request.before_path),
         after_path=Path(request.after_path),
     )
@@ -270,12 +281,20 @@ def knowledge_diff_payload(request: DiffToolRequest) -> dict[str, Any]:
     }
 
 
-def _diff_request(repository_id: str, request: dict[str, Any] | None) -> Any:
-    """The shipped diff request one tool call describes, taken from the caller's own validated body."""
+def _diff_request(request: dict[str, Any] | None) -> Any:
+    """The shipped diff request one tool call describes, taken from the caller's own validated body.
 
-    body = dict(request or {})
-    body["repository_id"] = repository_id
-    return KnowledgeDiffRequest.model_validate(body)
+    The namespace is **not** written into the body here. ``KnowledgeDiffRequest`` declares no
+    ``repository_id`` and its base model forbids undeclared fields, so injecting one made every call
+    of this tool raise ``validation error for KnowledgeDiffRequest: repository_id -- Extra inputs are
+    not permitted`` before any comparison ran. Nothing was lost with the injection: a comparison's
+    namespace is named twice already, by the two sides' own ``KnowledgeReadContext``, each of which
+    carries the ``repository_id`` its snapshot must belong to. The regression this case exists for is
+    the adversarial coverage review's finding ``A-2``: the family had a roster row and no functional
+    case, which is what let a body that could never validate ship as a mounted operation.
+    """
+
+    return KnowledgeDiffRequest.model_validate(dict(request or {}))
 
 
 def _supplied_effect_labels(request: dict[str, Any] | None) -> list[dict[str, Any]]:

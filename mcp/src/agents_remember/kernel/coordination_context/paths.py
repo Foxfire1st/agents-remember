@@ -123,7 +123,46 @@ def find_code_repository_root(workspace_root: Path, code_repository_name: str) -
     )
 
 
+# A leaf enclosure's memory worktree is the second shape a memory root legitimately takes:
+# ``worktree_group_for`` places it at
+# ``<coordination>/worktrees/<code-repository-name>/<group>/memory-<worktree-name>/onboarding``.
+# It is the shape the contract-scoped memory-quality route already measures, because that route
+# takes its onboarding root from the contract rather than from this resolver -- so refusing it here
+# refused a location the product itself uses (D-34).
+WORKTREES_DIRNAME = "worktrees"
+MEMORY_REPOS_DIRNAME = "memory-repos"
+MEMORY_WORKTREE_PREFIX = "memory-"
+
+
+def memory_worktree_enclosure(onboarding_root: Path) -> tuple[Path, str] | None:
+    """``(coordination_root, code_repository_name)`` for a memory worktree, else ``None``.
+
+    The shape is decoded structurally rather than guessed: ``.../worktrees/<repo>/<group>/
+    memory-<name>/onboarding``. Anything that does not match every segment is not this shape, so a
+    directory that merely happens to be named ``memory-something`` earns no acceptance.
+    """
+    segments = onboarding_root.resolve().parts
+    if len(segments) < 5 or segments[-1] != "onboarding":
+        return None
+    name, group, repo_name, worktrees = segments[-2], segments[-3], segments[-4], segments[-5]
+    if worktrees != WORKTREES_DIRNAME or not name.startswith(MEMORY_WORKTREE_PREFIX):
+        return None
+    if name == MEMORY_WORKTREE_PREFIX or not group or not repo_name:
+        return None
+    return Path(*segments[:-5]), repo_name
+
+
 def infer_settings_path(onboarding_root: Path) -> Path:
+    enclosure = memory_worktree_enclosure(onboarding_root)
+    if enclosure is not None:
+        coordination_root, code_repository_name = enclosure
+        # A memory worktree carries no `system/` of its own: the settings that govern it are the
+        # official memory repo's, which is the pair's own source. Falling back to the context-root
+        # inference below keeps an unknown worktree reporting the missing file rather than
+        # resolving to some other repository's settings.
+        official = external_memory_root(coordination_root, code_repository_name) / "system"
+        if (official / "settings.md").exists():
+            return official / "settings.md"
     if onboarding_root.name == "onboarding":
         context_root = onboarding_root.parent
     elif onboarding_root.parent.name == "onboarding":
@@ -147,11 +186,22 @@ def infer_topology_from_onboarding_root(onboarding_root: Path) -> Topology:
     if onboarding_root.parent.name == LEGACY_INTERNAL_MEMORY_DIRNAME:
         refuse_removed_memory_mode("internal", artifact=onboarding_root.as_posix())
     if (
-        onboarding_root.parent.parent.name == "memory-repos"
+        onboarding_root.parent.parent.name == MEMORY_REPOS_DIRNAME
         and onboarding_root.parent.name.startswith("ar-")
     ):
         return "external"
+    if memory_worktree_enclosure(onboarding_root) is not None:
+        # A leaf enclosure's memory worktree: the memory is external to the code repository all the
+        # same, and this is the exact root the contract-scoped memory-quality route measures. It
+        # was refused here only because the resolver inferred topology from the path while the tool
+        # took its root from the contract.
+        return "external"
     raise ValueError(
-        "onboarding_root must point to a supported memory location: "
-        "<ar-coordination>/memory-repos/ar-<code-repository-name>/onboarding"
+        "onboarding_root must point to a supported memory location, of which there are two: "
+        f"<ar-coordination>/{MEMORY_REPOS_DIRNAME}/ar-<code-repository-name>/onboarding for an "
+        f"official memory repo, or "
+        f"<ar-coordination>/{WORKTREES_DIRNAME}/<code-repository-name>/<group>/"
+        f"{MEMORY_WORKTREE_PREFIX}<worktree-name>/onboarding for a leaf enclosure's memory "
+        f"worktree (the root the contract-scoped memory-quality route already measures). "
+        f"Received: {onboarding_root.as_posix()}"
     )

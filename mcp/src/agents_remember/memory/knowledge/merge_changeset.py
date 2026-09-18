@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -93,9 +94,21 @@ class MaterializedChange:
     columns: tuple[str, ...] = ()
 
     def primary_key(self) -> tuple[Any, ...]:
-        """Return the operation's key values, read from whichever side carries them."""
+        """Return the operation's key values, read from the side that carries them.
 
-        side = self.new if self.new is not None else self.old
+        A changeset supplies only the columns an operation changes, and a key column is by
+        definition unchanged by an ``UPDATE``: SQLite therefore reports the update's *new* entries
+        with the not-supplied marker exactly where the key is, and a key read from that side is a
+        row identity that names no row. The old side is read first whenever it is present, which
+        resolves both operations that carry one -- a ``DELETE`` has only an old side, an ``UPDATE``
+        has both and only the old side holds the key -- and an ``INSERT``, the one operation with no
+        old side, carries every column including the key. This is the same rule
+        :func:`_conflicting_key` applies inside the conflict callback, stated once for the
+        postcondition check: reading the carrying side is what makes "the result does not hold the
+        row the delta wrote" a fact about a row rather than about the marker.
+        """
+
+        side = self.old if self.old is not None else self.new
         if side is None:
             return ()
         return tuple(side[position] for position in self.primary_key_columns)
@@ -147,6 +160,12 @@ class AppliedChangeset:
     ``detail`` carries the engine's own message when the application failed without invoking the
     conflict callback at all -- a missing target table is that shape -- so a caller always has a
     reason even when there was no conflict to report.
+
+    ``refusal`` carries a check the caller asked to run **inside the application's own
+    transaction**: the operation was applied, the check refused it, and the application was rolled
+    back, so the target holds exactly what it held before. It is a third outcome rather than a
+    conflict because no change conflicted -- the engine applied everything it was given, and what
+    the caller proved afterwards is that the whole application must not stand.
     """
 
     conflict_code: int | None = None
@@ -154,6 +173,7 @@ class AppliedChangeset:
     conflict_operation: str | None = None
     conflict_key: tuple[str, ...] | None = None
     detail: str = ""
+    refusal: KnowledgeRefusal | None = None
 
     @property
     def conflicted(self) -> bool:
@@ -234,7 +254,12 @@ def build_delta(
     )
 
 
-def apply_changeset(delta: Delta, target_path: Path) -> AppliedChangeset:
+def apply_changeset(
+    delta: Delta,
+    target_path: Path,
+    *,
+    within_transaction: Callable[[apsw.Connection], KnowledgeRefusal | None] | None = None,
+) -> AppliedChangeset:
     """Apply one delta to one private target with a conflict callback that always aborts.
 
     The callback copies the available facts -- the conflict code, the table, the operation and the
@@ -246,6 +271,14 @@ def apply_changeset(delta: Delta, target_path: Path) -> AppliedChangeset:
     expires when the iterator advances, and this is the only place the engine names the row it
     actually refused. A later search of the changeset finds *an* operation on the table, which is a
     different fact from the operation that conflicted.
+
+    ``within_transaction`` is the caller's own rule over the rows the application just wrote, and it
+    runs on the same connection, inside the same transaction, after the changeset has been applied
+    and **before the commit**. The application is therefore one atomic step with the check: a check
+    that refuses rolls the whole application back and the target keeps exactly what it held, which
+    is what a rule over the applied rows has to mean -- a rule proved after the commit would leave
+    a committed state the caller then rejects, and a rule proved before the application would be a
+    rule over the delta rather than over the result.
     """
 
     captured: dict[str, Any] = {}
@@ -262,19 +295,42 @@ def apply_changeset(delta: Delta, target_path: Path) -> AppliedChangeset:
     connection = apsw.Connection(str(target))
     try:
         connection.execute("PRAGMA foreign_keys=ON")
-        apsw.Changeset.apply(delta.changeset, connection, conflict=conflict, flags=0)
-    except apsw.Error as error:
-        if not captured:
-            return AppliedChangeset(detail=f"{type(error).__name__}: {error}")
-        return AppliedChangeset(
-            conflict_code=int(captured["code"]),
-            conflict_table=captured.get("table"),
-            conflict_operation=captured.get("operation"),
-            conflict_key=captured.get("key"),
-        )
+        connection.execute("BEGIN")
+        try:
+            apsw.Changeset.apply(delta.changeset, connection, conflict=conflict, flags=0)
+        except apsw.Error as error:
+            _roll_back_if_open(connection)
+            if not captured:
+                return AppliedChangeset(detail=f"{type(error).__name__}: {error}")
+            return AppliedChangeset(
+                conflict_code=int(captured["code"]),
+                conflict_table=captured.get("table"),
+                conflict_operation=captured.get("operation"),
+                conflict_key=captured.get("key"),
+            )
+        if within_transaction is not None:
+            refusal = within_transaction(connection)
+            if refusal is not None:
+                _roll_back_if_open(connection)
+                return AppliedChangeset(refusal=refusal)
+        connection.execute("COMMIT")
     finally:
         connection.close()
     return AppliedChangeset()
+
+
+def _roll_back_if_open(connection: apsw.Connection) -> None:
+    """Undo the application's transaction when the engine has left one open.
+
+    A failed application may already have ended the transaction by itself -- an I/O or full-disk
+    error rolls the statement back at that level -- and ``ROLLBACK`` against a connection with no
+    transaction is an error rather than a no-op. The connection is closed immediately afterwards,
+    which is what undoes anything still open, so this asks the connection whether there is anything
+    to undo instead of assuming there is.
+    """
+
+    if connection.in_transaction:
+        connection.execute("ROLLBACK")
 
 
 def _conflicting_key(change: object) -> tuple[str, ...] | None:

@@ -169,6 +169,7 @@ consumers = [
   "mcp/tests/test_code_quality_targeted.py",
   "mcp/tests/test_pytest_bootstrap_boundaries.py",
   "mcp/tests/test_quality_retry_proof.py",
+  "mcp/tests/test_evidence_catalog_gate_boundaries.py",
 ]
 
 [[artifact]]
@@ -773,6 +774,7 @@ consumers = [
   "mcp/tests/test_tools.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness_boundary.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
+  "mcp/tests/test_knowledge_views_and_projection.py",
 ]
 
 [[artifact]]
@@ -802,6 +804,8 @@ consumers = [
   "mcp/tests/test_quality_retry_proof.py",
   "mcp/tests/test_repository_certification_profiles.py",
   "mcp/tests/test_suite_budget.py",
+  "mcp/tests/test_evidence_catalog_gate_boundaries.py",
+  "mcp/tests/test_memory_citation_resolution.py",
 ]
 
 [[artifact]]
@@ -1281,6 +1285,7 @@ consumers = [
   "mcp/tests/test_knowledge_guarded_merge_boundaries.py",
   "mcp/tests/test_knowledge_portable_boundaries.py",
   "mcp/tests/test_knowledge_portable_roundtrip.py",
+  "mcp/tests/test_knowledge_merge_right_side_writes.py",
 ]
 
 [[artifact]]

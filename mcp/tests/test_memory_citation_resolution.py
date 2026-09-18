@@ -5,11 +5,13 @@ from __future__ import annotations
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
+REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.kernel.memory_attribution import render_memory_content_message
@@ -22,6 +24,8 @@ from agents_remember.memory_quality.style.citations import (
     deterministic_projection,
     range_resolution,
 )
+from agents_remember.memory_quality.style.citations.editing import rewritten
+from agents_remember.memory_quality.style.update_history import history_order
 
 CARD_HEADER = (
     "# {path}",
@@ -379,6 +383,482 @@ class RetainedPreparedProvenanceTests(TreeCase):
         self.tree.memory_file("system/policy.py", "VALUE = 2\n")
         result = claim_reopen.check_onboarding_root(self.tree.onboarding, self.tree.code)
         self.assertEqual(result["surfacedFindings"][0]["code"], "citation_claim_reopened")
+
+
+class InheritedProvenanceDebtTests(TreeCase):
+    """A row the task INHERITED is debt or closeout-owned; a row it created or edited is its own.
+
+    D-24 measured the guard: ``_demote_preexisting_provenance_debt`` keyed on document dirtiness, so
+    a curation pass that CORRECTED a document made every pre-existing ambiguous row in it enforced
+    debt -- measured 0 of 4 demoted -- and those rows cannot be cleared by any edit, because anchor
+    multiplicity is decided per cited FILE (narrowing changes no occurrence count and splitting adds
+    a row). These cases pin both halves of the fix: the demotion keys on the ROW's pre-task
+    revision, and the multiplicity class is reported as closeout-owned instead of repairable.
+    """
+
+    AMBIGUOUS = "VALUE = 1\nVALUE = 2\nOTHER = 3\nTAIL = 4\n"
+    ROWS = (
+        "| The doubled value | `VALUE` | src.py:1-2 |",
+        "| The other value | `OTHER` | src.py:3-3 |",
+    )
+    EDITED_ROW = "| The other value | `OTHER` | src.py:3-4 |"
+    ADDED_ROW = "| The tail value | `TAIL` | src.py:4-4 |"
+
+    def git(self, root: Path, *args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise AssertionError(result.stderr or result.stdout)
+        return result.stdout.strip()
+
+    def setUp(self) -> None:
+        super().setUp()
+        for root in (self.tree.code, self.tree.memory):
+            self.git(root, "init", "--quiet")
+            self.git(root, "config", "user.email", "fixture@example.invalid")
+            self.git(root, "config", "user.name", "Fixture")
+        (self.tree.memory / "memory.md").write_text("# Memory\n", encoding="utf-8")
+        self.git(self.tree.memory, "add", "memory.md")
+        self.git(self.tree.memory, "commit", "--quiet", "-m", "init")
+        self.tree.source("src.py", self.AMBIGUOUS)
+        self.git(self.tree.code, "add", "src.py")
+        self.git(self.tree.code, "commit", "--quiet", "-m", "source")
+        self.stamp = self.git(self.tree.code, "rev-parse", "HEAD")
+        # The semantic route only opens when the cited path MOVED since the stamp: a path proven
+        # unchanged is skipped without resolving any anchor at all, which is the cheap routing the
+        # module documents. One uncommitted line is enough, and it leaves both anchors' own
+        # occurrence counts intact.
+        self.tree.source("src.py", self.AMBIGUOUS.replace("TAIL = 4", "TAIL = 5"))
+
+    def card(self, rows: tuple[str, ...], *, stamp: str | None = None, commit: bool) -> Path:
+        card = self.tree.memory_file(
+            "onboarding/src.py.md",
+            "\n".join(
+                (
+                    "# src.py",
+                    "",
+                    "| Field | Value |",
+                    "| --- | --- |",
+                    f"| lastVerifiedCommitHash | `{self.stamp if stamp is None else stamp}` |",
+                    "| lastVerifiedCommitDate | 2026-09-10 |",
+                    "",
+                    "## Repo-Internal References",
+                    "",
+                    "| Finding | Anchor | Source |",
+                    "| --- | --- | --- |",
+                    *rows,
+                    "",
+                )
+            ),
+        )
+        if commit:
+            self.git(self.tree.memory, "add", "onboarding/src.py.md")
+            self.git(self.tree.memory, "commit", "--quiet", "-m", "card")
+        return card
+
+    def rewrite(self, card: Path, old: str, new: str) -> None:
+        card.write_text(card.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+
+    def check(self) -> dict:
+        return claim_reopen.check_onboarding_root(self.tree.onboarding, self.tree.code)
+
+    def test_an_ambiguous_row_in_a_document_the_task_corrected_is_closeout_owned(self) -> None:
+        """The acceptance case: correct an UNRELATED range and the inherited row is not promoted.
+
+        `VALUE` binds twice in ``src.py``, so no edit can make it unique. Red before the fix: the
+        document becomes dirty, the row stays in ``findings`` as enforced curator debt the curator
+        cannot discharge.
+        """
+
+        card = self.card(self.ROWS, commit=True)
+        self.rewrite(card, self.ROWS[1], self.EDITED_ROW)
+
+        result = self.check()
+
+        self.assertEqual(result["findings"], [], result["findings"])
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["debtFindings"], [])
+        self.assertEqual(result["closeoutOwnedCount"], 1)
+        owned = result["closeoutOwnedFindings"]
+        self.assertEqual(owned[0]["code"], "citation_provenance_invalid")
+        self.assertEqual(owned[0]["path"], "src.py.md")
+        self.assertTrue(owned[0]["closeoutOwned"])
+        self.assertIn("resolved 2 times at verification", owned[0]["message"])
+
+    def test_an_unrelated_new_range_does_not_promote_the_documents_inherited_rows(self) -> None:
+        """The demotion keys on the ROW's pre-task revision, not on the document's dirtiness.
+
+        The stamp is not a Git commit, which is inherited rather than introduced here, so every
+        inherited row is a ``citation_provenance_invalid`` on the non-multiplicity path. The task
+        corrects the document by adding one unrelated citation range: that row is its own and stays
+        enforced, while the two it inherited stay inherited. Red before the fix -- document
+        dirtiness made all three enforced, so a curator was charged with rows no edit can clear.
+        """
+
+        card = self.card(self.ROWS, stamp="zzz", commit=True)
+        self.rewrite(card, self.ROWS[1], self.ROWS[1] + "\n" + self.ADDED_ROW)
+
+        result = self.check()
+
+        self.assertEqual(len(result["findings"]), 1, result["findings"])
+        self.assertIn("`TAIL`", result["findings"][0]["message"])
+        self.assertEqual(result["closeoutOwnedFindings"], [])
+        self.assertEqual(len(result["debtFindings"]), 2, result["debtFindings"])
+        self.assertEqual(
+            {row["code"] for row in result["debtFindings"]}, {"citation_provenance_invalid"}
+        )
+        self.assertEqual({row["severity"] for row in result["debtFindings"]}, {"warning"})
+        for inherited, anchor in zip(result["debtFindings"], ("`VALUE`", "`OTHER`"), strict=True):
+            self.assertIn(anchor, inherited["message"])
+
+    def test_a_row_the_task_created_stays_enforced(self) -> None:
+        """A card this task wrote has no pre-existing anything, so its rows are the task's own.
+
+        The document is untracked, so the pre-task revision does not carry it at all. Red if the
+        demotion ever falls back to reading presence in the working tree.
+        """
+
+        self.card(self.ROWS, stamp="zzz", commit=False)
+
+        result = self.check()
+
+        self.assertEqual(len(result["findings"]), 2, result["findings"])
+        self.assertEqual(result["debtFindings"], [])
+        self.assertFalse(result["ok"])
+
+    def test_a_row_the_task_edited_stays_enforced(self) -> None:
+        """Touch it, own it: editing the row makes the row the task's, whatever it said before.
+
+        Red if the demotion degrades to "the document was tracked before", which would let a leaf
+        clear an inherited row by editing it and still be told the row is not its problem. The
+        untouched sibling row stays inherited debt, so this is a per-ROW decision rather than a
+        per-document one in both directions.
+        """
+
+        card = self.card(self.ROWS, stamp="zzz", commit=True)
+        self.rewrite(card, self.ROWS[0], self.ROWS[0].replace("doubled", "doubled and restated"))
+
+        result = self.check()
+
+        self.assertEqual(len(result["findings"]), 1, result["findings"])
+        self.assertIn("`VALUE`", result["findings"][0]["message"])
+        self.assertEqual(len(result["debtFindings"]), 1, result["debtFindings"])
+        self.assertIn("`OTHER`", result["debtFindings"][0]["message"])
+
+
+class InsertedRegistrationRangeDriftTests(TreeCase):
+    """D-23: a landing's new registration must not bill a pure move as curator debt.
+
+    `mcp/tests/test-evidence-lanes.toml` keeps one member list per lane and `mcp/tests/
+    evidence-lifecycle.toml` keeps a table per contract, so a registration inserted anywhere but
+    the end of its list moves every row below it. Cards cite those rows by line, so one landing
+    staled **90** citations tree-wide at L19 -- 74 already stale before the leaf's own rows and 16
+    shifted by them -- and every one of those rows landed in the curator's repairable set although
+    the anchor was still exactly where it always was, one line down.
+    """
+
+    REGISTRY = (
+        "[files]\n"
+        "unit-regression = [\n"
+        '  "mcp/tests/test_alpha.py",\n'
+        '  "mcp/tests/test_beta.py",\n'
+        "]\n"
+    )
+    ROW = '| The beta row. | "mcp/tests/test_beta.py" | mcp/tests/test-evidence-lanes.toml:4-4 |'
+
+    def registry(self, body: str) -> None:
+        self.tree.memory_file("mcp/tests/test-evidence-lanes.toml", body)
+
+    def test_an_inserted_registration_is_reported_as_a_stale_range_not_curator_work(self) -> None:
+        """The anchor still resolves once, so the row is a MOVE and never enters ``findings``.
+
+        Red if the classification goes back to billing every absent anchor the same: the curator
+        is handed a row whose only defect is that somebody else's landing inserted a line above it,
+        and no edit of the claim can clear it.
+        """
+
+        self.registry(
+            self.REGISTRY.replace("test_beta", "test_inserted", 1).replace(
+                '  "mcp/tests/test_inserted.py",\n',
+                '  "mcp/tests/test_inserted.py",\n  "mcp/tests/test_beta.py",\n',
+            )
+        )
+        self.tree.card("mcp/tests/test_beta.py", self.ROW)
+
+        result = self.tree.run()
+
+        self.assertEqual(result["findings"], [], result["findings"])
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(result["reportOnlyFindings"]), 1, result["reportOnlyFindings"])
+        reported = result["reportOnlyFindings"][0]
+        self.assertEqual(reported["code"], "citation_anchor_absent_from_range")
+        self.assertTrue(reported["reportOnly"])
+        self.assertIn("STALE BY A MOVE", reported["message"])
+
+    def test_an_anchor_that_moved_out_of_the_file_stays_enforced(self) -> None:
+        """A row whose anchor is gone from the cited file is a broken claim, not a stale range.
+
+        The registry carries no ``test_beta.py`` row at all, so the anchor resolves NOWHERE. This
+        is the control that keeps the classification from swallowing the class it exists to
+        separate: red if 'resolves nowhere' is ever treated as a move.
+        """
+
+        self.registry(self.REGISTRY.replace('  "mcp/tests/test_beta.py",\n', ""))
+        self.tree.card("mcp/tests/test_beta.py", self.ROW)
+
+        result = self.tree.run()
+
+        self.assertEqual(result["reportOnlyFindings"], [])
+        self.assertEqual(self.codes(result), ["citation_anchor_absent_from_range"])
+        self.assertFalse(result["ok"])
+
+    def test_an_ambiguous_anchor_is_a_broken_citation_rather_than_a_moved_one(self) -> None:
+        """Two rows naming the module are not a pointer that moved; they are an ambiguity.
+
+        Red if the classification accepts anything but EXACTLY ONE resolved construct: a projection
+        that "repaired" an ambiguous row would pick one of two sites on the curator's behalf, which
+        is the guess the check exists to refuse.
+        """
+
+        self.registry(
+            "[files]\n"
+            "unit-regression = [\n"
+            '  "mcp/tests/test_beta.py",\n'
+            '  "mcp/tests/test_gamma.py",\n'
+            '  "mcp/tests/test_beta.py",\n'
+            "]\n"
+        )
+        self.tree.card("mcp/tests/test_beta.py", self.ROW)
+
+        result = self.tree.run()
+
+        self.assertEqual(result["reportOnlyFindings"], [])
+        self.assertEqual(self.codes(result), ["citation_anchor_absent_from_range"])
+
+    def test_the_shipped_registries_append_point_is_the_end_of_its_own_list(self) -> None:
+        """Half (a): appending at that point leaves every earlier row of the list at its line.
+
+        A citation into those rows cannot be staled by the next registration, which is what
+        "append at the end of its lane list or table" buys. This case appends a synthetic row to
+        the SHIPPED manifest's first list and re-parses it, so it measures the real file rather
+        than a fixture: red if the list stops being a shape whose end is a line-stable append
+        point, and red for the mid-list insertion it contrasts with.
+        """
+
+        manifest = (REPO_ROOT / "mcp/tests/test-evidence-lanes.toml").read_text(encoding="utf-8")
+        before = tomllib.loads(manifest)["files"]["unit-regression"]
+        original = manifest.splitlines()
+        lines_of = {row: original.index(f'  "{row}",') + 1 for row in before}
+
+        appended = manifest.replace(
+            f'  "{before[-1]}",\n',
+            f'  "{before[-1]}",\n  "mcp/tests/test_appended_registration.py",\n',
+            1,
+        )
+        after = tomllib.loads(appended)["files"]["unit-regression"]
+        shifted = appended.splitlines()
+        for row, line in lines_of.items():
+            self.assertEqual(shifted.index(f'  "{row}",') + 1, line, row)
+        self.assertEqual(after[:-1], before)
+
+        inserted = manifest.replace(
+            f'  "{before[-1]}",\n',
+            f'  "mcp/tests/test_inserted_registration.py",\n  "{before[-1]}",\n',
+            1,
+        ).splitlines()
+        self.assertEqual(
+            inserted.index(f'  "{before[-1]}",') + 1,
+            lines_of[before[-1]] + 1,
+            "the contrast case must move a row, or this case proves nothing",
+        )
+
+
+class DecoratedDeclarationCitationTests(TreeCase):
+    """A card citing a decorated declaration at ITS OWN lines must not reopen against itself.
+
+    ``grammars`` widens a definition's extent outwards through ``decorated_definition`` so the
+    range covers the decorator, which is deliberate: a projected range should quote the whole
+    construct. What D-21 measured is the consequence for the reopen rule -- an extent whose start
+    is the DECORATOR line (57 for a declaration at 58-85) made ``:58-83`` reopen while ``:57-83``
+    passed, so three curator seats learned to include the decorator line instead of reporting the
+    phantom. The rule this class pins: coverage is judged against the declaration's own line, and
+    a range that begins inside the construct still reopens.
+    """
+
+    DECORATED = "import functools\n\n\n@functools.cache\ndef build():\n    return 1\n"
+    CHANGED = "import functools\n\n\n@functools.cache\ndef build():\n    return 2\n"
+
+    def git(self, root: Path, *args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise AssertionError(result.stderr or result.stdout)
+        return result.stdout.strip()
+
+    def setUp(self) -> None:
+        super().setUp()
+        for root in (self.tree.code, self.tree.memory):
+            self.git(root, "init", "--quiet")
+            self.git(root, "config", "user.email", "fixture@example.invalid")
+            self.git(root, "config", "user.name", "Fixture")
+        (self.tree.memory / "memory.md").write_text("# Memory\n", encoding="utf-8")
+        self.git(self.tree.memory, "add", "memory.md")
+        self.git(self.tree.memory, "commit", "--quiet", "-m", "init")
+
+    def card(self, citation: str) -> str:
+        """Commit the declaration, change it, and cite it at ``citation``."""
+        self.tree.source("src.py", self.DECORATED)
+        self.git(self.tree.code, "add", "src.py")
+        self.git(self.tree.code, "commit", "--quiet", "-m", "declaration")
+        stamp = self.git(self.tree.code, "rev-parse", "HEAD")
+        self.tree.source("src.py", self.CHANGED)
+        self.tree.memory_file(
+            "onboarding/src.py.md",
+            "\n".join(
+                (
+                    "# src.py",
+                    "",
+                    "| Field | Value |",
+                    "| --- | --- |",
+                    f"| lastVerifiedCommitHash | `{stamp}` |",
+                    "| lastVerifiedCommitDate | 2026-09-10 |",
+                    "",
+                    "## Repo-Internal References",
+                    "",
+                    "| Finding | Anchor | Source |",
+                    "| --- | --- | --- |",
+                    f"| Builds the cached value | `build` | {citation} |",
+                    "",
+                )
+            ),
+        )
+        return claim_reopen.check_onboarding_root(self.tree.onboarding, self.tree.code)
+
+    def test_citing_the_declarations_own_lines_is_current_not_a_reopen(self) -> None:
+        """The decorator at 4 is not the declaration; the declaration's own lines are 5-6.
+
+        Red if coverage goes back to the widened extent's start: the row returns to ``findings``
+        as enforced curator debt for a citation that is exactly right.
+        """
+
+        result = self.card("src.py:5-6")
+        self.assertEqual([one["code"] for one in result["findings"]], [])
+        self.assertEqual(
+            [one["code"] for one in result["surfacedFindings"]], ["citation_claim_reopened"]
+        )
+
+    def test_including_the_decorator_line_still_reads_as_current(self) -> None:
+        """The range a curator learned to write keeps working, so the fix adds no new demand."""
+
+        result = self.card("src.py:4-6")
+        self.assertEqual([one["code"] for one in result["findings"]], [])
+        self.assertEqual(
+            [one["code"] for one in result["surfacedFindings"]], ["citation_claim_reopened"]
+        )
+
+    def test_a_range_that_begins_inside_the_construct_still_reopens(self) -> None:
+        """The reopen rule itself is not relaxed: a range below the declaration is not current.
+
+        Red if the comparison stops bounding the range's start, which would make any range that
+        merely overlaps the construct -- including one starting in its body -- pass.
+        """
+
+        result = self.card("src.py:6-6")
+        self.assertEqual([one["code"] for one in result["findings"]], ["citation_claim_reopened"])
+        self.assertEqual(result["surfacedFindings"], [])
+
+
+class GeneratedHistoryInsertionOrderTests(TreeCase):
+    """The engine inserts its generated bullet by the INSTANT, not by the block's top.
+
+    A generated bullet is stamped in UTC while the document's own entries may carry another offset,
+    so "directly under the heading" and "newest first" are different claims: an entry stamped
+    ``+02:00`` can be newer than the bullet (D-27 measured exactly that block --
+    ``05:29:42+00:00`` sitting below ``06:05+02:00``). These cases drive the two calls
+    ``DocumentTransaction.render`` makes -- ``history_edit`` then ``rewritten`` -- and judge the
+    result with the shipped checker plus a direct read of the instants.
+    """
+
+    ENTRIES = (
+        "- 2026-09-18T06:50+02:00: curator entry A",
+        "- 2026-09-18T06:35+02:00: curator entry B",
+        "- 2026-09-18T06:05+02:00: curator entry C",
+        "- 2026-09-18T05:15+02:00: older entry D",
+    )
+
+    def render(self, at: datetime) -> str:
+        document = "\n".join(("# card", "", "## Update History", "", *self.ENTRIES, ""))
+        lines = document.split("\n")
+        heading = deterministic_projection.history_section_line(lines)
+        assert heading is not None
+        bullet = deterministic_projection.history_bullet(
+            at=at,
+            snapshot_id="b" * 64,
+            extents=(
+                deterministic_projection.ResolvedExtentInfo(
+                    anchor="`build_route_indexes`",
+                    path="kernel/build.py",
+                    start=1,
+                    end=2,
+                    kind="definition",
+                ),
+            ),
+        )
+        site, text = deterministic_projection.history_edit(lines, heading, [bullet])
+        return "\n".join(rewritten(lines, [(site, text)]))
+
+    def bullets(self, rendered: str) -> list[str]:
+        return [line for line in rendered.splitlines() if line.startswith("- ")]
+
+    def instants(self, rendered: str) -> list[datetime]:
+        stamps: list[datetime] = []
+        for bullet in self.bullets(rendered):
+            parsed = history_order.parse_timestamp(bullet[2:])
+            assert parsed is not None, bullet
+            stamps.append(history_order.datetime_value(parsed))
+        return stamps
+
+    def test_a_bullet_older_than_the_blocks_entries_is_inserted_below_them(self) -> None:
+        """04:00:00Z is 06:00+02:00, so it belongs BELOW the 06:05+02:00 entry, not above it.
+
+        Red before the fix: the bullet was always inserted directly under the heading, so the
+        block read ``04:00Z`` above ``06:05+02:00`` and the checker reported
+        ``update_history_not_newest_first`` on a document nobody edited wrongly.
+        """
+
+        rendered = self.render(datetime(2026, 9, 18, 4, 0, 0, tzinfo=UTC))
+        stamps = self.instants(rendered)
+        self.assertEqual(stamps, sorted(stamps, reverse=True), rendered)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "onboarding").mkdir()
+            (root / "onboarding" / "card.md").write_text(rendered, encoding="utf-8")
+            result = history_order.check_onboarding_root(root / "onboarding")
+        self.assertEqual(result["findings"], [])
+        self.assertTrue(result["ok"])
+
+    def test_a_bullet_newer_than_the_block_is_still_inserted_at_the_top(self) -> None:
+        """07:29:42+02:00 is the newest instant, so the common case is unchanged.
+
+        This is the control for the case above: it must stay green, or the fix would have moved a
+        genuinely newest bullet out of the position the section's own order demands.
+        """
+
+        rendered = self.render(datetime(2026, 9, 18, 5, 29, 42, tzinfo=UTC))
+        stamps = self.instants(rendered)
+        self.assertEqual(stamps, sorted(stamps, reverse=True), rendered)
+        self.assertIn("Generated citation repair", self.bullets(rendered)[0])
 
 
 class MechanicallyProjectedRangeTests(TreeCase):

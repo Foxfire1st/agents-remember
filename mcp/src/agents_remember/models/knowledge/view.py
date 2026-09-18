@@ -111,7 +111,11 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 ViewName = Literal["source_context", "invariant", "family", "review_matrix", "curation_queue"]
-VIEW_NAMES: tuple[str, ...] = get_args(ViewName)
+# ``VIEW_NAMES`` is the five names themselves, not five arbitrary strings: a caller that iterates it
+# is iterating admitted view names, and a caller holding a plain ``str`` must still satisfy the
+# request model's own check. Declaring the element type as the literal union says that once, instead
+# of leaving every consumer to re-narrow what ``get_args`` erased.
+VIEW_NAMES: tuple[ViewName, ...] = get_args(ViewName)
 
 # One phrase per view, for the published interface ``KS-R22@v1`` mounts. These describe what the
 # view selects; they are not a second content list and they carry no ordering claim.

@@ -73,6 +73,7 @@ from agents_remember.models.knowledge.candidate import (
     MutableRecordTable,
     SetFamilyRevisionRoute,
 )
+from agents_remember.models.knowledge.census import CENSUS_WRITABLE_TABLES
 from agents_remember.models.knowledge.composition import (
     COMPOSITION_COMMAND_KINDS,
     COMPOSITION_WRITABLE_TABLES,
@@ -258,6 +259,18 @@ def test_the_composition_commands_are_the_closed_unions_own_members() -> None:
     the whole-union fact that the dispatch table is exactly the union (``set(_TARGET_CHECKS) == kinds``
     below, unchanged). A command added to the union without a check still reddens here, which is what
     the equality was standing in for.
+
+    RE-SCOPED AGAIN by L21's landing, and again *not* weakened -- this is the second instance of the
+    same mechanism, caught by the adversarial coverage review as its finding ``A-1``. The
+    writable-table union went stale in exactly the way the sentence above describes: ``KS-R21@v1``
+    appended six census tables to the vocabulary's own ``MutableRecordTable`` and this assertion
+    still named the three groups that existed when L17 landed, so the case failed ``3.20 s`` after
+    the tip was frozen. The repair is the rule this case already states -- the new group's published
+    constant (``models.knowledge.census.CENSUS_WRITABLE_TABLES``) joins the union as a fourth term,
+    which is what ``test_knowledge_facets.py``'s equivalent assertion did for the same append. No
+    member was deleted from the assertion and no group was absorbed into the literal: the census
+    membership is asked of the census vocabulary, so a table added there still reddens this case by
+    making the two declarations disagree.
     """
 
     kinds = command_kinds()
@@ -267,15 +280,27 @@ def test_the_composition_commands_are_the_closed_unions_own_members() -> None:
     assert set(APPLY_COMPOSITION_KINDS) == COMPOSITION_COMMAND_KINDS
     assert (kinds | set(_INSERTING_KINDS)) >= COMPOSITION_COMMAND_KINDS
     declared_tables = set(get_args(MutableRecordTable))
-    assert declared_tables == {
-        "invariant",
-        "invariant_revision",
-        "family",
-        "family_revision",
-        "source_anchor",
-        "family_member",
-        "realization_claim",
-    } | set(FACET_WRITABLE_TABLES) | COMPOSITION_WRITABLE_TABLES | set(EVIDENCE_WRITABLE_TABLES)
+    assert declared_tables == (
+        {
+            "invariant",
+            "invariant_revision",
+            "family",
+            "family_revision",
+            "source_anchor",
+            "family_member",
+            "realization_claim",
+        }
+        | set(FACET_WRITABLE_TABLES)
+        | COMPOSITION_WRITABLE_TABLES
+        | set(EVIDENCE_WRITABLE_TABLES)
+        # The census group's own declared table set, registered by ``260915-KS-L21``: its three
+        # record tables and the three relations they resolve through. Named as the group's own
+        # constant rather than spelled here, which is the rule this case already applies to the
+        # facet, composition and evidence groups -- an appended generation adds its constant to
+        # this union instead of editing the literals above. The registry it must agree with is the
+        # one the vocabulary declares; nothing here restates the members.
+        | set(CENSUS_WRITABLE_TABLES)
+    )
     assert set(GENERATION_6.tables[len(GENERATION_5.tables) :]) == COMPOSITION_WRITABLE_TABLES
 
 

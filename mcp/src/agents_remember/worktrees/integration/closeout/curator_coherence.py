@@ -82,12 +82,25 @@ class CuratorCoherencePaths:
     canonical: Path
     generations: Path
     snapshots: Path
+    attestations: Path
 
     def generation_record(self, digest: str) -> Path:
         return self.generations / digest / "record.json"
 
     def generation_report(self, digest: str) -> Path:
         return self.generations / digest / "report.md"
+
+    def attestation_copy(self, digest: str) -> Path:
+        """The durable copy of the memory-quality attestation a publication bound.
+
+        Content-addressed by the attestation's own digest and living in the task tree beside the
+        record, because the enclosure path the record binds is reclaimed by
+        ``lifecycle_finalize_task``: without this copy an authority's ``attestationSha256`` commits
+        to bytes no longer recoverable anywhere in the workspace, and nothing can re-derive from the
+        bound attestation why the record's source-candidate list is what it is.
+        """
+
+        return self.attestations / f"{digest}.json"
 
 
 @dataclass(frozen=True)
@@ -153,6 +166,7 @@ def curator_coherence_paths(contract: WorktreeContract) -> CuratorCoherencePaths
         canonical=reports / f"{contract.leaf_id}-curator-coherence.json",
         generations=history / "generations",
         snapshots=history / "attempts",
+        attestations=history / "attestations",
     )
 
 

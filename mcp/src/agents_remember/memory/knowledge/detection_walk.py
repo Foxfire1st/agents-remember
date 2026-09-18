@@ -28,7 +28,7 @@ the two modules split along the property each one protects rather than along a c
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from uuid import NAMESPACE_URL, uuid5
 
 from agents_remember.models.knowledge.detection import (
@@ -100,6 +100,7 @@ class _ClaimFacts:
 
     item_id: str
     claim_id: str
+    group_key: str
     invariant_revision_id: str
     path: str | None
     locator_kind: str | None
@@ -118,9 +119,11 @@ def _claim_facts(item: KnowledgeDiffItem) -> _ClaimFacts:
     payload = item.before if item.before is not None else item.after
     anchor = None if payload is None else payload.anchor
     change = item.source_change
+    claim_id = str(item.record_id or item.item_id)
     return _ClaimFacts(
         item_id=item.item_id,
-        claim_id=str(item.record_id or item.item_id),
+        claim_id=claim_id,
+        group_key=claim_id,
         invariant_revision_id=str(
             (payload.invariant_revision_id if payload is not None else None) or ""
         ),
@@ -141,6 +144,37 @@ def _locator_kind(locator: object) -> str | None:
 
     kind = getattr(locator, "kind", None)
     return None if kind is None else str(kind)
+
+
+def _regroup_shared_items(claims: Sequence[_ClaimFacts]) -> tuple[_ClaimFacts, ...]:
+    """Return the union's realization items with the group key each single-item signal is named by.
+
+    One realization claim *record* can be spoken for by more than one union item -- the union's own
+    unit is the item, and two coverage items of one claim are two recorded facts about it -- so the
+    record identity is not always a key that names one item. A condition about a single attribution
+    ("this claim's anchor path is absent", "this claim's attribution is gone from the after side")
+    is a condition about the item that carried that fact, and naming it by the shared record
+    identity emits two signals under one identity, which the run's own reproducibility rule refuses
+    -- correctly, because a total order that names an identity twice is not an order over a set.
+
+    So the record identity stays the group key while it names exactly one item in this union, and
+    the item identity -- the union's own stable key for the record it carries -- takes over exactly
+    when several items share the record. Both are read from the comparison, so two walks over the
+    same recorded structure still produce the same ordered identities, and the ordinary one-item
+    case keeps the identity it has always had. What a relationship *path* reaches is unaffected:
+    a path's edges name the claim record, which is what the record identity is for.
+    """
+
+    counts: dict[str, int] = {}
+    for claim in claims:
+        counts[claim.claim_id] = counts.get(claim.claim_id, 0) + 1
+    return tuple(
+        replace(
+            claim,
+            group_key=claim.item_id if counts[claim.claim_id] > 1 else claim.claim_id,
+        )
+        for claim in claims
+    )
 
 
 def _items(result: KnowledgeDiffResult) -> tuple[KnowledgeDiffItem, ...]:
@@ -191,7 +225,9 @@ def detect_review_conditions(walk: DetectionWalkInput) -> tuple[DetectionSignalP
     """
 
     items = _items(walk.comparison)
-    claims = tuple(_claim_facts(item) for item in items if item.kind == "realization")
+    claims = _regroup_shared_items(
+        tuple(_claim_facts(item) for item in items if item.kind == "realization")
+    )
     members = _family_members(items)
     claims_by_invariant: dict[str, list[_ClaimFacts]] = {}
     for claim in claims:
@@ -355,7 +391,7 @@ def _claim_signal(
     return _emit(
         walk,
         _MatchedCondition(
-            condition=condition, group_key=claim.claim_id, changes=(change,), paths=(path,)
+            condition=condition, group_key=claim.group_key, changes=(change,), paths=(path,)
         ),
     )
 

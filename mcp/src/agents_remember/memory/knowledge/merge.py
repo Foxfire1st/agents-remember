@@ -87,6 +87,7 @@ from agents_remember.memory.knowledge.refusals import (
     lock_capability_refusal,
     refusal,
 )
+from agents_remember.memory.knowledge.routes import require_acyclic_routes
 from agents_remember.memory.knowledge.schema_generations import SchemaGeneration
 from agents_remember.memory.knowledge.store import open_existing_knowledge_store
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
@@ -241,6 +242,24 @@ class MergeRun:
             raise KnowledgeMergeDefect("a merge run reached a step before resolving its datasets")
         return self.databases
 
+    def acyclic_routes(self, connection: apsw.Connection) -> KnowledgeRefusal | None:
+        """Refuse a merged candidate whose route hierarchy reaches itself.
+
+        The walk runs on the connection the right delta was applied on, inside that application's
+        own uncommitted transaction, so a candidate that reparents a route into a cycle is rolled
+        back instead of published: the rule and the write it judges are one atomic step, which is
+        what "inside the same transaction" has to mean for a rule over inserted rows. ``route`` is
+        inside the merge's attached table set and a right-side ``route.parent_route_id`` change is
+        a real operation the replay performs, so this is a production path that has to run the
+        rule rather than a check the authoring operation happens to own. The refusal is attributed
+        to this operation, the rule itself stays the one walk in
+        :mod:`agents_remember.memory.knowledge.routes`.
+        """
+
+        return require_acyclic_routes(
+            connection, self.request.resolution.repository_id, MERGE_OPERATION
+        )
+
 
 class KnowledgeMergeDefect(RuntimeError):
     """A merge internal state that the sequence itself makes unreachable."""
@@ -278,7 +297,9 @@ def _apply_and_validate(run: MergeRun) -> MergeOutcome:
     merged_path = run.workspace / STAGED_LEFT_NAME
     shutil.copyfile(databases["left"], merged_path)
     right = run.deltas["right"]
-    applied = apply_changeset(right, merged_path)
+    applied = apply_changeset(right, merged_path, within_transaction=run.acyclic_routes)
+    if applied.refusal is not None:
+        return run.refused(applied.refusal)
     if applied.conflicted or applied.detail:
         return run.refused(
             _conflict_refusal(applied, right), conflict=_conflict_facts(applied, right)

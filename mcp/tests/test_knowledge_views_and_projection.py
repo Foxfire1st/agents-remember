@@ -1,13 +1,17 @@
-"""``KS-R20@v1`` §2, §3 and §5 as behaviour: the classification, the bounding and the vault safety.
+"""``KS-R20@v1`` §1, §2, §3, §5 and §6 as behaviour: the views, the classification, the bounding,
+the vault safety, and the mounted surface's own refusals.
 
 Every case names the failure it catches, and the four that carry the leaf are the ordering
 differential, the classification completeness scan, the authored-versus-mechanical separation, and
 the vault-safety scenario in which two of the checkpoints protect files the substrate never wrote.
 
-The cases run without a database. The view vocabulary, the closed rule registry, the ordering pass
+Most cases run without a database. The view vocabulary, the closed rule registry, the ordering pass
 and the projection writer are all pure functions of their inputs -- which is exactly why the
 classification rule can be tested without a store, and why a renderer that opened one would not
-typecheck against the port in the first place.
+typecheck against the port in the first place. The §1 literal case is pure too. The §6 cases are
+not: they drive the **registered** ``knowledge_*`` handlers through a real ``FastMCP`` server, so
+they open a dataset the build creates, and their point is precisely that the mounted surface
+executes rather than merely appearing in the roster.
 """
 
 from __future__ import annotations
@@ -15,12 +19,17 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.mcp.registration.knowledge import register_knowledge_tools
+from agents_remember.memory.knowledge.connection import create_or_validate_schema, open_database
 from agents_remember.memory.knowledge.managed_projection import (
     ManagedProjectionWriter,
     ProjectionHooks,
 )
+from agents_remember.memory.knowledge.schema_generations import GENERATIONS, generation_for_key
 from agents_remember.models.knowledge.classification import (
     AUTHORED_CLASS,
     CLASSIFICATION_CLASSES,
@@ -48,6 +57,9 @@ from agents_remember.models.knowledge.projection_manifest import (
 )
 from agents_remember.models.knowledge.read import KnowledgeReadSnapshot
 from agents_remember.models.knowledge.view import (
+    VIEW_NAMES,
+    VIEW_PAYLOADS,
+    VIEW_PURPOSES,
     CurationQueueRow,
     MachineWorkItem,
     NoConsequenceStatement,
@@ -64,6 +76,7 @@ from agents_remember.models.knowledge.view import (
     require_continuation_snapshot,
     view_counts,
 )
+from mcp.server.fastmcp import FastMCP
 
 SNAPSHOT = KnowledgeReadSnapshot(
     repository_id="11111111-1111-1111-1111-111111111111",
@@ -509,6 +522,9 @@ def test_an_explicit_per_path_authorization_is_the_only_route_to_an_overwrite(
     )
     assert (root / "invariants/INV-014.md").read_text(encoding="utf-8") == "# A\n"
     assert (root / "families/GUA-003.md").read_text(encoding="utf-8") == "# edited too\n"
+    # A report carries its manifest only when it wrote something, and this case is about what it
+    # wrote, so the manifest is required rather than read off an optional field.
+    assert report.manifest is not None
     authorized = {
         entry.destination_relative_path: entry.authorized_overwrite
         for entry in report.manifest.outputs
@@ -684,3 +700,390 @@ def _tree_snapshot(root: Path) -> dict[str, str]:
         for path in sorted(root.rglob("*"))
         if path.is_file()
     }
+
+
+# ---------------------------------------------------------------------------
+# §1.1's closed set and order, as a literal.
+# ---------------------------------------------------------------------------
+
+
+def test_the_five_view_names_are_the_closed_ordered_set() -> None:
+    """Requirement 1.1: the five names, spelled the same and in the same order.
+
+    Both view-looping cases in this module -- and the differential beside them -- iterate
+    ``VIEW_NAMES``, so every one of them stays green under a rename, an insertion, a reorder or a
+    sixth member: they check that each view *behaves*, never that the set is the one the packet
+    enumerated. This case is the one assertion that cannot be satisfied by iterating the constant it
+    is checking, because the expected tuple is written out here rather than derived. It goes red on
+    a sixth view, on a rename, on a reorder, and on a name that is admitted by the ``ViewName``
+    literal union but missing from the published ``VIEW_PURPOSES`` map -- and the last of those is
+    the one a reader of ``VIEW_NAMES`` alone cannot see.
+    """
+
+    assert VIEW_NAMES == (
+        "source_context",
+        "invariant",
+        "family",
+        "review_matrix",
+        "curation_queue",
+    )
+    assert tuple(VIEW_PURPOSES) == VIEW_NAMES
+    # Each payload class declares the view it is a payload *of*, in this order, so a swapped pair of
+    # payload types is red here even though the set of five would be unchanged.
+    assert tuple(payload.model_fields["view"].default for payload in VIEW_PAYLOADS) == VIEW_NAMES
+
+
+# ---------------------------------------------------------------------------
+# §6: the mounted surface's own refusals, one case per operation family.
+# ---------------------------------------------------------------------------
+
+# The namespace every §6 case addresses. It is the fixture's own repository id, so a case that
+# reaches a real dataset is reading the namespace the dataset is bound to rather than a stray one.
+REPOSITORY_ID = "18710698-4317-43ad-a1d5-e8ab551cc3a7"
+# A Git object id for the source-resolution pair the read context requires in full. Its value is
+# never resolved by the cases that name it: the refusals they assert are decided before any anchor
+# is observed, which is the property "refused before a page is built" states.
+CODE_TREE_ID = "0" * 40
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Run the §6 cases on asyncio, the backend every registered handler is served on."""
+
+    return "asyncio"
+
+
+class _RegistrationConfig:
+    """The one registration-time fact the knowledge family closes over.
+
+    ``register_knowledge_tools`` reads ``config.workspace_root`` and nothing else, so the stub is a
+    permissive chain rather than a built runtime: these cases are about the surface's refusals, not
+    about assembling a config.
+    """
+
+    workspace_root = Path("/tmp/ar-w5-registration-root")
+
+    def __getattr__(self, name: str) -> _RegistrationConfig:
+        return _RegistrationConfig()
+
+
+def _knowledge_tool_server() -> FastMCP:
+    """One server carrying **only** the knowledge family, as its own registrar mounts it."""
+
+    server = FastMCP("knowledge-refusal-probe")
+    register_knowledge_tools(server, cast(McpRuntimeConfig, _RegistrationConfig()))
+    return server
+
+
+def _current_generation_dataset(tmp_path: Path, name: str = "knowledge.db") -> Path:
+    """One dataset this build creates, bound to the namespace these cases address.
+
+    Written against the production creation path rather than a shared generation helper, because
+    these §6 cases need a dataset that is *current* and nothing generation-specific: every refusal
+    they assert is decided from the caller's own input, and the one case that reaches a report path
+    needs a store that opens rather than a store of some named older generation.
+    """
+
+    path = tmp_path / name
+    connection = open_database(path)
+    try:
+        create_or_validate_schema(connection)
+        connection.execute(
+            "INSERT INTO repository (repository_id, authority_home) VALUES (?, ?)",
+            (REPOSITORY_ID, f"memory:{REPOSITORY_ID}"),
+        )
+    finally:
+        connection.close()
+    return path
+
+
+def _unregistered_generation_name() -> str:
+    """Return a schema name **no** registered generation carries, derived from the registry."""
+
+    candidate = GENERATIONS[-1].user_version + 1
+    while generation_for_key(f"ar-knowledge-sqlite/v{candidate}", candidate) is not None:
+        candidate += 1
+    return f"ar-knowledge-sqlite/v{candidate}"
+
+
+async def _call(server: FastMCP, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """The JSON body the named registered tool returned for one call."""
+
+    _content, structured = await server.call_tool(tool, arguments)
+    return cast(dict[str, Any], structured)
+
+
+def _diff_body(schema_name: str, digest: str) -> dict[str, Any]:
+    """One comparison body, with both sides' contexts spelled in full.
+
+    The namespace and the snapshot live on each *side* rather than on the request, which is why the
+    handler must not add a request-level ``repository_id``: the model declares none and forbids
+    undeclared fields, so an added one makes every call of this tool fail before it compares.
+    """
+
+    snapshot = {
+        "repository_id": REPOSITORY_ID,
+        "schema_version": schema_name,
+        "logical_digest": digest,
+    }
+    context = {"repository_id": REPOSITORY_ID, "knowledge": snapshot}
+    return {
+        "selector": {"kind": "path", "path": "src/subject.py"},
+        "before": {"context": context},
+        "after": {"context": context},
+    }
+
+
+@pytest.mark.anyio
+async def test_the_read_family_refuses_an_ordering_input_it_does_not_admit(
+    tmp_path: Path,
+) -> None:
+    """§2.5 and §6.5: a fifth ordering is refused by name, with no fallback order and no page.
+
+    ``ViewRequest.ordering_input`` is a ``Literal``, so an unadmitted spelling cannot travel through
+    a request model -- constructing one raises instead of refusing. The surface therefore asks the
+    view module's own closure check before it opens the dataset, and this case is what catches a
+    regression to the raise: the caller must receive the refusal the requirement promises, naming
+    the offending input, rather than a tool error. A handler that fell back to the declared stable
+    ordering would serve a page here and be this leaf's own semantic choice wearing a caller's
+    request.
+    """
+
+    body = await _call(
+        _knowledge_tool_server(),
+        "knowledge_read",
+        {
+            "databasePath": str(_current_generation_dataset(tmp_path)),
+            "repositoryId": REPOSITORY_ID,
+            "view": "invariant",
+            "orderingInput": "symbol_name",
+        },
+    )
+
+    assert body["state"] == "refused", body
+    assert body["refusalCode"] == "unadmitted_ordering_input", body
+    assert body["view"] == "invariant", body
+    assert "none of the four admitted ordering inputs" in body["refusalDetail"], body
+
+
+@pytest.mark.anyio
+async def test_the_read_family_refuses_a_sixth_view_before_it_touches_a_dataset() -> None:
+    """§1.1 and §6.1: the closed set of five is enforced by the mounted read operation itself.
+
+    The database path here does not exist, which is the second half of the assertion: a sixth view
+    is refused from the name alone, so a caller cannot reach a dataset -- or a filesystem error --
+    through a view this surface does not admit. A reader that opened first and checked the name
+    later would fail on the missing file instead, which is the mutation this case catches.
+    """
+
+    body = await _call(
+        _knowledge_tool_server(),
+        "knowledge_read",
+        {
+            "databasePath": "/nonexistent/knowledge-dataset.db",
+            "repositoryId": REPOSITORY_ID,
+            "view": "sixth_view",
+        },
+    )
+
+    assert body["state"] == "refused", body
+    assert body["refusalCode"] == "unknown_view", body
+    assert body["view"] == "sixth_view", body
+    assert "sixth_view" in body["refusalDetail"], body
+
+
+@pytest.mark.anyio
+async def test_the_read_family_refuses_a_continuation_minted_for_another_walk(
+    tmp_path: Path,
+) -> None:
+    """§3 and §6.4: a continuation bound elsewhere is refused by name, and no page is mixed.
+
+    The token is minted by the view module's own ``continuation_for`` -- it is the real encoding,
+    not a forged string -- and then presented to a *different* view's walk. The binding travels
+    inside the token, so the surface rebuilds it and refuses rather than handing a position in one
+    selection to another selection's page. This is the mismatched-snapshot-continuation input the
+    packet's verification evidence names, reaching a mounted handler rather than only the payload
+    builder.
+    """
+
+    token = continuation_for(
+        view="family",
+        snapshot=KnowledgeReadSnapshot(
+            repository_id=REPOSITORY_ID,
+            schema_version="ar-knowledge-sqlite/v9",
+            logical_digest="a" * 64,
+            context_digest="b" * 64,
+        ),
+        position=3,
+    ).token
+    body = await _call(
+        _knowledge_tool_server(),
+        "knowledge_read",
+        {
+            "databasePath": str(_current_generation_dataset(tmp_path)),
+            "repositoryId": REPOSITORY_ID,
+            "view": "invariant",
+            "continuation": token,
+            "repositoryRoot": str(tmp_path),
+            "codeTreeId": CODE_TREE_ID,
+        },
+    )
+
+    assert body["state"] == "refused", body
+    assert body["refusalCode"] == "continuation_unreadable", body
+    assert body["view"] == "invariant", body
+    assert "minted for another view's walk" in body["refusalDetail"], body
+
+
+@pytest.mark.anyio
+async def test_the_change_family_refuses_a_record_kind_it_has_no_admitted_write_for() -> None:
+    """§6.6: the change operation records through admitted owners and authors no second path.
+
+    A census claim is a real record kind of this substrate. It is refused here because the mounted
+    change surface has no admitted write operation for it, and the refusal names the kind rather
+    than mapping it onto a write this leaf would have to invent. A handler that grew a fallback
+    write path, or that accepted the kind and reported success, reddens on the state and the code.
+    """
+
+    body = await _call(
+        _knowledge_tool_server(),
+        "knowledge_change",
+        {
+            "databasePath": "/nonexistent/knowledge-dataset.db",
+            "repositoryId": REPOSITORY_ID,
+            "recordKind": "census_claim",
+        },
+    )
+
+    assert body["state"] == "refused", body
+    assert body["refusalCode"] == "registration_absent", body
+    assert body["recordKind"] == "census_claim", body
+    assert "census_claim" in body["refusalDetail"], body
+
+
+@pytest.mark.anyio
+async def test_the_diff_family_refuses_an_absent_side_by_naming_the_path_it_could_not_read(
+    tmp_path: Path,
+) -> None:
+    """§6.2 and §6.4: a comparison whose side is absent is refused, and no HEAD is substituted.
+
+    The request is a complete, valid comparison body -- which is the whole point, because this is
+    the case that catches a surface that cannot get past its own request: injecting a request-level
+    ``repository_id`` into a model that forbids undeclared fields made every ``knowledge_diff`` call
+    raise a validation error instead of comparing anything, and a roster row cannot see that. The
+    before side names a path that does not exist, so the comparison must refuse by naming it rather
+    than reaching for a working tree or answering with an empty comparison.
+    """
+
+    absent = tmp_path / "absent-before.sqlite"
+    body = await _call(
+        _knowledge_tool_server(),
+        "knowledge_diff",
+        {
+            "databasePath": str(_current_generation_dataset(tmp_path)),
+            "repositoryId": REPOSITORY_ID,
+            "beforePath": str(absent),
+            "afterPath": str(tmp_path / "absent-after.sqlite"),
+            "request": _diff_body("ar-knowledge-sqlite/v9", "a" * 64),
+        },
+    )
+
+    assert absent.exists() is False, "the case must not create the side it reports as absent"
+    assert body["state"] == "refused", body
+    assert body["refusalCode"] == "selected_input_unavailable", body
+    assert str(absent) in body["refusalDetail"], body
+    assert body["repositoryId"] == REPOSITORY_ID, body
+
+
+@pytest.mark.anyio
+async def test_the_integrity_family_reports_the_absence_of_a_detection_run_without_a_verdict(
+    tmp_path: Path,
+) -> None:
+    """§6.7: the report operation reports its limits and produces no compatibility verdict.
+
+    The dataset is real and current, so the operation reaches its own report path rather than
+    failing to open anything, and the case pins the two facts that make "no verdict" measurable: a
+    namespace with no recorded detection run is reported as *unresolved* with a stated limitation
+    rather than as zero conditions, and ``compatible`` is ``None`` -- present and null, not omitted
+    and not inferred from the absence of a matched condition. The traversal scope a caller named is
+    echoed in the report rather than defaulted away.
+    """
+
+    body = await _call(
+        _knowledge_tool_server(),
+        "knowledge_integrity_check",
+        {
+            "databasePath": str(_current_generation_dataset(tmp_path)),
+            "repositoryId": REPOSITORY_ID,
+            "scopeId": "registered-scope-from-the-case",
+        },
+    )
+
+    assert body["state"] == "reported", body
+    assert body["compatible"] is None, body
+    assert body["conditions"] == [], body
+    assert body["unresolved"] == ["no recorded detection run to report conditions from"], body
+    assert body["limitations"] == [
+        "no detection run is recorded for this namespace at this snapshot"
+    ], body
+    assert body["traversalScope"] == "registered-scope-from-the-case", body
+
+
+@pytest.mark.anyio
+async def test_the_project_family_refuses_an_unresolved_projection_input(
+    tmp_path: Path,
+) -> None:
+    """§5 and §6.8: no view named is a refusal, not an empty projection that "just cleans up".
+
+    The destination is a real, empty directory, so nothing but the missing input can refuse this
+    call: a handler that projected zero artifacts and reported success would create a managed
+    destination out of a caller's mistake. The refusal names the destination it did not write to and
+    the input it could not resolve, and the destination stays uncreated.
+    """
+
+    destination = tmp_path / "vault"
+    body = await _call(
+        _knowledge_tool_server(),
+        "knowledge_project",
+        {
+            "databasePath": str(_current_generation_dataset(tmp_path)),
+            "repositoryId": REPOSITORY_ID,
+            "destinationRoot": str(destination),
+        },
+    )
+
+    assert body["state"] == "refused", body
+    assert body["refusalCode"] == "unresolved_projection_input", body
+    assert body["destinationRoot"] == str(destination), body
+    assert "no view was named to project" in body["refusalDetail"], body
+    assert not destination.exists(), "a refused projection must not create its destination"
+
+
+@pytest.mark.anyio
+async def test_the_mounted_families_are_exactly_the_five_these_cases_drive() -> None:
+    """§6.1: the family module mounts five, this module drives five, and the two sets are equal.
+
+    The roster case in ``test_tools.py`` proves the five names are advertised and that existing names
+    keep their positions. It cannot prove that any of them executes, which is finding ``A-2``: the
+    family shipped with a roster row and no functional case. This case closes the loop from the
+    other end. It reads *this module's own source* for a call naming each mounted tool, so a family
+    added to the surface -- or one of these five renamed out from under the cases that drive it --
+    reddens here instead of shipping with a roster row and no caller.
+    """
+
+    server = _knowledge_tool_server()
+    mounted = tuple(tool.name for tool in await server.list_tools())
+
+    assert mounted == (
+        "knowledge_read",
+        "knowledge_change",
+        "knowledge_diff",
+        "knowledge_integrity_check",
+        "knowledge_project",
+    )
+    source = Path(__file__).read_text(encoding="utf-8")
+    undriven = [name for name in mounted if f'"{name}"' not in source]
+    assert not undriven, (
+        f"the mounted families {undriven} have no case in this module that calls them by name; a "
+        "roster row is not coverage"
+    )

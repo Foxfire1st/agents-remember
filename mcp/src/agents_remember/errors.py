@@ -563,6 +563,51 @@ class TaskProjectionSourceError(AgentsRememberError):
         return fields
 
 
+class AtomicReplaceError(AgentsRememberError, OSError):
+    """A publish failed on **one named leg**, and the destination's state is reported with it.
+
+    ``kernel.atomic_write.atomic_replace`` does two things that can fail independently: the
+    rename that makes the new bytes reachable, and the directory flush that makes the *name*
+    durable. Both used to surface as one indistinguishable ``OSError``, so a caller could not
+    tell "the destination never changed" from "the destination already changed but the rename
+    is not durable" -- the second is a recoverable publication whose retry must not be
+    confused with the first, and a caller that retried the first as if it were the second, or
+    reported either as a plain replace failure, was describing a state it had not measured.
+
+    ``leg`` names the failure (``replace`` or ``directory-fsync``) and ``destinationState``
+    states what the destination holds at the moment of the raise: ``previous-bytes`` (the
+    rename did not happen), ``new-bytes`` (the rename completed and its name is not yet
+    durable) or ``source-absent`` (the rename completed and the source path was consumed).
+    It subclasses ``OSError`` as well as the domain family so an existing ``except OSError``
+    around a publish keeps observing the failure it always did.
+    """
+
+    def __init__(
+        self,
+        leg: str,
+        destination: str,
+        *,
+        destination_state: str,
+        detail: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(detail)
+        self.leg = leg
+        self.destination = destination
+        self.destination_state = destination_state
+        self.detail = detail
+        self.cause = cause
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded facts a caller branches on, with the destination's state named."""
+
+        return {
+            "leg": self.leg,
+            "destination": self.destination,
+            "destinationState": self.destination_state,
+        }
+
+
 class MemoryModeUnsupportedError(AgentsRememberError):
     """A caller asked for a memory mode this product removed.
 

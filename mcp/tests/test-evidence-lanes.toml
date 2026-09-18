@@ -188,6 +188,11 @@ unit-regression = [
   "mcp/tests/test_review_assessments.py",
   "mcp/tests/test_knowledge_change_sets.py",
   "mcp/tests/test_knowledge_effect_claims.py",
+  "mcp/tests/test_next_step_address_binding.py",
+  "mcp/tests/test_terminal_preview_expectation.py",
+  "mcp/tests/test_knowledge_merge_right_side_writes.py",
+  "mcp/tests/test_evidence_catalog_gate_boundaries.py",
+  "mcp/tests/test_curator_coherence_publication_discoverability.py",
 ]
 public-contract = [
   "mcp/tests/test_durable_store_contract.py",

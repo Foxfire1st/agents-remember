@@ -38,6 +38,7 @@ from agents_remember.memory.knowledge.export_portable import (
 from agents_remember.memory.knowledge.schema_generations import (
     CURRENT_GENERATION,
     GENERATION_1,
+    GENERATIONS,
     generation_for_key,
 )
 from agents_remember.models.knowledge.context import KNOWLEDGE_SCHEMA_NAME
@@ -214,8 +215,24 @@ def test_the_canonical_form_of_the_whole_document_is_the_only_form_the_reader_ac
     }
     assert len(set(respellings.values())) == len(respellings)
     assert all(_declared_digest(text) == declared for text in respellings.values())
+    # The two axes the collapse actually took out, restored as measurements rather than as the
+    # comment that failed to prevent it (finding ``A-1``): the seventh axis must declare a
+    # generation the registry does not contain, and it must remain a *different* document from the
+    # depth-2 axis it collapsed onto when ``v9`` became current -- otherwise the seven respellings
+    # would be six distinct documents and the equality above would be measuring nothing.
+    assert UNSUPPORTED_SCHEMA_NAME not in {generation.schema_name for generation in GENERATIONS}, (
+        f"{UNSUPPORTED_SCHEMA_NAME} is a registered generation, so this axis is not unsupported"
+    )
+    assert UNSUPPORTED_SCHEMA_NAME != DECLARED_SCHEMA_NAME, (
+        "the unsupported axis declares the same generation the artifact does, which is the collapse "
+        "this case exists to prevent"
+    )
     assert doubly != respellings["depth_two_key_order"], (
         "the doubly-defective input must really declare another schema"
+    )
+    assert f'"schema":"{UNSUPPORTED_SCHEMA_NAME}"' in doubly, (
+        "the axis is unsupported because of the generation it declares, so the substitution that "
+        "makes it unsupported must have landed rather than silently matching nothing"
     )
     assert len(respellings["escaped_solidus"].encode("utf-8")) != len(artifact.encode("utf-8"))
     for name, text in respellings.items():
@@ -421,6 +438,31 @@ def _header_type_respellings() -> dict[str, tuple[str, Any, str, str | None]]:
 DECLARED_SCHEMA_NAME = CURRENT_GENERATION.schema_name
 
 
+def _unregistered_generation_name() -> str:
+    """Return a schema name **no** registered generation carries, derived from the registry.
+
+    The ``non_canonical_and_unsupported`` axis below needs a genuinely unsupported generation, and
+    a literal is exactly how it stopped being one: this axis was spelled ``ar-knowledge-sqlite/v9``
+    until ``KS-R21@v1`` registered generation 9, at which point the substitution became a no-op, the
+    axis collapsed onto ``depth_two_key_order``, and the case failed on ``6 == 7`` while testing the
+    *current* generation. The probe therefore asks the code's own registry rather than restating a
+    number: it starts one past the newest registered version and walks up to the first name the
+    registry does not contain. Registered value: derived from
+    ``memory.knowledge.schema_generations.GENERATIONS``.
+    """
+
+    candidate = CURRENT_GENERATION.user_version + 1
+    while generation_for_key(f"ar-knowledge-sqlite/v{candidate}", candidate) is not None:
+        candidate += 1
+    return f"ar-knowledge-sqlite/v{candidate}"
+
+
+# One spelling, computed once, so both the axis below and the case's own two-axes assertion read the
+# same name. A registry that ever contains it reddens the case's assertion rather than silently
+# restoring the collapse this name exists to prevent.
+UNSUPPORTED_SCHEMA_NAME = _unregistered_generation_name()
+
+
 def _non_canonical_axes(artifact: str, provenance: dict) -> dict[str, str]:
     """Return every respelling of one document that the canonical-form rule has to refuse.
 
@@ -442,12 +484,14 @@ def _non_canonical_axes(artifact: str, provenance: dict) -> dict[str, str]:
         "table_mapping_order": _reordered_document(artifact, envelope=False, tables=True),
         "depth_two_key_order": depth_two,
         "list_of_objects_key_order": listed,
-        # Re-scoped with `KS-R10`: the artifact declares its **own** generation's schema name, which
-        # is the created generation's -- so the literal is read from the artifact rather than spelled
-        # here, and a generation-1 literal would leave this axis identical to ``depth_two_key_order``
-        # and collapse two independent refusals into one.
+        # Re-scoped with `KS-R10` and again after `KS-R21`: the artifact declares its **own**
+        # generation's schema name, which is the created generation's -- so the literal is read from
+        # the artifact rather than spelled here, and the replacement is a name the registry does not
+        # contain rather than a hard-coded next version. A literal here is what let ``v9`` become the
+        # *current* generation, leaving this axis identical to ``depth_two_key_order`` and collapsing
+        # two independent refusals into one; ``UNSUPPORTED_SCHEMA_NAME`` cannot do that.
         "non_canonical_and_unsupported": depth_two.replace(
-            f'"schema":"{DECLARED_SCHEMA_NAME}"', '"schema":"ar-knowledge-sqlite/v9"', 1
+            f'"schema":"{DECLARED_SCHEMA_NAME}"', f'"schema":"{UNSUPPORTED_SCHEMA_NAME}"', 1
         ),
         "encoder_direction_marker": artifact,
     }

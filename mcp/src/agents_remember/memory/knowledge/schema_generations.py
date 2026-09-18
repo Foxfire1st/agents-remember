@@ -241,10 +241,13 @@ GENERATION_1 = SchemaGeneration(
 
 
 # A generation is composed by *appending one module's declarations to the generation it descends
-# from*, and there is exactly one function that does it. The four per-generation wrappers below are
-# therefore one line each and name only their base and their module, so a leaf that must renumber
-# its generation -- because another leaf landed the same number first on the accumulated line --
-# changes a name and a base rather than re-deriving a composition.
+# from*, and there is exactly one function that does it. Eight per-generation wrappers follow --
+# generations 2 to 9 -- and seven of them are a single ``_append_generation`` call naming only their
+# base, their schema name, their version and their module. The eighth, generation 5, is a
+# hand-written seventeen-line composition instead: it is the one wrapper that does not go through
+# ``_append_generation``. A leaf that must renumber its generation -- because another leaf landed the
+# same number first on the accumulated line -- changes a name and a base rather than re-deriving a
+# composition.
 def _append_generation(
     *,
     base: SchemaGeneration,
@@ -339,11 +342,11 @@ GENERATION_4 = _compose_generation_4()
 
 
 # Generation 5 is generation 4, unchanged, plus the table :mod:`…schema_v5` appends -- the authored
-# citation binding. The composition is written as the same explicit append generations 2, 3 and 4
-# are, so ``GENERATION_5.tables[: len(GENERATION_4.tables)] == GENERATION_4.tables`` and generation
-# 5's columns for each of the first twenty-one names are generation 4's. That prefix equality is the
-# whole of ``KS-R10@v1`` §1.3's additive rule: a generation appends tables and never retypes,
-# reorders or drops an earlier generation's.
+# citation binding. Its composition is written out in full, where generations 2, 3 and 4 reach the
+# same merge through ``_append_generation``, so ``GENERATION_5.tables[: len(GENERATION_4.tables)] ==
+# GENERATION_4.tables`` and generation 5's columns for each of the first twenty-one names are
+# generation 4's. That prefix equality is the whole of ``KS-R10@v1`` §1.3's additive rule: a
+# generation appends tables and never retypes, reorders or drops an earlier generation's.
 def _compose_generation_5() -> SchemaGeneration:
     """Return generation 5: generation 4's declarations, unchanged, with this leaf's table appended."""
 

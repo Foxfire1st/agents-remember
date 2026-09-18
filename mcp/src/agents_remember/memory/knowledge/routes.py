@@ -92,7 +92,9 @@ def normalize_route_path(path: object) -> str | KnowledgeRefusal:
 
 
 def require_acyclic_routes(
-    connection: apsw.Connection, repository_id: str
+    connection: apsw.Connection,
+    repository_id: str,
+    operation: KnowledgeOperation = ROUTE_OPERATION,
 ) -> KnowledgeRefusal | None:
     """Return the refusal for a route hierarchy that reaches itself, or ``None``.
 
@@ -108,6 +110,13 @@ def require_acyclic_routes(
     A one-node cycle is caught by the table's own ``CHECK (parent_route_id <> route_id)``; this
     catches the longer one. It runs **inside the caller's transaction**, after the insertions and
     before the commit, so a cycle refuses the whole batch rather than leaving a partial hierarchy.
+
+    ``operation`` names the operation the refusal is attributed to, and it defaults to the
+    authoring operation this rule was written for. A second production path that replays
+    ``route.parent_route_id`` changes -- the merge, which applies a side's changeset and must
+    refuse a candidate whose hierarchy reaches itself before that candidate exists -- passes its
+    own identity, so the refusal a caller branches on names the call it made while the rule itself
+    stays the one walk in this module.
     """
 
     rows = connection.execute(
@@ -130,7 +139,7 @@ def require_acyclic_routes(
         return None
     return refusal(
         "lineage_cycle",
-        ROUTE_OPERATION,
+        operation,
         "the route hierarchy reaches itself, so it is not an acyclic hierarchy and no route in "
         "the cycle names a scope",
         facts=RefusalFacts(

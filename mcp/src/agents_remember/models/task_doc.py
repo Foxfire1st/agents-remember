@@ -112,6 +112,29 @@ class TaskDocDiscardEvidence(BaseModel):
     nextArgs: dict[str, Any] | None = Field(default=None, max_length=32)
 
 
+class TaskDocSubStepRead(BaseModel):
+    """One substep's addressing and progress facts, as ``read_steps`` publishes them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    status: str
+    note: str | None = None
+
+
+class TaskDocStepRead(BaseModel):
+    """One top-level step plus its substeps, as ``read_steps`` publishes them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    status: str
+    note: str | None = None
+    substeps: list[TaskDocSubStepRead] = Field(default_factory=list)
+
+
 class TaskDocResponse(ToolResponse):
     """``task_doc``: the document's identity, status, and progress after the op."""
 
@@ -181,6 +204,13 @@ class TaskDocResponse(ToolResponse):
     linkageFacts: list[dict[str, Any]] | None = None
     # Bounded first-review/fix-verification state; absent persisted state is reported as zero.
     reviewState: dict[str, Any] | None = None
+    # ``read_steps``: the focused checklist read. The handler has always emitted this payload
+    # (``task_doc_tools._read_steps`` -> ``task_doc_steps.step_payloads``) and the response model
+    # never declared it, so under ``StrictResponseModel``'s ``extra="forbid"`` the real payload was
+    # REJECTED after the read: ``steps: Extra inputs are not permitted``. The operation was unusable
+    # on every document until the model and the handler agreed. Present only on ``read_steps``;
+    # every other operation leaves it None (excluded by exclude_none).
+    steps: list[TaskDocStepRead] | None = None
     # author_execution_graph: what the batch applied and the derived scheduling view.
     bootstrapped: bool | None = None
     appliedMutations: list[dict[str, Any]] | None = None

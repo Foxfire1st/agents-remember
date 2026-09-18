@@ -40,7 +40,13 @@ from agents_remember.models.knowledge.projection_manifest import (
     ProjectionPlan,
     RenderedOutput,
 )
-from agents_remember.models.knowledge.view import VIEW_NAMES, ViewRequest
+from agents_remember.models.knowledge.view import (
+    VIEW_NAMES,
+    InvariantView,
+    SourceContextView,
+    SubjectRef,
+    ViewRequest,
+)
 from read_scope_test_support import ReadScopeFixture, build_read_scope_fixture
 
 pytestmark = pytest.mark.integration
@@ -80,6 +86,17 @@ def _manifest(root: Path) -> dict[str, object]:
     return json.loads((root / PROJECTION_MANIFEST_NAME).read_text(encoding="utf-8"))
 
 
+def subject_identity(subject: SubjectRef) -> tuple[str, str, str | None]:
+    """One row subject's whole recorded identity, as a value two rows can be compared on.
+
+    A ``SubjectRef`` is a model rather than a value type, so it is not hashable and cannot be a set
+    member; its three recorded fields are also exactly what "is this the same row" means, so reducing
+    it here compares nothing less than the model's own equality would.
+    """
+
+    return (subject.record_kind, subject.record_id, subject.revision_id)
+
+
 def test_the_vault_safety_contract_holds_for_all_eight_checkpoints_in_one_scenario(
     fixture: ReadScopeFixture, tmp_path: Path
 ) -> None:
@@ -100,8 +117,13 @@ def test_the_vault_safety_contract_holds_for_all_eight_checkpoints_in_one_scenar
     _open_the_scenario(root, elsewhere)
     _checkpoints_one_to_four(root, elsewhere, checkpoints)
     _checkpoints_five_to_eight(root, checkpoints)
-    checkpoints["manifest"] = f"generation {_manifest(root)['generation']}"
-    assert _manifest(root)["generation"] >= 2
+    # The manifest is JSON, so its values arrive as ``object``: the generation is asserted to be an
+    # integer here rather than compared as one, which is also what makes the checkpoint string below
+    # a statement about a measured generation.
+    generation = _manifest(root)["generation"]
+    assert isinstance(generation, int) and not isinstance(generation, bool), generation
+    checkpoints["manifest"] = f"generation {generation}"
+    assert generation >= 2
     # The eight checkpoints are eight distinct, recorded facts -- not one behaviour seen twice.
     assert set(checkpoints) == {
         "1 confinement",
@@ -291,6 +313,11 @@ def test_the_records_unchanged_differential_leaves_the_order_unchanged(
     first = read_knowledge_view(fixture.database_path, context, request)
     again = read_knowledge_view(fixture.database_path, context, request)
     assert first.payload is not None and again.payload is not None
+    # The result's payload is the discriminated union of the five views, so the concrete view is
+    # asserted before its rows are read: a source-context request that answered with another view's
+    # rows would otherwise be compared row-for-row with itself and pass.
+    assert isinstance(first.payload, SourceContextView)
+    assert isinstance(again.payload, SourceContextView)
     assert [row.subject.record_id for row in first.payload.rows] == [
         row.subject.record_id for row in again.payload.rows
     ]
@@ -335,6 +362,7 @@ def test_a_bound_payload_carries_a_snapshot_bound_continuation_and_the_next_page
         ViewRequest(view="invariant", repository_id=fixture.repository_id, limit=1),
     )
     assert first.payload is not None
+    assert isinstance(first.payload, InvariantView)
     assert first.payload.counts.rows_remaining.value
     assert first.payload.continuation is not None
     assert (
@@ -342,8 +370,10 @@ def test_a_bound_payload_carries_a_snapshot_bound_continuation_and_the_next_page
     )
     # The row's identity is its subject -- record identity *and* revision identity -- because a view
     # selection is over recorded revisions: two pages may legitimately carry two revisions of one
-    # record, and comparing record identities alone would call that a repeated page.
-    seen = {row.subject for row in first.payload.rows}
+    # record, and comparing record identities alone would call that a repeated page. The subject is
+    # reduced to its three recorded values here because a subject is a model and therefore not
+    # hashable, and the three values are the whole of what the two pages are compared on.
+    seen = {subject_identity(row.subject) for row in first.payload.rows}
     second = read_knowledge_view(
         fixture.database_path,
         context,
@@ -355,7 +385,8 @@ def test_a_bound_payload_carries_a_snapshot_bound_continuation_and_the_next_page
         ),
     )
     assert second.payload is not None
-    assert {row.subject for row in second.payload.rows} != seen
+    assert isinstance(second.payload, InvariantView)
+    assert {subject_identity(row.subject) for row in second.payload.rows} != seen
 
 
 def test_deleting_every_projection_and_reprojecting_loses_no_canonical_information(

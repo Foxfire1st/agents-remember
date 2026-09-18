@@ -212,6 +212,13 @@ class CuratorCoherenceRecord(_StrictModel):
     attestationPath: str = Field(min_length=1, max_length=8192)
     attestationSha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
     attestationReportSha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
+    # The durable copy of the bytes ``attestationSha256`` commits to: task-root-relative, in the same
+    # surviving tree as the record. ``attestationPath`` names the enclosure's own file, which
+    # ``lifecycle_finalize_task`` reclaims -- without this copy the record's digest names bytes that
+    # no longer exist anywhere, and a reader cannot tell a candidate-empty publication from one whose
+    # attestation listed candidates. Optional because authorities published before this field existed
+    # do not carry it.
+    attestationCopyPath: str | None = Field(default=None, max_length=8192)
     sourceCandidates: list[CuratorSourceCandidate] = Field(max_length=MAX_CURATOR_SOURCE_CANDIDATES)
     judgments: list[CuratorCoherenceRecordedJudgment] = Field(
         max_length=MAX_CURATOR_SOURCE_CANDIDATES

@@ -10,9 +10,11 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
+from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.tasks import TaskDocument, read_task_doc, write_task_doc
 from agents_remember.tasks.leaf_doc import plan_leaf_doc_lifecycle_restamp
 from agents_remember.worktrees.task_resolver import leaf_enclosure_path, series_contract_path
+from pydantic import ValidationError
 from test_task_document import ApplicationTests
 
 
@@ -541,6 +543,54 @@ class ApplicationTests1(ApplicationTests):
         )
         self.assertNotIn("an objective the focused read must not drag along", str(result))
         self.assertEqual((leaf_path.read_bytes(), markdown_path.read_bytes()), before)
+
+    def test_read_steps_response_validates_against_the_model_the_tool_advertises(self) -> None:
+        """The focused read must survive its own declared response contract.
+
+        ``_read_steps`` has always emitted a top-level ``steps`` list with nested ``substeps`` while
+        ``TaskDocResponse`` declared only ``stepsDone``/``stepsTotal``. Under
+        ``StrictResponseModel``'s ``extra="forbid"`` the envelope therefore rejected the payload the
+        handler had just produced -- ``steps: Extra inputs are not permitted`` -- so ``read_steps``
+        was unusable on every document, and every caller since the foundation read the leaf JSON by
+        hand instead. Validating the real handler's payload through the model
+        ``TOOL_RESPONSE_MODELS`` advertises is the one place that mismatch is visible, and the
+        negative control keeps the fix from being a blanket widening of the envelope.
+        """
+        self._create(
+            steps=[
+                {
+                    "id": "S1",
+                    "title": "One",
+                    "status": "done",
+                    "note": "top note",
+                    "substeps": [
+                        {"id": "C1", "title": "Child", "status": "pending", "note": "sub note"}
+                    ],
+                }
+            ]
+        )
+        payload = self._call("read_steps")
+
+        response = finalize_tool_response("task_doc", payload)
+
+        self.assertEqual(
+            response["steps"],
+            [
+                {
+                    "id": "S1",
+                    "title": "One",
+                    "status": "done",
+                    "note": "top note",
+                    "substeps": [
+                        {"id": "C1", "title": "Child", "status": "pending", "note": "sub note"}
+                    ],
+                }
+            ],
+        )
+        # The declaration is one field with the handler's shape, not a relaxed envelope: an
+        # undeclared key still fails, so deleting ``steps`` again reddens this case.
+        with self.assertRaises(ValidationError):
+            finalize_tool_response("task_doc", {**payload, "undeclaredStepKey": []})
 
     def test_skip_step_is_exact_audited_and_does_not_cascade(self) -> None:
         self._create(

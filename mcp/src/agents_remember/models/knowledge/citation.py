@@ -355,10 +355,12 @@ class CitationBindingPayload(KnowledgeModel):
 
     It holds the three authored facts that belong to the *record*: the prose owner revision, the
     local key as written, and the target reference with its locator. The binding's own recorded
-    identity, its lifecycle, its provenance and its **governing route** come from the envelope --
-    ``knowledge_record`` already carries a governing-route association, and this leaf adds its own
-    per-binding association table beside the binding's own table rather than altering a
-    generation-1 or generation-2 table.
+    identity, its lifecycle and its provenance come from the envelope, which already carries a
+    governing-route association for ``knowledge_record``. This leaf appends exactly **one** table --
+    ``citation_binding`` -- and the binding's governing route is a nullable ``governing_route_id``
+    **column on that same row**, a real foreign key into the existing ``route`` entity, rather than
+    a second per-binding association table beside it. No generation-1 or generation-2 table is
+    altered.
 
     ``asserted_by_ref`` names the actor the *interpretation* is attributed to. Requirement 1.5 makes
     the binding authored rather than inferred: a curator or agent states that this key denotes this

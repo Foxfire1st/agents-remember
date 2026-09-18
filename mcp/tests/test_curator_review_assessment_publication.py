@@ -754,3 +754,179 @@ class TestAssessmentRefusals:
             with pytest.raises(AssessmentEvidenceBlockedError) as blocked:
                 publish_assessment_evidence_bytes(contract, assessment_id, _revision().evidenceRefs)
             assert blocked.value.status == "review-assessment-evidence-destination-invalid"
+
+
+class TestPublisherCallerAddress:
+    """D-26: the caller refusal states the canonical path shape it demands.
+
+    A publication binds one exact leaf, but ``caller.task_document_ref.path`` has to be the
+    task-root-relative document path (``<task-slug>/<leaf-document-file>``). Nothing said so -- not
+    the refusal, not ``prepare``, not ``status``, not the contract -- so the only way to learn it was
+    the refused call itself. The contract already identifies the leaf unambiguously, so a bare file
+    name that is exactly the addressed document's own name is resolved to it; anything else is
+    refused with the shape **and** this contract's exact expected value.
+    """
+
+    def test_a_bare_leaf_document_name_is_resolved_against_the_contract(
+        self, enclosure: tuple[WorktreeContract, TaskDocumentRef]
+    ) -> None:
+        contract, _sprint = enclosure
+        # The task directory's own name, which is what a canonical ref path is relative to.
+        canonical = f"{contract.task_root.name}/{contract.leaf_id}.json"
+        prepared = _prepared(contract)
+        candidates = list(prepared["candidates"])  # type: ignore[arg-type]
+        evidence = contract.task_root / "notes" / "reports" / "fixture-curator-evidence.md"
+        judgments = [
+            CuratorCoherenceJudgment(
+                **dict(CuratorSourceCandidate.model_validate(candidate).model_dump(mode="json")),
+                disposition="reconciled",
+                rationale="The fixture candidate has one explicit reconciliation judgment.",
+                evidenceRef=f"task:{evidence.relative_to(contract.task_root).as_posix()}",
+            )
+            for candidate in candidates
+        ]
+
+        payload = curator_coherence_action(
+            contract,
+            CuratorCoherenceRequest(
+                action="publish",
+                contract_path=contract.contract_path.as_posix(),
+                semantic_requirement_revision="KS-R15@v1",
+                delivery_attempt="A001",
+                judgments=judgments,
+                expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
+                expected_code_candidate_tree=str(prepared["codeCandidateTree"]),
+                expected_memory_candidate_tree=str(prepared["memoryCandidateTree"]),
+                expected_task_topology_fingerprint=str(prepared["taskTopologyFingerprint"]),
+                expected_task_intent=TaskIntentIdentity.model_validate(prepared["taskIntent"]),
+                expected_attestation_sha256=str(prepared["attestationSha256"]),
+                caller=DeclaredCaller(
+                    role="curator",
+                    task_document_ref=TaskDocumentRef(
+                        repository=REPO, path=f"{contract.leaf_id}.json"
+                    ),
+                ),
+            ),
+        )
+
+        assert payload["state"] == "published"
+        record = load_curator_coherence_authority(contract).record
+        assert record.taskDocumentRef.path == canonical
+        # The resolved ref is what the record (and any assessment's author identity) carries, not
+        # the bare spelling the caller supplied.
+        assert record.publishedBy == f"curator@{REPO}/{canonical}"
+
+    def test_a_bare_name_for_another_leaf_is_refused_with_the_canonical_path(
+        self, enclosure: tuple[WorktreeContract, TaskDocumentRef]
+    ) -> None:
+        contract, _sprint = enclosure
+
+        payload = _tool_publish_bare_name(contract, f"{contract.leaf_id}-not-the-leaf.json")
+
+        assert payload["state"] == "refused"
+        assert payload["status"] == "curator-coherence-caller-refused"
+        detail = str(payload["detail"])
+        canonical = f"{contract.task_root.name}/{contract.leaf_id}.json"
+        assert "<task-slug>/<leaf-document-file>" in detail
+        assert canonical in detail
+        assert payload["expected"]["taskDocumentRef"]["path"] == canonical
+        assert (
+            payload["observed"]["taskDocumentRef"]["path"]
+            == f"{contract.leaf_id}-not-the-leaf.json"
+        )
+
+
+def _tool_publish_bare_name(
+    contract: WorktreeContract,
+    bare_path: str,
+) -> dict[str, object]:
+    """Publish through the application boundary with a bare-name caller (where the code is read)."""
+
+    config_path = contract.code_repo_path.parent / "settings.json"
+    config = load_config(config_path)
+    prepared = _prepared(contract)
+    candidates = list(prepared["candidates"])  # type: ignore[arg-type]
+    evidence = contract.task_root / "notes" / "reports" / "fixture-curator-evidence.md"
+    judgments = [
+        CuratorCoherenceJudgment(
+            **dict(CuratorSourceCandidate.model_validate(candidate).model_dump(mode="json")),
+            disposition="reconciled",
+            rationale="The fixture candidate has one explicit reconciliation judgment.",
+            evidenceRef=f"task:{evidence.relative_to(contract.task_root).as_posix()}",
+        )
+        for candidate in candidates
+    ]
+    return curator_coherence_tool(
+        config,
+        CuratorCoherenceRequest(
+            action="publish",
+            contract_path=contract.contract_path.as_posix(),
+            semantic_requirement_revision="KS-R15@v1",
+            delivery_attempt="A001",
+            judgments=judgments,
+            expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
+            expected_code_candidate_tree=str(prepared["codeCandidateTree"]),
+            expected_memory_candidate_tree=str(prepared["memoryCandidateTree"]),
+            expected_task_topology_fingerprint=str(prepared["taskTopologyFingerprint"]),
+            expected_task_intent=TaskIntentIdentity.model_validate(prepared["taskIntent"]),
+            expected_attestation_sha256=str(prepared["attestationSha256"]),
+            caller=DeclaredCaller(
+                role="curator",
+                task_document_ref=TaskDocumentRef(repository=REPO, path=bare_path),
+            ),
+        ),
+    )
+
+
+class TestAttestationDurability:
+    """The bound attestation must outlive the enclosure whose path the record commits to.
+
+    Every authority published in this accumulation binds an ``attestationPath`` inside its own leaf
+    enclosure, and ``lifecycle_finalize_task`` reclaims that enclosure -- so after cleanup the
+    record's ``attestationSha256`` names bytes that exist nowhere. This is D-25's family: the same
+    cleanup that closes the ``validate`` window destroys the evidence a publication binds to.
+    """
+
+    def test_the_bound_attestation_is_copied_into_the_surviving_tree_and_reads_back_after_cleanup(
+        self, enclosure: tuple[WorktreeContract, TaskDocumentRef]
+    ) -> None:
+        contract, sprint = enclosure
+        _publish(contract, sprint, assessments=[_revision()])
+        validated = require_current_curator_coherence(contract)
+        record = validated.record
+
+        assert record.attestationCopyPath is not None
+        assert contract.task_root in (contract.task_root / record.attestationCopyPath).parents
+        # The enclosure-local file the record binds, named by the record itself.
+        bound = Path(record.attestationPath)
+        assert contract.worktree_group in bound.parents
+        assert bound.is_file()
+        assert hashlib.sha256(bound.read_bytes()).hexdigest() == record.attestationSha256
+
+        shutil.rmtree(contract.worktree_group / "reports")
+
+        # What the envelope's own cleanup removes is gone; what the record carries is not.
+        assert not bound.exists()
+        copied = contract.task_root / record.attestationCopyPath
+        payload = copied.read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == record.attestationSha256
+        attestation = json.loads(payload)
+        assert [candidate["sourceFile"] for candidate in attestation["sourceChangeCandidates"]] == [
+            candidate.sourceFile for candidate in record.sourceCandidates
+        ]
+        assert record.attestationPath != record.attestationCopyPath
+
+    def test_the_copy_is_content_addressed_so_a_republish_does_not_rewrite_it(
+        self, enclosure: tuple[WorktreeContract, TaskDocumentRef]
+    ) -> None:
+        contract, sprint = enclosure
+        _publish(contract, sprint, assessments=[_revision()])
+        first = require_current_curator_coherence(contract).record
+        assert first.attestationCopyPath is not None
+        before = (contract.task_root / first.attestationCopyPath).read_bytes()
+
+        # A second publication over the same bound attestation reuses the same immutable copy.
+        _publish(contract, sprint, assessments=[_revision()], attempt="A002")
+        second = require_current_curator_coherence(contract).record
+        assert second.attestationCopyPath == first.attestationCopyPath
+        assert (contract.task_root / second.attestationCopyPath).read_bytes() == before

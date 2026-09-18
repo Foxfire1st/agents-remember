@@ -99,6 +99,24 @@ from .worktree_tool_requests import (
     TaskIdentity,
 )
 
+_START_ELIGIBILITY: dict[str, object] = {
+    "requiresCheck": "not-performed",
+    "detail": (
+        "worktree_start does not read or verify the plan's Requires lines; the addressed leaf's "
+        "declared dependencies are the owning seat's check, so confirm they are landed before "
+        "building on this base"
+    ),
+}
+"""What this tool did *not* check, stated where a caller reads the result.
+
+D-17 measured the gap: a leaf previewed as ``would-start`` while a requirement its packet declares
+as a dependency was unlanded, so a session that trusted the tool could create an enclosure whose
+base lacks what the leaf builds on. Nothing in the leaf document carries the ``Requires`` set in a
+machine-readable form (it lives in the plan document's prose), so the tool cannot verify it; what it
+can do is stop implying that eligibility is part of what it checked. This notice is additive on
+every start result and on the lifecycle refusal.
+"""
+
 
 def worktree_start_tool(
     config: McpRuntimeConfig,
@@ -113,13 +131,22 @@ def worktree_start_tool(
         return {
             "ok": False,
             "state": "lifecycle-switch-required",
+            # The condition this actually tests, measured at D-17: a *real* start binds the
+            # session's current fleeting lifecycle to the new enclosure and leaves it non-fleeting,
+            # so the next start refuses. It has no knowledge of other leaves, enclosures or
+            # sessions -- the old sentence ("refuses to repoint the active persistent lifecycle")
+            # read as if one enclosure could block another, which is not the case and cost this
+            # master five extra calls plus a misleading line in its own record.
             "summary": (
-                "worktree_start refuses to repoint the active persistent lifecycle; switch "
-                "away from it to a fresh fleeting lifecycle, then retry worktree_start"
+                "worktree_start binds the session's current lifecycle to the new enclosure, and this "
+                "session's current lifecycle is already bound to another one; start a fresh fleeting "
+                "lifecycle with switch_lifecycle, or resume the enclosure you meant, then retry "
+                "worktree_start. No other leaf, enclosure or session can block this start"
             ),
             "nextOperation": "switch_task_lifecycle",
             "nextTool": "switch_lifecycle",
             "nextArgs": {},
+            "eligibility": dict(_START_ELIGIBILITY),
             "nextStep": {
                 "summary": "Switch to a fresh fleeting lifecycle, then retry worktree_start.",
                 "nextOperation": "switch_task_lifecycle",
@@ -193,6 +220,7 @@ def worktree_start_tool(
             if authority.error is not None:
                 veto["error"] = authority.error
             result["providersAuthority"] = veto
+        result["eligibility"] = dict(_START_ELIGIBILITY)
         _attribute_start(amb, result, identity.repo_id)
         return result
     finally:

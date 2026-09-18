@@ -24,7 +24,7 @@ from uuid import uuid4
 import apsw
 import pytest
 from agents_remember.application.knowledge_diff import diff_knowledge_scope, open_diff_side
-from agents_remember.memory.knowledge.connection import open_database
+from agents_remember.memory.knowledge.connection import open_database, open_read_only_database
 from agents_remember.memory.knowledge.detection import (
     DetectionRunAssembly,
     build_detection_run,
@@ -39,9 +39,11 @@ from agents_remember.memory.knowledge.detection_walk import (
     DetectionWalkInput,
     detect_review_conditions,
 )
+from agents_remember.memory.knowledge.logical import logical_digest
 from agents_remember.memory.knowledge.schema_generations import (
     GENERATION_3,
     create_schema_statements,
+    generation_of_database,
 )
 from agents_remember.memory.knowledge.store import (
     open_existing_knowledge_store,
@@ -537,6 +539,179 @@ def test_the_walk_consumes_the_shipped_comparison_and_emits_facts_only_signals(
             relationship_paths=tuple(path.path_id for path in produced.relationship_paths),
             limitations=produced.limitations,
         )
+
+
+def real_input_sides(
+    fixture: DiffFixture, result: KnowledgeDiffResult
+) -> tuple[DetectionInputSide, DetectionInputSide]:
+    """The two sides one walk read, each named by its own dataset's logical digest.
+
+    One selector produced both sides of this comparison, so the selector digest is one value; the
+    dataset identity is not, and a recorded run that copied one side's snapshot onto the other would
+    name a dataset it did not read.
+    """
+
+    sides: list[DetectionInputSide] = []
+    named: tuple[tuple[Path, DetectionSide], ...] = (
+        (fixture.before.database_path, "before"),
+        (fixture.after.database_path, "after"),
+    )
+    for database_path, side in named:
+        connection = open_read_only_database(database_path)
+        try:
+            generation = generation_of_database(connection)
+            digest = logical_digest(connection, generation)
+        finally:
+            connection.close()
+        sides.append(
+            DetectionInputSide(
+                side=side,
+                context=KnowledgeReadContext(
+                    repository_id=fixture.repository_id,
+                    knowledge=SnapshotIdentity(
+                        repository_id=fixture.repository_id,
+                        schema_version=generation.schema_name,
+                        logical_digest=digest,
+                    ),
+                ),
+                selector_digest=str(result.selector_digest),
+                selector_policy_version=str(result.policy_version),
+            )
+        )
+    first, second = sides
+    return first, second
+
+
+def claim_records_spoken_for_twice(result: KnowledgeDiffResult) -> set[str]:
+    """Return the claim records more than one realization item of the union speaks for."""
+
+    items = () if result.page is None else result.page.items
+    counts: dict[str, int] = {}
+    for item in items:
+        if item.kind != "realization" or item.record_id is None:
+            continue
+        counts[item.record_id] = counts.get(item.record_id, 0) + 1
+    return {record for record, count in counts.items() if count > 1}
+
+
+def test_a_run_over_the_shipped_comparison_names_every_signal_once_and_is_recorded(
+    real_fixture: DiffFixture, tmp_path: Path
+) -> None:
+    """The identity scheme names the item each single-item condition is about, and the run records.
+
+    The shipped fixture's union holds one realization claim record that two realization items speak
+    for -- one claim carrying two coverage items, which is a shape R08's union produces and not a
+    fixture artifact -- and both of those items are gone from the after side. A walk that identified
+    both signals by the record they share would emit two signals under one identity, and the run's own
+    reproducibility rule refuses that order (correctly: an order that names an identity twice is not
+    an order over a set of signals). So this case walks the shipped comparison, records the run it
+    produces and reads the recorded order back, which is what makes the identity a property of the
+    write path rather than of a walk asserted beside it.
+
+    Reverting the walk's group key to the record identity reddens it at the duplicate-identity
+    assertion and at the refusal the run builder raises after it; collapsing the two items into one
+    signal reddens it at the per-item signal assertion below.
+    """
+
+    result = run_real_diff(real_fixture)
+    assert result.state == "page"
+    union_items = () if result.page is None else result.page.items
+    removed_items = {
+        item.item_id
+        for item in union_items
+        if item.kind == "realization" and item.before is not None and item.after is None
+    }
+    shared_records = claim_records_spoken_for_twice(result)
+    removed_records = {item.record_id for item in union_items if item.item_id in removed_items}
+    assert removed_records & shared_records, (
+        "the shipped fixture must keep the structure this case exists for: two realization items "
+        "that are gone from the after side and speak for one claim record"
+    )
+
+    before, after = real_input_sides(real_fixture, result)
+    signals = detect_review_conditions(
+        DetectionWalkInput(
+            repository_id=real_fixture.repository_id,
+            governing_route_id=ROUTE_ID,
+            comparison=result,
+            input_sides=(before, after),
+            declared="union_of_both_sides",
+        )
+    )
+    identities = [signal.signal_id for signal in signals]
+    assert len(set(identities)) == len(identities), (
+        "two signals about two different union items may not be named by one identity"
+    )
+
+    removed_signals = [
+        signal for signal in signals if signal.condition == "removed_or_reparented_attribution"
+    ]
+    assert len(removed_signals) == len(removed_items), (
+        "each union item that is gone from the after side is reported as its own signal"
+    )
+    assert {
+        change.item_id for signal in removed_signals for change in signal.observed_changes
+    } == removed_items
+
+    # The refusal D-30 records is about a *deterministic* order, so the same union in the other
+    # order has to produce the same ordered identities: the shared-record key is read from the
+    # comparison, not from the position an item happened to be enumerated at.
+    assert result.page is not None
+    reversed_result = result.model_copy(
+        update={
+            "page": result.page.model_copy(update={"items": tuple(reversed(result.page.items))})
+        }
+    )
+    reordered = detect_review_conditions(
+        DetectionWalkInput(
+            repository_id=real_fixture.repository_id,
+            governing_route_id=ROUTE_ID,
+            comparison=reversed_result,
+            input_sides=(before, after),
+            declared="union_of_both_sides",
+        )
+    )
+    assert [signal.signal_id for signal in reordered] == identities
+
+    store = open_knowledge_store(tmp_path / "detection.db", real_fixture.repository_id)
+    try:
+        store.create_repository(
+            RepositoryIdentity(
+                repository_id=real_fixture.repository_id, authority_home="agents-remember"
+            )
+        )
+        run = build_detection_run(
+            DetectionRunAssembly(
+                run_id=str(uuid4()),
+                repository_id=real_fixture.repository_id,
+                assessed_repository_id=real_fixture.repository_id,
+                governing_route_id=ROUTE_ID,
+                input_sides=(before, after),
+                policy_version=DETECTION_POLICY_VERSION,
+            ),
+            signals,
+        )
+        recorded = record_detection_run(
+            store,
+            DetectionRunRequest(
+                repository_id=real_fixture.repository_id,
+                provenance=authorship(),
+                run=run,
+                signals=signals,
+                assessed_database_paths=(
+                    str(real_fixture.before.database_path),
+                    str(real_fixture.after.database_path),
+                ),
+            ),
+        )
+        assert recorded.state == "created", recorded.refusal
+        assert recorded.run is not None
+        read_back = read_detection_run(store, run.run_id)
+        assert read_back.state == "read", read_back.refusal
+        assert read_back.ordered_signal_ids() == run.signal_order
+        assert read_back.ordered_signal_ids() == tuple(identities)
+    finally:
+        store.close()
 
 
 # ---------------------------------------------------------------------------

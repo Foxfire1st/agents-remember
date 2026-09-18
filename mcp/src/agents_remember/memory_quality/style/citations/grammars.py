@@ -121,6 +121,22 @@ Spans = dict[str, list[tuple[int, int]]]
 
 
 @dataclass(frozen=True)
+class Binding:
+    """One name a construct binds: its extent, and the line the declaration itself begins on.
+
+    The two differ for a decorated Python definition. ``_widened`` grows the construct outwards
+    through ``decorated_definition`` so its extent covers the decorator, which is what makes a
+    range projected from that extent quote the whole construct. The declaration the name belongs
+    to, however, begins on the ``def``/``class`` line BELOW the decorator -- so a citation that
+    starts at exactly the declaration's own lines must be read as current for it rather than as
+    one line short of it.
+    """
+
+    span: tuple[int, int]
+    declaration: int
+
+
+@dataclass(frozen=True)
 class CallLiteral:
     """One direct quoted argument, its syntax identity, and its call's line extent."""
 
@@ -235,6 +251,23 @@ def definitions(path: str, lines: list[str]) -> Spans:
     -- the stated ceiling, not a parse failure. A construct CONTAINING a syntax error is
     skipped while its file's sound constructs are kept, so a file written for another
     dialect degrades to occurrence matching for the broken part alone.
+
+    The span is the WIDENED one, so a decorated definition's extent covers its decorator. A
+    caller that needs the declaration's own first line as well reads :func:`bindings`.
+    """
+    return {
+        name: [binding.span for binding in items] for name, items in bindings(path, lines).items()
+    }
+
+
+def bindings(path: str, lines: list[str]) -> dict[str, list[Binding]]:
+    """Every name ``path`` binds, with both its widened extent and its declaration line.
+
+    One walk answers both, so a caller needing the declaration line does not re-parse the file.
+    The declaration line is the first line of the UNWIDENED construct: for a decorated
+    definition that is the ``def``/``class`` line, and for every other construct -- including an
+    exported TypeScript declaration, whose ``export`` keyword shares the declaration's own first
+    line -- it is the extent's start.
     """
     grammar = grammar_of(path)
     if grammar is None:
@@ -245,14 +278,14 @@ def definitions(path: str, lines: list[str]) -> Spans:
     tree = Parser(language(grammar)).parse("\n".join(lines).encode("utf-8"))
     reader = _python_names if grammar == PYTHON else _script_names
     wrappers = PYTHON_WRAPPERS if grammar == PYTHON else SCRIPT_WRAPPERS
-    found: Spans = {}
+    found: dict[str, list[Binding]] = {}
     for node in _walk(tree.root_node):
         names = [] if node.has_error else reader(node)
         if not names:
             continue
-        span = _span(_widened(node, wrappers))
+        binding = Binding(span=_span(_widened(node, wrappers)), declaration=_span(node)[0])
         for name in names:
-            found.setdefault(name, []).append(span)
+            found.setdefault(name, []).append(binding)
     return found
 
 

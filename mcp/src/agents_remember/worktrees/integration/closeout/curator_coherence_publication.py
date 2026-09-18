@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from agents_remember.errors import CuratorCoherenceError
 from agents_remember.kernel.atomic_write import atomic_replace, atomic_write_text
+from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceAuthority,
     CuratorCoherenceRecord,
@@ -40,6 +41,7 @@ from agents_remember.models.lifecycles.review_assessment_store import (
     review_record_edges,
     reviewed_bytes,
 )
+from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
@@ -74,6 +76,7 @@ class _RecordPublication:
     assessments: list[ReviewAssessment]
     fingerprint: str
     predecessor: str
+    attestation_copy_path: str
 
 
 @dataclass(frozen=True)
@@ -169,8 +172,8 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
     observation = observe_curator_coherence_source(contract)
     _require_expected_observation(request, observation)
     judgments = exact_curator_judgments(contract, observation.source_candidates, request.judgments)
-    _authorize_publisher(contract, observation, request)
-    assessments = _exact_review_assessments(contract, request, observation)
+    caller = _authorized_publisher(contract, observation, request)
+    assessments = _exact_review_assessments(contract, request, observation, caller=caller)
     publication_fingerprint = _publication_fingerprint(request, observation, judgments, assessments)
     predecessor = current_curator_coherence_predecessor(contract)
     replay = _idempotent_replay(contract, publication_fingerprint)
@@ -193,7 +196,11 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
             assessments=assessments,
             fingerprint=publication_fingerprint,
             predecessor=predecessor,
+            attestation_copy_path=_task_relative(
+                contract, _publish_attestation_copy(contract, observation)
+            ),
         ),
+        caller=caller,
     )
     record_bytes = _json_bytes(record.model_dump(mode="json", by_alias=True))
     report_bytes = report.encode("utf-8")
@@ -249,6 +256,8 @@ def _exact_review_assessments(
     contract: WorktreeContract,
     request: CuratorCoherenceRequest,
     observation: CuratorCoherenceObservation,
+    *,
+    caller: DeclaredCaller,
 ) -> list[ReviewAssessment]:
     """Bind each submitted assessment to the authenticated caller and the exact examined inputs.
 
@@ -276,8 +285,6 @@ def _exact_review_assessments(
             error.detail,
             next_action=error.next_action,
         ) from error
-    caller = request.caller
-    assert caller is not None
     bound: list[ReviewAssessment] = []
     for authorized in assessments:
         inputs = _assessment_inputs(contract, observation)
@@ -354,10 +361,11 @@ def _record(
     request: CuratorCoherenceRequest,
     observation: CuratorCoherenceObservation,
     publication: _RecordPublication,
+    *,
+    caller: DeclaredCaller,
 ) -> tuple[CuratorCoherenceRecord, str]:
     assert request.semantic_requirement_revision is not None
     assert request.delivery_attempt is not None
-    assert request.caller is not None
     evidence_edges = {
         judgment.evidenceRef: judgment.evidenceSha256 for judgment in publication.judgments
     }
@@ -434,13 +442,14 @@ def _record(
         attestationPath=observation.attestation_path.resolve().as_posix(),
         attestationSha256=observation.attestation_sha256,
         attestationReportSha256=observation.attestation.reportSha256,
+        attestationCopyPath=publication.attestation_copy_path,
         sourceCandidates=observation.source_candidates,
         judgments=publication.judgments,
         assessments=publication.assessments,
         dependencies=dependencies,
         predecessorAuthorityDigest=publication.predecessor,
         publicationFingerprint=publication.fingerprint,
-        publishedBy=f"{request.caller.role}@{request.caller.task_document_ref.key}",
+        publishedBy=f"{caller.role}@{caller.task_document_ref.key}",
         reportSha256="0" * 64,
     )
     report = render_curator_coherence(provisional)
@@ -451,11 +460,29 @@ def _record(
     return record, rendered
 
 
-def _authorize_publisher(
+_CALLER_PATH_SHAPE = "task-root-relative document path '<task-slug>/<leaf-document-file>'"
+"""The shape ``TaskDocumentRef.path`` must take here, stated in the refusal that demands it (D-26).
+
+D-26 measured the cost of leaving it unsaid: a caller who passed the bare leaf-document name was
+refused by ``curator-coherence-caller-refused`` with no statement of the expected shape anywhere --
+not in the refusal, not in ``status``/``prepare``, not in the contract -- so the only way to learn it
+was the trial and error the schema exists to prevent. It is an instructions-do-not-travel defect.
+"""
+
+
+def _authorized_publisher(
     contract: WorktreeContract,
     observation: CuratorCoherenceObservation,
     request: CuratorCoherenceRequest,
-) -> None:
+) -> DeclaredCaller:
+    """The caller, with a bare leaf-document name resolved against this contract, or a refusal.
+
+    The contract already identifies the leaf unambiguously, so a bare file name that is exactly the
+    addressed document's own file name (and repository) cannot mean any other document: it is
+    resolved to the canonical ref instead of being refused. Anything else is refused, and the
+    refusal now names the shape it wants **and** the exact value this contract expects.
+    """
+
     caller = request.caller
     assert caller is not None
     topology = TaskDocumentTopology(contract.coordination_root)
@@ -464,19 +491,127 @@ def _authorize_publisher(
         sprint_ref = topology.parent(master_ref) if master_ref is not None else None
     except TaskDocumentRefError as exc:
         raise CuratorCoherenceError(exc.status, str(exc), next_action="task_doc") from exc
-    allowed = (
-        caller.role == "curator" and caller.task_document_ref == observation.candidate.ref
-    ) or (
-        caller.role == "architect"
-        and sprint_ref is not None
-        and caller.task_document_ref == sprint_ref
+    expected = observation.candidate.ref if caller.role == "curator" else sprint_ref
+    resolved = _resolve_caller_ref(caller.task_document_ref, expected)
+    if expected is not None and resolved == expected:
+        return DeclaredCaller(role=caller.role, task_document_ref=resolved)
+    raise CuratorCoherenceError(
+        "curator-coherence-caller-refused",
+        _caller_refusal_detail(caller, expected),
+        expected={
+            "role": caller.role,
+            "taskDocumentRef": expected.model_dump(mode="json") if expected is not None else None,
+        },
+        observed={
+            "role": caller.role,
+            "taskDocumentRef": caller.task_document_ref.model_dump(mode="json"),
+        },
+        next_action="developer-decision",
     )
-    if not allowed:
-        raise CuratorCoherenceError(
-            "curator-coherence-caller-refused",
-            "publish requires the exact leaf curator or owning sprint architect",
-            next_action="developer-decision",
+
+
+def _resolve_caller_ref(
+    caller_ref: TaskDocumentRef,
+    expected: TaskDocumentRef | None,
+) -> TaskDocumentRef:
+    """Resolve a bare document file name to ``expected`` when it names that exact document.
+
+    Only the file name is resolved: the repository must match and the name must equal the expected
+    document's own file name, so a bare name can never be read as a different leaf's document.
+    """
+
+    if expected is None or "/" in caller_ref.path or caller_ref.repository != expected.repository:
+        return caller_ref
+    if expected.path.rsplit("/", 1)[-1] != caller_ref.path:
+        return caller_ref
+    return expected
+
+
+def _caller_refusal_detail(caller: DeclaredCaller, expected: TaskDocumentRef | None) -> str:
+    """The refusal sentence: the rule, the shape, and this contract's exact expected value."""
+
+    supplied = f"{caller.task_document_ref.repository}:{caller.task_document_ref.path}"
+    if expected is None:
+        return (
+            "publish requires the exact leaf curator or owning sprint architect; "
+            f"caller.task_document_ref.path must be the {_CALLER_PATH_SHAPE}, and this contract "
+            f"has no owning sprint document to resolve one from; received {supplied!r}"
         )
+    return (
+        "publish requires the exact leaf curator or owning sprint architect; "
+        f"caller.task_document_ref.path must be the {_CALLER_PATH_SHAPE} -- for this contract "
+        f"that is {expected.path!r} in repository {expected.repository!r}, or the bare file name "
+        f"{expected.path.rsplit('/', 1)[-1]!r}; received {supplied!r}"
+    )
+
+
+def _publish_attestation_copy(
+    contract: WorktreeContract,
+    observation: CuratorCoherenceObservation,
+) -> Path:
+    """Copy the bound memory-quality attestation beside the record, content-addressed.
+
+    The record binds ``attestationPath`` inside the leaf's **enclosure**, and
+    ``lifecycle_finalize_task`` reclaims the enclosure: after cleanup the digest the record commits
+    to names bytes that no longer exist anywhere, so a reader can no longer tell a candidate-empty
+    publication from one whose attestation listed candidates (D-25's family -- the same cleanup that
+    closes the ``validate`` window destroys the evidence the publication binds to). The copy lives
+    in the task tree, under the same ``notes/reports/curator-coherence/<leaf>/`` root the record
+    itself survives in, and is named by the attestation's own digest so it is immutable and
+    idempotent across re-publications.
+    """
+
+    paths = curator_coherence_paths(contract)
+    source = observation.attestation_path
+    try:
+        payload = source.read_bytes()
+    except OSError as exc:
+        raise CuratorCoherenceError(
+            "curator-coherence-attestation-unreadable",
+            "the bound memory-quality attestation cannot be read for its durable copy",
+            expected={"attestationPath": source.as_posix()},
+            observed={"attestationPath": source.as_posix(), "state": "unreadable"},
+            next_action="developer-decision",
+        ) from exc
+    digest = _digest(payload)
+    if digest != observation.attestation_sha256:
+        raise CuratorCoherenceError(
+            "curator-coherence-attestation-stale",
+            "the memory-quality attestation changed between observation and its durable copy",
+            expected={"attestationSha256": observation.attestation_sha256},
+            observed={"attestationSha256": digest},
+            next_action="prepare",
+        )
+    destination = paths.attestation_copy(digest)
+    if destination.exists():
+        try:
+            existing = destination.read_bytes()
+        except OSError as exc:
+            raise CuratorCoherenceError(
+                "curator-coherence-attestation-unreadable",
+                "the durable attestation copy exists but its bytes cannot be read",
+                expected={"attestationPath": destination.as_posix()},
+                observed={"attestationPath": destination.as_posix(), "state": "unreadable"},
+                next_action="developer-decision",
+            ) from exc
+        if existing != payload:
+            raise CuratorCoherenceError(
+                "curator-coherence-content-address-collision",
+                "a durable attestation copy path already holds different bytes",
+                expected={"attestationSha256": digest},
+                observed={"attestationSha256": _digest(existing)},
+                next_action="developer-decision",
+            )
+        return destination
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.parent / f".{destination.name}.{os.getpid()}.{uuid4().hex}.tmp"
+    try:
+        _write_fsynced(temporary, payload)
+        atomic_replace(temporary, destination)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    return destination
 
 
 def _require_expected_observation(

@@ -11,13 +11,18 @@ An unknown ``kind``, an unknown ``record_schema``, or a payload that does not va
 resolved model is refused with the shipped code ``invalid_payload``, with no row written and the
 before/after digest unchanged.
 
-**One internal conformance kind, plus the eight authored facet kinds, plus the two
-mechanical-detection kinds, plus the citation-binding kind.** The concrete knowledge categories that
-are *not* facets (``EvidenceClaim``, …) are later leaves. This leaf registers the eight
-authored-judgment subtypes beside the internal conformance kind -- one registry entry per subtype,
-whose model is the frozen payload model the facet vocabulary declares -- so the typed half of the
-envelope carries the real vocabulary rather than only a promise. The internal kind is marked internal
-and is not a knowledge category.
+**What this registry holds, measured from the mapping below: twenty-two kind/schema pairs.** They are
+the one internal conformance kind; the eight authored facet kinds; the two mechanical-detection
+kinds; the requirement-revision kind; the citation-binding kind; the supporting-record pair
+(``evidence_claim`` and ``verification_observation``); the three authored-effect member kinds and the
+semantic change set that composes them; and the truth-coverage census's three kinds. The concrete
+knowledge categories that are *not* facets register here too -- nothing this docstring once deferred
+is deferred now -- and the paragraphs below record each group as it arrived, while the mapping itself
+is the authority for the membership. This leaf's own contribution is the internal conformance kind
+beside the eight authored-judgment subtypes -- one registry entry per subtype, whose model is the
+frozen payload model the facet vocabulary declares -- so the typed half of the envelope carries the
+real vocabulary rather than only a promise. The internal kind is marked internal and is not a
+knowledge category.
 
 The detection leaf registers the two kinds this docstring used to defer: ``detection_signal`` and
 ``detection_run`` resolve to the frozen payload models
@@ -192,37 +197,40 @@ PAYLOAD_MODELS: Mapping[tuple[str, str], type[BaseModel]] = {
 FACET_RECORD_KINDS: frozenset[str] = frozenset(kind for (kind, _schema) in _FACET_PAYLOAD_MODELS)
 
 # The mechanical-detection kinds this registry admits, derived from the same declarations the entries
-# above are built from rather than restated. A caller that needs to say what the registry holds names
-# all three groups -- the internal conformance kind, the eight facet kinds and these two -- and the
-# three sets are disjoint by construction because a kind is one string.
+# above are built from rather than restated. A caller that needs to say what the registry holds reads
+# ``PAYLOAD_MODELS`` above: the membership is stated once, in that mapping and in this module's
+# docstring, rather than restated per derived set. The derived kind sets are disjoint by
+# construction because a kind is one string.
 DETECTION_RECORD_KINDS: frozenset[str] = frozenset({DETECTION_SIGNAL_KIND, DETECTION_RUN_KIND})
 
 # The requirement-revision kinds this registry admits, derived from the same declaration the entry
-# above is built from rather than restated. A caller that needs to say what the registry holds names
-# every group -- the internal conformance kind, the eight facet kinds, the two detection kinds, the
-# citation-binding kind and this one -- and the groups are disjoint by construction because a kind is one string.
+# above is built from rather than restated. A caller that needs to say what the registry holds reads
+# ``PAYLOAD_MODELS`` above: the membership is stated once, in that mapping and in this module's
+# docstring, rather than restated per derived set. The derived kind sets are disjoint by
+# construction because a kind is one string.
 REQUIREMENT_RECORD_KINDS: frozenset[str] = frozenset(
     kind for (kind, _schema) in REQUIREMENT_PAYLOAD_MODELS
 )
 # The citation-binding kinds this registry admits, derived from the declarations the entry above is
-# built from rather than restated. A caller that needs to say what the registry holds names every
-# group -- the internal conformance kind, the eight facet kinds, the two detection kinds, the
-# requirement-revision kinds and this one -- and the four sets are disjoint by construction because a kind is one string.
+# built from rather than restated. A caller that needs to say what the registry holds reads
+# ``PAYLOAD_MODELS`` above: the membership is stated once, in that mapping and in this module's
+# docstring, rather than restated per derived set. The derived kind sets are disjoint by
+# construction because a kind is one string.
 CITATION_BINDING_RECORD_KINDS: frozenset[str] = frozenset({BINDING_RECORD_KIND})
 
 # The supporting-record kinds, derived from the same declarations the entries above are built from.
-# A caller that needs to say what the registry holds names every group -- the internal conformance
-# kind, the eight facet kinds, the two detection kinds, the requirement-revision kinds, the
-# citation-binding kind and these two -- and the sets are disjoint by construction because a kind is
-# one string.
+# A caller that needs to say what the registry holds reads
+# ``PAYLOAD_MODELS`` above: the membership is stated once, in that mapping and in this module's
+# docstring, rather than restated per derived set. The derived kind sets are disjoint by
+# construction because a kind is one string.
 EVIDENCE_RECORD_KINDS: frozenset[str] = frozenset(
     {EVIDENCE_CLAIM_KIND, VERIFICATION_OBSERVATION_KIND}
 )
 
 # The authored-effect kinds this registry admits, derived from the same declarations the entries
-# above are built from rather than restated. A caller that needs to say what the registry holds names
-# every group -- the internal conformance kind, the eight facet kinds, the two detection kinds, the
-# requirement kind, these three member kinds and the change-set kind -- and the groups are disjoint by
+# above are built from rather than restated. A caller that needs to say what the registry holds reads
+# ``PAYLOAD_MODELS`` above: the membership is stated once, in that mapping and in this module's
+# docstring, rather than restated per derived set. The derived kind sets are disjoint by
 # construction because a kind is one string.
 EFFECT_MEMBER_RECORD_KINDS: frozenset[str] = frozenset(
     kind for (kind, _schema) in MEMBER_PAYLOAD_MODELS

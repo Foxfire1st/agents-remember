@@ -282,7 +282,11 @@ def terminal_result_blockers(result: TerminalResult) -> list[dict[str, object]]:
             _result_blockers(
                 "driftSnapshot",
                 result.drift_snapshots,
-                expect=TerminalExpectation(done_key="removed"),
+                # Every sibling collection above propagates ``preview``; this one did not, so a
+                # preview's ``would_remove`` entry was read with the real call's ``would_delete``
+                # key, looked like a blockage, and ``_blocker`` raised on the missing reason. A
+                # preview then failed on exactly the contracts a real finalize completed.
+                expect=TerminalExpectation(done_key="removed", preview=result.preview),
             )
         )
     return blockers

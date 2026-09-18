@@ -28,7 +28,11 @@ from agents_remember.memory.knowledge import realizations
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import logical_digest
 from agents_remember.memory.knowledge.read import _manifest_digest
-from agents_remember.memory.knowledge.schema_generations import generation_of_database
+from agents_remember.memory.knowledge.schema_generations import (
+    GENERATIONS,
+    generation_for_key,
+    generation_of_database,
+)
 from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.graph import RealizationClaimDraft
 from agents_remember.models.knowledge.read import (
@@ -73,6 +77,28 @@ pytestmark = pytest.mark.integration
 # declares the newest generation it supports (requirement 2.7), so a digest computed under a
 # hardcoded generation name would be the digest of a dataset these fixtures do not hold.
 SCHEMA_NAME = "ar-knowledge-sqlite/v1"
+
+
+def _unregistered_generation_name() -> str:
+    """Return a schema name **no** registered generation carries, derived from the registry.
+
+    The "another schema generation" case below needs a declared generation the build does not
+    support, and a literal is exactly how it stopped being one: the case spelled
+    ``ar-knowledge-sqlite/v9`` until ``KS-R21@v1`` registered generation 9, after which the
+    declaration named the dataset's *own* generation, the guard returned ``page`` where the case
+    asserted ``refused``, and the only case for the caller-declared-generation rule measured the
+    supported path instead (adversarial coverage review finding ``A-1``). The probe asks the code's
+    own registry rather than restating a number: it starts one past the newest registered version
+    and walks up to the first name the registry does not contain.
+    """
+
+    candidate = GENERATIONS[-1].user_version + 1
+    while generation_for_key(f"ar-knowledge-sqlite/v{candidate}", candidate) is not None:
+        candidate += 1
+    return f"ar-knowledge-sqlite/v{candidate}"
+
+
+UNSUPPORTED_SCHEMA_NAME = _unregistered_generation_name()
 EVERY_RECORDED_PATH = {
     INTEGRATION_PATH,
     SYNCHRONIZATION_PATH,
@@ -780,17 +806,32 @@ def test_a_context_declaring_another_schema_generation_is_refused_before_a_page_
     between the caller and a page served from a generation it did not name. The two variants are a
     pair: this one pins the schema comparison, the digest-only one below pins the digest comparison,
     and each is refused by its own guard as a different fact.
+
+    The generation this case declares is *derived from the registry* (``UNSUPPORTED_SCHEMA_NAME``)
+    rather than spelled, and the case asserts the derivation before it uses it. That is the repair
+    the adversarial coverage review's finding ``A-1`` requires rather than a tightening: this case
+    spelled ``ar-knowledge-sqlite/v9`` until ``KS-R21@v1`` made ``v9`` the dataset's own generation,
+    at which point the declaration became the honest one, the guard had nothing to refuse, and the
+    case went red reporting ``page``. The assertion below cannot silently become a test of the
+    current generation again, because a registry that ever contains the name reddens here.
     """
 
+    assert UNSUPPORTED_SCHEMA_NAME not in {generation.schema_name for generation in GENERATIONS}, (
+        f"{UNSUPPORTED_SCHEMA_NAME} is a registered generation, so this case no longer reaches the "
+        "guard it exists for"
+    )
     resolved = anchored_context(fixture)
     assert resolved.knowledge.schema_version == declared_schema_name(fixture.database_path)
+    assert resolved.knowledge.schema_version != UNSUPPORTED_SCHEMA_NAME, (
+        "the declared generation must be another one than the file's own for the guard to be reached"
+    )
     assert resolved.knowledge.logical_digest == fixture.knowledge_digest, (
         "the declared digest is the one the file really holds"
     )
     context = resolved.model_copy(
         update={
             "knowledge": resolved.knowledge.model_copy(
-                update={"schema_version": "ar-knowledge-sqlite/v9"}
+                update={"schema_version": UNSUPPORTED_SCHEMA_NAME}
             )
         }
     )
@@ -807,7 +848,7 @@ def test_a_context_declaring_another_schema_generation_is_refused_before_a_page_
     assert result.refusal.detail.endswith(
         "the selected database declares another schema generation"
     )
-    assert result.refusal.expected == "ar-knowledge-sqlite/v9"
+    assert result.refusal.expected == UNSUPPORTED_SCHEMA_NAME
     # The observed generation is the one the *file* declares, which is the created generation
     # (requirement 2.7) rather than generation 1's hardcoded name.
     assert result.refusal.observed == declared_schema_name(fixture.database_path)

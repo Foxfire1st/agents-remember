@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from agents_remember.models.base import FlexibleToolResponse, ToolResponse
+from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.drift import DriftStatus
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 
@@ -76,6 +77,11 @@ class MemoryQualityCheckResponse(FlexibleToolResponse):
     closeoutOwnedFindingCount: int | None = Field(default=None, ge=0)
     noteworthyFindingCount: int | None = Field(default=None, ge=0)
     scopeAuthority: Literal["official-diagnostic", "leaf-candidate"] | None = None
+    # WHICH RULER produced these counts (D-33). `memory_quality_check` executes a fixed serving
+    # build, which need not be the candidate's own code, and until this field existed a reader of
+    # a checklist could not tell the two apart. Declared rather than left to `extra="allow"`: what
+    # this package writes, this package declares.
+    servingBuild: ServingBuildPayload | None = None
     acceptanceEligible: bool | None = None
     contractPath: str | None = Field(default=None, max_length=8192)
     pairIdentity: MemoryCandidatePairIdentity | None = None
@@ -132,6 +138,9 @@ class CitationFixResponse(FlexibleToolResponse):
     operation: Literal["citation_fix"] = "citation_fix"
     repoId: str | None = None
     dryRun: bool | None = None
+    # The repair engine's rules are part of the measuring machinery, so a count this response
+    # reports names the build that applied them (D-33).
+    servingBuild: ServingBuildPayload | None = None
 
 
 class CitationMigrateResponse(FlexibleToolResponse):
@@ -151,6 +160,8 @@ class CitationMigrateResponse(FlexibleToolResponse):
     tablesConverted: int | None = Field(default=None, ge=0)
     declinedCount: int | None = Field(default=None, ge=0)
     findingsRemaining: int | None = Field(default=None, ge=0)
+    # Same ruler requirement as `CitationFixResponse` (D-33).
+    servingBuild: ServingBuildPayload | None = None
 
 
 class RouteIndexRefreshResponse(FlexibleToolResponse):

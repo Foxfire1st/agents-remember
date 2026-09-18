@@ -9,10 +9,10 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 from unittest import mock
 
-from agents_remember.application import memory_scope
+from agents_remember.application import memory_scope, memory_tools
 from agents_remember.application.memory_quality import census, controller, runs
 from agents_remember.application.memory_scope import (
     MemoryScope,
@@ -22,8 +22,11 @@ from agents_remember.errors import MemoryCandidatePairError, MemoryCandidatePair
 from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.memory_quality.check import AVAILABLE_CHECKS
 from agents_remember.models.certification.references import CertificateObjectReference
+from agents_remember.models.core import ServingBuildPayload
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.lifecycles.preparation import build_prepared_closeout_output
+from agents_remember.models.memory import MemoryQualityCheckResponse
+from agents_remember.serving.build_info import process_serving_build
 from agents_remember.worktrees.integration.closeout.preparation import code_view
 from agents_remember.worktrees.modules import onboarding
 from agents_remember.worktrees.modules.onboarding_acceptance import OnboardingBodyGateEvidence
@@ -618,6 +621,114 @@ class MemoryQualityControllerTests(unittest.TestCase):
         assert code_input is not None
         self.assertEqual(candidate.code_tree, current_tree)
         self.assertEqual(code_input.targetCodeTree, candidate.code_tree)
+
+
+class MeasuringBuildStampTests(unittest.TestCase):
+    """Every memory-quality and citation response names the build that measured (D-33).
+
+    D-33 measured that the MCP tool surface executes a FIXED serving build while the candidate
+    under measurement carries different code, and that the two are indistinguishable in the
+    output. For the items that change the measuring machinery itself, a tool-produced count can
+    therefore never show the fix. These cases make the ruler nameable in the response, so a
+    reader -- and the terminal report -- can say which build produced a count.
+    """
+
+    def test_every_memory_quality_entry_point_stamps_the_serving_build(self) -> None:
+        """All three modes carry the resolved stamp, not one of them.
+
+        Red if a wrapper is dropped, if a mode returns its body's payload unwrapped, or if the
+        stamp stops being the process's resolved identity: an unstamped envelope is exactly the
+        state D-33 recorded, where a count cannot be attributed to a ruler.
+        """
+
+        resolved = process_serving_build()
+        cases = (
+            ("run", controller.run_memory_quality_request, "run"),
+            ("start", controller.start_memory_quality_request, "start"),
+            ("poll", controller.poll_memory_quality_request, "poll"),
+        )
+        for label, entry, body_name in cases:
+            with self.subTest(mode=label):
+                with mock.patch.object(
+                    controller, f"_{body_name}_memory_quality_request", return_value={"ok": True}
+                ):
+                    response = entry(mock.Mock(), mock.Mock())
+                assert isinstance(response, dict)
+                self.assertEqual(response["servingBuild"]["commit"], resolved.commit)
+                self.assertEqual(response["servingBuild"]["sourceDigest"], resolved.source_digest)
+                self.assertTrue(response["servingBuild"]["commit"])
+
+    def test_the_stamp_is_declared_on_the_responses_that_carry_it(self) -> None:
+        """The field is part of the declared contract, not tolerated drift.
+
+        ``FlexibleToolResponse`` sets ``extra="allow"``, so an undeclared key would validate and
+        still be invisible in the tool's own schema. Red if the declaration is removed, or if the
+        stamp stops resolving to the shared boot payload.
+        """
+
+        for model in (MemoryQualityCheckResponse,):
+            self.assertIn("servingBuild", model.model_fields)
+        stamp = memory_tools.measuring_build_stamp()["servingBuild"]
+        self.assertEqual(
+            ServingBuildPayload.model_validate(stamp), process_serving_build().payload()
+        )
+
+    def test_the_citation_repair_response_names_its_ruler(self) -> None:
+        """``citation_fix`` rewrites ranges with the serving build's rules.
+
+        The repair engine is part of the measuring machinery this leaf changes, so its response
+        must name the build too. Red if the tool's return stops including the stamp: the counts it
+        reports would then be attributable to no build at all.
+        """
+
+        scope = SimpleNamespace(repo_id="repo", onboarding_root=Path("/memory/onboarding"))
+        with (
+            mock.patch.object(memory_tools, "_leaf_memory_writer_scope", return_value=scope),
+            mock.patch.object(memory_tools, "_citation_trees", return_value=mock.Mock()),
+            mock.patch.object(memory_tools.fixer, "fix_onboarding_root", return_value={"ok": True}),
+        ):
+            response = memory_tools.citation_fix_tool(
+                mock.Mock(), repo_id="repo", contract_path="/contract"
+            )
+        self.assertEqual(
+            response["servingBuild"], memory_tools.measuring_build_stamp()["servingBuild"]
+        )
+        self.assertEqual(response["servingBuild"]["commit"], process_serving_build().commit)
+
+
+class CloseoutOwnedProvenanceRoutingTests(unittest.TestCase):
+    """A closeout-owned row is REPORTED in the closeout-owned section, never dropped.
+
+    ``claim_reopen`` publishes the rows no curator edit can discharge in its own bucket instead of
+    the enforced set. The checklist is where that classification has to land -- in the section the
+    report already keeps for the closing stamp -- and this case is the wire between the two. Red if
+    the collection stops reading the bucket: the rows would then be in neither the repairable set
+    nor the closeout-owned section, which is the silence the disposition rules forbid.
+    """
+
+    ROW: ClassVar[dict[str, Any]] = {
+        "code": "citation_provenance_invalid",
+        "path": "a.md",
+        "closeoutOwned": True,
+    }
+
+    def checklist_sets(self, payload: dict) -> tuple[list[dict], list[dict]]:
+        with mock.patch.object(controller, "split_commit_owned_findings", return_value=([], [])):
+            return controller._checklist_finding_sets([], payload, Path("/memory/onboarding"))
+
+    def test_the_checklists_commit_owned_set_collects_the_checks_own_bucket(self) -> None:
+        payload = {
+            "checks": {
+                "style.citations.claim_reopen": {
+                    "findings": [],
+                    "closeoutOwnedFindings": [self.ROW],
+                },
+                "style.update_history.history_order": {"findings": []},
+            }
+        }
+        self.assertEqual(self.checklist_sets(payload), ([], [self.ROW]))
+        self.assertEqual(self.checklist_sets({}), ([], []))
+        self.assertEqual(self.checklist_sets({"checks": []}), ([], []))
 
 
 if __name__ == "__main__":  # pragma: no cover

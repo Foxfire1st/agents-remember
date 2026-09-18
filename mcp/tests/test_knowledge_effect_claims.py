@@ -72,6 +72,7 @@ from agents_remember.models.knowledge.requirement import (
     REQUIREMENT_REVISION_KIND,
     REQUIREMENT_REVISION_SCHEMA,
     RequirementOwnerRef,
+    RequirementOwnerResolution,
     RequirementRevisionPayload,
     RequirementRevisionRequest,
 )
@@ -266,7 +267,9 @@ def test_an_out_of_vocabulary_label_names_the_observed_label_and_all_nine_admitt
 
     assert evidence.refusal.code == "invalid_payload"
     assert evidence.refusal.observed == "preserve"
-    assert evidence.refusal.expected.split(" | ") == list(ADMITTED_EFFECT_LABELS)
+    expected = evidence.refusal.expected
+    assert expected is not None, "the refusal names the admitted labels beside the observed one"
+    assert expected.split(" | ") == list(ADMITTED_EFFECT_LABELS)
     assert evidence.wrote_nothing()
 
 
@@ -337,8 +340,11 @@ def test_a_split_with_one_output_is_refused_as_invalid_payload_naming_label_and_
     )
 
     assert evidence.refusal.code == "invalid_payload"
-    assert evidence.refusal.observed.startswith("effect='split' inputs=1 outputs=1")
-    assert "two or more outputs" in evidence.refusal.expected
+    observed = evidence.refusal.observed
+    expected = evidence.refusal.expected
+    assert observed is not None and expected is not None
+    assert observed.startswith("effect='split' inputs=1 outputs=1")
+    assert "two or more outputs" in expected
     assert evidence.wrote_nothing()
 
     # The union side of the same rule, for the same reason: ``merge`` is admitted only with two or
@@ -352,7 +358,9 @@ def test_a_split_with_one_output_is_refused_as_invalid_payload_naming_label_and_
         ),
     )
     assert merged.refusal.code == "invalid_payload"
-    assert merged.refusal.observed.startswith("effect='merge' inputs=1 outputs=1")
+    merged_observed = merged.refusal.observed
+    assert merged_observed is not None
+    assert merged_observed.startswith("effect='merge' inputs=1 outputs=1")
 
 
 def test_one_revision_on_both_sides_is_refused_and_the_shared_reference_is_named(
@@ -1018,7 +1026,7 @@ def _requirement_request(harness: CandidateHarness) -> Any:
                 stableId="KS-R13",
                 version="v1",
             ),
-            owner_resolution={"state": "resolved"},
+            owner_resolution=RequirementOwnerResolution(state="resolved"),
             explanation="An obligation this record group stores no requirement authority for.",
         ),
     )

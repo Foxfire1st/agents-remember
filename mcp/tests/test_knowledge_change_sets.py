@@ -458,7 +458,11 @@ def test_a_preservation_subject_is_a_named_reference_of_one_declared_kind() -> N
     for kind in ("invariant", "invariant_revision", "source_anchor", "semantic_change_set"):
         assert PreservationSubject(kind=kind, reference_id=str(uuid4())).kind == kind
     with pytest.raises(ValueError):
-        PreservationSubject(kind="effect", reference_id=str(uuid4()))
+        # The value under test is outside the declared type *by construction* -- that is the whole
+        # case -- so it is handed to the model as untyped input through ``model_validate``, which
+        # runs the same validator the constructor runs, rather than through a cast that would claim
+        # the type system admitted it.
+        PreservationSubject.model_validate({"kind": "effect", "reference_id": str(uuid4())})
 
 
 def test_a_preservation_subject_that_resolves_to_nothing_is_reported_unresolved(
