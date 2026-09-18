@@ -1053,6 +1053,8 @@ consumers = [
   "mcp/tests/test_knowledge_graph_reads.py",
   "mcp/tests/test_knowledge_label_operations.py",
   "mcp/tests/test_knowledge_relation_rules.py",
+  "mcp/tests/test_knowledge_requirement_reference_contract.py",
+  "mcp/tests/test_knowledge_requirement_revisions.py",
   "mcp/tests/test_knowledge_revision_seals.py",
   "mcp/tests/test_knowledge_store.py",
   "mcp/tests/test_knowledge_portable_boundaries.py",
@@ -1185,6 +1187,8 @@ consumers = [
   "mcp/tests/test_knowledge_portable_boundaries.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
   "mcp/tests/test_knowledge_read_paths.py",
+  "mcp/tests/test_knowledge_requirement_reference_contract.py",
+  "mcp/tests/test_knowledge_requirement_revisions.py",
   "mcp/tests/test_knowledge_schema_generations.py",
   "mcp/tests/test_knowledge_store.py",
 ]

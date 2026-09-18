@@ -94,6 +94,14 @@ KnowledgeOperation = Literal[
     # to come back in. Neither member can carry a conclusion, and neither mints a new gate.
     "record_detection_run",
     "read_detection_run",
+    # Requirement revisions. Two members rather than one, for the reason the read pair and the diff
+    # pair are one each: recording a revision of a requirement obligation and reading the revisions
+    # back are different acts with different remedies, and the read is the one that has to answer
+    # with the derived views rather than with whatever rows the record happens to hold. Neither
+    # member can carry a task status, a seat owner or a lifecycle gate, and neither mints an
+    # approval: the owner's recorded acceptance is carried as data here and never produced.
+    "record_requirement_revision",
+    "read_requirement_revisions",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct

@@ -27,6 +27,12 @@ typed record passes through rather than by a second one beside it.
 
 The registry maps to **frozen** models: a validated payload is a value, and a caller cannot mutate
 what it validated into something the registry would not have accepted.
+
+The requirement-revision leaf registers the fourth typed family: ``requirement_revision`` resolves
+to the frozen payload model :mod:`agents_remember.models.knowledge.requirement` declares, which
+carries the obligation's owning packet identity, the attributed self-contained explanation and the
+inherited ``state_at_origin``/``acceptance_ref`` pair. That record group adds no table of its own --
+the pair above is the envelope, and a requirement revision is an envelope record.
 """
 
 from __future__ import annotations
@@ -51,6 +57,7 @@ from agents_remember.models.knowledge.facet import (
     FACET_RECORD_SCHEMAS,
     facet_payload_models,
 )
+from agents_remember.models.knowledge.requirement import REQUIREMENT_PAYLOAD_MODELS
 from agents_remember.models.knowledge.result import KnowledgeOperation, KnowledgeRefusal
 
 # The one kind this leaf registers. It is internal: it carries no knowledge-category meaning and
@@ -95,6 +102,14 @@ PAYLOAD_MODELS: Mapping[tuple[str, str], type[BaseModel]] = {
     # envelope cannot express -- the run's recorded signal order.
     (DETECTION_SIGNAL_KIND, DETECTION_SIGNAL_SCHEMA): DetectionSignalPayload,
     (DETECTION_RUN_KIND, DETECTION_RUN_SCHEMA): DetectionRunPayload,
+    # The requirement-revision record group. It is the envelope's fourth typed family, and it
+    # registers the same way the two above do: the frozen payload model *is* the shape, declared
+    # once in :mod:`agents_remember.models.knowledge.requirement`, so a revision's owner reference,
+    # its self-contained explanation and its inherited state/acceptance pair are enforced by the same
+    # seam every other typed record passes through rather than by a second one beside it. The mapping
+    # is unpacked from that module rather than restated here, so the registry and the vocabulary
+    # cannot drift and a requirement kind cannot exist without a registered shape.
+    **REQUIREMENT_PAYLOAD_MODELS,
 }
 
 # The facet kinds this registry admits, for a caller that needs the closed vocabulary rather than a
@@ -107,6 +122,14 @@ FACET_RECORD_KINDS: frozenset[str] = frozenset(kind for (kind, _schema) in _FACE
 # all three groups -- the internal conformance kind, the eight facet kinds and these two -- and the
 # three sets are disjoint by construction because a kind is one string.
 DETECTION_RECORD_KINDS: frozenset[str] = frozenset({DETECTION_SIGNAL_KIND, DETECTION_RUN_KIND})
+
+# The requirement-revision kinds this registry admits, derived from the same declaration the entry
+# above is built from rather than restated. A caller that needs to say what the registry holds names
+# every group -- the internal conformance kind, the eight facet kinds, the two detection kinds and
+# this one -- and the groups are disjoint by construction because a kind is one string.
+REQUIREMENT_RECORD_KINDS: frozenset[str] = frozenset(
+    kind for (kind, _schema) in REQUIREMENT_PAYLOAD_MODELS
+)
 
 # Which shapes each kind admits. Derived from the registry rather than restated, so a kind cannot
 # admit a shape the registry does not hold.
