@@ -1234,6 +1234,8 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_candidate_batch_commands.py",
   "mcp/tests/test_candidate_batch_transaction.py",
+  "mcp/tests/test_knowledge_change_sets.py",
+  "mcp/tests/test_knowledge_effect_claims.py",
 ]
 
 [[artifact]]
@@ -1305,6 +1307,7 @@ consumers = [
   "mcp/tests/test_knowledge_schema_generations.py",
   "mcp/tests/test_knowledge_store.py",
   "mcp/tests/test_knowledge_citation_boundaries.py",
+  "mcp/tests/test_knowledge_effect_claims.py",
 ]
 
 [[artifact]]

@@ -31,6 +31,7 @@ from agents_remember.memory.knowledge.refusals import (
     KnowledgeRefused,
     missing_relation_endpoint_refusal,
 )
+from agents_remember.models.knowledge.change_set import SEMANTIC_CHANGE_SET_KIND
 from agents_remember.models.knowledge.facet import (
     FACET_KINDS,
     FAMILY_REVISION_ENDPOINT_KIND,
@@ -57,6 +58,26 @@ _KIND_OF_REVISION = (
     "WHERE envelope.repository_id = ? AND revision.revision_id = ?"
 )
 
+# The existence lookup for an authored facet revision: a sealed ``record_revision`` row whose
+# envelope names one of the eight declared facet kinds. The kind list is interpolated from the
+# vocabulary's own declaration rather than written here, so a ninth subtype cannot be added without
+# this check admitting it, and it reaches the statement as declared identifiers rather than as caller
+# text.
+_FACET_KIND_PLACEHOLDERS = ", ".join("?" for _ in FACET_KINDS)
+_FACET_REVISION_EXISTS = (
+    "SELECT revision.revision_id FROM record_revision AS revision "
+    "JOIN knowledge_record AS envelope ON envelope.repository_id = revision.repository_id "
+    "AND envelope.record_id = revision.record_id "
+    f"WHERE revision.repository_id = ? AND revision.revision_id = ? "
+    f"AND envelope.kind IN ({_FACET_KIND_PLACEHOLDERS})"
+)
+
+# The existence lookup for a change set: the envelope's own one-key lookup, narrowed to the kind, so
+# a record of another kind that happens to carry this identity is not a change set.
+_CHANGE_SET_EXISTS = (
+    "SELECT record_id FROM knowledge_record WHERE repository_id = ? AND record_id = ? AND kind = ?"
+)
+
 RelationWrite = Literal[
     "create_family_member",
     "create_realization_claim",
@@ -65,6 +86,10 @@ RelationWrite = Literal[
     "create_composition",
     "set_family_revision_route",
     "add_evidence_claim",
+    # The authored-effect record group performs its writes under the candidate batch's own operation:
+    # unlike the authored-facet group, it has no standalone operation beside the batch, so naming a
+    # command kind here would report a refusal under an operation that cannot be asked for.
+    "change_candidate",
 ]
 
 
@@ -235,6 +260,8 @@ def require_attachment_endpoint(
 __all__ = [
     "RelationWrite",
     "require_attachment_endpoint",
+    "require_change_set_endpoint",
+    "require_effect_revision_endpoint",
     "require_facet_revision_endpoint",
     "require_family_revision_endpoint",
     "require_invariant_revision_endpoint",
@@ -242,3 +269,64 @@ __all__ = [
     "require_route_endpoint",
     "require_source_anchor_endpoint",
 ]
+
+
+def require_effect_revision_endpoint(
+    store: OpenedKnowledgeStore, revision_id: str, relation_id: str, operation: RelationWrite
+) -> None:
+    """Refuse when a revision an effect claim names as an input or an output is not stored here.
+
+    An effect claim's input and output each name an *exact stored revision*, and the admitted kinds
+    are an invariant revision and an authored facet revision. The two are **one** check rather than
+    two because the author names a revision and not a kind: which kind is stored under that identity
+    is a fact about the store, and both branches ask the same question of the table that owns the
+    revision. Requiring the author to declare the kind as well would be a second addressing scheme
+    beside the stored key, and resolving it anywhere but here would be a second resolution path for
+    the same reference -- which is what this module exists to prevent.
+
+    A refusal names the offending identity, and it is the shipped ``invalid_reference``: the
+    reference is not re-pointed to a similarly named revision and not dropped to make the record
+    valid.
+    """
+
+    if store.get_revision(revision_id) is not None:
+        return
+    facet_parameters: tuple[str, ...] = (store.repository_id, revision_id, *FACET_KINDS)
+    if fetch_one(store.connection, _FACET_REVISION_EXISTS, facet_parameters) is not None:
+        return
+    raise KnowledgeRefused(
+        missing_relation_endpoint_refusal(
+            operation=operation,
+            table="record_revision",
+            relation_id=relation_id,
+            endpoint_id=revision_id,
+            endpoint_kind="recorded revision (an invariant revision or an authored facet revision)",
+        )
+    )
+
+
+def require_change_set_endpoint(
+    store: OpenedKnowledgeStore, change_set_id: str, relation_id: str, operation: RelationWrite
+) -> None:
+    """Refuse when the change set a member or a succession edge names is not stored here.
+
+    A member declares the one change set it belongs to and a successor declares its exact
+    predecessors, so both are references to a stored ``semantic_change_set`` record and both are
+    resolved by the envelope's own one-key lookup narrowed to that kind. A record of another kind
+    carrying this identity is not a change set, and a change set that is not stored is
+    ``invalid_reference`` naming the offending identity rather than a member stored without its
+    group.
+    """
+
+    parameters = (store.repository_id, change_set_id, SEMANTIC_CHANGE_SET_KIND)
+    if fetch_one(store.connection, _CHANGE_SET_EXISTS, parameters) is not None:
+        return
+    raise KnowledgeRefused(
+        missing_relation_endpoint_refusal(
+            operation=operation,
+            table="knowledge_record",
+            relation_id=relation_id,
+            endpoint_id=change_set_id,
+            endpoint_kind="semantic change set",
+        )
+    )

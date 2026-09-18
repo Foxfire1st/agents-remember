@@ -24,7 +24,7 @@ graphs -- so a batch is refused by the state it produced rather than by the requ
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -34,6 +34,7 @@ from agents_remember.memory.knowledge import (
     anchors,
     composition_policies,
     compositions,
+    effects,
     evidence,
     facet_records,
     facets,
@@ -46,6 +47,11 @@ from agents_remember.memory.knowledge import (
     records,
 )
 from agents_remember.memory.knowledge.candidate_records import pending_identities
+from agents_remember.memory.knowledge.effect_records import (
+    CHANGE_SET_PREDECESSOR_EDGES,
+    EFFECT_RECORD_KINDS,
+    stored_revisions_of_kind,
+)
 from agents_remember.memory.knowledge.refusals import (
     KnowledgeRefused,
     KnowledgeStorageError,
@@ -79,12 +85,16 @@ from agents_remember.models.knowledge.candidate import (
     SetFamilyRevisionRoute,
     SetInvariantLabel,
 )
+from agents_remember.models.knowledge.candidate import (
+    EffectCommand as _EffectCommand,
+)
 from agents_remember.models.knowledge.composition import (
     COMPOSITION_COMMAND_KINDS,
     FamilyCompositionDraft,
     FamilyCompositionPolicyVersion,
     FamilyExplanationContext,
 )
+from agents_remember.models.knowledge.effect import EFFECT_COMMAND_KINDS
 from agents_remember.models.knowledge.evidence import EVIDENCE_COMMAND_KINDS
 from agents_remember.models.knowledge.facet import (
     FACET_COMMAND_KINDS,
@@ -218,32 +228,114 @@ def _apply_one(
         ) from refused
 
 
+# The families one command can belong to, as a dispatch table rather than a ladder: each row pairs
+# the vocabulary's own declaration of a family's kinds with the step that applies it. Six families are
+# dispatched separately -- insertion, label edit, the composition commands, the authored facet
+# commands, the supporting-record commands and the authored-effect commands -- so each one reads as
+# the single decision it is rather than as one long conditional over twenty-six variants. The facet,
+# supporting-record and authored-effect commands go to their own modules' in-transaction steps, which
+# raise the same typed refusals this batch restates and report the same kind of touched-row entry.
+#
+# The row's membership is the vocabulary's own constant rather than a second literal, so a command
+# added to a family reaches its step without an edit here. A family that needs neither the authorship
+# nor the pending set ignores the parameter it does not read, which is what keeps the table one shape
+# instead of six.
+ApplyFamily = Callable[
+    ["OpenedKnowledgeStore", ChangeCommand, Authorship, frozenset[tuple[str, str]]],
+    tuple[RecordIdentity, ...],
+]
+
+
+def _apply_family_insert(
+    store: OpenedKnowledgeStore,
+    command: ChangeCommand,
+    authorship: Authorship,
+    pending: frozenset[tuple[str, str]],
+) -> tuple[RecordIdentity, ...]:
+    return _apply_insert(store, command, authorship, pending)
+
+
+def _apply_family_label(
+    store: OpenedKnowledgeStore,
+    command: ChangeCommand,
+    authorship: Authorship,
+    pending: frozenset[tuple[str, str]],
+) -> tuple[RecordIdentity, ...]:
+    del authorship, pending
+    return _apply_label(store, command)
+
+
+def _apply_family_composition(
+    store: OpenedKnowledgeStore,
+    command: ChangeCommand,
+    authorship: Authorship,
+    pending: frozenset[tuple[str, str]],
+) -> tuple[RecordIdentity, ...]:
+    del pending
+    return _apply_composition(store, command, authorship)
+
+
+def _apply_family_facet(
+    store: OpenedKnowledgeStore,
+    command: ChangeCommand,
+    authorship: Authorship,
+    pending: frozenset[tuple[str, str]],
+) -> tuple[RecordIdentity, ...]:
+    return _apply_facet(store, command, authorship, pending)
+
+
+def _apply_family_evidence(
+    store: OpenedKnowledgeStore,
+    command: ChangeCommand,
+    authorship: Authorship,
+    pending: frozenset[tuple[str, str]],
+) -> tuple[RecordIdentity, ...]:
+    del pending
+    return _apply_evidence(store, command, authorship)
+
+
+def _apply_family_effect(
+    store: OpenedKnowledgeStore,
+    command: ChangeCommand,
+    authorship: Authorship,
+    pending: frozenset[tuple[str, str]],
+) -> tuple[RecordIdentity, ...]:
+    del pending
+    return _apply_effect(store, command, authorship)
+
+
 def _apply_command(
     store: OpenedKnowledgeStore,
     command: ChangeCommand,
     authorship: Authorship,
     pending: frozenset[tuple[str, str]],
 ) -> tuple[RecordIdentity, ...]:
-    """Apply one validated command.
+    """Apply one validated command, through the dispatched family that owns its kind."""
 
-    Five families are dispatched separately -- insertion, label edit, removal, the authored facet
-    commands, and the supporting-record commands -- so each one reads as the single decision it is
-    rather than as one long ladder over twenty variants. The facet and supporting-record commands go
-    to their own modules' in-transaction steps, which raise the same typed refusals this batch
-    restates and report the same kind of touched-row entry.
+    for kinds, apply_family in _APPLY_FAMILIES:
+        if command.kind in kinds:
+            return apply_family(store, command, authorship, pending)
+    return _apply_removal(store, command)
+
+
+def _apply_effect(
+    store: OpenedKnowledgeStore,
+    command: ChangeCommand,
+    authorship: Authorship,
+) -> tuple[RecordIdentity, ...]:
+    """Apply one authored-effect command through the record group's in-transaction step.
+
+    The step is handed no ``pending`` set, and that is deliberate: it resolves every reference against
+    the rows as they stand, and the batch applies commands in the order the author wrote them, so a
+    citation of an identity the same batch creates resolves once that command has run. A citation that
+    arrives first is refused with the offending reference named and the ordering remedy stated.
     """
 
-    if command.kind in _INSERTING_KINDS:
-        return _apply_insert(store, command, authorship, pending)
-    if command.kind in _LABELING_KINDS:
-        return _apply_label(store, command)
-    if command.kind in _COMPOSITION_KINDS:
-        return _apply_composition(store, command, authorship)
-    if command.kind in FACET_COMMAND_KINDS:
-        return _apply_facet(store, command, authorship, pending)
-    if command.kind in EVIDENCE_COMMAND_KINDS:
-        return _apply_evidence(store, command, authorship)
-    return _apply_removal(store, command)
+    if not isinstance(command, _EffectCommand):  # pragma: no cover - the dispatch set is closed
+        raise KnowledgeStorageError(
+            f"no authored-effect apply step for candidate command kind {command.kind!r}"
+        )
+    return effects.apply_effect_command(store, command, authorship)
 
 
 def _apply_facet(
@@ -439,6 +531,23 @@ def _author_family_explanation_context(
             )
         )
     return tuple(entries)
+
+
+# The authored-effect command kinds, as the one vocabulary the record group's own module declares.
+# Derived from that declaration rather than restated, so a fifth command cannot exist in the union
+# without reaching its apply step.
+_EFFECT_KINDS = frozenset(EFFECT_COMMAND_KINDS)
+
+# The dispatch table itself, declared after every family's kind set and every step it names, so a
+# reader sees each declaration before the table that selects between them.
+_APPLY_FAMILIES: tuple[tuple[frozenset[str], ApplyFamily], ...] = (
+    (_INSERTING_KINDS, _apply_family_insert),
+    (_LABELING_KINDS, _apply_family_label),
+    (frozenset(_COMPOSITION_KINDS), _apply_family_composition),
+    (frozenset(FACET_COMMAND_KINDS), _apply_family_facet),
+    (frozenset(EVIDENCE_COMMAND_KINDS), _apply_family_evidence),
+    (frozenset(EFFECT_COMMAND_KINDS), _apply_family_effect),
+)
 
 
 def _apply_insert(
@@ -785,10 +894,12 @@ def require_after_integrity(store: OpenedKnowledgeStore) -> None:
     store.require_referential_integrity()
     _require_sealed_rows(store)
     _require_sealed_facet_rows(store)
+    _require_sealed_effect_rows(store)
     _require_acyclic_graph(store, table="invariant_predecessor", family=False)
     _require_acyclic_graph(store, table="family_predecessor", family=True)
     _require_acyclic_supersessions(store)
     _require_acyclic_compositions(store)
+    _require_acyclic_successions(store)
 
 
 def _require_sealed_rows(store: OpenedKnowledgeStore) -> None:
@@ -835,15 +946,23 @@ def _facet_revisions(store: OpenedKnowledgeStore) -> tuple[tuple[str, str, str],
     not the facet vocabulary has its own decoder and its own shape. ``knowledge_record`` is shared by
     every record group, so "which revisions does this pass own" is a question about the kind the
     envelope carries rather than about the table.
+
+    The kind list is part of the statement rather than a filter applied afterwards, and that is a
+    correction rather than a convenience: the envelope carries every record group's rows, so a scan
+    that named no kind would hand this pass another group's revision to decode as a facet -- which its
+    decoder correctly refuses, turning a healthy store into a reported storage error. The list is
+    interpolated from the vocabulary's own declaration, so a ninth facet subtype is admitted here
+    without a second edit, and it reaches the statement as declared identifiers rather than as caller
+    text, exactly as the shared endpoint check does the same thing.
     """
 
-    placeholders = ", ".join("?" for _ in FACET_KINDS)
+    kind_placeholders = ", ".join("?" for _ in FACET_KINDS)
     rows = store.connection.execute(
         "SELECT envelope.record_id, revision.revision_id, envelope.kind "
         "FROM knowledge_record AS envelope "
         "JOIN record_revision AS revision ON revision.repository_id = envelope.repository_id "
         "AND revision.record_id = envelope.record_id "
-        f"WHERE envelope.repository_id = ? AND envelope.kind IN ({placeholders}) "
+        f"WHERE envelope.repository_id = ? AND envelope.kind IN ({kind_placeholders}) "
         "ORDER BY revision.revision_id",
         (store.repository_id, *FACET_KINDS),
     )
@@ -913,6 +1032,52 @@ def _require_acyclic_compositions(store: OpenedKnowledgeStore) -> None:
         return
     members = tuple(sorted(cycle))
     raise KnowledgeRefused(family_composition_cycle_refusal(members[0], members))
+
+
+def _require_sealed_effect_rows(store: OpenedKnowledgeStore) -> None:
+    """Decode every stored authored-effect revision, re-deriving its seal.
+
+    An authored-effect revision's ``content_digest`` is a seal over its payload, and the decoder
+    recomputes it from the row as stored -- so a batch that wrote a row which does not match its own
+    identity is caught here, inside the same transaction, rather than becoming durable. Each revision
+    is decoded against the shape its own kind declares, because the kind lives on the envelope row and
+    the payload does not carry it.
+    """
+
+    for kind in EFFECT_RECORD_KINDS:
+        stored_revisions_of_kind(store, kind)
+
+
+def _require_acyclic_successions(store: OpenedKnowledgeStore) -> None:
+    """Refuse when the change-set succession graph holds a cycle after the batch was applied.
+
+    The fourth graph the shared rule is applied to, and a whole-graph check like the three above: the
+    batch is finished, so the question is whether the graph it left is acyclic at all. A cycle a
+    single command could not write alone -- two successors each naming the other -- is refused by the
+    rows rather than by the request that produced them.
+    """
+
+    graph: dict[str, set[str]] = {}
+    for child, parent in _change_set_edges(store):
+        graph.setdefault(child, set()).add(parent)
+        graph.setdefault(parent, set())
+    cycle = lineage.cycle_vertices(graph)
+    if not cycle:
+        return
+    members = tuple(sorted(cycle))
+    denial = effects.require_acyclic_successions(store, members[0])
+    if denial is None:  # pragma: no cover - the same edges were just read
+        return
+    raise KnowledgeRefused(denial)
+
+
+def _change_set_edges(store: OpenedKnowledgeStore) -> tuple[tuple[str, str], ...]:
+    """Return every stored change-set succession edge as a ``(successor, predecessor)`` pair."""
+
+    return tuple(
+        (str(row[0]), str(row[1]))
+        for row in store.connection.execute(CHANGE_SET_PREDECESSOR_EDGES, (store.repository_id,))
+    )
 
 
 def _vanished_row(table: str) -> KnowledgeRefusal:

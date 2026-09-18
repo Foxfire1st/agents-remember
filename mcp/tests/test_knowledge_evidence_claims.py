@@ -62,6 +62,7 @@ from agents_remember.memory.knowledge.schema_generations import (
     GENERATION_1,
     GENERATION_6,
     GENERATION_7,
+    GENERATIONS,
     create_schema_statements,
 )
 from agents_remember.memory.knowledge.store import (
@@ -725,15 +726,33 @@ def test_a_fresh_store_declares_the_generation_that_carries_these_tables(tmp_pat
     registration constant, and that is the more precise claim: the property is "a brand-new dataset
     declares the generation that carries these tables", which stays true through a later leaf's
     renumber, while an equality between two constants that this leaf edits together would not.
+
+    RE-SCOPED for ``KS-R13@v1``, which registers generation 8 above this leaf's generation 7. The
+    identity ``REQUIRED_EVIDENCE_GENERATION is CURRENT_GENERATION`` was this leaf's own renumber-proof
+    spelling, and it held exactly until a later generation joined: the gate names the generation that
+    *carries these tables* (7, a fact the write path below and every predating-dataset case in this
+    module measure against), while ``CURRENT_GENERATION`` is whatever the registry's tip is. The
+    property is therefore two facts, and both are now asserted: the gate names a generation that is
+    registered and no later than the tip, and the store this case creates -- at the tip -- satisfies
+    it. The same re-scope is applied to the assertion on the created store below, which compared its
+    user version to the gate's: the property is that a store this build creates is at the tip and that
+    the tip satisfies the gate, not that the gate's number *is* the tip's. No case was deleted and
+    nothing was relaxed -- the gate, its refusal and every predating-dataset case still measure the
+    generation it names.
     """
 
-    assert REQUIRED_EVIDENCE_GENERATION is CURRENT_GENERATION
+    assert REQUIRED_EVIDENCE_GENERATION in GENERATIONS
+    assert REQUIRED_EVIDENCE_GENERATION.user_version <= CURRENT_GENERATION.user_version
     store = open_knowledge_store(tmp_path / "fresh.db", REPOSITORY_ID)
     try:
         store.create_repository(
             RepositoryIdentity(repository_id=REPOSITORY_ID, authority_home="agents-remember")
         )
-        assert store.generation.user_version == REQUIRED_EVIDENCE_GENERATION.user_version
+        # The created store is at the registry's tip, which is what makes these tables readable
+        # there; the gate names the generation that carries them, and a tip at or above it is the
+        # fact the write path below depends on.
+        assert store.generation is CURRENT_GENERATION
+        assert store.generation.user_version >= REQUIRED_EVIDENCE_GENERATION.user_version
         tables = {
             str(row[0])
             for row in store.connection.execute(

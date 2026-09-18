@@ -49,7 +49,10 @@ from agents_remember.memory.knowledge.facet_records import (
 )
 from agents_remember.memory.knowledge.logical import logical_body
 from agents_remember.memory.knowledge.read_owner_revisions import owner_revision_resolver_for
-from agents_remember.memory.knowledge.schema_generations import GENERATION_4, GENERATION_5
+from agents_remember.memory.knowledge.schema_generations import (
+    CURRENT_GENERATION,
+    GENERATION_4,
+)
 from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.citation import (
@@ -551,6 +554,15 @@ def test_the_binding_rows_live_in_the_datasets_own_declared_tables(tmp_path: Pat
     names ``citation_binding``, the rows are inside it, and the store the dataset is read from is the
     memory leg's own file -- so the binding is not enclosure-local evidence. A case that only read
     the row back through the operation would pass whether or not the table belonged to the dataset.
+
+    RE-SCOPED for ``KS-R13@v1``, which registers generation 8 above this leaf's generation 5. The
+    store this case writes into is *created* by the test, so it declares the registry's tip, and the
+    identity ``store.generation is GENERATION_5`` held only while generation 5 happened to be that
+    tip. The property is unchanged and is now stated as itself: the store is at ``CURRENT_GENERATION``
+    and the dataset's own logical body -- read at exactly the generation the store declares -- carries
+    the binding row. The generation-5 fact this leaf owns is the *append*, and it is still asserted
+    below: generation 4 has no ``citation_binding`` table, so the table is generation 5's addition
+    rather than a rename of something already there.
     """
 
     _repository, blob = _memory_repository(tmp_path, f"# run.py\n\nprose {CORPUS_KEY} end\n")
@@ -565,8 +577,8 @@ def test_the_binding_rows_live_in_the_datasets_own_declared_tables(tmp_path: Pat
         owner = _owner_revision(blob)
         written = case.author(owner=owner, key=CORPUS_KEY, source=CORPUS_SOURCE)
         assert written.state == "applied", written.refusal
-        assert store.generation is GENERATION_5
-        body = logical_body(store.connection, GENERATION_5)
+        assert store.generation is CURRENT_GENERATION
+        body = logical_body(store.connection, CURRENT_GENERATION)
         tables = body["tables"]
         assert "citation_binding" in tables
         assert len(tables["citation_binding"]) == 1

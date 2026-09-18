@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 from agents_remember.memory.knowledge import (
     anchors,
     compositions,
+    effects,
     evidence,
     facet_records,
     facets,
@@ -82,6 +83,7 @@ from agents_remember.models.knowledge.candidate import (
     AuthorFamilyExplanationContext,
     ChangeBatch,
     ChangeCommand,
+    EffectCommand,
     ExpectedRecord,
     NewAnchor,
     RemoveFacetAttachment,
@@ -93,6 +95,7 @@ from agents_remember.models.knowledge.candidate import (
     SetInvariantLabel,
 )
 from agents_remember.models.knowledge.composition import COMPOSITION_COMMAND_KINDS
+from agents_remember.models.knowledge.effect import EFFECT_COMMAND_KINDS
 from agents_remember.models.knowledge.evidence import (
     EVIDENCE_COMMAND_KINDS,
     AddEvidenceClaim,
@@ -159,6 +162,7 @@ def require_preconditions(store: OpenedKnowledgeStore, batch: ChangeBatch) -> No
     require_facet_generation(store, batch.commands)
     require_composition_generation(store, batch.commands)
     require_evidence_generation(store, batch.commands)
+    require_effect_generation(store, batch.commands)
     require_insertions_absent(store, batch.commands)
     require_command_targets(store, batch.commands)
 
@@ -225,6 +229,8 @@ def require_no_accepted_origin(commands: Sequence[ChangeCommand]) -> None:
                 raise KnowledgeRefused(batch_promotion_not_supported_refusal(revision.revision_id))
         if isinstance(command, AddFacet):
             facets.require_proposed_origin(command)
+        if isinstance(command, EffectCommand):
+            effects.require_proposed_origin(command)
 
 
 def require_facet_generation(
@@ -290,6 +296,32 @@ def evidence_commands(commands: Sequence[ChangeCommand]) -> tuple[ChangeCommand,
     """Return the supporting-record commands one batch declares, in order."""
 
     return tuple(command for command in commands if command.kind in EVIDENCE_COMMAND_KINDS)
+
+
+def require_effect_generation(
+    store: OpenedKnowledgeStore, commands: Sequence[ChangeCommand]
+) -> None:
+    """Refuse an authored-effect command against a dataset that predates the record group.
+
+    The same disposition the authored-judgment generation takes, for the same reason: this record
+    group is registered by generation 8, which is where its succession table is declared, and a
+    dataset whose recorded generation predates that is neither migrated nor widened nor written
+    through. The dataset's own generation is read from the open store, so the refusal carries both
+    numbers as facts.
+    """
+
+    if not effect_commands(commands):
+        return
+    effects.require_effect_generation_or_raise(store)
+
+
+def effect_commands(commands: Sequence[ChangeCommand]) -> tuple[ChangeCommand, ...]:
+    """Return the authored-effect commands one batch declares, in order."""
+
+    return tuple(command for command in commands if command.kind in _EFFECT_KINDS)
+
+
+_EFFECT_KINDS = frozenset(EFFECT_COMMAND_KINDS)
 
 
 def require_insertions_absent(
@@ -590,6 +622,28 @@ def _family_revision_check(
 
     assert isinstance(command, AddFamilyRevision)
     _require_new_family_revision(store, index, command, pending)
+
+
+def _effect_check(
+    store: OpenedKnowledgeStore,
+    index: int,
+    command: ChangeCommand,
+    pending: set[tuple[str, str]],
+) -> None:
+    """Check one authored-effect command against this record group's own shape rules.
+
+    The generation and the declared shape are checked here, before any row exists. Reference
+    resolution is deliberately **not** here: it belongs to the record group's own write step, which
+    runs in command order, so a command that cites an identity the same batch also creates resolves it
+    to the row that command wrote -- the shipped ``ChangeBatch`` contract -- and a citation that
+    arrives before its creator is refused by name there rather than left to a foreign key.
+    """
+
+    del index, pending
+    if not isinstance(command, EffectCommand):  # pragma: no cover - the dispatch set is closed
+        return
+    effects.require_effect_generation_or_raise(store)
+    effects.require_admitted_declaration(command)
 
 
 def _require_identity(
@@ -1247,4 +1301,8 @@ _TARGET_CHECKS: Mapping[str, TargetCheck] = {
     "author_family_explanation_context": _composition_check,
     "add_evidence_claim": _evidence_check,
     "add_verification_observation": _evidence_check,
+    "add_invariant_effect_claim": _effect_check,
+    "add_preservation_claim": _effect_check,
+    "add_unresolved_question": _effect_check,
+    "add_semantic_change_set": _effect_check,
 }

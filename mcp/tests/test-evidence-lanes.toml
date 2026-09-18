@@ -180,6 +180,8 @@ unit-regression = [
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_review_assessments.py",
+  "mcp/tests/test_knowledge_change_sets.py",
+  "mcp/tests/test_knowledge_effect_claims.py",
 ]
 public-contract = [
   "mcp/tests/test_durable_store_contract.py",

@@ -27,6 +27,7 @@ raises ``UsageError`` and executes zero tests.
 
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 from typing import Any, get_args
 from uuid import uuid4
@@ -45,12 +46,15 @@ from agents_remember.memory.knowledge import (
 )
 from agents_remember.memory.knowledge.batch_commands import _INSERTING_KINDS
 from agents_remember.memory.knowledge.batch_preconditions import _TARGET_CHECKS
+from agents_remember.memory.knowledge.candidate_records import EFFECT_ONLY_WRITABLE_TABLES
 from agents_remember.memory.knowledge.facet_records import FacetEnvelopeDraft, facet_record_row
 from agents_remember.memory.knowledge.facets import _STEPS
 from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.record_envelope import (
+    CHANGE_SET_RECORD_KINDS,
     CITATION_BINDING_RECORD_KINDS,
     DETECTION_RECORD_KINDS,
+    EFFECT_MEMBER_RECORD_KINDS,
     EVIDENCE_RECORD_KINDS,
     FACET_RECORD_KINDS,
     KIND_SCHEMAS,
@@ -77,6 +81,7 @@ from agents_remember.models.knowledge.composition import (
     COMPOSITION_COMMAND_KINDS,
     COMPOSITION_WRITABLE_TABLES,
 )
+from agents_remember.models.knowledge.effect import EFFECT_COMMAND_KINDS
 from agents_remember.models.knowledge.evidence import (
     EVIDENCE_COMMAND_KINDS,
     EVIDENCE_WRITABLE_TABLES,
@@ -234,20 +239,57 @@ def test_the_seam_registry_is_exactly_the_eight_declared_subtypes() -> None:
     with the facet kinds' admissible schemas still exactly their declared ones. The membership is
     written as a union of the groups' own derived sets rather than as a literal, so a later record
     group's registration is answered by that group's constant instead of by an edit here.
+
+    RE-SCOPED again for ``KS-R13@v1``, which registers the authored-effect group -- three member
+    kinds and the change-set kind -- through the same seam. Two edits, both strengthening rather than
+    weakening. First, the group's own two derived sets (``EFFECT_MEMBER_RECORD_KINDS`` and
+    ``CHANGE_SET_RECORD_KINDS``) join the union as terms, so the vocabulary answers for them exactly
+    as it answers for every earlier group. Second, the enumerated-union line became a *union over a
+    tuple of groups* with two facts beside it that the enumeration could only imply: every named group
+    must be a **subset of the registry** -- otherwise a group constant naming an unregistered kind
+    would be silently absorbed by the equality -- and the groups must be **pairwise disjoint**, which
+    is what makes the equality a partition rather than a list a later leaf could widen by overlapping
+    an existing group. Nothing was deleted: the eight facet kinds are still exactly
+    ``FACET_RECORD_KINDS``, every group is still named, and a ninth registration still cannot be
+    admitted without this case changing.
     """
 
     assert len(FACET_KINDS) == 8
     assert payload_kinds() == set(FACET_KINDS)
     assert set(FACET_RECORD_SCHEMAS) == set(FACET_KINDS)
     assert frozenset(FACET_KINDS) == FACET_RECORD_KINDS
-    assert set(KIND_SCHEMAS) == (
-        set(FACET_KINDS)
-        | {"internal_conformance"}
-        | set(DETECTION_RECORD_KINDS)
-        | set(REQUIREMENT_RECORD_KINDS)
-        | set(CITATION_BINDING_RECORD_KINDS)
-        | set(EVIDENCE_RECORD_KINDS)
+    groups = (
+        # The facet vocabulary's own eight kinds, this leaf's group.
+        set(FACET_KINDS),
+        # The registry's own conformance kind and the mechanical-detection pair, both registered by
+        # ``260915-KS-L14``.
+        {"internal_conformance"},
+        set(DETECTION_RECORD_KINDS),
+        # The requirement-revision kind, registered by ``260915-KS-L19``.
+        set(REQUIREMENT_RECORD_KINDS),
+        # The citation-binding kind, registered by ``260915-KS-L18``.
+        set(CITATION_BINDING_RECORD_KINDS),
+        # The supporting-record pair, registered by ``260915-KS-L12``.
+        set(EVIDENCE_RECORD_KINDS),
+        # The authored-effect record group, registered by ``260915-KS-L13``: three member kinds and
+        # the change set that composes them. The two sets are the group's own derived declarations
+        # rather than a literal, so a fourth member kind or a second change-set kind is answered by
+        # the vocabulary instead of by an edit here.
+        set(EFFECT_MEMBER_RECORD_KINDS),
+        set(CHANGE_SET_RECORD_KINDS),
     )
+    # Every named group is a subset of the registry: a group constant that named a kind the registry
+    # does not hold would otherwise be absorbed by the equality below without failing.
+    for group in groups:
+        assert group <= set(KIND_SCHEMAS), sorted(group - set(KIND_SCHEMAS))
+    # RE-SCOPED for ``KS-R13@v1``, and stated as the property the enumerated-union line was standing
+    # for: the declared groups are pairwise disjoint, so the union above is a *partition* of the
+    # registry rather than a list that a later leaf can widen by adding an overlapping entry, and a
+    # further group still cannot be admitted without this line changing.
+    for index, group in enumerate(groups):
+        for other in groups[index + 1 :]:
+            assert not group & other, (sorted(group), sorted(other))
+    assert set(KIND_SCHEMAS) == set().union(*groups)
     for kind in FACET_KINDS:
         assert KIND_SCHEMAS[kind] == frozenset({FACET_RECORD_SCHEMAS[kind]}), kind
     for kind in FACET_KINDS:
@@ -869,8 +911,22 @@ def test_the_facet_commands_join_the_closed_union_and_its_dispatch_tables() -> N
     the writable-table literal is exactly the shipped seven plus every group's declared set. The
     stronger half is unchanged and still checked -- ``_TARGET_CHECKS`` is exactly the union, so a
     command added without a target check still fails here rather than at a caller's expense.
+
+    RE-SCOPED again for ``KS-R13@v1``, which appends four authored-effect commands. The command
+    equality gains the group's own ``EFFECT_COMMAND_KINDS`` as a term rather than restating its four
+    literals, so a fifth command in that group is answered by the vocabulary. The writable-table
+    equality gains ``EFFECT_ONLY_WRITABLE_TABLES`` as a term *and* an assertion that the term is
+    empty: the group's commands write the two envelope tables and no table of their own -- the
+    succession edge a change set declares is written only as part of the aggregate that owns it -- so
+    naming the term keeps the equality exactly as strong as before while making the group's shape a
+    checked fact instead of an absence a reader has to notice. Nothing was deleted, no case was
+    weakened, and ``set(_TARGET_CHECKS) == kinds`` still holds the union closed.
     """
 
+    # RE-SCOPED for ``KS-R13@v1``, and stated as the property the 18-kind literal was standing in
+    # for: the union is exactly the *declared* command groups, and every kind it declares has a
+    # target check. A literal count cannot catch a kind added to one group but not to the dispatch
+    # table; the set equality below can, and it keeps catching it for the next group too.
     kinds = command_kinds()
     assert kinds >= SHIPPED_COMMAND_KINDS
     assert kinds == (
@@ -878,10 +934,17 @@ def test_the_facet_commands_join_the_closed_union_and_its_dispatch_tables() -> N
         | set(FACET_COMMAND_KINDS)
         | set(COMPOSITION_COMMAND_KINDS)
         | set(EVIDENCE_COMMAND_KINDS)
+        | set(EFFECT_COMMAND_KINDS)
     )
     assert set(_TARGET_CHECKS) == kinds
     assert set(_STEPS) == set(FACET_COMMAND_KINDS)
     assert set(FACET_COMMAND_KINDS) <= (kinds | set(_INSERTING_KINDS))
+    # The authored-effect group's own declared table set is the two envelope tables, and it is named
+    # as its own term in the union below rather than absorbed into the literal: the group's commands
+    # write ``knowledge_record`` and ``record_revision`` and no table of their own, so subtracting the
+    # envelope names from it yields the empty set and the equality is unchanged in strength. A group
+    # that does gain a table of its own therefore adds one term here instead of editing the literal.
+    assert set(EFFECT_ONLY_WRITABLE_TABLES) == set()
     assert set(get_args(MutableRecordTable)) == (
         {
             "invariant",
@@ -895,6 +958,7 @@ def test_the_facet_commands_join_the_closed_union_and_its_dispatch_tables() -> N
         | set(FACET_WRITABLE_TABLES)
         | set(EVIDENCE_WRITABLE_TABLES)
         | set(COMPOSITION_WRITABLE_TABLES)
+        | set(EFFECT_ONLY_WRITABLE_TABLES)
     )
 
 
@@ -996,6 +1060,16 @@ def test_the_registered_generation_appends_only_and_the_preceding_ones_are_uncha
     schema name, fingerprint-bearing declarations and appended table list, and the created generation
     is the newest registered one rather than a pinned literal. Every generation-3-specific assertion
     below is unchanged.
+
+    RE-SCOPED again for ``KS-R13@v1``, which registers generation 8 through the same registry. The
+    property this case protects is unchanged -- *this leaf's* generation appends, every generation
+    before it is untouched, and the created generation is the newest -- and the registry half is
+    stated as two facts rather than one: the versions form the contiguous ascending sequence from 1
+    to the newest registered generation, and every generation's table list begins with the whole of
+    the previous generation's. The second is ``KS-R10@v1`` §1.3's additive rule checked at *every*
+    boundary rather than only where this leaf's own generation sits, so a later generation that
+    retyped, reordered or dropped an inherited table now reddens here. Nothing was deleted and the
+    generation-3-specific assertions below are still unchanged.
     """
 
     # RE-SCOPED again for ``KS-R17@v1``, on the same reasoning the paragraph above records for
@@ -1004,11 +1078,26 @@ def test_the_registered_generation_appends_only_and_the_preceding_ones_are_uncha
     # what the closed list was standing in for -- the registry is the generations in *order*, each
     # one's schema name is its own version's name, and generation 3 is still exactly this leaf's
     # generation.
+    #
+    # RE-SCOPED again for ``KS-R13@v1``, and unioned rather than replaced: ``KS-R13@v1``'s own
+    # paragraph asserts the property the two literal lists were standing in for -- strictly ascending
+    # versions from 1, each generation's schema name its own version's name, and every generation's
+    # table list beginning with the whole of the previous generation's, which is ``KS-R10@v1`` §1.3's
+    # additive rule applied across the registry rather than checked only at generation 3. Each half
+    # catches something the other does not: the contiguous-range equality reddens on a *gap* or a
+    # mis-ordered entry at the tip, and the pairwise prefix walk reddens on a broken append at any
+    # boundary. Both are kept.
     versions = [generation.user_version for generation in GENERATIONS]
     assert versions == list(range(1, len(GENERATIONS) + 1)), versions
+    assert versions == sorted(set(versions))
+    assert versions[0] == 1
     assert [generation.schema_name for generation in GENERATIONS] == [
         f"ar-knowledge-sqlite/v{version}" for version in versions
     ]
+    for generation in GENERATIONS:
+        assert generation.schema_name == f"ar-knowledge-sqlite/v{generation.user_version}"
+    for earlier, later in itertools.pairwise(GENERATIONS):
+        assert later.tables[: len(earlier.tables)] == earlier.tables, later.schema_name
     assert GENERATION_3 in GENERATIONS
     assert GENERATION_3.user_version == 3
     assert CURRENT_GENERATION is GENERATIONS[-1]

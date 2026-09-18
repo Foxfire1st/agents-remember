@@ -34,9 +34,11 @@ from agents_remember.memory.knowledge.composition_policies import (
 from agents_remember.memory.knowledge.connection import fetch_one
 from agents_remember.models.knowledge.candidate import (
     ChangeCommand,
+    EffectCommand,
     NewAnchor,
 )
 from agents_remember.models.knowledge.composition import COMPOSITION_WRITABLE_TABLES
+from agents_remember.models.knowledge.effect import EFFECT_WRITABLE_TABLES
 from agents_remember.models.knowledge.evidence import (
     EVIDENCE_WRITABLE_TABLES,
     InvariantRevisionSubject,
@@ -55,8 +57,10 @@ if TYPE_CHECKING:
 # per record group so each leaf's addition is its own named constant rather than an edit inside
 # another leaf's list: the shipped seven are written out here, ``FACET_WRITABLE_TABLES`` is imported
 # from the facet vocabulary beside its own commands, ``EVIDENCE_WRITABLE_TABLES`` from the
-# supporting-record vocabulary beside its own, and the composition generation's six from
-# ``COMPOSITION_WRITABLE_TABLES`` beside theirs. A case asserts the declarations agree with the
+# supporting-record vocabulary beside its own, the composition generation's six from
+# ``COMPOSITION_WRITABLE_TABLES`` beside theirs, and the authored-effect group's set from
+# ``EFFECT_WRITABLE_TABLES`` beside its four commands -- which contributes no table, because that
+# group writes the envelope and nothing of its own. A case asserts the declarations agree with the
 # union, so a command cannot write a table this list does not name.
 SHIPPED_WRITABLE_TABLES: tuple[str, ...] = (
     "invariant",
@@ -78,6 +82,17 @@ EVIDENCE_ONLY_WRITABLE_TABLES: tuple[str, ...] = tuple(
     table for table in EVIDENCE_WRITABLE_TABLES if table not in ENVELOPE_WRITABLE_TABLES
 )
 
+# The authored-effect group's own declared table set, minus the same two envelope tables. The
+# remainder is **empty** -- the group's four commands write one envelope row and its sealed revision
+# and no table of their own, and the succession edge a change set declares is written only as part of
+# the aggregate that owns it -- and it is subtracted here in the same form as every other group's so
+# that a group which does gain a table is a one-line change rather than an edit inside another leaf's
+# list. The empty result is asserted in ``test_knowledge_facets``'s writable-table case, so the absence
+# is a checked fact rather than something a reader has to notice.
+EFFECT_ONLY_WRITABLE_TABLES: tuple[str, ...] = tuple(
+    table for table in EFFECT_WRITABLE_TABLES if table not in ENVELOPE_WRITABLE_TABLES
+)
+
 # The composition generation's six tables are appended to the union rather than merged into another
 # leaf's list, and they are declared in sorted order so the union a case pins is stable. The
 # declaration names no envelope table, but it is subtracted as well so the union below cannot carry a
@@ -92,6 +107,7 @@ WRITABLE_TABLES: tuple[str, ...] = (
     *(table for table in FACET_WRITABLE_TABLES if table not in ENVELOPE_WRITABLE_TABLES),
     *EVIDENCE_ONLY_WRITABLE_TABLES,
     *COMPOSITION_ONLY_WRITABLE_TABLES,
+    *EFFECT_ONLY_WRITABLE_TABLES,
 )
 
 IdentityPairs = tuple[tuple[str, str], ...]
@@ -359,6 +375,23 @@ def written_identities(command: ChangeCommand) -> IdentityPairs:
     supporting = _supporting_record_identities(command)
     if supporting is not None:
         return supporting
+    authored = _authored_record_identities(command)
+    if authored is not None:
+        return authored
+    return (_WRITTEN_IDENTITY[command.kind](command),)
+
+
+def _authored_record_identities(command: ChangeCommand) -> IdentityPairs | None:
+    """Return the identities an authored multi-row command addresses, or ``None``.
+
+    Three of the shipped commands address more than the one identity ``_WRITTEN_IDENTITY`` names, and
+    they are kept together here for the same reason the supporting-record pair above is: each one's
+    identities depend on the command's *shape* rather than on its discriminator alone -- a claim's
+    optional new anchor, a facet's optional superseded revision, a context's revision-versus-record
+    distinction -- so the table that maps a kind to one identity stays a table of one-identity
+    commands. A command with no entry here has exactly the identity that table names.
+    """
+
     if command.kind == "add_realization_claim":
         identities = [("realization_claim", command.claim.claim_id)]
         if isinstance(command.anchor, NewAnchor):
@@ -377,13 +410,23 @@ def written_identities(command: ChangeCommand) -> IdentityPairs:
             ("explanation", command.explanation_id),
             ("explanation_revision", command.revision_id),
         )
+    if isinstance(command, EffectCommand):
+        # Every authored-effect command writes one envelope row and its one sealed revision, so both
+        # identities are addressable by an expectation, a duplicate check and a receipt. The
+        # succession edge a change set declares is deliberately *not* here: like the invariant and
+        # family predecessor rows, it is written only as part of the aggregate that owns it, so an
+        # expectation about it would name a state no command could produce.
+        return (
+            ("knowledge_record", command.record_id),
+            ("record_revision", command.revision_id),
+        )
     if command.kind == "author_family_explanation_context":
         # The authored row is the *revision*; the context record is created with the first one and
         # is read through its current revision, so the revision identity is what an expectation,
         # a duplicate check and a receipt all address. Naming the record here as well would make a
         # successor revision's own insertion collide with the record the first revision created.
         return (("family_revision_context_revision", command.context.revision_id),)
-    return (_WRITTEN_IDENTITY[command.kind](command),)
+    return None
 
 
 def _supporting_record_identities(command: ChangeCommand) -> IdentityPairs | None:

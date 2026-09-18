@@ -21,7 +21,8 @@ Three splits are load-bearing:
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from collections.abc import Mapping
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, model_validator
 
@@ -33,6 +34,8 @@ from agents_remember.models.knowledge.base import (
     SHA256_PATTERN,
     UUID_PATTERN,
     KnowledgeModel,
+    KnowledgeState,
+    require_consistent_acceptance,
 )
 from agents_remember.models.knowledge.composition import (
     FamilyCompositionPolicyDraft,
@@ -71,9 +74,13 @@ __all__ = [
     "AddFamilyMember",
     "AddFamilyRevision",
     "AddInvariant",
+    "AddInvariantEffectClaim",
     "AddInvariantRevision",
+    "AddPreservationClaim",
     "AddRealizationClaim",
+    "AddSemanticChangeSet",
     "AddSourceAnchor",
+    "AddUnresolvedQuestion",
     "AddVerificationObservation",
     "AnchorEndpoint",
     "AnchorReference",
@@ -84,6 +91,7 @@ __all__ = [
     "ChangeBatch",
     "ChangeCommand",
     "DesignateExplanation",
+    "EffectCommand",
     "ExactCandidateInput",
     "ExpectedRecord",
     "KnowledgeContext",
@@ -163,6 +171,14 @@ MutableRecordTable = Literal[
     "evidence_claim_facet_subject",
     "evidence_claim_coverage",
     "verification_observation",
+    # The authored-effect generation adds **no** table here, and that is the group's declared shape
+    # rather than an omission: its four commands write the two envelope tables above -- one
+    # ``knowledge_record`` row and its one sealed ``record_revision`` -- exactly as the facet and
+    # detection commands do, and the succession edge a change set declares is written only as part of
+    # the aggregate that owns it, so an expectation about it would name a state no command could
+    # produce. ``models.knowledge.effect``'s own ``EFFECT_WRITABLE_TABLES`` declares that set beside
+    # the commands, and ``candidate_records.EFFECT_ONLY_WRITABLE_TABLES`` is its envelope-subtracted
+    # remainder -- empty, and asserted empty rather than left to a reader to notice.
 ]
 
 
@@ -455,6 +471,82 @@ class AddFamilyComposition(KnowledgeModel):
         return self
 
 
+class _AuthoredEffectCommand(KnowledgeModel):
+    """What every authored-effect command shares: the payload seam, the route and the origin state.
+
+    The payload arrives as the authored mapping and is validated **at the envelope seam**, which is
+    the one place any write path decides whether a payload is admissible. It is deliberately not
+    pre-validated here: a second validation in the command model would be a second decision point,
+    and it would turn an out-of-vocabulary label or an inadmissible cardinality into a parse error
+    instead of the typed ``invalid_payload`` refusal a caller has to branch on.
+
+    ``state_at_origin`` and ``acceptance_ref`` exist so that "this operation stores proposed origin
+    data only" is checkable in both directions: the accepted-origin consistency rule is inherited
+    from the shipped vocabulary base, and a command that would store accepted origin data is refused
+    by the batch with the shipped ``promotion_not_supported``. Every row this record group writes is
+    the shipped ``proposed`` lifecycle state, surfaced by the read projection as ``lifecycle`` --
+    never a third authored status, and never an answer to "is this claim true".
+    """
+
+    record_id: str = Field(pattern=UUID_PATTERN)
+    revision_id: str = Field(pattern=UUID_PATTERN)
+    payload: Mapping[str, Any]
+    governing_route_id: str | None = Field(default=None, pattern=UUID_PATTERN)
+    state_at_origin: KnowledgeState = "proposed"
+    acceptance_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+
+    @model_validator(mode="after")
+    def _require_consistent_origin(self) -> _AuthoredEffectCommand:
+        require_consistent_acceptance(self.state_at_origin, self.acceptance_ref)
+        return self
+
+
+class AddInvariantEffectClaim(_AuthoredEffectCommand):
+    """Record one authored invariant effect claim as one envelope record and its sealed revision.
+
+    The command fixes the identity pair the seam resolves with -- the record and the revision the
+    payload is written under -- so a refusal can name both. It carries no author: provenance comes
+    from the admission, so no part of a submitted payload can become the claim's author.
+    """
+
+    kind: Literal["add_invariant_effect_claim"] = "add_invariant_effect_claim"
+
+
+class AddPreservationClaim(_AuthoredEffectCommand):
+    """Record one authored preservation claim as one envelope record and its sealed revision."""
+
+    kind: Literal["add_preservation_claim"] = "add_preservation_claim"
+
+
+class AddUnresolvedQuestion(_AuthoredEffectCommand):
+    """Record one authored open question as one envelope record and its sealed revision."""
+
+    kind: Literal["add_unresolved_question"] = "add_unresolved_question"
+
+
+class AddSemanticChangeSet(_AuthoredEffectCommand):
+    """Record one authored change set, with the succession edge it declares, in one batch.
+
+    ``predecessor_change_set_ids`` is the edge requirement 4.8 requires: a revised change set is a new
+    record naming its exact predecessor, and the edge is inserted inside this successor's own creation
+    batch -- there is no standalone predecessor-append operation, exactly as the shipped ``store``
+    rule states. The default is the empty tuple, which is the record that supersedes nothing, and it is
+    an explicit declaration rather than an assumed one.
+    """
+
+    kind: Literal["add_semantic_change_set"] = "add_semantic_change_set"
+    predecessor_change_set_ids: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def _require_distinct_predecessors(self) -> AddSemanticChangeSet:
+        if len(set(self.predecessor_change_set_ids)) != len(self.predecessor_change_set_ids):
+            raise ValueError(
+                "a predecessor change set is named twice; a lineage is a set of exact ancestors, so "
+                "declare each one once"
+            )
+        return self
+
+
 class SetFamilyRevisionRoute(KnowledgeModel):
     """Record the canonical owning route of one exact family revision.
 
@@ -485,16 +577,22 @@ class AuthorFamilyExplanationContext(KnowledgeModel):
 # The closed command union. The twelve shipped authored commands, the six facet commands and the four
 # composition commands keep their exact discriminators and shapes: the composition generation adds
 # declare-a-policy-version, author-an-edge, record-a-revision's-owning-route and author-a-context-
-# revision, and the supporting-record generation adds two more -- record an evidence claim and record a
-# verification observation. There is still no free-form member and still no member that could promote,
-# approve or execute a statement the caller wrote, and deliberately **no** removal member: a
-# composition edge is immutable in the same sense a revision row is, so a correction is a new edge
-# with its own identity rather than a deletion of an earlier dataset's recorded relationship. Each
-# widening added exactly the acts one record kind needs, and each of those acts has a typed shape of
-# its own: an evidence claim's subject, evidence anchor and claimed coverage are typed endpoint values
-# the write path must resolve, and an observation's payload is a frozen shape whose execution result is
-# a closed vocabulary. Nothing here can address an arbitrary table or column, and no member can infer
-# anything the caller did not write.
+# revision, the supporting-record generation adds two more -- record an evidence claim and record a
+# verification observation -- and the authored-effect generation adds four: record an effect claim,
+# record a preservation claim, record an open question, and record a change set together with the
+# succession edge it declares. There is still no free-form member and still no member that could
+# promote, approve, judge or execute a statement the caller wrote, and deliberately **no** removal
+# member: a composition edge is immutable in the same sense a revision row is, so a correction is a
+# new edge with its own identity rather than a deletion of an earlier dataset's recorded relationship.
+# Each widening added exactly the acts one record kind needs, and each of those acts has a typed shape
+# of its own: an evidence claim's subject, evidence anchor and claimed coverage are typed endpoint
+# values the write path must resolve, an observation's payload is a frozen shape whose execution
+# result is a closed vocabulary, and an authored-effect command carries its payload as the authored
+# mapping so the envelope seam stays the one place a payload is decided. Nothing here can address an
+# arbitrary table or column, and no member can infer anything the caller did not write -- in
+# particular there is **no** member that derives an effect label, converts an unchanged row into a
+# preservation claim, or summarises a change set, so those acts are absent from the vocabulary rather
+# than refused by it.
 ProposedCommand = Annotated[
     AddInvariant
     | AddInvariantRevision
@@ -519,11 +617,22 @@ ProposedCommand = Annotated[
     | SetFamilyRevisionRoute
     | AuthorFamilyExplanationContext
     | AddEvidenceClaim
-    | AddVerificationObservation,
+    | AddVerificationObservation
+    | AddInvariantEffectClaim
+    | AddPreservationClaim
+    | AddUnresolvedQuestion
+    | AddSemanticChangeSet,
     Field(discriminator="kind"),
 ]
 
 ChangeCommand = ProposedCommand
+
+# The four candidate commands that write the authored-effect record group. The alias exists so the
+# batch's dispatch, its preconditions and the record group's own write path all name one type rather
+# than four, and so a fifth command added to the union without a handler is a type error here.
+EffectCommand = (
+    AddInvariantEffectClaim | AddPreservationClaim | AddUnresolvedQuestion | AddSemanticChangeSet
+)
 
 
 class CandidateResolution(KnowledgeModel):

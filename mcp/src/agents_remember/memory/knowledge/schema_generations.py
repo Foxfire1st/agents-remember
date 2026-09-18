@@ -34,13 +34,18 @@ This module makes a generation one frozen record, and makes *selection* a read o
   context. A generation-5 dataset that already exists keeps declaring version 5 and is read through
   generation 5's own record.
 * :data:`GENERATION_7` is generation 6 plus the five tables :mod:`…schema_v7` appends -- the evidence
-  claim, its two subject join tables, its claimed coverage and the verification observation. It is the
-  created generation now, so a *new* store declares version 7, while a generation-4, generation-5 or
-  generation-6 dataset that already exists keeps declaring its own version and is read through that
-  generation's record. Both record groups' payload shapes are registered in the record envelope; the
+  claim, its two subject join tables, its claimed coverage and the verification observation. A
+  generation-6 dataset that already exists keeps declaring version 6 and is read through generation
+  6's own record. Both record groups' payload shapes are registered in the record envelope; the
   appended tables are the relations an evidence claim resolves and the observation's own recorded
   columns.
-
+* :data:`GENERATION_8` is generation 7 plus the table :mod:`…schema_v8` appends -- the edge by which
+  one semantic change set supersedes another. It is the created generation now, so a *new* store
+  declares version 8 while a generation-7 dataset that already exists keeps declaring version 7 and is
+  read through generation 7's own record. The authored-effect record group's own payload shapes --
+  the effect claim, the preservation claim, the unresolved question and the change set -- are
+  registered in the record envelope for the same reason the detection group's are, which is why this
+  generation adds the one fact the envelope cannot express and not a record group.
 * :func:`require_pinned_generation_1_unchanged` is the gate that fails -- not warns -- when the
   pinned generation no longer recomputes to its constant. Without it the pin is a comment.
 * :func:`generation_of_database` and :func:`generation_of_artifact` select a generation from what
@@ -72,6 +77,7 @@ from agents_remember.memory.knowledge import (
     schema_v5,
     schema_v6,
     schema_v7,
+    schema_v8,
 )
 from agents_remember.memory.knowledge.export_refusals import unsupported_schema_refusal
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
@@ -83,7 +89,7 @@ class _AppendedGeneration(Protocol):
     """The declarations one appended-table module must expose for a generation to compose it.
 
     A protocol rather than a base class, so a generation module stays a module of plain declared
-    data: ``schema_v2`` … ``schema_v7`` each publish exactly these names, and the single composition
+    data: ``schema_v2`` … ``schema_v8`` each publish exactly these names, and the single composition
     function above reads them without any of them importing the registry back.
     """
 
@@ -206,6 +212,7 @@ GENERATION_4_SCHEMA_NAME = "ar-knowledge-sqlite/v4"
 GENERATION_5_SCHEMA_NAME = "ar-knowledge-sqlite/v5"
 GENERATION_6_SCHEMA_NAME = "ar-knowledge-sqlite/v6"
 GENERATION_7_SCHEMA_NAME = "ar-knowledge-sqlite/v7"
+GENERATION_8_SCHEMA_NAME = "ar-knowledge-sqlite/v8"
 
 GENERATION_1 = SchemaGeneration(
     schema_name=GENERATION_1_SCHEMA_NAME,
@@ -388,10 +395,33 @@ def _compose_generation_7() -> SchemaGeneration:
 
 GENERATION_7 = _compose_generation_7()
 
+
+# Generation 8 is generation 7, unchanged, plus the table :mod:`…schema_v8` appends -- the edge by
+# which one semantic change set supersedes another. The composition is written as the same generic
+# append generations 2 to 7 are, so ``GENERATION_8.tables[: len(GENERATION_7.tables)] ==
+# GENERATION_7.tables`` and generation 8's columns for each earlier name are the generation it
+# descends from. That prefix equality is the whole of ``KS-R10@v1`` §1.3's additive rule: a
+# generation appends tables and never retypes, reorders or drops an earlier generation's. This leaf's
+# module was authored against generation 4 and renumbered to 8 at its sync, because three leaves
+# landed generations 5, 6 and 7 first: the renumber moved a module name, a constant, a schema name and
+# a base argument, never the append's content.
+def _compose_generation_8() -> SchemaGeneration:
+    """Return generation 8: generation 7's declarations with this leaf's table appended."""
+
+    return _append_generation(
+        base=GENERATION_7,
+        schema_name=GENERATION_8_SCHEMA_NAME,
+        user_version=8,
+        appended=schema_v8,
+    )
+
+
+GENERATION_8 = _compose_generation_8()
+
 # The registry. Ordered oldest first, so "the newest generation this build supports" is the last
 # entry rather than a second literal that could drift from the tuple -- and so
-# ``generation_of_new_store()`` declares generation 7 while a generation-6 dataset stays
-# generation 6 (``KS-R10@v1`` §5.1).
+# ``generation_of_new_store()`` declares generation 8 while a generation-7 dataset stays
+# generation 7 (``KS-R10@v1`` §5.1).
 GENERATIONS: tuple[SchemaGeneration, ...] = (
     GENERATION_1,
     GENERATION_2,
@@ -400,6 +430,7 @@ GENERATIONS: tuple[SchemaGeneration, ...] = (
     GENERATION_5,
     GENERATION_6,
     GENERATION_7,
+    GENERATION_8,
 )
 
 GENERATIONS_BY_VERSION: Mapping[int, SchemaGeneration] = {

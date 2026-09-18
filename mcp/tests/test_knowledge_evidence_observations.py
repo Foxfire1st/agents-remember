@@ -51,6 +51,7 @@ from agents_remember.memory.knowledge.schema_generations import (
     CURRENT_GENERATION,
     GENERATION_6,
     GENERATION_7,
+    GENERATIONS,
     create_schema_statements,
 )
 from agents_remember.memory.knowledge.schema_v7 import EXECUTION_RESULT_MEMBERS
@@ -929,7 +930,15 @@ def test_the_observation_generation_appends_and_inherits_by_name() -> None:
     # append is measured against rather than as a number a later landing would falsify.
     assert len(GENERATION_6.tables) == 28
     assert len(GENERATION_7.tables) == len(GENERATION_6.tables) + 5
-    assert CURRENT_GENERATION is GENERATION_7
+    # RE-SCOPED for ``KS-R13@v1``, and stated as the property the identity was standing in for:
+    # this leaf's generation is the one a brand-new store is created as -- not that no generation
+    # has been registered above it since. Generation 8 is the tip now, so an equality against
+    # generation 7 asserted a fact about how many generations happen to exist, which is exactly
+    # the claim ``KS-R12@v1``'s own report recorded this idiom as being vulnerable to. Every
+    # generation-7-specific assertion above is unchanged, and the difference between the tip and
+    # this leaf's generation is what makes a predating dataset readable through its own record.
+    assert CURRENT_GENERATION is GENERATIONS[-1]
+    assert CURRENT_GENERATION.user_version > GENERATION_7.user_version
 
 
 def test_a_publication_reference_is_stored_on_the_record_and_served_with_it(

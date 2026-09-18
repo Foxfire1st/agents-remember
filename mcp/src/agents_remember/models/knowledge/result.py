@@ -136,6 +136,14 @@ KnowledgeOperation = Literal[
     "add_evidence_claim",
     "add_verification_observation",
     "read_evidence_scope",
+    # Authored effects and change sets. One member, and it is the read: recording an effect claim, a
+    # preservation claim, an unresolved question or a change set is the candidate batch's own
+    # operation (``change_candidate``), because the requirement places those records on that one
+    # write path rather than beside it. Reading the authored-effect scope is the act a caller asks
+    # for by name, and the read is the one that has to answer with derived views -- authorship, the
+    # shipped lifecycle state, computed membership and every unresolved reference verbatim -- rather
+    # than with whatever rows the record group happens to hold.
+    "read_effect_scope",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct

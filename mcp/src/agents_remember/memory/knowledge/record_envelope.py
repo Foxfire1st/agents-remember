@@ -45,6 +45,18 @@ to the frozen payload model :mod:`agents_remember.models.knowledge.requirement` 
 carries the obligation's owning packet identity, the attributed self-contained explanation and the
 inherited ``state_at_origin``/``acceptance_ref`` pair. That record group adds no table of its own --
 the pair above is the envelope, and a requirement revision is an envelope record.
+
+The authored-effect leaf registers the fifth typed family: the three member kinds --
+``invariant_effect_claim``, ``preservation_claim`` and ``unresolved_question`` -- and
+``semantic_change_set`` resolve to the frozen payload models
+:mod:`agents_remember.models.knowledge.effect` and
+:mod:`agents_remember.models.knowledge.change_set` declare. The effect vocabulary is closed at this
+seam in the strongest available sense: the nine admitted labels are a literal type, so a synonym, a
+compound label, a free-text label and a tenth member are all "this payload does not validate", and
+the one cardinality rule is applied here at construction and again by the record group's storage
+boundary from the same function rather than from a second copy of the predicate. The group adds the
+one fact the envelope cannot express -- a record-to-record succession edge -- and no record group of
+its own.
 """
 
 from __future__ import annotations
@@ -56,6 +68,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from agents_remember.memory.knowledge.refusals import RefusalFacts, refusal
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH, KnowledgeModel
+from agents_remember.models.knowledge.change_set import CHANGE_SET_PAYLOAD_MODELS
 from agents_remember.models.knowledge.citation import (
     BINDING_RECORD_KIND,
     BINDING_RECORD_SCHEMA,
@@ -69,6 +82,7 @@ from agents_remember.models.knowledge.detection import (
     DetectionRunPayload,
     DetectionSignalPayload,
 )
+from agents_remember.models.knowledge.effect import MEMBER_PAYLOAD_MODELS
 from agents_remember.models.knowledge.evidence import (
     EVIDENCE_CLAIM_KIND,
     EVIDENCE_CLAIM_SCHEMA,
@@ -154,6 +168,13 @@ PAYLOAD_MODELS: Mapping[tuple[str, str], type[BaseModel]] = {
         VERIFICATION_OBSERVATION_KIND,
         VERIFICATION_OBSERVATION_SCHEMA,
     ): VerificationObservationPayload,
+    # The authored-effect record group: its three member kinds and the change set that composes them.
+    # They register the same way every family above does, and the two mappings are unpacked from the
+    # modules that declare the vocabulary rather than restated here. The cardinality rule the effect
+    # claim obeys is *not* restated at this seam either: the payload model applies it at construction
+    # and the record group's write path builds its typed refusal from the same function.
+    **MEMBER_PAYLOAD_MODELS,
+    **CHANGE_SET_PAYLOAD_MODELS,
 }
 
 # The facet kinds this registry admits, for a caller that needs the closed vocabulary rather than a
@@ -187,6 +208,19 @@ CITATION_BINDING_RECORD_KINDS: frozenset[str] = frozenset({BINDING_RECORD_KIND})
 # one string.
 EVIDENCE_RECORD_KINDS: frozenset[str] = frozenset(
     {EVIDENCE_CLAIM_KIND, VERIFICATION_OBSERVATION_KIND}
+)
+
+# The authored-effect kinds this registry admits, derived from the same declarations the entries
+# above are built from rather than restated. A caller that needs to say what the registry holds names
+# every group -- the internal conformance kind, the eight facet kinds, the two detection kinds, the
+# requirement kind, these three member kinds and the change-set kind -- and the groups are disjoint by
+# construction because a kind is one string.
+EFFECT_MEMBER_RECORD_KINDS: frozenset[str] = frozenset(
+    kind for (kind, _schema) in MEMBER_PAYLOAD_MODELS
+)
+
+CHANGE_SET_RECORD_KINDS: frozenset[str] = frozenset(
+    kind for (kind, _schema) in CHANGE_SET_PAYLOAD_MODELS
 )
 
 # Which shapes each kind admits. Derived from the registry rather than restated, so a kind cannot
