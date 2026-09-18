@@ -19,12 +19,14 @@ from agents_remember.models.conversations.control_wire import (
     ControlIdentity,
     LaunchSpec,
 )
+from agents_remember.serving.capsule_delivery import CodexCapsuleDelivery
 from agents_remember.serving.harness_control_adapter import (
     LaunchableHarnessProtocolAdapter,
     UnsupportedHarnessProtocolAdapter,
 )
 from agents_remember.serving.harness_control_bridge import HarnessControlBridge
 from agents_remember.serving.harness_control_factories import (
+    LaunchSelection,
     create_harness_protocol_adapter,
     harness_launch_knobs,
 )
@@ -50,6 +52,64 @@ class RunnerConfig:
     session_commands: tuple[str, ...] = ()
     resolved_launch: ResolvedLaunch | None = None
     resume_thread_id: str | None = None
+    capsule_delivery: CodexCapsuleDelivery | None = None
+    """The admitted role capsule this launch must apply, or ``None`` for the legacy launch.
+
+    One optional carrier on the launch configuration, supplied by whoever admits the capsule at the
+    launch boundary. ``None`` is the ordinary path: a capsule-free launch sends the payload it always
+    sent, so this field changes nothing until a caller fills it.
+    """
+
+
+MAX_ARGV_TOKEN_BYTES = 131072
+"""Linux ``MAX_ARG_STRLEN``: the kernel's limit on ONE ``execve`` argument, in bytes.
+
+The whole launch configuration travels as a single base64 token (``argv[3]`` here), so this --
+not ``ARG_MAX``, which bounds the whole argv and environment together -- is the limit that binds
+this mechanism. Past it ``execve`` fails with ``E2BIG`` **at spawn**, before this process can
+report anything, which is why the bound is checked here where the encoded bytes first exist.
+"""
+
+ARGV_TOKEN_SAFETY_MARGIN_BYTES = 2048
+"""The declared margin held under the kernel limit.
+
+Small on purpose. The check measures the same byte string the kernel counts, so the margin does
+not have to absorb an approximation; it exists so a token at the boundary is refused by name here
+rather than by the kernel at spawn. A larger margin would refuse capsules the kernel accepts --
+the largest shipped capsule is inside this bound -- which would trade a visible refusal for a
+lost capability.
+"""
+
+ARGV_TOKEN_BOUND_BYTES = MAX_ARGV_TOKEN_BYTES - ARGV_TOKEN_SAFETY_MARGIN_BYTES
+"""The enforced bound: the longest encoded launch token this boundary will hand to a spawn."""
+
+
+def _refuse_over_bound_token(encoded: str, config: RunnerConfig) -> None:
+    """Refuse an over-bound launch token by name, before it can reach ``execve``.
+
+    The refusal names the measured size, the bound, the kernel limit it is derived from, and the
+    seat the capsule was compiled for, because "the session did not start" is not an operator
+    message: ``E2BIG`` at spawn is otherwise AR-invisible and indistinguishable from a runtime
+    that crashed on start.
+    """
+
+    measured = len(encoded.encode("utf-8"))
+    if measured <= ARGV_TOKEN_BOUND_BYTES:
+        return
+    delivery = config.capsule_delivery
+    seat = (
+        "no capsule (legacy launch)"
+        if delivery is None
+        else f"role {delivery.binding.role!r} operation {delivery.binding.operation!r}"
+    )
+    raise HarnessControlError(
+        f"the encoded launch configuration is {measured} bytes, over the {ARGV_TOKEN_BOUND_BYTES}-byte "
+        f"bound ({MAX_ARGV_TOKEN_BYTES}-byte MAX_ARG_STRLEN less a "
+        f"{ARGV_TOKEN_SAFETY_MARGIN_BYTES}-byte margin); the launch for {seat} was not spawned, "
+        "because past MAX_ARG_STRLEN execve fails with E2BIG before any AR surface can report it. "
+        "Reduce the compiled capsule's instruction corpus for this seat, or split the delivery "
+        "off argv."
+    )
 
 
 def control_runner_command(config: RunnerConfig) -> tuple[str, ...]:
@@ -64,10 +124,20 @@ def control_runner_command(config: RunnerConfig) -> tuple[str, ...]:
             config.resolved_launch.to_json() if config.resolved_launch is not None else None
         ),
         "resumeThreadId": config.resume_thread_id,
+        # Added only when a capsule is actually being delivered, so a legacy launch sends the exact
+        # payload it always sent — byte for byte, not merely an equal-shaped one.
+        **(
+            {"capsuleDelivery": config.capsule_delivery.to_json()}
+            if config.capsule_delivery is not None
+            else {}
+        ),
     }
     encoded = base64.urlsafe_b64encode(
         json.dumps(payload, separators=(",", ":")).encode("utf-8")
     ).decode("ascii")
+    # Checked here, where the encoded token first exists and before any caller can spawn it: an
+    # over-bound token is refused by name rather than handed to an ``execve`` that answers E2BIG.
+    _refuse_over_bound_token(encoded, config)
     return (sys.executable, "-m", "agents_remember.serving.harness_control_runner", encoded)
 
 
@@ -85,6 +155,7 @@ def parse_runner_config(encoded: str) -> RunnerConfig:
     resolved_raw = raw.get("resolvedLaunch")
     resolved_launch = ResolvedLaunch.from_json(resolved_raw) if resolved_raw is not None else None
     resume_thread_id = _optional_resume_thread_id(raw)
+    capsule_delivery = _optional_capsule_delivery(raw)
     config = RunnerConfig(
         identity=ControlIdentity.from_json(identity),
         harness_id=_required_text(raw, "harnessId"),
@@ -94,9 +165,26 @@ def parse_runner_config(encoded: str) -> RunnerConfig:
         session_commands=tuple(session_commands),
         resolved_launch=resolved_launch,
         resume_thread_id=resume_thread_id,
+        capsule_delivery=capsule_delivery,
     )
     _require_launch_agrees_with_config(config)
     return config
+
+
+def _optional_capsule_delivery(raw: Mapping[str, object]) -> CodexCapsuleDelivery | None:
+    """The capsule carrier from the encoded payload, refusing a malformed value.
+
+    An absent key is ``None`` (the legacy launch). A present-but-unreadable value is a refusal, not a
+    silent drop: a caller that supplied a capsule must never receive a capsule-free process.
+    """
+
+    value = raw.get("capsuleDelivery")
+    if value is None:
+        return None
+    delivery = CodexCapsuleDelivery.from_json(value)
+    if delivery is None:
+        raise HarnessControlError("hosted control runner received a malformed capsule delivery")
+    return delivery
 
 
 def _decode_runner_payload(encoded: str) -> dict[str, object]:
@@ -212,6 +300,7 @@ async def _prepare_controlled_launch(
                 config.harness_id,
                 env=env,
                 resume_thread_id=config.resume_thread_id,
+                capsule_delivery=config.capsule_delivery,
             ),
             base,
         )
@@ -235,9 +324,9 @@ async def _prepare_controlled_launch(
     adapter = create_harness_protocol_adapter(
         config.harness_id,
         env=env,
-        resolved_launch=selection,
-        launch_knobs=knobs,
+        selection=LaunchSelection(resolved_launch=selection, launch_knobs=knobs),
         resume_thread_id=config.resume_thread_id,
+        capsule_delivery=config.capsule_delivery,
     )
     return adapter, launch
 

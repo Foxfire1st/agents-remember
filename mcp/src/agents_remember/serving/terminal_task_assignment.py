@@ -9,6 +9,7 @@ from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.seat_binding import attach_seat_role
+from agents_remember.serving.task_binding import TASKLESS_SEAT_ROLES
 from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
 from agents_remember.worktrees.source_lineage import lineage_refusal, source_lineage_for_task
 
@@ -155,7 +156,9 @@ def _assign_terminal_session_to_task(
         )
     try:
         runtime.topology.resolve(task_document_ref)
-        if seat_role not in {"chat", "terminal"}:
+        # A taskless seat carries no structural altitude to validate; it is admitted by
+        # name rather than by shape. See TASKLESS_SEAT_ROLES for what that class is.
+        if seat_role not in TASKLESS_SEAT_ROLES:
             runtime.topology.validate_role(task_document_ref, seat_role)
     except TaskDocumentRefError:
         return TaskAssignmentResult(

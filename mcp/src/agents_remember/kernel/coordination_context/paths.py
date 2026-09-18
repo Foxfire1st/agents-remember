@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Literal
+
+from agents_remember.kernel.memory_mode import (
+    LEGACY_INTERNAL_MEMORY_DIRNAME,
+    Topology,
+    refuse_removed_memory_mode,
+)
 
 DEFAULT_AR_COORDINATION_ROOT = "../ar-coordination"
 
@@ -59,27 +64,11 @@ def extract_yaml_blocks(markdown_text: str) -> list[str]:
     ]
 
 
-def default_storage_mode(topology: Literal["internal", "external"]) -> str:
-    return "repo-sidecar" if topology == "internal" else "memory-repo"
-
-
-def internal_memory_root(code_repository_root: Path) -> Path:
-    return (code_repository_root / "ar-memory").resolve()
-
-
-def internal_coordination_root(code_repository_root: Path) -> Path:
-    return (code_repository_root / "ar-coordination").resolve()
-
-
 def external_memory_root(coordination_root: Path, code_repository_name: str) -> Path:
     return (coordination_root / "memory-repos" / f"ar-{code_repository_name}").resolve()
 
 
-def settings_path_for_roots(
-    memory_root: Path,
-    coordination_root: Path,
-    _topology: Literal["internal", "external"],
-) -> Path:
+def settings_path_for_roots(memory_root: Path, coordination_root: Path) -> Path:
     memory_settings = memory_root / "system" / "settings.md"
     coordination_settings = coordination_root / "system" / "settings.md"
     if memory_settings.exists():
@@ -91,21 +80,23 @@ def settings_path_for_roots(
 
 def memory_roots_from_settings(
     settings_path: Path,
-    code_repository_root: Path,
     code_repository_name: str,
-    topology: Literal["internal", "external"],
 ) -> tuple[Path, Path]:
+    """The coordination and memory roots a settings file implies.
+
+    Two shapes are admitted: a settings file inside a per-repo memory repo, and one at a
+    coordination root. A settings file anywhere else is not a supported memory location, so
+    it is refused by its own path rather than silently resolving to some other root.
+    """
     settings_root = settings_path.resolve().parent.parent
-    if topology == "external":
-        if (
-            settings_root.name == f"ar-{code_repository_name}"
-            and settings_root.parent.name == "memory-repos"
-        ):
-            return settings_root.parent.parent, settings_root
-        return settings_root, external_memory_root(settings_root, code_repository_name)
-    if settings_root.name == "ar-memory":
-        return internal_coordination_root(code_repository_root), settings_root
-    return settings_root, internal_memory_root(code_repository_root)
+    if (
+        settings_root.name == f"ar-{code_repository_name}"
+        and settings_root.parent.name == "memory-repos"
+    ):
+        return settings_root.parent.parent, settings_root
+    if settings_root.name == LEGACY_INTERNAL_MEMORY_DIRNAME:
+        refuse_removed_memory_mode("internal", artifact=settings_path.as_posix())
+    return settings_root, external_memory_root(settings_root, code_repository_name)
 
 
 def resolve_coordination_root_hint(coordination_root: Path | None) -> Path:
@@ -146,9 +137,15 @@ def path_settings_path_for(settings_path: Path) -> Path:
     return settings_path.with_suffix(".json")
 
 
-def infer_topology_from_onboarding_root(onboarding_root: Path) -> Literal["internal", "external"]:
-    if onboarding_root.parent.name == "ar-memory":
-        return "internal"
+def infer_topology_from_onboarding_root(onboarding_root: Path) -> Topology:
+    """The topology an onboarding root belongs to, or a refusal naming that root.
+
+    An onboarding root under the removed repo-sidecar layout is refused by name and by exact
+    path: it is real existing state, and reporting it is the whole point -- resolving it to
+    ``external``, or to any other root, would silently move a repository's memory.
+    """
+    if onboarding_root.parent.name == LEGACY_INTERNAL_MEMORY_DIRNAME:
+        refuse_removed_memory_mode("internal", artifact=onboarding_root.as_posix())
     if (
         onboarding_root.parent.parent.name == "memory-repos"
         and onboarding_root.parent.name.startswith("ar-")
@@ -156,6 +153,5 @@ def infer_topology_from_onboarding_root(onboarding_root: Path) -> Literal["inter
         return "external"
     raise ValueError(
         "onboarding_root must point to a supported memory location: "
-        "<code-repository-root>/ar-memory/onboarding or "
         "<ar-coordination>/memory-repos/ar-<code-repository-name>/onboarding"
     )

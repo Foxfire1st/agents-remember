@@ -18,10 +18,12 @@ that are true for only one code repository.
 
 ## Memory Repo
 
-`examples/memory-repo/` models files for either:
+`examples/memory-repo/` models files for:
 
-- `<repo>/ar-memory/system/`
 - `ar-coordination/memory-repos/ar-<repo>/system/`
+
+Repo-local internal memory under `<repo>/ar-memory/` was removed from the product; a repository
+still carrying that layout is reported and refused, never migrated.
 
 The memory layer owns rules that are valid for its respective code repository:
 onboarding storage, path eligibility, cross-repo policy, domain sources,

@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from agents_remember.kernel.memory_mode import (
+    legacy_internal_memory_root,
+    refuse_removed_memory_mode,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.worktrees.activation.atomic_series_activation import bounded_activation_detail
 from agents_remember.worktrees.activation.atomic_series_admission import (
@@ -79,12 +83,17 @@ class MasterSeriesContractAdmissionError(RuntimeError):
 
 
 def memory_mode_for_repository(code_repo: Path, memory_root: Path | None) -> str:
-    """Derive the contract vocabulary from the configured repository topology."""
+    """Derive the contract vocabulary from the configured repository topology.
+
+    A memory root inside the code repository is the removed repo-sidecar layout, and it is
+    refused by its own path: this function used to *derive* ``internal`` from it, which is how
+    a repository could silently keep a mode the product no longer supports.
+    """
 
     if memory_root is None:
         return "disabled"
-    if memory_root.resolve() == (code_repo / "ar-memory").resolve():
-        return "internal"
+    if memory_root.resolve() == legacy_internal_memory_root(code_repo):
+        refuse_removed_memory_mode("internal", artifact=memory_root.resolve().as_posix())
     return "external"
 
 

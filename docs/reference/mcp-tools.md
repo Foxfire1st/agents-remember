@@ -88,8 +88,12 @@ gone, is refused; nothing falls back to the official repo. The response carries 
 which tree was acted on is always visible.
 
 Only a full leaf-scoped sync/start `memory_quality_check` request writes the curator checklist. It reports
-`curatorActionableCount` and `checklistStatus`; the curator reruns it until the actionable count is
-zero. Subset checks and official-repository checks do not create that artifact. The checklist is
+`curatorActionableCount`, the **raw** `qualityChecklistStatus`, and the combined `checklistStatus`; the
+curator reruns it until the actionable count is zero and the raw status reads `ready-for-closeout`. The
+combined field is rewritten to `coherence-required` only when the coherence record is then missing or
+stale — that is the coherence gate, cleared with `prepare` → `publish` → `validate` — and `closeoutReady`
+becomes true only once that validation passes. Subset checks and official-repository checks do not create
+that artifact. The checklist is
 outside both Git worktrees, replaces its predecessor instead of accumulating timestamped files,
 and `worktree_cleanup`/`worktree_abandon` remove its reserved `reports/` directory with the
 enclosure. Dirty-source and real-commit residuals remain listed separately so the pre-commit loop

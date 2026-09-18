@@ -41,23 +41,30 @@ from agents_remember.models.terminal_catalog import (
 )
 from agents_remember.models.worktree import SourceLineageProjection
 from agents_remember.observer.events import now_iso
+from agents_remember.serving.capsule_delivery import CodexCapsuleDelivery
 from agents_remember.serving.harness_control_adapter import protocol_adapter_status
 from agents_remember.serving.harness_control_ipc import LocalControlEndpoint
 from agents_remember.serving.harness_control_models import (
     CONTROL_PROTOCOL_VERSION,
 )
-from agents_remember.serving.harness_control_runner import RunnerConfig, control_runner_command
+from agents_remember.serving.harness_control_runner import (
+    RunnerConfig,
+    control_runner_command,
+)
 from agents_remember.serving.harness_launch import ResolvedLaunch
 from agents_remember.serving.harnesses import (
     Which,
     find_harness,
+    harness_detection_detail,
     invalid_effort_detail,
     invalid_model_detail,
     is_detected,
     knob_argv,
+    terminal_launch_detail,
     unknown_harness_detail,
 )
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.launch_capsule import LaunchCapsule
 from agents_remember.serving.task_binding import (
     TaskBindingRequest,
     TaskDocumentResolutionFailure,
@@ -114,6 +121,12 @@ class ControlRunnerRequest:
 
     resolved_launch: ResolvedLaunch | None = None
     resume_thread_id: str | None = None
+    capsule_delivery: CodexCapsuleDelivery | None = None
+    """The admitted role capsule this launch applies, or ``None`` for the legacy launch.
+
+    The caller-facing half of the one optional carrier: whoever admits the capsule at the launch
+    boundary sets it here, and it travels unchanged to the adapter factory.
+    """
     endpoint: Path | None = None
     """An explicit socket path; ``None`` mints one for this session under :attr:`endpoint_root`."""
     endpoint_root: Path | None = None
@@ -133,6 +146,13 @@ class TerminalLaunchRequest:
     kind: str
     workspace_root: Path
     shell: str
+    capsule: LaunchCapsule | None = None
+    """The instruction delivery this launch resolved, or ``None`` for a launch that predates it.
+
+    Resolved by the launch point before the request is built, never inside the opener: the opener
+    performs, it does not decide what a seat's instructions are. A refusal never reaches here — the
+    launch point refuses first — and the opener still refuses one defensively rather than spawning.
+    """
     harness: str | None = None
     which: Which | None = None
     """How installed-ness is probed; ``None`` means :func:`shutil.which`."""
@@ -140,6 +160,17 @@ class TerminalLaunchRequest:
     """The EFFECTIVE registry ids resolve against; ``None`` means the builtin defaults."""
     env: Mapping[str, str] | None = None
     """Spawn env seeded at creation -- the L2 knob-injection seam, and the carrier of AR_SPAWN_ROLE."""
+    session_backend: bool = False
+    """Whether this open is spawning a session BACKEND rather than launching a terminal program.
+
+    A harness kind always runs behind the control runner, so the process this path spawns is the
+    runner (which starts the harness's own runtime); the harness ``argv`` is data the runner carries
+    to its adapter. For a PATH TUI the two coincide, but for a harness whose runtime is an
+    application -- eve -- there is no program to exec at all, and the launch must refuse rather than
+    report an argv nothing can spawn. The seat-spawning caller states which question it is asking;
+    the dashboard's terminal-open route deliberately does not, so opening eve as a terminal refuses
+    by name instead of silently producing an impossible command.
+    """
     knobs: SpawnKnobs = field(default_factory=SpawnKnobs)
     control: ControlRunnerRequest = field(default_factory=ControlRunnerRequest)
     flag_model: str | None = None
@@ -266,8 +297,7 @@ def resolve_terminal_launch(launch: TerminalLaunchRequest) -> LaunchCommand:
         found = find_harness(harness, registry=launch.harnesses)
         if found is None:
             raise ValueError(unknown_harness_detail(harness, registry=launch.harnesses))
-        if not is_detected(found, which=launch.which):
-            raise ValueError(f"harness not installed: {harness!r}")
+        _require_launchable_harness(found, launch)
         model = launch.flag_model
         effort = launch.flag_effort
         for detail in (
@@ -282,6 +312,29 @@ def resolve_terminal_launch(launch: TerminalLaunchRequest) -> LaunchCommand:
             argv += [str(arg) for arg in launch.knobs.launch_args]
         return LaunchCommand(launch.workspace_root, tuple(argv))
     raise ValueError(f"unknown terminal kind: {launch.kind!r}")
+
+
+def _require_launchable_harness(found: Harness, launch: TerminalLaunchRequest) -> None:
+    """Refuse a harness this launch cannot start, with the reason that belongs to ITS question.
+
+    Two questions, and they are not the same one.
+
+    A terminal OPEN execs ``argv[0]``, so what it needs is a program that exists. A runtime-probed
+    harness is detected -- its runtime can start -- and still has nothing for this path to launch,
+    so it refuses by name instead of resolving to an impossible command.
+
+    A session BACKEND spawn starts the control runner, which owns the harness's own runtime; the
+    harness ``argv`` is data the runner carries to its adapter, so the question there is the
+    detection one: the runtime has to be startable, not be a PATH program.
+    """
+
+    if launch.session_backend:
+        if not is_detected(found, which=launch.which):
+            raise ValueError(harness_detection_detail(found, which=launch.which))
+        return
+    unavailable = terminal_launch_detail(found, which=launch.which)
+    if unavailable is not None:
+        raise ValueError(unavailable)
 
 
 def _terminal_label(kind: TerminalSessionKind, harness: str | None, fallback: str) -> str:
@@ -486,6 +539,28 @@ def _runner_spawn_env(env: Mapping[str, str]) -> dict[str, str]:
     return seeded
 
 
+def _codex_capsule_delivery(launch: TerminalLaunchRequest) -> CodexCapsuleDelivery | None:
+    """The admitted capsule this launch carries to the Codex app-server, or ``None``.
+
+    Read from the resolved capsule, and only for a launch that resolved one: a capsule supplied
+    through ``control.capsule_delivery`` by a caller stays supported (L5's own seam), so the two
+    sources are checked in the order that keeps one authority — the launch point's resolution first,
+    the pre-existing caller field second.
+    """
+
+    if launch.capsule is not None and launch.capsule.codex_delivery is not None:
+        return launch.capsule.codex_delivery
+    return launch.control.capsule_delivery
+
+
+def _eve_capsule_env(launch: TerminalLaunchRequest) -> dict[str, str]:
+    """The eve binding environment this launch carries, or an empty mapping."""
+
+    if launch.capsule is None:
+        return {}
+    return {name: value for name, value in launch.capsule.eve_env.items() if value}
+
+
 def _session_command(
     *,
     identity: ControlIdentity,
@@ -517,6 +592,7 @@ def _session_command(
             session_commands=tuple(launch.knobs.session_commands or ()),
             resolved_launch=launch.control.resolved_launch,
             resume_thread_id=launch.control.resume_thread_id,
+            capsule_delivery=_codex_capsule_delivery(launch),
         )
     )
     return list(runner), endpoint
@@ -647,6 +723,9 @@ def _open_terminal_transaction(
         launch=launch,
     )
     spawn_env = _scrub_daemon_identity_env(launch.env or {})
+    # The eve carrier travels as the launch environment L7's loader already reads; the names come
+    # from the carrier module, so the writer and the reader cannot drift into two spellings.
+    spawn_env.update(_eve_capsule_env(launch))
     # Each harness starts its own MCP child process. Seed the exact hosted identity only into that
     # process environment so structural tools can resolve the caller without any model argument.
     # Scrubbing above guarantees a parent process's identity can never leak into its child.
@@ -764,6 +843,11 @@ def open_terminal_session(
     authority class: it rides the runner payload to the adapter factory, and the opener never
     validates or authorizes the target.
     """
+    if launch.capsule is not None and launch.capsule.is_refusal:
+        # Defensive. Every launch point refuses a capsule it could not supply BEFORE it builds a
+        # request, so a refusal here means a caller bypassed that gate; refusing again is the only
+        # outcome that cannot start a role-configured session with no instructions.
+        return OpenTerminalResult(status="launch-conflict", detail=launch.capsule.explain())
     resume_thread_id = launch.control.resume_thread_id
     if resume_thread_id is not None and (launch.kind != "harness" or launch.harness != "codex"):
         return OpenTerminalResult(

@@ -19,7 +19,7 @@ from agents_remember.models.conversations.evidence import (
 from agents_remember.models.conversations.identity import (
     HarnessId,
 )
-from agents_remember.serving.conversation.projectors import claude, codex, pi
+from agents_remember.serving.conversation.projectors import claude, codex, eve, pi
 from agents_remember.serving.conversation.projectors.common import MapperOutput
 
 
@@ -112,10 +112,24 @@ class _PiProjector:
         raise NotImplementedError("pi has no transcript echo channel")
 
 
+class _EveProjector:
+    harness_id: HarnessId = "eve"
+    # eve's durable stream is the only evidence surface: there is no native-history page to
+    # continue and no transient transcript to echo, so both channels fail closed.
+    uses_native_pages = False
+    uses_transcript_echo = False
+    eager_native_continuation = False
+
+    map_native_frame = staticmethod(eve.map_native_frame)
+    map_evidence_frame = staticmethod(eve.map_evidence_frame)
+    map_transcript_echo = staticmethod(eve.map_transcript_echo)
+
+
 PROJECTORS: Mapping[str, HarnessProjector] = {
     "codex": _CodexProjector(),
     "claude": _ClaudeProjector(),
     "pi": _PiProjector(),
+    "eve": _EveProjector(),
 }
 
 

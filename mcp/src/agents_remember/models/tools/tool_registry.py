@@ -42,6 +42,7 @@ from agents_remember.models.lifecycles.responses import (
 )
 from agents_remember.models.memory import (
     CitationFixResponse,
+    CitationMigrateResponse,
     DriftCheckResponse,
     MemoryBaselineAdoptResponse,
     MemoryBaselineStatusResponse,
@@ -73,6 +74,11 @@ from agents_remember.models.providers import (
 )
 from agents_remember.models.queue.closeout_queue import CloseoutQueueResponse
 from agents_remember.models.read_files import ReadArFilesResponse
+from agents_remember.models.role_capsule_resources import (
+    RoleCapsuleResponse,
+    SkillCatalogListResponse,
+    SkillCatalogReadResponse,
+)
 from agents_remember.models.runtime import ResolveContextResponse, RuntimeInstallResponse
 from agents_remember.models.skills import SkillsInstallResponse
 from agents_remember.models.structural.agent import (
@@ -166,6 +172,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "drift_check": DriftCheckResponse,
     "memory_quality_check": MemoryQualityCheckResponse,
     "citation_fix": CitationFixResponse,
+    "citation_migrate": CitationMigrateResponse,
     "route_index_refresh": RouteIndexRefreshResponse,
     "memory_init": MemoryInitResponse,
     "skills_install": SkillsInstallResponse,
@@ -228,6 +235,9 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "orchestration_nudge_manager": OrchestrationNudgeManagerResponse,
     "message_parent": MessageParentResponse,
     "message_child": MessageChildResponse,
+    "role_capsule_compile": RoleCapsuleResponse,
+    "skill_catalog_list": SkillCatalogListResponse,
+    "skill_catalog_read": SkillCatalogReadResponse,
 }
 
 PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {

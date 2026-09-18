@@ -90,8 +90,8 @@ def _queued(
     return queued_operation_record(contract, operation_input, candidate, None, datetime.now(UTC))
 
 
-def _fixture(root: Path, *, select: bool = True, memory_mode: str = "internal") -> _Fixture:
-    fixture = selected_fixture(root, memory_mode=memory_mode)
+def _fixture(root: Path, *, select: bool = True) -> _Fixture:
+    fixture = selected_fixture(root)
     contract = fixture.contracts[MASTER_A]
     operation_input = closeout_operation_input(contract, config_path=fixture.config_path)
     frozen = prepare_closeout_certification(

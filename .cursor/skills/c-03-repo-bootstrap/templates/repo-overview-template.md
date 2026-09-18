@@ -39,9 +39,9 @@
 
 <Explain important repo-level cross-repo or external-boundary behavior. Back the explanation with the table below. If nothing relevant exists, keep the table and record what was checked plus `No relevant cross-repo evidence found.`>
 
-| Finding | Citations | Source Path |
+| Finding | Anchor | Source |
 |---|---|---|
-| <Concise summary of the cross-repo tie, interface, or service boundary.> | L10-L18 | [<source-or-onboarding.md>](relative/path/to/source-or-onboarding.md) |
+| <Concise summary of the cross-repo tie, interface, or service boundary.> | "<verbatim string the cited range holds>" | <repo-relative path>:<start>-<end> |
 
 ## Build & Dev
 
@@ -64,9 +64,9 @@
 
 <Explain documentation context that matters for understanding this repo. Back the explanation with the table below. If nothing relevant exists, keep the table and record what was checked plus `No relevant documentation found.`>
 
-| Finding | Citations | Source Path |
+| Finding | Anchor | Source |
 |---|---|---|
-| <Concise summary of the cited lines and why they matter.> | L20-L33 | [<doc-title-or-id>](https://example.com/canonical-doc-url) |
+| <Concise summary of the cited lines and why they matter.> | `<source_symbol>`, or the table's no-citation marker | <repo-relative path>:<start>-<end> |
 
 ## What To Explore Next
 

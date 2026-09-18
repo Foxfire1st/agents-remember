@@ -21,7 +21,7 @@ Research-only answers, minimal `w-02-light-task-workflow` tasks, and master + li
 
 Three ways, matched to what the agent already knows:
 
-- **By path** — when it has the file in hand, the note is at a deterministic path (`src/foo/bar.ts` → `ar-memory/onboarding/src/foo/bar.ts.md`). No ranking, embedding threshold, or index step — the path is the address, so reads stay predictable.
+- **By path** — when it has the file in hand, the note is at a deterministic path (`src/foo/bar.ts` → `<memory-root>/onboarding/src/foo/bar.ts.md`). No ranking, embedding threshold, or index step — the path is the address, so reads stay predictable.
 - **By meaning** — when it knows the concept but not the file, semantic search over the memory returns candidate notes.
 - **By relationship** — when it knows an anchor but not its connections, a code graph answers callers, callees, and dependencies.
 
@@ -95,17 +95,23 @@ Mixing them would pollute memory with speculation. The separation is what lets a
 
 ### Why use external memory?
 
-External memory is useful when code and memory should live in separate repositories or when branch-specific code and memory need ledgered alignment.
-
-Most users should start with internal memory under `<repo>/ar-memory/`. External memory adds operational power but also adds commit and ledger discipline.
+External memory is the supported topology: durable memory lives in its own repo per code
+repository, so it can be branched, committed and reviewed separately, and code and memory stay
+aligned through the ledger. It adds commit and ledger discipline, and that discipline is what
+makes a memory update attributable.
 
 ### What is `memory.md`?
 
 `memory.md` is the external-memory ledger. It records which memory commit was verified against which code commit. The `c-12-closeout` skill writes it during closeout and the `c-09-git-worktree-manager` skill uses it during worktree integration, so code and memory do not drift apart silently.
 
-### Can a workspace mix internal and external memory?
+### How is a repository's memory located?
 
-Yes. The `c-08-ar-coordination-context-resolver` skill resolves topology per target repository. A repo with `<repo>/ar-memory/` uses internal memory. A repo with only `ar-coordination/memory-repos/ar-<repo>/` uses external memory. One repository does not force the choice onto its siblings.
+The `c-08-ar-coordination-context-resolver` skill resolves it per target repository: each
+configured repository binds to `<coordination-root>/memory-repos/ar-<repo>/`, and one
+repository's memory never moves a sibling's. Repo-local internal memory under
+`<repo>/ar-memory/` was removed from the product; a repository that still carries that layout is
+refused by name with the exact path, together with the route to re-point it at its external
+memory root.
 
 ## Comparisons
 

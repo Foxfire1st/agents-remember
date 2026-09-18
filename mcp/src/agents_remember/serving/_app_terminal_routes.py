@@ -42,6 +42,12 @@ from agents_remember.serving.harness_control_client import (
 )
 from agents_remember.serving.harnesses import detect_harnesses
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.launch_capsule import (
+    LaunchCapsuleRequest,
+    resolve_launch_capsule,
+    selection_for_workspace,
+    session_workspace,
+)
 from agents_remember.serving.response_contract import (
     DetectedHarnessesResponse,
     SeatTakenConflict,
@@ -251,12 +257,38 @@ def _open_terminal_response(
             content={"status": "launch-selection-invalid", "detail": str(exc)},
             status_code=400,
         )
+    # Resolve this launch's instruction delivery BEFORE any host side effect. The compile crosses
+    # the injected application-rank port (``serving`` may not import ``application``); the decision
+    # and the record stay here, so this route answers "capsule, legacy or refused" exactly as the
+    # spawn primitive does.
+    capsule = resolve_launch_capsule(
+        runtime.capsule_launch,
+        LaunchCapsuleRequest(
+            role=request.role,
+            workspace_root=config.workspace_root,
+            task_document_ref=request.task_document_ref,
+            harness=request.harness,
+        ),
+    )
+    if capsule.is_refusal:
+        return JSONResponse(
+            content={
+                "status": "capsule-unavailable",
+                "role": request.role,
+                "detail": capsule.explain(),
+            },
+            status_code=400,
+        )
+    # One workspace authority for this session: the capsule's admitted workspace when it has one,
+    # otherwise the server's own — and the settings selection follows it, so the child's cwd, the
+    # selection and the carrier's own AR_WORKSPACE_ROOT cannot disagree.
+    workspace_root = session_workspace(capsule, server_workspace=config.workspace_root)
     result = open_terminal_session(
         runtime=HostedSessionRuntime(catalog=runtime.catalog, host=runtime.host),
         session_id=session,
         launch=TerminalLaunchRequest(
             kind=request.kind,
-            workspace_root=config.workspace_root,
+            workspace_root=workspace_root,
             shell=os.environ.get("SHELL") or DEFAULT_SHELL,
             harness=request.harness,
             env={"AR_SPAWN_ROLE": request.role} if request.role is not None else None,
@@ -270,9 +302,10 @@ def _open_terminal_response(
                 else None
             ),
             control=ControlRunnerRequest(
-                resolved_launch=resolved_launch,
+                resolved_launch=selection_for_workspace(resolved_launch, workspace=workspace_root),
                 endpoint_root=config.coordination_root / "runtime" / "harness-control",
             ),
+            capsule=capsule,
         ),
         provenance=SpawnProvenance(
             label=request.label,
@@ -297,6 +330,9 @@ def _open_terminal_response(
     return JSONResponse(
         content={
             **_terminal_entry_payload(entry),
+            # The per-run record of the instruction mode this launch selected: `capsule` with the
+            # digest and byte size, or `legacy` with the named decision behind it.
+            "instructionMode": dict(capsule.report),
             "label": entry.label,
             "lifecycleId": entry.lifecycle_id,
             "taskDocumentRef": (

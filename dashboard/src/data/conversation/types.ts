@@ -7,7 +7,10 @@
 // validator — the server is the sole authority; the reducer defends against protocol faults it can
 // actually observe (revision regressions, cursor gaps), not against re-validating trusted shapes.
 
-export type HarnessId = "codex" | "claude" | "pi";
+// Mirror of the server's `models/conversations/identity.py` union; keep the two in step. `eve` is
+// a native session backend whose runtime the adapter starts, so its conversation identity has to be
+// representable here like any other harness's.
+export type HarnessId = "codex" | "claude" | "pi" | "eve";
 
 export interface NativeConversationRef {
   harnessId: HarnessId;

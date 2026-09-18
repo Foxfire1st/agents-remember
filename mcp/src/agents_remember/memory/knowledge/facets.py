@@ -640,7 +640,7 @@ def apply_designate_explanation(
 
 
 def _require_explanation(
-    store: OpenedKnowledgeStore, explanation_id: str, operation: str
+    store: OpenedKnowledgeStore, explanation_id: str, operation: KnowledgeOperation
 ) -> ExplanationRecord:
     """Return one stored explanation record, or refuse the operation that named it."""
 
@@ -670,27 +670,63 @@ _FacetStep = Callable[
 PendingIdentities = frozenset
 
 
-def _step_taking_authorship(step: _FacetStep) -> _FacetStep:
-    """Adapt a step that needs the admitted envelope to the table's uniform signature."""
-
-    return step
-
-
-def _step_ignoring_authorship(
-    step: Callable[[OpenedKnowledgeStore, FacetCommand], tuple[FacetWriteIdentity, ...]],
+def _step_taking_authorship[FacetMember: FacetCommand](
+    member: type[FacetMember],
+    step: Callable[
+        [OpenedKnowledgeStore, FacetMember, Authorship, PendingIdentities],
+        tuple[FacetWriteIdentity, ...],
+    ],
 ) -> _FacetStep:
-    """Adapt a removal or designation step, which needs neither the envelope nor the pending set."""
+    """Adapt one member's envelope-taking step to the table's uniform signature.
 
-    return lambda store, command, _authorship, _pending: step(store, command)
+    ``_STEPS`` is keyed by command kind, so a step receives exactly the member it was registered for.
+    The assertion states that invariant at the boundary rather than widening the step's own parameter
+    to the whole facet union, which every member's step would then have to re-check for itself.
+    """
+
+    def adapted(
+        store: OpenedKnowledgeStore,
+        command: FacetCommand,
+        authorship: Authorship,
+        pending: PendingIdentities,
+    ) -> tuple[FacetWriteIdentity, ...]:
+        assert isinstance(command, member)
+        return step(store, command, authorship, pending)
+
+    return adapted
+
+
+def _step_ignoring_authorship[FacetMember: FacetCommand](
+    member: type[FacetMember],
+    step: Callable[[OpenedKnowledgeStore, FacetMember], tuple[FacetWriteIdentity, ...]],
+) -> _FacetStep:
+    """Adapt one member's removal or designation step, which needs neither envelope nor pending set."""
+
+    def adapted(
+        store: OpenedKnowledgeStore,
+        command: FacetCommand,
+        _authorship: Authorship,
+        _pending: PendingIdentities,
+    ) -> tuple[FacetWriteIdentity, ...]:
+        assert isinstance(command, member)
+        return step(store, command)
+
+    return adapted
 
 
 _STEPS: Mapping[str, _FacetStep] = {
-    "add_facet": apply_add_facet,
-    "attach_facet": apply_attach_facet,
-    "remove_facet_attachment": _step_ignoring_authorship(apply_remove_facet_attachment),
-    "author_explanation": apply_author_explanation,
-    "add_explanation_revision": apply_add_explanation_revision,
-    "designate_explanation": _step_ignoring_authorship(apply_designate_explanation),
+    "add_facet": _step_taking_authorship(AddFacet, apply_add_facet),
+    "attach_facet": _step_taking_authorship(AttachFacet, apply_attach_facet),
+    "remove_facet_attachment": _step_ignoring_authorship(
+        RemoveFacetAttachment, apply_remove_facet_attachment
+    ),
+    "author_explanation": _step_taking_authorship(AuthorExplanation, apply_author_explanation),
+    "add_explanation_revision": _step_taking_authorship(
+        AddExplanationRevision, apply_add_explanation_revision
+    ),
+    "designate_explanation": _step_ignoring_authorship(
+        DesignateExplanation, apply_designate_explanation
+    ),
 }
 
 

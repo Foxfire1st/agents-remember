@@ -9,9 +9,9 @@ NOT under version control (master decision OQ6, 2026-07-31): the release job run
 script placed.
 
 Because nothing in the repository can drift from a bundle the repository does not
-contain, there is no ``--check`` mode: the drift comparison, the fingerprint
-re-verification, and the "no dashboard/dist yet" no-op that made the old check exit 0 on
-every fresh clone are all gone with their subject.
+contain, the WRITE path has no drift comparison to make: the drift comparison, the
+fingerprint re-verification, and the "no dashboard/dist yet" no-op that made the old check
+exit 0 on every fresh clone are all gone with their subject.
 
 What survives is a freshness proof, and it runs on the write path where it cannot be
 skipped. ``vite.config.ts`` compiles the fingerprint of the real build inputs into the
@@ -23,6 +23,14 @@ identity ``serving/build_info.py`` advertises as ``servingBuild.dashboardBuild``
 a live tab compares against ``CLIENT_DASHBOARD_BUILD`` to notice it is running stale JS;
 stamping it over an unbuilt tree, as the old ``sync()`` did, corrupted exactly the signal
 it exists to carry.
+
+``--check`` answers the ONE question the write path cannot: whether what is placed right
+now still matches the source, which is what a pre-commit or CI gate needs. It reports the
+drift and writes NOTHING -- no staging copy, no rename, no sidecar rewrite -- so running it
+can never be the thing that made the tree dirty. It is deliberately NOT the old check: it
+reports "cannot verify: nothing has been built or placed" as drift rather than as a pass,
+because an unverifiable tree and a current one are different facts and the old mode
+conflated them.
 """
 
 from __future__ import annotations
@@ -150,6 +158,72 @@ def replace_tree(source: Path, target: Path) -> None:
         shutil.rmtree(retired)
 
 
+def tree_digests(root: Path) -> dict[str, str]:
+    """Digest every file under ``root``, keyed by its POSIX path relative to ``root``."""
+    return {
+        path.relative_to(root).as_posix(): _digest(path)
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and not ignored(path.relative_to(root))
+    }
+
+
+def drift_reasons() -> list[str]:
+    """Every reason the placed bundle does not match the source, in a fixed order.
+
+    Ordered and complete rather than short-circuiting: a gate that reports the first reason
+    sends the reader back for a second run to find the second one.
+    """
+    reasons: list[str] = []
+    if not SOURCE.is_dir():
+        reasons.append(f"dashboard/dist is absent: nothing has been built (run: {REBUILD_HINT})")
+        return reasons
+    if not TARGET.is_dir():
+        reasons.append(
+            f"the placed bundle {TARGET} is absent: it has never been placed (run: {REBUILD_HINT})"
+        )
+        return reasons
+    fingerprint = source_fingerprint()
+    if not bundle_is_current(fingerprint):
+        reasons.append(
+            "dashboard/dist is stale: it does not carry the current build-input "
+            f"fingerprint, so it was not built from this source (run: {REBUILD_HINT})"
+        )
+    placed = tree_digests(TARGET)
+    expected = tree_digests(SOURCE)
+    for name in sorted(set(expected) | set(placed)):
+        if name not in placed:
+            reasons.append(f"{name} is in dashboard/dist but not in the placed bundle")
+        elif name not in expected:
+            reasons.append(f"{name} is in the placed bundle but not in dashboard/dist")
+        elif placed[name] != expected[name]:
+            reasons.append(f"{name} differs between dashboard/dist and the placed bundle")
+    stamped = (
+        FINGERPRINT_FILE.read_text(encoding="utf-8").strip() if FINGERPRINT_FILE.is_file() else ""
+    )
+    if stamped != fingerprint:
+        reasons.append(
+            f"the dashboard.fingerprint sidecar records "
+            f"{stamped or '<nothing>'}, not the current build-input fingerprint"
+        )
+    return reasons
+
+
+def check() -> int:
+    """Report whether the placed bundle still matches the source. Writes nothing."""
+    reasons = drift_reasons()
+    if reasons:
+        print(
+            f"[sync-dashboard] --check: the placed bundle has drifted "
+            f"({len(reasons)} reason(s)); nothing was written:",
+            file=sys.stderr,
+        )
+        for reason in reasons:
+            print(f"[sync-dashboard]   - {reason}", file=sys.stderr)
+        return 1
+    print("[sync-dashboard] --check: the placed bundle matches dashboard/dist")
+    return 0
+
+
 def sync() -> int:
     """Place a current ``dashboard/dist`` into package data, or refuse and explain."""
     if not SOURCE.is_dir():
@@ -175,10 +249,17 @@ def sync() -> int:
 
 
 def main() -> int:
-    argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Place a freshly built dashboard/dist into MCP package data."
-    ).parse_args()
-    return sync()
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Report whether the placed bundle still matches dashboard/dist, and write "
+        "nothing. Exits non-zero on any drift, including 'nothing has been built or placed'.",
+    )
+    args = parser.parse_args()
+    return check() if args.check else sync()
 
 
 if __name__ == "__main__":

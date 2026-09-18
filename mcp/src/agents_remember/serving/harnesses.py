@@ -24,7 +24,10 @@ Detection is :func:`shutil.which`: a harness is *launchable* only when its comma
 ``PATH``. The argv is fixed here, server-side -- the browser sends a harness **id**, never a command
 (``GET /api/harnesses`` reports the set + per-harness detection; ``POST /api/terminal/{id}`` with
 ``{"kind": "harness", "harness": "<id>"}`` resolves the id to its argv) -- so there is no
-command-injection surface, the same posture as the slice-6d fixed-argv host.
+command-injection surface, the same posture as the slice-6d fixed-argv host. A harness whose
+runtime is not a PATH program declares a readiness probe on its registry row instead, and the
+probe's own sentence is the detection detail; see
+``kernel/eve_runtime_readiness.py`` for the one such runtime.
 
 The ``which`` lookup is injectable (and falls back to :func:`shutil.which` at call time, so tests can
 monkeypatch the module attribute too) -- detection unit-tests deterministically without depending on
@@ -38,10 +41,14 @@ harnesses; they are not a fallback catalog for Claude, Codex, or Pi.
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
-from agents_remember.kernel.harnesses import HARNESSES, Harness
+from agents_remember.kernel.harnesses import (
+    HARNESSES,
+    Harness,
+    harness_availability_detail,
+)
 
 Which = Callable[[str], str | None]
 """A :func:`shutil.which`-shaped lookup: a command name -> its resolved path, or ``None`` if absent."""
@@ -83,18 +90,74 @@ def unknown_harness_detail(harness_id: str, *, registry: Sequence[Harness] | Non
     )
 
 
-def is_detected(harness: Harness, *, which: Which | None = None) -> bool:
-    """Whether ``harness`` is launchable here -- its ``command`` resolves on ``PATH``.
+def is_detected(
+    harness: Harness,
+    *,
+    which: Which | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """Whether ``harness`` is launchable here.
 
-    ``which`` defaults to :func:`shutil.which`, resolved at call time so a test can either inject a
-    fake or monkeypatch the module attribute.
+    A PATH harness is detected when its ``command`` resolves (``which`` defaults to
+    :func:`shutil.which`, resolved at call time so a test can inject a fake or monkeypatch the
+    module attribute). A harness that declares a runtime readiness probe is detected by that probe
+    instead -- its runtime is not a PATH program, so ``which`` can only ever answer "no" for it.
+    ``env`` is forwarded to the probe; the PATH lookup ignores it.
     """
+    return harness_availability_detail(harness, which=which, env=env) is None
+
+
+def harness_detection_detail(
+    harness: Harness,
+    *,
+    which: Which | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """The operator-readable reason ``harness`` is not launchable here.
+
+    The probe's own sentence when the harness declares a readiness probe -- naming the missing
+    component -- and the ordinary not-on-PATH sentence otherwise. Callers that only refuse use this
+    to say WHAT is missing instead of repeating "not installed" for a runtime that is simply absent.
+    """
+    return harness_availability_detail(harness, which=which, env=env) or (
+        f"harness {harness.id!r} is available"
+    )
+
+
+def terminal_launch_detail(harness: Harness, *, which: Which | None = None) -> str | None:
+    """``None`` when ``harness`` can be spawned as a terminal program, else the reason.
+
+    The terminal path execs ``argv[0]``, so the only program that can be launched is one that
+    actually exists. Detection and terminal launchability are therefore different questions for a
+    harness whose runtime is an application rather than a program: eve's runtime is the AR-owned Node
+    application the *session adapter* starts itself, so a detected eve row is selectable as a session
+    backend and is still not a PTY program. Answering this with detection alone is what let a ready
+    eve row resolve to an argv whose program exists nowhere, which is a false affordance rather than a
+    launch.
+
+    A settings override that gives the row a real command on this machine's ``PATH`` is launchable
+    again: the check is the program, not the harness id.
+    """
+
     resolver = which if which is not None else shutil.which
-    return resolver(harness.command) is not None
+    if resolver(harness.argv[0]) is not None:
+        return None
+    if harness.runtime_probe is not None:
+        return (
+            f"harness {harness.id!r} is not a terminal program: its runtime is the AR-owned "
+            f"application the session adapter starts itself, so there is no command line for the "
+            f"terminal host to exec (it would try {harness.argv[0]!r}, which does not exist). Select "
+            f"it through orchestration.roles/orchestration.spawn as a harness session instead of "
+            f"opening it as a terminal."
+        )
+    return f"harness {harness.id!r} is not installed: {harness.command!r} is not on PATH"
 
 
 def detect_harnesses(
-    *, which: Which | None = None, registry: Sequence[Harness] | None = None
+    *,
+    which: Which | None = None,
+    registry: Sequence[Harness] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> list[DetectedHarness]:
     """The full supported set in registry order, each marked detected/undetected for this machine.
 
@@ -103,7 +166,9 @@ def detect_harnesses(
     """
     return [
         DetectedHarness(
-            id=harness.id, name=harness.name, detected=is_detected(harness, which=which)
+            id=harness.id,
+            name=harness.name,
+            detected=is_detected(harness, which=which, env=env),
         )
         for harness in (registry if registry is not None else HARNESSES)
     ]

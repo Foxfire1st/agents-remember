@@ -26,6 +26,7 @@ import shutil
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 from agents_remember.application.curator_coherence import curator_coherence_tool
@@ -41,6 +42,7 @@ from agents_remember.models.lifecycles.review_assessment import (
     AssessmentEvidenceReference,
     AssessmentSubject,
     ReviewAssessment,
+    ReviewAssessmentDisposition,
     ReviewAssessmentRevision,
 )
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -176,10 +178,17 @@ def _leaf_document(contract: WorktreeContract) -> TaskDocument:
     return document.model_copy(update={"routeReview": review})
 
 
+def _evidence_reference(spelling: str) -> AssessmentEvidenceReference:
+    """Build one evidence reference from its canonical ``namespace:relative`` spelling."""
+
+    namespace, _, ref = spelling.partition(":")
+    return AssessmentEvidenceReference.model_validate({"namespace": namespace, "ref": ref})
+
+
 def _revision(
     *,
     assessment_id: str = ASSESSMENT_ID,
-    disposition: str = "concern_found",
+    disposition: ReviewAssessmentDisposition = "concern_found",
     finding: str = "The combined retry configuration can exceed the five-second budget.",
     subject: AssessmentSubject | None = None,
     evidence: tuple[str, ...] = (f"task:{FIXTURE_EVIDENCE}",),
@@ -197,12 +206,7 @@ def _revision(
         finding=finding,
         rationale="Four attempts may each consume two seconds; no earlier shared deadline exists.",
         assumptions=("Every attempt can consume its configured timeout.",),
-        evidenceRefs=tuple(
-            AssessmentEvidenceReference(
-                namespace=spelling.split(":", 1)[0], ref=spelling.split(":", 1)[1]
-            )
-            for spelling in evidence
-        ),
+        evidenceRefs=tuple(_evidence_reference(spelling) for spelling in evidence),
         comparisonRef=COMPARISON,
         scopeManifestRef=SCOPE_MANIFEST,
     )
@@ -585,12 +589,18 @@ class TestAssessmentRefusals:
                 semantic_requirement_revision="KS-R15@v1",
                 delivery_attempt="A001",
                 judgments=judgments,
-                review_assessments=[
-                    {
-                        **_revision().model_dump(mode="json"),
-                        "authorRef": "somebody-else@leaf",
-                    }
-                ],
+                # The submission is deliberately not a revision of the declared shape: it is the
+                # serialized form a caller sends with an author smuggled in, and the request model is
+                # what must refuse it as an undeclared field.
+                review_assessments=cast(
+                    "list[ReviewAssessmentRevision]",
+                    [
+                        {
+                            **_revision().model_dump(mode="json"),
+                            "authorRef": "somebody-else@leaf",
+                        }
+                    ],
+                ),
                 expected_predecessor_digest=str(prepared["predecessorAuthorityDigest"]),
                 expected_code_candidate_tree=str(prepared["codeCandidateTree"]),
                 expected_memory_candidate_tree=str(prepared["memoryCandidateTree"]),

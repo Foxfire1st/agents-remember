@@ -8,7 +8,7 @@
 
 ```text
 src/orchestrator/core_editor.py
-ar-memory/onboarding/src/orchestrator/core_editor.py.md
+memory-repos/ar-agents-remember/onboarding/src/orchestrator/core_editor.py.md
 ```
 
 - **Path-addressed memory:** A source file's note lives at a deterministic mirror path, so an agent holding a file can reach the right context without search, ranking, or guesswork.
@@ -18,7 +18,7 @@ ar-memory/onboarding/src/orchestrator/core_editor.py.md
 - **Repo-owned agent behavior:** Each memory repo carries `system/` files for path rules, tools, coding guidelines, documentation sources, branch policy, and reporting shape, so the same project rules load across harnesses.
 - **Harness-ready first run:** Starter packages for Claude Code, Codex, Cursor, Antigravity, VS Code Copilot, Hermes, Pi.dev, and OpenClaw carry the native MCP, skills, hooks, rules, and instruction files each harness needs.
 
-The default setup stores durable memory in the target repository under `ar-memory/`. Teams that need separate memory repositories can use external memory under `ar-coordination/memory-repos/ar-<repo>/`. For the full tour, see [Features](docs/features.md).
+The setup stores durable memory in a memory repository of its own, under `ar-coordination/memory-repos/ar-<repo>/`. Repo-local internal memory under `<repo>/ar-memory/` was removed from the product and is refused. For the full tour, see [Features](docs/features.md).
 
 ## Start Here
 

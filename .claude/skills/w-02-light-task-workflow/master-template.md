@@ -154,9 +154,10 @@ is scoped to one slice and points back at the master:
 4. Only the master records the version bump and release; sub-tasks never bump.
 5. Each slice runs its relevant targeted checks plus its listed requirement checks before handoff,
    and records failures or not-run checks without claiming full green from a subset. Closeout and
-   integration publish only the authorized code/memory/ledger Git transactions; full code quality,
-   full tests, full memory quality, curator certification, and independent review run only on an
-   explicit developer request.
+   integration publish only the authorized code/memory/ledger Git transactions. Curation is always
+   complete — the curator runs the full memory-quality operation and its result travels with the
+   handoff as a prerequisite — while full code quality, full tests, and independent review run only
+   on an explicit developer request.
 6. Decision logs are append-only in both the master and the sub-task files.
 7. Any slice that introduces or retains durable test evidence records a registered stable executable
    contract or an exact expiry/retirement event in that slice; the master may not hide this decision

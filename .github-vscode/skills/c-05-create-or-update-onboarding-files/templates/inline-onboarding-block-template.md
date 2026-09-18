@@ -14,7 +14,7 @@ scope: file
 governingOverview: <nearest governing overview.md>
 
 Governing Overview:
-- <Nearest route-local overview that governs this file, or root overview.md if none exists.>
+- <Markdown link to the nearest route-local overview that governs this file, or to root overview.md if none exists -- the SAME value the governingOverview field above carries, written relative to this card. A bare path with no link declares no body link.>
 
 Purpose:
 - <What this source file is responsible for and why it matters.>

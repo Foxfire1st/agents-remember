@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents_remember.application.memory_mode_refusal import (
+    memory_mode_refusal_evidence,
+    memory_mode_refusal_payload,
+)
+from agents_remember.errors import MemoryModeUnsupportedError
 from agents_remember.kernel.authority import require_within_coordination
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.worktrees.closeout_input import CloseoutInputError
@@ -38,7 +43,11 @@ from agents_remember.worktrees.integration.lifecycle.lifecycle_public_evidence i
 from agents_remember.worktrees.integration.lifecycle.observation.projection import (
     unreadable_contract_operation_projections,
 )
-from agents_remember.worktrees.worktree_contract import ContractError, load_contract
+from agents_remember.worktrees.worktree_contract import (
+    ContractError,
+    WorktreeContract,
+    load_contract,
+)
 
 from .configured_contract_admission import (
     ConfiguredContractRefused,
@@ -147,10 +156,10 @@ def _direct_recovery_action(
     request: DirectLandingRequest,
 ) -> dict[str, object]:
     path = require_within_coordination(config, request.contract_path, "contract_path")
-    try:
-        contract = load_contract(path)
-    except (ContractError, OSError, UnicodeError, ValueError) as exc:
-        return _unreadable_direct_decision(config, path, exc)
+    read = _read_direct_contract(config, path)
+    if isinstance(read, dict):
+        return read
+    contract = read
     try:
         record = direct_landing_store(contract).read()
     except LifecycleOperationReadError as error:
@@ -200,6 +209,61 @@ def _unreadable_direct_decision(
     if projected is not None:
         return projected
     return _missing_direct_generation_decision(location, contract_path, error)
+
+
+def _read_direct_contract(
+    config: McpRuntimeConfig,
+    path: Path,
+) -> WorktreeContract | dict[str, object]:
+    """Read the direct-landing contract, or answer with the refusal its failure deserves.
+
+    The removed memory mode is refused first: the generic clause would answer with an unreadable
+    decision that names neither the recorded value nor the supported set nor the route.
+    """
+
+    try:
+        return load_contract(path)
+    except MemoryModeUnsupportedError as exc:
+        return _removed_memory_mode_direct_decision(config, path, exc)
+    except (ContractError, OSError, UnicodeError, ValueError) as exc:
+        return _unreadable_direct_decision(config, path, exc)
+
+
+def _removed_memory_mode_direct_decision(
+    config: McpRuntimeConfig,
+    contract_path: Path,
+    error: MemoryModeUnsupportedError,
+) -> dict[str, object]:
+    """Report the removed memory mode with its route, without losing a retained generation.
+
+    A retained direct-landing generation still outranks a fresh refusal: the recovery route it
+    publishes is executable, and dropping it would strand a task whose recovery exists. The
+    refusal facts are published when there is none -- which is exactly the case the generic
+    "unreadable" decision used to answer with no value, no supported set and no route.
+    """
+
+    location, decision = _direct_operation_location(config, contract_path)
+    if decision is not None:
+        return decision
+    assert location is not None
+    projected = _unreadable_direct_projection(location, contract_path, error)
+    if projected is not None:
+        return projected
+    return {
+        "expected": {
+            "contractPath": location.contract_path.as_posix(),
+            "supported": list(error.supported),
+            "artifact": error.artifact or contract_path.as_posix(),
+        },
+        "observed": public_failure_evidence(
+            stage="contract-read",
+            side="contract",
+            name=contract_path.name,
+            error_type=type(error).__name__,
+            observed=memory_mode_refusal_evidence(error),
+        ),
+        **memory_mode_refusal_payload(error),
+    }
 
 
 def _direct_operation_location(

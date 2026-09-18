@@ -53,6 +53,7 @@ from agents_remember.models.knowledge.detection import (
     DetectionRunPayload,
     DetectionRunResult,
     DetectionScopeManifest,
+    DetectionSide,
     DetectionSignalPayload,
     ManifestDestinationObservation,
     conclusion_bearing_fields,
@@ -80,7 +81,7 @@ def snapshot(repository_id: str, digest: str, *, schema_version: str = "ar-knowl
     )
 
 
-def input_side(side: str, digest: str) -> DetectionInputSide:
+def input_side(side: DetectionSide, digest: str) -> DetectionInputSide:
     return DetectionInputSide(
         side=side,
         context=KnowledgeReadContext(

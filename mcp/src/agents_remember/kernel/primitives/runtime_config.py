@@ -20,6 +20,10 @@ from agents_remember.kernel.agentic_settings import (
     parse_gate_delegation,
 )
 from agents_remember.kernel.git_command import run_git
+from agents_remember.kernel.memory_mode import (
+    legacy_internal_memory_root,
+    refuse_removed_memory_mode,
+)
 from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.gate_policy import DEFAULT_GATE_POLICY, GatePolicy
 from agents_remember.kernel.primitives.identity import (
@@ -402,8 +406,9 @@ def _require_unique_repository_git_identities(
             if repository.memory_root is not None
             else None
         )
-        # An internal memory directory is intentionally part of the code repository, not
-        # a second external-memory authority edge.
+        # A memory root inside the code repository would not be a second authority edge, but
+        # no supported mode has one: `default_memory_root` refuses that layout before this
+        # check, so a memory identity here is always a real external edge.
         if memory_identity is not None and memory_identity != code_identity:
             _claim_configured_git_identity(owners, memory_identity, repo_id, "memory")
 
@@ -435,9 +440,15 @@ def _claim_configured_git_identity(
 
 
 def default_memory_root(repo_path: Path, coordination_root: Path, repo_id: str) -> Path:
-    internal_memory_root = repo_path / "ar-memory"
-    if internal_memory_root.exists():
-        return internal_memory_root.resolve()
+    """The configured repository's memory root: the external one, always.
+
+    A repo-sidecar ``<repo>/ar-memory`` root used to win here silently. It is now reported
+    instead: a repository still carrying one is in the removed layout, and answering with its
+    path would re-admit the mode through the configuration reader.
+    """
+    legacy_root = legacy_internal_memory_root(repo_path)
+    if legacy_root.exists():
+        refuse_removed_memory_mode("internal", artifact=legacy_root.as_posix())
     return coordination_root / "memory-repos" / f"ar-{repo_id}"
 
 

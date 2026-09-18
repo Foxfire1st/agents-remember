@@ -6,32 +6,27 @@ Agents Remember is built around a small set of concepts. The names matter becaus
 
 An onboarding unit is durable repository knowledge that an agent can retrieve deterministically.
 
-In the default repo-local mode, a source file maps to a mirrored Markdown file:
+A source file maps to a mirrored Markdown file inside its repository's memory repo:
 
 ```text
 src/foo/bar.ts
-ar-memory/onboarding/src/foo/bar.ts.md
+ar-coordination/memory-repos/ar-my-app/onboarding/src/foo/bar.ts.md
 ```
 
 The onboarding unit should explain what the code does not make obvious: invariants, intent, boundaries, conventions, cross-repo edges, and risky assumptions. It should not duplicate code, type signatures, or obvious implementation details.
 
 ## Memory Root
 
-The memory root is where durable memory for one code repository lives.
-
-Internal memory:
-
-```text
-<repo>/ar-memory/
-```
-
-External memory:
+The memory root is where durable memory for one code repository lives:
 
 ```text
 <ar-coordination>/memory-repos/ar-<repo>/
 ```
 
-Internal memory is the default. External memory is for teams that intentionally want memory in a separate repository.
+External memory is the only supported topology: memory is a repository of its own, so it can be
+branched, committed and reviewed separately from the code it describes. Repo-local internal
+memory under `<repo>/ar-memory/` was removed from the product; a repository that still carries
+that layout is refused by name with its exact path.
 
 ## Coordination Root
 
@@ -47,7 +42,7 @@ It owns installed skills, installed `AGENTS.md` templates, task files, notes, wo
 
 Agents reach memory through three substrates, matched to what they already know.
 
-- **By path** — when an agent has a file in hand, its note is located directly from the path: `src/foo/bar.ts` → `ar-memory/onboarding/src/foo/bar.ts.md`. No lookup, ranking, or index step — the path *is* the address. Reads stay predictable, and unrelated-but-similar material stays out of context.
+- **By path** — when an agent has a file in hand, its note is located directly from the path: `src/foo/bar.ts` → `<memory-root>/onboarding/src/foo/bar.ts.md`. No lookup, ranking, or index step — the path *is* the address. Reads stay predictable, and unrelated-but-similar material stays out of context.
 - **By meaning** — when the concept is known but the file is not, semantic search over the memory finds candidate notes. This is the reverse of `code → onboarding`: a vague description leads to an onboarding note, whose path then names the code file, with pointers to the surrounding logic.
 - **By relationship** — when an anchor is known but its connections are not, a code-relationship graph answers callers, callees, and dependencies.
 

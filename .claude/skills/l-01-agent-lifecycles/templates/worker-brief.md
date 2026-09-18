@@ -6,6 +6,12 @@ checkpoint, reframe, plan). Compile it fresh per leaf from this shape; the prove
 absorbed a series of real dispatch frictions (route-index leaks, attestation format, provider-stack
 keying, missing `python` shim), so deviate knowingly or not at all.
 
+**This template feeds inputs; it does not author rules.** Where the packet states a rule, the rule's
+single home is `../roles/worker.md` (the seat's own duties), `../operations/implementation.md` and
+`../operations/closeout.md` (the build procedure and the targeted-check contract), or
+`../core/acceptance.md` (the acceptance envelope, attempt lineage, and completion truth). The rows
+below carry the *values* for this leaf; if a value here disagrees with those files, they win.
+
 Dispatch with `dispatch_agent(task_document_ref=<canonical leaf document>, role="worker",
 brief=<this complete brief>)`. The control plane claims the `(leaf document, worker)` seat and
 privately binds its current occupant; the brief never carries a runtime address.
@@ -20,7 +26,7 @@ ROLE BRIEF — worker
 You are a WORKER for leaf `<leaf-id>` of master `<master>` (repo: <repo-id>). Your lifecycle is
 `skills/l-01-agent-lifecycles/roles/worker.md`; this brief is your session start. Execute the leaf
 code completely, write your builder turn report, then stop. Leaf closeout consumes the
-builder code, worker report, and (when memory changed) curator scoped onboarding/check handoff.
+builder code, worker report, and (when memory changed) the curator's complete onboarding/check handoff.
 Review is dispatched only when the developer or approved task brief requests it. After a stable
 code handoff, a `reviewMode=baseline` manager may dispatch an independent reviewer chair
 which fans out one reviewer per materially affected major route. An R27 successor uses
@@ -150,11 +156,13 @@ verdict finding, not a style note.
   review round; applicable non-code checks follow repository policy.
 - Read `system/git-workflow.md`, `system/coding-guidelines.md`, and `system/tools.md`; use their
   repository-specific targeted-check commands, environment, and evidence requirements. Do not
-  invent a runner or fallback. Full quality/test operations require an explicit developer request.
+  invent a runner or fallback. Full code-quality and full-test operations require an explicit
+  developer request; curation does not, because the curator always runs it complete.
 - Closeout and integration are Git code/memory/ledger transactions. They do not launch automatic
-  code-quality, full-suite, memory-quality, curator-certification, or independent-review work.
-  Full code quality, full tests, and full memory quality run only after an explicit developer
-  request. A failed or not-run targeted check is reported and never relabeled as full green.
+  code-quality, full-suite, or independent-review work, and full code quality and full tests run only
+  after an explicit developer request. Curation is the exception: the curator always runs the full
+  memory-quality operation as part of curation, and closeout and integration carry that result as a
+  prerequisite. A failed or not-run targeted check is reported and never relabeled as full green.
 - `git diff --check` in both worktrees.
 - Separate durable-evidence promotion hold point: for each new/retained fixture, recording, shared support,
   or proof, record either its registered owner + executable stable contract or its dated

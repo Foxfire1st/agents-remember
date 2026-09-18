@@ -390,17 +390,17 @@ Use explicit templates instead of inferring artifact shape from prior examples:
 Required table columns:
 
 ```markdown
-| Finding | Citations | Source Path |
-| ------- | --------- | ----------- |
+| Finding | Anchor | Source |
+| ------- | ------ | ------ |
 ```
 
 Rules:
 
 1. `Finding` is a concise summary of what the cited lines establish.
-2. `Citations` records exact line ranges, for example `L10-L18` or `L10-L18; L42-L47`.
-3. `Docs References` uses canonical documentation links, even when a local mirror was read for line access.
+2. `Anchor` names what the cited lines must contain: a backticked identifier, a backticked `#`-heading, or a double-quoted literal that occurs inside the range. `Source` is plain `path:start-end`, never a markdown link and never a bare `L10-L18` range.
+3. `Docs References` still names the canonical documentation URL in its prose summary; the row itself cites the file that carries the quoted text. A canonical URL belongs in the summary, not in a `Source` cell.
 4. `Repo-Internal References` uses same-repo source, test, config, generated artifact, or onboarding evidence.
-5. `Cross-Repo References` uses workspace-relative links to adjacent repo code/onboarding or external boundary proof.
+5. `Cross-Repo References` cites adjacent-repo code or onboarding as `path:start-end`; external boundary proof is named in the prose summary and anchored to the quoted text it states.
 6. Never emit absolute filesystem paths in onboarding output.
 7. Treat `system/sources.md`, search registries, embedding hits, and source lists as routing inputs only. Never cite them as proof.
 8. If no relevant source exists, keep the section and record what was checked plus that no relevant evidence was found.
@@ -1089,6 +1089,16 @@ The handoff lists:
 
 Automated bootstrap stops at this handoff/review boundary. After presenting the handoff, ask whether a separate closeout should run.
 
+**Bootstrap output is not a baseline.** This skill produces onboarding content; it does not
+commit it, and it does not create a ledger. When the memory repo is newly scaffolded, the next
+step is `c-10-adopt-memory-baseline`, which commits this content as the first attributed
+memory baseline and computes the ledger cache from it. Name that next step in the handoff and
+say whether it has already run.
+
+`bootstrap/` is transient scaffolding and is never part of a memory commit - not the first
+baseline, not a later one. Whether it is removed before adoption is the developer's decision,
+and adoption excludes it either way.
+
 ---
 
 ## Guided Mode Defaults
@@ -1239,6 +1249,7 @@ The orchestrator remains thin throughout.
 | `c-08-ar-coordination-context-resolver`           | Required first step. Resolves memory root, settings, sources, path rules, storage, and cross-repo policy.     |
 | `c-05-create-or-update-onboarding-files`          | Owns final file-level onboarding semantics and routes structural slice maintenance back to the `c-03-repo-bootstrap` skill. The `c-03-repo-bootstrap` skill creates cards/waves and delegates file output rules to the `c-05-create-or-update-onboarding-files` skill. |
 | `c-04-retrieval-strategy-router`                  | Consumes bootstrapped overviews and file maps as the Intent substrate and can route to semantic/relationship providers first. |
+| `c-10-adopt-memory-baseline`                      | The next step on a newly scaffolded memory repo: commits this skill's output as the first attributed memory baseline and computes the ledger cache. It owns the drift check and the adoption procedure. |
 | `c-02-memory-quality-control`                     | Becomes relevant after bootstrap; touched files can be promoted from deferred to covered.                     |
 | `l-01-agent-lifecycles`                           | May trigger targeted bootstrap when an active job enters an uncovered area.                                   |
 | `confluence-search` / documentation search skills | Feed the docs evidence pass through approved sources from the input ledger.                                   |
@@ -1263,3 +1274,5 @@ This skill implementation is successful when:
 12. guards prevent the likely bad behaviors without adding compatibility scaffolding for alpha-era labels
 13. existing-memory slice maintenance can create, refresh, move, or clean up route-local memory without treating the repo as blank
 14. automated bootstrap ends at handoff and asks whether separate closeout should run
+15. a newly scaffolded memory repo's next step is named: `c-10-adopt-memory-baseline` commits the bootstrap output as the first attributed baseline and creates the ledger row that maps memory content to a code commit
+16. `bootstrap/` scaffolding is stated as transient and is never part of a memory commit

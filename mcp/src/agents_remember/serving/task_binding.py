@@ -57,6 +57,32 @@ class TaskDocumentResolutionFailure(ValueError):
         super().__init__(str(error))
 
 
+#: The seat roles that are deliberately **not** task-bound: a session opened with one of
+#: these and no task document is the intended shape, not an incomplete claim.
+#:
+#: Membership here is a real policy decision, which is why it is a named set rather than a
+#: literal inside the refusal — the ruling has to be legible to the next reader:
+#:
+#: * ``chat`` — the legacy fallback for a session that declared no role; it has no task by
+#:   construction.
+#: * ``terminal`` — a plain shell. It is not an agent and has no obligations at all.
+#: * ``bootstrap`` — the new user's first-hour **free agent**. Developer ruling 2026-09-16:
+#:   *"It is not a task related agent. Can't be. It needs to be free agent. All what it needs
+#:   is that can 'call'."* A regular agent starts it by opening a session with this role and
+#:   no task document; its instructions are its compiled capsule rather than a dispatched
+#:   brief.
+#:
+#: Being taskless means **the structural altitude check does not run for these roles at all**,
+#: with or without a document. That is measured behaviour, not an accident of the condition
+#: below: a taskless role has no task altitude to validate against, so validating one would
+#: only ever produce "role 'bootstrap' has no structural task altitude". The document, when a
+#: caller supplies one, is still **resolved** — a bad reference is still refused as
+#: ``task-binding-invalid`` — and then the altitude check is skipped for every member of this
+#: set, not only for ``terminal``. An unknown role is still refused, because it is outside the
+#: set and therefore takes the structural path.
+TASKLESS_SEAT_ROLES: frozenset[str] = frozenset({"chat", "terminal", "bootstrap"})
+
+
 def resolve_task_binding(
     coordination_root: Path,
     request: TaskBindingRequest,
@@ -107,7 +133,8 @@ def _binding_refusal(
     ):
         return TaskBindingRefusal("task-binding-invalid")
     document = request.task_document_ref or request.replacement_for_task_document_ref
-    structural_role = request.seat_role not in {"chat", "terminal"}
+    # A taskless seat needs no document; every other role does. See TASKLESS_SEAT_ROLES.
+    structural_role = request.seat_role not in TASKLESS_SEAT_ROLES
     if document is None:
         return TaskBindingRefusal("task-binding-required") if structural_role else None
     if not structural_role:

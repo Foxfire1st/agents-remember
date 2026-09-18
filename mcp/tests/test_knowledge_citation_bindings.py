@@ -60,6 +60,7 @@ from agents_remember.models.knowledge.citation import (
     CitationBindingCounts,
     CitationBindingPayload,
     CitationBindingRequest,
+    CitationBindingState,
     CitationTargetReference,
     KeyFormCoverage,
     ProseCitationKey,
@@ -211,7 +212,9 @@ def test_the_prose_mark_is_the_one_the_shipped_grammar_declares() -> None:
 
 
 @pytest.mark.parametrize("state", SHIPPED_BINDING_STATES)
-def test_every_shared_fact_reports_the_identical_shipped_literal(state: str) -> None:
+def test_every_shared_fact_reports_the_identical_shipped_literal(
+    state: CitationBindingState,
+) -> None:
     """§4.1a: each shared fact carries the **identical literal** on both surfaces.
 
     This is the case the packet names: a second vocabulary for one fact is how a silent drop becomes

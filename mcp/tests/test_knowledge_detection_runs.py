@@ -60,6 +60,7 @@ from agents_remember.models.knowledge.detection import (
     DetectionRunPayload,
     DetectionRunRequest,
     DetectionScopeManifest,
+    DetectionSide,
     DetectionSignalPayload,
     ManifestDestinationObservation,
     conclusion_bearing_fields,
@@ -254,7 +255,7 @@ def comparison(items: list[KnowledgeDiffItem], *, changed_sources: int = 2) -> K
     )
 
 
-def input_side(side: str, digest: str) -> DetectionInputSide:
+def input_side(side: DetectionSide, digest: str) -> DetectionInputSide:
     return DetectionInputSide(
         side=side,
         context=KnowledgeReadContext(
@@ -623,6 +624,7 @@ def test_a_recorded_run_reads_back_in_its_recorded_order_with_two_place_versions
     assert read_back.state == "read", read_back.refusal
     assert read_back.ordered_signal_ids() == run.signal_order
     assert read_back.ordered_signal_ids() == tuple(signal.signal_id for signal in signals)
+    assert read_back.run is not None
     for produced in read_back.signals:
         assert produced.policy_version == read_back.run.policy_version
         assert produced.extractor_version == read_back.run.extractor_version

@@ -42,9 +42,10 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 14
-LIFECYCLE_ARTIFACT_COUNT = 55
-LIFECYCLE_CATALOG_SHA256 = "96347b54548828d285516877997e13335864c142e14c573e808c15fffcc0eb02"
-"""``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately once.
+LIFECYCLE_ARTIFACT_COUNT = 64
+LIFECYCLE_CATALOG_SHA256 = "786569ce45f49bec812ff709a99176b3083521998d7e253f2a5ef8024eedfbb9"
+"""``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately nine times since its
+first pin -- the ten records below, one per deliberate value, in file order.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
 ``a9d83c375d1bfdcae7d0c46020eba41fbaf305a306fe89bb1b9b479b861c2002``. ``LOCR-R26@v1``'s
@@ -106,11 +107,114 @@ admitted candidate through the facet leaf's ``knowledge-facet-cases`` helpers ra
 third fixture of their own, and they read their graphs through the ``knowledge-generation-cases`` and
 ``knowledge-read-scope-cases`` support modules the earlier leaves registered -- so the counts stay
 thirteen and fifty-four and this value is the catalog after L17's consumer registration.
-``260915-KS``'s L12 leaf then registered its own supporting-record support module --
-``mcp/tests/evidence_test_support.py``, a new contract and a new artifact -- which is what this value
-pins: fourteen contracts and fifty-five artifacts. The proof's own artifact delta remains exactly
-empty -- none of these rows is the proof's -- so the freeze still forbids the proof adding or widening
+The digest was first pinned at the R16 proof's landing (5b7a84f2) as
+``a9d83c375d1bfdcae7d0c46020eba41fbaf305a306fe89bb1b9b479b861c2002``. ``LOCR-R26@v1``'s
+catalog-freeze clause was then amended by explicit developer decision to permit registering
+artifacts that ANOTHER leaf introduced, and the two ``LOCR-L04`` handoff support modules were
+registered, closing the inventory. This value is the post-registration catalog. The proof's own
+artifact delta remains exactly empty, so the freeze still forbids the proof adding or widening
 anything, and any further catalog change must re-pin this digest deliberately.
+
+**Second deliberate re-pin (260915-CAPS-L16, 2026-09-16).** The first re-pin left the pin behind
+the file: at the source-line convergence merge ``23cc7a72`` the catalog was already
+``bb567a25f30b9e3bdbd48a9dd1d2641a6a240763f545ddeca1a4b7932e98cb15`` over **4 contracts / 50
+artifacts** while this pin still read ``293a187f…`` / 45, because the merge carried the landed
+260831-LOCR line's governed artifacts in without a re-pin, and ``260915-CAPS-L13`` then moved the
+file again (``9ea1d207…``, 4/50). That stale pin was the single pre-existing integration failure
+(D10) inherited by every candidate cut from the master tip, and it is nobody's finding.
+
+The value below is re-derived at ``8997e184`` -- the tip this leaf lands -- where the catalog is
+``812211e9…`` over **4 contracts / 51 artifacts**: ``260915-CAPS-L7``'s landing added the
+fifty-first governed artifact row. The population moved 45 -> 50 (the merged LOCR line) -> 51
+(L7), and each of those states was measured rather than assumed. It is pinned here because a leaf
+that changes the catalog last must pin the value at its own tip; a value correct for someone
+else's base re-reds the moment this one lands. The proof's own artifact delta is still exactly
+empty: this leaf registered nothing and added no consumer.
+
+**Third deliberate re-pin (260915-CAPS-L15, 2026-09-17).** ``260915-CAPS-L15`` added **consumer
+rows only** — the three governed artifacts its acceptance module reaches through the shared test
+support it imports — so the populations stayed at **4 contracts / 51 artifacts** and the catalog
+became ``3342a249…`` at that leaf's tip. Nothing was registered, no row was removed and no
+artifact's identity moved: only the consumer proofs of ``curator_coherence_test_support.py``, the
+Node ``package-lock.json`` fixture and the Codex ``model_page`` recording gained the new importer,
+which is the same shape L7 used when its own module became a consumer.
+
+**Fourth deliberate re-pin (260915-CAPS-L14, 2026-09-17) — the merged value.** ``260915-CAPS-L14``
+added the fresh-user acceptance harness under ``scripts/e2e_harness/`` — a declared permanent
+evidence-support root — so three governed artifacts entered the inventory and the population moved
+51 -> **54**. L15 landed first, so this value is re-derived against the **merged** artifact set:
+L14's three registered rows **plus** L15's consumer rows, over **4 contracts / 54 artifacts**, and
+the catalog is ``5e938c85…`` — which is neither leaf's own figure (L14 measured ``3c7f184e…``
+before L15 landed, L15 measured ``3342a249…`` before L14's rows existed). Unlike the first two
+re-pins this one registers *new* artifacts rather than consumers of existing ones: each row
+declares its exact source-derived consumers and an executable ``node:`` replacement, and
+``mcp/tests/test_fresh_user_harness.py`` is the module that answers for all three (it is the
+literal-path consumer, the shape proof for the fixtures, and the guard that a step which cannot run
+is recorded ``blocked`` and never ``completed``).
+
+**Fifth deliberate re-pin (260915-CAPS-L17, 2026-09-17) — its own branch's merged value.** ``260915-CAPS-L17``
+added one real test module (``mcp/tests/test_eve_effort_runtime.py``) which begins the shipped
+runtime and therefore consumes three already-governed artifacts — the eve adapter and capsule
+shared-support modules and the portable Node lockfile fixture — so the census requires its path on
+those three rows. **No artifact was registered and no contract changed**: the population stays at
+**4 contracts / 51 artifacts**, and the only new bytes are three consumer entries on top of L15's.
+L15 landed first, so this value is re-derived against the **merged** catalog rather than carried
+from either leaf's base: ``563582a0…``, which is neither L15's ``3342a249…`` nor the
+``22ce7027…`` this leaf measured before L15 landed.
+
+**Sixth deliberate re-pin (260915-CAPS-L17, 2026-09-17) — the merged value at landing.** `260915-CAPS-L17` added **consumer
+rows only** (its new runtime module reaches three already-governed artifacts), and L14 landed first, so this value is
+re-derived against the **merged** catalog: L14's fifty-fourth artifact row plus this leaf's three consumer entries,
+over **4 contracts / 54 artifacts**, giving `e3651d6f…`. Neither L14's `5e938c85…` nor this leaf's pre-sync
+`563582a0…` (measured at 51 artifacts before L14 landed) is correct at this tip.
+
+**Seventh deliberate re-pin (260915-CAPS-L9, 2026-09-17) — this leaf's own branch value.** ``260915-CAPS-L9`` added
+**consumer rows only** — two of them, for the one governed artifact its installer surface reaches:
+``mcp/tests/fixtures/repository_profiles/node/package-lock.json``. Measured at this leaf's own base the
+populations were unchanged at **4 contracts / 51 artifacts** and the catalog stood at ``8764ea1f…``. One row is the
+leaf's new module (``test_capsule_experiment_install.py``), which reads the pinned application's committed lockfile
+through the installer it drives; the other is ``test_install_runtime.py``, which became a consumer of the same
+artifact because the module it imports now reaches the lockfile — the same propagation L7, L14 and L15 recorded when
+their own modules became consumers. Nothing was registered, no row was removed and no artifact's identity moved.
+**This figure and the one below are historical**: each was correct at the first-sync tip it was measured at, and
+neither is correct at the merged tip.
+
+**Eighth deliberate re-pin (260915-CAPS-L9, 2026-09-17) — the first merged value.** ``260915-CAPS-L14`` landed while
+this leaf was in flight, so this value was re-derived after ``worktree_sync`` against the **merged** catalog: L14's
+three registered rows plus this leaf's two consumer entries, over **4 contracts / 54 artifacts**, giving
+``dca9c2f9…``. Neither L14's ``5e938c85…`` nor this leaf's pre-sync ``8764ea1f…`` was correct at that tip.
+
+**Ninth deliberate re-pin (260915-CAPS-L9, 2026-09-17) — the merged value at this leaf's landing.** ``260915-CAPS-L17``
+then landed as well, so the value is re-derived a second time against the **merged** catalog: L14's three registered
+rows, L17's three consumer entries and this leaf's own two consumer entries, over **4 contracts / 54 artifacts**,
+giving ``31c6983d…``. Neither L17's landing figure ``e3651d6f…``, nor the first merged value ``dca9c2f9…``, nor this
+leaf's pre-sync ``8764ea1f…`` is correct here. The measured delta against L17's landed catalog is exactly this leaf's
+two added consumer paths and nothing else, which is why the value could not be taken from either leaf's figure.
+
+**Tenth deliberate re-pin (260915-CAPS-L21, 2026-09-17) — consumer rows only.** ``260915-CAPS-L21`` added one real
+test module, ``mcp/tests/test_citation_migrate_registration.py``, which drives the MCP tool registration through the
+shared test support and therefore consumes the portable Node lockfile fixture: the census requires its path on that
+row. **Nothing was registered, no row was removed and no artifact's identity moved**, so the populations stay at
+**4 contracts / 54 artifacts** and the only new bytes are one consumer entry. The value is re-derived at this leaf's
+own tip (L9 landed first and its ninth re-pin is the base), giving ``0bf0a2be…``, and the measured delta against
+L9's landed catalog is exactly that one consumer path and nothing else. The proof's own artifact delta remains
+exactly empty.
+``260915-KS``'s L12 leaf then registered its own supporting-record support module --
+``mcp/tests/evidence_test_support.py``, a new contract and a new artifact -- which is what that
+line's own value pinned as fourteen contracts and fifty-five artifacts on its own branch. **This is
+the pin in force, and it is the merge's**: at the merge of the two lines the measured merged
+population is **fourteen contracts and sixty-four artifacts** -- this master's ten
+knowledge-substrate rows plus the ias line's nine rows, on top of the forty-five rows both sides
+already carried -- with this master's consumer additions retained alongside the ias line's. Five rows
+both sides touched carry the union of both sides' consumer entries rather than either side's list:
+``mcp/tests/curator_coherence_test_support.py`` (45 + 47 -> 48),
+``mcp/tests/lifecycle_enclosure_test_support.py`` (2 + 3 -> 3),
+``mcp/tests/fixtures/repository_profiles/node/package-lock.json`` (22 + 103 -> 103),
+``scripts/e2e_harness/reporting.py`` (4 + 6 -> 6) and ``scripts/e2e_harness/run.py`` (5 + 3 -> 5,
+the one case where the union is simply this master's list because the ias side's three entries are
+all inside it). The proof's own artifact delta remains exactly empty -- none of these rows is the
+proof's -- so the freeze still forbids the proof adding or widening anything, and any further
+catalog change must re-pin this digest deliberately.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"

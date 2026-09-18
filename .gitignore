@@ -38,3 +38,10 @@ mcp/tests/fixtures/sim-rich/
 # unignored is staged and committed rather than merely ignored by ruff.
 .dmypy.json
 .mypy_cache/
+
+# The AR-owned eve runtime application's install and generated trees. `package.json` and the
+# authored `agent/` surface are the source; `node_modules/` (already ignored above), eve's
+# compile/discovery artifacts and its host output are machine-local build products.
+/eve_runtime/.eve/
+/eve_runtime/.output/
+/eve_runtime/.vercel/

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
 
 from agents_remember.kernel.coordination_context import paths as _paths
 from agents_remember.kernel.coordination_context import resolver as _resolver
@@ -43,14 +42,11 @@ from agents_remember.kernel.coordination_context.paths import (
     DEFAULT_AR_COORDINATION_ROOT,
     agents_repo_from_script,
     clean_scalar,
-    default_storage_mode,
     external_memory_root,
     extract_yaml_blocks,
     find_code_repository_root,
     infer_settings_path,
     infer_topology_from_onboarding_root,
-    internal_coordination_root,
-    internal_memory_root,
     looks_like_installed_coordination_root,
     memory_roots_from_settings,
     mirror_onboarding_path,
@@ -103,6 +99,15 @@ from agents_remember.kernel.coordination_context.storage import (
     rule_patterns,
     source_file_type,
 )
+from agents_remember.kernel.memory_mode import (
+    SUPPORTED_MEMORY_MODES,
+    SUPPORTED_TOPOLOGIES,
+    MemoryMode,
+    MemoryModeUnsupportedError,
+    Topology,
+    legacy_internal_coordination_root,
+    legacy_internal_memory_root,
+)
 
 
 def resolve_coordination_root_hint(coordination_root: Path | None) -> Path:
@@ -112,7 +117,7 @@ def resolve_coordination_root_hint(coordination_root: Path | None) -> Path:
 def detect_coordination_selection(
     code_repository_name: str,
     code_repository_root: Path,
-    requested_topology: Literal["internal", "external"] | None = None,
+    requested_topology: Topology | None = None,
     coordination_root_hint: Path | None = None,
     settings_path: Path | None = None,
 ) -> CoordinationSelection:
@@ -161,6 +166,8 @@ def _with_facade_agents_repo(function, *args, **kwargs):
 
 __all__ = [
     "DEFAULT_AR_COORDINATION_ROOT",
+    "SUPPORTED_MEMORY_MODES",
+    "SUPPORTED_TOPOLOGIES",
     "CodeRepository",
     "CoordinationContext",
     "CoordinationHints",
@@ -169,9 +176,12 @@ __all__ = [
     "CrossRepoAllowEntry",
     "CrossRepoSettings",
     "EnclosureSelector",
+    "MemoryMode",
+    "MemoryModeUnsupportedError",
     "MissingMemoryError",
     "StorageRule",
     "StorageSettings",
+    "Topology",
     "_entry_with_state",
     "agents_repo_from_script",
     "build_coordination_context",
@@ -182,7 +192,6 @@ __all__ = [
     "cross_repo_entry_to_dict",
     "cross_repo_to_dict",
     "default_rule_storage",
-    "default_storage_mode",
     "default_unmatched_storage",
     "detect_coordination_selection",
     "excludes_file_type",
@@ -194,10 +203,10 @@ __all__ = [
     "git_head_or_empty",
     "infer_settings_path",
     "infer_topology_from_onboarding_root",
-    "internal_coordination_root",
-    "internal_memory_root",
     "invalid_cross_repo_entry",
     "is_sidecar_storage",
+    "legacy_internal_coordination_root",
+    "legacy_internal_memory_root",
     "looks_like_installed_coordination_root",
     "matches_any",
     "matches_file_type",

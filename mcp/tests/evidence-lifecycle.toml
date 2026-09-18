@@ -21,6 +21,56 @@ id = "synthetic-test-evidence-candidate"
 owner = "mcp/test_support/agents_remember_test_support/testing/evidence_lifecycle.py"
 evidence_node = "mcp/tests/test_dependency_ownership_ast_helpers.py::test_repository_inputs_reach_their_supported_consumers"
 
+[[contract]]
+id = "knowledge-identity-branching-fixture"
+owner = "mcp/tests/knowledge_fixture_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
+
+[[contract]]
+id = "knowledge-graph-case-support"
+owner = "mcp/tests/knowledge_graph_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_family_revision.py::test_the_family_lineage_rule_matches_the_invariant_rule"
+
+[[contract]]
+id = "candidate-batch-case-harness"
+owner = "mcp/tests/candidate_batch_test_support.py"
+evidence_node = "mcp/tests/test_candidate_batch_transaction.py::test_a_late_invalid_command_rolls_back_every_earlier_insert_in_the_batch"
+
+[[contract]]
+id = "knowledge-snapshot-lifecycle-cases"
+owner = "mcp/tests/snapshot_lifecycle_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_snapshot_publication.py::test_a_wal_resident_batch_is_published_whole_while_a_main_file_copy_is_not"
+
+[[contract]]
+id = "common-base-merge-cases"
+owner = "mcp/tests/merge_case_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_guarded_merge.py::test_disjoint_edits_from_both_sides_survive_in_a_closed_published_candidate"
+
+[[contract]]
+id = "knowledge-generation-cases"
+owner = "mcp/tests/generation_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_schema_generations.py::test_a_generation_1_dataset_keeps_its_own_body_under_generation_1"
+
+[[contract]]
+id = "knowledge-facet-cases"
+owner = "mcp/tests/facet_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_facets.py::test_the_seam_registry_is_exactly_the_eight_declared_subtypes"
+
+[[contract]]
+id = "knowledge-diff-cases"
+owner = "mcp/tests/diff_scope_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_diff_scope.py::test_a_realization_the_candidate_removed_keeps_its_baseline_source_in_the_union"
+
+[[contract]]
+id = "knowledge-read-scope-cases"
+owner = "mcp/tests/read_scope_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_read_scope.py::test_a_path_seed_returns_the_sibling_realizations_and_advertises_the_unreached_family"
+
+[[contract]]
+id = "knowledge-evidence-cases"
+owner = "mcp/tests/evidence_test_support.py"
+evidence_node = "mcp/tests/test_knowledge_evidence_claims.py::test_a_claim_reads_back_with_every_field_including_an_empty_limitations"
+
 [[artifact]]
 path = "mcp/tests/_control_plane.py"
 kind = "shared-support"
@@ -386,6 +436,9 @@ consumers = [
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
+  "mcp/tests/test_capsule_launch_wiring.py",
+  "mcp/tests/test_memory_branch_authority.py",
+  "mcp/tests/test_memory_mode_removal.py",
 ]
 
 [[artifact]]
@@ -461,6 +514,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_task_reopen.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
+  "mcp/tests/test_memory_mode_removal.py",
 ]
 
 [[artifact]]
@@ -634,6 +688,87 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
+  "mcp/tests/test_activation_admission_registered.py",
+  "mcp/tests/test_active_projector_singleflight.py",
+  "mcp/tests/test_agent_notifier_seat.py",
+  "mcp/tests/test_author_execution_graph.py",
+  "mcp/tests/test_capsule_experiment_install.py",
+  "mcp/tests/test_capsule_launch_wiring.py",
+  "mcp/tests/test_capsule_serving.py",
+  "mcp/tests/test_checkpoint_landing_end_to_end.py",
+  "mcp/tests/test_citation_index_resilience.py",
+  "mcp/tests/test_citation_migrate_registration.py",
+  "mcp/tests/test_codex_capsule_delivery.py",
+  "mcp/tests/test_compact_content.py",
+  "mcp/tests/test_context_packet.py",
+  "mcp/tests/test_conversation_active_service.py",
+  "mcp/tests/test_conversation_authorization.py",
+  "mcp/tests/test_conversation_control_api.py",
+  "mcp/tests/test_conversation_control_attachments.py",
+  "mcp/tests/test_conversation_control_queue.py",
+  "mcp/tests/test_conversation_library_api.py",
+  "mcp/tests/test_conversation_library_cursor.py",
+  "mcp/tests/test_conversation_library_open.py",
+  "mcp/tests/test_conversation_native_ingestion.py",
+  "mcp/tests/test_cross_master_concurrency.py",
+  "mcp/tests/test_cross_store_lock_order.py",
+  "mcp/tests/test_dispatch_agent_ambient.py",
+  "mcp/tests/test_dispatch_brief.py",
+  "mcp/tests/test_eve_adapter.py",
+  "mcp/tests/test_eve_effort_runtime.py",
+  "mcp/tests/test_eve_capsule_binding.py",
+  "mcp/tests/test_eve_capsule_runtime.py",
+  "mcp/tests/test_eve_product_integration.py",
+  "mcp/tests/test_eve_protocol.py",
+  "mcp/tests/test_fresh_user_harness.py",
+  "mcp/tests/test_harness_control_ipc.py",
+  "mcp/tests/test_harness_launch.py",
+  "mcp/tests/test_hosted_readiness.py",
+  "mcp/tests/test_inbox_rebinding_mechanics.py",
+  "mcp/tests/test_install_runtime.py",
+  "mcp/tests/test_layering.py",
+  "mcp/tests/test_leaf_doc_master_link_binding.py",
+  "mcp/tests/test_legacy_expectation_kinds_parse_only.py",
+  "mcp/tests/test_lifecycle_owned_completion_relay.py",
+  "mcp/tests/test_lifecycle_owned_completion_relay_reviewer.py",
+  "mcp/tests/test_lifecycle_playthrough_end_to_end.py",
+  "mcp/tests/test_memory_mode_removal.py",
+  "mcp/tests/test_models.py",
+  "mcp/tests/test_parked_external_await_separation.py",
+  "mcp/tests/test_pause_stop_only_end_to_end.py",
+  "mcp/tests/test_provider_containment.py",
+  "mcp/tests/test_provider_degradation.py",
+  "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_serving.py",
+  "mcp/tests/test_serving_files.py",
+  "mcp/tests/test_serving_notifier_handoff.py",
+  "mcp/tests/test_serving_observation_loop.py",
+  "mcp/tests/test_serving_shutdown_drain.py",
+  "mcp/tests/test_serving_startup_prime.py",
+  "mcp/tests/test_serving_terminal_catalog_read.py",
+  "mcp/tests/test_spawn_agent_session.py",
+  "mcp/tests/test_state_signal_boundary_delivery.py",
+  "mcp/tests/test_state_signal_curator_wake.py",
+  "mcp/tests/test_state_signal_relay.py",
+  "mcp/tests/test_state_signal_restart_recovery.py",
+  "mcp/tests/test_state_signal_worker_wake.py",
+  "mcp/tests/test_structural_dispatch_recovery.py",
+  "mcp/tests/test_task_doc_review_public.py",
+  "mcp/tests/test_task_doc_structural_publication_l2.py",
+  "mcp/tests/test_task_document.py",
+  "mcp/tests/test_task_document_application_1.py",
+  "mcp/tests/test_task_document_master.py",
+  "mcp/tests/test_task_sprint_linkage.py",
+  "mcp/tests/test_terminal_evidence_cursors.py",
+  "mcp/tests/test_terminal_evidence_mapping.py",
+  "mcp/tests/test_terminal_liveness.py",
+  "mcp/tests/test_terminal_liveness_deferred_work.py",
+  "mcp/tests/test_terminal_liveness_pane_authority.py",
+  "mcp/tests/test_terminal_liveness_registration_order.py",
+  "mcp/tests/test_terminal_observer_health.py",
+  "mcp/tests/test_tools.py",
+  "mcp/tests/test_wire_vocabulary_exhaustiveness_boundary.py",
+  "mcp/tests/test_worktree_status_terminal_next_tool.py",
 ]
 
 [[artifact]]
@@ -751,6 +886,8 @@ consumers = [
   "scripts/e2e_harness/run.py",
   "scripts/e2e_harness/scenario.py",
   "scripts/e2e_harness/scenario_evidence.py",
+  "scripts/e2e_harness/fresh_user_scenario.py",
+  "scripts/e2e_harness/run_fresh_user.py",
 ]
 
 [[artifact]]
@@ -1031,11 +1168,6 @@ consumers = [
   "mcp/tests/test_transaction_only_worktree_delivery.py",
 ]
 
-[[contract]]
-id = "knowledge-identity-branching-fixture"
-owner = "mcp/tests/knowledge_fixture_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_store.py::test_two_same_label_successors_reopen_as_separate_revisions"
-
 [[artifact]]
 path = "mcp/tests/knowledge_fixture_test_support.py"
 kind = "shared-support"
@@ -1065,11 +1197,6 @@ consumers = [
   "mcp/tests/test_knowledge_citation_boundaries.py",
 ]
 
-[[contract]]
-id = "knowledge-graph-case-support"
-owner = "mcp/tests/knowledge_graph_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_family_revision.py::test_the_family_lineage_rule_matches_the_invariant_rule"
-
 [[artifact]]
 path = "mcp/tests/knowledge_graph_test_support.py"
 kind = "shared-support"
@@ -1090,11 +1217,6 @@ consumers = [
   "mcp/tests/test_knowledge_relation_rules.py",
 ]
 
-[[contract]]
-id = "candidate-batch-case-harness"
-owner = "mcp/tests/candidate_batch_test_support.py"
-evidence_node = "mcp/tests/test_candidate_batch_transaction.py::test_a_late_invalid_command_rolls_back_every_earlier_insert_in_the_batch"
-
 [[artifact]]
 path = "mcp/tests/candidate_batch_test_support.py"
 kind = "shared-support"
@@ -1113,11 +1235,6 @@ consumers = [
   "mcp/tests/test_candidate_batch_commands.py",
   "mcp/tests/test_candidate_batch_transaction.py",
 ]
-
-[[contract]]
-id = "knowledge-snapshot-lifecycle-cases"
-owner = "mcp/tests/snapshot_lifecycle_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_snapshot_publication.py::test_a_wal_resident_batch_is_published_whole_while_a_main_file_copy_is_not"
 
 [[artifact]]
 path = "mcp/tests/snapshot_lifecycle_test_support.py"
@@ -1139,11 +1256,6 @@ consumers = [
   "mcp/tests/test_knowledge_snapshot_publication.py",
 ]
 
-[[contract]]
-id = "common-base-merge-cases"
-owner = "mcp/tests/merge_case_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_guarded_merge.py::test_disjoint_edits_from_both_sides_survive_in_a_closed_published_candidate"
-
 [[artifact]]
 path = "mcp/tests/merge_case_test_support.py"
 kind = "shared-support"
@@ -1164,11 +1276,6 @@ consumers = [
   "mcp/tests/test_knowledge_portable_boundaries.py",
   "mcp/tests/test_knowledge_portable_roundtrip.py",
 ]
-
-[[contract]]
-id = "knowledge-generation-cases"
-owner = "mcp/tests/generation_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_schema_generations.py::test_a_generation_1_dataset_keeps_its_own_body_under_generation_1"
 
 [[artifact]]
 path = "mcp/tests/generation_test_support.py"
@@ -1199,11 +1306,6 @@ consumers = [
   "mcp/tests/test_knowledge_store.py",
   "mcp/tests/test_knowledge_citation_boundaries.py",
 ]
-
-[[contract]]
-id = "knowledge-facet-cases"
-owner = "mcp/tests/facet_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_facets.py::test_the_seam_registry_is_exactly_the_eight_declared_subtypes"
 
 [[artifact]]
 path = "mcp/tests/facet_test_support.py"
@@ -1262,16 +1364,6 @@ consumers = [
   "mcp/tests/test_serving_notifier_handoff.py",
 ]
 
-[[contract]]
-id = "knowledge-diff-cases"
-owner = "mcp/tests/diff_scope_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_diff_scope.py::test_a_realization_the_candidate_removed_keeps_its_baseline_source_in_the_union"
-
-[[contract]]
-id = "knowledge-read-scope-cases"
-owner = "mcp/tests/read_scope_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_read_scope.py::test_a_path_seed_returns_the_sibling_realizations_and_advertises_the_unreached_family"
-
 [[artifact]]
 path = "mcp/tests/diff_scope_test_support.py"
 kind = "shared-support"
@@ -1316,11 +1408,6 @@ consumers = [
   "mcp/tests/test_knowledge_read_scope.py",
 ]
 
-[[contract]]
-id = "knowledge-evidence-cases"
-owner = "mcp/tests/evidence_test_support.py"
-evidence_node = "mcp/tests/test_knowledge_evidence_claims.py::test_a_claim_reads_back_with_every_field_including_an_empty_limitations"
-
 [[artifact]]
 path = "mcp/tests/evidence_test_support.py"
 kind = "shared-support"
@@ -1338,4 +1425,177 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_evidence_claims.py",
   "mcp/tests/test_knowledge_evidence_observations.py",
+]
+
+[[artifact]]
+path = "mcp/tests/eve_capsule_test_support.py"
+kind = "shared-support"
+authority = "internal-hand-authored"
+owner = "mcp/src/agents_remember/application/eve_capsule/__init__.py"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "real git worktrees plus a real coordination tree and an authored composition corpus"
+introduced_by = "260915-CAPS-L7"
+lifetime = "permanent"
+permanence_rationale = "The capsule and workspace binding is only observable against real worktrees, a real enclosure and a real corpus."
+replacement_contract = "node:mcp/tests/test_eve_capsule_binding.py::test_carrier_carries_the_compiled_capsule_verbatim"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_eve_adapter.py",
+  "mcp/tests/test_eve_capsule_binding.py",
+  "mcp/tests/test_eve_capsule_runtime.py",
+  "mcp/tests/test_eve_effort_runtime.py",
+  "mcp/tests/test_eve_product_integration.py",
+]
+
+[[artifact]]
+path = "mcp/tests/eve_adapter_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "eve-session-adapter-test-port"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "local composition of the native eve session adapter over a fake runtime transport"
+introduced_by = "260915-CAPS-L6"
+lifetime = "permanent"
+permanence_rationale = "One shared fake-runtime composition keeps handshake, submission, queue and cancellation evidence on the real adapter instead of four re-implemented fakes."
+replacement_contract = "node:mcp/tests/test_eve_adapter.py::EveAdapterHandshakeTests::test_start_reports_protocol_readiness_and_settings_identity"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_eve_adapter.py",
+  "mcp/tests/test_eve_effort_runtime.py",
+  "mcp/tests/test_eve_product_integration.py",
+]
+
+[[artifact]]
+path = "mcp/tests/eve_fixture_model.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "eve-fixture-model"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "deterministic eve runtime frame model served to the live native fixture"
+introduced_by = "260915-CAPS-L6"
+lifetime = "permanent"
+permanence_rationale = "The live native run needs one scripted vendor runtime whose frames are produced once and shared, so a reproduced failure is the model's and not the vendor's."
+replacement_contract = "node:mcp/tests/eve_fixture_model.py::serve"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/live_eve_native_fixture.py",
+]
+
+[[artifact]]
+path = "mcp/tests/live_eve_native_fixture.py"
+kind = "recording-generator"
+authority = "internal-canonical"
+owner = "eve-native-live-evidence"
+category = "integration"
+fidelity = "independent-boundary"
+cadence = "affected"
+source_version_or_generator = "live native eve run over the AR-owned Node runtime, recorded as a JSON report"
+introduced_by = "260915-CAPS-L6"
+lifetime = "permanent"
+permanence_rationale = "The native-runtime claim needs one reproducible live run rather than a mock, and this script is the only surface that performs it. It is run directly and imported by no test module, so no consumer-scoped population exists to declare."
+replacement_contract = "node:mcp/tests/live_eve_native_fixture.py::main"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_eve_adapter.py",
+  "mcp/tests/test_eve_product_integration.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/codex_app_server_instruction_channels.json"
+kind = "recording"
+authority = "external-spec-derived"
+owner = "codex-app-server-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Codex app-server 0.151.0 installed JSON schema: the instruction-channel surface"
+introduced_by = "260915-CAPS-L5"
+lifetime = "versioned"
+permanence_rationale = "Retained while the pinned 0.151.0 instruction-channel schema remains the supported capsule-delivery input."
+replacement_contract = "node:mcp/tests/test_codex_capsule_delivery.py::test_instruction_channel_is_the_schema_supported_thread_open_field"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_codex_capsule_delivery.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/codex_app_server_model_page.json"
+kind = "recording"
+authority = "external-recorded"
+owner = "codex-app-server-provider-conformance"
+category = "provider-conformance"
+fidelity = "independent-boundary"
+cadence = "provider-bump"
+source_version_or_generator = "Codex app-server 0.151.0 captured model/list page"
+introduced_by = "260915-CAPS-L5"
+lifetime = "versioned"
+permanence_rationale = "Retained while the pinned 0.151.0 model/list page shape remains the supported discovery input."
+replacement_contract = "node:mcp/tests/test_codex_capsule_delivery.py::test_a_launch_boundary_capsule_reaches_the_adapter_settings"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_capsule_launch_wiring.py",
+  "mcp/tests/test_codex_capsule_delivery.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/fresh_user_fixture.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "fresh-user-acceptance"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "deterministic disposable code repositories, memory roots and authority settings created from nothing under one run root"
+introduced_by = "260915-CAPS-L14"
+lifetime = "permanent"
+permanence_rationale = "The fresh-user acceptance needs repositories whose spear branch is not main, whose tree crosses the per-file cap, and whose vendored tree the register excludes; a fixture that read the developer's repositories could not prove the clean-room path and could not be re-run by a successor."
+replacement_contract = "node:mcp/tests/test_fresh_user_harness.py::FreshUserFixtureShapeTests::test_the_over_cap_fixture_really_crosses_the_cap"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_fresh_user_harness.py",
+  "scripts/e2e_harness/fresh_user_scenario.py",
+  "scripts/e2e_harness/run_fresh_user.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/fresh_user_scenario.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "fresh-user-acceptance"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "the product's own install, memory_init, baseline, worktree-start, citation-check and closeout-gate entry points driven in order over the fixtures"
+introduced_by = "260915-CAPS-L14"
+lifetime = "permanent"
+permanence_rationale = "The chain, not its links, is what this master could not previously claim: the scenario records each step's real call and real result, and it reports a step it cannot run as blocked by name instead of as completed."
+replacement_contract = "node:mcp/tests/test_fresh_user_harness.py::FreshUserScenarioContractTests::test_a_step_that_cannot_run_is_blocked_by_name_and_not_completed"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_fresh_user_harness.py",
+  "scripts/e2e_harness/run_fresh_user.py",
+]
+
+[[artifact]]
+path = "scripts/e2e_harness/run_fresh_user.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "fresh-user-acceptance"
+category = "integration"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "the scenario's transcript writer: environment facts, per-step records, invariants and the blocked list"
+introduced_by = "260915-CAPS-L14"
+lifetime = "permanent"
+permanence_rationale = "A successor must be able to re-run the acceptance from the repository alone and read the same verdict; this entry point fixes the invocation, the transcript path and the exit status that carries the verdict."
+replacement_contract = "node:mcp/tests/test_fresh_user_harness.py::FreshUserScenarioContractTests::test_the_entry_point_requires_reports_and_defaults_the_run_root"
+consumer_scope = "exact-source"
+consumers = [
+  "mcp/tests/test_fresh_user_harness.py",
 ]

@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from typing import cast
 
 import pytest
 from agents_remember.kernel.canonical_json import sha256_digest
@@ -44,11 +45,14 @@ from agents_remember.models.lifecycles.evidence_dependencies import (
 )
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.lifecycles.review_assessment import (
+    AssessmentEntry,
     AssessmentEvidenceByte,
     AssessmentEvidenceReference,
     AssessmentSubject,
+    AssessmentSubjectKind,
     ExaminedInputs,
     ReviewAssessment,
+    ReviewAssessmentDisposition,
     ReviewAssessmentRevision,
     SubjectAssessmentState,
     assessment_binding_gaps,
@@ -83,7 +87,7 @@ SCOPE_MANIFEST = "scope-union-B-M-F1"
 COMPARISON = "comparison-B-M-F1"
 
 
-def _subject(kind: str = "family", record_id: str = "FAM-F") -> AssessmentSubject:
+def _subject(kind: AssessmentSubjectKind = "family", record_id: str = "FAM-F") -> AssessmentSubject:
     if kind == "comparison":
         return AssessmentSubject(kind="comparison", recordId=record_id, comparisonRef=COMPARISON)
     return AssessmentSubject(
@@ -94,10 +98,17 @@ def _subject(kind: str = "family", record_id: str = "FAM-F") -> AssessmentSubjec
     )
 
 
+def _evidence_reference(spelling: str) -> AssessmentEvidenceReference:
+    """Build one evidence reference from its canonical ``namespace:relative`` spelling."""
+
+    namespace, _, ref = spelling.partition(":")
+    return AssessmentEvidenceReference.model_validate({"namespace": namespace, "ref": ref})
+
+
 def _revision(
     *,
     assessment_id: str = "assessment-B-M-F1-curator",
-    disposition: str = "concern_found",
+    disposition: ReviewAssessmentDisposition = "concern_found",
     finding: str = "The combined retry configuration can exceed the five-second budget.",
     subject: AssessmentSubject | None = None,
     evidence: tuple[str, ...] = ("task:notes/reports/fixtures/retry-budget.md",),
@@ -109,12 +120,7 @@ def _revision(
         finding=finding,
         rationale="Four attempts may each consume two seconds and no earlier deadline is shared.",
         assumptions=("Every attempt can consume its configured timeout.",),
-        evidenceRefs=tuple(
-            AssessmentEvidenceReference(
-                namespace=spelling.split(":", 1)[0], ref=spelling.split(":", 1)[1]
-            )
-            for spelling in evidence
-        ),
+        evidenceRefs=tuple(_evidence_reference(spelling) for spelling in evidence),
         comparisonRef=COMPARISON,
         scopeManifestRef=SCOPE_MANIFEST,
     )
@@ -144,7 +150,7 @@ class _Binding:
     """What the test varies when it binds one authored revision into a stored record."""
 
     assessment_id: str = "assessment-B-M-F1-curator"
-    disposition: str = "concern_found"
+    disposition: ReviewAssessmentDisposition = "concern_found"
     finding: str = "The combined retry configuration can exceed the five-second budget."
     subject: AssessmentSubject | None = None
     inputs: AssessmentInputs | None = None
@@ -265,20 +271,22 @@ class TestDispositionVocabulary:
     """Requirement 1.2: closed, stored, and never collapsed into one another."""
 
     def test_the_vocabulary_is_exactly_the_three_declared_values(self) -> None:
+        declared: tuple[tuple[ReviewAssessmentDisposition, str], ...] = (
+            ("concern_found", "A concern."),
+            ("no_concern_found", ""),
+            ("unresolved", "Could not decide."),
+        )
         stored = {
             _bound(_Binding(disposition=disposition, finding=finding)).disposition
-            for disposition, finding in (
-                ("concern_found", "A concern."),
-                ("no_concern_found", ""),
-                ("unresolved", "Could not decide."),
-            )
+            for disposition, finding in declared
         }
 
         assert stored == {"concern_found", "no_concern_found", "unresolved"}
 
     def test_an_unknown_disposition_is_refused(self) -> None:
+        # The spelling is deliberately not a declared disposition: the case measures the refusal.
         with pytest.raises(ValidationError):
-            _revision(disposition="compatible")
+            _revision(disposition=cast(ReviewAssessmentDisposition, "compatible"))
 
     def test_unresolved_is_not_a_synonym_for_no_concern_found(self) -> None:
         """The two are stored differently and read differently, and neither is derived from the other."""
@@ -626,11 +634,13 @@ class TestReadStates:
                 unresolvedCount=0,
                 staleCount=0,
                 assessments=(
-                    {
-                        "assessmentId": "fabricated",
-                        "disposition": "no_concern_found",
-                        "currentness": "current",
-                    },
+                    AssessmentEntry.model_validate(
+                        {
+                            "assessmentId": "fabricated",
+                            "disposition": "no_concern_found",
+                            "currentness": "current",
+                        }
+                    ),
                 ),
             )
 

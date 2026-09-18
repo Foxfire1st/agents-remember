@@ -108,8 +108,9 @@ from agents_remember.models.knowledge.facet_read import (
 )
 from agents_remember.models.knowledge.result import (
     InvariantRequest,
+    KnowledgeRefusal,
 )
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -186,6 +187,30 @@ def admitted(tmp_path: Path) -> tuple[Any, Any]:
 pytestmark = pytest.mark.evidence_unit
 
 
+def _present[Present](value: Present | None) -> Present:
+    """Return one recorded value a case depends on, refusing an absent one in the same breath.
+
+    The store's readers answer ``X | None`` because a missing row is a fact a caller branches on. A
+    case that has already established the row exists needs one place to say so, and naming it here
+    keeps the narrowing out of every assertion that follows.
+    """
+
+    assert value is not None
+    return value
+
+
+def _refused_payload(value: BaseModel | KnowledgeRefusal) -> KnowledgeRefusal:
+    """Return the refusal one validation seam produced, refusing a value that is not one.
+
+    The seam answers ``BaseModel | KnowledgeRefusal`` because that is what a caller branches on. It
+    is stated in this module's own source rather than borrowed from the evidence lane's support
+    module, which is a governed artifact with a declared consumer list this case is not part of.
+    """
+
+    assert isinstance(value, KnowledgeRefusal), value
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Requirements 1 and 2.2: the closed, structurally validated vocabulary and its payload seam.
 
@@ -228,8 +253,8 @@ def test_the_seam_registry_is_exactly_the_eight_declared_subtypes() -> None:
     for kind in FACET_KINDS:
         model = facet_payload_model(kind)
         assert model is not None, kind
-        assert model.model_config["extra"] == "forbid", kind
-        assert model.model_config["frozen"] is True, kind
+        assert model.model_config.get("extra") == "forbid", kind
+        assert model.model_config.get("frozen") is True, kind
         assert PAYLOAD_MODELS[(kind, FACET_RECORD_SCHEMAS[kind])] is model, kind
 
     # The envelope row a facet is stored as, derived from its kind rather than supplied twice.
@@ -275,19 +300,23 @@ def test_every_subtype_refuses_a_bad_shape_a_missing_meaning_and_its_own_provena
         validated = validate_facet_payload(facet_kind, minimal)
         assert validated.model_dump(mode="json")["facet_kind"] == facet_kind, facet_kind
 
-        undeclared = validate_facet_payload(facet_kind, minimal | {"undeclared_note": "x"})
+        undeclared = _refused_payload(
+            validate_facet_payload(facet_kind, minimal | {"undeclared_note": "x"})
+        )
         assert undeclared.code == "invalid_payload", facet_kind
         assert "undeclared_note" in undeclared.detail, facet_kind
 
         omitted = dict(minimal)
         dropped = next(iter(omitted))
         omitted.pop(dropped)
-        missing = validate_facet_payload(facet_kind, omitted, record_id="r-1")
+        missing = _refused_payload(validate_facet_payload(facet_kind, omitted, record_id="r-1"))
         assert missing.code == "invalid_payload", (facet_kind, dropped)
         assert missing.record_id == "r-1", facet_kind
 
         for substituted in ("actor_ref", "authorization_ref", "recorded_at"):
-            refused = validate_facet_payload(facet_kind, minimal | {substituted: "caller-supplied"})
+            refused = _refused_payload(
+                validate_facet_payload(facet_kind, minimal | {substituted: "caller-supplied"})
+            )
             assert refused.code == "invalid_payload", (facet_kind, substituted)
             assert substituted in refused.detail, (facet_kind, substituted)
 
@@ -296,7 +325,7 @@ def test_every_subtype_refuses_a_bad_shape_a_missing_meaning_and_its_own_provena
             for name, field in type(validated).model_fields.items()
             if field.annotation is str and name != "facet_kind"
         )
-        over = validate_facet_payload(facet_kind, minimal | {prose: "x" * 20001})
+        over = _refused_payload(validate_facet_payload(facet_kind, minimal | {prose: "x" * 20001}))
         assert over.code == "invalid_payload", (facet_kind, prose)
 
         # Requirement 1.5: guidance may state an interpretation, never a verdict.
@@ -310,7 +339,9 @@ def test_every_subtype_refuses_a_bad_shape_a_missing_meaning_and_its_own_provena
         ):
             assert forbidden not in type(validated).model_fields, (facet_kind, forbidden)
 
-    ninth = validate_facet_payload("retrospective", {"text": "we should have"}, record_id="r-9")
+    ninth = _refused_payload(
+        validate_facet_payload("retrospective", {"text": "we should have"}, record_id="r-9")
+    )
     assert ninth.code == "invalid_payload"
     assert ninth.observed == "retrospective"
     assert ninth.expected == " | ".join(FACET_KINDS)
@@ -721,7 +752,7 @@ def test_an_explanation_is_separable_and_editing_it_never_rewrites_the_statement
         invariant_id, revision_id = seed_subject(store, destination, destination.authorship)
         before = store.get_revision(revision_id)
         assert before is not None
-        row_digest_before = store.get_invariant(invariant_id).row_digest
+        row_digest_before = _present(store.get_invariant(invariant_id)).row_digest
         payload_digest_before = before.revision.payload_digest
 
         subject = InvariantStatementSubject(invariant_id=invariant_id, revision_id=revision_id)
@@ -751,18 +782,20 @@ def test_an_explanation_is_separable_and_editing_it_never_rewrites_the_statement
             ),
         )
         assert stale.state == "refused"
-        assert stale.refusal.code == "stale_precondition"
+        assert _present(stale.refusal).code == "stale_precondition"
         wrong_revision = write_facet(
             store,
             destination,
             DesignateExplanation(
                 explanation_id=explanation_id,
                 revision_id=str(uuid4()),
-                expected_row_digest=facet_records.explanation_record_digest(store, explanation_id),
+                expected_row_digest=_present(
+                    facet_records.explanation_record_digest(store, explanation_id)
+                ),
             ),
         )
         assert wrong_revision.state == "refused"
-        assert wrong_revision.refusal.code == "invalid_reference"
+        assert _present(wrong_revision.refusal).code == "invalid_reference"
 
         # The recorded designation is the FIRST revision even though a successor exists: a response
         # reports what the record stores rather than the newest revision.
@@ -772,7 +805,9 @@ def test_an_explanation_is_separable_and_editing_it_never_rewrites_the_statement
             DesignateExplanation(
                 explanation_id=explanation_id,
                 revision_id=first_revision,
-                expected_row_digest=facet_records.explanation_record_digest(store, explanation_id),
+                expected_row_digest=_present(
+                    facet_records.explanation_record_digest(store, explanation_id)
+                ),
             ),
         )
         assert designated.state == "applied"
@@ -782,7 +817,7 @@ def test_an_explanation_is_separable_and_editing_it_never_rewrites_the_statement
         assert after.revision.payload_digest == payload_digest_before
         assert after.revision.statement == before.revision.statement
         assert after.revision.conditions == before.revision.conditions
-        assert store.get_invariant(invariant_id).row_digest == row_digest_before
+        assert _present(store.get_invariant(invariant_id)).row_digest == row_digest_before
         assert "explanation" not in GENERATION_1.columns["invariant_revision"]
 
         page = read_facet(store, destination, ExplanationSubjectSeed(subject=subject))
@@ -907,6 +942,7 @@ def test_the_two_entry_points_agree_and_a_refused_write_writes_nothing(admitted:
             ),
         )
         assert wrong.state == "refused"
+        assert wrong.refusal is not None
         assert wrong.refusal.code == "invalid_reference"
         assert (wrong.refusal.expected, wrong.refusal.observed) == ("add_facet", "attach_facet")
 
@@ -1036,6 +1072,7 @@ def test_a_dataset_predating_the_facet_tables_refuses_a_facet_write(tmp_path: Pa
             ),
         )
         assert standalone.state == "refused"
+        assert standalone.refusal is not None
         assert standalone.refusal.code == "unsupported_schema"
         assert standalone.refusal.expected == str(GENERATION_3.user_version)
         assert standalone.refusal.observed == str(GENERATION_2.user_version)
@@ -1111,6 +1148,7 @@ def test_the_shipped_seed_page_is_byte_identical_and_the_facet_page_is_its_own_p
         path, context, FacetReadRequest(seed=FacetRecordSeed(record_id=str(uuid4())))
     )
     assert facet.state == "refused"
+    assert facet.refusal is not None
     assert facet.refusal.code == "selector_absent"
     assert facet.page is None
     assert facet.policy_version == FACET_SELECTION_POLICY_VERSION
@@ -1164,6 +1202,7 @@ def test_a_facet_does_not_join_a_shipped_seed_and_the_facet_page_is_exact(
         )
         assert shipped.state == "page", shipped.refusal
         assert shipped.policy_version == KNOWLEDGE_READ_POLICY_VERSION
+        assert shipped.page is not None
         kinds = {item.kind for item in shipped.page.items}
         assert kinds <= set(get_args(ItemKind))
         assert all("facet" not in kind for kind in kinds)

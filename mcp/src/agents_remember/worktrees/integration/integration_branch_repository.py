@@ -49,7 +49,14 @@ def repository_default_branch(repository: Path) -> str:
 
 
 def memory_repository_default_branch(repository: Path) -> str:
-    """Return remote authority, or memory_init's exact existing local default."""
+    """Return remote authority, or memory_init's exact existing local default.
+
+    The local default is whatever ``memory_init`` recorded, validated against itself:
+    the recorded name must resolve to a real local branch. It is deliberately **not**
+    compared to a fixed name — the memory repository is founded on the code branch the
+    developer chose, and a name comparison here would refuse every repository whose
+    memory is founded on anything but ``main``.
+    """
 
     remote = _remote_repository_default_branch(repository)
     if remote is not None:
@@ -65,10 +72,10 @@ def memory_repository_default_branch(repository: Path) -> str:
             "initialize it through memory_init before task branch mutation"
         )
     normalized = branch.removeprefix("refs/heads/")
-    if normalized != "main":
+    if not normalized:
         raise RuntimeError(
-            f"memory repository local default-branch authority does not match memory_init "
-            f"for {repository}: {branch!r}"
+            f"memory repository local default-branch authority is malformed for {repository}: "
+            f"{branch!r}"
         )
     verified = run_git(repository, ["rev-parse", "--verify", f"refs/heads/{normalized}"])
     if verified.returncode != 0:

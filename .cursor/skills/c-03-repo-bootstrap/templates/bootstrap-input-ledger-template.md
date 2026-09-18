@@ -7,7 +7,7 @@
 | bootstrapMode | quick-orientation / safe-starter-memory / cross-repo-focused / domain-doc-focused / existing-memory-slice-maintenance / full-bootstrap |
 | memoryRoot | `<path>` |
 | onboardingRoot | `<path>` |
-| topology | internal / external / mixed |
+| topology | external / mixed |
 | targetBranch | `<branch>` |
 | generated | <YYYY-MM-DDThh:mm> |
 | sourceInventoryGate | pending / accepted / corrected / blocked |

@@ -50,6 +50,8 @@ from agents_remember.memory.knowledge.facet_records import (
 from agents_remember.memory.knowledge.logical import logical_body
 from agents_remember.memory.knowledge.read_owner_revisions import owner_revision_resolver_for
 from agents_remember.memory.knowledge.schema_generations import GENERATION_4, GENERATION_5
+from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
+from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.citation import (
     CitationBindingClosureRequest,
     CitationBindingPayload,
@@ -126,46 +128,14 @@ def _owner_revision(blob: str) -> ProseOwnerRevision:
     )
 
 
-def _binding_fixture(tmp_path: Path):
-    """Build the shared branching fixture plus one real authored knowledge record to bind against."""
-
-    fixture = build_branching_knowledge_fixture(tmp_path / "knowledge")
-    store = fixture.reopen()
-    record_id = str(uuid4())
-    authorship = make_authorship()
-    created = facets.add_facet(
-        store,
-        FacetWriteRequest(
-            repository_id=fixture.repository_id,
-            provenance=authorship,
-            command=AddFacet(
-                record_id=record_id,
-                revision_id=str(uuid4()),
-                facet_kind="terminology",
-                payload={
-                    "facet_kind": "terminology",
-                    "term": "citation binding",
-                    "definition": (
-                        "the recorded statement that one prose citation key denotes one knowledge "
-                        "record at one locator"
-                    ),
-                    "scope": "the prose corpus of this memory repository",
-                },
-            ),
-        ),
-    )
-    assert created.state == "applied", created.refusal
-    return store, fixture, record_id, authorship
-
-
 @dataclass(frozen=True)
 class _BindingCase:
     """The identity facts one binding write needs, so the helper takes one value rather than seven."""
 
-    store: object
+    store: OpenedKnowledgeStore
     repository_id: str
     record_id: str
-    authorship: object
+    authorship: Authorship
 
     def author(self, *, owner, key, source, **overrides):
         """Author one binding against this case's fixture record and return the receipt."""
@@ -368,6 +338,9 @@ def test_a_key_absent_from_its_owner_revision_reports_the_shipped_mismatch_liter
         assert "stale_bindings_present" in result.limitations
         item = result.items[0]
         assert item.observation.state == "recorded_blob_mismatch"
+        # The key this case recorded is a prose ``cit:`` body, so its written construct is the fact
+        # that survives on the failure; the other recorded key form carries an anchor cell instead.
+        assert isinstance(item.observation.local_key, ProseCitationKey)
         assert item.observation.local_key.written == CORPUS_KEY
         assert item.observation.target.record_id == record_id
     finally:
@@ -829,6 +802,8 @@ def test_an_uncovered_key_form_is_counted_and_reported_on_a_real_store(tmp_path:
         row_item = by_binding[row_binding_id]
         assert row_item.observation.state == "uncovered_key_form"
         # The recorded key text survives on the failure, and it is not the absent-from-revision state.
+        # This record's key is the table-row form, which is exactly why the prose form does not cover it.
+        assert isinstance(row_item.observation.local_key, TableRowKeyForm)
         assert row_item.observation.local_key.anchor_cell == "`_candidate_identity`"
         assert row_item.observation.state != "recorded_blob_mismatch"
     finally:

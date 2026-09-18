@@ -28,6 +28,9 @@ from agents_remember.serving.agent_notifier_heartbeat import (
 from agents_remember.serving.build_info import ServingBuild
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.launch_capsule import (
+    LaunchCapsuleResolver as LaunchCapsuleResolverPort,
+)
 from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.projector import ProjectionReplay, Projector
 from agents_remember.serving.served_state import served_state_tail
@@ -449,6 +452,15 @@ class ServingCollaborators:
     register_inbox_execution_evidence: (
         Callable[[Path, tuple[OperatorInboxEntry, ...]], frozenset[str]] | None
     ) = None
+    capsule_launch: LaunchCapsuleResolverPort | None = None
+    """The application-tier capsule compiler, supplied by the composition root.
+
+    ``serving`` ranks below ``application`` in ``layers.toml``, so the dashboard's launch route
+    cannot import the compiler; it takes this port instead, exactly as it takes the execution-
+    evidence registrars above. Production wires it in :mod:`agents_remember.cli.dashboard`; a
+    process that omits it refuses a role-configured launch by name rather than starting a seat
+    with no instructions.
+    """
 
 
 INFERRED_LIVE_INPUTS = LiveProjectionInputs()
@@ -481,6 +493,7 @@ class _ServingRuntime:
         Callable[[Path, tuple[OperatorInboxEntry, ...]], frozenset[str]] | None
     )
     interval: float
+    capsule_launch: LaunchCapsuleResolverPort | None = None
 
     @property
     def observer_root(self) -> Path:

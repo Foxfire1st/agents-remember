@@ -135,7 +135,7 @@ class HarnessProtocolRegistry:
 DEFAULT_HARNESS_PROTOCOL_REGISTRY = HarnessProtocolRegistry()
 """Factory-free status registry; the hosted runner constructs built-ins from spawn settings."""
 
-BUILTIN_PROTOCOL_HARNESSES = frozenset({"claude", "codex", "pi"})
+BUILTIN_PROTOCOL_HARNESSES = frozenset({"claude", "codex", "pi", "eve"})
 
 
 def protocol_adapter_status(

@@ -52,9 +52,9 @@ Start with generated, vendor, build, cache, IDE, environment, and binary artifac
 
 ## Scoping
 
-In repo-local internal settings, an unscoped rule applies to that repository.
+In a one-repo memory repo, an unscoped rule applies to that repository.
 
-In external-memory settings, scope rules by repository when a settings file covers more than one repository. A one-repo memory repo can use unscoped path rules because the memory repo already maps to one code repository.
+In shared coordinator settings covering more than one repository, scope rules by repository. A one-repo memory repo can use unscoped path rules because the memory repo already maps to one code repository.
 
 ## Practical Advice
 

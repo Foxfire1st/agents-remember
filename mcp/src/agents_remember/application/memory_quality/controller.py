@@ -53,6 +53,9 @@ from agents_remember.memory_quality.final_certification.catalog import (
 from agents_remember.memory_quality.integrity.check_missing_onboarding import (
     check_missing_onboarding,
 )
+from agents_remember.memory_quality.integrity.governing_overview_resolution import (
+    check_governing_overview_resolution,
+)
 from agents_remember.memory_quality.knowledge_review import (
     AssessmentSummary,
     AssessmentSummaryInput,
@@ -447,6 +450,33 @@ def _attach_curator_checklist(
         style_findings,
         scope.onboarding_root,
     )
+    # D3/D16: a card whose declared `governingOverview` field or whose `## Governing Overview`
+    # link resolves to nothing is a route failure. Until this leaf the product validated that a
+    # source HAS a card and never that the card's declared route RESOLVES, so a dead declaration
+    # reported clean. The findings join the gated repair set rather than a report-only surface:
+    # a link a reader can click and land nowhere is a repair obligation, not a statistic.
+    #
+    # The summary is attached to `response`, not `payload`: `response` is composed from
+    # `**payload` before this function runs, so a key added to `payload` here would never be
+    # published. It stays OUT of `response["checks"]` because that mapping is the closed
+    # `AVAILABLE_CHECKS` population the certification catalog is validated against, and a key
+    # outside that population would be a catalog item with no planned identity.
+    governing_overviews = check_governing_overview_resolution(scope.onboarding_root)
+    response["governingOverviewResolution"] = {
+        "check": governing_overviews.check,
+        "ok": governing_overviews.ok,
+        "cardsWalked": governing_overviews.cardsWalked,
+        "cardsFlagged": governing_overviews.cardsFlagged,
+        "unresolvedFieldCount": governing_overviews.unresolvedField,
+        "unresolvedLinkCount": governing_overviews.unresolvedLink,
+        "sectionAbsentCount": governing_overviews.sectionAbsent,
+        "findings": [row.to_dict() for row in governing_overviews.findings],
+        "observations": [
+            {"path": row.card, "code": row.code, "message": row.note}
+            for row in governing_overviews.observations
+        ],
+    }
+    repair_findings.extend(row.to_dict() for row in governing_overviews.findings)
     missing_onboarding = check_missing_onboarding(
         code_repository_root=scope.quality_code_root,
         onboarding_root=scope.onboarding_root,
@@ -475,6 +505,12 @@ def _attach_curator_checklist(
     if census is None:
         raise RuntimeError("curator publication requires its complete plane-derived census")
     source_candidates = census_curator_candidates(census)
+    # The knowledge-review summary is derived from the curator-coherence authority, which only the
+    # external-memory leaf path below can read -- but `CuratorChecklist` is built for EVERY scope.
+    # It is therefore initialised here, on the same path as the other two accepted-no-impact
+    # defaults, so a scope that does not enter the block reports "no recorded assessments" instead
+    # of raising UnboundLocalError at the checklist construction below.
+    knowledge_review: tuple[AssessmentSummary, ...] = ()
     if (
         scope.contract is not None
         and scope.contract.memory_mode == "external"
@@ -484,7 +520,6 @@ def _attach_curator_checklist(
         current_working_paths = _current_working_code_paths(scope, census.scope.working_paths)
         accepted_no_impact = frozenset()
         accepted_route_no_impact = frozenset()
-        knowledge_review: tuple[AssessmentSummary, ...] = ()
         try:
             coherence = require_current_curator_coherence(scope.contract)
         except CuratorCoherenceError:

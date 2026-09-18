@@ -12,7 +12,9 @@ from typing import Any, Literal
 from agents_remember.application.lifecycle.lifecycle_operation_location import (
     primary_operation_projection,
 )
+from agents_remember.application.memory_mode_refusal import memory_mode_refusal_payload
 from agents_remember.controlplane.operator_inbox_store import OperatorInboxStore
+from agents_remember.errors import MemoryModeUnsupportedError
 from agents_remember.kernel.primitives.observer_paths import observer_root
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
@@ -248,7 +250,7 @@ def _contract_fact(
     binding: LeafTaskBinding,
     facts: list[dict[str, Any]],
     severity: list[Literal["started", "ambiguous"]],
-) -> tuple[WorktreeContract | None, dict[str, str] | None]:
+) -> tuple[WorktreeContract | None, dict[str, object] | None]:
     path = binding.contract_path
     try:
         mode = path.lstat().st_mode
@@ -271,6 +273,24 @@ def _contract_fact(
         return None, {"state": "unreadable", "errorType": "NonRegularFile"}
     try:
         contract = load_contract(path)
+    except MemoryModeUnsupportedError as exc:
+        # The unstarted census must report the removed mode, not a generic unreadable enclosure:
+        # the operator's next action depends on which of the two it is.
+        severity.append("ambiguous")
+        facts.append(_fact("enclosure", "unreadable", path, detail=exc.requested))
+        facts.append(
+            {
+                "kind": "memoryMode",
+                "state": "removed",
+                "address": path.as_posix(),
+                **memory_mode_refusal_payload(exc),
+            }
+        )
+        return None, {
+            "state": "removed-mode",
+            "errorType": type(exc).__name__,
+            **memory_mode_refusal_payload(exc),
+        }
     except (ContractError, OSError, UnicodeError, ValueError) as exc:
         severity.append("ambiguous")
         facts.append(_fact("enclosure", "unreadable", path, detail=type(exc).__name__))
@@ -301,7 +321,7 @@ def _operation_facts(
     census: _EvidenceCensus,
     locator: LifecycleLocatorObservation,
     contract: WorktreeContract | None,
-    contract_failure: dict[str, str] | None,
+    contract_failure: dict[str, object] | None,
 ) -> tuple[LifecycleOperationProjection, ...]:
     """Read exact locator-addressed manifest/journals even when contract bytes are lost."""
 
@@ -353,9 +373,10 @@ def _operation_facts(
         )
     else:
         failure = contract_failure or {"state": "unreadable", "errorType": "ContractError"}
+        error_type = failure["errorType"]
         projections = unreadable_contract_operation_projections(
             location,
-            error_type=failure["errorType"],
+            error_type=error_type if isinstance(error_type, str) else "ContractError",
             name=binding.contract_path.name,
         )
     if not projections:

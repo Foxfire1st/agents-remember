@@ -42,19 +42,23 @@ from agents_remember.models.conversations.identity import (
 )
 from agents_remember.serving.conversation.control.capabilities import (
     interrupt_capability_for,
+    telemetry_capabilities_for,
 )
 
 _CODEX_FIXTURE = "codex-0.144.5-installed-20260718"
 _CLAUDE_FIXTURE = "claude-2.1.211-installed-20260718"
 _PI_FIXTURE = "pi-0.80.7-installed-20260718"
+_EVE_FIXTURE = "eve-0.56.0-native-20260916"
 
 _CODEX_RUNTIME = "0.144.5"
 _CLAUDE_RUNTIME = "2.1.211"
 _CLAUDE_HELPER = "0.3.207"
 _PI_RUNTIME = "0.80.7"
 _PI_HELPER = "0.80.7"
+_EVE_RUNTIME = "0.56.0"
 
 _OBSERVED_AT = "2026-07-18T09:50:17+02:00"
+_EVE_OBSERVED_AT = "2026-09-16T09:43:00+02:00"
 
 
 def _fixture_evidence(
@@ -62,12 +66,13 @@ def _fixture_evidence(
     fixture_id: str,
     *,
     helper_version: str | None = None,
+    observed_at: str = _OBSERVED_AT,
 ) -> CapabilityEvidence:
     return CapabilityEvidence(
         runtime_version=runtime_version,
         helper_version=helper_version,
         fixture_id=fixture_id,
-        observed_at=_OBSERVED_AT,
+        observed_at=observed_at,
     )
 
 
@@ -343,6 +348,95 @@ def _pi_capabilities(snapshot: AdapterSnapshot) -> ConversationCapabilities:
     )
 
 
+def _eve_capabilities(snapshot: AdapterSnapshot) -> ConversationCapabilities:
+    """eve's own feature evidence, never another harness's.
+
+    Every ``supported``/``partial`` state rests on the pinned runtime's recorded native scenario
+    (a real session, tool round-trip, input request, cancel and park) through the production
+    adapter, mapped by ``serving/conversation/projectors/eve.py``. Features eve's stream does not
+    carry are ``unavailable``, and the ones whose frame contract is real but unexercised end to end
+    stay ``unverified`` -- the same conservatism the other harnesses use.
+    """
+
+    live_evidence = _fixture_evidence(_EVE_RUNTIME, _EVE_FIXTURE, observed_at=_EVE_OBSERVED_AT)
+    return ConversationCapabilities(
+        live=LiveCapabilities(
+            text=_runtime(
+                "supported",
+                "installed fixture observed message.received/reasoning/message.completed frames "
+                "cross the production evidence seam on a live 0.56.0 session",
+                live_evidence,
+            ),
+            thinking=_runtime(
+                "supported",
+                "installed fixture observed reasoning.appended/reasoning.completed frames and the "
+                "projector materializes the finalized reasoning block exactly once",
+                live_evidence,
+            ),
+            tools=_runtime(
+                "supported",
+                "installed fixture observed an actions.requested/action.result round-trip whose "
+                "result the runtime's own file tool produced",
+                live_evidence,
+            ),
+            diffs=_unavailable(
+                "eve's stream carries no structured diff frame; a tool result's output is opaque"
+            ),
+            interactions=_runtime(
+                "supported",
+                "installed fixture observed input.requested and authorization.required become "
+                "pending interactions answered through the existing adapter authority",
+                live_evidence,
+            ),
+            completeness=_runtime(
+                "partial",
+                "the durable stream is complete per session, but this view reads a bounded evidence "
+                "window and eve exposes no native-history page to continue past it",
+                live_evidence,
+            ),
+        ),
+        history=HistoryCapabilities(
+            list=_unavailable("dormant session listing is the L2 native-library leaf"),
+            read=_unavailable(
+                "eve exposes no native-history page surface; the projector fails closed rather "
+                "than inventing one (durable replay is the stream cursor's job)"
+            ),
+            resume=_unavailable("exact resume/open is the L2 native-library leaf"),
+            completeness=_adapter(
+                "unverified",
+                "bounded evidence window only; no native page exists to prove a complete history",
+                _EVE_RUNTIME,
+            ),
+            tool_completeness=_adapter(
+                "unverified",
+                "tool frames are observed live; completeness of a long historical turn is unproven",
+                _EVE_RUNTIME,
+            ),
+        ),
+        controls=ControlCapabilities(
+            interrupt=interrupt_capability_for("eve", snapshot),
+            steer=_unavailable("not an ordinary submit action"),
+            follow_up=_unavailable("not an ordinary submit action"),
+            attachments=_no_attachments(),
+            policy_read=_runtime(
+                "supported",
+                "installed fixture observed eve's authorization.required challenge reach the "
+                "pending-interaction authority through the production adapter",
+                live_evidence,
+            ),
+        ),
+        telemetry=telemetry_capabilities_for("eve", snapshot),
+    )
+
+
+_CONTROL_PLANE = {
+    "codex": _codex_capabilities,
+    "claude": _claude_capabilities,
+    "pi": _pi_capabilities,
+    "eve": _eve_capabilities,
+}
+
+
 def capabilities_for(harness_id: HarnessId, snapshot: AdapterSnapshot) -> ConversationCapabilities:
     """Build the exact-session capability set.
 
@@ -352,13 +446,15 @@ def capabilities_for(harness_id: HarnessId, snapshot: AdapterSnapshot) -> Conver
 
     ``controls.interrupt`` is bridged from the L3 control gate's single-source verdict
     (``interrupt_capability_for``); the snapshot is forwarded, never used as a version predicate.
+
+    Dispatch is a keyed table, not a default arm: a harness this view has no evidence for must fail
+    loudly rather than inherit another runtime's entire feature set. The previous ``return
+    _pi_capabilities(...)`` fall-through would have published pi's fixture ids, runtime version and
+    ``supported`` rows under any new harness's name -- the exact capability dishonesty this module
+    exists to prevent.
     """
 
-    if harness_id == "codex":
-        return _codex_capabilities(snapshot)
-    if harness_id == "claude":
-        return _claude_capabilities(snapshot)
-    return _pi_capabilities(snapshot)
+    return _CONTROL_PLANE[harness_id](snapshot)
 
 
 __all__ = ["capabilities_for"]

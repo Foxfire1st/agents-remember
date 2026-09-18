@@ -262,7 +262,7 @@ def validate_facet_payload(
     selects exactly one frozen model, and only that model's fields are admissible.
     """
 
-    record_schema = FACET_RECORD_SCHEMAS.get(facet_kind)
+    record_schema = _declared_facet_record_schema(facet_kind)
     if record_schema is None:
         return _invalid_payload_refusal(
             operation,
@@ -274,6 +274,21 @@ def validate_facet_payload(
     return validate_record_payload(
         facet_kind, record_schema, payload, operation=operation, record_id=record_id
     )
+
+
+def _declared_facet_record_schema(facet_kind: str) -> str | None:
+    """Return the record schema one declared facet kind stores, or ``None`` for an undeclared kind.
+
+    ``FACET_RECORD_SCHEMAS`` is keyed by the declared ``FacetKind`` rather than by ``str``, so a
+    caller's spelling is resolved against the closed tuple first: the registry is never asked a key
+    this build does not declare, and an unknown or ninth subtype is answered with ``None`` -- the
+    refusal this operation reports -- instead of a lookup that cannot succeed.
+    """
+
+    for declared in FACET_KINDS:
+        if facet_kind == declared:
+            return FACET_RECORD_SCHEMAS[declared]
+    return None
 
 
 def _render_validation_error(error: ValidationError) -> str:

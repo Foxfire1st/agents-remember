@@ -2,30 +2,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict
 
 from agents_remember.errors import AgentsRememberError
+from agents_remember.kernel.memory_mode import MemoryMode, Topology
 
 
 class MissingMemoryError(AgentsRememberError):
-    """Raised when neither supported durable memory location exists."""
+    """Raised when the supported durable memory location does not exist."""
 
     def __init__(
         self,
         code_repository_name: str,
-        internal_root: Path,
         coordination_root: Path,
         external_memory: Path,
     ) -> None:
         self.code_repository_name = code_repository_name
-        self.internal_root = internal_root
         self.coordination_root = coordination_root
         self.external_memory = external_memory
         super().__init__(
             "Agents Remember memory is missing for "
-            f"{code_repository_name!r}. Checked internal memory at {internal_root.as_posix()} "
-            f"and external memory at {external_memory.as_posix()} using coordination root {coordination_root.as_posix()}. "
-            "Ask the developer whether to initialize memory with c-00-initialize-memory-repo, then run c-03-repo-bootstrap if they want onboarding content generated."
+            f"{code_repository_name!r}. Checked external memory at {external_memory.as_posix()} "
+            f"using coordination root {coordination_root.as_posix()}. "
+            "Memory setup is not a message's job to prescribe: the c-00-initialize-memory-repo "
+            "skill owns creating or repairing this root, and the c-03-repo-bootstrap skill owns "
+            "generating onboarding content under it."
         )
 
 
@@ -38,10 +39,19 @@ class StorageRule(TypedDict, total=False):
     exclude_file_types: list[str]
 
 
+DEFAULT_STORAGE_MODE = "memory-repo"
+"""Storage for eligible onboarding when a repository declares no override.
+
+``internal`` memory used to default this to ``repo-sidecar``; with ``internal`` removed,
+``memory-repo`` is the only derived default. ``repo-sidecar`` remains a *declarable* mode for
+an individual path rule -- it says where one artifact is written, not where memory lives.
+"""
+
+
 @dataclass
 class StorageSettings:
-    mode: str = "repo-sidecar"
-    default: str = "repo-sidecar"
+    mode: str = DEFAULT_STORAGE_MODE
+    default: str = DEFAULT_STORAGE_MODE
     path_rules: list[StorageRule] = field(default_factory=list)
 
 
@@ -65,7 +75,7 @@ class CrossRepoSettings:
 
 @dataclass
 class CoordinationSelection:
-    topology: Literal["internal", "external"]
+    topology: Topology
     coordination_root: Path
     memory_root: Path
     settings_path: Path
@@ -99,7 +109,7 @@ class CoordinationHints:
     absent.
     """
 
-    topology: Literal["internal", "external"] | None = None
+    topology: Topology | None = None
     coordination_root: Path | None = None
     settings_path: Path | None = None
     onboarding_root: Path | None = None
@@ -168,7 +178,7 @@ class CoordinationRoots:
     """The coordination tree after resolution: which topology won, and the four roots that
     topology implies. Detection produces them together and no reader wants a subset."""
 
-    topology: Literal["internal", "external"]
+    topology: Topology
     coordination_root: Path
     memory_root: Path
     onboarding_root: Path
@@ -177,7 +187,7 @@ class CoordinationRoots:
 
 @dataclass
 class CoordinationContext:
-    topology: Literal["internal", "external"]
+    topology: Topology
     code_repository_name: str
     code_repository_root: Path
     coordination_root: Path
@@ -204,6 +214,3 @@ class CoordinationContext:
     code_worktree: Path | None = None
     memory_worktree: Path | None = None
     ledger_path: Path | None = None
-
-
-MemoryMode = Literal["internal", "external", "disabled"]

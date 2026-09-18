@@ -62,25 +62,25 @@
 
 <Explain same-repository structures, flows, files, tests, configs, or generated artifacts that affect this route. Use direct evidence and workspace-relative links. If nothing relevant exists, record what was checked plus `No relevant internal references found.`>
 
-| Finding | Citations | Source Path |
+| Finding | Anchor | Source |
 |---|---|---|
-| <Concise summary of same-repository evidence that matters to this route.> | L20-L35 | [<same-repo-source-or-onboarding-file>](relative/path/to/source-or-onboarding-file) |
+| <Concise summary of same-repository evidence that matters to this route.> | `source_symbol` | <repo-relative path>:<start>-<end> |
 
 ## Cross-Repo References
 
 <Explain cross-repo or external-boundary behavior that affects this route. Use a boundary pack when available. If none exists, record what was checked plus `No relevant cross-repo evidence found.`>
 
-| Finding | Citations | Source Path |
+| Finding | Anchor | Source |
 |---|---|---|
-| <Concise summary of the boundary and why it matters to this route.> | L10-L18 | [<boundary-pack>](<relative-path-from-this-overview-to-repo-root>/bootstrap/evidence/cross-repo/<pack>.md) |
+| <Concise summary of the boundary and why it matters to this route.> | "<verbatim string the cited range holds>" | <repo-relative path>:<start>-<end> |
 
 ## Docs References
 
 <Explain documentation context that affects this route. Use a docs pack when available. If none exists, record what was checked plus `No relevant documentation found.`>
 
-| Finding | Citations | Source Path |
+| Finding | Anchor | Source |
 |---|---|---|
-| <Concise summary of the cited documentation and why it matters to this route.> | L20-L33 | [<docs-pack>](<relative-path-from-this-overview-to-repo-root>/bootstrap/evidence/docs/<pack>.md) |
+| <Concise summary of the cited documentation and why it matters to this route.> | "<verbatim string the cited range holds>" | <repo-relative path>:<start>-<end> |
 
 ## File-Level Onboarding Map
 

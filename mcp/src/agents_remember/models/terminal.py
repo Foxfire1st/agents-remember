@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
 from agents_remember.models.base import ToolResponse
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -79,6 +79,11 @@ SpawnAgentSessionStatus = Literal[
     "bad-kind",
     "source-lineage-stale",
     "source-lineage-unavailable",
+    # 260915-CAPS-L15: the seat is role-configured and its capsule could not be supplied (no
+    # compilable capsule for the role, or no verified channel on this launch). Refused before any
+    # host side effect, with the exact stage and role named in the detail: a session that would run
+    # without instructions is never started.
+    "capsule-unavailable",
 ]
 
 # The runtime half of each alias, derived from it rather than retyped beside it, so a member can
@@ -123,6 +128,11 @@ class SpawnAgentSessionResponse(ToolResponse):
     launchArgs: list[str] | None = None
     promptKeywords: list[str] | None = None
     sessionCommands: list[str] | None = None
+    # 260915-CAPS-L15: which instruction mode this launch selected — ``capsule`` with the compiled
+    # digest, instruction count and byte size, or ``legacy``/``refused`` with the named decision
+    # behind it. Recorded per run so "ran without instructions" is legible, never inferred from an
+    # absent field.
+    instructionMode: dict[str, Any] | None = None
     # Settings-owned launch/session commands remain spawn-phase configuration. Without a bound
     # brief log, ``False`` means their application was not proven; it is never a brief-delivery claim.
     sessionCommandsDelivered: bool | None = None

@@ -14,7 +14,12 @@ This is the canonical file-level onboarding content model. Sidecar onboarding mi
 
 ## Governing Overview
 
-<Backlink to the nearest route-local `overview.md` that governs this file. If no route-local overview exists yet, link to the closest ancestor overview, falling back to the root `overview.md`.>
+[overview.md](<relative-path-from-this-card-to-the-nearest-governing-overview.md>)
+
+The link target is the SAME value the `governingOverview` metadata field carries, written
+relative to this card's own directory -- that is the path a reader clicking it resolves. A
+section with only prose, or with a bare path and no markdown link, declares no body link and
+is reported by the integrity check as `governing-overview-section-absent`.
 
 ## Purpose
 
@@ -43,25 +48,25 @@ This is the canonical file-level onboarding content model. Sidecar onboarding mi
 <Start with a short prose summary if there is meaningful external or domain-documentation context to explain, then add the citation table. Use the `c-08-ar-coordination-context-resolver` skill resolved `system/sources.md` as a discovery aid, not as the citation target, and search beyond the registry until you find the actual proving document.
 Cite the actual online, intranet, library, or product documentation that directly proves the statement. Read local mirrors if needed, but treat them as orientation caches, link the table row to the canonical live document reference, and health-check that canonical reference during create/update work. If the reference cannot be verified, record the blocker explicitly. Investigate and preserve useful explanation already present in this section; correct it if needed rather than deleting it. If nothing relevant exists after checking live sources, keep the table and record what was checked plus `No relevant documentation found after checking live sources.`>
 
-| Finding                                                                | Citations | Source Path                                                |
-| ---------------------------------------------------------------------- | --------- | ---------------------------------------------------------- |
-| <Concise summary of the cited lines and why they matter to this file.> | L10-L18   | [<doc-title-or-id>](https://example.com/canonical-doc-url) |
+| Finding                                                                | Anchor                                                     | Source                                  |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------- | --------------------------------------- |
+| <Concise summary of the cited lines and why they matter to this file.> | "<verbatim string the cited range holds, or `#heading`>"     | <repo-relative path>:<start>-<end>      |
 
 ## Repo-Internal References
 
 <Start with a short prose summary if there is meaningful same-repository context to explain, then add the citation table. Cite the actual code, onboarding evidence, config, test, or generated artifact that directly proves the statement. Use workspace-relative links for same-repository evidence; never absolute filesystem paths. Health-check each workspace-relative target during create/update work; if the target moved or no longer exists, repair the entry before finishing. Investigate and preserve useful explanation already present in this section; correct it if needed rather than deleting it. If nothing relevant exists, keep the table and record what was checked plus `No relevant internal references found.`>
 
-| Finding                                                                | Citations | Source Path                                                                         |
-| ---------------------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------- |
-| <Concise summary of the cited lines and why they matter to this file.> | L20-L35   | [<same-repo-source-or-onboarding-file>](relative/path/to/source-or-onboarding-file) |
+| Finding                                                                | Anchor                                                     | Source                                                                              |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| <Concise summary of the cited lines and why they matter to this file.> | `source_symbol`                                            | <repo-relative path>:<start>-<end>                                                  |
 
 ## Cross-Repo References
 
 <Start with a short prose summary if there is meaningful cross-repo or external-boundary behavior to explain, then add the citation table. Use the `c-08-ar-coordination-context-resolver` skill resolved `system/sources.md` only to choose the search space; never cite the registry itself. Cite the actual sibling-repo file, generated handoff artifact, boundary contract, or authoritative external-system document that directly proves the boundary. Use workspace-relative links when the proving target is in the workspace, and canonical external URLs otherwise. Health-check each cited target during create/update work; if the target moved or no longer exists, repair the entry before finishing. Investigate and preserve useful explanation already present in this section; correct it if needed rather than deleting it. If nothing relevant exists, keep the table and record what was checked plus `No meaningful cross-repo references found.`>
 
-| Finding                                                                                 | Citations | Source Path                                                                     |
-| --------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------- |
-| <Concise summary of the interface, external repo/service involved, and why it matters.> | L42-L58   | [<source-or-adjacent-repo-file>](relative/path/to/source-or-adjacent-repo-file) |
+| Finding                                                                                 | Anchor                                       | Source                                                                          |
+| --------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------- |
+| <Concise summary of the interface, external repo/service involved, and why it matters.> | `boundary_symbol`                            | <repo-relative path>:<start>-<end>                                              |
 
 ## Update History
 

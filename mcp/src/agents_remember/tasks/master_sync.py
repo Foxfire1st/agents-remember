@@ -103,7 +103,23 @@ def subtask_ref_from_leaf(
 
 
 def derived_master_status(leaf: TaskDocument) -> DocStatus:
-    """Collapse leaf step state to the master's strict status vocabulary."""
+    """Collapse leaf state to the master's strict status vocabulary.
+
+    A ROW IS ``Completed`` WHEN THE WORK LANDED, NOT WHEN ITS STEPS WERE MARKED. The only
+    writer that sets a leaf document's ``status`` to ``Completed`` is the task finalizer
+    (``worktrees/modules/finalize.py``), and it does so only after proving the task commit is
+    reachable from the contract's target branch and cleanup completed. Marking the last step
+    ``done`` writes no such proof, so a step-state-derived ``Completed`` published a row for
+    work still sitting uncommitted on a task branch -- recorded defect D42 of
+    ``260915_role-capsules-and-native-eve``, where a row flipped before any closeout or
+    integration had run.
+
+    The three inputs therefore keep their own meaning and none is substituted for another:
+    ``abandoned`` is a decision and stays terminal on its own; a ``Completed`` leaf document is
+    the landing the finalizer proved; and step state distinguishes "started" from "untouched".
+    A leaf whose steps are all done but whose document has not landed projects ``inProgress``,
+    which is the true state of that row and is what the finalizer overwrites when it lands.
+    """
     if leaf.status == "abandoned":
         # A leaf whose work was deliberately not taken projects that terminal row directly.
         # Without this the partially-done check below would collapse it back to ``inProgress``,
@@ -111,7 +127,7 @@ def derived_master_status(leaf: TaskDocument) -> DocStatus:
         return "abandoned"
     statuses = [step.status for step in leaf.steps]
     statuses.extend(sub.status for step in leaf.steps for sub in step.substeps)
-    if statuses and not completion_blockers(leaf):
+    if leaf.status == "Completed" and statuses and not completion_blockers(leaf):
         return "Completed"
     if any(status in {"done", "inProgress", "blocked"} for status in statuses):
         return "inProgress"

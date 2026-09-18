@@ -459,3 +459,156 @@ class NativeHistoryLimitExceeded(NativeHistoryUnavailable):
         super().__init__(detail, code="materialization-limit")
         self.actual_bytes = actual_bytes
         self.limit_bytes = limit_bytes
+
+
+class CapsuleCompilationError(AgentsRememberError):
+    """A role capsule could not be compiled, or an admitted input refused to build.
+
+    A compilation failure never produces a partially valid capsule: the caller
+    receives this typed refusal instead of content. ``status`` is a stable,
+    branchable code (``unknown-role``, ``missing-required-instruction``,
+    ``equal-authority-contradiction``, ...); ``detail`` names the exact defect for
+    an operator who does not know the internals; ``next_action`` names the owner
+    that has to change something. ``conflicts`` carries the structured
+    contradiction rows when the refusal is a stopped conflict.
+    """
+
+    def __init__(
+        self,
+        status: str,
+        detail: str,
+        *,
+        next_action: str = "",
+        conflicts: Sequence[Mapping[str, object]] = (),
+    ) -> None:
+        super().__init__(detail)
+        self.status = status
+        self.detail = detail
+        self.next_action = next_action
+        self.conflicts = tuple(MappingProxyType(dict(row)) for row in conflicts)
+
+    def render(self) -> str:
+        """The one-line operator-facing projection of this refusal."""
+
+        if self.next_action:
+            return f"{self.status}: {self.detail} (remedy: {self.next_action})"
+        return f"{self.status}: {self.detail}"
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded refusal facts, without lower-layer diagnostics."""
+
+        fields: dict[str, object] = {"status": self.status, "detail": self.detail}
+        if self.next_action:
+            fields["nextAction"] = self.next_action
+        if self.conflicts:
+            fields["conflicts"] = [dict(row) for row in self.conflicts]
+        return fields
+
+
+class CapsuleManifestError(CapsuleCompilationError):
+    """The canonical composition manifest (or a declared source path) was invalid."""
+
+
+class CapsuleSourceError(CapsuleCompilationError):
+    """A canonical instruction source was absent, unreadable, or outside its root."""
+
+
+class TaskProjectionSourceError(AgentsRememberError):
+    """An admitted task/worktree binding could not be projected into task context.
+
+    A projection is either complete or refused: there is no partial projection and
+    no fallback to another branch, another task revision or a broader scope.
+    ``status`` is a stable, branchable code; the authoritative vocabulary is the
+    registry in
+    :mod:`agents_remember.application.task_projection.statuses`
+    (``PROJECTION_STATUSES``), which every raise site imports its code from, so a
+    second spelling or an unregistered code is a test failure rather than drift.
+    ``detail`` names the exact defect for an operator who does not know the
+    internals; ``next_action`` names the owner that has to change something. The
+    projection never repairs what it could not resolve, so the current task
+    document is untouched by any of these refusals.
+    """
+
+    def __init__(
+        self,
+        status: str,
+        detail: str,
+        *,
+        next_action: str = "",
+        owner_status: str = "",
+    ) -> None:
+        super().__init__(detail)
+        self.status = status
+        self.detail = detail
+        self.next_action = next_action
+        # The status the existing AR owner raised, when this refusal wraps one, so a
+        # caller can still branch on the owner's own vocabulary instead of matching prose.
+        self.owner_status = owner_status
+
+    def render(self) -> str:
+        """The one-line operator-facing projection of this refusal."""
+
+        if self.next_action:
+            return f"{self.status}: {self.detail} (remedy: {self.next_action})"
+        return f"{self.status}: {self.detail}"
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded refusal facts a transport may publish."""
+
+        fields: dict[str, object] = {"status": self.status, "detail": self.detail}
+        if self.next_action:
+            fields["nextAction"] = self.next_action
+        if self.owner_status:
+            fields["ownerStatus"] = self.owner_status
+        return fields
+
+
+class MemoryModeUnsupportedError(AgentsRememberError):
+    """A caller asked for a memory mode this product removed.
+
+    The refusal names the removed mode, the supported set and the route out, so an operator
+    who never saw the old vocabulary can still act. It deliberately carries the *artifact*
+    that records the removed mode when one exists -- a contract path, a settings path or a
+    memory root -- because existing state is reported, never silently migrated: the caller
+    must be able to point at the exact file or directory that still says ``internal``.
+
+    ``status`` is the stable, branchable code every surface publishes for this refusal; it is
+    one value rather than a per-surface spelling so a caller can match on it directly.
+    """
+
+    status = "memory-mode-unsupported"
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        requested: str,
+        supported: Sequence[str],
+        artifact: str | None = None,
+        remedies: Sequence[str] = (),
+    ) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.requested = requested
+        self.supported = tuple(supported)
+        self.artifact = artifact
+        self.remedies = tuple(remedies)
+
+    def render(self) -> str:
+        """The one-line operator-facing projection of this refusal."""
+
+        return f"{self.status}: {self.detail}"
+
+    def response_fields(self) -> dict[str, object]:
+        """The bounded refusal facts a transport may publish."""
+
+        fields: dict[str, object] = {
+            "status": self.status,
+            "detail": self.detail,
+            "requested": self.requested,
+            "supported": list(self.supported),
+            "remedies": list(self.remedies),
+        }
+        if self.artifact is not None:
+            fields["artifact"] = self.artifact
+        return fields

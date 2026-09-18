@@ -54,8 +54,12 @@ Run this sequence in order:
 1. Runtime scaffold: run or verify `runtime_install()`.
 2. Agentic settings: walk the developer through the orchestration defaults in
    the seeded global settings file.
-3. Optional repository certification: only on an explicit developer request, author, validate, and
-   register one repository-owned Gate 1-4 profile for the requested repository.
+3. Repository certification profile: author, validate, and register one repository-owned Gate 1-4
+   profile for the requested repository when the developer asks for repository certification or the
+   full code-quality operation. This profile is not curation, so the curator's complete
+   memory-quality result neither waits on it nor substitutes for it: curation is always complete,
+   while a certification profile is authored only as that requested operation and routine closeout
+   and master integration do not enter this stage.
 4. Memory repo: ask scaffold-new vs use-existing, unless memory already exists.
 5. Bootstrap: when a new memory repo was scaffolded, hand off to
    `c-03-repo-bootstrap`.
@@ -94,10 +98,9 @@ Check, in order:
    Docker. If provider diagnostics report Docker/Ollama/image problems, explain
    the gap. A developer may explicitly defer providers and continue with core
    memory setup.
-6. **Topology consistency.** If MCP settings point at an external coordination
-   root, memory setup must remain consistent with that topology. Do not let
-   memory initialization silently choose internal memory when settings clearly
-   describe an external-memory layout.
+6. **Topology consistency.** `external` is the only supported memory topology. Never
+   let memory setup create a repo-local `ar-memory/` root: it was removed from the
+   product, and a request for it is refused by name rather than substituted.
 7. **Certification authority, when explicitly requested.** For a developer-requested certification
    operation, report the exact `repositories.<repo-id>.certificationProfile` value and whether that
    candidate file exists inside the repository. Routine code closeout/integration is a Git
@@ -230,7 +233,8 @@ field and authoring procedure are documented in
    suite or clean-room scenarios merely as install diagnostics.
 6. If the authority settings changed, tell the developer that the MCP/harness must restart before
    the new boot-time repository authority is live. This affects the requested certification
-   operation only; it is not a routine closeout/integration prerequisite.
+   operation only; it is not a curation step, and routine closeout and integration do not enter
+   this stage.
 
 Make progress autonomously from durable repository contracts. Ask the developer only when the
 repository's intended rail, posture, or clean-room boundary is genuinely ambiguous. Never copy the
@@ -247,26 +251,48 @@ Do not assume the developer wants a fresh memory repo. Ask which case applies,
 unless a memory repo is already present and resolvable:
 
 1. **Scaffold a new memory repo** - they have no existing memory for this code
-   repo. Run `c-00-initialize-memory-repo` (internal by default; external only if
-   the developer asks or the configured topology requires it). Continue to Stage
-   5.
+   repo. Ask the foundation question before creating anything: **which code branch
+   should be the foundation (spear) of this repository's memory?** Default it to the
+   branch the code repository currently has checked out, say plainly why it matters
+   (memory is written against that branch's state, and changing it later is a
+   carryover step rather than an edit), and hand the answer to
+   `c-00-initialize-memory-repo` as `initial_branch`. That skill owns the procedure,
+   including the short plain-language account for a developer who skipped the
+   README. It creates the external memory repo at
+   `<coordination-root>/memory-repos/ar-<code-repository-name>`. Continue to
+   Stage 5.
 2. **Use an existing memory repo** - they already have one. Clone or checkout it
    to the resolved memory location, then adopt it as the Git-attributed baseline with
    `c-10-adopt-memory-baseline`. Skip Stage 5 because its onboarding already
    exists.
 
-Internal-memory note: pre-existing internal memory lives inside the code repo
-(`<repo>/ar-memory/`), so it is already present on checkout. Detect that through
-`c-08-ar-coordination-context-resolver` and skip the question when the memory
-layer is already there.
+Removed-layout note: repo-local internal memory lived inside the code repo at
+`<repo>/ar-memory/`. That layout was removed from the product and is refused, not
+migrated. If a checkout still carries one, report the exact path and the route out
+(re-point to the external memory root and record `memory_mode: external` on the
+worktree contracts, or re-initialize with `c-00-initialize-memory-repo`); never
+rewrite or delete it, and never treat it as an already-present memory layer.
 
-## Stage 5 - Bootstrap
+## Stage 5 - Bootstrap, Then The First Baseline
 
-Run this stage only when Stage 4 scaffolded a new memory repo.
+Run this stage only when Stage 4 scaffolded a new memory repo. It has two halves, and the
+second is what makes the memory repo usable: a scaffold with no baseline has **no commit and
+no ledger**, so nothing downstream can attribute memory content to a code commit.
 
-Hand off to `c-03-repo-bootstrap` to generate initial onboarding. A thin
-`overview.md` is enough to start; deeper route-local overviews and file-level
-onboarding should grow as work touches new areas.
+1. **Scaffold onboarding** - hand off to `c-03-repo-bootstrap` to generate initial
+   onboarding. A thin `overview.md` is enough to start; deeper route-local overviews and
+   file-level onboarding should grow as work touches new areas. Whether the developer wants
+   onboarding at all is their call: `system/` alone is enough to adopt.
+2. **Adopt the first attributed baseline** - hand off to `c-10-adopt-memory-baseline`,
+   which owns the procedure. Read `memory_baseline_status` **before** adoption, put the
+   drift-acceptance decision to the developer rather than assuming it, adopt through
+   `memory_baseline_adopt`, then read `memory_baseline_status` **again** and report both.
+   Baseline adoption is valid only before attributed memory exists, so an
+   `already-adopted` report means this half is already done.
+
+`bootstrap/` scaffolding is transient and is never part of a memory commit - not the first
+baseline and not any later one. Say so before the first adoption, because the developer is
+the one who decides when the bootstrap directory is removed.
 
 Skip this stage when an existing memory repo was adopted.
 
@@ -311,7 +337,9 @@ Summarize:
 5. memory repo: scaffolded, existing-adopted, or already present, with the
    resolved memory root;
 6. bootstrap: run via `c-03-repo-bootstrap` or skipped;
-7. providers: indexing status and any deferred/degraded state.
+7. first baseline: `memory_baseline_status` before and after adoption, the adoption
+   result at its memory-content commit, or the exact reason it was not run;
+8. providers: indexing status and any deferred/degraded state.
 
 End by telling the developer whether the project is ready for normal work. Do
 not tell them to restart for hooks installed by this skill, because this skill no
@@ -330,7 +358,8 @@ longer installs hooks.
 5. It delegates memory init to `c-00-initialize-memory-repo`, bootstrap to
    `c-03-repo-bootstrap`, baseline adoption to
    `c-10-adopt-memory-baseline`, and context resolution to
-   `c-08-ar-coordination-context-resolver`.
+   `c-08-ar-coordination-context-resolver`. The fresh-scaffold path reaches baseline
+   adoption in Stage 5; it does not stop at the scaffold.
 6. It must not invent a certification profile, discover one by convention, or copy another
    repository's commands. A missing/invalid profile blocks only the explicitly requested
    certification operation; routine code/memory/ledger closeout remains a Git transaction.

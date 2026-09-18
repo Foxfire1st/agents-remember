@@ -58,7 +58,8 @@ def _register_worktree_start_tools(server: FastMCP, config: McpRuntimeConfig) ->
         reservations refuse. Mutating: creates branches/worktrees on disk. Preview with
         dry_run=true. Driven by the
         c-09-git-worktree-manager skill workflow; workflow_kind is the task format ('light-task' or 'chat-task').
-        memory_mode is 'internal', 'external', or 'disabled'.
+        memory_mode is 'external' or 'disabled'; the removed 'internal' mode is refused by
+        name with status 'memory-mode-unsupported' before any worktree exists.
 
         A leaf whose cleanup already completed must be reset explicitly through
         task_reopen first. In that terminal state this tool returns reopen-required with

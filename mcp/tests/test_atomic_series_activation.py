@@ -93,13 +93,13 @@ class ActivationFixture:
             ),
         )
 
-    def contract(self, name: str) -> WorktreeContract:
+    def contract(self, name: str, *, memory_root: Path | None = None) -> WorktreeContract:
         result = ensure_master_series_contract(
             MasterSeriesContractSpec(
                 coordination_root=self.coord,
                 repo_name=REPO,
                 code_repo=self.code,
-                memory_root=None,
+                memory_root=memory_root,
                 task_root=self.tasks / name,
                 task_name=name,
                 parent_task_name="sprint",

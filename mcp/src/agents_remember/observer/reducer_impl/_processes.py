@@ -328,7 +328,7 @@ class _CodeRefs:
 class _MemoryRefs:
     """The memory lane of one worktree contract: its two refs plus the ledger that maps them.
 
-    All three are ``None`` unless the contract runs external memory -- an internal or disabled
+    All three are ``None`` unless the contract runs external memory -- a disabled-memory
     contract has no memory lane, so the node leaves those fields unset rather than rendering
     an empty lane as an observation.
     """

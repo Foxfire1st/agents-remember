@@ -15,29 +15,66 @@ installation environment.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from functools import cached_property
 from pathlib import Path
 
 from agents_remember.errors import CitationCacheError
 from agents_remember.memory_quality.style.citations.candidate.git_source import GitSourceCandidate
+from agents_remember.memory_quality.style.citations.exclusion_register import (
+    resolve_exclusion_register,
+)
 from agents_remember.memory_quality.style.citations.source_index_cache import (
     ManagedCacheAuthority,
 )
-from agents_remember.memory_quality.style.citations.source_index_state import candidate_tree
+from agents_remember.memory_quality.style.citations.source_index_state import (
+    CitationIndexCaps,
+    ExclusionRegister,
+    candidate_tree,
+)
 
 
 @dataclass(frozen=True)
 class Trees:
-    """The two roots a source may name."""
+    """The two roots a source may name, the register they are read under, and the caps.
+
+    ``exclusions`` and ``caps`` are cached properties rather than constructor arguments because
+    every caller in the product already supplies the two roots, and a second construction site
+    that had to remember to pass the register is a second place it can be forgotten. A caller
+    that wants to add its own excludes for one operation passes ``caller_excludes``; the
+    settings-derived register and the caps are then read from the memory layer's own
+    ``system/settings.json``.
+    """
 
     code_root: Path
     memory_root: Path
     cache_authority: ManagedCacheAuthority | None = None
     candidate_tree: str | None = None
+    caller_excludes: tuple[str, ...] = ()
+    _exclusions: ExclusionRegister | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         candidate_tree(self.candidate_tree)
+
+    @property
+    def exclusions(self) -> ExclusionRegister:
+        """The exclusion register in force: pathRules, the ignore file, and the caller's own."""
+        if self._exclusions is not None:
+            return self._exclusions
+        return resolve_exclusion_register(
+            code_root=self.code_root,
+            memory_root=self.memory_root,
+            caller=self.caller_excludes,
+        )
+
+    @property
+    def caps(self) -> CitationIndexCaps:
+        """The bounds in force, from ``onboarding.citationIndex`` or the module constants."""
+        return self.exclusions.caps
+
+    def with_exclusions(self, exclusions: ExclusionRegister) -> Trees:
+        """The same trees with an already-resolved register, so it is read exactly once."""
+        return replace(self, _exclusions=exclusions)
 
     @cached_property
     def source_candidate(self) -> GitSourceCandidate | None:

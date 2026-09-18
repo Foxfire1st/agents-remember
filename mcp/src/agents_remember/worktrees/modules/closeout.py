@@ -183,7 +183,7 @@ def _memory_refresh_preview(contract, worklist: dict[str, list[str]]) -> _Memory
     """Plan the external-memory refresh and classify it, without touching anything.
 
     Every field is the same conditional: plan it for real when the task carries external
-    memory, and answer with the empty plan when it does not -- internal-memory closeout has
+    memory, and answer with the empty plan when it does not -- a disabled-memory closeout has
     no onboarding tree to refresh.
     """
     changed_paths = worklist["all"]
@@ -597,8 +597,8 @@ def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, An
 def _memory_ledger_repair(updated, memory: MemoryCloseoutOutcome) -> dict[str, object] | None:
     """What recomputing the ledger changed, or an explicit statement that it was not touched.
 
-    External-memory closeout always speaks about its ledger; internal-memory closeout has no
-    ledger to speak about, so the key is absent rather than falsely present.
+    External-memory closeout always speaks about its ledger; a disabled-memory closeout has
+    no ledger to speak about, so the key is absent rather than falsely present.
     """
 
     if memory.ledger_repair:

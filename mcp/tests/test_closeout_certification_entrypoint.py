@@ -49,7 +49,7 @@ def _fixture(
     profile_reference: Path = AGENTS_REMEMBER_PROFILE_REFERENCE,
     candidate_file: tuple[str, str] | None = None,
 ) -> QueueFixture:
-    fixture = QueueFixture(root, memory_mode="internal")
+    fixture = QueueFixture(root)
     contract = fixture.contracts[MASTER_A]
     installed = install_fixture_profile(contract.code_worktree, contract.repo_name, profile)
     declared = RepositoryCertificationProfile.model_validate_json(installed.read_bytes())

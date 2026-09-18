@@ -6,6 +6,9 @@ from dataclasses import dataclass, replace
 
 from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
 from agents_remember.models.closeout.input import EffectiveCloseoutInput
+from agents_remember.models.memory_content_excludes import (
+    MEMORY_CONTENT_EXCLUDES,
+)
 from agents_remember.worktrees.integration.mutation_evidence import (
     begin_git_mutation,
     prove_git_commit,
@@ -87,7 +90,7 @@ def _commit_memory_content(
 
     repository = contract.memory_worktree
     assert repository is not None
-    if not worktree_dirty(repository, exclude_paths=("memory.md",)):
+    if not worktree_dirty(repository, exclude_paths=MEMORY_CONTENT_EXCLUDES):
         return head_commit(repository), False
     prepare_memory_cache(repository)
     report_operation_progress(
@@ -100,11 +103,11 @@ def _commit_memory_content(
         expected_output_tree=None,
         use_current_candidate=True,
     )
-    stage_worktree_content(repository, exclude_paths=("memory.md",))
+    stage_worktree_content(repository, exclude_paths=MEMORY_CONTENT_EXCLUDES)
     committed = commit_verified_staged(
         repository,
         effective_input.memory_content_message(code_commit),
-        exclude_paths=("memory.md",),
+        exclude_paths=MEMORY_CONTENT_EXCLUDES,
     )
     prove_git_commit(args, intent, repository=repository, commit=committed)
     return committed, True

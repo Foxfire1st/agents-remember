@@ -96,6 +96,7 @@ def test_a_path_outside_the_one_admitted_form_is_refused(admitted, path: str) ->
 def test_a_child_names_an_authored_parent_and_the_hierarchy_stays_acyclic(admitted) -> None:
     store, authorship = admitted
     parent = _author(store, authorship, "src")
+    assert isinstance(parent, str)
     child = _author(store, authorship, "src/knowledge", parent=parent)
     assert isinstance(child, str)
     assert routes.require_acyclic_routes(store.connection, store.repository_id) is None
@@ -113,6 +114,7 @@ def test_a_hierarchy_that_reaches_itself_is_refused(admitted) -> None:
 
     store, authorship = admitted
     first = _author(store, authorship, "src")
+    assert isinstance(first, str)
     second = _author(store, authorship, "src/knowledge", parent=first)
     store.connection.execute(
         "UPDATE route SET parent_route_id = ? WHERE route_id = ?", (second, first)
@@ -135,6 +137,8 @@ def test_a_governed_row_names_at_most_one_governing_route(admitted) -> None:
     )
     first = _author(store, authorship, "src/one")
     second = _author(store, authorship, "src/two")
+    assert isinstance(first, str)
+    assert isinstance(second, str)
     assert (
         routes.set_governing_route(
             store.connection,
@@ -195,6 +199,7 @@ def test_the_envelope_reports_its_own_governing_column_and_refuses_the_setter(ad
 
     store, authorship = admitted
     route_id = _author(store, authorship, "src/knowledge/records.py", str(uuid4()))
+    assert isinstance(route_id, str)
     governed_record = str(uuid4())
     ungoverned_record = str(uuid4())
     for record_id, route in ((governed_record, route_id), (ungoverned_record, None)):

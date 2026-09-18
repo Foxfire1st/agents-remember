@@ -21,6 +21,7 @@ from agents_remember.memory_quality.integrity.onboarding_drift_check.summary imp
     run_drift_summary,
 )
 from agents_remember.memory_quality.style.citations import claim_reopen, range_resolution
+from agents_remember.memory_quality.style.citations.source_index_state import SourceIndexError
 from agents_remember.memory_quality.style.document_shape import (
     diff_markers,
     entity_catalog_alignment,
@@ -29,6 +30,7 @@ from agents_remember.memory_quality.style.document_shape import (
 from agents_remember.memory_quality.style.update_history import history_order
 
 DRIFT_CHECK_NAME = "integrity.onboarding_drift_check.summary"
+SOURCE_INDEX_UNAVAILABLE_STATUS = "citation-source-index-unavailable"
 FINDING_KEYS = ("findings", "reportOnlyFindings")
 # Matches the drift check's own `detail_limit` default, for the same reason.
 REPORT_ONLY_SAMPLE_LIMIT = 50
@@ -146,6 +148,26 @@ def run_check(
     onboarding_root: Path,
     drift_context: DriftCheckContext | None,
 ) -> dict[str, Any]:
+    """Run one check, turning an unusable source index into a REPORTED check result.
+
+    The quality surface cannot be bricked: when the citation source index cannot be acquired at
+    all -- past its hard stop, over its file-count cap, a malformed settings block, an
+    unreadable checkout -- the checks that need it return an actionable finding naming the
+    cause and the next step, exactly as the drift check already degrades. The raw exception
+    must never escape to a client as a bare tool error, because that turns the surface that
+    *describes* memory into the surface that blocks it.
+    """
+    try:
+        return _run_check(check, onboarding_root, drift_context)
+    except SourceIndexError as error:
+        return source_index_unavailable_result(check, error)
+
+
+def _run_check(
+    check: str,
+    onboarding_root: Path,
+    drift_context: DriftCheckContext | None,
+) -> dict[str, Any]:
     if check in STYLE_CHECKS:
         return STYLE_CHECKS[check](
             StyleCheckInputs(
@@ -166,6 +188,29 @@ def run_check(
             raise ValueError(f"{DRIFT_CHECK_NAME} requires drift context")
         return run_drift_quality_check(drift_context)
     raise ValueError(f"unknown memory quality check: {check}")
+
+
+def source_index_unavailable_result(check: str, error: SourceIndexError) -> dict[str, Any]:
+    """The reported state one check carries when the citation source index cannot be acquired."""
+    return {
+        "ok": False,
+        "check": check,
+        "status": SOURCE_INDEX_UNAVAILABLE_STATUS,
+        "findingCount": 1,
+        "findings": [
+            {
+                "check": check,
+                "severity": "error",
+                "code": "citation_source_index_unavailable",
+                "message": str(error),
+                "nextStep": (
+                    "the citation index reported why it could not be acquired; exclude the named "
+                    "paths through onboarding.pathRules.exclude, or move the bound deliberately "
+                    "through onboarding.citationIndex, and run the check again"
+                ),
+            }
+        ],
+    }
 
 
 def run_drift_quality_check(drift_context: DriftCheckContext) -> dict[str, Any]:

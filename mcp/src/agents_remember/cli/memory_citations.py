@@ -7,6 +7,11 @@
 exactly as the worktree verbs do, and there is no argument list that names the official
 memory repo. A whole-tree reflow after a package move is this one command.
 
+``--exclude GLOB`` adds a caller-supplied pattern to this call's exclusion register, on top of
+the register every call already honours (the memory layer's ``onboarding.pathRules.exclude``
+and the code repo's ``.gitignore``). The register's rule set is reported in the result, so a
+reader can see which patterns produced the population.
+
 THE FOUR MODES DO DIFFERENT WORK AND ARE NOT INTERCHANGEABLE.
 
     (none)          report. Nothing is written.
@@ -95,6 +100,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "generation is refused rather than rebuilt.",
     )
     parser.add_argument(
+        "--exclude",
+        action="append",
+        default=None,
+        metavar="GLOB",
+        help="Add a code-root-relative path glob to this call's exclusion register, on top of "
+        "the register every call already honours (settings.json onboarding.pathRules.exclude "
+        "and the code repo's .gitignore). Repeat for more than one pattern. The name is "
+        "deliberately --exclude rather than --ignore: it narrows the candidate population, it "
+        "does not reimplement Git's ignore rules.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="With --fix or --migrate, report every rewrite it would make and write nothing.",
@@ -105,6 +121,7 @@ def run(args: argparse.Namespace) -> int:
     build_index = getattr(args, "build_index", False)
     expected_snapshot = getattr(args, "expected_snapshot", None)
     document = getattr(args, "document", None)
+    caller_excludes = tuple(getattr(args, "exclude", None) or ())
     selected_modes = sum((build_index, args.fix, args.migrate))
     if selected_modes > 1:
         print("--build-index, --fix, and --migrate are different operations; pass one.")
@@ -119,6 +136,7 @@ def run(args: argparse.Namespace) -> int:
         operation_scope = CitationOperationScope(
             document=document,
             expected_snapshot=expected_snapshot,
+            excludes=caller_excludes,
         )
     except ValueError as error:
         print(str(error))
@@ -134,6 +152,7 @@ def run(args: argparse.Namespace) -> int:
                 config,
                 repo_id=args.repo,
                 contract_path=args.contract,
+                operation_scope=operation_scope,
             )
         elif args.migrate:
             payload = citation_migrate_tool(

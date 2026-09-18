@@ -11,6 +11,18 @@ from agents_remember.models.conversations.control_wire import (
     AdapterSnapshot,
     LaunchSpec,
 )
+from agents_remember.serving.capsule_delivery import (
+    REFRESH_REPORT_KEY,
+    CapsuleBindingIdentity,
+    CapsuleRefresh,
+    CodexCapsuleDelivery,
+    LegacyInstructionSwitch,
+    RefreshPlan,
+    ThreadInstructionState,
+    legacy_instruction_switch,
+    plan_refresh,
+    thread_instruction_params,
+)
 from agents_remember.serving.codex_app_server_protocol import (
     CODEX_APP_SERVER_PROTOCOL,
     CodexAppServerTransport,
@@ -72,6 +84,11 @@ class CodexAppServerSettings:
     submission_limit: int = 256
     model_page_limit: int = 32
     ephemeral: bool = False
+    capsule_delivery: CodexCapsuleDelivery | None = None
+    """The admitted capsule this session delivers, or ``None`` for the unmodified legacy launch.
+
+    Filled by an owner above ``serving`` (the compiler's own rank); this module only consumes it.
+    """
     client_name: str = "agents_remember"
     client_title: str = "Agents Remember"
     client_version: str = "3.0.0"
@@ -123,6 +140,9 @@ class CodexAppServerSession:
         self.desired_effort: str | None = None
         self.effective_effort: str | None = None
         self._settings_overridden = False
+        self.instruction_sources: tuple[str, ...] = ()
+        self.capsule_report: JsonObject | None = None
+        self.legacy_switch: LegacyInstructionSwitch | None = None
 
     async def connect(
         self,
@@ -153,12 +173,14 @@ class CodexAppServerSession:
             self.desired_model = selected
             self.desired_effort = desired_effort
             method = "thread/resume" if resume_thread_id else "thread/start"
+            plan = self._capsule_refresh_plan(resume_thread_id=resume_thread_id)
             response = await transport.request(
                 method,
                 self._thread_params(
                     resume_thread_id=resume_thread_id,
                     selected=selected,
                     desired_effort=desired_effort,
+                    capsule_plan=plan,
                 ),
             )
             thread = parse_thread_open_response(
@@ -184,6 +206,8 @@ class CodexAppServerSession:
                     f"requested cwd was {str(launch.cwd)!r}"
                 )
             self.thread_id = thread.thread_id
+            self.instruction_sources = thread.instruction_sources
+            self.capsule_report = self._capsule_report(plan)
             self.cli_version = cli_version
             self.model = selected
             self.desired_model = selected
@@ -202,6 +226,10 @@ class CodexAppServerSession:
                     "threadOpenMethod": method,
                     "threadCliVersion": thread.cli_version,
                     "modelProvider": thread.model_provider,
+                    # Host-native observation of the instructions this thread actually loaded,
+                    # including any automatic injection by the host. Reported verbatim.
+                    "instructionSources": list(thread.instruction_sources),
+                    **({"capsule": self.capsule_report} if self.capsule_report is not None else {}),
                 },
             )
             connected = True
@@ -404,12 +432,71 @@ class CodexAppServerSession:
             seen_cursors.add(cursor)
         raise CodexAppServerError("Codex model/list exceeded the pagination limit")
 
+    def _capsule_refresh_plan(self, *, resume_thread_id: str | None) -> RefreshPlan | None:
+        """What this open call does about the capsule, or ``None`` on the legacy launch.
+
+        The installed protocol carries instructions on ``thread/start``, ``thread/resume`` and
+        ``thread/fork`` and none on ``turn/start``, so a resumed thread whose applied revision is
+        unknown is a *bounded fresh thread*, never a silent re-statement. Resuming a thread this
+        session itself opened with the same digest re-states identical bytes and stacks nothing.
+        """
+
+        delivery = self.settings.capsule_delivery
+        if delivery is None:
+            return None
+        if resume_thread_id is None:
+            return plan_refresh(delivery, ThreadInstructionState())
+        same_thread = self.thread_id == resume_thread_id and self.capsule_report is not None
+        if not same_thread:
+            # Resuming a thread this session did not itself open: the applied revision is unknown,
+            # and restating instructions onto an unknown thread could stack two revisions. The
+            # supported answer is a bounded fresh thread, which the caller gets by opening one.
+            return RefreshPlan(
+                CapsuleRefresh.FRESH_THREAD,
+                "resume target was not opened by this session, so its applied capsule revision is "
+                "unknown; an unknown revision opens a bounded fresh thread rather than restating "
+                "instructions onto it",
+            )
+        report = self.capsule_report or {}
+        # Compare the RECORDED binding against the incoming one. Substituting the incoming binding
+        # here would make every resume look like a match; an unreadable record is an unknown thread.
+        recorded = CapsuleBindingIdentity.from_report(report.get("binding"))
+        recorded_digest = report.get("semanticDigest")
+        if recorded is None or not isinstance(recorded_digest, str) or not recorded_digest:
+            return RefreshPlan(
+                CapsuleRefresh.FRESH_THREAD,
+                "the recorded capsule evidence for this thread is unreadable or incomplete, so the "
+                "applied revision cannot be compared; a bounded fresh thread is opened instead",
+            )
+        return plan_refresh(
+            delivery,
+            ThreadInstructionState(binding=recorded, semantic_digest=recorded_digest),
+        )
+
+    def _capsule_report(self, plan: RefreshPlan | None) -> JsonObject | None:
+        """The provenance record published on the thread-open evidence; no instruction prose."""
+
+        delivery = self.settings.capsule_delivery
+        if delivery is None or plan is None:
+            return None
+        switch = legacy_instruction_switch(
+            capsule_delivered=True,
+            observed_sources=self.instruction_sources,
+        )
+        self.legacy_switch = switch
+        return {
+            **delivery.as_report(),
+            REFRESH_REPORT_KEY: plan.as_report(),
+            "legacyInstructionSwitch": switch.as_report(),
+        }
+
     def _thread_params(
         self,
         *,
         resume_thread_id: str | None,
         selected: CodexModelCapability,
         desired_effort: str,
+        capsule_plan: RefreshPlan | None = None,
     ) -> JsonObject:
         assert self.launch is not None
         config = dict(self.settings.config)
@@ -449,6 +536,25 @@ class CodexAppServerSession:
         ):
             if value is not None:
                 params[key] = value
+        delivery = self.settings.capsule_delivery
+        if delivery is not None:
+            # Detect first, then switch: the decision is recorded on the session evidence and the
+            # only config change is the per-launch key that stops the host loading its own document.
+            switch = legacy_instruction_switch(
+                capsule_delivered=True,
+                observed_sources=self.instruction_sources,
+            )
+            config.update(switch.request_config)
+            # An unsupported or mismatched refresh opens a *fresh* thread rather than restating
+            # instructions onto a thread that already carries another revision or another binding.
+            plan = capsule_plan or plan_refresh(delivery, ThreadInstructionState())
+            if plan.is_refusal or (
+                plan.mode is CapsuleRefresh.FRESH_THREAD and resume_thread_id is not None
+            ):
+                params.pop("threadId", None)
+                params["ephemeral"] = self.settings.ephemeral
+                plan = plan_refresh(delivery, ThreadInstructionState())
+            params.update(thread_instruction_params(delivery, plan))
         return params
 
     def require_desired_effort(self) -> str:

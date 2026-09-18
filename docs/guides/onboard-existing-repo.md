@@ -16,10 +16,11 @@ Expose skills for your harness using the relevant [install guide](../README.md#i
 
 Ask the agent to run `c-00-initialize-memory-repo` for the target repository.
 
-Default internal memory creates:
+External memory creates one memory repo per code repository:
 
 ```text
-<repo>/ar-memory/
+<coordination-root>/memory-repos/ar-<repo>/
+  memory.md
   onboarding/
   docs/
   system/
@@ -33,16 +34,16 @@ Do not create onboarding content by hand before the memory root exists. The `c-0
 
 ## 3. Configure Path Eligibility
 
-Review `<repo>/ar-memory/system/settings.json`.
+Review `<coordination-root>/memory-repos/ar-<repo>/system/settings.json`.
 
 Start with a small eligible surface:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "onboarding": {
     "storage": {
-      "mode": "repo-sidecar"
+      "mode": "memory-repo"
     },
     "pathRules": {
       "include": {
@@ -54,6 +55,9 @@ Start with a small eligible surface:
         "fileTypes": [".png", ".zip"]
       }
     }
+  },
+  "crossRepo": {
+    "allow": []
   }
 }
 ```

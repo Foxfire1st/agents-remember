@@ -22,8 +22,12 @@ replaces one combined worklist at:
 
 The worklist includes repairable quality findings, missing onboarding, stale route indexes,
 source-change reconciliation candidates, closeout-owned provenance, and noteworthy report-only
-evidence. The curator runs it at intake and after repairs until `curatorActionableCount=0` and
-`checklistStatus=ready-for-closeout`. It is operational state outside both Git worktrees, and
+evidence. The curator runs it at intake and after repairs until `curatorActionableCount=0` and the
+**raw** `qualityChecklistStatus` reads `ready-for-closeout`; the combined `checklistStatus` is rewritten
+to `coherence-required` only when the coherence record is then missing or stale — the coherence gate
+that `prepare` → `publish` → `validate` must clear — and `closeoutReady` becomes true only once that
+validation passes. It is operational state outside both Git
+worktrees, and
 cleanup or abandon removes `reports/` with the enclosure.
 
 ## Common Classifications

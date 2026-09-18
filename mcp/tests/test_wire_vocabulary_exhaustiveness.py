@@ -164,7 +164,7 @@ def _contract(root: Path, **overrides: Any) -> WorktreeContract:
         task_name="t",
         repo_name="r",
         workflow_kind="light-task",
-        memory_mode="internal",
+        memory_mode="disabled",
         coordination_root=root,
         task_root=root / "tasks",
         contract_path=root / "tasks" / "series-contract.md",

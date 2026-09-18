@@ -286,11 +286,20 @@ def _leaf_landing_precedes(
     earlier: WorktreeContract,
     later: WorktreeContract,
 ) -> bool:
-    """Whether one leaf's landing is on the way to another's, on both sides of the pair."""
+    """Whether one leaf's landing is on the way to another's, on both sides of the pair.
 
-    if earlier.integrated_code_commit == later.integrated_code_commit:
+    The order is over the *pair*, not over the code commit alone: a leaf whose code leg is
+    ``not-applicable`` lands a memory commit and records the code position it stood on, so two
+    leaves may share one code commit and remain two distinct landings -- each memory commit makes
+    the pair unique. Only a pair that is equal on both sides is one landing recorded twice, and
+    that stays unordered.
+    """
+
+    same_code = earlier.integrated_code_commit == later.integrated_code_commit
+    same_memory = earlier.integrated_memory_content_commit == later.integrated_memory_content_commit
+    if same_code and (series.memory_mode != "external" or same_memory):
         return False
-    if not is_ancestor(
+    if not same_code and not is_ancestor(
         series.code_repo_path,
         earlier.integrated_code_commit,
         later.integrated_code_commit,
@@ -299,6 +308,8 @@ def _leaf_landing_precedes(
     if series.memory_mode != "external":
         return True
     assert series.memory_repo_path is not None
+    if same_memory:
+        return True
     return is_ancestor(
         series.memory_repo_path,
         earlier.integrated_memory_content_commit,

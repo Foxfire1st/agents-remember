@@ -4,6 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from agents_remember.application.runtime.install import RuntimeInstallRequest
 from agents_remember.application.runtime.startup import mcp_serving_build_payload
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -102,9 +103,9 @@ def _register_orientation_tools(server: FastMCP, config: McpRuntimeConfig) -> No
         worktree_name: str | None = None,
         topology: str | None = None,
     ) -> dict[str, Any]:
-        """Resolve a repository's coordination/memory context: topology (internal/external), code
-        and memory roots, settings paths, storage mode, and path rules. Read-only. Use this (or
-        context_packet) before relying on onboarding, task files, or provider tools."""
+        """Resolve a repository's coordination/memory context: topology (external), code and memory
+        roots, settings paths, storage mode, and path rules. Read-only. Use this (or context_packet)
+        before relying on onboarding, task files, or provider tools."""
         return resolve_context_payload(
             config,
             TaskRef(
@@ -128,6 +129,7 @@ def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> N
         include_benchmarks: bool = False,
         install_provider_deps: bool = True,
         no_cache: bool = False,
+        experiment: str | None = None,
     ) -> dict[str, Any]:
         """Install/refresh the packaged coordinator runtime into the coordination root. Safe to
         re-run over an existing install.
@@ -142,13 +144,22 @@ def _register_installation_tools(server: FastMCP, config: McpRuntimeConfig) -> N
         image whose tag already exists, then starts/rechecks watchers without rebuilding indexes.
         Pass no_cache=true to force a true from-scratch rebuild (bypasses that skip AND adds
         --no-cache to docker build). include_benchmarks=true also installs benchmark fixtures.
-        ALWAYS preview with dry_run=true first."""
+        ALWAYS preview with dry_run=true first.
+
+        experiment="role-capsules" installs the experimental instruction cutover for THIS run: the
+        legacy AR startup chain is withheld and the pinned eve application is installed beside the
+        canonical assets. It is a per-call input, never a setting: the same parameter omitted (and
+        no AR_EXPERIMENT in the server environment) installs the unmodified runtime, and the returned
+        record's selectionSource names which input supplied the mode. Leave it unset for production."""
         return runtime_install_payload(
             config,
-            dry_run=dry_run,
-            include_benchmarks=include_benchmarks,
-            install_provider_deps=install_provider_deps,
-            no_cache=no_cache,
+            RuntimeInstallRequest(
+                dry_run=dry_run,
+                include_benchmarks=include_benchmarks,
+                install_provider_deps=install_provider_deps,
+                no_cache=no_cache,
+                experiment=experiment,
+            ),
         )
 
     @server.tool()

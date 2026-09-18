@@ -7,6 +7,11 @@ orchestrator already ran. Dispatch it with
 complete brief>)`. The control plane claims the `(master document, manager)` seat and privately
 binds its current occupant.
 
+**This template feeds inputs; it does not author rules.** The manager's duties live in
+`../roles/manager.md`, the loop and closeout procedure in `../operations/coordination.md` and
+`../operations/closeout.md`, and the truth boundary in `../core/acceptance.md`. The rows below carry
+the *values* for this master; if a value here disagrees with those files, they win.
+
 ---
 
 ```md
@@ -86,7 +91,7 @@ to the developer.
   `non-attempt-correction`/void reference and consumes no attempt ID; a malformed handed-off row
   requires independent reviewer rejection before a successor handoff. The worker never self-rejects.
 - Leaf handoff: manager -> builder -> optional reviewer -> curator when memory changes. The manager
-  closes a leaf from builder code plus the curator's affected-onboarding/scoped-check report; a
+  closes a leaf from builder code plus the curator's complete affected-onboarding/check report; a
   reviewer verdict is included only when review was requested.
 - Closeout-door publication: after that handoff and a current-lineage proof, call
   `closeout_door(request={action:"declare", contract_path:...})` against the configured leaf
@@ -141,11 +146,12 @@ to the developer.
   substitute for the requirement acceptance envelope, and the envelope cannot waive it.
 - Transaction boundary: closeout and integration publish only explicitly authorized Git code
   and prepared memory commits/merges with source/destination refs, conflict checks, and
-  recovery evidence. They do not automatically run code-quality checks, full test suites,
-  memory-quality suites, curator certification, or independent review. Full code quality, full
-  tests, and full memory quality run only after an explicit developer request. Worker targeted
-  checks and curator scoped onboarding checks are reported truthfully, including failures and
-  not-run checks.
+  recovery evidence. They do not automatically run code-quality checks, full test suites, or
+  independent review, and full code quality and full tests run only after an explicit developer
+  request. Curation is never deferred that way: the curator runs the complete memory-quality
+  operation, and closeout and integration carry that result as a prerequisite instead of rerunning
+  it. Worker targeted checks and the curator's complete onboarding result are reported truthfully,
+  including failures and not-run checks.
 - Curator dispatches: `../templates/curator-brief.md`, fresh per leaf with the canonical leaf
   document and role `curator`, so the plane claims the `(leaf document, curator)` seat; dispatch
   only after builder code exists. When review was requested, include its verdict. The brief FEEDS
@@ -173,7 +179,7 @@ to the developer.
 
 ## The exit
 - When the master reaches its completion boundary, prepare the master-handover packet with the
-  exact code/memory transaction, worker targeted-check report, curator scoped onboarding/
+  exact code/memory transaction, worker targeted-check report, the curator's complete onboarding/
   check report, current refs, and concrete conflicts or failed/not-run checks. If the developer or
   approved brief requests a master-exit review, dispatch the reviewer on its canonical document,
   carry the exact requested review mode, and preserve the three-round monotonic rule: review 1

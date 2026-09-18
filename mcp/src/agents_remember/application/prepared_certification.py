@@ -71,7 +71,11 @@ from agents_remember.memory_quality.integrity.check_missing_onboarding import (
     missing_onboarding_for_source,
 )
 from agents_remember.memory_quality.style.citations.resolution import Trees
-from agents_remember.memory_quality.style.citations.source_index import open_repository_index
+from agents_remember.memory_quality.style.citations.source_index import (
+    RepositoryIndex,
+    open_repository_index,
+)
+from agents_remember.memory_quality.style.citations.source_index_state import SourceIndexError
 from agents_remember.models.lifecycles.operation import CloseoutOperationInput
 from agents_remember.models.lifecycles.preparation import (
     PreparedCloseoutOutput,
@@ -408,6 +412,31 @@ def _realize_prepared_memory(
     return after
 
 
+def _admitted_source_index(trees: Trees) -> RepositoryIndex:
+    """The closeout certification's own source index, or a NAMED refusal with a next step.
+
+    The closeout gate cannot be bricked by an index it did not choose: when the citation
+    source index cannot be acquired -- past the ~2 GiB hard stop, over the 100k file-count
+    cap, a malformed ``onboarding.citationIndex`` block, an unreadable checkout -- the
+    candidate is refused with the cause and the operator move, not a bare ``ValueError`` and
+    not a traceback. Caps that can be satisfied never reach here: they skip and report.
+    """
+    try:
+        return open_repository_index(trees, verify_integrity=True)
+    except SourceIndexError as error:
+        raise CertificationContractError(
+            "closeout certification admission refused",
+            (
+                {
+                    "code": "citation-source-index-unavailable",
+                    "path": "citationSourceIndex",
+                    "expected": "an acquirable citation source index for the candidate code tree",
+                    "observed": str(error),
+                },
+            ),
+        ) from error
+
+
 def _run(request: PreparedMemoryCertificationRequest) -> FinalCertificationResult:
     current = _current(request)
     coherence = require_current_curator_coherence(current.contract)
@@ -430,9 +459,8 @@ def _run(request: PreparedMemoryCertificationRequest) -> FinalCertificationResul
     # R06/R07 retain canonical logical roots and require every indexed code byte to
     # match the exact Git tree. HEAD-based final checks use only the proved view.
     logical_code = Path(pair.codeRoot)
-    with open_repository_index(
-        Trees(logical_code, memory, candidate_tree=candidate.code.candidateTree),
-        verify_integrity=True,
+    with _admitted_source_index(
+        Trees(logical_code, memory, candidate_tree=candidate.code.candidateTree)
     ) as index:
         scope = compile_scope_manifest(
             authority,

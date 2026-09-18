@@ -677,8 +677,8 @@ def cleanup_result(args: WorktreeArgs) -> WorktreeCommandResult:
         if contract.integration_status != "completed":
             raise RuntimeError("cleanup requires integration.status completed")
         # 05m: carryover must have run first -- it reads the parked memory branch this step deletes.
-        # The signal is the official ledger (carryover_done), not a contract stamp; internal/disabled
-        # memory has nothing to carry and passes vacuously.
+        # The signal is the official ledger (carryover_done), not a contract stamp; a disabled-memory
+        # contract has no memory worktree to carry and passes vacuously.
         carried, _carried_at = carryover_done(contract)
         if not carried:
             raise RuntimeError(

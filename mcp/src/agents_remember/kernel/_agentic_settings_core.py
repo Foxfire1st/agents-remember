@@ -75,7 +75,10 @@ KNOWN_LOOP_LEVEL_FIELDS = frozenset({"loop"})
 # The dispatch-time complexity scale (blast radius x novelty x size) the loop
 # thresholds are expressed on (l-01 The Three-Party Loop).
 COMPLEXITY_SCALE = ("low", "medium", "high")
-# The nine portable role lifecycles the l-01 registry defines.
+# The ten portable role lifecycles the l-01 registry defines. Kept in step with
+# ``models.role_capsules.vocabulary.CAPSULE_ROLES`` by a test: an orchestration knob
+# addressed to a role the registry does not publish must fail loud, and a role the
+# registry publishes must be configurable.
 KNOWN_ROLES = frozenset(
     {
         "architect",
@@ -87,6 +90,7 @@ KNOWN_ROLES = frozenset(
         "curator",
         "reviewer",
         "system-specialist",
+        "bootstrap",
     }
 )
 KNOWN_ROLE_KNOB_FIELDS = frozenset(

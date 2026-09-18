@@ -20,10 +20,11 @@ Optional inputs include `coordination_root`, `requested_topology`, `task_name`, 
 The `c-08-ar-coordination-context-resolver` skill checks:
 
 1. explicit contract or coordination inputs
-2. repo-local memory at `<repo>/ar-memory/`
-3. external memory at `<coordination-root>/memory-repos/ar-<repo>/`
+2. the memory repo at `<coordination-root>/memory-repos/ar-<repo>/`
 
-If neither memory location exists, the `c-08-ar-coordination-context-resolver` skill fails with a missing-memory error and lists the checked paths.
+If that memory location does not exist, the `c-08-ar-coordination-context-resolver` skill fails
+with a missing-memory error naming the checked path. A repository still carrying the removed
+repo-local `<repo>/ar-memory/` root is refused with that exact path and the route out.
 
 ## Key Outputs
 

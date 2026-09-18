@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.kernel.authority import require_repo, require_within_coordination
@@ -13,12 +13,11 @@ from agents_remember.kernel.coordination_context_resolver import (
     context_to_dict,
     resolve_coordination_context,
 )
+from agents_remember.kernel.memory_mode import Topology, require_supported_topology
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
-
-Topology = Literal["internal", "external"]
 
 
 def resolve_context_tool(
@@ -60,10 +59,13 @@ def resolve_context_tool(
 
 
 def _topology(value: str | None) -> Topology | None:
+    """Narrow a caller-supplied topology onto the supported set, or refuse.
+
+    Every narrowing goes through the shared vocabulary helper rather than an inline comparison,
+    so the public tool reports the same typed status and the same supported set as every other
+    surface -- and, equally, so an unknown token stays a plain invalid-argument refusal instead
+    of being reported as a removal that never happened.
+    """
     if value is None:
         return None
-    if value == "internal":
-        return "internal"
-    if value == "external":
-        return "external"
-    raise ValueError("topology must be 'internal' or 'external'")
+    return require_supported_topology(value)

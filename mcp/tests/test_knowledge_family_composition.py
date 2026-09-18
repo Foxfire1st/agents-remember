@@ -48,7 +48,7 @@ from agents_remember.memory.knowledge.batch_commands import (
 )
 from agents_remember.memory.knowledge.batch_preconditions import _COMPOSITION_KINDS, _TARGET_CHECKS
 from agents_remember.memory.knowledge.connection import fetch_one
-from agents_remember.memory.knowledge.family_view import family_revision_view
+from agents_remember.memory.knowledge.family_view import FamilyRevisionView, family_revision_view
 from agents_remember.memory.knowledge.refusals import KnowledgeRefused
 from agents_remember.memory.knowledge.schema_generations import (
     CURRENT_GENERATION,
@@ -696,6 +696,7 @@ def test_a_recorded_route_governs_and_the_ungoverned_state_is_reported_not_fille
         route_id = _author_route(store, destination, "mcp/src/agents_remember/memory/knowledge")
         assert compositions.owning_route_of_family_revision(store, left) is None
         view = family_revision_view(store, left)
+        assert isinstance(view, FamilyRevisionView)
         assert view.owning_route_id is None
         assert view.governed is False
 
@@ -708,7 +709,9 @@ def test_a_recorded_route_governs_and_the_ungoverned_state_is_reported_not_fille
         )
         assert recorded.state == "changed", recorded.refusal
         assert compositions.owning_route_of_family_revision(store, left) == route_id
-        assert family_revision_view(store, left).owning_route_id == route_id
+        recorded_view = family_revision_view(store, left)
+        assert isinstance(recorded_view, FamilyRevisionView)
+        assert recorded_view.owning_route_id == route_id
 
         again = apply_commands(
             destination,
@@ -810,7 +813,9 @@ def test_a_context_is_bound_to_the_exact_revision_and_a_successor_appends(
             ),
         )
         assert edited.state == "changed", edited.refusal
-        assert compositions.context_of_family_revision(store, left).body == successor.body
+        stored_context = compositions.context_of_family_revision(store, left)
+        assert stored_context is not None
+        assert stored_context.body == successor.body
         earlier = compositions.get_context_revision(store, context_id, first.revision_id)
         assert earlier is not None and earlier.body == first.body
         assert _guarantee_and_digest(store, left) == before
@@ -931,7 +936,9 @@ def test_one_shared_rule_judges_the_composition_graph_at_both_check_levels(admit
         with pytest.raises(KnowledgeRefused) as refused:
             require_after_integrity(store)
         assert refused.value.refusal.code == "lineage_cycle"
-        assert set(refused.value.refusal.observed.split(" | ")) == {first, second, third}
+        cycle_members = refused.value.refusal.observed
+        assert cycle_members is not None
+        assert set(cycle_members.split(" | ")) == {first, second, third}
 
 
 def test_the_shared_rules_second_branch_applies_uniformly_to_the_cross_family_graph(

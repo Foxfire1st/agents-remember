@@ -29,6 +29,7 @@ from agents_remember.memory.knowledge import (
     anchors,
     compositions,
     evidence,
+    facet_records,
     facets,
     families,
     lineage,
@@ -510,6 +511,7 @@ def _identity_check(table: str) -> TargetCheck:
         command: ChangeCommand,
         pending: set[tuple[str, str]],
     ) -> None:
+        assert isinstance(command, AddInvariant | SetInvariantLabel | AddFamily | SetFamilyLabel)
         _require_identity(store, index, command, pending, table=table)
 
     return check
@@ -559,6 +561,35 @@ def _facet_check(
     pending: set[tuple[str, str]],
 ) -> None:
     _require_facet(store, index, command, pending)
+
+
+def _invariant_revision_check(
+    store: OpenedKnowledgeStore,
+    index: int,
+    command: ChangeCommand,
+    pending: set[tuple[str, str]],
+) -> None:
+    """Adapt the invariant-revision check to the table's uniform signature.
+
+    ``_TARGET_CHECKS`` is keyed by command kind, so the command this entry receives is exactly the
+    member the table registered it for. The assertion states that invariant at the boundary rather
+    than widening the check's own parameter to the whole closed union.
+    """
+
+    assert isinstance(command, AddInvariantRevision)
+    _require_new_invariant_revision(store, index, command, pending)
+
+
+def _family_revision_check(
+    store: OpenedKnowledgeStore,
+    index: int,
+    command: ChangeCommand,
+    pending: set[tuple[str, str]],
+) -> None:
+    """Adapt the family-revision check to the table's uniform signature, on its invariant twin's rule."""
+
+    assert isinstance(command, AddFamilyRevision)
+    _require_new_family_revision(store, index, command, pending)
 
 
 def _require_identity(
@@ -823,7 +854,7 @@ def _require_facet(
         )
         return
     if isinstance(command, RemoveFacetAttachment):
-        if facets.attachment_endpoint_digest(store, command.attachment_id) is None:
+        if facet_records.attachment_endpoint_digest(store, command.attachment_id) is None:
             raise KnowledgeRefused(
                 batch_command_refusal(
                     "missing_expected_row",
@@ -1196,8 +1227,8 @@ _TARGET_CHECKS: Mapping[str, TargetCheck] = {
     "set_invariant_label": _identity_check("invariant"),
     "add_family": _identity_check("family"),
     "set_family_label": _identity_check("family"),
-    "add_invariant_revision": _require_new_invariant_revision,
-    "add_family_revision": _require_new_family_revision,
+    "add_invariant_revision": _invariant_revision_check,
+    "add_family_revision": _family_revision_check,
     "add_source_anchor": _anchor_check,
     "remove_source_anchor": _anchor_check,
     "add_family_member": _membership_check,

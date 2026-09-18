@@ -35,7 +35,7 @@ from agents_remember.application.knowledge_composition import (
 )
 from agents_remember.application.knowledge_read import open_read_context, read_knowledge_scope
 from agents_remember.memory.knowledge import composition_traversal, compositions
-from agents_remember.memory.knowledge.family_view import family_revision_view
+from agents_remember.memory.knowledge.family_view import FamilyRevisionView, family_revision_view
 from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.records import decode_authorship
 from agents_remember.memory.knowledge.refusals import KnowledgeRefused, SqliteFailureContext
@@ -325,6 +325,7 @@ def test_a_traversal_under_a_declared_policy_reports_its_version_and_widens_noth
         # The projection reports the same links without traversing, and the traversal wrote nothing.
         before = _counts_and_digest(destination.database_path, store.repository_id)
         view = family_revision_view(store, first)
+        assert isinstance(view, FamilyRevisionView)
         assert [link.to_family_revision_id for link in view.composition_links] == [second]
         assert view.composition_links[0].policy_version_id == version_id
         assert view.composition_links[0].declared_version == "2026-09-18.1"
@@ -517,17 +518,14 @@ def test_every_pre_existing_family_revision_keeps_its_payload_digest(tmp_path: P
         assert refused is None, refused
         after = _family_revision_digests(store)
         assert after == before
-        assert (
-            (store.connection.execute("SELECT count(*) FROM family_composition").fetchone()[0]) == 1
-        )
-        assert (
-            (
-                store.connection.execute(
-                    "SELECT count(*) FROM family_revision_context_revision"
-                ).fetchone()[0]
-            )
-            == 1
-        )
+        edge_row = store.connection.execute("SELECT count(*) FROM family_composition").fetchone()
+        assert edge_row is not None
+        assert edge_row[0] == 1
+        context_row = store.connection.execute(
+            "SELECT count(*) FROM family_revision_context_revision"
+        ).fetchone()
+        assert context_row is not None
+        assert context_row[0] == 1
     finally:
         store.close()
     assert FAMILY_REVISION_PAYLOAD_VERSION == "family-revision-payload/v1"

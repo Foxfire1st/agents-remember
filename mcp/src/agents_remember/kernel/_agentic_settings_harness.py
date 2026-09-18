@@ -144,6 +144,13 @@ def _merged_harness(
         )
     )
     overrides: dict[str, Any] = {"command": command, "argv": argv}
+    if base is not None:
+        # A builtin's readiness probe is a property of its RUNTIME, not of the launch mapping an
+        # override customizes. Dropping it would silently downgrade a runtime-probed harness back
+        # to a ``which`` lookup over a command that was never a PATH program -- reporting a missing
+        # runtime as a generic not-installed harness. Carried explicitly, because
+        # ``orchestration.harnesses`` has no probe key for a settings entry to declare.
+        overrides["runtime_probe"] = base.runtime_probe
     declared = {
         "name": parsed.name,
         "model_flag": parsed.model_flag,

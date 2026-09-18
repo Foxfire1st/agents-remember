@@ -31,6 +31,7 @@ import apsw
 
 from agents_remember.memory.knowledge.records import encode_authorship
 from agents_remember.memory.knowledge.refusals import RefusalFacts, refusal
+from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.result import KnowledgeOperation, KnowledgeRefusal
 
 ROUTE_OPERATION: KnowledgeOperation = "create_invariant_revision"
@@ -250,7 +251,7 @@ def author_route(
     connection: apsw.Connection,
     repository_id: str,
     draft: RouteDraft,
-    authorship: object,
+    authorship: Authorship,
 ) -> str | KnowledgeRefusal:
     """Author one route, or return the refusal that replaced it.
 
@@ -410,7 +411,7 @@ def set_governing_route(
     connection: apsw.Connection,
     repository_id: str,
     draft: GoverningRouteDraft,
-    authorship: object,
+    authorship: Authorship,
 ) -> KnowledgeRefusal | None:
     """Attach one governed row to the route that governs it, or return the refusal.
 

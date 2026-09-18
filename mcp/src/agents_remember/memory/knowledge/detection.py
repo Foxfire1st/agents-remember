@@ -32,7 +32,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import NAMESPACE_URL, uuid5
 
 from agents_remember.kernel.canonical_json import decoded_json, sha256_digest
@@ -84,6 +84,11 @@ if TYPE_CHECKING:
 # The generation whose table a detection write needs. A dataset that predates it is refused, never
 # migrated or widened -- the same rule the facet write applies to its own generation.
 REQUIRED_DETECTION_GENERATION = GENERATION_4
+
+# The two operations this module's own result type publishes: a run is either recorded or read, and
+# every refusal it reports is restated under whichever of the two produced it. ``KnowledgeOperation``
+# is wider than that, so a result names this pair rather than the operation vocabulary at large.
+DetectionRunOperation = Literal["record_detection_run", "read_detection_run"]
 
 _RECORD_INSERT = (
     "INSERT INTO knowledge_record (repository_id, record_id, kind, authority_home, lifecycle, "
@@ -265,7 +270,7 @@ def record_detection_run(
 ) -> DetectionRunResult:
     """Record one detection run and its ordered signals, or return one typed refusal."""
 
-    operation: KnowledgeOperation = "record_detection_run"
+    operation: DetectionRunOperation = "record_detection_run"
     denied = scope_refusal(operation, store.repository_id, request.repository_id)
     if denied is None:
         denied = require_detection_generation(store, operation)
@@ -547,7 +552,7 @@ def _agreement_refusal(
 
 
 def _refused(
-    repository_id: str, refusal_value: KnowledgeRefusal, operation: KnowledgeOperation
+    repository_id: str, refusal_value: KnowledgeRefusal, operation: DetectionRunOperation
 ) -> DetectionRunResult:
     return DetectionRunResult(
         state="refused", operation=operation, repository_id=repository_id, refusal=refusal_value
@@ -563,7 +568,7 @@ def read_detection_run(store: OpenedKnowledgeStore, run_id: str) -> DetectionRun
     is reported as a damaged store instead of being served as a recorded run.
     """
 
-    operation: KnowledgeOperation = "read_detection_run"
+    operation: DetectionRunOperation = "read_detection_run"
     denied = require_detection_generation(store, operation)
     if denied is not None:
         return _refused(store.repository_id, denied, operation)
@@ -734,7 +739,9 @@ def _run_differences(
     return tuple(found)
 
 
-def _version_kind(axis: str) -> str:
+def _version_kind(axis: str) -> Literal["policy_version", "extractor_version"]:
+    """Return the difference kind one version axis reports under, as the record's own vocabulary."""
+
     return "policy_version" if axis == "policy_version" else "extractor_version"
 
 

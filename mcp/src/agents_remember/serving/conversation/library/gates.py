@@ -38,6 +38,7 @@ from agents_remember.observer.events import now_iso
 from agents_remember.serving.conversation.library import codex as codex_library
 from agents_remember.serving.conversation.library.errors import LibraryStoreError
 from agents_remember.serving.conversation.library.helper_host import (
+    HELPER_ENTRY_BY_HARNESS,
     ConversationLibraryHelperHost,
     HelperHarness,
     helper_preflight,
@@ -49,6 +50,22 @@ from agents_remember.serving.harnesses import Which
 # published reference/metadata value (and used by installed tests as an environment skip guard).
 LOCKED_CODEX_RUNTIME_VERSION = "0.144.5"
 _NORMALIZED: tuple[HarnessId, ...] = ("codex", "claude", "pi")
+
+#: The harness ids the locked library helper can actually serve. Derived from the helper host's own
+#: entry table so there is one authority for that set: a harness this gate has no implementation for
+#: is refused by name (``_unavailable_history``) rather than handed to a helper lookup that would
+#: raise ``KeyError`` on an id the helper has never heard of.
+_HELPER_HARNESS_IDS: tuple[HelperHarness, ...] = tuple(HELPER_ENTRY_BY_HARNESS)
+
+
+def _helper_harness(harness_id: HarnessId) -> HelperHarness | None:
+    """The helper host's own name for one harness id, or ``None`` when it serves no such harness."""
+
+    for candidate in _HELPER_HARNESS_IDS:
+        if candidate == harness_id:
+            return candidate
+    return None
+
 
 CodexProbe = Callable[[Harness, Path, Mapping[str, str]], Awaitable[str]]
 """Awaitable probe: connect, prove list, return the observed CLI version."""
@@ -238,7 +255,12 @@ class LibraryGateRegistry:
         observed_at = now_iso()
         if harness_id == "codex":
             return await self._codex_gate(harness, executable, observed_at)
-        return await self._helper_gate(harness_id, executable, observed_at)
+        helper_harness = _helper_harness(harness_id)
+        if helper_harness is None:
+            return _unavailable_history(
+                f"the conversation-library history gate has no {harness_id!r} implementation"
+            )
+        return await self._helper_gate(helper_harness, executable, observed_at)
 
     async def _codex_gate(
         self,

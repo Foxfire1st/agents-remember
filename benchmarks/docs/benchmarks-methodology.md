@@ -80,7 +80,7 @@ Token fields are parsed defensively because Codex JSONL schemas can evolve. When
 
 A useful result report should state whether the variant boundary held:
 
-- The `no-onboarding` run should not read `ar-coordination/memory-repos/`, `ar-memory/`, or target onboarding files.
+- The `no-onboarding` run should not read `ar-coordination/memory-repos/` or target onboarding files.
 - The `with-onboarding` run should resolve the benchmark-local coordination root, not the user's normal workspace.
 - Both variants should use the same pinned source commit.
 - The final answer should complete the primary task, not stop after startup checks.

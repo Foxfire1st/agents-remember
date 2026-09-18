@@ -7,13 +7,13 @@ description: "Resolve the active Agents Remember context for a target repository
 
 Use this skill whenever an agent needs the active Agents Remember context for a repository.
 
-In the normal workflow, pass the code repository name. The `c-08-ar-coordination-context-resolver` skill decides whether that repository is using repo-local internal memory or selected external memory, then returns the resolved code repository root, coordination, memory, settings, task, worktree, ledger, and cross-repo facts that downstream skills must use.
+In the normal workflow, pass the code repository name. The `c-08-ar-coordination-context-resolver` skill resolves that repository to its external memory root, then returns the resolved code repository root, coordination, memory, settings, task, worktree, ledger, and cross-repo facts that downstream skills must use.
 
 ## Inputs
 
 - `code_repository_name`: name of the code repository being worked on. This is the normal input.
 - `workspace_root`: optional workspace root used to find `code_repository_name` when the caller is not already in the workspace root.
-- `requested_topology`: optional `internal` or `external` override for repair or explicit external-memory operations.
+- `requested_topology`: optional `external` override for repair or explicit external-memory operations. `external` is the only supported topology; the removed `internal` value is refused by name.
 - `coordination_root`: optional coordination-root hint. Normal installed resolution uses MCP settings. Package-local resolver calls use explicit input first, then the installed runtime root when invoked from an installed coordinator, then the built-in source-development default `../ar-coordination`.
 - `settings_path`: optional override for repair cases.
 - `onboarding_root`: optional override when a caller has already resolved the repository onboarding root.
@@ -30,7 +30,7 @@ When a sibling `settings.json` exists beside `settings.md`, the `c-08-ar-coordin
 
 The resolver returns one coordination context for the target repository:
 
-- `topology`: `internal` or `external`
+- `topology`: `external`
 - `code_repository_name`
 - `code_repository_root`
 - `coordination_root`
@@ -56,15 +56,15 @@ The resolver returns one coordination context for the target repository:
 
 ## Resolution Rules
 
-1. If `onboarding_root` is supplied, treat it as an explicit override only when it points under a supported memory location: `<code-repository-root>/ar-memory/onboarding` or `<ar-coordination>/memory-repos/ar-<code-repository-name>/onboarding`.
+1. If `onboarding_root` is supplied, treat it as an explicit override only when it points under `<ar-coordination>/memory-repos/ar-<code-repository-name>/onboarding`. An `onboarding_root` under a repo-local `ar-memory/` root is refused by name, with its exact path reported.
 2. If a worktree contract path is supplied, use the contract's `coordination_root` before validating memory so task worktrees resolve against their own coordinator.
 3. Resolve the coordinator from explicit `coordination_root`, the installed runtime root when invoked from an installed coordinator, or the built-in source-development default `../ar-coordination`.
-4. If `requested_topology` is `internal`, require `<code-repository-root>/ar-memory/` to exist and use it as `memory_root`.
-5. If `requested_topology` is `external`, require `<coordination-root>/memory-repos/ar-<code-repository-name>/` to exist and use it as `memory_root`.
-6. If no topology override is supplied, check `<code-repository-root>/ar-memory/` first, then `<coordination-root>/memory-repos/ar-<code-repository-name>/`.
-7. If neither supported memory location exists, fail with a missing-memory error that lists both checked paths. The agent should ask the developer whether to initialize memory with `c-00-initialize-memory-repo`, explain that the `c-00-initialize-memory-repo` skill creates the scaffold/settings, and then run the `c-03-repo-bootstrap` skill only if onboarding content should be generated.
+4. If `requested_topology` is `external`, require `<coordination-root>/memory-repos/ar-<code-repository-name>/` to exist and use it as `memory_root`.
+5. If `requested_topology` is the removed `internal`, or a repository still carries a repo-local `ar-memory/` root, refuse with a `memory-mode-unsupported` error naming the exact artifact, the removal and the supported set. Never fall through to the external root.
+6. If no topology override is supplied, resolve `<coordination-root>/memory-repos/ar-<code-repository-name>/`.
+7. If that memory location does not exist, fail with a missing-memory error that names the checked path. The agent should ask the developer whether to initialize memory with `c-00-initialize-memory-repo`, explain that the `c-00-initialize-memory-repo` skill creates the scaffold/settings, and then run the `c-03-repo-bootstrap` skill only if onboarding content should be generated.
 
-Mixed workspaces are resolved per target repository. One external memory repo does not move neighboring local repositories onto the coordination root, and one local repository does not prevent another repository from using external memory.
+Workspaces are resolved per target repository: each repository binds to its own external memory repo under the coordination root, and one repository's memory never moves a sibling's.
 
 ## MCP Tools
 
@@ -72,7 +72,7 @@ Use the Agents Remember MCP resolver tools as the normal installed runtime entry
 point:
 
 ```text
-resolve_context(repo_id="<repo-id>", task_name="<task>", parent_task="<parent-task>", leaf_id="<leaf-id>", contract_path="<series-contract.md>", worktree_name="<worktree>", topology="<internal|external>")
+resolve_context(repo_id="<repo-id>", task_name="<task>", parent_task="<parent-task>", leaf_id="<leaf-id>", contract_path="<series-contract.md>", worktree_name="<worktree>", topology="external")
 ```
 
 For startup context that also needs provider status or drift summary, request:

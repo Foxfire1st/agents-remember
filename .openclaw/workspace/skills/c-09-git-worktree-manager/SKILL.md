@@ -307,14 +307,16 @@ remains reconciling until the exact current memory source is merged and validate
 Use the `c-12-closeout` skill for worktree closeout. The `c-12-closeout` skill owns
 the explicit approval/series authority, code commit, and prepared memory-content
 commit. The consumer ledger cache is refreshed separately from those outputs. Closeout is a Git
-transaction and does not run or require code-quality checks, test suites, memory-quality checks,
-curator certification, or independent review.
+transaction that runs no code-quality checks, test suites, or independent review itself: it consumes
+the worker's targeted checks and the curator's complete memory-quality result, which travel with the
+handoff as prerequisites.
 
 Closeout scheduling and closeout execution have different owners:
 
 1. The `closeout_door` MCP tool publishes one exact contract-owned generation after current task,
-   memory, admission, source, priority, and explicit authority evidence is complete. Review
-   or quality evidence may be attached when requested, but is not required. Its disposition is
+   memory, admission, source, priority, and explicit authority evidence is complete. The curator's
+   complete memory-quality result is part of that evidence; an optional review record may be attached
+   when requested. Its disposition is
    `waiting`, `deferred`, `withdrawn`, or `claimed`.
 2. The `closeout_queue` MCP tool is only the sprint's source-fingerprinted ordering projection of
    current `waiting` generations. It has `status` and `rebuild`; it has no declare, select, claim,
@@ -368,7 +370,8 @@ The moved source does not veto task authoring and does not erase the journal or 
 Integration runs only after closeout completed and is authority-gated by context. It performs the
 declared merge/fast-forward/replay strategy, moves the recorded code and memory refs together, and
 records the actual resulting code/memory pair in the operation journal. It does not run or require
-acceptance, code quality, test suites, memory quality, curator certification, or independent review.
+acceptance, code quality, test suites, or independent review; the curator's complete memory-quality
+result already traveled with the closeout handoff as a prerequisite.
 A queue projection may be absent or invalid-empty throughout integration; `worktree_status` and
 `worktree_operation_control` remain task-addressed through the locator/manifest/journal chain. If a
 crash occurs before or after protected ref moves, recovery reconciles the live ref and recorded

@@ -242,6 +242,7 @@ def _build_serving_runtime(
         observer_health=TerminalObserverHealthPublisher(observer_root(config), serving_clock),
         register_inbox_execution_evidence=collaborators.register_inbox_execution_evidence,
         interval=cadence.interval,
+        capsule_launch=collaborators.capsule_launch,
     )
     # The serving daemon samples labeled provider
     # containers on its own cadence (decoupled from the 1s projection tick) into

@@ -135,9 +135,7 @@ def _authority_fixture(root: Path, *, external_memory: bool = False) -> Any:
     )
     configured_code = root / "repo"
     configured_code.symlink_to(fixture.code_repo, target_is_directory=True)
-    memory_mode = "external" if external_memory else "internal"
-    if not external_memory:
-        (configured_code / "ar-memory").mkdir()
+    memory_mode = "external" if external_memory else "disabled"
     if fixture.leaf_contract.memory_repo_path is not None:
         configured_memory = fixture.coordination / "memory-repos" / "ar-repo"
         configured_memory.parent.mkdir(parents=True, exist_ok=True)

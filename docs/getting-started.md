@@ -165,23 +165,31 @@ for that capability; it is not part of the quickstart.
 
 The `c-13-install-and-onboard` skill asks whether to **scaffold a new memory repo** or **use an existing one** — it does not assume you always want a fresh one. If you answer "scaffold," it runs `c-00-initialize-memory-repo` for the target repository.
 
-By default the `c-00-initialize-memory-repo` skill creates repo-local internal memory:
+The `c-00-initialize-memory-repo` skill creates the external memory repo for the target
+repository:
 
 ```text
-my-app/
-  ar-memory/
-    onboarding/
-    docs/
-    system/
-      settings.md
-      settings.json
-      sources.md
-      tools.md
+ar-coordination/
+  memory-repos/
+    ar-my-app/
+      memory.md
+      onboarding/
+      docs/
+      system/
+        settings.md
+        settings.json
+        sources.md
+        tools.md
 ```
 
-Use external memory only when you intentionally want a separate memory repo under `ar-coordination/memory-repos/ar-<repo>/`. See [Use External Memory](guides/use-external-memory.md).
+See [Use External Memory](guides/use-external-memory.md).
 
-**How the resolver picks a location.** With no explicit choice, the resolver prefers repo-local internal memory (`<repo>/ar-memory/`) **when it exists**, and otherwise falls back to external memory (`ar-coordination/memory-repos/ar-<repo>/`) when *that* exists. Before either exists — a brand-new repo — resolution fails until you initialize one, which is exactly what the `c-13-install-and-onboard` and `c-00-initialize-memory-repo` skills do here. For new projects the recommended default is repo-local internal memory; once `ar-memory/` exists, the resolver prefers it for that repository.
+**How the resolver picks a location.** External memory is the only supported topology, so the
+resolver binds each configured repository to `ar-coordination/memory-repos/ar-<repo>/`. If that
+location does not exist, resolution fails until you initialize it, which is exactly what the
+`c-13-install-and-onboard` and `c-00-initialize-memory-repo` skills do here. A repository that
+still carries the removed repo-local `ar-memory/` root is refused with that exact path and the
+route to re-point it at its external memory root.
 
 ## Bootstrap Onboarding
 

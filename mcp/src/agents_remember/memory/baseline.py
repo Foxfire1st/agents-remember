@@ -10,7 +10,6 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.coordination_context.models import CoordinationRequest
@@ -26,7 +25,10 @@ from agents_remember.kernel.memory_cache import (
     prepare_memory_cache,
     refresh_memory_cache,
 )
+from agents_remember.kernel.memory_init import DEFAULT_BRANCH_CONFIG_KEY
+from agents_remember.kernel.memory_mode import Topology, require_supported_topology
 from agents_remember.memory_quality.integrity.onboarding_drift_check import drift
+from agents_remember.models.memory_content_excludes import MEMORY_CONTENT_EXCLUDES
 from agents_remember.worktrees import git_worktree_manager as worktree_manager
 from agents_remember.worktrees.integration.integration_branch_authority import (
     memory_repository_default_branch,
@@ -37,7 +39,6 @@ from agents_remember.worktrees.modules.git import (
     commit_if_dirty,
     ensure_git_identity,
     local_branch_ref,
-    require_git,
 )
 
 
@@ -47,14 +48,21 @@ class BaselineRequest:
     workspace_root: Path
     code_repository_root: Path | None = None
     coordination_root: Path | None = None
-    topology: Literal["internal", "external"] | None = "external"
+    topology: Topology | None = "external"
     report: Path | None = None
 
 
-def _normalize_topology(value: str | None) -> Literal["internal", "external"] | None:
-    if value in ("internal", "external"):
-        return value
-    return None
+def _normalize_topology(value: str | None) -> Topology | None:
+    """Narrow ``--topology`` onto the supported set, or refuse.
+
+    Through the shared vocabulary helper, for two reasons that used to be one: letting an
+    unrecognized value fall through to ``None`` would turn an explicit request into ordinary
+    detection, and answering *every* unrecognized value with "which was removed" tells a
+    developer who mistyped the flag that a mode was removed when none was named.
+    """
+    if value is None:
+        return None
+    return require_supported_topology(value)
 
 
 def request_from_args(args: argparse.Namespace) -> BaselineRequest:
@@ -130,20 +138,35 @@ def head_commit(repo: Path, ref: str = "HEAD") -> str:
     return worktree_manager.head_commit(repo, ref)
 
 
+#: The exclusions below are the shared memory-content policy, declared in ``models`` so all
+#: four producing seams read one set. They are carried on the call that actually stages:
+#: ``commit_if_dirty`` re-stages the whole worktree, so an exclusion applied only to a bare
+#: ``git add`` before it is inert and the file lands in the commit anyway. That was this
+#: leaf's baseline defect; the case in ``test_memory_branch_authority.py`` fails if it
+#: returns.
+
+
 def _baseline_default_branch(memory_root: Path) -> str:
-    """Prove the existing default, or the exact unborn branch minted by memory_init."""
+    """Prove the existing default, or the exact unborn branch minted by memory_init.
+
+    The branch is whatever ``memory_init`` recorded, not a fixed name: the memory
+    repository is founded on the code branch the developer chose, and hard-coding ``main``
+    here would refuse every repository whose memory is founded on anything else.
+    """
 
     head = run_git(memory_root, ["rev-parse", "--verify", "HEAD"])
     if head.returncode == 0:
         return memory_repository_default_branch(memory_root)
     configured = run_git(
         memory_root,
-        ["config", "--get", "agents-remember.defaultBranch"],
+        ["config", "--get", DEFAULT_BRANCH_CONFIG_KEY],
     )
     branch = configured.stdout.strip().removeprefix("refs/heads/")
-    if configured.returncode != 0 or branch != "main":
+    if configured.returncode != 0 or not branch:
         raise RuntimeError(
-            "memory baseline adoption requires explicit default-branch authority from memory_init"
+            "memory baseline adoption requires explicit default-branch authority from "
+            "memory_init; the memory repository records no "
+            f"{DEFAULT_BRANCH_CONFIG_KEY} value"
         )
     ref = local_branch_ref(branch)
     existing = run_git(memory_root, ["show-ref", "--verify", "--quiet", ref])
@@ -207,14 +230,13 @@ def adopt_initial_baseline(context, source_branch: str, memory_branch: str) -> d
     # Resolve attribution once; the consumer cache derives the same pair from this commit.
     code_source_commit = branch_commit(context.code_repository_root, source_branch)
     prepare_memory_cache(context.memory_root)
-    require_git(context.memory_root, ["add", *existing_paths])
     memory_content_commit = commit_if_dirty(
         context.memory_root,
         render_memory_content_message(
             f"[adopt-{context.code_repository_name}-memory-baseline] Adopt external memory content",
             code_source_commit,
         ),
-        exclude_paths=("memory.md",),
+        exclude_paths=MEMORY_CONTENT_EXCLUDES,
     )
     return {
         "state": "adopted-baseline",
@@ -353,7 +375,9 @@ def add_common(parser: argparse.ArgumentParser) -> None:
         help="Root directory of the code repository to resolve.",
     )
     parser.add_argument(
-        "--topology", choices=("internal", "external"), help="Optional topology override."
+        "--topology",
+        metavar="external",
+        help="Optional topology override. `external` is the only supported topology.",
     )
     parser.add_argument("--coordination-root", type=Path, help="Optional coordination root.")
     parser.add_argument(

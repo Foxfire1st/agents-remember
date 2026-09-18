@@ -1006,7 +1006,7 @@ class EngineProcessNode(BaseModel):
 
     codeSource: CommitRefNode
     codeWorktree: CommitRefNode
-    memoryMode: str  # "external" | "internal" | "disabled"
+    memoryMode: str  # "external" | "disabled"
     memorySource: CommitRefNode | None = None
     memoryWorktree: CommitRefNode | None = None
     ledgerPath: str | None = None

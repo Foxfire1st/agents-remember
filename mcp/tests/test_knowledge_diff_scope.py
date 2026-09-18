@@ -28,6 +28,7 @@ from agents_remember.memory.knowledge.read_queries import (
     invariant_revision_is_recorded,
 )
 from agents_remember.models.knowledge.diff import (
+    DiffLimitation,
     DisplayFilter,
     KnowledgeDiffCounts,
     KnowledgeDiffItem,
@@ -632,16 +633,25 @@ def test_a_comparison_that_declares_a_limit_it_did_not_establish_fails_construct
         items=(), counts=counts, has_more=False, enumeration_complete=True, continuation=None
     )
 
-    def build(**overrides: object) -> KnowledgeDiffResult:
-        base: dict[str, object] = {
-            "state": "page",
-            "repository_id": fixture.repository_id,
-            "limitations": ("no_semantic_assessment_performed",),
-            "omissions": (),
-            "page": page,
-        }
-        base.update(overrides)
-        return KnowledgeDiffResult(**base)
+    def build(
+        *,
+        limitations: tuple[DiffLimitation, ...] = ("no_semantic_assessment_performed",),
+        omissions: tuple[OmittedChanges, ...] = (),
+    ) -> KnowledgeDiffResult:
+        """Build a comparison response, varying only the two fields the guards below read.
+
+        The declaration is what the model declares rather than a mapping of ``object`` values: a
+        keyword mapping would hand the constructor values no reader could check, and the two fields
+        this case varies are exactly the ones whose own guard is under measurement.
+        """
+
+        return KnowledgeDiffResult(
+            state="page",
+            repository_id=fixture.repository_id,
+            limitations=limitations,
+            omissions=omissions,
+            page=page,
+        )
 
     # The honest state constructs: an omission travels with the limitation that advertises it.
     honest = build(

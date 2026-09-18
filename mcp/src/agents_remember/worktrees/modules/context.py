@@ -55,9 +55,7 @@ def contract_context(contract: WorktreeContract):
     ):
         return context
 
-    storage, cross_repo = resolver.parse_coordination_settings(
-        worktree_settings_path, context.topology
-    )
+    storage, cross_repo = resolver.parse_coordination_settings(worktree_settings_path)
     system_root = worktree_settings_path.parent
     resolved_cross_repo = resolver.resolve_cross_repo_settings(
         cross_repo,

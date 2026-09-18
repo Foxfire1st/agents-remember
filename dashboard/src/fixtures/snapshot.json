@@ -375,7 +375,7 @@
         "leafId": "sim-leaf-3",
         "ledgerRowCount": 0,
         "ledgerRows": [],
-        "memoryMode": "internal",
+        "memoryMode": "disabled",
         "missingFacts": [],
         "phase": "commit-approval-pending",
         "providers": [],

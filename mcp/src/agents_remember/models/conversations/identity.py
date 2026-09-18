@@ -7,7 +7,7 @@ from agents_remember.models.conversations.primitives import (
     WireModel,
 )
 
-HarnessId = Literal["codex", "claude", "pi"]
+HarnessId = Literal["codex", "claude", "pi", "eve"]
 
 ConversationLane = Literal[
     "operator",

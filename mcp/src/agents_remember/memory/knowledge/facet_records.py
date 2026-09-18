@@ -101,7 +101,11 @@ class AttachmentDraft:
     endpoint: AttachmentEndpoint
 
 
-def facet_record_row(draft: FacetEnvelopeDraft, authorship: Authorship) -> tuple[str, ...]:
+# Each row builder below returns one INSERT's positional parameters, so its members are
+# ``str | None``: ``None`` is a fact the schema records -- an ungoverned envelope's route, a first
+# revision's absent predecessor, the endpoint columns an attachment's own kind leaves unpopulated --
+# and the connection binds it as SQL NULL rather than as an omitted column.
+def facet_record_row(draft: FacetEnvelopeDraft, authorship: Authorship) -> tuple[str | None, ...]:
     """Return the ``knowledge_record`` column tuple for one facet envelope.
 
     ``record_schema`` is derived from the facet kind rather than supplied, so the pair the payload
@@ -192,7 +196,7 @@ def decode_facet_record_row(row: Sequence[Any]) -> FacetRecord:
 
 def record_revision_row(
     draft: RecordRevisionDraft, payload: Mapping[str, Any], authorship: Authorship
-) -> tuple[str, ...]:
+) -> tuple[str | None, ...]:
     """Return the ``record_revision`` column tuple for one sealed facet revision."""
 
     return (
@@ -337,7 +341,7 @@ def decode_attachment_endpoint(
     return RealizationClaimEndpoint(claim_id=text)
 
 
-def attachment_row(draft: AttachmentDraft, authorship: Authorship) -> tuple[str, ...]:
+def attachment_row(draft: AttachmentDraft, authorship: Authorship) -> tuple[str | None, ...]:
     """Return the ``facet_attachment`` column tuple for one authored attachment."""
 
     columns = attachment_endpoint_columns(draft.endpoint)
@@ -515,7 +519,7 @@ def explanation_row(
     subject: ExplanationSubject,
     current_revision_id: str | None,
     authorship: Authorship,
-) -> tuple[str, ...]:
+) -> tuple[str | None, ...]:
     """Return the ``explanation`` column tuple for one authored explanation record."""
 
     columns = subject_columns(subject)
@@ -591,7 +595,7 @@ def explanation_revision_row(
     predecessor_revision_id: str | None,
     body: str,
     authorship: Authorship,
-) -> tuple[str, ...]:
+) -> tuple[str | None, ...]:
     """Return the ``explanation_revision`` column tuple for one sealed explanation revision."""
 
     return (

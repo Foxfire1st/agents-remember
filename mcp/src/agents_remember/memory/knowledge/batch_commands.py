@@ -86,7 +86,16 @@ from agents_remember.models.knowledge.composition import (
     FamilyExplanationContext,
 )
 from agents_remember.models.knowledge.evidence import EVIDENCE_COMMAND_KINDS
-from agents_remember.models.knowledge.facet import FACET_COMMAND_KINDS, FACET_KINDS
+from agents_remember.models.knowledge.facet import (
+    FACET_COMMAND_KINDS,
+    FACET_KINDS,
+    AddExplanationRevision,
+    AddFacet,
+    AttachFacet,
+    AuthorExplanation,
+    DesignateExplanation,
+    RemoveFacetAttachment,
+)
 from agents_remember.models.knowledge.family import FamilyRevision, FamilyRevisionDraft
 from agents_remember.models.knowledge.invariant import InvariantRevision
 from agents_remember.models.knowledge.result import (
@@ -245,6 +254,7 @@ def _apply_facet(
 ) -> tuple[RecordIdentity, ...]:
     """Apply one authored facet command through the facet module's in-transaction step."""
 
+    assert isinstance(command, _FACET_COMMANDS)
     written = facets.apply_facet_command(store, command, authorship, pending)
     return tuple(
         _written_entry(entry.state, entry.table, entry.record_id, entry.digest) for entry in written
@@ -283,6 +293,18 @@ _INSERTING_KINDS = frozenset(
 )
 
 _LABELING_KINDS = frozenset({"set_invariant_label", "set_family_label"})
+
+# The six facet commands as classes, declared once beside the kind set the dispatcher routes on. The
+# facet step's own parameter is the facet union rather than the whole closed command union, so the
+# dispatcher states which family it routed at the boundary instead of widening that step.
+_FACET_COMMANDS = (
+    AddFacet,
+    AttachFacet,
+    RemoveFacetAttachment,
+    AuthorExplanation,
+    AddExplanationRevision,
+    DesignateExplanation,
+)
 
 # The four commands the composition generation adds, dispatched together: each writes one authored
 # row through the module that owns it, and none of them addresses a sealed revision aggregate. The

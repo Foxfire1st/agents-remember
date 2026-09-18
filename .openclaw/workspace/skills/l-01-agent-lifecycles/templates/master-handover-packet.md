@@ -3,14 +3,15 @@
 The artifact a **manager** hands to the **orchestrator** at master exit (`roles/manager.md`), after
 the leaf handoffs and any explicitly requested master-exit review. The artifact is durable, and
 terminal/finalizer truth — which attests only that the manager's turn ended — wakes the current
-orchestrator, who validates the packet. It
-tells the orchestrator which completion boundary is ready: the final accumulated
-organizational candidate containing prior landed contributions plus the proposed final leaf, or
-one isolated atomic branch ready to land.
+orchestrator, who validates the packet. It tells the orchestrator which completion boundary is
+ready: the final accumulated organizational candidate containing prior landed contributions plus the
+proposed final leaf, or one isolated atomic branch ready to land.
+
+The truth boundary this template obeys is authored once in `../core/acceptance.md`.
 
 ## Rules
 
-1. Post it after the prepared code/memory transaction inputs and scoped handoff reports
+1. Post it after the prepared code/memory transaction inputs and complete handoff reports
    exist. Include an independent master-exit verdict only when review was explicitly requested;
    when present, its exact artifact reference must identify the proposed candidate it reviewed.
 2. Name `executionNature` and the exact scope. An organizational master names the
@@ -49,7 +50,7 @@ one isolated atomic branch ready to land.
 | handover evidence  | <delegated decision / accepted-series authority ref> |
 | super source       | <canonical sprint document / plane-owned current edge> |
 | worker checks      | <targeted commands/results, including failed or not-run> |
-| curator checks     | <affected onboarding/scoped commands/results, or N/A> |
+| curator checks     | <complete onboarding/full-operation commands/results, or N/A> |
 | transaction legs   | <code commit · prepared memory commit · exact Git/operation refs> |
 | verdict            | <independent master-exit verdict artifact ref, or none> |
 | verdict outcome    | <pass or pass-with-notes, or N/A>             |

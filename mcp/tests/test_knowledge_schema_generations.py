@@ -295,6 +295,8 @@ def test_a_version_1_artifact_is_imported_at_the_generation_it_declares(tmp_path
     )
     assert exported.state == "exported", exported.refusal
     assert exported.artifact is not None
+    exported_identity = exported.identity
+    assert exported_identity is not None
     envelope = json.loads(exported.artifact)
     assert (envelope["schema"], envelope["userVersion"]) == (
         GENERATION_1.schema_name,
@@ -311,19 +313,19 @@ def test_a_version_1_artifact_is_imported_at_the_generation_it_declares(tmp_path
         assert generation_of_database(reader) is GENERATION_1
     finally:
         reader.close()
-    assert logical.dataset_identity(destination).logical_digest == exported.identity.logical_digest
+    assert logical.dataset_identity(destination).logical_digest == exported_identity.logical_digest
 
     # The same artifact staged at the running build: refused, and refused for the identity rather
     # than for anything the artifact did wrong.
     staged_at_the_build = _stage_imported_dataset(
         _private_stage_directory() / _STAGE_FILE_NAME,
         envelope["tables"],
-        exported.identity,
+        exported_identity,
         CURRENT_GENERATION,
     )
     assert isinstance(staged_at_the_build, KnowledgeRefusal)
     assert staged_at_the_build.code == "invalid_export"
-    assert staged_at_the_build.expected == exported.identity.logical_digest
+    assert staged_at_the_build.expected == exported_identity.logical_digest
 
 
 def test_a_generation_2_artifact_carries_its_appended_rows_across_an_import(tmp_path: Path) -> None:
@@ -368,6 +370,8 @@ def test_a_generation_2_artifact_carries_its_appended_rows_across_an_import(tmp_
         )
     assert exported.state == "exported", exported.refusal
     assert exported.artifact is not None
+    exported_identity = exported.identity
+    assert exported_identity is not None
     envelope = json.loads(exported.artifact)
     assert (envelope["schema"], envelope["userVersion"]) == (
         GENERATION_2.schema_name,
@@ -394,7 +398,7 @@ def test_a_generation_2_artifact_carries_its_appended_rows_across_an_import(tmp_
         ] == [(record_id, route_id)]
     finally:
         reader.close()
-    assert logical.dataset_identity(destination).logical_digest == exported.identity.logical_digest
+    assert logical.dataset_identity(destination).logical_digest == exported_identity.logical_digest
 
 
 def test_every_supported_generation_declares_its_own_key_and_json_registries() -> None:

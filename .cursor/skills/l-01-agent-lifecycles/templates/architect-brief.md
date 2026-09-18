@@ -9,6 +9,11 @@ ambient-launcher mode; the request does not carry caller identity. The control p
 settings-owned profile, creates the canonical `(sprint document, architect)` seat, and durably pins
 these exact bytes before returning `dispatched` or `dispatch-queued`.
 
+**This template feeds inputs; it does not author rules.** The architect's duties live in
+`../roles/architect.md`, the launcher's in `../core/launcher.md`, and the dispatch transaction in
+`../core/authority.md`. The rows below carry the *values* for this sprint; if a value here disagrees
+with those files, they win.
+
 ---
 
 ```md

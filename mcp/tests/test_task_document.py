@@ -43,7 +43,7 @@ from agents_remember.tasks import (
     write_task_doc,
     write_task_docs,
 )
-from agents_remember.tasks.master_sync import derived_master_status
+from agents_remember.tasks.master_sync import derived_master_status, plan_master_sync
 
 
 def _doc(**over: Any) -> TaskDocument:
@@ -225,6 +225,111 @@ class AbandonedRowTests(unittest.TestCase):
             subTasks=[{"number": "1", "name": "Landed", "status": "Completed"}],
         )
         self.assertFalse(master_is_terminal(master))
+
+
+class RowStatusReflectsLandingTests(unittest.TestCase):
+    """A master row turns ``Completed`` when the work LANDED, not when its steps were marked.
+
+    Recorded defect D42 of `260915_role-capsules-and-native-eve`: the row flipped the moment a
+    leaf's last step was marked done, before any closeout or integration had run, so a master
+    claimed that work had landed while the commits were still only on the leaf's task branch.
+
+    The only writer that sets a leaf document's status to ``Completed`` is the task finalizer,
+    and it does so only after proving the commit is reachable from the contract's target branch
+    and cleanup completed. Step marking writes no such proof. These cases pin both sides of the
+    gate: marked-but-unlanded projects ``inProgress``, and the finalizer's own terminal
+    generation still projects ``Completed``.
+
+    ``plan_master_sync`` is exercised end to end over real documents on disk, because the gate
+    has to hold at the projection that actually writes the row -- not only in the helper.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.task_root = Path(self._tmp.name)
+
+    def _leaf(self, **over: Any) -> TaskDocument:
+        base: dict[str, Any] = {
+            "id": "1",
+            "slug": "leaf",
+            "title": "Leaf one",
+            "kind": "subTask",
+            "repo": "agents-remember",
+            "type": "Docs",
+            "createdAt": "2026-01-01T00:00",
+        }
+        base.update(over)
+        return TaskDocument.model_validate(base)
+
+    def _write_master(self) -> None:
+        write_task_doc(
+            self.task_root,
+            _master(
+                subTasks=[{"number": "1", "name": "Leaf one", "status": "planning"}],
+                sections=[{"kind": "subTasks", "heading": "Sub-tasks (execution order)"}],
+            ),
+        )
+
+    def _row_status(self) -> str:
+        master = read_task_doc(self.task_root / "task.json")
+        return next(ref.status for ref in master.subTasks if ref.number == "1")
+
+    def test_a_leaf_with_every_step_done_but_no_landing_does_not_complete_its_row(self) -> None:
+        self._write_master()
+        leaf = self._leaf(
+            status="inProgress",
+            steps=[
+                {"id": "S1", "title": "One", "status": "done"},
+                {"id": "S2", "title": "Two", "status": "done"},
+            ],
+        )
+        self.assertEqual(derived_master_status(leaf), "inProgress")
+
+        plan = plan_master_sync(self.task_root, leaf)
+
+        self.assertEqual(plan.status, "updated")
+        self.assertIsNotNone(plan.master)
+        assert plan.master is not None
+        write_task_docs(self.task_root, [plan.master])
+        self.assertEqual(self._row_status(), "inProgress")
+
+    def test_the_finalizers_completed_leaf_projects_completed(self) -> None:
+        self._write_master()
+        landed = self._leaf(
+            status="Completed",
+            steps=[
+                {"id": "S1", "title": "One", "status": "done"},
+                {"id": "S2", "title": "Two", "status": "done"},
+            ],
+        )
+
+        plan = plan_master_sync(self.task_root, landed)
+
+        self.assertEqual(plan.status, "updated")
+        self.assertIsNotNone(plan.master)
+        assert plan.master is not None
+        row = next(ref for ref in plan.master.subTasks if ref.number == "1")
+        self.assertEqual(row.status, "Completed")
+
+    def test_the_other_three_inputs_keep_their_own_meaning(self) -> None:
+        """Step state still distinguishes started from untouched, and it cannot overrule steps.
+
+        A stale ``Completed`` document with an unresolved step is neither: the document is not
+        the landing and the step is not done, so the row stays open. An untouched leaf keeps
+        projecting its own ``planning`` state rather than being folded into ``inProgress``.
+        """
+        unresolved = self._leaf(
+            status="Completed",
+            steps=[
+                {"id": "S1", "title": "One", "status": "done"},
+                {"id": "S2", "title": "Two", "status": "pending"},
+            ],
+        )
+        untouched = self._leaf(status="planning", steps=[{"id": "S1", "title": "One"}])
+
+        self.assertEqual(derived_master_status(unresolved), "inProgress")
+        self.assertEqual(derived_master_status(untouched), "planning")
 
 
 class RenderTests(unittest.TestCase):

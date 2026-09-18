@@ -10,7 +10,7 @@
 | memoryRoot | `<path>` |
 | onboardingRoot | `<path>` |
 | targetRepoBranch | `<branch>` |
-| topology | internal / external / mixed |
+| topology | external / mixed |
 | sourceInventoryStatus | pending / presented / accepted / corrected / blocked |
 
 ## Phase Status

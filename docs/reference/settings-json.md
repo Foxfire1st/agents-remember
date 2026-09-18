@@ -18,47 +18,7 @@ and NOT a provider settings source (the old implicit fallback to it is
 removed; an explicit `--from-settings` path is still read wherever it points). MCP authority settings
 live outside the coordinator root; see `examples/mcp/settings.example.json`.
 
-## Internal Memory Example
-
-```json
-{
-  "version": 1,
-  "onboarding": {
-    "storage": {
-      "mode": "repo-sidecar"
-    },
-    "pathRules": {
-      "include": {
-        "paths": ["README.md", "docs/**", "src/**"],
-        "fileTypes": [".md", ".py", ".ts", ".tsx"]
-      },
-      "exclude": {
-        "paths": [
-          "node_modules/**",
-          "vendor/**",
-          "dist/**",
-          "build/**",
-          "coverage/**",
-          ".cache/**",
-          ".pytest_cache/**",
-          ".venv/**",
-          ".idea/**",
-          ".vscode/**",
-          ".env",
-          ".env.*",
-          "**/generated/**",
-          "**/*.generated.*",
-          "**/*.Zone.Identifier",
-          "**/*:Zone.Identifier"
-        ],
-        "fileTypes": [".png", ".zip"]
-      }
-    }
-  }
-}
-```
-
-## External Memory Example
+## Memory Repo Example
 
 ```json
 {
@@ -155,15 +115,15 @@ Even when enabled, `codex_sandbox` defaults to Codex's own `default` sandbox; pa
 
 ## Memory Fields
 
-`version` identifies the settings shape, not a release number. Internal
-(`repo-sidecar`) memory uses `version` 1; external (`memory-repo`) memory uses
-`version` 2, which adds the `crossRepo` block. The version difference reflects
-the different schema each storage mode needs, so the internal and external
-examples above are both current.
+`version` identifies the settings shape, not a release number. External
+(`memory-repo`) memory uses `version` 2, which adds the `crossRepo` block. The
+`version` 1 repo-sidecar shape belonged to the removed repo-local internal memory
+mode and is no longer written.
 
 `onboarding.storage.mode` selects storage for eligible onboarding. Current
-public modes are `repo-sidecar`, `memory-repo`, and explicit inline mode where
-supported by repository settings and file type.
+public modes are `memory-repo`, `repo-sidecar` (write one artifact beside its
+source), and explicit inline mode where supported by repository settings and file
+type. `repo-sidecar` here is a per-artifact placement, not a memory topology.
 
 `onboarding.pathRules` controls which paths and file types are eligible. It
 does not switch storage by path.

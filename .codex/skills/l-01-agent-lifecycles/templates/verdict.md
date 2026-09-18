@@ -8,6 +8,11 @@ handover gates as **judge evidence**. Variants are **standalone/organizational l
 **super-exit** (before orchestrator → developer), and the loop-review adaptation below. Atomic
 child leaves do not receive a separate route-review verdict.
 
+**This template shapes the artifact; it does not author the rules.** The reviewer's duties and the
+criteria-catalog binding live in `../roles/reviewer.md`, the mode contract in
+`../operations/review.md`, and the adjudication and truth boundary in `../core/acceptance.md`. The
+sections below are the fields a consumer reads; where wording differs, those files win.
+
 ## Rules
 
 1. **A verdict is evidence, not a decision.** State an explicit pass/block **recommendation**; the gate's
@@ -268,8 +273,8 @@ under the protected mutation authority.
 
 ## Lens 3 — Onboarding vs Code
 - changed files' sidecars refreshed same pass: yes | <gaps>
-- affected c-05 onboarding/scoped checks: pass | failed | blocked | not-run — <finding>
-- full drift_check/memory_quality_check: not run unless explicitly requested — <request/result if any>
+- affected c-05 onboarding checks + full `memory_quality_check` curation result: pass | failed | blocked | not-run — <finding/returned codes>
+- drift_check when the workflow requests it: pass | failed | blocked | not-run — <request/result if any>
 - master-side route overviews current: yes | <finding>
 - backing evidence file: <onboarding-coherency report path>
 
@@ -335,8 +340,8 @@ reviewer does not.
 
 ## Lens 3 — Onboarding vs Code
 - changed files' sidecars refreshed same pass: yes | <gaps>
-- affected c-05 onboarding/scoped checks: pass | failed | blocked | not-run — <finding>
-- full drift_check/memory_quality_check: not run unless explicitly requested — <request/result if any>
+- affected c-05 onboarding checks + full `memory_quality_check` curation result: pass | failed | blocked | not-run — <finding/returned codes>
+- drift_check when the workflow requests it: pass | failed | blocked | not-run — <request/result if any>
 - route overviews describe the accumulated behavior: yes | <finding>
 - C-11 carry-over and ledger mapping coherent for the final super branch: yes | <finding>
 - backing evidence file: <onboarding-coherency report path>

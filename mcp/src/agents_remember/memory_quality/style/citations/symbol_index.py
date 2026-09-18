@@ -147,9 +147,8 @@ def locate_uncached(
 def walk(trees: Trees) -> list[tuple[Path, str]]:
     """Every readable code file, with the path text a ``Source`` would spell it as.
 
-    The memory tree is excluded even when it sits INSIDE the code tree, which is what
-    internal memory does: a card holds its own anchor text, so indexing cards makes every
-    anchor ambiguous with the claim that names it.
+    The memory tree is excluded even when it sits INSIDE the code tree: a card holds its own
+    anchor text, so indexing cards makes every anchor ambiguous with the claim that names it.
     """
     return source_index.code_files(trees)
 

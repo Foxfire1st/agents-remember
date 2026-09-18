@@ -31,7 +31,8 @@ from agents_remember.worktrees.worktree_contract import (
     write_contract,
 )
 from mcp.shared.memory import create_connected_server_and_client_session
-from test_atomic_series_activation import ActivationFixture
+from test_atomic_series_activation import REPO, ActivationFixture
+from test_worktree_support import git, init_repo
 
 
 class RegisteredActivationAdmissionTests(unittest.TestCase):
@@ -136,15 +137,15 @@ class RegisteredActivationAdmissionTests(unittest.TestCase):
         )
 
     def _contract(self, name: str):
-        # The configured-authority route derives an internal memory edge when the configured
-        # code repository carries its ``ar-memory`` root. Keep this fixture local and untracked
-        # while exercising the same series activation source pair.
-        (self.fixture.code / "ar-memory").mkdir(exist_ok=True)
-        internal_coordination = self.fixture.code / "ar-coordination"
-        if not internal_coordination.exists():
-            internal_coordination.symlink_to(self.fixture.coord, target_is_directory=True)
-        contract = self.fixture.contract(name)
-        configured = replace(contract, memory_mode="internal")
+        # The configured-authority route binds the contract to the memory root the settings
+        # resolve for this repository, and that root is external now that the repo-sidecar
+        # ``ar-memory/`` layout is gone. Provision the external memory repository the
+        # configuration actually resolves to, so the fixture still exercises a real edge.
+        memory_repo = self.fixture.coord / "memory-repos" / f"ar-{REPO}"
+        if not (memory_repo / ".git").exists():
+            init_repo(memory_repo, "main")
+            git(memory_repo, "branch", "super", "main")
+        configured = self.fixture.contract(name, memory_root=memory_repo)
         lifecycle_operation_locator_path(
             configured.coordination_root, configured.contract_path
         ).unlink(missing_ok=True)
