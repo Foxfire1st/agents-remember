@@ -97,6 +97,19 @@ def split_commit_owned_findings(
     return repairable, commit_owned
 
 
+def curator_actionable_count(repair: int, missing: int, stale: int) -> int:
+    """Return the shipped actionability formula over its exactly three terms.
+
+    Named rather than inlined at the one place that used to compute it, so a second consumer can
+    *consume* the formula instead of restating it, and the "gains no fourth term" property
+    (``KS-R16@v1`` §5.3) becomes a property of one function with one definition. The three terms are
+    repairable findings, missing onboarding and stale route indexes; the ``knowledgeReview`` section is
+    deliberately not among them and is never an input here.
+    """
+
+    return repair + missing + stale
+
+
 def write_curator_checklist(checklist: CuratorChecklist) -> dict[str, Any]:
     """Atomically replace the deterministic checklist and return its compact wire summary."""
     missing = sorted(
@@ -118,7 +131,7 @@ def write_curator_checklist(checklist: CuratorChecklist) -> dict[str, Any]:
         }
         for row in checklist.source_candidates
     ]
-    actionable_count = len(repair) + len(missing) + len(stale)
+    actionable_count = curator_actionable_count(len(repair), len(missing), len(stale))
     status = "ready-for-closeout" if actionable_count == 0 else "action-required"
     sections = _ChecklistSections(
         status=status,

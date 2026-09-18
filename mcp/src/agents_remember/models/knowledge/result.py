@@ -144,6 +144,16 @@ KnowledgeOperation = Literal[
     # shipped lifecycle state, computed membership and every unresolved reference verbatim -- rather
     # than with whatever rows the record group happens to hold.
     "read_effect_scope",
+    # The registered review scope. Its own member for the same reason: constructing the §8 scope from
+    # the declared snapshots, the recorded links and a declared policy is neither the retrieval
+    # selection nor the composition traversal -- it consumes the second and never touches the first
+    # (R16 §1.4). No refusal *code* is added with it: a construction refusal reuses the shipped codes.
+    "construct_registered_scope",
+    # The pipeline's own composition act. Its own member because it is neither the construction nor a
+    # record read: it groups the facts a recorded run emitted, composes the five separated statuses and
+    # routes the groups -- and it refuses a request that would make it report an owner's status for it,
+    # which is a fact about the composition rather than about any record it read (R16 §4.1).
+    "compose_family_integrity_report",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct

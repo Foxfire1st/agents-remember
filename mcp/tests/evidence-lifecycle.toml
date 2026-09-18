@@ -1385,6 +1385,7 @@ consumers = [
   "mcp/tests/test_knowledge_diff_scope.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_detection_runs.py",
+  "mcp/tests/test_knowledge_family_integrity_pipeline.py",
 ]
 
 [[artifact]]
@@ -1409,6 +1410,8 @@ consumers = [
   "mcp/tests/test_knowledge_read_boundaries.py",
   "mcp/tests/test_knowledge_read_paths.py",
   "mcp/tests/test_knowledge_read_scope.py",
+  "mcp/tests/test_knowledge_family_integrity_pipeline.py",
+  "mcp/tests/test_knowledge_registered_scope.py",
 ]
 
 [[artifact]]
