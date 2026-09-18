@@ -11,6 +11,7 @@ unit-regression = [
   "mcp/tests/test_agents_remember_quality.py",
   "mcp/tests/test_application_guards.py",
   "mcp/tests/test_atomic_master_review_identity.py",
+  "mcp/tests/test_atomic_series_chain_pair_order.py",
   "mcp/tests/test_atomic_master_review_scope.py",
   "mcp/tests/test_benchmark_analysis.py",
   "mcp/tests/test_catalog_selection.py",
@@ -87,6 +88,7 @@ unit-regression = [
   "mcp/tests/test_knowledge_evidence_claims.py",
   "mcp/tests/test_knowledge_evidence_observations.py",
   "mcp/tests/test_knowledge_facets.py",
+  "mcp/tests/test_knowledge_views_and_projection.py",
   "mcp/tests/test_knowledge_family_composition.py",
   "mcp/tests/test_knowledge_family_composition_boundaries.py",
   "mcp/tests/test_knowledge_family_review.py",
@@ -263,6 +265,7 @@ integration = [
   "mcp/tests/test_worktree_sync.py",
   "mcp/tests/test_curator_review_assessment_publication.py",
   "mcp/tests/test_knowledge_family_integrity_pipeline.py",
+  "mcp/tests/test_knowledge_projection_vault_safety.py",
 ]
 architecture-fitness = [
   "mcp/tests/test_atomic_write.py",

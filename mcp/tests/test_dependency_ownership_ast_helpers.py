@@ -43,7 +43,7 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 14
 LIFECYCLE_ARTIFACT_COUNT = 64
-LIFECYCLE_CATALOG_SHA256 = "143b0cf5c3a8432450f45072b7351057ba51fe6c386f65eb662c0ec4cb729ce6"
+LIFECYCLE_CATALOG_SHA256 = "1aef5f9b928055d3762df13d8042f1719d8614de8c0141c71bd0e0209bc91df7"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
 The value this line carries is the **merged** catalog's own digest, re-measured after the master synced onto
@@ -122,6 +122,27 @@ so this leaf's rows are counted in the fourteen and sixty-four this pin carries.
 artifact delta remains exactly empty -- none of these rows is the proof's -- so the freeze still
 forbids the proof adding or widening
 anything, and any further catalog change must re-pin this digest deliberately.
+
+``260915-KS-L20`` (``ar/260915-ks-l20``) re-pinned it once more, and adds no governed artifact.
+L20 delivers the five query views and the managed external projection; its two new modules are
+ordinary ``test_`` source (``test_knowledge_views_and_projection.py`` in the unit lane and
+``test_knowledge_projection_vault_safety.py`` in the integration lane), so the inventory stays
+closed at 14 contracts / 64 artifacts and the counts are unchanged. The digest moves for the one
+reason the L19 precedent records: the integration lane's acceptance case builds its dataset through
+the registered ``shared-support`` fixture ``mcp/tests/read_scope_test_support.py``, whose
+``consumer_scope = "exact"`` requires its ``consumers`` list to equal the source-derived consumer
+set, so the new module was appended there -- and a ``consumers`` addition necessarily shifts every
+line below it. Both directions were re-measured on the delivered candidate: the validator prints
+``evidence-lifecycle: PASS (64 governed artifacts)`` and this pin equals
+``sha256sum mcp/tests/evidence-lifecycle.toml``.
+
+The same change repaired the lane manifest: ``mcp/tests/test_atomic_series_chain_pair_order.py`` was
+committed by ``260915-CAPS-L25`` (``f0313143``) with no row in ``mcp/tests/test-evidence-lanes.toml``,
+so ``load_lane_manifest`` raised ``test files without an explicit lane`` -- 288 test modules against
+287 rows. That took the manifest out of service for its consumers without failing an ordinary
+``pytest mcp/tests`` run, because it is loaded by the cadence plugin and ``code_quality/check.py``
+rather than by the default selection. The missing row was added in the unit-regression lane, where
+its neighbours sit; no lane was widened and no module moved between lanes.
 
 **Second deliberate re-pin (260915-CAPS-L16, 2026-09-16).** The first re-pin left the pin behind
 the file: at the source-line convergence merge ``23cc7a72`` the catalog was already

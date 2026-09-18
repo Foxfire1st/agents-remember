@@ -24,6 +24,7 @@ from .closeout import register_closeout_tools
 from .code_search import register_code_search_tools
 from .core import register_core_tools
 from .gates import register_gate_tools
+from .knowledge import register_knowledge_tools
 from .lifecycle import register_lifecycle_tools
 from .memory import register_memory_tools
 from .orchestration import register_orchestration_tools
@@ -48,6 +49,7 @@ TOOL_REGISTRARS: tuple[ToolRegistrar, ...] = (
     register_gate_tools,
     register_orchestration_tools,
     register_capsule_and_skill_tools,
+    register_knowledge_tools,
 )
 
 __all__ = ["TOOL_REGISTRARS", "ToolRegistrar"]

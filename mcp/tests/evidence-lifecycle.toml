@@ -1405,6 +1405,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_family_composition_boundaries.py",
+  "mcp/tests/test_knowledge_projection_vault_safety.py",
   "mcp/tests/test_knowledge_diff_scope.py",
   "mcp/tests/test_knowledge_detection_runs.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
