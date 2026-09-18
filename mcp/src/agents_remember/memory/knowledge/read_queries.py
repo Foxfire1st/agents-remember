@@ -23,6 +23,12 @@ from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 # The declared read order of each table: the DDL's primary key, which is not every table's leading
 # column list. Ordering a read by a stored key rather than by insertion order is what makes two
 # datasets holding the same records page identically.
+#
+# The composition generation's six tables are declared here for exactly that reason. A composition
+# read ordered by insertion is a defect rather than a presentation choice: two datasets holding the
+# same edges must report the same links in the same order, and a revision's links must not move when
+# an unrelated row is written. Each entry is the primary key's distinguishing column, so the order is
+# the row's own identity rather than the order a write happened to produce.
 _ORDER_COLUMNS: Mapping[str, str] = {
     "invariant": "invariant_id",
     "invariant_revision": "revision_id",
@@ -31,6 +37,12 @@ _ORDER_COLUMNS: Mapping[str, str] = {
     "family_member": "member_id",
     "realization_claim": "claim_id",
     "source_anchor": "anchor_id",
+    "family_composition": "composition_id",
+    "family_composition_policy": "policy_id",
+    "family_composition_policy_version": "policy_version_id",
+    "family_revision_route": "family_revision_id",
+    "family_revision_context": "context_id",
+    "family_revision_context_revision": "revision_id",
 }
 
 
@@ -328,6 +340,116 @@ def membership_is_recorded(connection: apsw.Connection, repository_id: str, memb
         "SELECT 1 FROM family_member WHERE repository_id = ? AND member_id = ?",
         (repository_id, member_id),
     )
+
+
+def fetch_composition_rows(
+    connection: apsw.Connection, repository_id: str, family_revision_ids: Sequence[str]
+) -> list[dict[str, Any]]:
+    """Return the recorded composition links of the named family revisions, in declared order.
+
+    The filter is on the revision the edge *participates in*, at either endpoint, so a link is
+    reported for both of the revisions it relates and neither revision's link is inferred from the
+    other's. The declared policy's version spelling, widened scope and bound travel with the link
+    when one is declared, which is what requirement 3.3 asks of anything that reports a traversal
+    result -- and this reports the *declaration*, never a traversal.
+    """
+
+    if not family_revision_ids:
+        return []
+    placeholders = ", ".join("?" for _ in family_revision_ids)
+    rows = connection.execute(
+        "SELECT composition.composition_id, composition.from_family_revision_id, "
+        "composition.to_family_revision_id, composition.policy_id, composition.policy_version_id, "
+        "composition.provenance, version.declared_version, version.widened_scope, "
+        "version.depth_bound "
+        "FROM family_composition AS composition "
+        "LEFT JOIN family_composition_policy_version AS version "
+        "ON version.repository_id = composition.repository_id "
+        "AND version.policy_id = composition.policy_id "
+        "AND version.policy_version_id = composition.policy_version_id "
+        f"WHERE composition.repository_id = ? "
+        f"AND (composition.from_family_revision_id IN ({placeholders}) "
+        f"OR composition.to_family_revision_id IN ({placeholders})) "
+        "ORDER BY composition.composition_id",
+        (repository_id, *family_revision_ids, *family_revision_ids),
+    )
+    return [
+        {
+            "composition_id": str(row[0]),
+            "from_family_revision_id": str(row[1]),
+            "to_family_revision_id": str(row[2]),
+            "policy_id": None if row[3] is None else str(row[3]),
+            "policy_version_id": None if row[4] is None else str(row[4]),
+            "provenance": logical.cell_value(row[5], is_json=True),
+            "declared_version": None if row[6] is None else str(row[6]),
+            "widened_scope": None if row[7] is None else str(row[7]),
+            "depth_bound": None if row[8] is None else int(row[8]),
+        }
+        for row in rows
+    ]
+
+
+def fetch_owning_routes_for_revisions(
+    connection: apsw.Connection, repository_id: str, family_revision_ids: Sequence[str]
+) -> dict[str, str]:
+    """Return ``family_revision_id -> route_id`` for the revisions that record an owning route.
+
+    A revision absent from this mapping is the explicit **ungoverned** state. Nothing here fills the
+    gap: there is no default to the repository root, to the family identity's own route or to a
+    route derived from the revision's members.
+    """
+
+    if not family_revision_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in family_revision_ids)
+    rows = connection.execute(
+        "SELECT family_revision_id, route_id FROM family_revision_route "
+        f"WHERE repository_id = ? AND family_revision_id IN ({placeholders}) "
+        "ORDER BY family_revision_id",
+        (repository_id, *family_revision_ids),
+    )
+    return {str(row[0]): str(row[1]) for row in rows}
+
+
+def fetch_contexts_for_revisions(
+    connection: apsw.Connection, repository_id: str, family_revision_ids: Sequence[str]
+) -> list[dict[str, Any]]:
+    """Return the authored explanatory context of the named family revisions, in declared order.
+
+    The row is the context's *current* revision, joined through the record's own designation, and it
+    carries its exact revision identity and provenance so a caller can hold the text it read. A
+    revision with no row here has no recorded context: it is reported absent, never reconstructed
+    from the joint guarantee.
+    """
+
+    if not family_revision_ids:
+        return []
+    placeholders = ", ".join("?" for _ in family_revision_ids)
+    rows = connection.execute(
+        "SELECT context.context_id, context.family_id, context.family_revision_id, "
+        "revision.revision_id, revision.predecessor_revision_id, revision.body, "
+        "revision.provenance "
+        "FROM family_revision_context AS context "
+        "JOIN family_revision_context_revision AS revision "
+        "ON revision.repository_id = context.repository_id "
+        "AND revision.revision_id = context.current_revision_id "
+        f"WHERE context.repository_id = ? "
+        f"AND context.family_revision_id IN ({placeholders}) "
+        "ORDER BY context.context_id",
+        (repository_id, *family_revision_ids),
+    )
+    return [
+        {
+            "context_id": str(row[0]),
+            "family_id": str(row[1]),
+            "family_revision_id": str(row[2]),
+            "revision_id": str(row[3]),
+            "predecessor_revision_id": str(row[4]),
+            "body": str(row[5]),
+            "provenance": logical.cell_value(row[6], is_json=True),
+        }
+        for row in rows
+    ]
 
 
 def fetch_predecessor_edges(

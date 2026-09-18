@@ -27,11 +27,14 @@ from typing import TYPE_CHECKING
 
 from agents_remember.memory.knowledge import (
     anchors,
+    compositions,
     facets,
     families,
     lineage,
+    lineages,
     memberships,
     realizations,
+    routes,
 )
 from agents_remember.memory.knowledge.candidate_records import (
     inserted_identities,
@@ -55,20 +58,26 @@ from agents_remember.memory.knowledge.refusals import (
     duplicate_family_revision_refusal,
     duplicate_invariant_refusal,
     duplicate_revision_refusal,
+    family_composition_cycle_refusal,
+    generation_mismatch_refusal,
     unknown_family_refusal,
     unknown_invariant_refusal,
 )
+from agents_remember.memory.knowledge.schema_generations import GENERATION_5
 from agents_remember.models.knowledge.authorship import PROPOSED_STATE
 from agents_remember.models.knowledge.candidate import (
     AddExplanationRevision,
     AddFacet,
     AddFamily,
+    AddFamilyComposition,
+    AddFamilyCompositionPolicy,
     AddFamilyMember,
     AddFamilyRevision,
     AddInvariant,
     AddInvariantRevision,
     AddRealizationClaim,
     AddSourceAnchor,
+    AuthorFamilyExplanationContext,
     ChangeBatch,
     ChangeCommand,
     ExpectedRecord,
@@ -78,8 +87,10 @@ from agents_remember.models.knowledge.candidate import (
     RemoveRealizationClaim,
     RemoveSourceAnchor,
     SetFamilyLabel,
+    SetFamilyRevisionRoute,
     SetInvariantLabel,
 )
+from agents_remember.models.knowledge.composition import COMPOSITION_COMMAND_KINDS
 from agents_remember.models.knowledge.facet import (
     AttachFacet,
     AuthorExplanation,
@@ -90,6 +101,11 @@ if TYPE_CHECKING:
     from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
 
 _AGGREGATE_KINDS = (AddInvariantRevision, AddFamilyRevision)
+
+# The generation the composition tables are registered by. Recorded as the generation *record*
+# rather than as the integer, so a leaf that renumbers its own generation updates this one name and
+# the guard keeps comparing against the tables that actually carry the commands.
+REQUIRED_COMPOSITION_GENERATION = GENERATION_5
 
 # The facet commands whose declared references may be satisfied by the batch itself rather than by
 # stored rows. A batch validates the *completed* graph, so these cite `pending`, and the apply step
@@ -102,6 +118,11 @@ def facet_commands(commands: Sequence[ChangeCommand]) -> tuple[ChangeCommand, ..
 
     return tuple(command for command in commands if command.kind in _FACET_KINDS)
 
+
+# The four commands the composition generation adds. Taken from the vocabulary's own declaration so
+# the generation guard, the target-check table and the cycle pass agree about which commands they
+# own by construction rather than by three copies of one literal.
+_COMPOSITION_KINDS = COMPOSITION_COMMAND_KINDS
 
 _FACET_KINDS = frozenset(
     {
@@ -122,6 +143,7 @@ def require_preconditions(store: OpenedKnowledgeStore, batch: ChangeBatch) -> No
     require_distinct_commands(batch.commands)
     require_no_accepted_origin(batch.commands)
     require_facet_generation(store, batch.commands)
+    require_composition_generation(store, batch.commands)
     require_insertions_absent(store, batch.commands)
     require_command_targets(store, batch.commands)
 
@@ -206,6 +228,33 @@ def require_facet_generation(
         raise KnowledgeRefused(denied)
 
 
+def require_composition_generation(
+    store: OpenedKnowledgeStore, commands: Sequence[ChangeCommand]
+) -> None:
+    """Refuse a composition command against a dataset whose generation predates its tables.
+
+    The same rule the facet commands get, for the same reason: a dataset that declares an earlier
+    generation does not carry these tables, and this operation neither migrates it nor writes
+    through a matching subset. Nothing is written.
+    """
+
+    if not any(command.kind in _COMPOSITION_KINDS for command in commands):
+        return
+    observed = store.generation.user_version
+    required = REQUIRED_COMPOSITION_GENERATION.user_version
+    if observed >= required:
+        return
+    raise KnowledgeRefused(
+        generation_mismatch_refusal(
+            "change_candidate",
+            "the family-composition tables are registered by generation "
+            f"{REQUIRED_COMPOSITION_GENERATION.schema_name} (user_version {required})",
+            required=required,
+            observed=observed,
+        )
+    )
+
+
 def require_insertions_absent(
     store: OpenedKnowledgeStore, commands: Sequence[ChangeCommand]
 ) -> None:
@@ -265,6 +314,62 @@ def require_completed_lineage(
     )
     _require_declared_acyclic(store, pending, family_edges, table="family_predecessor", family=True)
     _require_declared_acyclic_supersessions(store, commands, pending)
+    _require_declared_acyclic_compositions(store, commands, pending)
+
+
+def _require_declared_acyclic_compositions(
+    store: OpenedKnowledgeStore, commands: Sequence[ChangeCommand], pending: set[tuple[str, str]]
+) -> None:
+    """Refuse a batch whose composition declarations leave the completed graph on a cycle.
+
+    The third caller of the same shared rule. The graph the batch describes is the stored
+    composition edges *plus* every edge the batch itself declares, and the judgement belongs to
+    :func:`…lineage.declared_cycle`, which is fed the third edge source in
+    :mod:`…lineages`. Nothing here walks a graph: this gathers the declared edges and the stored
+    ones and asks the shared rule, exactly as the invariant, family and supersession passes do.
+
+    A cycle formed entirely inside one batch is what makes this pass worth having beside the
+    after-apply one -- it refuses before any row is written and names the batch's own declarations
+    rather than the rows that would have carried them.
+    """
+
+    declared = _declared_composition_edges(commands)
+    if not declared:
+        return
+    finding = lineage.declared_cycle(
+        extras=_wider_edges,
+        edges=lineages.composition_edges(store.connection, store.repository_id),
+        declared=declared,
+    )
+    if finding is None:
+        return
+    creations = {record_id for table, record_id in pending if table == "family_composition"}
+    named = sorted(creations & set(finding.members))
+    subject = named[0] if named else sorted(finding.members)[0]
+    raise KnowledgeRefused(
+        family_composition_cycle_refusal(
+            subject, finding.members, candidate_on_cycle=finding.candidate_on_cycle
+        )
+    )
+
+
+def _declared_composition_edges(
+    commands: Sequence[ChangeCommand],
+) -> tuple[tuple[str, str], ...]:
+    """Return every composition edge the batch declares, as ``(from, to)`` pairs.
+
+    The pair is the edge's own declared direction -- the direction :mod:`…lineages` reads and the
+    direction the shared rule walks -- and deliberately not the direction a traversal policy might
+    later choose. A cycle is a cycle whichever way a policy steps through it, so the graph the rule
+    judges must not depend on which policy an edge carries.
+    """
+
+    edges: list[tuple[str, str]] = []
+    for command in commands:
+        if not isinstance(command, AddFamilyComposition):
+            continue
+        edges.append((command.from_family_revision_id, command.to_family_revision_id))
+    return tuple(edges)
 
 
 def _declared_edges(
@@ -400,6 +505,15 @@ def _claim_check(
     pending: set[tuple[str, str]],
 ) -> None:
     _require_claim(store, index, command, pending)  # type: ignore[arg-type]
+
+
+def _composition_check(
+    store: OpenedKnowledgeStore,
+    index: int,
+    command: ChangeCommand,
+    pending: set[tuple[str, str]],
+) -> None:
+    _require_composition(store, index, command, pending)
 
 
 def _facet_check(
@@ -688,6 +802,140 @@ def _require_facet(
     del command
 
 
+def _require_composition(
+    store: OpenedKnowledgeStore,
+    index: int,
+    command: ChangeCommand,
+    pending: set[tuple[str, str]],
+) -> None:
+    """Check one composition command's declared references against the completed batch.
+
+    Every reference is asked of the batch's declared set as well as the stored rows, because the
+    completed graph is what a batch is validated against: an edge may cite a family revision or a
+    policy version an earlier command of the same batch authors, wherever in the sequence that
+    command appears. A missing endpoint is refused by name before any row is written.
+    """
+
+    if isinstance(command, AddFamilyCompositionPolicy):
+        return
+    if isinstance(command, AddFamilyComposition):
+        _require_endpoint(
+            store, index, command, pending, ("family_revision", command.from_family_revision_id)
+        )
+        _require_endpoint(
+            store, index, command, pending, ("family_revision", command.to_family_revision_id)
+        )
+        if command.policy_id is not None and command.policy_version_id is not None:
+            _require_declared_policy_reference(store, index, command)
+        return
+    if isinstance(command, SetFamilyRevisionRoute):
+        _require_endpoint(
+            store, index, command, pending, ("family_revision", command.family_revision_id)
+        )
+        _require_route_reference(store, index, command)
+        return
+    if isinstance(command, AuthorFamilyExplanationContext):
+        _require_endpoint(
+            store, index, command, pending, ("family_revision", command.context.family_revision_id)
+        )
+        if command.context.predecessor_revision_id is not None:
+            _require_context_revision_reference(store, index, command)
+        return
+    del command
+
+
+def _require_declared_policy_reference(
+    store: OpenedKnowledgeStore, index: int, command: AddFamilyComposition
+) -> None:
+    """Refuse an edge that cites a policy identity or version this namespace has not declared.
+
+    The question is asked of the module that owns declared policies, so "is this a declared version
+    of this identity" stays one definition rather than one per caller, and the refusal it raises
+    names the half that is missing -- an undeclared identity and an undeclared version of a declared
+    identity are different remedies.
+    """
+
+    try:
+        compositions.require_declared_policy(
+            store, command.policy_id or "", command.policy_version_id or ""
+        )
+    except KnowledgeRefused as refused:
+        raise KnowledgeRefused(
+            batch_command_refusal(
+                refused.refusal.code,
+                f"{index}:{command.kind}",
+                detail=refused.refusal.detail,
+                next_action=refused.refusal.next_action,
+                facts=RefusalFacts(
+                    table=refused.refusal.table,
+                    record_id=refused.refusal.record_id,
+                    expected=refused.refusal.expected,
+                    observed=refused.refusal.observed,
+                ),
+            )
+        ) from refused
+
+
+def _require_route_reference(
+    store: OpenedKnowledgeStore, index: int, command: SetFamilyRevisionRoute
+) -> None:
+    """Refuse an owning route that is not an authored route of this namespace.
+
+    A route is named, never inferred, so a dangling route identity is refused by name rather than
+    resolved to the nearest scope. ``None`` -- no association at all -- is a different fact and is
+    the explicit ungoverned state, which is why the omission is the caller's way of saying it.
+    """
+
+    if routes.route_exists(store.connection, store.repository_id, command.route_id):
+        return
+    raise KnowledgeRefused(
+        batch_command_refusal(
+            "missing_expected_row",
+            f"{index}:{command.kind}",
+            detail="the route this association names is not authored in this repository",
+            next_action="Author the route first, or omit the association for an ungoverned revision.",
+            facts=RefusalFacts(
+                table="route",
+                record_id=command.route_id,
+                expected="an authored route in this repository",
+                observed=command.route_id,
+            ),
+        )
+    )
+
+
+def _require_context_revision_reference(
+    store: OpenedKnowledgeStore, index: int, command: AuthorFamilyExplanationContext
+) -> None:
+    """Refuse a context revision whose named predecessor is not a stored revision of that context.
+
+    A change to the context is a successor naming its exact predecessor, so a predecessor that is
+    not stored -- or that belongs to another context -- is refused rather than treated as the first
+    revision of a new chain.
+    """
+
+    predecessor_id = command.context.predecessor_revision_id or ""
+    if compositions.get_context_revision(store, command.context.context_id, predecessor_id) is None:
+        raise KnowledgeRefused(
+            batch_command_refusal(
+                "missing_expected_row",
+                f"{index}:{command.kind}",
+                detail="the predecessor this context revision names is not a stored revision of "
+                "this context",
+                next_action=(
+                    "Reread the context and name its own stored revision as the predecessor, or "
+                    "author the context's first revision with no predecessor."
+                ),
+                facts=RefusalFacts(
+                    table="family_revision_context_revision",
+                    record_id=predecessor_id,
+                    expected="a stored revision of this context",
+                    observed="<absent>",
+                ),
+            )
+        )
+
+
 def _require_superseded_decision(
     store: OpenedKnowledgeStore,
     index: int,
@@ -805,6 +1053,10 @@ def _require_endpoint(
                 f"Author the {noun} in this batch before the command that cites it, or cite a "
                 "stored identity."
             ),
+            # The offending endpoint's own identity travels as a fact, not only inside the prose:
+            # a caller that has to name what was missing reads ``record_id`` rather than parsing
+            # the detail, and the endpoint kind is the ``table`` beside it.
+            facts=RefusalFacts(table=table, record_id=record_id),
         )
     )
 
@@ -830,4 +1082,8 @@ _TARGET_CHECKS: Mapping[str, TargetCheck] = {
     "author_explanation": _facet_check,
     "add_explanation_revision": _facet_check,
     "designate_explanation": _facet_check,
+    "add_family_composition_policy": _composition_check,
+    "add_family_composition": _composition_check,
+    "set_family_revision_route": _composition_check,
+    "author_family_explanation_context": _composition_check,
 }

@@ -72,6 +72,10 @@ from agents_remember.models.knowledge.candidate import (
     ExpectedRecord,
     MutableRecordTable,
 )
+from agents_remember.models.knowledge.composition import (
+    COMPOSITION_COMMAND_KINDS,
+    COMPOSITION_WRITABLE_TABLES,
+)
 from agents_remember.models.knowledge.facet import (
     ATTACHMENT_ENDPOINT_KINDS,
     EXPLANATION_SUBJECT_KINDS,
@@ -210,7 +214,6 @@ def test_the_seam_registry_is_exactly_the_eight_declared_subtypes() -> None:
         | set(DETECTION_RECORD_KINDS)
         | set(REQUIREMENT_RECORD_KINDS)
         | set(CITATION_BINDING_RECORD_KINDS)
-
     )
     for kind in FACET_KINDS:
         assert KIND_SCHEMAS[kind] == frozenset({FACET_RECORD_SCHEMAS[kind]}), kind
@@ -811,12 +814,26 @@ def test_an_explanation_is_separable_and_editing_it_never_rewrites_the_statement
 
 
 def test_the_facet_commands_join_the_closed_union_and_its_dispatch_tables() -> None:
-    """Requirements 7.3 and 7.5: one union, one set of dispatch tables, one set of tables."""
+    """Requirements 7.3 and 7.5: one union, one set of dispatch tables, one set of tables.
+
+    RE-SCOPED for ``KS-R17@v1``. This case's protected property is that the union is *closed* over
+    the declarations that are in it and that every dispatch table agrees with the union -- not that
+    the union holds exactly eighteen members. The composition generation (``KS-R17@v1``) appended
+    four commands and six record tables beside this leaf's six and six, so the two assertions that
+    spelled the membership as one leaf's own sum are replaced by the fact they stood in for: the
+    union is exactly the shipped kinds plus the facet leaf's declaration plus the composition
+    leaf's, and the writable-table literal is exactly the base seven plus both leaves' declared
+    sets. The stronger half is unchanged and still checked -- ``_TARGET_CHECKS`` is exactly the
+    union, so a command added without a target check still fails here rather than at a caller's
+    expense.
+    """
 
     kinds = command_kinds()
     assert kinds >= SHIPPED_COMMAND_KINDS
-    assert kinds == SHIPPED_COMMAND_KINDS | set(FACET_COMMAND_KINDS)
-    assert len(kinds) == 18
+    assert kinds == SHIPPED_COMMAND_KINDS | set(FACET_COMMAND_KINDS) | set(
+        COMPOSITION_COMMAND_KINDS
+    )
+    assert len(kinds) == 18 + len(COMPOSITION_COMMAND_KINDS)
     assert set(_TARGET_CHECKS) == kinds
     assert set(_STEPS) == set(FACET_COMMAND_KINDS)
     assert set(FACET_COMMAND_KINDS) <= (kinds | set(_INSERTING_KINDS))
@@ -828,7 +845,7 @@ def test_the_facet_commands_join_the_closed_union_and_its_dispatch_tables() -> N
         "source_anchor",
         "family_member",
         "realization_claim",
-    } | set(FACET_WRITABLE_TABLES)
+    } | set(FACET_WRITABLE_TABLES) | set(COMPOSITION_WRITABLE_TABLES)
 
 
 def test_the_two_entry_points_agree_and_a_refused_write_writes_nothing(admitted: Any) -> None:
@@ -930,6 +947,12 @@ def test_the_registered_generation_appends_only_and_the_preceding_ones_are_uncha
     re-scoping to the fact that now holds buys a property the enumeration never had.
     """
 
+    # RE-SCOPED again for ``KS-R17@v1``, on the same reasoning the paragraph above records for
+    # ``KS-R14@v1``: a registry membership spelled as a closed list of four is a claim about how
+    # many generations happen to exist, not about this leaf's generation. What is asserted instead
+    # is what the closed list was standing in for -- the registry is the generations in *order*,
+    # each one's schema name is its own version's name, and generation 3 is still exactly this
+    # leaf's generation. Every generation-3-specific assertion below is unchanged.
     versions = [generation.user_version for generation in GENERATIONS]
     assert versions == list(range(1, len(GENERATIONS) + 1)), versions
     assert [generation.schema_name for generation in GENERATIONS] == [

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from agents_remember.memory.knowledge import anchors, families
+from agents_remember.memory.knowledge import anchors, families, routes
 from agents_remember.memory.knowledge.connection import fetch_one
 from agents_remember.memory.knowledge.refusals import (
     KnowledgeRefused,
@@ -42,7 +42,34 @@ RelationWrite = Literal[
     "create_realization_claim",
     "attach_facet",
     "add_facet",
+    "create_composition",
+    "set_family_revision_route",
 ]
+
+
+def require_route_endpoint(
+    store: OpenedKnowledgeStore, route_id: str, relation_id: str, operation: RelationWrite
+) -> None:
+    """Refuse when the route a relation names is not authored in this namespace.
+
+    A named route that does not exist is a dangling reference to refuse; ``None`` is a different
+    fact -- the explicit ungoverned state -- and the two must not collapse into one answer. The
+    existence question is asked through :func:`…routes.route_exists`, which is the same one-key
+    lookup the governing-route write path performs, so "this route is authored here" stays one
+    definition for every governed row rather than one per relation kind.
+    """
+
+    if routes.route_exists(store.connection, store.repository_id, route_id):
+        return
+    raise KnowledgeRefused(
+        missing_relation_endpoint_refusal(
+            operation=operation,
+            table="route",
+            relation_id=relation_id,
+            endpoint_id=route_id,
+            endpoint_kind="route",
+        )
+    )
 
 
 def require_family_revision_endpoint(
@@ -162,5 +189,6 @@ __all__ = [
     "require_family_revision_endpoint",
     "require_invariant_revision_endpoint",
     "require_realization_claim_endpoint",
+    "require_route_endpoint",
     "require_source_anchor_endpoint",
 ]

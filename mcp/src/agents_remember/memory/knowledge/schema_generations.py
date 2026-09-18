@@ -23,12 +23,18 @@ This module makes a generation one frozen record, and makes *selection* a read o
   shapes are registered in the record envelope rather than appended as columns, which is why this
   generation adds one table and not a record group.
 * :data:`GENERATION_5` is generation 4 plus the table :mod:`…schema_v5` appends -- the authored
-  citation binding. It is the created generation now, so a *new* store declares version 5 while a
-  generation-4 dataset that already exists keeps declaring version 4 and is read through generation
-  4's own record. The binding's payload shape is registered in the record envelope exactly as the
-  facet and detection payloads are, which is again why the generation adds one table: what the
-  envelope cannot express is the binding's *owner-revision/key identity pair* and its own governing
-  route, and those are columns rather than a second record group.
+  citation binding. A generation-4 dataset that already exists keeps declaring version 4 and is read
+  through generation 4's own record. The binding's payload shape is registered in the record envelope
+  exactly as the facet and detection payloads are, which is again why the generation adds one table:
+  what the envelope cannot express is the binding's *owner-revision/key identity pair* and its own
+  governing route, and those are columns rather than a second record group.
+* :data:`GENERATION_6` is generation 5 plus the six tables :mod:`…schema_v6` appends -- authored
+  family composition between two exact family revisions, its declared traversal policy and version
+  set, the family revision's canonical owning route, and the two tables of its authored explanatory
+  context. It is the created generation now, so a *new* store declares version 6, while a
+  generation-4 or generation-5 dataset that already exists keeps declaring its own version and is
+  read through that generation's record.
+
 * :func:`require_pinned_generation_1_unchanged` is the gate that fails -- not warns -- when the
   pinned generation no longer recomputes to its constant. Without it the pin is a comment.
 * :func:`generation_of_database` and :func:`generation_of_artifact` select a generation from what
@@ -47,15 +53,41 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from typing import Protocol
 
 import apsw
 
 from agents_remember.kernel.canonical_json import sha256_digest
-from agents_remember.memory.knowledge import schema, schema_v2, schema_v3, schema_v4, schema_v5
+from agents_remember.memory.knowledge import (
+    schema,
+    schema_v2,
+    schema_v3,
+    schema_v4,
+    schema_v5,
+    schema_v6,
+)
 from agents_remember.memory.knowledge.export_refusals import unsupported_schema_refusal
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.context import KNOWLEDGE_SCHEMA_NAME
 from agents_remember.models.knowledge.result import KnowledgeOperation, KnowledgeRefusal
+
+
+class _AppendedGeneration(Protocol):
+    """The declarations one appended-table module must expose for a generation to compose it.
+
+    A protocol rather than a base class, so a generation module stays a module of plain declared
+    data: ``schema_v2`` … ``schema_v6`` each publish exactly these names, and the single composition
+    function above reads them without any of them importing the registry back.
+    """
+
+    APPENDED_TABLES: tuple[str, ...]
+    APPENDED_COLUMNS: Mapping[str, tuple[str, ...]]
+    APPENDED_PRIMARY_KEYS: Mapping[str, tuple[str, ...]]
+    APPENDED_JSON_COLUMNS: Mapping[str, frozenset[str]]
+    APPENDED_FEATURES: tuple[str, ...]
+    APPENDED_TABLE_DDL: Mapping[str, str]
+    APPENDED_INDEX_DDL: tuple[str, ...]
+    APPENDED_TRIGGERS: Mapping[str, str]
 
 
 class KnowledgeSchemaPinError(KnowledgeStorageError):
@@ -165,6 +197,7 @@ GENERATION_2_SCHEMA_NAME = "ar-knowledge-sqlite/v2"
 GENERATION_3_SCHEMA_NAME = "ar-knowledge-sqlite/v3"
 GENERATION_4_SCHEMA_NAME = "ar-knowledge-sqlite/v4"
 GENERATION_5_SCHEMA_NAME = "ar-knowledge-sqlite/v5"
+GENERATION_6_SCHEMA_NAME = "ar-knowledge-sqlite/v6"
 
 GENERATION_1 = SchemaGeneration(
     schema_name=GENERATION_1_SCHEMA_NAME,
@@ -181,85 +214,99 @@ GENERATION_1 = SchemaGeneration(
 )
 
 
-# Generation 2 is generation 1, unchanged, plus the appended tables. The composition is written as
-# an explicit append so ``GENERATION_2.tables[: len(GENERATION_1.tables)] == GENERATION_1.tables``
-# and generation 2's columns for each of the first ten names are generation 1's -- the two
-# comparisons Example 1 makes checkable, and the reason the governing-route association lives in
-# generation-2 tables rather than as a column appended to a generation-1 table.
-def _compose_generation_2() -> SchemaGeneration:
-    """Return generation 2: generation 1's declarations, unchanged, with this leaf's tables appended."""
+# A generation is composed by *appending one module's declarations to the generation it descends
+# from*, and there is exactly one function that does it. The four per-generation wrappers below are
+# therefore one line each and name only their base and their module, so a leaf that must renumber
+# its generation -- because another leaf landed the same number first on the accumulated line --
+# changes a name and a base rather than re-deriving a composition.
+def _append_generation(
+    *,
+    base: SchemaGeneration,
+    schema_name: str,
+    user_version: int,
+    appended: _AppendedGeneration,
+) -> SchemaGeneration:
+    """Return one generation: ``base``'s declarations, unchanged, with one module's appended."""
 
     composed = SchemaGeneration(
-        schema_name=GENERATION_2_SCHEMA_NAME,
-        user_version=2,
-        tables=GENERATION_1.tables + schema_v2.APPENDED_TABLES,
-        columns={**GENERATION_1.columns, **schema_v2.APPENDED_COLUMNS},
-        primary_keys={**GENERATION_1.primary_keys, **schema_v2.APPENDED_PRIMARY_KEYS},
-        json_columns={**GENERATION_1.json_columns, **schema_v2.APPENDED_JSON_COLUMNS},
-        features=GENERATION_1.features + schema_v2.APPENDED_FEATURES,
-        table_ddl={**GENERATION_1.table_ddl, **schema_v2.APPENDED_TABLE_DDL},
-        index_ddl=GENERATION_1.index_ddl + schema_v2.APPENDED_INDEX_DDL,
-        triggers={**GENERATION_1.triggers, **schema_v2.APPENDED_TRIGGERS},
+        schema_name=schema_name,
+        user_version=user_version,
+        tables=base.tables + appended.APPENDED_TABLES,
+        columns={**base.columns, **appended.APPENDED_COLUMNS},
+        primary_keys={**base.primary_keys, **appended.APPENDED_PRIMARY_KEYS},
+        json_columns={**base.json_columns, **appended.APPENDED_JSON_COLUMNS},
+        features=base.features + appended.APPENDED_FEATURES,
+        table_ddl={**base.table_ddl, **appended.APPENDED_TABLE_DDL},
+        index_ddl=base.index_ddl + appended.APPENDED_INDEX_DDL,
+        triggers={**base.triggers, **appended.APPENDED_TRIGGERS},
         fingerprint="",
     )
     return replace(composed, fingerprint=structure_fingerprint(composed))
+
+
+def descends_from(
+    generation: SchemaGeneration, base: SchemaGeneration, names: tuple[str, ...]
+) -> bool:
+    """Whether ``generation`` is ``base`` with tables appended and no earlier declaration retyped.
+
+    This is ``KS-R10@v1`` §1.3's additive rule as one predicate, used by the registry's own case:
+    the appended tables follow ``base``'s exactly, and every one of ``base``'s names keeps the exact
+    column tuple, primary key and typed-JSON set the base declared. The ``names`` argument is the
+    base's own ``tables`` tuple, so a caller states *which* base it checked by passing that base's
+    declaration rather than a literal that could drift from it.
+    """
+
+    if generation.tables[: len(base.tables)] != base.tables:
+        return False
+    for table in names:
+        if generation.columns[table] != base.columns[table]:
+            return False
+        if generation.primary_keys[table] != base.primary_keys[table]:
+            return False
+        if generation.json_columns.get(table, frozenset()) != base.json_columns.get(
+            table, frozenset()
+        ):
+            return False
+    return True
+
+
+def _compose_generation_2() -> SchemaGeneration:
+    """Return generation 2: generation 1's declarations with generation 2's tables appended."""
+
+    return _append_generation(
+        base=GENERATION_1,
+        schema_name=GENERATION_2_SCHEMA_NAME,
+        user_version=2,
+        appended=schema_v2,
+    )
 
 
 GENERATION_2 = _compose_generation_2()
 
 
-# Generation 3 is generation 2, unchanged, plus the tables :mod:`…schema_v3` appends -- the facet
-# attachments, the decision supersession edge and the explanation pair. The composition is written
-# as the same explicit append generation 2's is, so
-# ``GENERATION_3.tables[: len(GENERATION_2.tables)] == GENERATION_2.tables`` and generation 3's
-# columns for each of the first sixteen names are generation 2's. That prefix equality is the whole
-# of ``KS-R10@v1`` §1.3's additive rule: a generation appends tables and never retypes, reorders or
-# drops an earlier generation's.
 def _compose_generation_3() -> SchemaGeneration:
-    """Return generation 3: generation 2's declarations, unchanged, with this leaf's tables appended."""
+    """Return generation 3: generation 2's declarations with generation 3's tables appended."""
 
-    composed = SchemaGeneration(
+    return _append_generation(
+        base=GENERATION_2,
         schema_name=GENERATION_3_SCHEMA_NAME,
         user_version=3,
-        tables=GENERATION_2.tables + schema_v3.APPENDED_TABLES,
-        columns={**GENERATION_2.columns, **schema_v3.APPENDED_COLUMNS},
-        primary_keys={**GENERATION_2.primary_keys, **schema_v3.APPENDED_PRIMARY_KEYS},
-        json_columns={**GENERATION_2.json_columns, **schema_v3.APPENDED_JSON_COLUMNS},
-        features=GENERATION_2.features + schema_v3.APPENDED_FEATURES,
-        table_ddl={**GENERATION_2.table_ddl, **schema_v3.APPENDED_TABLE_DDL},
-        index_ddl=GENERATION_2.index_ddl + schema_v3.APPENDED_INDEX_DDL,
-        triggers={**GENERATION_2.triggers, **schema_v3.APPENDED_TRIGGERS},
-        fingerprint="",
+        appended=schema_v3,
     )
-    return replace(composed, fingerprint=structure_fingerprint(composed))
 
 
 GENERATION_3 = _compose_generation_3()
 
 
-# Generation 4 is generation 3, unchanged, plus the table :mod:`…schema_v4` appends -- the recorded
-# order of one detection run's signals. The composition is written as the same explicit append
-# generations 2 and 3 are, so ``GENERATION_4.tables[: len(GENERATION_3.tables)] ==
-# GENERATION_3.tables`` and generation 4's columns for each of the first twenty names are generation
-# 3's. That prefix equality is the whole of ``KS-R10@v1`` §1.3's additive rule: a generation appends
-# tables and never retypes, reorders or drops an earlier generation's.
 def _compose_generation_4() -> SchemaGeneration:
-    """Return generation 4: generation 3's declarations, unchanged, with this leaf's table appended."""
+    """Return generation 4: generation 3's declarations with generation 4's table appended."""
 
-    composed = SchemaGeneration(
+    return _append_generation(
+        base=GENERATION_3,
         schema_name=GENERATION_4_SCHEMA_NAME,
         user_version=4,
-        tables=GENERATION_3.tables + schema_v4.APPENDED_TABLES,
-        columns={**GENERATION_3.columns, **schema_v4.APPENDED_COLUMNS},
-        primary_keys={**GENERATION_3.primary_keys, **schema_v4.APPENDED_PRIMARY_KEYS},
-        json_columns={**GENERATION_3.json_columns, **schema_v4.APPENDED_JSON_COLUMNS},
-        features=GENERATION_3.features + schema_v4.APPENDED_FEATURES,
-        table_ddl={**GENERATION_3.table_ddl, **schema_v4.APPENDED_TABLE_DDL},
-        index_ddl=GENERATION_3.index_ddl + schema_v4.APPENDED_INDEX_DDL,
-        triggers={**GENERATION_3.triggers, **schema_v4.APPENDED_TRIGGERS},
-        fingerprint="",
+        appended=schema_v4,
     )
-    return replace(composed, fingerprint=structure_fingerprint(composed))
 
 
 GENERATION_4 = _compose_generation_4()
@@ -290,18 +337,38 @@ def _compose_generation_5() -> SchemaGeneration:
     return replace(composed, fingerprint=structure_fingerprint(composed))
 
 
+# Generation 6 is generation 5, unchanged, plus the six tables :mod:`…schema_v6` appends -- authored
+# family composition, its declared policy and version set, the family revision's owning route and
+# the two tables of its authored explanatory context. The composition is written as the same
+# explicit append generations 2 to 5 are, so ``GENERATION_6.tables[: len(GENERATION_5.tables)] ==
+# GENERATION_5.tables`` and generation 6's columns for each earlier name are the generation it
+# descends from. That prefix equality is the whole of ``KS-R10@v1`` §1.3's additive rule.
+def _compose_generation_6() -> SchemaGeneration:
+    """Return generation 6: generation 5's declarations with this leaf's six tables appended."""
+
+    return _append_generation(
+        base=GENERATION_5,
+        schema_name=GENERATION_6_SCHEMA_NAME,
+        user_version=6,
+        appended=schema_v6,
+    )
+
+
 GENERATION_5 = _compose_generation_5()
+GENERATION_6 = _compose_generation_6()
+
 
 # The registry. Ordered oldest first, so "the newest generation this build supports" is the last
 # entry rather than a second literal that could drift from the tuple -- and so
-# ``generation_of_new_store()`` declares generation 5 while a generation-4 dataset stays
-# generation 4 (``KS-R10@v1`` §5.1).
+# ``generation_of_new_store()`` declares generation 6 while a generation-5 dataset stays
+# generation 5 (``KS-R10@v1`` §5.1).
 GENERATIONS: tuple[SchemaGeneration, ...] = (
     GENERATION_1,
     GENERATION_2,
     GENERATION_3,
     GENERATION_4,
     GENERATION_5,
+    GENERATION_6,
 )
 
 GENERATIONS_BY_VERSION: Mapping[int, SchemaGeneration] = {

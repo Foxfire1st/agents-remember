@@ -34,6 +34,10 @@ from agents_remember.models.knowledge.base import (
     UUID_PATTERN,
     KnowledgeModel,
 )
+from agents_remember.models.knowledge.composition import (
+    FamilyCompositionPolicyDraft,
+    FamilyExplanationContextDraft,
+)
 from agents_remember.models.knowledge.facet import (
     AddExplanationRevision,
     AddFacet,
@@ -61,6 +65,8 @@ __all__ = [
     "AddExplanationRevision",
     "AddFacet",
     "AddFamily",
+    "AddFamilyComposition",
+    "AddFamilyCompositionPolicy",
     "AddFamilyMember",
     "AddFamilyRevision",
     "AddInvariant",
@@ -71,6 +77,7 @@ __all__ = [
     "AnchorReference",
     "AttachFacet",
     "AuthorExplanation",
+    "AuthorFamilyExplanationContext",
     "CandidateResolution",
     "ChangeBatch",
     "ChangeCommand",
@@ -89,6 +96,7 @@ __all__ = [
     "RemoveRealizationClaim",
     "RemoveSourceAnchor",
     "SetFamilyLabel",
+    "SetFamilyRevisionRoute",
     "SetInvariantLabel",
     "SnapshotIdentity",
     "context_digest",
@@ -133,6 +141,17 @@ MutableRecordTable = Literal[
     "facet_decision_supersession",
     "explanation",
     "explanation_revision",
+    # The composition generation's six tables. They are here for the same reason the facet
+    # generation's six are: a composition, a declared policy version, a family revision's owning
+    # route and its explanatory-context record and revisions are all written by a batch command, so
+    # an expectation, a duplicate check and a receipt all address one of these rows by its own
+    # primary key.
+    "family_composition",
+    "family_composition_policy",
+    "family_composition_policy_version",
+    "family_revision_route",
+    "family_revision_context",
+    "family_revision_context_revision",
 ]
 
 
@@ -363,12 +382,90 @@ class RemoveRealizationClaim(KnowledgeModel):
     expected_row_digest: str = Field(pattern=SHA256_PATTERN)
 
 
-# The closed command union. The twelve shipped authored commands keep their exact discriminators and
-# shapes, and the authored-judgment generation adds six members beside them -- record a facet,
-# attach it to an exact endpoint, remove one attachment, author an explanation, edit an explanation,
-# and record a designation. There is still no free-form member and still no member that could
-# promote, approve or execute a statement the caller wrote: the widening adds the acts the facet
-# record kind needs, and each has a typed shape of its own.
+class AddFamilyCompositionPolicy(KnowledgeModel):
+    """Declare one immutable version of a traversal policy an edge may cite.
+
+    The command carries an identity *and* a version, because a declared policy that cannot say which
+    version was executed is not a reportable traversal (``Doc13:227``); a policy that names no finite
+    bound, or that widens a scope the build does not register, is refused by the value's own
+    construction rather than stored as a malformed policy.
+    """
+
+    kind: Literal["add_family_composition_policy"] = "add_family_composition_policy"
+    policy: FamilyCompositionPolicyDraft
+
+
+class AddFamilyComposition(KnowledgeModel):
+    """Author one composition edge between two exact family revisions.
+
+    ``policy_id``/``policy_version_id`` are absent for an edge that is authored, readable and not
+    traversable -- the default. When present, both must name a *declared* policy version, which the
+    batch checks before any row is written.
+    """
+
+    kind: Literal["add_family_composition"] = "add_family_composition"
+    composition_id: str = Field(pattern=UUID_PATTERN)
+    from_family_revision_id: str = Field(pattern=UUID_PATTERN)
+    to_family_revision_id: str = Field(pattern=UUID_PATTERN)
+    policy_id: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
+    policy_version_id: str | None = Field(default=None, pattern=UUID_PATTERN)
+
+    @model_validator(mode="after")
+    def _require_a_declared_policy_to_name_both_halves(self) -> AddFamilyComposition:
+        """Refuse an edge that carries half of a declared policy.
+
+        ``CR17-2`` recorded that the packet's schematic example made neither half alone a refusal;
+        §3.2 is what implementation satisfies, so identity-without-version and
+        version-without-identity are refused at construction *and* by the table's own ``CHECK``.
+        """
+
+        if (self.policy_id is None) != (self.policy_version_id is None):
+            raise ValueError(
+                "a declared traversal policy is an identity *and* a version; an edge that carries "
+                "one without the other is refused rather than stored as not traversable"
+            )
+        if self.from_family_revision_id == self.to_family_revision_id:
+            raise ValueError(
+                "a composition edge relates two family revisions; an edge from a revision to itself "
+                "is not a relationship between two guarantees"
+            )
+        return self
+
+
+class SetFamilyRevisionRoute(KnowledgeModel):
+    """Record the canonical owning route of one exact family revision.
+
+    Nothing here is derived: the route is named, never inferred from a member's anchor, a
+    realization's path, a display label or a common path prefix. A family revision with no rows
+    recording one is the explicit ungoverned state.
+    """
+
+    kind: Literal["set_family_revision_route"] = "set_family_revision_route"
+    family_revision_id: str = Field(pattern=UUID_PATTERN)
+    route_id: str = Field(pattern=UUID_PATTERN)
+
+
+class AuthorFamilyExplanationContext(KnowledgeModel):
+    """Author one revision of a family revision's explanatory context.
+
+    The first revision of a context carries no predecessor; a later one names the exact revision it
+    succeeds, so a change is a newly identified revision rather than an in-place edit. The command
+    carries no field that could hold the joint guarantee, which is what makes "explanations are
+    never written through the statement column" a property of the vocabulary rather than a rule the
+    write path remembers.
+    """
+
+    kind: Literal["author_family_explanation_context"] = "author_family_explanation_context"
+    context: FamilyExplanationContextDraft
+
+
+# The closed command union. The twelve shipped authored commands and the six facet commands keep
+# their exact discriminators and shapes, and the composition generation adds four members beside
+# them -- declare a policy version, author an edge, record a revision's owning route, and author a
+# context revision. There is still no free-form member and still no member that could promote,
+# approve or execute a statement the caller wrote, and deliberately **no** removal member: a
+# composition edge is immutable in the same sense a revision row is, so a correction is a new edge
+# with its own identity rather than a deletion of an earlier dataset's recorded relationship.
 ProposedCommand = Annotated[
     AddInvariant
     | AddInvariantRevision
@@ -387,7 +484,11 @@ ProposedCommand = Annotated[
     | RemoveFacetAttachment
     | AuthorExplanation
     | AddExplanationRevision
-    | DesignateExplanation,
+    | DesignateExplanation
+    | AddFamilyCompositionPolicy
+    | AddFamilyComposition
+    | SetFamilyRevisionRoute
+    | AuthorFamilyExplanationContext,
     Field(discriminator="kind"),
 ]
 

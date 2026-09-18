@@ -18,16 +18,24 @@ from typing import TYPE_CHECKING, Any
 
 from agents_remember.memory.knowledge import (
     anchors,
+    compositions,
     facet_records,
     families,
     memberships,
     realizations,
     records,
 )
+from agents_remember.memory.knowledge.composition_policies import (
+    get_policy_version,
+    policy_identity_row_digest,
+    policy_version_row_digest,
+)
+from agents_remember.memory.knowledge.connection import fetch_one
 from agents_remember.models.knowledge.candidate import (
     ChangeCommand,
     NewAnchor,
 )
+from agents_remember.models.knowledge.composition import COMPOSITION_WRITABLE_TABLES
 
 if TYPE_CHECKING:
     from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
@@ -36,7 +44,7 @@ if TYPE_CHECKING:
 # The tables a batch command writes directly. The repository row and the two predecessor-edge
 # tables are written only as part of the aggregate that owns them, so an identity outside this set
 # is a caller mistake rather than a record this operation can address.
-WRITABLE_TABLES: tuple[str, ...] = (
+_BASE_WRITABLE_TABLES: tuple[str, ...] = (
     "invariant",
     "invariant_revision",
     "family",
@@ -50,6 +58,13 @@ WRITABLE_TABLES: tuple[str, ...] = (
     "facet_decision_supersession",
     "explanation",
     "explanation_revision",
+)
+
+# The composition generation's six tables are appended to the base list rather than merged into it,
+# so the union a case pins is ``base | this leaf's declaration``: a later leaf appends its own named
+# set and nothing here has to be re-derived from a count.
+WRITABLE_TABLES: tuple[str, ...] = _BASE_WRITABLE_TABLES + tuple(
+    sorted(COMPOSITION_WRITABLE_TABLES)
 )
 
 IdentityPairs = tuple[tuple[str, str], ...]
@@ -100,6 +115,91 @@ def _claim_digest(store: OpenedKnowledgeStore, record_id: str) -> str | None:
     return None if claim is None else claim.row_digest
 
 
+def _composition_digest(store: OpenedKnowledgeStore, record_id: str) -> str | None:
+    """Return one stored composition edge's digest, or ``None``.
+
+    The digest is the row's own authored content, computed rather than read from a stored column: a
+    composition row deliberately stores no digest, because it is not a revision aggregate and mints
+    no content address. A caller carries this value into an expectation exactly as it carries a
+    ``row_digest``.
+    """
+
+    composition = compositions.get_composition(store, record_id)
+    if composition is None:
+        return None
+    return compositions.composition_row_digest(store.repository_id, composition)
+
+
+def _policy_identity_digest(store: OpenedKnowledgeStore, record_id: str) -> str | None:
+    """Return one declared policy identity row's digest, or ``None``."""
+
+    row = fetch_one(
+        store.connection,
+        "SELECT policy_id FROM family_composition_policy WHERE repository_id = ? AND policy_id = ?",
+        (store.repository_id, record_id),
+    )
+    if row is None:
+        return None
+    return policy_identity_row_digest(store.repository_id, str(row[0]))
+
+
+def _composition_policy_version_digest(store: OpenedKnowledgeStore, record_id: str) -> str | None:
+    """Return one declared policy version's digest, resolved by its own version row identity.
+
+    A policy version's declared identity is the pair ``(policy_id, policy_version_id)``, and the
+    version row id is a UUID unique across the namespace, so this resolves the pair from the row and
+    then reads through the module that owns the lookup rather than querying the table twice.
+    """
+
+    row = fetch_one(
+        store.connection,
+        "SELECT policy_id FROM family_composition_policy_version "
+        "WHERE repository_id = ? AND policy_version_id = ?",
+        (store.repository_id, record_id),
+    )
+    if row is None:
+        return None
+    version = get_policy_version(store, str(row[0]), record_id)
+    if version is None:  # pragma: no cover - the id came from that same table
+        return None
+    return policy_version_row_digest(store.repository_id, version)
+
+
+def _family_revision_route_digest(store: OpenedKnowledgeStore, record_id: str) -> str | None:
+    """Return one recorded owning-route row's digest, or ``None`` when the revision is ungoverned."""
+
+    route_id = compositions.owning_route_of_family_revision(store, record_id)
+    if route_id is None:
+        return None
+    return compositions.owning_route_row_digest(store.repository_id, record_id, route_id)
+
+
+def _context_digest(store: OpenedKnowledgeStore, record_id: str) -> str | None:
+    """Return the current revision of one explanatory context, digested, or ``None``."""
+
+    context = compositions.get_context_record(store, record_id)
+    if context is None:
+        return None
+    return compositions.context_row_digest(store.repository_id, context)
+
+
+def _context_revision_digest(store: OpenedKnowledgeStore, record_id: str) -> str | None:
+    """Return one exact context revision, digested, or ``None``."""
+
+    row = fetch_one(
+        store.connection,
+        "SELECT context_id FROM family_revision_context_revision "
+        "WHERE repository_id = ? AND revision_id = ?",
+        (store.repository_id, record_id),
+    )
+    if row is None:
+        return None
+    context = compositions.get_context_revision(store, str(row[0]), record_id)
+    if context is None:  # pragma: no cover - the id came from that same table
+        return None
+    return compositions.context_row_digest(store.repository_id, context)
+
+
 # The facet tables' readers all live in :mod:`…facets`, next to the write path that produces the
 # rows: each returns the same value the read projection exposes, so an expectation carried from a
 # read names the row the write path will compare against.
@@ -117,6 +217,12 @@ _RECORD_READERS: dict[str, RecordReader] = {
     "facet_decision_supersession": facet_records.supersession_digest,
     "explanation": facet_records.explanation_record_digest,
     "explanation_revision": facet_records.explanation_revision_payload_digest,
+    "family_composition": _composition_digest,
+    "family_composition_policy": _policy_identity_digest,
+    "family_composition_policy_version": _composition_policy_version_digest,
+    "family_revision_route": _family_revision_route_digest,
+    "family_revision_context": _context_digest,
+    "family_revision_context_revision": _context_revision_digest,
 }
 
 # One record identity per command kind, for the eleven commands that address exactly one. The
@@ -148,6 +254,23 @@ _WRITTEN_IDENTITY: dict[str, Callable[[Any], tuple[str, str]]] = {
     "author_explanation": lambda command: ("explanation", command.explanation_id),
     "add_explanation_revision": lambda command: ("explanation_revision", command.revision_id),
     "designate_explanation": lambda command: ("explanation", command.explanation_id),
+    # The four composition-generation commands. A policy *version* is the row the batch creates and
+    # the row an edge cites, so it is the identity a duplicate check addresses; the policy identity
+    # row is created idempotently beside it and is not a second creation. A context revision is the
+    # append-only row; the context record is created with the first revision and is read through it.
+    "add_family_composition_policy": lambda command: (
+        "family_composition_policy_version",
+        command.policy.policy_version_id,
+    ),
+    "add_family_composition": lambda command: ("family_composition", command.composition_id),
+    "set_family_revision_route": lambda command: (
+        "family_revision_route",
+        command.family_revision_id,
+    ),
+    "author_family_explanation_context": lambda command: (
+        "family_revision_context_revision",
+        command.context.revision_id,
+    ),
 }
 
 # The commands that create nothing: they address an existing row to edit or remove it, so two of
@@ -160,6 +283,11 @@ _ADDRESSES_EXISTING: tuple[str, ...] = (
     "remove_realization_claim",
     "remove_facet_attachment",
     "designate_explanation",
+    # A route association addresses a revision that must already be stored, and a *successor* context
+    # revision addresses the record it extends. Both are edits to an existing aggregate rather than
+    # new identities, so they are not duplicate-checked as insertions; the steps themselves refuse a
+    # missing subject by name.
+    "set_family_revision_route",
 )
 
 
@@ -184,6 +312,12 @@ def written_identities(command: ChangeCommand) -> IdentityPairs:
             ("explanation", command.explanation_id),
             ("explanation_revision", command.revision_id),
         )
+    if command.kind == "author_family_explanation_context":
+        # The authored row is the *revision*; the context record is created with the first one and
+        # is read through its current revision, so the revision identity is what an expectation,
+        # a duplicate check and a receipt all address. Naming the record here as well would make a
+        # successor revision's own insertion collide with the record the first revision created.
+        return (("family_revision_context_revision", command.context.revision_id),)
     return (_WRITTEN_IDENTITY[command.kind](command),)
 
 

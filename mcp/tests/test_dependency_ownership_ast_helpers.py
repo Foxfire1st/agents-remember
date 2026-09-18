@@ -43,7 +43,7 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 13
 LIFECYCLE_ARTIFACT_COUNT = 54
-LIFECYCLE_CATALOG_SHA256 = "c6c41f54d169938098d63063b97835db54301fe6446b49c617c45e255f1196c1"
+LIFECYCLE_CATALOG_SHA256 = "562eebfb22fcfe1fba3a4d3bc022e90593c21f11dce6b4815868359c486082cd"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately once.
 
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
@@ -106,6 +106,14 @@ fifty-four, and this value is the catalog after that consumer registration. The 
 delta remains exactly empty -- none of these rows is the proof's -- so the freeze still forbids the
 proof adding or widening anything, and any further catalog change must re-pin this digest
 deliberately.
+and this value is the catalog after that consumer registration. ``260915-KS``'s L17 leaf then
+added further *consumers* -- its two composition modules build their admitted candidate through the
+facet leaf's ``knowledge-facet-cases`` helpers rather than through a third fixture of their own, and
+they read their graphs through the ``knowledge-generation-cases`` and ``knowledge-read-scope-cases``
+support modules the earlier leaves registered -- so the counts stay thirteen and fifty-four and this
+value is the catalog after L17's consumer registration. The proof's own artifact delta remains exactly empty --
+none of these rows is the proof's -- so the freeze still forbids the proof adding or widening
+anything, and any further catalog change must re-pin this digest deliberately.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"

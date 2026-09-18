@@ -41,6 +41,7 @@ from agents_remember.memory.knowledge.read_owner_revisions import (
     OwnerRevisionResolver,
 )
 from agents_remember.memory.knowledge.schema_generations import (
+    CURRENT_GENERATION,
     GENERATION_4,
     GENERATION_5,
     GENERATION_5_SCHEMA_NAME,
@@ -120,6 +121,17 @@ def test_generation_5_appends_to_generation_4_without_touching_its_twenty_one_ta
 
     The base is named rather than restated as a list, so the case says *which* generation it checked
     and a renumber moves one name instead of silently checking a stale list.
+
+    RE-SCOPED for ``KS-R17@v1``, by the same reasoning this docstring already states. The last
+    assertion pinned *this leaf's* generation as the store's created generation, which was true when
+    generation 5 was the newest registered one and false the moment generation 6 joined the registry.
+    What the assertion actually means is "a brand-new store declares the newest supported
+    generation", so it now compares against ``CURRENT_GENERATION`` -- the registry's own last entry,
+    the same form ``test_knowledge_schema_generations.py`` uses. That is renumber-proof and therefore
+    strictly stronger than the literal: a future leaf that appends a generation cannot make this
+    case stale, and a build that stopped making its newest generation the created one still fails
+    here. Every generation-5-specific assertion above is unchanged and still passes, because
+    generation 5 *is* still an additive append to generation 4 with exactly one new table.
     """
 
     assert GENERATION_5.tables[: len(GENERATION_4.tables)] == GENERATION_4.tables
@@ -130,7 +142,7 @@ def test_generation_5_appends_to_generation_4_without_touching_its_twenty_one_ta
     assert GENERATION_5.tables[-1] == "citation_binding"
     assert GENERATION_5.schema_name == GENERATION_5_SCHEMA_NAME
     assert GENERATION_5.fingerprint != GENERATION_4.fingerprint
-    assert generation_of_new_store() is GENERATION_5
+    assert generation_of_new_store() is CURRENT_GENERATION
 
 
 def test_the_generation_1_pin_still_recomputes_after_this_leaf_appends_a_generation() -> None:

@@ -1194,3 +1194,129 @@ def explanation_revision_refusal(
             "predecessor and nothing is rewritten in place."
         ),
     )
+
+
+def family_composition_cycle_refusal(
+    revision_id: str, members: tuple[str, ...], *, candidate_on_cycle: bool = True
+) -> KnowledgeRefusal:
+    """Refuse a composition edge that would leave the composition graph on a cycle.
+
+    This is the third graph the *same* shared rule judges (``KS-R17@v1`` §4.1): the walk that
+    decided is :func:`…lineage.find_cycle`, and this factory only renders its finding. The members
+    are the guarantee revision ids the refusal must name, so a caller is told which guarantees are
+    on the cycle rather than which single edge was refused.
+
+    ``candidate_on_cycle`` is ``False`` for the rule's second branch -- the edge descends from a
+    stored cycle rather than completing one -- and the two wordings differ because the remedies do:
+    a completed cycle is corrected by removing an edge, while a revision that merely reaches a
+    stored cycle is corrected at the cycle itself.
+
+    The code is the shipped ``lineage_cycle``: "the graph this write would leave reaches itself" is
+    one fact about one authored graph, and giving it a second code per graph would make a caller
+    branch on which relation it happened to write instead of on what happened.
+    """
+
+    named = " | ".join(members)
+    if candidate_on_cycle:
+        detail = (
+            "the composition edges this batch declares would leave the composition graph reaching "
+            "itself, so the recorded relationships do not describe a directed acyclic graph"
+        )
+        next_action = (
+            "Correct one of the named edges so the composition graph terminates. The whole batch "
+            "was rolled back; no partial edge set was stored."
+        )
+    else:
+        detail = (
+            "a stored cycle in the composition graph is reachable from this edge, and a newly "
+            "authored relationship must not silently inherit one"
+        )
+        next_action = (
+            "Correct the stored cycle the named revisions are on before authoring a relationship "
+            "that reaches it. The whole batch was rolled back."
+        )
+    return refusal(
+        "lineage_cycle",
+        "change_candidate",
+        detail,
+        facts=RefusalFacts(
+            table="family_composition",
+            record_id=revision_id,
+            expected="an acyclic composition graph",
+            observed=named,
+        ),
+        next_action=next_action,
+    )
+
+
+def composition_policy_refusal(
+    operation: KnowledgeOperation,
+    detail: str,
+    *,
+    record_id: str | None,
+    expected: str | None,
+    observed: str | None,
+) -> KnowledgeRefusal:
+    """Refuse a declared traversal policy that is unknown, unbounded or scope-silent.
+
+    One code for three states, because the remedy is one act: declare the policy. The detailed
+    distinction is in ``detail`` and in the facts, and the caller that must branch on *which* half
+    is missing reads the policy identity it named rather than parsing prose.
+
+    ``invalid_payload`` is the shipped code for "the authored value is not an admissible value",
+    which is exactly what a policy naming no bound or widening an unnamed scope is.
+    """
+
+    return refusal(
+        "invalid_payload",
+        operation,
+        f"the declared traversal policy is not admissible: {detail}",
+        facts=RefusalFacts(
+            table="family_composition_policy_version",
+            record_id=record_id,
+            expected=expected,
+            observed=observed,
+        ),
+        next_action=(
+            "Declare the policy version with an identity, an explicit version, a direction, a "
+            "finite depth bound and the one scope it may widen, and cite it from the edge. An edge "
+            "that declares no policy is stored and readable and is simply not traversable."
+        ),
+    )
+
+
+def composition_traversal_refusal(
+    operation: KnowledgeOperation,
+    detail: str,
+    *,
+    record_id: str,
+    expected: str,
+    observed: str,
+) -> KnowledgeRefusal:
+    """Refuse a traversal that an executed policy does not permit.
+
+    Three states share it -- an edge the policy does not admit, a policy version that is not the one
+    the edge declares, and a step past the declared bound -- because they are one fact from the
+    caller's side: the traversal under *this* policy cannot continue. A truncated traversal is never
+    reported as a complete scope, so this is a refusal rather than a partial result.
+
+    ``relationship_constraint`` is the shipped code for "the stored rows do not admit the
+    relationship this request asks for", which is what each of the three states is.
+    """
+
+    return refusal(
+        "relationship_constraint",
+        operation,
+        f"the traversal cannot be reported as a complete scope: {detail}",
+        facts=RefusalFacts(
+            table="family_composition",
+            record_id=record_id,
+            expected=expected,
+            observed=observed,
+        ),
+        next_action=(
+            "Follow the edges the named policy version declares, inside its bound, or request a "
+            "scope under a policy version that admits these edges. Nothing was widened and the "
+            "shipped retrieval selection is unchanged."
+        ),
+    )

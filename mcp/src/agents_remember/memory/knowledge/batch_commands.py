@@ -32,11 +32,14 @@ import apsw
 
 from agents_remember.memory.knowledge import (
     anchors,
+    composition_policies,
+    compositions,
     facet_records,
     facets,
     families,
     labels,
     lineage,
+    lineages,
     memberships,
     realizations,
     records,
@@ -49,18 +52,22 @@ from agents_remember.memory.knowledge.refusals import (
     batch_lineage_cycle_refusal,
     batch_refusal,
     facet_supersession_cycle_refusal,
+    family_composition_cycle_refusal,
     unknown_family_refusal,
     unknown_invariant_refusal,
 )
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.candidate import (
     AddFamily,
+    AddFamilyComposition,
+    AddFamilyCompositionPolicy,
     AddFamilyMember,
     AddFamilyRevision,
     AddInvariant,
     AddInvariantRevision,
     AddRealizationClaim,
     AddSourceAnchor,
+    AuthorFamilyExplanationContext,
     ChangeCommand,
     MutableRecordTable,
     RecordIdentity,
@@ -68,7 +75,14 @@ from agents_remember.models.knowledge.candidate import (
     RemoveRealizationClaim,
     RemoveSourceAnchor,
     SetFamilyLabel,
+    SetFamilyRevisionRoute,
     SetInvariantLabel,
+)
+from agents_remember.models.knowledge.composition import (
+    COMPOSITION_COMMAND_KINDS,
+    FamilyCompositionDraft,
+    FamilyCompositionPolicyVersion,
+    FamilyExplanationContext,
 )
 from agents_remember.models.knowledge.facet import FACET_COMMAND_KINDS
 from agents_remember.models.knowledge.family import FamilyRevision, FamilyRevisionDraft
@@ -212,6 +226,8 @@ def _apply_command(
         return _apply_insert(store, command, authorship, pending)
     if command.kind in _LABELING_KINDS:
         return _apply_label(store, command)
+    if command.kind in _COMPOSITION_KINDS:
+        return _apply_composition(store, command, authorship)
     if command.kind in FACET_COMMAND_KINDS:
         return _apply_facet(store, command, authorship, pending)
     return _apply_removal(store, command)
@@ -244,6 +260,140 @@ _INSERTING_KINDS = frozenset(
 )
 
 _LABELING_KINDS = frozenset({"set_invariant_label", "set_family_label"})
+
+# The four commands the composition generation adds, dispatched together: each writes one authored
+# row through the module that owns it, and none of them addresses a sealed revision aggregate. The
+# membership comes from the vocabulary's own declaration rather than from a second literal.
+_COMPOSITION_KINDS = COMPOSITION_COMMAND_KINDS
+
+
+def _apply_composition(
+    store: OpenedKnowledgeStore, command: ChangeCommand, authorship: Authorship
+) -> tuple[RecordIdentity, ...]:
+    """Apply one composition command through its own in-transaction step."""
+
+    if isinstance(command, AddFamilyCompositionPolicy):
+        return _add_composition_policy(store, command, authorship)
+    if isinstance(command, AddFamilyComposition):
+        return _add_composition(store, command, authorship)
+    if isinstance(command, SetFamilyRevisionRoute):
+        return _set_family_revision_route(store, command, authorship)
+    if isinstance(command, AuthorFamilyExplanationContext):
+        return _author_family_explanation_context(store, command, authorship)
+    return _refuse_unreachable(command)
+
+
+def _add_composition_policy(
+    store: OpenedKnowledgeStore, command: AddFamilyCompositionPolicy, authorship: Authorship
+) -> tuple[RecordIdentity, ...]:
+    """Declare one immutable policy version under the admitted provenance.
+
+    The provenance comes from the admission and never from the command, so no part of a submitted
+    payload can become the record's author, authorization or instant.
+    """
+
+    version = FamilyCompositionPolicyVersion(
+        repository_id=store.repository_id,
+        policy_id=command.policy.policy_id,
+        policy_version_id=command.policy.policy_version_id,
+        declared_version=command.policy.declared_version,
+        direction=command.policy.direction,
+        depth_bound=command.policy.depth_bound,
+        widened_scope=command.policy.widened_scope,
+        provenance=authorship,
+    )
+    composition_policies.insert_policy_version(store, version)
+    return (
+        _written_entry(
+            "written",
+            "family_composition_policy_version",
+            version.policy_version_id,
+            composition_policies.policy_version_row_digest(store.repository_id, version),
+        ),
+    )
+
+
+def _add_composition(
+    store: OpenedKnowledgeStore, command: AddFamilyComposition, authorship: Authorship
+) -> tuple[RecordIdentity, ...]:
+    composition = compositions.composition_draft_of(
+        FamilyCompositionDraft(
+            composition_id=command.composition_id,
+            from_family_revision_id=command.from_family_revision_id,
+            to_family_revision_id=command.to_family_revision_id,
+            policy_id=command.policy_id,
+            policy_version_id=command.policy_version_id,
+            provenance=authorship,
+        ),
+        store.repository_id,
+    )
+    compositions.insert_composition(store, composition)
+    return (
+        _written_entry(
+            "written",
+            "family_composition",
+            composition.composition_id,
+            compositions.composition_row_digest(store.repository_id, composition),
+        ),
+    )
+
+
+def _set_family_revision_route(
+    store: OpenedKnowledgeStore, command: SetFamilyRevisionRoute, authorship: Authorship
+) -> tuple[RecordIdentity, ...]:
+    compositions.insert_family_revision_route(
+        store, command.family_revision_id, command.route_id, authorship
+    )
+    return (
+        _written_entry(
+            "written",
+            "family_revision_route",
+            command.family_revision_id,
+            compositions.owning_route_row_digest(
+                store.repository_id, command.family_revision_id, command.route_id
+            ),
+        ),
+    )
+
+
+def _author_family_explanation_context(
+    store: OpenedKnowledgeStore,
+    command: AuthorFamilyExplanationContext,
+    authorship: Authorship,
+) -> tuple[RecordIdentity, ...]:
+    subject = families.get_family_revision(store, command.context.family_revision_id)
+    if subject is None:  # pragma: no cover - the precondition refuses this before the apply step
+        raise KnowledgeRefused(unknown_family_refusal(command.context.family_revision_id))
+    context = FamilyExplanationContext(
+        context_id=command.context.context_id,
+        family_id=subject.revision.family_id,
+        family_revision_id=command.context.family_revision_id,
+        revision_id=command.context.revision_id,
+        predecessor_revision_id=(
+            command.context.predecessor_revision_id or command.context.revision_id
+        ),
+        body=command.context.body,
+        provenance=authorship,
+    )
+    compositions.insert_context_revision(store, context)
+    entries = [
+        _written_entry(
+            "written",
+            "family_revision_context_revision",
+            context.revision_id,
+            compositions.context_row_digest(store.repository_id, context),
+        )
+    ]
+    if command.context.predecessor_revision_id is None:
+        entries.append(
+            _written_entry(
+                "written",
+                "family_revision_context",
+                context.context_id,
+                compositions.context_row_digest(store.repository_id, context),
+            )
+        )
+    return tuple(entries)
 
 
 def _apply_insert(
@@ -593,6 +743,7 @@ def require_after_integrity(store: OpenedKnowledgeStore) -> None:
     _require_acyclic_graph(store, table="invariant_predecessor", family=False)
     _require_acyclic_graph(store, table="family_predecessor", family=True)
     _require_acyclic_supersessions(store)
+    _require_acyclic_compositions(store)
 
 
 def _require_sealed_rows(store: OpenedKnowledgeStore) -> None:
@@ -687,6 +838,27 @@ def _require_acyclic_supersessions(store: OpenedKnowledgeStore) -> None:
         return
     members = tuple(sorted(cycle))
     raise KnowledgeRefused(facet_supersession_cycle_refusal(members[0], members))
+
+
+def _require_acyclic_compositions(store: OpenedKnowledgeStore) -> None:
+    """Refuse when the composition graph holds a cycle after the batch was applied.
+
+    The fourth whole-graph pass, and the third *graph*: the batch is finished, so the question is
+    whether the graph it left is acyclic at all, and the verdict belongs to the shared rule in
+    :mod:`…lineage` -- this gathers the repository's edges through the third edge source and asks
+    ``cycle_vertices``. A single cycle anywhere in that graph is refused with its members, whatever
+    command happened to create it.
+    """
+
+    graph: dict[str, set[str]] = {}
+    for child, parent in lineages.composition_edges(store.connection, store.repository_id):
+        graph.setdefault(child, set()).add(parent)
+        graph.setdefault(parent, set())
+    cycle = lineage.cycle_vertices(graph)
+    if not cycle:
+        return
+    members = tuple(sorted(cycle))
+    raise KnowledgeRefused(family_composition_cycle_refusal(members[0], members))
 
 
 def _vanished_row(table: str) -> KnowledgeRefusal:

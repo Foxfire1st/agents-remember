@@ -50,6 +50,16 @@ KnowledgeOperation = Literal[
     "set_invariant_label",
     "set_family_label",
     "change_candidate",
+    # Family composition. The edge, the revision-level owning association and the explanatory
+    # context are authored through the candidate batch, whose refusals are restated as
+    # ``change_candidate``; these two names are the *operations* a relation write reports when it is
+    # reached directly, exactly as ``create_family_member`` and ``set_governing_route`` are for the
+    # relation tables that came before them. They are members here because
+    # :data:`…endpoints.RelationWrite` is a subset of this vocabulary: a relation write's
+    # ``operation`` has always been an operation name, and a new relation kind does not get to
+    # invent a second spelling for "which act refused this".
+    "create_composition",
+    "set_family_revision_route",
     "create_candidate",
     "clone_candidate",
     "open_candidate",
@@ -109,6 +119,13 @@ KnowledgeOperation = Literal[
     # mints a new gate.
     "author_citation_binding",
     "read_citation_closure",
+    # Family composition. One member, and deliberately not one per authored act: the edge, its
+    # declared policy version, the family revision's owning route and its explanatory context are all
+    # authored through the candidate batch's commands, whose refusals are restated as
+    # ``change_candidate``. This member names the one act that is *not* a write -- following declared
+    # composition edges under a versioned traversal policy -- because it is a different operation
+    # from ``read_knowledge_scope``'s retrieval selection rather than a variant of it (R17 §7.3).
+    "follow_family_composition",
 ]
 
 # The exact refusal vocabulary of the storage contract. Each member names a distinct

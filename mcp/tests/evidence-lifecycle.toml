@@ -1186,6 +1186,8 @@ replacement_contract = "contract:knowledge-generation-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_candidate_workspace.py",
+  "mcp/tests/test_knowledge_family_composition.py",
+  "mcp/tests/test_knowledge_family_composition_boundaries.py",
   "mcp/tests/test_knowledge_guarded_merge.py",
   "mcp/tests/test_knowledge_merge_generations_and_envelope.py",
   "mcp/tests/test_knowledge_portable_boundaries.py",
@@ -1219,6 +1221,8 @@ replacement_contract = "contract:knowledge-facet-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_facets.py",
+  "mcp/tests/test_knowledge_family_composition.py",
+  "mcp/tests/test_knowledge_family_composition_boundaries.py",
 ]
 
 [[artifact]]
@@ -1304,6 +1308,7 @@ replacement_contract = "contract:knowledge-read-scope-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_diff_boundaries.py",
+  "mcp/tests/test_knowledge_family_composition_boundaries.py",
   "mcp/tests/test_knowledge_diff_scope.py",
   "mcp/tests/test_knowledge_detection_runs.py",
   "mcp/tests/test_knowledge_read_boundaries.py",

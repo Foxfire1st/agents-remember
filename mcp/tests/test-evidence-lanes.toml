@@ -72,6 +72,8 @@ unit-regression = [
   "mcp/tests/test_knowledge_detection_runs.py",
   "mcp/tests/test_knowledge_detection_signals.py",
   "mcp/tests/test_knowledge_facets.py",
+  "mcp/tests/test_knowledge_family_composition.py",
+  "mcp/tests/test_knowledge_family_composition_boundaries.py",
   "mcp/tests/test_knowledge_family_revision.py",
   "mcp/tests/test_knowledge_label_operations.py",
   "mcp/tests/test_knowledge_graph_reads.py",

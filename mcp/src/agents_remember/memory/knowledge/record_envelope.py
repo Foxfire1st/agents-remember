@@ -128,7 +128,6 @@ PAYLOAD_MODELS: Mapping[tuple[str, str], type[BaseModel]] = {
     # refusal, raised at this one seam before any row exists. The binding's owner-revision/key
     # identity pair and its governing route are columns, because the envelope cannot express them.
     (BINDING_RECORD_KIND, BINDING_RECORD_SCHEMA): CitationBindingPayload,
-
 }
 
 # The facet kinds this registry admits, for a caller that needs the closed vocabulary rather than a
