@@ -16,6 +16,9 @@ from agents_remember.worktrees.activation.atomic_series_admission import (
     AtomicSeriesAdmissionRequest,
     atomic_series_admission_projection,
 )
+from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
+    LifecycleOperationLocationError,
+)
 from agents_remember.worktrees.modules.git import repository_identity, run_git
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.scheduling_mode import TERMINAL_SERIES_CLEANUP
@@ -67,6 +70,10 @@ class MasterSeriesContractAdmissionEvidence:
     existing_contract: WorktreeContract | None = None
     expected: dict[str, object] | None = None
     observed: dict[str, object] | None = None
+
+
+REOPEN_REQUIRED_STATUS = "atomic-series-contract-reopen-required"
+"""The refusal whose remedy is ``task_reopen``: a terminal generation is archived, not stale."""
 
 
 class MasterSeriesContractAdmissionError(RuntimeError):
@@ -141,6 +148,7 @@ def _master_series_admission_refusal(
     status_action = admission.get("statusAction")
     if not isinstance(status_action, dict):
         status_action = None
+    reopen_required = error.status == REOPEN_REQUIRED_STATUS
     return WorktreeCommandResult(
         2,
         {
@@ -150,13 +158,83 @@ def _master_series_admission_refusal(
             "detail": public_detail,
             "contract_path": error.contract_path.as_posix(),
             "retryable": True,
-            "nextTool": "worktree_status",
-            "nextArgs": status_action.get("args") if status_action is not None else None,
+            # A terminal generation is not something `worktree_status` can clear: the only route
+            # back is the one that publishes a successor enclosure citing the archived record. The
+            # default status action still travels in `statusAction`, so a reader who wants to see
+            # the contract first is not deprived of the address.
+            "nextTool": "task_reopen" if reopen_required else "worktree_status",
+            "nextArgs": (
+                {"contract_path": error.contract_path.as_posix(), "dry_run": True}
+                if reopen_required
+                else (status_action.get("args") if status_action is not None else None)
+            ),
             "admission": admission,
-            "retryPrecondition": admission["retryPrecondition"],
+            "retryPrecondition": (
+                "Preview and apply task_reopen for this contract; a start must not replace an "
+                "archived enclosure generation."
+                if reopen_required
+                else admission["retryPrecondition"]
+            ),
             "statusAction": status_action,
         },
     )
+
+
+def _archived_terminal_refusal(
+    *,
+    path: Path,
+    existing: WorktreeContract | None,
+    cleanup: str,
+) -> MasterSeriesContractAdmissionError:
+    """The typed refusal for a terminal generation whose enclosure root was collected."""
+
+    return MasterSeriesContractAdmissionError(
+        REOPEN_REQUIRED_STATUS,
+        f"master series contract is terminal ({cleanup!r}) and its enclosure generation is "
+        "archived; reopening this master is task_reopen's operation and a start must not replace "
+        "the archived contract.",
+        MasterSeriesContractAdmissionEvidence(
+            contract_path=path,
+            existing_contract=existing,
+            expected={"kind": "series", "cleanup": "pending", "nextTool": "task_reopen"},
+            observed={"cleanup": cleanup, "terminalArchive": "archived"},
+        ),
+    )
+
+
+def _archived_generation_at(coordination_root: Path, contract_path: Path) -> bool:
+    """Whether the lifecycle plane holds a collected generation for this contract path.
+
+    Asked of the plane rather than of the contract verbatim, because the plane is what owns the
+    fact and it can answer when the contract bytes are *gone*: a hand-deleted ``series-contract.md``
+    beside an archived locator would otherwise reach the fresh-bootstrap path, where the plane
+    refuses it late (``LifecycleOperationLocationError``) after the integration branch has already
+    been created. Nothing is minted either way -- the locator binding is immutable -- but the
+    refusal should come before the mutation and in the product's own vocabulary.
+    """
+
+    from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (  # noqa: PLC0415
+        inspect_lifecycle_operation_locator,
+    )
+
+    try:
+        observed = inspect_lifecycle_operation_locator(coordination_root, contract_path)
+    except (LifecycleOperationLocationError, OSError, ValueError):
+        return False
+    return observed.state == "terminal-archived"
+
+
+def _terminal_generation_archived(contract_path: Path) -> bool:
+    """Whether this contract's enclosure generation was collected after terminal archive proof.
+
+    The lifecycle address plane already owns this fact, and reading it there rather than
+    inferring it from the contract verbatim is the point: the archive is what makes the
+    contract unreplaceable, and an unreadable or absent address fails closed to *archived*
+    only when the plane says so -- anything else preserves today's stale-artifact behaviour.
+    """
+
+    contract = load_contract(contract_path)
+    return _archived_generation_at(contract.coordination_root, contract.contract_path)
 
 
 def _existing_master_series_contract(
@@ -164,6 +242,8 @@ def _existing_master_series_contract(
 ) -> WorktreeContract | None:
     path = series_contract_path(spec.task_root)
     if not path.exists():
+        if _archived_generation_at(spec.coordination_root, path):
+            raise _archived_terminal_refusal(path=path, existing=None, cleanup="absent")
         return None
     try:
         existing = load_contract(path)
@@ -194,8 +274,26 @@ def _existing_master_series_contract(
             ),
         )
     if existing.cleanup in TERMINAL_SERIES_CLEANUP:
-        # Stale terminal artifact (L13-R5b): it no longer owns the lane; the
-        # caller's fresh bootstrap replaces it.
+        # A terminal series artifact no longer owns the lane (L13-R5b) -- but "no longer owns"
+        # is not "may be replaced". When the terminal generation was archived, this contract IS
+        # the master's landed history: silently discarding it lets the caller's fresh bootstrap
+        # mint a replacement over the archived record (the 2026-09-19 hand edit is the
+        # precedent, and the permanent terminal-archive mismatch it left behind is the cost).
+        # The route back is task_reopen, which publishes a successor generation that cites the
+        # archived one; a start is refused and named to it instead of destroying the evidence.
+        if _terminal_generation_archived(path):
+            raise MasterSeriesContractAdmissionError(
+                REOPEN_REQUIRED_STATUS,
+                f"master series contract is terminal ({existing.cleanup!r}) and its enclosure "
+                "generation is archived; reopening this master is task_reopen's operation and a "
+                "start must not replace the archived contract.",
+                MasterSeriesContractAdmissionEvidence(
+                    contract_path=path,
+                    existing_contract=existing,
+                    expected={"kind": "series", "cleanup": "pending", "nextTool": "task_reopen"},
+                    observed={"cleanup": existing.cleanup, "terminalArchive": "archived"},
+                ),
+            )
         return None
     task_edge = _same_master_task_edge(existing, spec, path)
     repository_edge = _same_master_repository_edge(existing, spec)

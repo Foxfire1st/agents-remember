@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
+from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.tasks import SprintExecutionGraph, TaskDocument, write_task_doc
 from agents_remember.worktrees.worktree_contract import (
     ContractTask,
@@ -28,58 +30,189 @@ def _publish_restamp(task_root: Path, document: TaskDocument) -> object:
     return write_task_doc(task_root, document)
 
 
-def _completed_series_contract(workspace: Path) -> WorktreeContract:
+def _external_memory_repo(
+    coordination_root: Path,
+    repo_name: str,
+    branch: str,
+    *,
+    code_commit: str,
+) -> tuple[RepoBranchPlan, Path]:
+    """One external memory repository with a real ledger, and the branch plan addressing it.
+
+    The ledger is not decoration: a series reopen proves its *memory* landing is still an
+    ancestor of the memory source tip, and a repository whose ledger pair was never recorded
+    has no memory landing to prove. The plan's base commit is the ledger's memory commit, so
+    the fixture's contract cells and the repository agree about where the memory side landed.
+
+    ``branch`` is the repository's *own* default branch. It must not be the code repository's
+    default branch when a sprint is in play: a sprint-super surface owns one branch name on both
+    sides, and a memory repository whose default shares it collides with the repository-default
+    surface (``integration-branch authority collision``). The recorded default therefore stays
+    ``main`` even when the series source is a sprint super.
+    """
+
+    memory_repo = coordination_root / "memory-repos" / f"ar-{repo_name}"
+    memory_base = init_repo(memory_repo, "main")
+    # The memory default branch is a *recorded* fact, not a fixed name: the branch authority
+    # reads `agents-remember.defaultBranch` and refuses when it is absent or unresolvable
+    # (`memory_init` is its writer), so a fixture that omits it leaves the authority to fall
+    # back to the remote default and disagree with the branch it actually created. It stays
+    # `main` while the *series source* may be a sprint super: a sprint-super surface owns one
+    # branch name on both sides, and a memory repository whose own default shares that name
+    # collides with it in `_deduplicated`.
+    git(memory_repo, "config", "agents-remember.defaultBranch", "main")
+    if branch != "main":
+        git(memory_repo, "branch", branch, memory_base)
+    for name in ("system", "onboarding"):
+        (memory_repo / name).mkdir(parents=True, exist_ok=True)
+        (memory_repo / name / ".gitkeep").write_text("", encoding="utf-8")
+    write_ledger(
+        memory_repo / "memory.md",
+        create_initial_ledger(repo_name, code_commit, memory_base),
+    )
+    git(memory_repo, "add", "-A")
+    git(memory_repo, "commit", "-m", "Add ledger")
+    memory_base = git(memory_repo, "rev-parse", "HEAD")
+    # One unique content commit per world. Git hashes content, so two fixtures that build the same
+    # tree produce the *same* commit -- and the reopen's reachability proof would then be satisfied
+    # by an object that belongs to a different world's line. A fixture whose memory landing is not
+    # uniquely its own cannot pin a guard about that landing.
+    (memory_repo / "fixture-world.txt").write_text(f"{coordination_root.name}\n", encoding="utf-8")
+    # The ledger pair must name the commit that *becomes* the memory landing this contract
+    # records, and that landing is the branch tip a leaf starts from -- this commit, made after
+    # the seed ledger was written. Recording the pre-commit value instead leaves the reopen's
+    # reachability guard holding a landing no branch contains, which is exactly the refusal it
+    # exists to make: a record that cannot be proven must be repaired, not trusted.
+    write_ledger(
+        memory_repo / "memory.md",
+        create_initial_ledger(repo_name, code_commit, memory_base),
+    )
+    git(memory_repo, "add", "-A")
+    git(memory_repo, "commit", "-m", "Record the ledger pair and this world's identity")
+    memory_base = git(memory_repo, "rev-parse", "HEAD")
+    if branch != "main":
+        git(memory_repo, "branch", "-f", branch, memory_base)
+    return (
+        RepoBranchPlan(
+            repo_path=memory_repo,
+            source_branch=branch,
+            work_branch="ar/260698_demo-series",
+            base_commit=memory_base,
+        ),
+        memory_repo,
+    )
+
+
+def _completed_series_contract(
+    workspace: Path,
+    *,
+    repo_name: str = "repo-a",
+    memory_mode: str = "disabled",
+    sprint: bool = False,
+) -> WorktreeContract:
     """A terminal atomic series: landed, cleaned up, its enclosure root collected.
 
     The fixture reproduces the state a completed master is left in -- the integration branch is
     retired by cleanup, the series contract reads ``cleanup: completed``, the enclosure locator
     is ``terminal-archived`` and its root is gone -- instead of a synthetic variant of it, because
     the defect this fixture exists for is precisely that no tool could leave that state behind.
+
+    ``memory_mode`` ``external`` additionally builds the memory repository and its ledger, which
+    is what a reopened series needs before it can start a child leaf at all: a start resolves the
+    repository's configured memory topology, and a series whose recorded memory landing is absent
+    is refused by the reopen's own reachability precondition.
+
+    ``sprint`` commands this master from a sprint whose ``integrationBranch`` is ``super``, which
+    is what makes the master *landable*: generic integration refuses a standalone atomic series
+    onto a repository-default branch by design, because only the PR landing plane may move that
+    root. The default is the standalone shape the terminal-state case pins.
     """
 
     coordination_root = workspace / "ar-coordination"
-    code_repo = workspace / "repo-a"
+    code_repo = workspace / repo_name
     base = init_repo(code_repo, "main")
+    git(code_repo, "branch", "super", "main")
+    git(code_repo, "update-ref", "refs/remotes/origin/super", base)
     task = ContractTask(
         name="260698_demo-series",
-        repo_name="repo-a",
+        repo_name=repo_name,
         coordination_root=coordination_root,
         workflow_kind="light-task",
-        memory_mode="disabled",
+        memory_mode=memory_mode,
+    )
+    memory_source = "super" if sprint else "main"
+    memory_plan = (
+        _external_memory_repo(
+            coordination_root,
+            repo_name,
+            memory_source,
+            code_commit=base,
+        )[0]
+        if memory_mode == "external"
+        else None
     )
     contract = default_series_contract(
         task,
         code=RepoBranchPlan(
             repo_path=code_repo,
-            source_branch="main",
+            source_branch="super" if sprint else "main",
             work_branch="ar/260698_demo-series",
             base_commit=base,
         ),
+        memory=memory_plan,
     )
-    write_task_doc(
-        contract.task_root,
-        TaskDocument.model_validate(
-            {
-                "id": "260698_DEMO-SERIES",
-                "slug": "task",
-                "title": "Demo Series",
-                "kind": "master",
-                "status": "Completed",
-                "repo": "repo-a",
-                "createdAt": "2026-07-01T09:00",
-                "executionNature": "atomic",
-                "subTasks": [],
-            }
-        ),
-    )
+    memory_commit = memory_plan.base_commit if memory_plan is not None else ""
+    master_fields: dict[str, object] = {
+        "id": "260698_DEMO-SERIES",
+        "slug": "task",
+        "title": "Demo Series",
+        "kind": "master",
+        "status": "Completed",
+        "repo": repo_name,
+        "createdAt": "2026-07-01T09:00",
+        "executionNature": "atomic",
+        "subTasks": [],
+    }
+    if sprint:
+        master_fields["master"] = "../260698_demo-sprint/task.md"
+        write_task_doc(
+            contract.task_root.parent / "260698_demo-sprint",
+            TaskDocument.model_validate(
+                {
+                    "id": "260698_DEMO-SPRINT",
+                    "slug": "task",
+                    "title": "Demo Sprint",
+                    "kind": "master",
+                    "status": "inProgress",
+                    "repo": repo_name,
+                    "createdAt": "2026-07-01T08:00",
+                    "orchestrates": [contract.task_root.name],
+                    "integrationBranch": "super",
+                    "executionGraph": SprintExecutionGraph.model_validate(
+                        {
+                            "nodes": [
+                                {
+                                    "repository": repo_name,
+                                    "path": f"{contract.task_root.name}/task.json",
+                                }
+                            ],
+                            "edges": [],
+                        }
+                    ),
+                }
+            ),
+        )
+    write_task_doc(contract.task_root, TaskDocument.model_validate(master_fields))
     contract = replace(
         contract,
         human_review_status="approved",
         approved_for_commit=True,
         closeout_status="completed",
         code_commit=base,
+        memory_content_commit=memory_commit,
         integration_status="completed",
         integrated_code_commit=base,
+        integrated_memory_content_commit=memory_commit,
         cleanup="completed",
     )
     write_contract(contract.contract_path, contract)
@@ -159,14 +292,31 @@ def _completed_leaf_contract(workspace: Path) -> WorktreeContract:
 
 
 def _runtime_config(root: Path, contract: WorktreeContract) -> McpRuntimeConfig:
-    repository = RepositoryScope(repo_id=contract.repo_name, path=contract.code_repo_path)
-    return McpRuntimeConfig(
-        config_path=contract.coordination_root / "mcp.settings.json",
-        coordination_root=contract.coordination_root,
-        workspace_root=root,
-        transcript_root=contract.coordination_root / "logs",
-        repositories={contract.repo_name: repository},
-    )
+    """The runtime config a real operation loads, written to disk rather than only in memory.
+
+    The closeout and integration admission paths reload the authority settings file from the
+    coordination root, so a config object whose ``config_path`` does not exist refuses before
+    any work happens. The repository is declared at the same absolute path the contract carries,
+    which is what the configured-repository authority compares identity against.
+    """
+
+    config_path = root / "mcp.settings.json"
+    if not config_path.exists():
+        config_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "coordinationRoot": contract.coordination_root.as_posix(),
+                    "workspaceRoot": root.as_posix(),
+                    "directExecutionEnabled": False,
+                    "repositories": {
+                        contract.repo_name: {"path": contract.code_repo_path.as_posix()}
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+    return load_config(config_path)
 
 
 def _external_memory_dirs(coordination_root: Path) -> None:

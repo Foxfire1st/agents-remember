@@ -263,6 +263,7 @@ integration = [
   "mcp/tests/test_task_document_master.py",
   "mcp/tests/test_task_execution_topology.py",
   "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_task_reopen_series_extension.py",
   "mcp/tests/test_task_sprint_linkage.py",
   "mcp/tests/test_terminal.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
