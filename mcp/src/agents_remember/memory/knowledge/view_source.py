@@ -323,7 +323,11 @@ class StoreViewReader:
                 "rationale": _text(row[4]),
                 "path": _text(row[6]),
                 "source_identity": _text(row[7]),
-                "locator": row[8],
+                # Decoded, like every other JSON-valued payload value in this module: the column is a
+                # typed JSON column, and handing a consumer its stored text is what makes a raw string
+                # classify as neither a symbol nor a mapping, so a symbol locator would fall through
+                # to the file branch and be published as a path resolution it never was.
+                "locator": None if row[8] is None else decode_typed_column(str(row[8])),
             },
         )
 

@@ -136,6 +136,11 @@ whether the developer is effectively steering the work already in hand.
   onboarding-coherency · deep-research-report · orchestration-task (the strategist's sprint plan).
   Spawning seats compile briefs FROM these; sub-agents fan out and fill them, so analysis survives
   compaction.
+- `templates/curator-handoff-list.md` — the **producer's output shape** for the requirement-shaped
+  items the builder, the reviewer and the orchestrator hand to the curator: one entry per item, with
+  its statement, kind, place, evidence and disposition. Producers emit it as data; the curator fills
+  the curator-side fields. It is a hand-off artifact rather than a brief-schema, which is why it is
+  named here on its own.
 - `criteria/…` — the reviewer criteria catalogs (code-seam · doctrine · onboarding-memory ·
   report-verification · plan-review), the review test bench the three-party loop binds; maintained
   through the promotion ratchet, never made up on the spot.

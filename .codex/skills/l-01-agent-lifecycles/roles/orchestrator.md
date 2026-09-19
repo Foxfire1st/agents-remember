@@ -124,6 +124,11 @@ the architect through the inbox, and this spawned backend seat never wears anoth
   branch — because developer review is visible-behavior-first and code review second, and it **must carry demo
   notes: "what changed visibly"**, per master, with the user-visible behavior to walk and how to reach it.
 - **The adopted orchestration task**, before any orchestrated run, with its adoption decision-log entry.
+- **The producers' hand-off list, handed to the curator unparaphrased.** The builder's and the
+  reviewer's requirement-shaped items, in the shape `../templates/curator-handoff-list.md` owns, travel
+  to the curator **as that same list**: you pass it through, you do not re-derive its targets, and you
+  do not summarise it into a brief — **the list is the interface**, and a re-told list is a second
+  account of the same entries that can only be compared against nothing.
 - **Durable notes and reports current as you work**, with decision-needing questions in the task doc's
   `openQuestions` and analysis in `notes/`; a decision-log entry for every spirit-test act-alone, leaf move and
   renumber map (both masters where applicable), reopen, conflict-mode choice, and integration edge; and the

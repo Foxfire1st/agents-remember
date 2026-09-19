@@ -68,6 +68,13 @@ below, then stop.
 - notes/: `<series-notes-path>` — the builder turn report
   (`notes/reports/<leaf-id>-worker-report.md`), the optional route-review verdict, and
   any other task-local notes naming a factual current-state clarification.
+- Producers' curator hand-off list: `<path or fenced-block location of the builder's list, plus the
+  reviewer's own list when review was requested>` — the requirement-shaped items in the shape of
+  `../templates/curator-handoff-list.md`, handed over unparaphrased as data. Producer fields
+  (`id`, `statement`, `kind`, `target`, `found_at`, `disposition`, `disposition_source`, `evidence`,
+  `authority`) arrive filled; the curator fields (`resolution`, `validated_at`, `record_action`,
+  `supersedes`) are `null` and are yours to fill. If the list and a report prose summary disagree, the
+  list governs — attach the list itself, never a re-telling of it.
 
 ## Three-way intent inputs
 

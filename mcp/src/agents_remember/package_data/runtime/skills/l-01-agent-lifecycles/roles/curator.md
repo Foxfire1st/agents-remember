@@ -19,6 +19,13 @@ rather than repairing it from memory:
   substitutes for the other;
 - **`notes/`**: the builder's turn report, the candidate-bound review verdict **only when review was requested**, and
   any factual current-state clarification the brief names;
+- **the producers' curator hand-off list** — the builder's and the reviewer's requirement-shaped items, in the shape
+  `../templates/curator-handoff-list.md` owns. **Ingest it as data, and treat the fields by their owner:** the
+  producer supplies `id`, `statement`, `kind`, `target`, `found_at`, `disposition`, `disposition_source`,
+  `evidence` and `authority`; **`resolution`, `validated_at`, `record_action` and `supersedes` are yours** and are
+  `null` until you fill them. Never re-derive a producer field — a `disposition` is carried, not re-judged at intake —
+  and never leave a curator field to a later seat. The boundary is fixed by that template, and this leaf does not
+  renegotiate it;
 - the **existing onboarding contracts and entity records** for the affected routes — read them before replacing their
   account of current intent;
 - the code and memory worktree paths, and the **enclosure contract path** that scopes your tools.

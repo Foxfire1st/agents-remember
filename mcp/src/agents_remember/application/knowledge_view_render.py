@@ -47,6 +47,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from pydantic import TypeAdapter
+
 from agents_remember.models.knowledge.classification import (
     AUTHORED_CLASS,
     REGISTERED_ROLE_ORDER,
@@ -56,6 +58,7 @@ from agents_remember.models.knowledge.classification import (
     authored_provenance,
     mechanical_provenance,
 )
+from agents_remember.models.knowledge.source import SourceLocator
 from agents_remember.models.knowledge.view import (
     CurationQueueRow,
     CuratorDisposition,
@@ -189,6 +192,7 @@ class Candidate:
     essential_conditions: tuple[str, ...] = ()
     conditions_omitted: bool = False
     path: str | None = None
+    locator: SourceLocator | None = None
     lifecycle: str | None = None
     change_locus: str = "neither"
     assessment_status: str = "missing"
@@ -480,6 +484,7 @@ def _invariant_candidates(
                 fact_kind="realization",
                 statement=_string(row.payload.get("rationale")),
                 path=_string(row.payload.get("path")),
+                locator=_locator(row.payload.get("locator")),
             )
         )
     return tuple(candidates)
@@ -506,6 +511,7 @@ def _source_context_candidates(
                 fact_kind="registered_realization",
                 statement=_string(row.payload.get("rationale")),
                 path=_string(row.payload.get("path")),
+                locator=_locator(row.payload.get("locator")),
             )
         )
     if request.invariant_revision_id:
@@ -657,6 +663,20 @@ def _string(value: object) -> str | None:
     return None if value is None else str(value)
 
 
+# One decoder for the recorded locator union, parsed by the union's own discriminator rather than by
+# a branch here: a fourth locator kind is then admitted by the model instead of being silently read
+# as one of the three this module happens to know. Nothing is derived and nothing is re-anchored --
+# the recorded locator is reported as recorded, and one that does not validate raises rather than
+# becoming an extent this code invented.
+_LOCATOR_ADAPTER: TypeAdapter[SourceLocator] = TypeAdapter(SourceLocator)
+
+
+def _locator(value: object) -> SourceLocator | None:
+    """One recorded locator as the typed union, or ``None`` when the row carries none."""
+
+    return None if value is None else _LOCATOR_ADAPTER.validate_python(value)
+
+
 def _conditions(value: object) -> tuple[str, ...]:
     if isinstance(value, (list, tuple)):
         return tuple(str(item) for item in value)
@@ -717,6 +737,7 @@ def render_source_context(
                 statement=candidate.statement,
                 role=candidate.role,  # type: ignore[arg-type]
                 path=candidate.path,
+                locator=candidate.locator,
                 assessment_state="assessed" if candidate.assessment_ids else "not_applicable",
                 order=_position(page.start + index, provenance, request.ordering_input),
                 provenance=provenance,

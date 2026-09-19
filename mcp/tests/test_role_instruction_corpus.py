@@ -601,6 +601,45 @@ def unresolved_references(lifecycle_root: Path) -> list[str]:
     return unresolved
 
 
+def test_the_curator_hand_off_list_contract_has_one_home_its_consequences_declared() -> None:
+    """The shape the producers emit for the curator exists exactly once, and its seats name it.
+
+    The rule this protects is the hand-off contract, not a file name. A requirement-shaped item the
+    builder or the reviewer produces must reach the curator as data in one agreed shape; when the
+    contract has no home, or a seat that emits or consumes the list does not name it, each leaf
+    re-invents the shape and the curator ingests a different document every time. The consequences
+    asserted here are the four that make it a contract rather than formatting -- the field ownership
+    split, the JSON shape, the co-resolution rule and the no-paraphrase rule -- plus the registry
+    wiring, because an unregistered contract is one no seat is routed to.
+    """
+
+    relative = "templates/curator-handoff-list.md"
+    contract = LIFECYCLE_ROOT / relative
+    assert contract.is_file(), f"the curator hand-off list contract is missing: {relative}"
+
+    text = contract.read_text(encoding="utf-8")
+    for section in (
+        "## The entry",
+        "## Shape",
+        "## Rule 1 — co-resolution",
+        "## Rule 2 — no paraphrase",
+    ):
+        assert section in text, f"{relative} no longer carries '{section}'"
+    assert "target: []" in text, f"{relative} no longer encodes a ruling that applies nowhere"
+    assert unresolved_references(LIFECYCLE_ROOT) == [], "the contract cites a path that is gone"
+
+    # Every seat on either side of the interface declares the contract it hands over or ingests.
+    roles = _manifest()["roles"]
+    for role in ("worker", "reviewer", "orchestrator", "curator"):
+        assert "curator-handoff-list.md" in roles[role]["templates"], (
+            f"role '{role}' emits or consumes the curator hand-off list but does not declare it"
+        )
+        role_text = (LIFECYCLE_ROOT / roles[role]["file"]).read_text(encoding="utf-8")
+        assert "templates/curator-handoff-list.md" in role_text, (
+            f"{roles[role]['file']} does not name the hand-off list contract it depends on"
+        )
+
+
 def test_link_check_reports_a_repo_relative_anchor_pointed_at_nothing(tmp_path: Path) -> None:
     """The link check catches a repository-relative anchor whose file does not exist.
 

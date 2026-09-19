@@ -85,6 +85,14 @@ full first review.
 - **The verdict artifact**, at the seam's path under `notes/reports/`. **Its shape authority is
   `../templates/verdict.md`** — follow the variant that matches your seam, and say what governs when the two disagree.
   It carries an explicit **pass / block** recommendation and the durable-evidence checklist even when that is `N/A`.
+- **Your own curator hand-off list** — your verdicts and findings emitted in the shape
+  `../templates/curator-handoff-list.md` owns, as data rather than as verdict prose for the curator to
+  re-read. Each entry is one finding or one requirement adjudication, with the source it came from and
+  the place you found it at; a finding you minted carries its own stable ID, and the list is what the
+  curator ingests. **Emit it in the same list shape the worker emits**, because the curator consumes one
+  contract: name where the thing lives rather than where you looked — the path and the construct inside
+  it come from one resolution act — and carry your own statement and evidence verbatim rather than
+  re-telling them for the curator, whose whole job is to compare your list against the code.
 - **The durable sub-agent route reports** backing your findings (`../templates/impact-analysis.md`,
   `../templates/onboarding-coherency.md`), one per material route: its changed files plus surrounding owners, tests and
   side effects. A successor reuses the sealed reports rather than re-censusing routes.

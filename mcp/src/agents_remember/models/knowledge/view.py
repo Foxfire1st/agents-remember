@@ -55,6 +55,7 @@ from agents_remember.models.knowledge.classification import (
 )
 from agents_remember.models.knowledge.graph import RealizationRole
 from agents_remember.models.knowledge.read import AnchorResolutionState, KnowledgeReadSnapshot
+from agents_remember.models.knowledge.source import SourceLocator
 
 __all__ = [
     "COUNTED",
@@ -757,6 +758,11 @@ class SourceContextRow(KnowledgeModel):
     statement: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
     role: RealizationRole | None = None
     path: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+    # The recorded extent, carried beside the path it belongs to: a location rendered as a bare path
+    # is a fact about a file, and the claim the author actually recorded was about a construct inside
+    # it. It is reported exactly as recorded -- a line range is a rendering of the recorded symbol and
+    # never the record's identity, so nothing here re-derives or re-anchors one.
+    locator: SourceLocator | None = None
     anchor_state: AnchorResolutionState | None = None
     # "expose claim provenance and missing assessments": a fact whose assessment is absent says so
     # here, and the absence is never filled with a favourable default.

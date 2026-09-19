@@ -233,7 +233,8 @@
         "master-handover-packet.md",
         "conversation-handover-packet.md",
         "impact-analysis.md",
-        "onboarding-coherency.md"
+        "onboarding-coherency.md",
+        "curator-handoff-list.md"
       ],
       "criteria": [
         "plan-review.md"
@@ -369,7 +370,8 @@
       ],
       "templates": [
         "worker-brief.md",
-        "turn-report.md"
+        "turn-report.md",
+        "curator-handoff-list.md"
       ],
       "criteria": [
         "report-verification.md"
@@ -398,7 +400,8 @@
         "recovery"
       ],
       "templates": [
-        "curator-brief.md"
+        "curator-brief.md",
+        "curator-handoff-list.md"
       ],
       "criteria": [
         "onboarding-memory.md"
@@ -430,7 +433,8 @@
       "templates": [
         "verdict.md",
         "impact-analysis.md",
-        "onboarding-coherency.md"
+        "onboarding-coherency.md",
+        "curator-handoff-list.md"
       ],
       "criteria": [
         "code-seam.md",
