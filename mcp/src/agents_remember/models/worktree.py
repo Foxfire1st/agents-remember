@@ -185,6 +185,28 @@ class AtomicSeriesActivationFact(StrictResponseModel):
     detail: str | None = Field(default=None, max_length=8192)
 
 
+class AtomicSeriesActivationRelease(StrictResponseModel):
+    """What one terminal series operation did with the exact activation selection.
+
+    ``with_terminal_atomic_series_release`` writes this on the SUCCESS path of a series closeout,
+    integration, cleanup, abandonment or finalize, so it is part of those responses' contracts
+    rather than an unchecked extra: it was declared nowhere in ``mcp/src`` for as long as it was
+    written, and the strict response model that must carry it therefore rejected the payload of a
+    *successful* terminal operation (D-47). The five states are the writer's own closed vocabulary,
+    so a new one has to be added in both places rather than only where it is emitted.
+    """
+
+    state: Literal[
+        "vacant",
+        "already-vacant",
+        "different-selection-preserved",
+        "unreadable-preserved",
+        "release-failed",
+    ]
+    errorType: str | None = Field(default=None, max_length=256)
+    detail: str | None = Field(default=None, max_length=8192)
+
+
 class AtomicSeriesAdmissionActivation(StrictResponseModel):
     """Activation snapshot nested in an admission refusal."""
 

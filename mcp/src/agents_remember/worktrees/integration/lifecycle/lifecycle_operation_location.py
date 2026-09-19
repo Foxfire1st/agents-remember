@@ -309,17 +309,27 @@ def _prepare_start_generation(
     *,
     contract_text: str,
     predecessor_terminal: TerminalEnclosurePredecessor | None = None,
+    audit_intent: str | None = None,
 ) -> EnclosurePublicationArtifacts:
+    """Build one generation's artifacts, with the producer's own audit intent when it has one.
+
+    ``audit_intent`` is the manifest's durable statement of what published this generation, so a
+    producer whose transition is not a start (``task_reopen`` publishing a terminal series'
+    successor) states its own, and the start path keeps the two sentences it always wrote.
+    """
+
     successor = predecessor_terminal is not None
+    if audit_intent is None:
+        audit_intent = (
+            "worktree_start accepted this exact successor enclosure generation"
+            if successor
+            else "worktree_start accepted this exact enclosure binding"
+        )
     return prepare_enclosure_publication(
         contract,
         contract_text=contract_text,
         publication_kind="successor-enclosure" if successor else "new-enclosure",
-        audit_intent=(
-            "worktree_start accepted this exact successor enclosure generation"
-            if successor
-            else "worktree_start accepted this exact enclosure binding"
-        ),
+        audit_intent=audit_intent,
         predecessor_terminal=predecessor_terminal,
     )
 
@@ -343,6 +353,7 @@ def reserve_new_lifecycle_operation_location(
     *,
     contract_text: str,
     predecessor_contract: WorktreeContract | None = None,
+    audit_intent: str | None = None,
 ) -> LifecycleEnclosureLocator:
     """Reserve the exact initial or successor address before any long start work.
 
@@ -401,6 +412,7 @@ def reserve_new_lifecycle_operation_location(
             contract,
             contract_text=contract_text,
             predecessor_terminal=predecessor,
+            audit_intent=audit_intent,
         )
         if current is not None and current.state == "terminal-archived":
             if (
@@ -435,6 +447,7 @@ def resume_new_lifecycle_operation_location(
     contract: WorktreeContract,
     *,
     contract_text: str,
+    audit_intent: str | None = None,
 ) -> LifecycleOperationLocation:
     """Resume only the generation already recorded by the canonical reservation."""
 
@@ -472,6 +485,7 @@ def resume_new_lifecycle_operation_location(
         contract,
         contract_text=contract_text,
         predecessor_terminal=predecessor,
+        audit_intent=audit_intent,
     )
     return publish_enclosure_location(artifacts, contract_mode="publish")
 

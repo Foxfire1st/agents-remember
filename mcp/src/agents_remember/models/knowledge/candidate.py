@@ -589,13 +589,16 @@ class AuthorFamilyExplanationContext(KnowledgeModel):
     context: FamilyExplanationContextDraft
 
 
-# The closed command union. The twelve shipped authored commands, the six facet commands and the four
-# composition commands keep their exact discriminators and shapes: the composition generation adds
+# The closed command union, and the ONE declaration of its membership: this annotation is the
+# count, so no prose here (or anywhere else in ``mcp/src``) restates it -- the docstring in
+# ``memory/knowledge/candidate.py`` and ``_refuse_unreachable``'s both said "twelve" while this
+# union carried thirty-one members (D-40). The generations below keep their exact discriminators
+# and shapes: the shipped authored commands, the facet commands, the composition commands --
 # declare-a-policy-version, author-an-edge, record-a-revision's-owning-route and author-a-context-
-# revision, the supporting-record generation adds two more -- record an evidence claim and record a
-# verification observation -- and the authored-effect generation adds four: record an effect claim,
-# record a preservation claim, record an open question, and record a change set together with the
-# succession edge it declares. There is still no free-form member and still no member that could
+# revision -- the supporting-record commands (record an evidence claim, record a verification
+# observation) and the authored-effect commands (record an effect claim, record a preservation
+# claim, record an open question, and record a change set together with the succession edge it
+# declares). There is still no free-form member and still no member that could
 # promote, approve, judge or execute a statement the caller wrote, and deliberately **no** removal
 # member: a composition edge is immutable in the same sense a revision row is, so a correction is a
 # new edge with its own identity rather than a deletion of an earlier dataset's recorded relationship.

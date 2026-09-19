@@ -16,8 +16,11 @@ Everything else in the substrate mutates through here. The operation is delibera
 
 Two things this operation deliberately does *not* offer. There is no retry: a caller that loses the
 response rereads the candidate and reconciles its own explicit proposal rather than having the
-operation replay it. And there is no arbitrary SQL: the twelve commands in the union are the entire
-reach, and a caller cannot construct a thirteenth.
+operation replay it. And there is no arbitrary SQL: the union's own membership is the entire reach,
+and a caller cannot construct a member outside it. That membership has exactly one declaration --
+``ProposedCommand`` in :mod:`agents_remember.models.knowledge.candidate` -- so no count of it is
+retyped here: a retyped count is a second declaration, and this one had already rotted to "twelve"
+while the union carried thirty-one members (D-40).
 """
 
 from __future__ import annotations

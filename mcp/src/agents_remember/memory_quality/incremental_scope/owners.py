@@ -232,6 +232,7 @@ def extract_citation_edges(
         code_root=Path(candidate.code.root),
         memory_root=Path(candidate.memory.root),
         candidate_tree=candidate.code.candidateTree,
+        memory_candidate_tree=candidate.memory.candidateTree,
     )
     pairs: set[tuple[str, str]] = set()
     for document in sorted(onboarding_root.rglob("*.md")):
@@ -359,6 +360,7 @@ def _require_index_matches_candidate(
         code_root=Path(candidate.code.root),
         memory_root=Path(candidate.memory.root),
         candidate_tree=candidate.code.candidateTree,
+        memory_candidate_tree=candidate.memory.candidateTree,
     )
     try:
         current = {relative: absolute for absolute, relative in source_index.code_files(trees)}

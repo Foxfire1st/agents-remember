@@ -34,7 +34,14 @@ from agents_remember.memory.knowledge.refusals import RefusalFacts, refusal
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.result import KnowledgeOperation, KnowledgeRefusal
 
-ROUTE_OPERATION: KnowledgeOperation = "create_invariant_revision"
+# This module's own write operations, declared once each and before their first use: the two
+# rules below are shared by more than one caller, so each one is told the operation it is judging
+# rather than guessing one. The constant this replaced read
+# ``ROUTE_OPERATION = "create_invariant_revision"``, so an ``author_route`` refusal was attributed
+# to a write the caller never invoked and a caller that reads a refusal's operation to decide what
+# to do next was sent to revision creation (D-44).
+AUTHOR_ROUTE_OPERATION: KnowledgeOperation = "author_route"
+GOVERNING_ROUTE_OPERATION: KnowledgeOperation = "set_governing_route"
 
 # A Windows drive-relative or drive-absolute spelling, and a UNC or backslash form. All three are
 # machine locations rather than repository-relative scopes, so they are refused by name instead of
@@ -74,27 +81,32 @@ _CONFINEMENT_RULES: tuple[tuple[str, object], ...] = (
 )
 
 
-def normalize_route_path(path: object) -> str | KnowledgeRefusal:
+def normalize_route_path(path: object, *, operation: KnowledgeOperation) -> str | KnowledgeRefusal:
     """Return the one admitted spelling of one route path, or the refusal that replaced it.
 
     Normalisation is not repair: ``posixpath.normpath`` is used as a *comparison* against a path
     that is already confined, and a path that needed normalising to become confined is refused
     rather than silently rewritten. Rewriting is how two spellings become one route while a caller
     believes it authored two.
+
+    ``operation`` names the write this confinement rule is judging, so the refusal a caller
+    branches on names the call it made: this rule refuses on behalf of ``author_route`` and of any
+    other operation that admits a path, and a single hard-coded operation here told every one of
+    them about revision creation (D-44).
     """
 
     if not isinstance(path, str):
-        return _path_refusal("a route path must be a string", repr(path))
+        return _path_refusal("a route path must be a string", repr(path), operation)
     for detail, breached in _CONFINEMENT_RULES:
         if breached(path):  # type: ignore[operator]
-            return _path_refusal(detail, path)
+            return _path_refusal(detail, path, operation)
     return path
 
 
 def require_acyclic_routes(
     connection: apsw.Connection,
     repository_id: str,
-    operation: KnowledgeOperation = ROUTE_OPERATION,
+    operation: KnowledgeOperation,
 ) -> KnowledgeRefusal | None:
     """Return the refusal for a route hierarchy that reaches itself, or ``None``.
 
@@ -111,12 +123,12 @@ def require_acyclic_routes(
     catches the longer one. It runs **inside the caller's transaction**, after the insertions and
     before the commit, so a cycle refuses the whole batch rather than leaving a partial hierarchy.
 
-    ``operation`` names the operation the refusal is attributed to, and it defaults to the
-    authoring operation this rule was written for. A second production path that replays
-    ``route.parent_route_id`` changes -- the merge, which applies a side's changeset and must
-    refuse a candidate whose hierarchy reaches itself before that candidate exists -- passes its
-    own identity, so the refusal a caller branches on names the call it made while the rule itself
-    stays the one walk in this module.
+    ``operation`` names the operation the refusal is attributed to, and it is REQUIRED rather than
+    defaulted: this rule is shared by the authoring write and by a second production path that
+    replays ``route.parent_route_id`` changes -- the merge, which applies a side's changeset and
+    must refuse a candidate whose hierarchy reaches itself before that candidate exists -- so a
+    default would be a guess about which call produced the refusal, and the constant this module
+    used to default to named a third operation entirely (D-44).
     """
 
     rows = connection.execute(
@@ -155,12 +167,12 @@ def require_acyclic_routes(
     )
 
 
-def _path_refusal(detail: str, observed: str) -> KnowledgeRefusal:
-    """Refuse a route path that is not in the one admitted form."""
+def _path_refusal(detail: str, observed: str, operation: KnowledgeOperation) -> KnowledgeRefusal:
+    """Refuse a route path that is not in the one admitted form, on the caller's operation."""
 
     return refusal(
         "invalid_reference",
-        ROUTE_OPERATION,
+        operation,
         f"the route path is not a confined repository-relative scope: {detail}",
         facts=RefusalFacts(
             table="route", expected="a confined repository-relative path", observed=observed
@@ -198,9 +210,6 @@ class GoverningRouteDraft:
     governed_id: str
     route_id: str
 
-
-AUTHOR_ROUTE_OPERATION: KnowledgeOperation = "author_route"
-GOVERNING_ROUTE_OPERATION: KnowledgeOperation = "set_governing_route"
 
 # One governed generation-1 entity maps to exactly one join table, and that table's
 # primary key is the governed entity's own key. The mapping is data rather than a branch,
@@ -250,7 +259,7 @@ def route_for_path(connection: apsw.Connection, repository_id: str, path: str) -
     would make a caller believe it had written one it had not.
     """
 
-    admitted = normalize_route_path(path)
+    admitted = normalize_route_path(path, operation=AUTHOR_ROUTE_OPERATION)
     if isinstance(admitted, KnowledgeRefusal):
         return None
     return _route_for_path(connection, repository_id, admitted)
@@ -292,7 +301,7 @@ def author_route(
     partial hierarchy stored.
     """
 
-    admitted = normalize_route_path(draft.path)
+    admitted = normalize_route_path(draft.path, operation=AUTHOR_ROUTE_OPERATION)
     if isinstance(admitted, KnowledgeRefusal):
         return admitted
     existing = _route_for_path(connection, repository_id, admitted)
@@ -324,7 +333,7 @@ def author_route(
             encode_authorship(authorship),
         ),
     )
-    cycle = require_acyclic_routes(connection, repository_id)
+    cycle = require_acyclic_routes(connection, repository_id, AUTHOR_ROUTE_OPERATION)
     if cycle is not None:
         return cycle
     return draft.route_id
@@ -536,7 +545,9 @@ def require_confined_resolution(root: Path, path: str) -> KnowledgeRefusal | Non
         resolved_root = root.resolve(strict=True)
         resolved = candidate.resolve(strict=False)
     except OSError as error:
-        return _path_refusal(f"the route path could not be resolved: {error}", path)
+        return _path_refusal(
+            f"the route path could not be resolved: {error}", path, AUTHOR_ROUTE_OPERATION
+        )
     if resolved.is_relative_to(resolved_root):
         return None
     return refusal(

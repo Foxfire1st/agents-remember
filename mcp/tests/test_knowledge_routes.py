@@ -90,27 +90,46 @@ def test_a_path_outside_the_one_admitted_form_is_refused(admitted, path: str) ->
     authored = _author(store, authorship, path)
     assert not isinstance(authored, str)
     assert authored.code == "invalid_reference"
+    # D-44: the refusal names the write the caller made. It used to name
+    # ``create_invariant_revision``, so a caller that reads a refusal's operation to decide what
+    # to do next was sent to a different write with different preconditions.
+    assert authored.operation == routes.AUTHOR_ROUTE_OPERATION
     assert list(store.connection.execute("SELECT 1 FROM route")) == []
 
 
-def test_a_child_names_an_authored_parent_and_the_hierarchy_stays_acyclic(admitted) -> None:
+def test_a_childs_parent_must_be_an_authored_route(admitted) -> None:
+    """One rule, both outcomes: the accepted parent joins the hierarchy, a dangling one is refused.
+
+    These were two cases and are one -- each is unreadable without the other, because "the parent
+    must be authored" is exactly the pair (an authored parent is accepted / an unauthored one is
+    refused), and the consolidation kept the unit lane inside its declared 2300 cases on the line
+    this leaf certifies.
+    """
+
     store, authorship = admitted
     parent = _author(store, authorship, "src")
     assert isinstance(parent, str)
     child = _author(store, authorship, "src/knowledge", parent=parent)
     assert isinstance(child, str)
-    assert routes.require_acyclic_routes(store.connection, store.repository_id) is None
-
-
-def test_a_child_naming_an_unauthored_parent_is_refused(admitted) -> None:
-    store, authorship = admitted
-    refused = _author(store, authorship, "src/knowledge", parent=str(uuid4()))
+    assert (
+        routes.require_acyclic_routes(
+            store.connection, store.repository_id, routes.AUTHOR_ROUTE_OPERATION
+        )
+        is None
+    )
+    refused = _author(store, authorship, "src/other", parent=str(uuid4()))
     assert not isinstance(refused, str)
     assert refused.code == "missing_expected_row"
 
 
 def test_a_hierarchy_that_reaches_itself_is_refused(admitted) -> None:
-    """A cycle is refused however it arrives, not only through the authoring path."""
+    """A cycle is refused however it arrives, and the refusal names the call that found it.
+
+    D-44's discriminator is the second half: the walk is driven here through ``author_route``'s
+    OWN call, so the refusal a caller receives is the one the production path produces. It used to
+    name ``create_invariant_revision`` -- an operation the caller never invoked -- because the rule
+    defaulted to a constant that belonged to a different write.
+    """
 
     store, authorship = admitted
     first = _author(store, authorship, "src")
@@ -119,9 +138,18 @@ def test_a_hierarchy_that_reaches_itself_is_refused(admitted) -> None:
     store.connection.execute(
         "UPDATE route SET parent_route_id = ? WHERE route_id = ?", (second, first)
     )
-    refused = routes.require_acyclic_routes(store.connection, store.repository_id)
+    refused = routes.require_acyclic_routes(
+        store.connection, store.repository_id, routes.AUTHOR_ROUTE_OPERATION
+    )
     assert refused is not None
     assert refused.code == "lineage_cycle"
+    assert refused.operation == routes.AUTHOR_ROUTE_OPERATION
+    # The production path: authoring one more route runs the same walk and reports the write it
+    # was performing, which is the fact a caller branches on.
+    authored = _author(store, authorship, "src/late")
+    assert not isinstance(authored, str)
+    assert authored.code == "lineage_cycle"
+    assert authored.operation == routes.AUTHOR_ROUTE_OPERATION
 
 
 def test_a_governed_row_names_at_most_one_governing_route(admitted) -> None:
@@ -257,7 +285,9 @@ def test_a_path_that_escapes_through_a_symlink_is_refused(admitted, tmp_path: Pa
     (outside / "secret.py").write_text("x = 1\n")
     (root / "src" / "link.py").symlink_to(outside / "secret.py")
     # The lexical rules admit this spelling...
-    assert isinstance(routes.normalize_route_path("src/link.py"), str)
+    assert isinstance(
+        routes.normalize_route_path("src/link.py", operation=routes.AUTHOR_ROUTE_OPERATION), str
+    )
     # ...and the resolution check refuses it, because it lands outside the repository.
     refused = routes.require_confined_resolution(root, "src/link.py")
     assert refused is not None

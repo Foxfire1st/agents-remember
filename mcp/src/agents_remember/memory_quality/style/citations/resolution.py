@@ -44,17 +44,25 @@ class Trees:
     that wants to add its own excludes for one operation passes ``caller_excludes``; the
     settings-derived register and the caps are then read from the memory layer's own
     ``system/settings.json``.
+
+    Each root may be bound to the exact Git tree it stood on for the operation
+    (``candidate_tree`` for ``code_root``, ``memory_candidate_tree`` for ``memory_root``), and
+    :meth:`resolve` is the one place both bindings are read: when either is bound, an answer comes
+    from a bound tree or not at all, so "resolved" means "a member of a tree this resolver was
+    given" rather than "a file that happens to exist under a root" (D-43).
     """
 
     code_root: Path
     memory_root: Path
     cache_authority: ManagedCacheAuthority | None = None
     candidate_tree: str | None = None
+    memory_candidate_tree: str | None = None
     caller_excludes: tuple[str, ...] = ()
     _exclusions: ExclusionRegister | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         candidate_tree(self.candidate_tree)
+        candidate_tree(self.memory_candidate_tree)
 
     @property
     def exclusions(self) -> ExclusionRegister:
@@ -82,22 +90,47 @@ class Trees:
             return None
         return GitSourceCandidate(self.code_root.resolve(), self.candidate_tree)
 
+    @cached_property
+    def memory_source_candidate(self) -> GitSourceCandidate | None:
+        if self.memory_candidate_tree is None:
+            return None
+        return GitSourceCandidate(self.memory_root.resolve(), self.memory_candidate_tree)
+
     def resolve(self, path: str) -> Path | None:
-        if self.source_candidate is not None:
-            candidate = self.source_candidate.resolve(path)
+        """The file this source names, as a member of a bound tree whenever one is bound.
+
+        Two answers are admissible, and which one is available is a property of the binding rather
+        than of the filesystem. With no tree bound at all, the two roots are searched as trees of
+        convenience, which is what an unmanaged operation has: it never recorded a candidate, so
+        there is no tree for an answer to disagree with. With a tree bound on either side, an
+        answer must be a member of the tree bound to the root that carries it, and a path neither
+        bound tree contains resolves to nothing.
+
+        That last half is the repair. The old fallback answered from ``memory_root / path`` with
+        ``is_file()`` alone, so a caller that bound the code tree to a candidate could receive a
+        MEMORY path -- no member of the tree it bound -- and read an identity out of the wrong
+        tree. ``system/tools.md`` is the measured case: it is gitignored in the code repository
+        (.gitignore), so it is no member of the code tree, while the file exists beside a real
+        ``system/`` directory (D-43).
+        """
+
+        bound = self.source_candidate is not None or self.memory_source_candidate is not None
+        for root, candidate in (
+            (self.code_root, self.source_candidate),
+            (self.memory_root, self.memory_source_candidate),
+        ):
             if candidate is not None:
-                return candidate
-            roots = (self.memory_root,)
-        else:
-            roots = (self.code_root, self.memory_root)
-        for root in roots:
-            candidate = root / path
-            if self.candidate_tree is not None and not candidate.resolve().is_relative_to(
-                self.memory_root.resolve()
-            ):
+                target = candidate.resolve(path)
+                if target is not None:
+                    return target
                 continue
-            if candidate.is_file():
-                return candidate
+            if bound:
+                # A tree is bound for the other side, which is the caller saying that membership
+                # is what "resolved" must mean here; this root has no such proof to offer.
+                continue
+            target = root / path
+            if target.is_file():
+                return target
         return None
 
     def ours(self, path: str) -> bool:
