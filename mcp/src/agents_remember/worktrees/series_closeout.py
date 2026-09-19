@@ -411,13 +411,13 @@ def _require_landing_spine_side(
     """Prove one series ref is exactly the leaf landings, joined by the reconciled source line.
 
     Each leaf's landing must be an ancestor of the ref, each step from one landing to the next must
-    add nothing but an official position this contract synced with, and the same holds for the step
-    from the last landing to the ref. A ref that simply *is* the last landing -- every master that
-    reconciled before its final leaf landed -- needs no step at all.
+    add nothing but an official position one of these contracts synced with, and the same holds for
+    the step from the last landing to the ref. A ref that simply *is* the last landing -- every
+    master that reconciled before its final leaf landed -- needs no step at all.
     """
 
     landings, bases, recorded_base, repository, branch = _spine_facts(series, ordered, side=side)
-    positions = _landing_source_positions(series, side=side)
+    positions = _landing_source_positions(series, ordered, side=side)
     tip = branch_commit(repository, branch)
     previous = landings[0]
     for index, leaf in enumerate(ordered):
@@ -520,13 +520,29 @@ def _require_admitted_step(
         )
 
 
-def _landing_source_positions(series: WorktreeContract, *, side: str) -> tuple[str, ...]:
-    """Every official position this contract's own syncs reconciled with, and its recorded base."""
+def _landing_source_positions(
+    series: WorktreeContract,
+    ordered: list[WorktreeContract],
+    *,
+    side: str,
+) -> tuple[str, ...]:
+    """Every official position the chain's own syncs reconciled with, and the recorded base.
+
+    A sync is journaled on the contract it ran for, and that is not always the series contract: the
+    master's own reconciliation writes its entry here, while a leaf whose base had to be advanced
+    writes its entry on the leaf's contract -- which is the only place that position is recorded.
+    Reading the series contract alone therefore hid a leaf-level sync from this check and refused a
+    step to a base the leaf's own contract records as synced, so both are read here. The union is
+    still bounded by the chain's own evidence: every contract named here is one of the ordered
+    leaves this closeout already proved landed, so a position no contract ever synced with stays
+    inadmissible.
+    """
 
     key = "codeBaseTo" if side == "code" else "memoryBaseTo"
     base = series.code_base_commit if side == "code" else series.memory_base_commit
     positions = {base}
-    positions.update(entry.get(key, "") for entry in series.sync_log)
+    for contract in (series, *ordered):
+        positions.update(entry.get(key, "") for entry in contract.sync_log)
     return tuple(sorted(position for position in positions if position))
 
 
