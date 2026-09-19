@@ -14,9 +14,23 @@ Two independent fixes are in the tree, and this module pins both because neither
   contradict the response's own ``contractPath``/``enclosurePath``, so a hint that names another
   contract cannot reach a caller of an address-carrying envelope at all.
 
-The reachable surface is stated rather than assumed: the binder can only check a carrier that
-declares an address, and ``TaskDocResponse`` declares none, so the third case pins what that
-carrier does instead of implying a guarantee it does not have.
+The reachable surface is stated rather than assumed: a carrier that declares no address cannot be
+checked, and ``TaskDocResponse`` is the carrier that reaches this path. What the binder does with
+such a carrier is **withhold** the hint -- the rule ``260918-TSIP-L6`` landed as the `T54` repair
+(``bound_next_step``: *"a response that declares no contract path of its own cannot be validated,
+and its guidance is withheld rather than emitted unchecked"*), and this module's fourth case pins
+that, not the pre-repair pass-through it asserted before the two lines merged.
+
+**The correction, recorded because it is this leaf's own class.** This module was written on the
+``260915_knowledge-substrate`` line against the *older* binder, which returned the step unchanged
+when the response declared no address (``if not response_paths: return step``). ``260918-TSIP-L6``
+closed exactly that hole on the TSIP line, in a commit that landed after this module's last edit
+(``562cef4c`` 17:51 -> ``7879f5b2`` 20:18), and Git merged the two textually without a conflict
+marker. So the merged base held one module asserting the pass-through and another
+(``test_response_address_binding.py``, the repair's own case) asserting the withholding. The
+product is right and the older case was stale: a hint derived from the process-global ambient
+lifecycle cannot be vouched for by a response that does not state its own address, which is the whole
+of `T54`.
 """
 
 from __future__ import annotations
@@ -165,16 +179,22 @@ def test_two_addressed_contracts_in_sequence_yield_two_different_hints(tmp_path:
     assert first.contract_path.as_posix() not in second_body
 
 
-def test_an_envelope_with_no_address_passes_the_hint_through_unchanged() -> None:
+def test_an_envelope_with_no_address_has_its_hint_withheld() -> None:
     """The reachable surface, stated instead of assumed: an unaddressable carrier cannot be bound.
 
     ``bound_next_step`` compares the hint's path arguments against the response's own address, so a
     carrier that declares neither ``contractPath`` nor ``enclosurePath`` -- ``TaskDocResponse`` is
-    the one that reaches this path -- has nothing to compare against and keeps its hint. That is
-    not the D-13 leak: the hint's source is ``compute_next_step`` over the *caller's own* session
-    contract, and the global "most recently published enclosure" cursor is gone from the hint path
-    (its only remaining reader is the locator plane). This case pins the boundary so a future
-    address field on that carrier is a deliberate change with a red case, not a silent one.
+    the one that reaches this path -- has nothing to compare against. The rule is to **withhold**
+    the hint: guidance the response cannot vouch for is not forwarded unchecked, because the hint's
+    source is the *process-global* ambient lifecycle and the response has just told us it is about
+    a task it cannot name (`T54`, repaired by ``260918-TSIP-L6``; the same rule has its own case in
+    ``test_response_address_binding.py``).
+
+    This case pins the carrier boundary as well as the rule: the two ``model_fields`` assertions
+    below are what make a future address field on ``TaskDocResponse`` a deliberate change with a
+    red case rather than a silent one. **This case asserted the opposite until
+    ``260918-TSIP-L10``** -- see the module docstring: it was written against the pre-repair binder
+    and the two lines merged without a conflict marker, so the merged base held both rules at once.
     """
 
     foreign = NextStep(
@@ -196,4 +216,4 @@ def test_an_envelope_with_no_address_passes_the_hint_through_unchanged() -> None
 
     assert "contractPath" not in TaskDocResponse.model_fields
     assert "enclosurePath" not in TaskDocResponse.model_fields
-    assert bound_next_step(response, foreign) is foreign
+    assert bound_next_step(response, foreign) is None

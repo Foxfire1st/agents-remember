@@ -447,7 +447,24 @@ class CuratorCoherencePublishContractTests(unittest.TestCase):
                 # `input_value`, and a substring check against the echo reports "named" for a
                 # message that names nothing -- the instrument fault this case exists to catch.
                 message = raised.exception.errors()[0]["msg"]
-                self.assertIn(f"missing: {omitted}", message)
+                # The declared text, not a punctuation of it. This case asserted
+                # `f"missing: {omitted}"` from `0dd04d6a` (this master's L3, which wrote it against
+                # a product text that never carried that colon) until `260918-TSIP-L10` measured
+                # it: `publication_refusal` has emitted
+                # `"... field; missing " + ", ".join(missing)` since the commit that introduced it
+                # (`4264dcc9`, `260915-KS-R24`), and the sibling case in
+                # `test_curator_coherence_publication_discoverability.py` pins the same prefix with
+                # no colon. The old form was therefore red from the day it was written -- and
+                # invisible, because `mcp/tests/test_tools.py` is in the INTEGRATION lane and every
+                # leaf gate on this master runs `-m "not integration"`. The assertion is now the
+                # whole opening sentence plus the exact field, so it still cannot be satisfied by
+                # naming a different member, and it reads the contract the product actually
+                # declares.
+                self.assertIn(
+                    "publish requires every identity, predecessor, and caller field; "
+                    f"missing {omitted}",
+                    message,
+                )
 
 
 def _permissive_registration_config() -> McpRuntimeConfig:

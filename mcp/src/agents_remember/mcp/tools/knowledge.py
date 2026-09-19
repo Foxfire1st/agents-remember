@@ -15,6 +15,15 @@ short:
 * ``knowledge_diff`` includes "semantic effect labels ... only when supplied by an identified
   agent/assessment, not inferred from the diff"; the builder collects the labels the comparison
   already carries and never derives one.
+
+**Every public builder here returns ``_tool_payload(...)``, like every other adapter module.**
+The five builders used to hand a raw ``dict`` straight to the transport: the registered response
+models (``models/tools/knowledge_responses.py``) were therefore never met by a payload, the
+registration-agreement check found five registered models with no adapter entry, and the
+choke-point sweep counted 19 modules instead of 20. The body each builder produces is unchanged and
+now lives in one private ``*_result`` helper; what the public name does is exactly what every other
+module's entry point does -- route the body through the choke point so it is validated against
+``TOOL_RESPONSE_MODELS["knowledge_*"]`` before it reaches the wire.
 """
 
 from __future__ import annotations
@@ -51,6 +60,8 @@ from agents_remember.models.knowledge.view import (
     rebuild_continuation,
     require_admitted_ordering_input,
 )
+
+from .base import _tool_payload
 
 __all__ = [
     "ChangeToolRequest",
@@ -190,7 +201,13 @@ def _unusable_dataset(database_path: str, error: BaseException) -> tuple[str, st
 
 
 def knowledge_read_payload(request: ReadToolRequest) -> dict[str, Any]:
-    """Retrieve one named view at one snapshot, returning its payload or its typed refusal."""
+    """Retrieve one named view at one snapshot, through the response-model choke point."""
+
+    return _tool_payload("knowledge_read", _read_result(request))
+
+
+def _read_result(request: ReadToolRequest) -> dict[str, Any]:
+    """The one ``knowledge_read`` body, before the registered model validates it."""
 
     databasePath, repositoryId, view = (
         request.database_path,
@@ -285,7 +302,7 @@ def _view_request(request: ReadToolRequest) -> ViewRequest | ViewRefusal:
 
 
 def knowledge_change_payload(request: ChangeToolRequest) -> dict[str, Any]:
-    """Refuse one mount-side change request, naming the entry point that can actually write it.
+    """Refuse one mount-side change request, through the response-model choke point.
 
     This surface records nothing. It has no admitted write operation for any kind, so every kind --
     declared here or not -- is refused as ``registration_absent``, and the refusal names the
@@ -298,6 +315,12 @@ def knowledge_change_payload(request: ChangeToolRequest) -> dict[str, Any]:
     heard of: the surface has nothing to add in either case, and two spellings of "this tool does
     not write" would suggest the first one might.
     """
+
+    return _tool_payload("knowledge_change", _change_result(request))
+
+
+def _change_result(request: ChangeToolRequest) -> dict[str, Any]:
+    """The one ``knowledge_change`` body, before the registered model validates it."""
 
     repositoryId, recordKind = request.repository_id, request.record_kind
     return {
@@ -316,7 +339,17 @@ def knowledge_change_payload(request: ChangeToolRequest) -> dict[str, Any]:
 
 
 def knowledge_diff_payload(request: DiffToolRequest) -> dict[str, Any]:
-    """Compare two exact states, returning only the semantic labels an identified source supplied."""
+    """Compare two exact states, through the response-model choke point."""
+
+    return _tool_payload("knowledge_diff", _diff_result(request))
+
+
+def _diff_result(request: DiffToolRequest) -> dict[str, Any]:
+    """The one ``knowledge_diff`` body, before the registered model validates it.
+
+    Only the semantic labels an identified source supplied are carried; the builder never derives
+    one from the change.
+    """
 
     repositoryId = request.repository_id
     supplied = _supplied_effect_labels(request.body)
@@ -408,7 +441,25 @@ def knowledge_integrity_check_payload(
     repositoryId: str,
     scopeId: str | None = None,
 ) -> dict[str, Any]:
-    """Report declared structural-rule violations and their limits, and produce no verdict.
+    """Report declared structural-rule violations and their limits, through the choke point."""
+
+    return _tool_payload(
+        "knowledge_integrity_check",
+        _integrity_check_result(
+            databasePath=databasePath,
+            repositoryId=repositoryId,
+            scopeId=scopeId,
+        ),
+    )
+
+
+def _integrity_check_result(
+    *,
+    databasePath: str,
+    repositoryId: str,
+    scopeId: str | None = None,
+) -> dict[str, Any]:
+    """The one ``knowledge_integrity_check`` body, before the registered model validates it.
 
     ``compatible`` is ``None`` and is present. A caller that wants a compatibility decision makes it;
     this operation reports conditions, a traversal scope and the observable limitations of the read,
@@ -505,7 +556,13 @@ def _condition_report(result: Any, scope_id: str | None) -> dict[str, Any]:
 
 
 def knowledge_project_payload(request: ProjectToolRequest) -> dict[str, Any]:
-    """Render named read-only views into an explicitly authorized destination."""
+    """Render named read-only views into an explicitly authorized destination, through the choke point."""
+
+    return _tool_payload("knowledge_project", _project_result(request))
+
+
+def _project_result(request: ProjectToolRequest) -> dict[str, Any]:
+    """The one ``knowledge_project`` body, before the registered model validates it."""
 
     destinationRoot = request.destination_root
     profile = DestinationProfile(

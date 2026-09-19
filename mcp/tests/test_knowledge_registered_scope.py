@@ -49,6 +49,11 @@ from read_scope_test_support import (
 
 pytestmark = pytest.mark.evidence_unit
 
+# The checkout this module measures, anchored on ``__file__`` rather than on the process's working
+# directory -- the same anchor ``mcp/tests/conftest.py`` uses. The default lane runs from ``mcp/``,
+# so a repository-relative path literal resolves to a file that does not exist there.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+
 POLICY_ID = composition_policies.REGISTERED_COMPOSITION_POLICY_ID
 DECLARED_VERSION = "2026-09-18.1"
 
@@ -272,9 +277,32 @@ def test_the_read_frontiers_selection_surface_is_not_an_input_to_construction() 
     This is a derivation over the module's own text rather than an assurance: the shipped selection
     surface (``select_recorded_scope`` and its paging and expansion helpers) does not appear in the
     construction module at all, so no composition edge can reach a retrieval policy through it.
+
+    **The path is anchored to this checkout, not to the process's working directory.** It used to be
+    ``Path("mcp/src/agents_remember/memory/knowledge/registered_scope.py")`` -- a relative path that
+    resolves only when the run's cwd happens to be the repository root. The default lane runs
+    ``cd mcp && pytest tests``, so the merged base's DEFAULT run failed this case with
+    ``FileNotFoundError: 'mcp/src/…/registered_scope.py'`` while the same case passed from the root:
+    the *instrument* was reading its own cwd, not the tree (`T19`), and the module it wanted is
+    present at that revision (25,408 bytes at ``7879f5b2``). ``REPOSITORY_ROOT`` is derived from
+    ``__file__`` -- the same anchor ``mcp/tests/conftest.py`` uses -- so the case measures the same
+    file from any lane and any cwd, and the existence assertion below fails loudly rather than
+    silently reading a path that does not exist.
     """
 
-    source = Path("mcp/src/agents_remember/memory/knowledge/registered_scope.py").read_text()
+    source_path = (
+        REPOSITORY_ROOT
+        / "mcp"
+        / "src"
+        / "agents_remember"
+        / "memory"
+        / "knowledge"
+        / "registered_scope.py"
+    )
+    assert source_path.is_file(), (
+        f"the construction module is not where this repository says it is: {source_path}"
+    )
+    source = source_path.read_text(encoding="utf-8")
 
     for forbidden in (
         "select_recorded_scope",

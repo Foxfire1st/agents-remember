@@ -61,6 +61,10 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
 
     contract = absent_contract(world)
     outside = outside_contract(world)
+    # The knowledge family's unreadable selection: a path inside the coordination root that is
+    # not a database. Inside the root so nothing is touched outside the censused boundary even if
+    # a handler resolved it before refusing.
+    absent_knowledge = (world.coord / "temp" / "knowledge" / "absent-knowledge.db").as_posix()
     manager = {"role": "manager", "task_document_ref": TASK_REF}
     worker = {"role": "worker", "task_document_ref": LEAF_REF}
     return {
@@ -223,6 +227,55 @@ def failure_invocations(world) -> dict[str, dict[str, Any]]:
         },
         "skill_catalog_list": {},
         "skill_catalog_read": {"uri": "skill://no-such-skill/SKILL.md"},
+        # -- knowledge ----------------------------------------------------------------
+        # The five `knowledge_*` families, added to the roster by the merged
+        # `260915_knowledge-substrate` line and therefore to this table by `260918-TSIP-L10`
+        # (`T94`: 72 tools, not the 67 this census was written against). Each entry drives the
+        # production call with an input that cannot succeed:
+        #
+        # * four of the five address a dataset this world does not have. The surface answers an
+        #   unreadable selection INSIDE its own declared envelope -- `state: "refused"` with a
+        #   shipped refusal code and detail -- rather than raising, which is the property this
+        #   census exists to check, and the code names the missing input.
+        # * `knowledge_change` writes nothing by contract, so every kind is refused as
+        #   `registration_absent` and no dataset is needed at all.
+        # * `knowledge_diff` cannot reach its dataset branch here: a valid comparison body
+        #   carries two opened snapshot contexts (`KnowledgeDiffRequest.before/.after`), which
+        #   need a real knowledge store this fixture deliberately does not build. Its declared
+        #   `invalid_payload` refusal for a body the shipped request model refuses is therefore
+        #   the reachable failure path -- a named refusal, not a raise.
+        #
+        # All five answer `ok: true` with `state: "refused"`: the mounted knowledge surface
+        # reports a refusal as a STATE of a successful call, which is its own models' declared
+        # contract (`models/tools/knowledge_responses.py`: "A refusal is a state, not a partial
+        # success"). That shape is named and pinned in the conformance module beside this one
+        # (`STATEFUL_REFUSALS`), never tolerated silently through `ALWAYS_ANSWERS`.
+        "knowledge_read": {
+            "databasePath": absent_knowledge,
+            "repositoryId": REPO,
+            "view": "source_context",
+        },
+        "knowledge_change": {
+            "databasePath": absent_knowledge,
+            "repositoryId": REPO,
+            "recordKind": "evidence_claim",
+        },
+        "knowledge_diff": {
+            "databasePath": absent_knowledge,
+            "repositoryId": REPO,
+            "beforePath": absent_knowledge,
+            "afterPath": absent_knowledge,
+        },
+        "knowledge_integrity_check": {
+            "databasePath": absent_knowledge,
+            "repositoryId": REPO,
+        },
+        "knowledge_project": {
+            "databasePath": absent_knowledge,
+            "repositoryId": REPO,
+            "destinationRoot": (world.coord / "temp" / "knowledge-projection").as_posix(),
+            "views": [],
+        },
     }
 
 

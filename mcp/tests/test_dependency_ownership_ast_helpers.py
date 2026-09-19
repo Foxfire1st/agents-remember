@@ -41,12 +41,37 @@ LIFECYCLE_CATALOG = Path("mcp/tests/evidence-lifecycle.toml")
 LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
-LIFECYCLE_CONTRACT_COUNT = 15
-LIFECYCLE_ARTIFACT_COUNT = 65
-LIFECYCLE_CATALOG_SHA256 = "6ec7eb0d33e91c148b25ed64c6b791664446082bdf419bf511635f4ca3cbdd75"
+LIFECYCLE_CONTRACT_COUNT = 16
+LIFECYCLE_ARTIFACT_COUNT = 66
+LIFECYCLE_CATALOG_SHA256 = "ce2927584b6f35b8bb58458d5bd3d0474d42ee777aa317f6581b0f542bc6700f"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
-The value this line carries is the catalog after ``260915-KS``'s L28 leaf repaired the missing-consumer
+``260918-TSIP-L10`` registered the module this leaf's own red base exposed as ungoverned:
+``mcp/tests/tool_refusal_census_support.py``, introduced by ``260918-TSIP-L6`` (the refusal-census leaf
+of this master) and carrying no catalog row, so ``load_evidence_inventory``'s coverage finding read
+*"governed evidence has no lifecycle metadata: ['mcp/tests/tool_refusal_census_support.py']"* and the
+two integration cases below -- ``test_repository_inputs_reach_their_supported_consumers`` and
+``test_production_proof_adds_no_governed_evidence_artifact`` -- were red from L6's landing onward.
+Neither the unit lane nor any leaf's measurement could see it: ``addopts`` deselects integration, and
+the master's frozen-tip check is the combined lane. **A lane nobody runs cannot be reviewed**, which
+is why this registration is a leaf's work rather than a note. The registration follows the sibling
+support-module pattern exactly (``migration_census_test_support.py``): a new ``[[contract]]`` row
+(``tool-refusal-census-cases``) whose ``evidence_node`` is the census's own partition case, and one
+``[[artifact]]`` row of ``kind = "shared-support"``, ``category = "unit-regression"`` (both consumers
+are in that lane), ``fidelity = "local-composition"`` (the census drives production entry points over
+a disposable coordination root through a real MCP client session) and
+``replacement_contract = "contract:tool-refusal-census-cases"``. The consumer list is not invented:
+it is ``RepositoryDependencyFacts.observed_test_consumers`` for that path --
+``mcp/tests/test_tool_response_conformance.py`` and ``mcp/tests/test_response_address_binding.py``,
+the second through its ``from test_tool_refusal_conformance import refusal_axes`` import.
+**Registering the module moved one more list**: the census's import walk from that path reaches
+``agents_remember.models.tools.public_roster`` and, through it, the portable profile runtime whose
+input is the node lockfile, so ``mcp/tests/fixtures/repository_profiles/node/package-lock.json``
+gained those same two consumers -- a consumer change, not a new artifact, exactly as the sibling
+leaves' registrations each moved theirs. Contract count **15 -> 16**, artifact count **65 -> 66**;
+the digest this value replaces was ``6ec7eb0d…``.
+
+The value this line carried before is the catalog after ``260915-KS``'s L28 leaf repaired the missing-consumer
 registration that made the repository's own gate fail. L25 registered no artifact and no contract of its
 own -- its ingest drives the shipped batch operation through ``candidate_batch_test_support`` and builds
 its record trees through ``read_scope_test_support`` rather than introducing a third fixture -- so its

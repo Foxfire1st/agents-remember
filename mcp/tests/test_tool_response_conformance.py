@@ -71,6 +71,7 @@ from agents_remember.mcp.tools import terminal as terminal_payload_tools
 from agents_remember.mcp.tools.base import PUBLIC_TOOLS, _tool_payload
 from agents_remember.mcp.tools.operator_inbox import operator_inbox_post_payload
 from agents_remember.mcp.tools.task_doc import task_doc_payload
+from agents_remember.models.base import FlexibleResponseModel, StrictResponseModel
 from agents_remember.models.lifecycles.finalize import LifecycleFinalizeTaskResponse
 from agents_remember.models.operator_inbox import OperatorInboxPostResponse
 from agents_remember.models.structural.agent import (
@@ -109,8 +110,11 @@ def adapter_tool_ids() -> dict[str, list[str]]:
     """Every tool id a ``_tool_payload("<id>", ...)`` call site names, with its sites.
 
     Read from the source rather than from a hand-kept list, so this cannot drift from the
-    adapter surface it describes. 91 call sites name 84 ids: some tools have two entry
-    points (``operator_inbox_post_payload`` and ``registered_operator_inbox_post_payload``).
+    adapter surface it describes. 96 call sites name 89 ids at the merged base: some tools have
+    two entry points (``operator_inbox_post_payload`` and
+    ``registered_operator_inbox_post_payload``), and the five ``knowledge_*`` builders route
+    through the choke point as of ``260918-TSIP-L10`` -- before that they returned a raw dict,
+    which is why five registered models had no adapter entry here.
     """
 
     sites: dict[str, list[str]] = {}
@@ -190,6 +194,41 @@ class _RegistrationStub:
         return _RegistrationStub()
 
 
+def advertised_tool_names() -> set[str]:
+    """Every tool name the product actually registers, read from the registered surface.
+
+    The same probe :func:`advertised_description` uses: a real ``FastMCP`` server, every
+    registrar in ``TOOL_REGISTRARS``, and the server's own listing. This is the **derived**
+    population the roster assertions compare against, and it is derived from the registration
+    modules rather than from ``PUBLIC_TOOLS`` -- so a tool that is registered but missing from
+    the roster (or the reverse) is a disagreement this module can see, which a literal count
+    could never show. `T94`: the roster is 72 at this master's merged base, and the figure every
+    check on this master was measured against before it was 67.
+    """
+
+    server = FastMCP("tsip-l10-roster-probe")
+    for register_tools in TOOL_REGISTRARS:
+        register_tools(server, cast(McpRuntimeConfig, _RegistrationStub()))
+    return {tool.name for tool in asyncio.run(server.list_tools())}
+
+
+# The roster size this master measured on its own merged base (`7879f5b2`): **72**, five more
+# than the 67 every figure on this master was written against, because the incoming
+# `260915_knowledge-substrate` line added the five `knowledge_*` tools (`T94`). It is a
+# *visible* constant rather than an inline literal so that a deliberate change to the surface is
+# one edit here -- and it is asserted ALONGSIDE the live-surface equality below, never instead
+# of it, so an accidental change fails against the registration modules rather than against a
+# number somebody has to remember to update.
+ROSTER_SIZE = 72
+
+# The tool-adapter module population and the handler population, same rule: the numbers are
+# asserted with the rule (every module's every handler returns `_tool_payload(...)`, and the
+# call-site total equals the handler total) so the rule cannot be satisfied by measuring
+# nothing, and the derivation below is what makes a silent change fail.
+TOOL_MODULE_COUNT = 20
+TOOL_HANDLER_COUNT = 96
+
+
 def literal_keyword_values(path: Path, keyword: str) -> set[str]:
     """Every string literal passed to ``keyword=`` anywhere in one module.
 
@@ -264,9 +303,30 @@ class ToolResponseSurfaceTests(unittest.TestCase):
     def test_registration_and_adapter_surface_agree_in_both_directions(self) -> None:
         """Requirement: every roster tool is registered, and every registration is used.
 
-        Three sets, each derived rather than transcribed: the registry
+        Four populations, each derived rather than transcribed: the registry
         (``TOOL_RESPONSE_MODELS``), the adapter entries (the ``_tool_payload`` id literals
-        in ``mcp/tools/``), and the advertised roster (``PUBLIC_TOOLS``).
+        in ``mcp/tools/``), the advertised roster (``PUBLIC_TOOLS``) and the **registered
+        surface** the product itself publishes (the live ``FastMCP`` listing). The two
+        directions this leaf exists for are the first two assertions: registry minus adapter must be
+        empty (a registered model nobody produces is a model nothing validates against) and
+        adapter minus registry must be empty (a payload nobody declared). Both were non-empty on the
+        merged base for the five ``knowledge_*`` families, whose builders returned a raw dict
+        instead of routing through ``_tool_payload``.
+
+        The roster is then compared to the LIVE surface rather than to a count, so a tool that
+        is registered but unlisted (or listed but unregistered) fails here; `ROSTER_SIZE` is the
+        second, visible edit any deliberate change to that population must make.
+
+        **What was removed from this case, and why (`NF2`).** An earlier form of it ended with
+        ``assertEqual(len(registered), len(PUBLIC_TOOLS) + len(registered - set(PUBLIC_TOOLS)))``
+        and called it a fourth strengthening. It cannot fail while the ``roster - registered``
+        assertion three lines above passes -- ``|registered| = |roster| + |registered - roster|``
+        is a partition identity, and that assertion is what makes the second term the exact
+        internal set -- so it bought nothing and was deleted rather than dressed up. The failable
+        assertion that replaced its *purpose* (a tool silently leaving the advertised population)
+        is the live-surface equality above: it fails on a roster entry deleted, on a registrar
+        added, and on either side of the roster/registry pair moving alone, and the mutation that
+        reds it is recorded in the report's round-2 addendum.
         """
 
         registered = set(TOOL_RESPONSE_MODELS)
@@ -286,8 +346,18 @@ class ToolResponseSurfaceTests(unittest.TestCase):
             set(PUBLIC_TOOLS) - registered,
             "roster tools with no registered response model",
         )
-        self.assertEqual(67, len(PUBLIC_TOOLS))
-        self.assertEqual(84, len(registered))
+        advertised = advertised_tool_names()
+        self.assertEqual(
+            set(PUBLIC_TOOLS),
+            advertised,
+            "the advertised roster and the registered surface disagree",
+        )
+        self.assertEqual(
+            len(set(PUBLIC_TOOLS)),
+            len(PUBLIC_TOOLS),
+            "the roster names a tool twice",
+        )
+        self.assertEqual(ROSTER_SIZE, len(PUBLIC_TOOLS), "the advertised roster changed size")
 
     def test_the_seventeen_internal_registrations_are_named_not_implied(self) -> None:
         """The unadvertised registrations are compatibility/internal builders by design.
@@ -343,7 +413,17 @@ class ToolResponseSurfaceTests(unittest.TestCase):
                 self.assertIs(TOOL_RESPONSE_MODELS[tool], model)
 
     def test_every_registered_model_is_strict_or_declared_flexible(self) -> None:
-        """A strict model forbids extras; a flexible one declares them as its contract."""
+        """A strict model forbids extras; a flexible one declares them as its contract.
+
+        The split is derived TWICE and the two derivations must agree: the registry says which
+        base class each model inherits (the declaration) and ``model_config['extra']`` says what
+        the model actually does (the observation). A model that flips its config without moving
+        to the other family, or that moves family without carrying its config, fails here by
+        name -- which is what the old ``assertEqual(48, ...)``/``assertEqual(36, ...)`` pair was
+        buying, without the two bare counts that the merged line's five new strict
+        ``knowledge_*`` models invalidated (`T94`). The observed counts are asserted against the
+        declarations, so neither number is transcribed anywhere.
+        """
 
         strict = {
             tool
@@ -355,10 +435,25 @@ class ToolResponseSurfaceTests(unittest.TestCase):
             for tool, model in TOOL_RESPONSE_MODELS.items()
             if model.model_config.get("extra") == "allow"
         }
+        declared_strict = {
+            tool
+            for tool, model in TOOL_RESPONSE_MODELS.items()
+            if issubclass(model, StrictResponseModel)
+        }
+        declared_flexible = {
+            tool
+            for tool, model in TOOL_RESPONSE_MODELS.items()
+            if issubclass(model, FlexibleResponseModel)
+        }
         self.assertEqual(set(TOOL_RESPONSE_MODELS), strict | flexible)
         self.assertEqual(set(), strict & flexible)
-        self.assertEqual(48, len(strict))
-        self.assertEqual(36, len(flexible))
+        self.assertEqual(
+            declared_strict, strict, "a model declares strict but is not configured so"
+        )
+        self.assertEqual(
+            declared_flexible, flexible, "a model declares flexible but is not configured so"
+        )
+        self.assertEqual(set(TOOL_RESPONSE_MODELS), declared_strict | declared_flexible)
 
     def test_every_tool_adapter_module_routes_through_the_choke_point(self) -> None:
         """No tool handler may return a raw dict to the transport, bypassing validation.
@@ -375,8 +470,12 @@ class ToolResponseSurfaceTests(unittest.TestCase):
         handlers at all, and the call-site equality is load-bearing rather than decorative: a
         ``_tool_payload`` call whose result is discarded while a raw dict is returned is
         exactly the bypass shape, and it makes the module's call sites outnumber its
-        handlers. 19 modules hold 91 handlers and 91 call sites -- the same 91 the
-        registration census reports, so the two readings cannot drift apart.
+        handlers. 20 modules hold 96 handlers and 96 call sites at the merged base -- the same
+        96 the registration census reports, so the two readings cannot drift apart -- and the
+        handler/call-site totals are also asserted equal to the id-literal total read by
+        :func:`adapter_tool_ids`, which is the derivation that cannot be satisfied by measuring
+        nothing. This is the case the five ``knowledge_*`` builders failed before
+        ``260918-TSIP-L10``: they returned raw dicts, so the module count was 19.
         """
 
         modules = [
@@ -384,13 +483,15 @@ class ToolResponseSurfaceTests(unittest.TestCase):
             for path in sorted(TOOLS_ROOT.glob("*.py"))
             if path.name not in {"__init__.py", "base.py"}
         ]
-        self.assertEqual(19, len(modules))
+        self.assertEqual(TOOL_MODULE_COUNT, len(modules))
 
         handlers = 0
+        call_sites_total = 0
         for path in modules:
             functions, call_sites = choke_point_handlers(path)
             self.assertTrue(functions, f"{path.name} defines no handler")
             handlers += len(functions)
+            call_sites_total += call_sites
             for function in functions:
                 returns = [node for node in ast.walk(function) if isinstance(node, ast.Return)]
                 self.assertTrue(returns, f"{path.name}:{function.name} has no return")
@@ -413,7 +514,15 @@ class ToolResponseSurfaceTests(unittest.TestCase):
                 f"{path.name}: {call_sites} _tool_payload call sites for {len(functions)} "
                 "handlers -- a call whose result is not returned is a bypass",
             )
-        self.assertEqual(91, handlers, "the tool-handler population changed")
+        self.assertEqual(TOOL_HANDLER_COUNT, handlers, "the tool-handler population changed")
+        # Derived, not transcribed: the walk above and the id-literal census read the same
+        # 96 call sites from the same modules by two different routes.
+        self.assertEqual(
+            sum(len(sites) for sites in adapter_tool_ids().values()),
+            call_sites_total,
+            "the handler walk and the id-literal census disagree about the call-site population",
+        )
+        self.assertEqual(TOOL_HANDLER_COUNT, call_sites_total)
 
 
 # --------------------------------------------------------------------------------------

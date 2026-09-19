@@ -76,6 +76,7 @@ from agents_remember.models.knowledge.view import (
     require_continuation_snapshot,
     view_counts,
 )
+from agents_remember.models.tools.knowledge_responses import KnowledgeIntegrityCheckResponse
 from mcp.server.fastmcp import FastMCP
 
 SNAPSHOT = KnowledgeReadSnapshot(
@@ -1076,9 +1077,21 @@ async def test_the_integrity_family_reports_the_absence_of_a_detection_run_witho
     The dataset is real and current, so the operation reaches its own report path rather than
     failing to open anything, and the case pins the two facts that make "no verdict" measurable: a
     namespace with no recorded detection run is reported as *unresolved* with a stated limitation
-    rather than as zero conditions, and ``compatible`` is ``None`` -- present and null, not omitted
-    and not inferred from the absence of a matched condition. The traversal scope a caller named is
-    echoed in the report rather than defaulted away.
+    rather than as zero conditions, and ``compatible`` carries no verdict. The traversal scope a
+    caller named is echoed in the report rather than defaulted away.
+
+    **Where "no verdict" is measured, corrected by ``260918-TSIP-L10``.** This case used to assert
+    ``body["compatible"] is None`` -- "present and null, not omitted". That is true of the *model*
+    and false of the *wire*: the five builders now route through ``_tool_payload`` like every other
+    adapter, and the shared strict envelope dumps with ``exclude_none=True``
+    (``models/base.py::ResponseModel.to_payload``), so a declared-and-``None`` field is ABSENT from
+    the payload a caller receives. The two assertions below measure the property at the level where
+    each half of it lives -- the declaration on the model, the absence of a verdict on the wire --
+    and together they are the protection the single old assertion gave: ``compatible`` cannot leave
+    the model (first assertion), and a producer that emitted ``true``/``false`` would put the key
+    back and fail the second. The registered tool description already states the wire answer
+    ("``compatible`` is absent by design, not omitted by accident"); the model's own docstring still
+    says "present and null" and is registered as a documentation defect rather than edited here.
     """
 
     body = await _call(
@@ -1092,7 +1105,12 @@ async def test_the_integrity_family_reports_the_absence_of_a_detection_run_witho
     )
 
     assert body["state"] == "reported", body
-    assert body["compatible"] is None, body
+    assert "compatible" in KnowledgeIntegrityCheckResponse.model_fields, (
+        "the no-verdict field left the response model"
+    )
+    assert "compatible" not in body, (
+        f"a compatibility verdict reached the wire: {body.get('compatible')!r}"
+    )
     assert body["conditions"] == [], body
     assert body["unresolved"] == ["no recorded detection run to report conditions from"], body
     assert body["limitations"] == [

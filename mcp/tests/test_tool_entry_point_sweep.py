@@ -211,7 +211,10 @@ REFUSED_MODEL = re.compile(r"validation error for (?P<model>[A-Za-z_][A-Za-z0-9_
 # observer and transcript logs, its tool-report/temp trees, its control-plane records, the
 # enclosure worktrees it opens, the task documents the fixture authors, and the installed
 # scaffold. Measured, not assumed: a sweep of all 67 tools adds 18 files and rewrites 2, every
-# one of them inside these zones, and removes none.
+# one of them inside these zones, and removes none. **That figure is base-scoped** (`T94`): the
+# roster is 72 at the merged base, the five `knowledge_*` tools this leaf's fixture rows add
+# answer inside the envelope and write nothing, and the boundary case below re-measures the
+# census at run time rather than comparing against this number.
 COORDINATION_WRITE_ZONES = (
     "benchmarks/",
     "controlplane/",
@@ -597,6 +600,14 @@ class EntryPointWorld:
         absent = (
             self.coord / "tasks" / REPO / MASTER / "enclosures" / "absent" / "series-contract.md"
         ).as_posix()
+        # The knowledge family's benign branch: a dataset path this world does not have. The
+        # surface answers a selection it cannot read inside its own envelope rather than raising
+        # (see the knowledge block at the end of this table), so the branch is reachable and
+        # hermetic without a knowledge store -- and the path is inside the coordination root so
+        # nothing is touched outside it even if a handler resolved it.
+        absent_knowledge_database = (
+            self.coord / "temp" / "knowledge" / "absent-knowledge.db"
+        ).as_posix()
         return {
             "ping": {},
             "server_info": {},
@@ -755,6 +766,51 @@ class EntryPointWorld:
                 "ask": "sweep",
                 "response": "sweep",
             },
+            # -- knowledge ----------------------------------------------------------------
+            # The five `knowledge_*` operation families, added to the roster by the merged
+            # `260915_knowledge-substrate` line and therefore to this table by `260918-TSIP-L10`
+            # (`T94`: the roster is 72, not the 67 every figure on this master was measured at).
+            #
+            # What this world can honestly give them. The four read/render members address a
+            # knowledge dataset the caller names, and this fixture has none: naming an absent path
+            # is the reachable branch, and the surface's own contract answers it inside the
+            # envelope (`state: "refused"` with a shipped refusal code), which is the property
+            # this sweep is here to check. `knowledge_change` writes nothing by contract and
+            # refuses every kind, so no dataset is needed. `knowledge_diff` is the one member
+            # whose request body cannot validate here at all: a real comparison body carries two
+            # opened snapshot contexts (`KnowledgeDiffRequest.before/.after`), which need a
+            # knowledge store this fixture deliberately does not build, so the tool's own
+            # `invalid_payload` refusal is the reachable failure path -- still an envelope with a
+            # named code and detail, and the reason is stated here rather than assumed.
+            #
+            # `destinationRoot` is inside the coordination root's declared `temp/` write zone so
+            # a projection that ever wrote before refusing stays inside the censused boundary.
+            "knowledge_read": {
+                "databasePath": absent_knowledge_database,
+                "repositoryId": REPO,
+                "view": "source_context",
+            },
+            "knowledge_change": {
+                "databasePath": absent_knowledge_database,
+                "repositoryId": REPO,
+                "recordKind": "evidence_claim",
+            },
+            "knowledge_diff": {
+                "databasePath": absent_knowledge_database,
+                "repositoryId": REPO,
+                "beforePath": absent_knowledge_database,
+                "afterPath": absent_knowledge_database,
+            },
+            "knowledge_integrity_check": {
+                "databasePath": absent_knowledge_database,
+                "repositoryId": REPO,
+            },
+            "knowledge_project": {
+                "databasePath": absent_knowledge_database,
+                "repositoryId": REPO,
+                "destinationRoot": (self.coord / "temp" / "knowledge-projection").as_posix(),
+                "views": [],
+            },
         }
 
     def ambient_state(self) -> str:
@@ -800,9 +856,20 @@ class EntryPointWorld:
 
         The ambient state is recorded around each call, so a case can assert an arranged state
         rather than trusting that ``prepare`` arranged one.
+
+        A roster member with no row in :meth:`benign` is refused **by name here**, before any call
+        is made: the population is derived from ``PUBLIC_TOOLS`` at run time, so a tool that
+        arrives without a fixture row must read as *"roster tools with no case"* rather than as the
+        ``KeyError`` it used to be -- the same defect either way, but the named one says which five
+        tools and what is missing. (Measured on the merged base: five ``knowledge_*`` tools
+        arrived and this raised ``KeyError: 'knowledge_read'`` from ``setUpClass``, which is why
+        every case in ``EntryPointProbeTests`` errored instead of failing on its own assertion.)
         """
 
         arguments = self.benign()
+        uncased = sorted(set(PUBLIC_TOOLS) - set(arguments))
+        if uncased:
+            raise AssertionError(f"roster tools with no case: {uncased}")
         listing = self.call("skill_catalog_list", {})
         skills = (listing[1] or {}).get("skills") or []
         if skills:

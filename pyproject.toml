@@ -272,6 +272,12 @@ addopts = [
   # Ordinary edits exercise deterministic tests without delivery-only boundaries.
   "-m", "not integration",
   "-n=4",
+  # One file's cases stay in one worker, because file-scoped state is how several modules state a
+  # population claim (`test_task_reopen_series_extension.py`'s completion count is the measured
+  # one: its population case passes at `-n0` and red 4 runs of 4 at `-n4 --dist load`, which hands
+  # individual cases to whichever worker is free). `loadfile` changes how the suite parallelizes,
+  # never what a case checks.
+  "--dist", "loadfile",
   # An unregistered marker is a typo that quietly selects nothing. Fail on it.
   "--strict-markers",
   # An unknown or misspelled ini key is a setting that quietly does nothing. Fail on it.
