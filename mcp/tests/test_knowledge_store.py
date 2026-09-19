@@ -758,28 +758,29 @@ def test_schema_carries_the_declared_manifest_and_generation(tmp_path: Path) -> 
     assert columns == {table: tuple(declared.columns[table]) for table in declared.tables}
 
 
-def test_partial_schema_is_refused_instead_of_written_through(tmp_path: Path) -> None:
-    """A database missing a canonical table refuses rather than accepting writes."""
+def test_a_database_that_is_not_this_schema_refuses_to_open(tmp_path: Path) -> None:
+    """Two ways a stored database stops being this schema, and each is refused by name.
 
-    path = tmp_path / "partial.db"
-    open_knowledge_store(path, str(uuid4())).close()
-    connection = apsw.Connection(str(path))
+    A missing canonical table and a dropped immutability trigger are one question -- is this file
+    still the schema this build writes -- asked by the same opening guard, so they are one case.
+    What matters is that neither is written through, and that the refusal names which part is gone.
+    """
+
+    partial = tmp_path / "partial.db"
+    open_knowledge_store(partial, str(uuid4())).close()
+    connection = apsw.Connection(str(partial))
     connection.execute("DROP TABLE realization_claim")
     connection.close()
     with pytest.raises(KnowledgeStorageError, match="missing canonical table"):
-        open_knowledge_store(path, str(uuid4()))
+        open_knowledge_store(partial, str(uuid4()))
 
-
-def test_dropped_immutability_trigger_is_refused(tmp_path: Path) -> None:
-    """A database whose triggers were removed is not this schema and refuses to open."""
-
-    path = tmp_path / "untriggered.db"
-    open_knowledge_store(path, str(uuid4())).close()
-    connection = apsw.Connection(str(path))
+    untriggered = tmp_path / "untriggered.db"
+    open_knowledge_store(untriggered, str(uuid4())).close()
+    connection = apsw.Connection(str(untriggered))
     connection.execute("DROP TRIGGER invariant_revision_no_delete")
     connection.close()
     with pytest.raises(KnowledgeStorageError, match="missing immutability trigger"):
-        open_knowledge_store(path, str(uuid4()))
+        open_knowledge_store(untriggered, str(uuid4()))
 
 
 def test_application_seam_initializes_and_extends_one_namespace(tmp_path: Path) -> None:

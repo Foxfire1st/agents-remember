@@ -161,17 +161,18 @@ def test_a_mechanical_classification_names_its_rule_and_has_no_author() -> None:
         )
 
 
-def test_a_class_without_its_evidence_is_refused_rather_than_defaulted() -> None:
-    """A value with no author and no rule has no class here, so it cannot be emitted as classified."""
+def test_a_classification_needs_its_evidence_and_a_rule_the_registry_holds() -> None:
+    """Two directions of one rule: a class with no evidence is refused, and so is a foreign rule.
+
+    Requirement 2.2 with its own contrapositive, merged because both measure whether a
+    classification can exist without the input it is defined by: an unregistered rule cannot produce
+    one, and a class whose evidence is missing cannot be emitted as classified either.
+    """
 
     with pytest.raises(ValueError):
         Provenance(provenance_class=AUTHORED_CLASS)
     with pytest.raises(ValueError):
         Provenance(provenance_class=MECHANICAL_CLASS)
-
-
-def test_an_unregistered_rule_cannot_produce_a_classification() -> None:
-    """Requirement 2.2: a rule not in the registry cannot produce a classification."""
 
     with pytest.raises(MechanicalRuleNotRegistered):
         mechanical_provenance("ordering.invented-by-a-renderer", 1)
@@ -241,31 +242,32 @@ def test_a_position_cannot_name_an_unregistered_rule() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_payload_with_rows_remaining_must_carry_a_continuation() -> None:
-    """Requirement 3.3: a bounded response never presents its first page as the whole scope."""
+def test_incompleteness_and_its_continuation_must_agree() -> None:
+    """Requirement 3.3 in both directions: rows remaining need a token, and a token needs them.
 
-    counts = view_counts(
+    One statement about one pair of fields, so one case: a bounded response never presents its first
+    page as the whole scope, and a page that says it is complete never carries the token that says it
+    is not. Either half alone would let a reader size the scope from the wrong field.
+    """
+
+    remaining = view_counts(
         registered_realizations=2, registered_families=1, rows_returned=2, rows_remaining=3
     )
     with pytest.raises(ValueError):
         SourceContextView(
             snapshot=SNAPSHOT,
-            counts=counts,
+            counts=remaining,
             completeness=_completeness(),
             renderer_version="knowledge-view-renderer/1",
         )
 
-
-def test_a_complete_payload_must_not_carry_a_continuation() -> None:
-    """The two facts are one statement, so a complete page with a token is refused too."""
-
-    counts = view_counts(
+    complete = view_counts(
         registered_realizations=2, registered_families=1, rows_returned=2, rows_remaining=0
     )
     with pytest.raises(ValueError):
         SourceContextView(
             snapshot=SNAPSHOT,
-            counts=counts,
+            counts=complete,
             completeness=_completeness(),
             continuation=continuation_for(view="source_context", snapshot=SNAPSHOT, position=2),
             renderer_version="knowledge-view-renderer/1",

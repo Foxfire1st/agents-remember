@@ -239,6 +239,23 @@ def _route_for_path(connection: apsw.Connection, repository_id: str, path: str) 
     return None
 
 
+def route_for_path(connection: apsw.Connection, repository_id: str, path: str) -> str | None:
+    """Return the id of the route already authored for one admissible path, or ``None``.
+
+    Public because ``author_route`` answers a path that already has a row by returning *that* row's
+    id, and a caller reporting what it wrote needs the two facts apart: "this run authored the row"
+    and "this run answered with a row that was already there" are the same return value. The path is
+    normalised first, because the lookup ``author_route`` performs is on the admitted spelling, and
+    asking with an unadmitted spelling would answer ``None`` for a row that is really there -- which
+    would make a caller believe it had written one it had not.
+    """
+
+    admitted = normalize_route_path(path)
+    if isinstance(admitted, KnowledgeRefusal):
+        return None
+    return _route_for_path(connection, repository_id, admitted)
+
+
 def route_exists(connection: apsw.Connection, repository_id: str, route_id: str) -> bool:
     """Whether one route identity is authored in this repository.
 

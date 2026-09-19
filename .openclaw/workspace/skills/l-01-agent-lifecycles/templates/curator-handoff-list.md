@@ -6,8 +6,8 @@ hands the curator **that same list**, unparaphrased, as data. `roles/worker.md`,
 `roles/orchestrator.md` and `roles/curator.md` own the seats' sides of this contract.
 
 **The contract's authority is the owning seat's schema note, the increment's own
-*260915-KS-curator-handoff-list-schema.md*, at revision 1** — its twelve fields, its revision-1
-rules 1–9, and the reasons the rules exist are authored there once. This file transposes revision 1
+*260915-KS-curator-handoff-list-schema.md*, at revision 1** — its thirteen fields (nine producer,
+four curator), its revision-1 rules 1–9, and the reasons the rules exist are authored there once. This file transposes revision 1
 into the shape a producer writes and nothing more; where the two disagree, the schema note wins. The
 worked example that priced revision 1 is the 41-entry fixture beside it, the increment's
 *260915-KS-curator-handoff-fixture-L23-rev1.json* with its note. Both live with the increment that
@@ -18,10 +18,18 @@ list, so the curator ingests a list rather than reading a table.
 
 ## The entry
 
-Twelve fields, and each has a job. **Ownership is the whole point of the split:** the producer answers
-*what is true, and where*; the curator answers *what the record does about it*. A producer that fills a
-curator field has made the decision the curator exists to make, and a curator that re-derives a producer
-field has destroyed the evidence it was supposed to compare against.
+**Thirteen fields, and each has a job: nine are the producer's and four are the curator's.** Ownership
+is the whole point of the split — the producer answers *what is true, and where*; the curator answers
+*what the record does about it*. A producer that fills a curator field has made the decision the
+curator exists to make, and a curator that re-derives a producer field has destroyed the evidence it
+was supposed to compare against.
+
+The nine the producer supplies are `id`, `statement`, `kind`, `target`, `found_at`, `disposition`,
+`disposition_source`, `evidence` and `authority`; the four the curator decides or verifies are
+`resolution`, `validated_at`, `record_action` and `supersedes`. Every row below states which of the
+two owns it, and the shape beneath the table carries exactly those thirteen keys — so a producer can
+count the fields it owes rather than infer them. (`disposition_source` is a producer field: it says
+where the *producer's* verdict came from, which only the producer knows.)
 
 | field | who | what it carries |
 | --- | --- | --- |
@@ -39,7 +47,7 @@ field has destroyed the evidence it was supposed to compare against.
 | `record_action` | curator | `add` \| `revise` \| `supersede` — the curator's decision, which is the whole point of it being the curator and not the producer. |
 | `supersedes` | curator | the `id` this entry replaces, when it replaces one. |
 
-**Every entry carries all twelve keys, and every curator field is `null` in the producer's hands.** A
+**Every entry carries all thirteen keys, and every curator field is `null` in the producer's hands.** A
 producer emits no `resolution`, no `validated_at`, no `record_action`, no `supersedes`. `kind` may be an
 enum; **`disposition` may not** — it is free text carried verbatim.
 
@@ -59,7 +67,7 @@ enum; **`disposition` may not** — it is free text carried verbatim.
       }
     ],
     "found_at": [
-      { "path": "<path>", "locator": { "kind": "line_range", "start": 0, "end": 0 }, "commit": null }
+      { "path": "<path>", "locator": { "kind": "line_range", "start": 1, "end": 1 }, "commit": null }
     ],
     "disposition": "<the producer's verdict, verbatim>",
     "disposition_source": null,
@@ -74,8 +82,12 @@ enum; **`disposition` may not** — it is free text carried verbatim.
 ```
 
 `target[].locator` is `{kind: "symbol", value}` \| `{kind: "line_range", start, end}` \|
-`{kind: "file"}`. `found_at[].locator` may additionally be **`null`** — "the source says it was found,
-not where" is information, and different from an empty list.
+`{kind: "file"}`, and a `target[].locator` is **required**: a target that names a path and no construct
+is refused as an omission rather than read as a whole-file citation, because "the whole file is the
+place" is a claim a producer has to make explicitly. Line ranges are **one-based and inclusive**, so
+`{start: 0}` names nothing and is refused with that reason. `found_at[].locator` may additionally be
+**`null`** — "the source says it was found, not where" is information, and different from an empty
+list.
 
 ## Rule 1 — co-resolution: name where the thing lives, not where you looked
 
@@ -198,9 +210,11 @@ by the commit it was measured at:
   decision the leaf owes, or a bare commit with no code place. Its `kind` is what says why, and the
   content lives in the statement; a filler path is what a missing rule produces. Eight of the
   fixture's 41 entries are this shape; none of them was invented into a place.
-- **`governing_route` may be absent**, and absent is honest: 11 of 41 real target places had no memory
-  route at all (`notes/reports`, `notes`, `system`, the repository-root `pyproject.toml`). Never invent
-  a route to fill the field.
+- **`governing_route` may be absent**, and absent is honest: of the fixture's 41 entries, 3 of its 40
+  real target places had no memory route at all (`system/tools.md`, the repository-root
+  `pyproject.toml`, and a task-tree path), and a fourth entry's whole target list is empty. Never
+  invent a route to fill the field. (An earlier revision of this line said "11 of 41", which counted
+  the eight empty-`target` rulings as places and was wrong by more than three times.)
 - **A memory path is written once, without the `onboarding/` prefix** — memory-root-relative, because
   two spellings of one card are two records for one file, and the prefix is a rendering detail.
 - **`disposition` records the verdict the producer actually holds, and `disposition_source` records

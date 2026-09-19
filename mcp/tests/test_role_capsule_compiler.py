@@ -558,7 +558,14 @@ def test_operation_the_role_cannot_run_is_refused_instead_of_substituted() -> No
     assert "never selects a neighbouring operation" in error.next_action
 
 
-def test_launcher_seat_composes_its_own_core_and_is_not_a_role() -> None:
+def test_the_launcher_seat_composes_its_own_core_and_inherits_no_role_operation() -> None:
+    """The launcher is a seat with its own core, and no role's operation is ever inherited to it.
+
+    The positive shape and the refusal it implies are one rule -- the launcher's composition is its
+    own -- so they are one case: the capsule composes the launcher's core and names no role, and an
+    operation only a role could run is refused rather than substituted.
+    """
+
     result = compile_worker(binding=launcher_binding())
 
     identities = [block.identity for block in result.capsule.instructions]
@@ -566,8 +573,6 @@ def test_launcher_seat_composes_its_own_core_and_is_not_a_role() -> None:
     assert result.manifest.role is None
     assert result.manifest.seat_kind == "launcher"
 
-
-def test_launcher_is_refused_an_operation_no_role_inherits_to_it() -> None:
     error = failure(binding=launcher_binding(operation="implementation"))
 
     assert error.status == "operation-not-applicable"
@@ -985,18 +990,21 @@ def test_a_source_whose_revision_is_not_its_own_digest_is_refused() -> None:
     assert "not the digest of its bytes" in str(raised.value)
 
 
-def test_a_source_that_decodes_to_nothing_is_refused() -> None:
-    """An empty instruction body is a defect, not a block that silently does nothing."""
+def test_a_source_with_no_readable_instruction_text_is_refused_by_name() -> None:
+    """Both ways a source can hold no instruction text, and each names its own failure.
 
-    source = make_source("core:authority", content="   \n\n")
+    An empty body and a body that is not UTF-8 are one question -- is there instruction text here --
+    asked of the same accessor, so they are one case: what matters is that neither returns a block
+    that silently carries nothing, and that the two failures stay distinguishable.
+    """
 
-    with pytest.raises(ValueError) as raised:
-        source.text()
+    empty = make_source("core:authority", content="   \n\n")
 
-    assert "is empty" in str(raised.value)
+    with pytest.raises(ValueError) as blank:
+        empty.text()
 
+    assert "is empty" in str(blank.value)
 
-def test_a_source_that_is_not_utf8_text_is_refused() -> None:
     payload = b"\xff\xfe not utf-8"
     source = CapsuleSource(
         identity="core:authority",
@@ -1006,10 +1014,10 @@ def test_a_source_that_is_not_utf8_text_is_refused() -> None:
         revision=compute_content_digest(payload),
     )
 
-    with pytest.raises(CapsuleSourceError) as raised:
+    with pytest.raises(CapsuleSourceError) as undecodable:
         source.text()
 
-    assert raised.value.status == "source-not-utf8"
+    assert undecodable.value.status == "source-not-utf8"
 
 
 def test_a_selection_with_a_blank_anchor_is_refused() -> None:

@@ -607,9 +607,21 @@ def test_an_absent_database_refuses_as_an_unavailable_input_rather_than_as_empty
     assert result.page is None
 
 
-def test_a_continuation_presented_with_another_selector_refuses_and_returns_no_partial_page(
+def test_a_continuation_presented_with_another_binding_refuses_and_returns_no_partial_page(
     fixture: ReadScopeFixture,
 ) -> None:
+    """Every binding a cursor carries is checked, and none of them serves a partial page.
+
+    The selector half and the context/policy half are one rule -- a cursor is a position in one
+    named selection under one resolved context -- so they are one case: serving either mismatch would
+    append a page of one selection, or one tree, to a page of another. This was three cases until
+    they were merged, and every assertion of all three survives here.
+    """
+    _selector_binding_refuses(fixture)
+    _context_and_policy_bindings_refuse(fixture)
+
+
+def _selector_binding_refuses(fixture: ReadScopeFixture) -> None:
     """A cursor presented with a different selector is refused, and no items come back.
 
     A continuation is a position in one named selection. Serving it against another selector would
@@ -636,9 +648,7 @@ def test_a_continuation_presented_with_another_selector_refuses_and_returns_no_p
     assert foreign.page is None, "a mismatched continuation returns no partial page"
 
 
-def test_a_continuation_presented_under_another_context_or_policy_refuses(
-    fixture: ReadScopeFixture,
-) -> None:
+def _context_and_policy_bindings_refuse(fixture: ReadScopeFixture) -> None:
     """A cursor whose context or selection policy differs is refused, and no page comes back.
 
     Two of the five bindings a continuation carries, and the two the seam's own docstring names: a

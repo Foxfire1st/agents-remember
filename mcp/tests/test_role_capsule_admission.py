@@ -1189,6 +1189,18 @@ def test_the_role_lookup_answers_through_the_one_narrowing_gate() -> None:
     assert raised.value.status == "unknown-role"
     assert "'janitor'" in raised.value.detail
 
+    # The gate's other lookup, asked the same question: a name the manifest does not declare is
+    # refused by name rather than answered with a default. This was a second case until the two were
+    # merged, because both measure the one narrowing gate that turns a caller's string into a
+    # declared manifest entry.
+    assert parsed.skill_entry("l-01-agent-lifecycles").origin == "agents-remember/skills"
+
+    with pytest.raises(CapsuleCompilationError) as unknown_skill:
+        parsed.skill_entry("no-such-skill")
+
+    assert unknown_skill.value.status == "manifest-vocabulary-mismatch"
+    assert "no-such-skill" in unknown_skill.value.detail
+
 
 def test_the_specializations_field_must_be_an_array_when_present() -> None:
     """A present-but-wrong-typed optional field is refused, not ignored.
@@ -1203,6 +1215,18 @@ def test_the_specializations_field_must_be_an_array_when_present() -> None:
             document["specializations"] = value
 
         assert _refuse(_manifest_with(mutate)) == "manifest-invalid"
+
+    # The same rule one level down, in a declared value rather than the manifest: a blank identity is
+    # refused at construction instead of becoming an entry the compiler would have to name. The two
+    # were one case until they were merged -- both measure a required string being blank.
+    with pytest.raises(ValueError) as blank:
+        CapsuleDeclaredInstruction(
+            identity="   ",
+            composition_root="core",
+            authorities=("core:authority:shared-core",),
+        )
+
+    assert "non-blank" in str(blank.value)
 
 
 def test_an_override_whose_replacement_file_is_absent_is_refused() -> None:
@@ -1285,32 +1309,6 @@ def test_an_admitted_set_that_drops_the_manifest_mid_compile_is_refused() -> Non
 
     assert raised.value.status == "source-not-declared"
     assert "does not include the composition manifest" in raised.value.detail
-
-
-def test_a_declared_instruction_with_a_blank_identity_is_refused() -> None:
-    """The declared-instruction value type refuses a blank identity."""
-
-    with pytest.raises(ValueError) as raised:
-        CapsuleDeclaredInstruction(
-            identity="   ",
-            composition_root="core",
-            authorities=("core:authority:shared-core",),
-        )
-
-    assert "non-blank" in str(raised.value)
-
-
-def test_an_unknown_skill_name_is_refused_by_the_manifest_accessor() -> None:
-    """Asking for an undeclared skill is refused, not answered with a default."""
-
-    parsed = _shipped_parsed()
-    assert parsed.skill_entry("l-01-agent-lifecycles").origin == "agents-remember/skills"
-
-    with pytest.raises(CapsuleCompilationError) as raised:
-        parsed.skill_entry("no-such-skill")
-
-    assert raised.value.status == "manifest-vocabulary-mismatch"
-    assert "no-such-skill" in raised.value.detail
 
 
 def test_composing_roots_answers_what_each_seat_kind_can_actually_contribute() -> None:

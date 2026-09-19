@@ -150,16 +150,13 @@ def test_the_metadata_table_ends_before_the_body_so_a_body_table_is_not_a_front_
     )
     assert "Invariants And Boundaries" not in parsed.front_matter.fields
 
-
-def test_an_artifact_with_no_metadata_table_is_unsupported_and_reports_what_was_not_parsed() -> (
-    None
-):
-    """Catches a silent skip: an artifact with no declared form must still be a row with evidence."""
-
-    parsed = parse_artifact("bootstrap/coverage-plan.md", NO_TABLE_TEXT)
-    assert parsed.outcome == "unsupported"
-    assert parsed.front_matter is None
-    assert parsed.unparsed_content and "generated artifact" in parsed.unparsed_content
+    # The other side of the same boundary: an artifact the parser cannot read is still parsed *into*
+    # something, so no covered artifact is silently skipped. This was a second case until the two
+    # were merged, because both measure one front-matter boundary from its two directions.
+    unsupported = parse_artifact("bootstrap/coverage-plan.md", NO_TABLE_TEXT)
+    assert unsupported.outcome == "unsupported"
+    assert unsupported.front_matter is None
+    assert unsupported.unparsed_content and "generated artifact" in unsupported.unparsed_content
 
 
 def test_a_route_overview_declares_its_scope_through_source_route_not_through_a_path() -> None:
@@ -330,16 +327,18 @@ def test_an_artifact_whose_declared_form_matches_no_entry_is_unmapped_and_not_be
     assert mappings.mapping_identity(None) == mappings.NO_MAPPING_ID
 
 
-def test_the_disposition_mapping_is_the_registrys_only_wildcard_and_supplies_no_rationale() -> None:
-    """Catches a mapping that would fill a field only a curator may author."""
+def test_no_mapping_supplies_a_field_only_a_curator_may_author() -> None:
+    """Catches a mapping that would fill a field only a curator may author, in any entry.
+
+    Two readings of one rule, and they were two cases until they were merged: exactly one entry is
+    the catch-all -- which is what makes "every artifact gets a disposition" reachable -- and no
+    entry, the catch-all included, supplies a rationale, a claim kind, an applicability or an
+    assessment.
+    """
 
     wildcards = [entry for entry in mappings.MAPPINGS if entry.artifact_doc_type == "*"]
     assert len(wildcards) == 1
     assert "rationale" not in wildcards[0].supplied_fields
-
-
-def test_no_mapping_supplies_a_claim_kind_applicability_or_assessment() -> None:
-    """Catches an importer that would classify prose: the mapping has no field for it."""
 
     authored = {"claim_kind", "applicability", "assessment_disposition"}
     for entry in mappings.MAPPINGS:

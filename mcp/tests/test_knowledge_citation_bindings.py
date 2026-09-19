@@ -200,15 +200,20 @@ def test_the_key_form_check_names_exactly_the_declared_key_forms() -> None:
 # The shared literals, checked rather than asserted.
 
 
-def test_the_prose_mark_is_the_one_the_shipped_grammar_declares() -> None:
-    """§1.2: the recorded construct's mark is a quotation, and the quotation is checked.
+def test_the_prose_mark_is_the_shipped_one_and_a_key_without_it_is_refused() -> None:
+    """§1.2: the declared mark is a quotation checked against the parser, and it is enforced.
 
-    The binding stores the construct verbatim rather than re-deriving it, so the mark is the only
-    thing this leaf has to know about the grammar. Quoting it would drift; asserting the quotation
-    against the shipped parser is what keeps it from doing so.
+    Two readings of one rule, and they were two cases until they were merged: the constant this leaf
+    quotes has to be the mark the shipped grammar declares (quoting it and never checking it is how
+    a drift starts), and a recorded construct that does not begin with it has to be refused rather
+    than stored as a prose citation it is not.
     """
 
     assert CIT_MARK == SHIPPED_CIT_MARK
+
+    with pytest.raises(ValueError, match="must begin with the declared mark"):
+        ProseCitationKey(written="([`x`], a.py:1-2)")
+    assert render_local_key(_prose_key()) == CORPUS_KEY
 
 
 @pytest.mark.parametrize("state", SHIPPED_BINDING_STATES)
@@ -250,16 +255,18 @@ def test_the_binding_vocabulary_extends_the_shipped_one_only_in_one_direction() 
         assert state not in ANCHOR_RESOLUTIONS
 
 
-def test_the_closed_vocabulary_and_its_facts_agree_in_both_directions() -> None:
-    """§4.1: one closed vocabulary, with a declared fact for every member and no member left out."""
+def test_the_closed_vocabulary_agrees_with_its_facts_and_with_every_producing_surface() -> None:
+    """§4.1: one closed vocabulary, and nothing outside it is expressible anywhere.
+
+    The closure, the facts declared for it, and the two surfaces that produce its members are one
+    rule with three readings, so they are one case: every member has a declared fact, no member is
+    duplicated or dropped, the shipped states are a subset, and a state the owner-revision resolver
+    can report is a member of the vocabulary the closure counts.
+    """
 
     assert tuple(STATE_FACTS) == BINDING_STATES
     assert len(set(BINDING_STATES)) == len(BINDING_STATES)
     assert set(SHIPPED_BINDING_STATES) <= set(BINDING_STATES)
-
-
-def test_the_owner_revision_observation_reports_only_declared_states() -> None:
-    """§4.1: the resolver reports nothing outside the vocabulary the closure counts."""
 
     for state in OWNER_REVISION_STATES:
         assert state in BINDING_STATES
@@ -346,14 +353,6 @@ def test_a_key_form_coverage_refuses_to_leave_an_uncovered_form_uncounted() -> N
         KeyFormCoverage(covered_forms=("prose_cit_body",), uncovered_counts={})
     complete = KeyFormCoverage(covered_forms=KEY_FORMS, uncovered_counts={})
     assert complete.partial() is False
-
-
-def test_a_prose_key_that_does_not_carry_the_declared_mark_is_refused() -> None:
-    """§1.2: the recorded construct must be the construct the shipped form declares."""
-
-    with pytest.raises(ValueError, match="must begin with the declared mark"):
-        ProseCitationKey(written="([`x`], a.py:1-2)")
-    assert render_local_key(_prose_key()) == CORPUS_KEY
 
 
 # ---------------------------------------------------------------------------

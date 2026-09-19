@@ -518,13 +518,10 @@ def test_an_unassessed_subject_is_displayed_unassessed_and_never_defaulted_to_co
     )
     assert payload.submission.none_is_approval is True
 
-
-def test_no_evidence_records_reads_none_recorded_with_source_inspection_still_available(
-    fixture: DiffFixture,
-) -> None:
-    """An empty evidence corpus is a stated absence, and pane 2 stays usable beside it."""
-
-    payload = render(fixture)
+    # The evidence pane's version of the same rule: an empty corpus is a *stated* absence with
+    # source inspection still available beside it, never a silent blank and never a conclusion. This
+    # was a second case until the two were merged, because both measure one rendering rule -- what
+    # the surface does when it has no record to show -- across the two panes it applies to.
     assert payload.evidence.evidence_state == "none_recorded"
     assert payload.evidence.evidence_links == ()
     assert payload.evidence.observations == ()
@@ -569,10 +566,14 @@ def test_a_detection_signal_carries_its_facts_and_scope_limitations_and_no_sever
     assert payload.knowledge.authored_effects == ()
 
 
-def test_a_stale_comparison_keeps_the_previous_input_and_disables_submission(
-    fixture: DiffFixture,
-) -> None:
-    """A comparison that has moved is labelled previous input, and nothing may be submitted to it."""
+def test_the_stale_rule_holds_in_both_directions(fixture: DiffFixture) -> None:
+    """A moved comparison is previous input with submission disabled -- and the pair is not forgeable.
+
+    One rule, two directions, and they were two cases until they were merged: the stale state has to
+    keep the previous reference, say what happened, and disable submission; and a payload that claims
+    a current comparison while disabling submission for staleness has to be unconstructible rather
+    than merely unlikely. Asserting only the first would leave the rule as a rendering convention.
+    """
 
     previous = "9" * 64
     payload = render(fixture, previous_binding_digest=previous)
@@ -582,14 +583,8 @@ def test_a_stale_comparison_keeps_the_previous_input_and_disables_submission(
     assert payload.submission.state == "disabled_stale"
     assert payload.staleness.previous_comparison_ref != payload.comparison.binding_digest
 
-
-def test_a_current_comparison_cannot_be_built_with_submission_disabled_for_staleness(
-    fixture: DiffFixture,
-) -> None:
-    """The stale rule is a constructor check: the two disagreeing states are not constructible."""
-
-    payload = render(fixture)
-    torn = payload.model_dump(mode="json")
+    current = render(fixture)
+    torn = current.model_dump(mode="json")
     torn["submission"]["state"] = "disabled_stale"
     with pytest.raises(ValidationError):
         KnowledgeReviewPayload.model_validate(torn)
