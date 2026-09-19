@@ -33,6 +33,7 @@ import pytest
 from agents_remember.application import worktree_tools
 from agents_remember.application.provider_runtime import remove_tree
 from agents_remember.application.worktree_services import build_default_worktree_services
+from agents_remember.kernel.primitives.drift_snapshot import drift_snapshot_path
 from agents_remember.memory_quality.style.citations.source_index_cache import (
     TerminalNamespaceGuard,
 )
@@ -54,6 +55,23 @@ from test_transaction_only_worktree_delivery import _public_config
 pytestmark = pytest.mark.integration
 
 PROVIDER_RUNTIME_SETUP_FILE = "setup-progress.json"
+# The drift-snapshot entry a dry run reads: the producer's own preview shape, with the key
+# `kernel/primitives/drift_snapshot.py::_remove_snapshot_file` actually emits.
+DRIFT_PREVIEW_ENTRY = {
+    "path": "/x/drift.json",
+    "repository": "code",
+    "branch": "leaf",
+    "removed": False,
+    "would_remove": True,
+}
+# A real run that reclaimed nothing and explained nothing -- the shape the validator's own
+# contract exists to refuse, and the one case the preview allowance must NOT swallow.
+DRIFT_REASONLESS_ENTRY = {
+    "path": "/x/drift.json",
+    "repository": "code",
+    "branch": "leaf",
+    "removed": False,
+}
 
 
 class _NoManagedCitationCache:
@@ -359,3 +377,104 @@ def test_a_reclaimed_but_surviving_provider_runtime_reports_why_it_survived(
     assert result["removed"] is False
     assert result["reclaimedViaDocker"] is True
     assert result["reason"] == "still present after docker ownership reclaim"
+
+
+def test_a_drift_snapshot_preview_is_not_read_as_an_unreclaimed_result() -> None:
+    """`T62`: the preview crashed on the output its own producer emits -- and must not.
+
+    ``worktrees/modules/terminal_validation.py`` built the drift-snapshot expectation as
+    ``TerminalExpectation(done_key="removed")`` while the worktree, branch and directory
+    collections beside it pass ``preview=result.preview``. ``_done_blockers`` reads the pending
+    key OFF that flag (``would_remove`` for a preview, ``would_delete`` for a real run), and the
+    producer answers a dry run with ``would_remove``. With the flag unset the entry was neither
+    reclaimed, nor pending, nor reasoned, so ``_blocker`` raised: every preview of a task that
+    HAS a drift snapshot failed, while the real run that removed it succeeded.
+
+    The case is the preview shape and asserts **no blocker and no raise**. Its control is the
+    case below, which asserts the same call still refuses a reason-less entry -- so this repair
+    cannot be satisfied by weakening the validator's own contract.
+    """
+
+    preview_shape = TerminalResult(
+        providers={},
+        worktrees={},
+        branches={},
+        directories={},
+        drift_snapshots={"code": dict(DRIFT_PREVIEW_ENTRY)},
+        preview=True,
+    )
+    assert terminal_result_blockers(preview_shape) == []
+
+    # The control that locates the fault: the IDENTICAL shape passes in the worktree
+    # collection, which excludes "the producer is malformed" and pins it to the drift branch.
+    worktree_control = TerminalResult(
+        providers={},
+        worktrees={"code": dict(DRIFT_PREVIEW_ENTRY)},
+        branches={},
+        directories={},
+        drift_snapshots=None,
+        preview=True,
+    )
+    assert terminal_result_blockers(worktree_control) == []
+
+
+def test_a_real_reasonless_drift_snapshot_still_refuses_rather_than_passing_as_preview() -> None:
+    """The validator's own contract survives the preview allowance, measured not asserted.
+
+    A real (non-preview) terminal result whose drift snapshot was not reclaimed and carries no
+    reason is a producer defect, and the validator must still refuse it by name. If the repair
+    above had been made by teaching the validator to tolerate an unexplained entry, this case
+    would pass as an empty blocker list -- which is exactly the failure mode it exists to catch.
+    """
+
+    reasonless = TerminalResult(
+        providers={},
+        worktrees={},
+        branches={},
+        directories={},
+        drift_snapshots={"code": dict(DRIFT_REASONLESS_ENTRY)},
+        preview=False,
+    )
+    with pytest.raises(RuntimeError) as refusal:
+        terminal_result_blockers(reasonless)
+
+    assert "driftSnapshot=code" in str(refusal.value)
+    assert "carries no reason" in str(refusal.value)
+
+
+def test_the_cleanup_preview_of_a_task_with_a_drift_snapshot_reports_no_blocker(
+    tmp_path: Path, bound_worktree_services
+) -> None:
+    """The level that was missing: the same defect driven through the tool, not the validator.
+
+    `T62` was found live by an ordinary ``lifecycle_finalize_task(dry_run=True)`` on a task whose
+    code branch had a drift snapshot -- an artifact that only exists once something has written
+    one, which is why three earlier leaves' previews ran clean. This case creates that file at
+    the product's own resolved path and drives ``worktree_cleanup(dry_run=True)`` in preview
+    mode: it must answer ``would-cleanup`` with no blockers, change nothing, and leave the
+    snapshot file in place.
+    """
+
+    closed = _landed_leaf(tmp_path)
+    config = _landed_leaf_config(tmp_path, closed)
+    snapshot = drift_snapshot_path(
+        closed.coordination_root,
+        repository=closed.code_worktree.name,
+        branch=closed.code_work_branch,
+    )
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    snapshot.write_text('{"schema": "ar-drift-snapshot/v1"}\n', encoding="utf-8")
+    assert snapshot.exists(), "the preview case needs the snapshot to exist"
+
+    preview = worktree_tools.worktree_cleanup_tool(
+        config,
+        contract_path=closed.contract_path.as_posix(),
+        dry_run=True,
+    )
+
+    assert preview["state"] == "would-cleanup", preview
+    assert preview.get("blockers") in (None, []), preview.get("blockers")
+    # A preview is not a result: nothing it reported as reclaimable may actually be gone.
+    assert snapshot.exists(), "the preview removed the drift snapshot it only planned to"
+    assert closed.code_worktree.exists(), "the preview removed a worktree"
+    assert load_contract(closed.contract_path).cleanup == "pending"

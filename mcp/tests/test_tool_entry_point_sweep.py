@@ -79,25 +79,40 @@ LEAF_ID = "L1"
 WORKTREE_NAME = "w"
 
 # ---------------------------------------------------------------------------------------
-# T34: the tools that lose the whole envelope. Owner L6.
+# T34: the tools that lose the whole envelope. Owner L6 -- REPAIRED, and the pin is now
+# empty on purpose rather than deleted.
 #
-# Every entry names an ordinary precondition, not a crash: an absent provider, or a memory
-# repository whose default-branch authority was never recorded. `provider_status` and
-# `memory_baseline_status` meet the SAME conditions and answer with a typed payload, which
-# is why this is a defect rather than a contract. When L6 repairs one, remove that entry in
-# the same change; the sweep's equality assertion is what makes the removal mandatory.
+# `260918-TSIP-L6` repaired all nine at `application/provider_tools.py` and
+# `application/memory_tools.py`: each now answers with the standard refusal envelope
+# (`ok:false` plus `state`/`status`/`detail`/`nextAction`) instead of raising, which is what
+# its own siblings `provider_status` (`providers.state: "noProviders"`) and
+# `memory_baseline_status` already did under the identical absence.
+#
+# This constant was NOT deleted when the repair landed, because deleting it would delete the
+# only place that says what the sweep is allowed to observe. It is empty, and the rule stands:
+# an entry may only be added here deliberately, in the change that introduces the raiser this
+# list would then pin. Reintroducing one means editing BOTH this constant and
+# `test_the_pinned_raisers_are_exactly_the_ones_that_lose_the_envelope`, which asserts this set
+# equals the sweep's observed error arm in both directions.
 # ---------------------------------------------------------------------------------------
-ENVELOPE_LOSING_RAISERS: dict[str, str] = {
-    "memory_baseline_adopt": "memory repository default-branch authority is unavailable",
-    "grepai_search": "grepai-memory provider is not configured",
-    "grepai_trace": "grepai-memory provider is not configured",
-    "cgc_symbol_search": "providers are disabled in the on-disk authority settings",
-    "cgc_callers": "providers are disabled in the on-disk authority settings",
-    "cgc_callees": "providers are disabled in the on-disk authority settings",
-    "cgc_dependencies": "providers are disabled in the on-disk authority settings",
-    "cgc_complexity": "providers are disabled in the on-disk authority settings",
-    "cgc_visualize": "providers are disabled in the on-disk authority settings",
-}
+ENVELOPE_LOSING_RAISERS: frozenset[str] = frozenset()
+
+# What the repaired nine must answer with now. Derived from the roster rather than hard-coded,
+# so the case below cannot rot: these are the tools T34 named, and every one of them must still
+# be advertised and must still answer in the envelope.
+T34_REPAIRED_TOOLS: frozenset[str] = frozenset(
+    {
+        "memory_baseline_adopt",
+        "grepai_search",
+        "grepai_trace",
+        "cgc_symbol_search",
+        "cgc_callers",
+        "cgc_callees",
+        "cgc_dependencies",
+        "cgc_complexity",
+        "cgc_visualize",
+    }
+)
 
 # ---------------------------------------------------------------------------------------
 # The second pin, same defect, different precondition: the lifecycle family's *state*.
@@ -162,12 +177,16 @@ KNOWN_MEMORY_SCAFFOLD_ADDITIONS = frozenset({"system/sources.md", "system/tools.
 # next action: an envelope, but one a caller cannot act on without reading prose. Same rule as
 # the pinned raisers — a new member is a failure unless it is added here deliberately, in the
 # change that introduces it.
-UNMARKED_NOT_OK: dict[str, str] = {
-    "citation_migrate": (
-        "reports a no-work run (all counters zero) as ok:false with no status, state or "
-        "next action, so a caller cannot tell 'nothing to migrate' from 'refused'"
-    ),
-}
+#
+# EMPTY ON PURPOSE, and not deleted: `260918-TSIP-L6` repaired `T64` (the `citation_*` family
+# split its `ok` vocabulary on the same preview shape). `migration.payload` now answers
+# ``ok: true`` on a dry run that planned its complete conversion -- matching its sibling
+# `citation_fix` -- and declares the distinction the old `ok` folded together in
+# ``state``/``outcome``/``findingsRemaining``. So there is no bare ``ok:false`` left to pin,
+# and the constant stays here because it is the only place that says what a refusal with no
+# identity would look like. The rule above still governs: adding an entry means editing this
+# constant in the change that introduces the payload.
+UNMARKED_NOT_OK: dict[str, str] = {}
 
 REFUSAL_IDENTITY_KEYS = ("status", "state", "refusalStatus")
 NAVIGATION_KEYS = ("nextStep", "nextTool", "nextAction", "nextArgs")
@@ -919,6 +938,14 @@ class EntryPointProbeTests(unittest.TestCase):
         )
 
     def test_the_pinned_raisers_are_exactly_the_ones_that_lose_the_envelope(self) -> None:
+        """The pin is empty because `T34` is repaired -- and the pin still guards the surface.
+
+        Deleting the constant when the repair landed would have deleted the only place that
+        records what the sweep may observe. Keeping it empty keeps the guard: this case asserts
+        the pin equals the observed error arm in BOTH directions, so a reintroduced raiser fails
+        here by name, and an entry added to the pin without a raiser fails here too.
+        """
+
         observed = {tool for tool, row in self.results.items() if row["arm"] == "error"}
         self.assertEqual(
             set(ENVELOPE_LOSING_RAISERS),
@@ -926,6 +953,58 @@ class EntryPointProbeTests(unittest.TestCase):
             "a raiser appeared or disappeared: update ENVELOPE_LOSING_RAISERS in the same "
             "change that repairs or introduces it (T34, owner L6)",
         )
+        self.assertEqual(
+            set(),
+            observed,
+            "an envelope-losing raiser is on the swept surface again; T34's repair (L6) has "
+            "regressed, or a new tool arrived without a refusal envelope",
+        )
+
+    def test_the_t34_family_answers_with_a_named_refusal_instead_of_raising(self) -> None:
+        """`T34`'s positive control: the nine repaired tools answer, and the answer is typed.
+
+        Before the repair each of these nine raised `ToolError` with ``envelope_keys=[]``, so
+        the caller lost ``ok``/``status``/``nextAction``. This case is the durable form of that
+        finding: every one of the nine is still advertised, still answers, and the answer names
+        **what refused** (a refusal identity), **why** (a non-empty detail) and **the next
+        action**.
+
+        Its control is not a comment. The same assertions are run against an `ok: false` payload
+        with the refusal keys stripped, and that control must fail them -- so the case proves it
+        can see a refusal that stopped naming anything rather than describing one.
+        """
+
+        def assert_named_refusal(tool: str, payload: dict[str, Any]) -> None:
+            self.assertEqual(False, payload.get("ok"), f"{tool} did not refuse")
+            identity = refusal_marks(payload)
+            self.assertTrue(
+                [key for key in REFUSAL_IDENTITY_KEYS if key in identity],
+                f"{tool} refused without a refusal identity: {sorted(payload)}",
+            )
+            self.assertTrue(
+                str(payload.get("detail") or "").strip(),
+                f"{tool} refused without saying why (no detail)",
+            )
+            self.assertTrue(
+                [key for key in NAVIGATION_KEYS if key in identity],
+                f"{tool} refused without a machine-readable next action: {sorted(payload)}",
+            )
+
+        missing = T34_REPAIRED_TOOLS - set(PUBLIC_TOOLS)
+        self.assertEqual(set(), missing, "a repaired T34 tool is no longer advertised")
+        self.assertEqual(
+            set(),
+            T34_REPAIRED_TOOLS - set(self.results),
+            "the sweep did not invoke a repaired T34 tool",
+        )
+        for tool in sorted(T34_REPAIRED_TOOLS):
+            row = self.results[tool]
+            self.assertNotEqual("error", row["arm"], f"{tool} lost the envelope again")
+            assert_named_refusal(tool, row["payload"])
+
+        # The control: the same predicate, on the shape a bare raise would have produced.
+        with self.assertRaises(AssertionError):
+            assert_named_refusal("grepai_search", {"ok": False, "operation": "grepai_search"})
 
     def test_the_state_dependent_raisers_lose_the_envelope_when_unprepared(self) -> None:
         """The second pin is measured, not declared: the four-state matrix is re-derived."""

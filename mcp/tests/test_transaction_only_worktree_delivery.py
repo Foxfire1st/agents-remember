@@ -272,6 +272,15 @@ def test_public_closeout_commits_code_and_memory_without_acceptance_tools(
     # two commits and their ancestry are the whole record of what it did.
     assert applied["ok"] is True, applied
     assert applied["state"] == "closed", applied
+    # The response's OWN address, in the envelope's spelling. `status_payload` emits the
+    # snake_case `contract_path`; the guidance guard that a seat's next move depends on reads
+    # `contractPath`/`enclosurePath` (`application/tool_response.py::bound_next_step`), so a
+    # closed closeout that declares neither has `response_paths` empty and the guard withholds
+    # the guidance ENTIRELY -- the seat silently loses "integrate the task branches". This is
+    # the producer half of `260918-TSIP` `T54`; the guard half is pinned in
+    # `test_response_address_binding.py`, and this is the only case that drives the real
+    # producer end to end.
+    assert applied["contractPath"] == contract.contract_path.as_posix(), applied.get("contractPath")
     closed = load_contract(contract.contract_path)
     # The reload above rebinds `contract`, so the optional memory worktree and ledger
     # path must be narrowed again before they are read.

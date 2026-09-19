@@ -4,7 +4,26 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.git_command import run_git
+
+
+class BranchAuthorityUnavailable(AgentsRememberError):
+    """A repository's default-branch authority was never RECORDED.
+
+    This is a CONDITION, not a crash: the repository exists and simply does not yet carry the
+    authority a branch mutation requires, and the error's own message names the remedy
+    (``memory_init`` records it; ``origin/HEAD`` supplies it for a code repository). It is a
+    typed member of the product's error family so a caller can answer it in the response
+    envelope instead of letting it escape as a traceback in which the caller loses
+    ``ok``/``status``/``nextAction`` -- the class `260918-TSIP` `T34` recorded, measured on
+    ``memory_baseline_adopt``.
+
+    Deliberately NOT this class: a recorded authority that is malformed, or that names a ref
+    which does not resolve. Those are refusals of a state a caller must understand and change
+    rather than an absence a sibling tool already reports, and they keep raising -- widening
+    this type to cover them would move the boundary the authority tests hold.
+    """
 
 
 def canonical_local_branch(repository: Path, branch: str) -> str:
@@ -41,7 +60,7 @@ def repository_default_branch(repository: Path) -> str:
 
     branch = _remote_repository_default_branch(repository)
     if branch is None:
-        raise RuntimeError(
+        raise BranchAuthorityUnavailable(
             f"repository default-branch authority is unavailable for {repository}; "
             "configure origin/HEAD before task branch mutation"
         )
@@ -67,7 +86,7 @@ def memory_repository_default_branch(repository: Path) -> str:
     )
     branch = local.stdout.strip()
     if local.returncode != 0 or not branch:
-        raise RuntimeError(
+        raise BranchAuthorityUnavailable(
             f"memory repository default-branch authority is unavailable for {repository}; "
             "initialize it through memory_init before task branch mutation"
         )

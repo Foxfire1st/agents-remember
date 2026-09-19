@@ -113,8 +113,30 @@ def closeout_changed_paths(contract) -> dict[str, list[str]]:
 
 
 def _bounded_paths(paths: list[str]) -> dict[str, object]:
-    """Count plus capped sample so committed-range lists never flood the payload."""
-    return {"count": len(paths), "sample": paths[:PATH_SAMPLE_LIMIT]}
+    """Count plus capped sample so committed-range lists never flood the payload.
+
+    Every entry is a real path: a blank is refused here rather than counted, because a
+    ``count`` that includes entries the sample cannot name is a number an operator cannot
+    audit (`260918-TSIP` `T71`).
+    """
+
+    named = [path for path in paths if path.strip()]
+    return {"count": len(named), "sample": named[:PATH_SAMPLE_LIMIT]}
+
+
+def _refreshed_onboarding_paths(entries: list[dict[str, str]]) -> list[str]:
+    """The refreshed onboarding documents, each named by the path that identifies it.
+
+    A refresh entry is either a *source* file (``source_path``) or a regenerated **document**
+    whose own path is the only identity it has -- the citation/carryover pass appends those
+    with ``source_path: ""`` because there is no source file behind them
+    (``worktrees/modules/onboarding.py::_refresh_regenerated_documents``). Reading
+    ``source_path`` alone turned every document entry into a blank string, so the payload
+    reported ``count 19`` with 2 real paths and 17 blanks (`T71`); the document path was
+    already in ``onboarding_file`` and was discarded at exactly this boundary.
+    """
+
+    return [item.get("source_path") or item.get("onboarding_file") or "" for item in entries]
 
 
 def _bounded_refresh_plan_view(plan: OnboardingRefreshPlan) -> dict[str, object]:
@@ -575,12 +597,21 @@ def _closed_result_payload(updated, facts: _CloseoutResultFacts) -> dict[str, An
     memory = facts.memory
     payload = {
         "state": "closed",
+        # The response's OWN task address, in the envelope's spelling. `status_payload` emits
+        # the snake_case `contract_path`, while the guidance guard that a seat's next move
+        # depends on reads `contractPath`/`enclosurePath` (`application/tool_response.py::
+        # bound_next_step`) -- so without this key a closed closeout declared no address at
+        # all, the guard had nothing to compare against, and guidance derived from whatever
+        # enclosure the *process* happened to hold was emitted verbatim. That is exactly how a
+        # closeout for one leaf shipped a `nextStep` naming another master's contract
+        # (`260918-TSIP` `T54`).
+        "contractPath": updated.contract_path.as_posix(),
         **status_payload(updated),
         "summary": "Closeout completed; integrate the task branches back into their source branches.",
         "code_commit": facts.code_commit,
         "memory_content_commit": memory.memory_commit,
         "refreshed_onboarding": _bounded_paths(
-            [item["source_path"] for item in memory.refreshed_onboarding]
+            _refreshed_onboarding_paths(memory.refreshed_onboarding)
         ),
         "refreshed_entities": memory.refreshed_entities,
         "refreshed_route_overviews": memory.refreshed_route_overviews,
