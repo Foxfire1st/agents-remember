@@ -86,6 +86,10 @@ class RangeResolutionAffectedExecutor:
                 code_root=self._context.codeRoot,
                 memory_root=self._context.memoryRoot,
                 candidate_tree=unit.codeTree,
+                # Both sides are bound: this unit resolves the citations of an onboarding
+                # document, so a memory-rooted citation must be answered by the memory tree
+                # rather than by whatever the filesystem happens to hold (D-43).
+                memory_candidate_tree=plan.memoryTree,
             ),
             only=unit.document,
             index=self._context.citationIndex,

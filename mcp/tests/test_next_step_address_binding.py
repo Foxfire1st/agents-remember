@@ -138,14 +138,13 @@ def test_two_addressed_contracts_in_sequence_yield_two_different_hints(tmp_path:
     )
     state = _live_state()
 
-    # ``compute_next_step`` reads the guidance by key, so each call widens the ``TypedDict`` the
-    # way the production edge does (``_guidance_for`` in ``application.next_step``).
-    first_step = compute_next_step(
-        state, first, "worktree_status", guidance=dict(lifecycle_guidance(first))
-    )
-    second_step = compute_next_step(
-        state, second, "worktree_status", guidance=dict(lifecycle_guidance(second))
-    )
+    # The edge widens the TypedDict before it calls in (``next_step._guidance_for``): the hint
+    # layer reads the guidance defensively by key, so ``compute_next_step`` declares a plain dict
+    # and this case calls it the way the production path does.
+    first_guidance = dict(lifecycle_guidance(first))
+    second_guidance = dict(lifecycle_guidance(second))
+    first_step = compute_next_step(state, first, "worktree_status", guidance=first_guidance)
+    second_step = compute_next_step(state, second, "worktree_status", guidance=second_guidance)
 
     assert first_step is not None and second_step is not None
     assert first_step.summary != second_step.summary

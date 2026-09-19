@@ -185,16 +185,15 @@ class AtomicSeriesActivationFact(StrictResponseModel):
     detail: str | None = Field(default=None, max_length=8192)
 
 
-class AtomicSeriesActivationReleaseFact(StrictResponseModel):
-    """Terminal release evidence for the exact selected series, or its refusal.
+class AtomicSeriesActivationRelease(StrictResponseModel):
+    """What one terminal series operation did with the exact activation selection.
 
-    Produced by ``with_terminal_atomic_series_release``
-    (``worktrees/activation/atomic_series_activation_terminal.py:36,64``) on every
-    terminal series operation: ``state`` names the release outcome, and the error
-    triple is present only on a failed release. The success path of
-    ``lifecycle_finalize_task`` copies it through; the ``activation-release-blocked``
-    arm spreads the bridge payload whole, so declaring it here is what keeps the
-    terminal response inside its own contract instead of raising after the work.
+    ``with_terminal_atomic_series_release`` writes this on the SUCCESS path of a series closeout,
+    integration, cleanup, abandonment or finalize, so it is part of those responses' contracts
+    rather than an unchecked extra: it was declared nowhere in ``mcp/src`` for as long as it was
+    written, and the strict response model that must carry it therefore rejected the payload of a
+    *successful* terminal operation (D-47). The five states are the writer's own closed vocabulary,
+    so a new one has to be added in both places rather than only where it is emitted.
     """
 
     state: Literal[

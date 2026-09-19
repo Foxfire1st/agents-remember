@@ -9,7 +9,10 @@ operation must not do.
 
 from __future__ import annotations
 
+import ast
+import re
 from pathlib import Path
+from typing import get_args
 from uuid import UUID, uuid4
 
 import pytest
@@ -26,6 +29,7 @@ from agents_remember.models.knowledge.candidate import (
     ChangeBatch,
     ExpectedRecord,
     MutationResult,
+    ProposedCommand,
     RemoveFamilyMember,
     RemoveRealizationClaim,
     RemoveSourceAnchor,
@@ -114,10 +118,12 @@ def claim_draft(*, claim_id: str, revision_id: str) -> RealizationClaimDraft:
 def test_every_declared_command_is_applied_and_read_back(
     candidate: CandidateHarness,
 ) -> None:
-    """All twelve command kinds are reachable, and each one's effect is readable afterwards.
+    """Every command kind the union declares is reachable, and each effect is readable after.
 
     This is the union's own coverage: if a command kind lost its apply step, or wrote a row that a
     reader cannot see, one of the two batches below would not come back as the identity it authored.
+    The count is deliberately not restated here either -- the union's own annotation is its
+    membership, and a case that pinned a number would have to be edited by every widening (D-40).
     """
 
     seeds = CommandSeeds()
@@ -206,6 +212,32 @@ def test_every_declared_command_is_applied_and_read_back(
     finally:
         store.close()
 
+    # D-40, the same subject from the other side: the union's own annotation IS its membership, so
+    # the prose that describes it states no count. It said "twelve" in three places while the union
+    # carried thirty-one members, and a retyped count is a second declaration that rots on its own.
+    # The sites are extracted by their own structure -- the module docstring, ``_refuse_unreachable``'s
+    # docstring, and the comment block above the union -- so an edit that reintroduces a number fails
+    # here instead of being discovered by a reader who trusted it.
+    sites = {
+        "memory/knowledge/candidate.py": _module_docstring("memory/knowledge/candidate.py"),
+        "memory/knowledge/batch_commands.py": _function_docstring(
+            "memory/knowledge/batch_commands.py", "_refuse_unreachable"
+        ),
+        "models/knowledge/candidate.py": _comment_block_above(
+            "models/knowledge/candidate.py", "ProposedCommand = Annotated["
+        ),
+    }
+    declared = len(get_args(get_args(ProposedCommand)[0]))
+    assert declared > 0
+    for path, prose in sites.items():
+        assert prose.strip(), f"{path}: the union's prose site is gone, so this proves nothing"
+        normalized = " ".join(re.sub(r"[#*`]", " ", prose).split())
+        claims = [match.group(0) for match in _CARDINAL_CLAIM.finditer(normalized)]
+        assert claims == [], (
+            f"{path} restates the command union's membership ({claims}) while its one declaration "
+            f"carries {declared} members; state no count instead of a second one"
+        )
+
 
 def test_a_receipt_reports_the_rows_the_store_now_holds(
     candidate: CandidateHarness,
@@ -250,6 +282,43 @@ def test_a_receipt_reports_the_rows_the_store_now_holds(
     assert result.before.repository_id == candidate.repository_id
     assert result.after.logical_digest == candidate.logical_digest()
     assert result.before.logical_digest != result.after.logical_digest
+
+    # D-42: one entry per row written, even when two commands touch the same row. ``add_realization_
+    # claim`` writes the anchor it cites when the batch did not place that anchor first, so the
+    # documented anchor-then-claim order reported that anchor twice -- once per command -- and a
+    # consumer counting entries over-counted the rows it wrote. The whole-list ingest in the
+    # knowledge lane places the anchor and the citing claim adjacent by design, so the second batch
+    # below is the shipped shape rather than a contrived one.
+    claim_seeds = CommandSeeds()
+    cited = candidate.apply(
+        candidate.batch(
+            AddInvariantRevision(
+                revision=revision_draft(
+                    candidate,
+                    invariant_id=seeds.invariant_id,
+                    revision_id=seeds.successor_id,
+                    predecessors=(seeds.revision_id,),
+                    statement="A successor the citing claim resolves against.",
+                )
+            ),
+            AddSourceAnchor(anchor=anchor_draft(claim_seeds.anchor_id)),
+            AddRealizationClaim(
+                claim=claim_draft(claim_id=claim_seeds.claim_id, revision_id=seeds.successor_id),
+                anchor=AnchorReference(anchor_id=str(claim_seeds.anchor_id)),
+            ),
+        )
+    )
+    assert cited.state == "changed"
+    entries = [(row.table, row.record_id) for row in cited.changed]
+    assert len(entries) == len(set(entries)), (
+        f"a receipt entry is a row the batch wrote, so no row may appear twice: {entries}"
+    )
+    assert set(entries) == {
+        ("invariant_revision", seeds.successor_id),
+        ("source_anchor", str(claim_seeds.anchor_id)),
+        ("realization_claim", claim_seeds.claim_id),
+    }
+    assert cited.after.logical_digest == candidate.logical_digest()
 
 
 def test_a_changed_receipt_must_name_at_least_one_touched_record(
@@ -434,6 +503,44 @@ def test_the_context_digest_seals_the_whole_resolved_context(
     tampered = context.model_copy(update={"candidate_ref": "draft:somewhere-else"})
     with pytest.raises(ValueError, match="context_digest"):
         type(context).model_validate(tampered.model_dump(mode="json"))
+
+
+_PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "src" / "agents_remember"
+
+_CARDINAL_CLAIM = re.compile(
+    r"\b(?:\d+|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|"
+    r"fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty)\b"
+    r"(?:\s+[\w'-]+){0,2}\s+(?:commands|command kinds|kinds)\b",
+    re.IGNORECASE,
+)
+
+
+def _module_docstring(relative: str) -> str:
+    source = (_PACKAGE_ROOT / relative).read_text(encoding="utf-8")
+    return ast.get_docstring(ast.parse(source, filename=relative)) or ""
+
+
+def _function_docstring(relative: str, name: str) -> str:
+    source = (_PACKAGE_ROOT / relative).read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(source, filename=relative)):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return ast.get_docstring(node) or ""
+    raise AssertionError(f"{relative} declares no {name!r}, so its prose cannot be checked")
+
+
+def _comment_block_above(relative: str, declaration: str) -> str:
+    lines = (_PACKAGE_ROOT / relative).read_text(encoding="utf-8").splitlines()
+    index = next(
+        (position for position, line in enumerate(lines) if line.startswith(declaration)), None
+    )
+    if index is None:
+        raise AssertionError(f"{relative} declares no {declaration!r}")
+    block: list[str] = []
+    cursor = index - 1
+    while cursor >= 0 and lines[cursor].lstrip().startswith("#"):
+        block.append(lines[cursor])
+        cursor -= 1
+    return "\n".join(reversed(block))
 
 
 def _invariant_digest(harness: CandidateHarness, invariant_id: str) -> str:

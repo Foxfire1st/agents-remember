@@ -460,7 +460,12 @@ def _run(request: PreparedMemoryCertificationRequest) -> FinalCertificationResul
     # match the exact Git tree. HEAD-based final checks use only the proved view.
     logical_code = Path(pair.codeRoot)
     with _admitted_source_index(
-        Trees(logical_code, memory, candidate_tree=candidate.code.candidateTree)
+        Trees(
+            logical_code,
+            memory,
+            candidate_tree=candidate.code.candidateTree,
+            memory_candidate_tree=candidate.memory.candidateTree,
+        )
     ) as index:
         scope = compile_scope_manifest(
             authority,

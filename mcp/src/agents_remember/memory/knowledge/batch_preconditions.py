@@ -23,7 +23,6 @@ Four rules shape the checks:
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from collections.abc import Set as AbstractSet
 from typing import TYPE_CHECKING
 
 from agents_remember.memory.knowledge import (
@@ -1322,7 +1321,7 @@ def _census_check(
     store: OpenedKnowledgeStore,
     index: int,
     command: ChangeCommand,
-    pending: AbstractSet[tuple[str, str]],
+    pending: set[tuple[str, str]],
 ) -> None:
     """Check one census command against its record group's own shape rules.
 

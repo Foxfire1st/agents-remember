@@ -119,6 +119,10 @@ BATCH_PATH = "src/batch.py"
 RESOLUTION_PATH = "src/resolution.py"
 AUXILIARY_PATH = "src/anchors.py"
 MISMATCH_PATH = "src/timeout.py"
+# A recorded path whose language the shipped extractor has NO grammar for. It is what makes the read
+# rail's one remaining ``unsupported_locator`` reachable from the fixture: a symbol cannot be told
+# from a mention in a language nothing parses, so the observation reports that instead of guessing.
+UNPARSED_PATH = "src/schema.sql"
 
 # The blob identity recorded for the mismatch claim is deliberately not the one the fixture
 # repository holds at that path, so the observation is a real comparison and not a fixture fact.
@@ -687,12 +691,21 @@ def _write_git_tree(fixture: ReadScopeFixture) -> None:
     _git(fixture.git_root, ["config", "user.email", "fixture@example.invalid"])
     _git(fixture.git_root, ["config", "user.name", "read fixture"])
     for path, text in (
-        (INTEGRATION_PATH, "# integration\nshared retry budget\n"),
+        # ``INTEGRATION_PATH`` carries a real nested Python definition beside the prose the fixture
+        # is named for: a symbol locator is observed through the shipped tree-sitter extractor, so
+        # the tree has to hold a construct that extractor can actually bind -- ``SharedBudget`` at
+        # line 5 and its ``retry_budget`` method at 6-7.
+        (
+            INTEGRATION_PATH,
+            "# integration\nshared retry budget\n\n\nclass SharedBudget:\n"
+            "    def retry_budget(self) -> int:\n        return 3\n",
+        ),
         (SYNCHRONIZATION_PATH, "# synchronization\nshared retry budget\npropagated\n"),
         (BATCH_PATH, "# batch\none transaction\n"),
         (RESOLUTION_PATH, "# resolution\n"),
         (AUXILIARY_PATH, "# anchors\n"),
         (MISMATCH_PATH, "# timeout\nchanged bytes\n"),
+        (UNPARSED_PATH, "-- schema\nCREATE TABLE budget (attempts INTEGER);\n"),
     ):
         target = fixture.git_root / path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -716,6 +729,7 @@ def _write_git_tree(fixture: ReadScopeFixture) -> None:
                 RESOLUTION_PATH,
                 AUXILIARY_PATH,
                 MISMATCH_PATH,
+                UNPARSED_PATH,
             )
         },
     )

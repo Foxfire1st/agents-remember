@@ -798,9 +798,10 @@ class GeneratedHistoryInsertionOrderTests(TreeCase):
     )
 
     def render(self, at: datetime) -> str:
-        parts: list[str] = ["# card", "", "## Update History", *self.ENTRIES, ""]
-        document = "\n".join(parts)
-        lines = document.split("\n")
+        document = "\n".join(("# card", "", "## Update History", "", *self.ENTRIES, ""))
+        # The join of literals is a ``LiteralString``, whose ``split`` answers ``list[LiteralString]``;
+        # the projected document is an ordinary ``str`` list, and the two shipped helpers declare it.
+        lines = list[str](document.split("\n"))
         heading = deterministic_projection.history_section_line(lines)
         assert heading is not None
         bullet = deterministic_projection.history_bullet(

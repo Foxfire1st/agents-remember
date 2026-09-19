@@ -336,6 +336,119 @@ class AtomicSeriesLeafSyncPositionTests(unittest.TestCase):
         self.assertEqual(refused.exception.status, "atomic-series-leaf-chain-invalid")
         self.assertIn(self.code_foreign, str(refused.exception))
 
+    def test_a_position_that_descends_from_a_step_does_not_vacate_it(self) -> None:
+        """A recorded position reaching PAST a step cannot erase the foreign commit inside it.
+
+        The rail used to subtract every recorded position from the revision walk
+        (``rev-list <later> --not <earlier> <positions>``). Subtraction removes everything a
+        position reaches, so one position descending from the step's own endpoint removed the whole
+        step and the check passed vacuously: a genuinely foreign commit between the previous
+        landing and the next leaf's base was admitted. The repair tests MEMBERSHIP instead, and
+        this case pins the four ways the vacating entry can be supplied -- recorded by the leaf
+        whose own step is checked, and recorded by a different ordered leaf -- on both spines.
+
+        Both directions of the property are one assertion: the vacated step is refused AND names
+        the commit that is neither the step's endpoint nor a recorded position.
+        """
+
+        code_out = _commit(self.code, "e.txt", "code out")
+        memory_foreign = _commit(self.memory, "m5.txt", "memory foreign")
+        memory_out = _commit(self.memory, "m6.txt", "memory out")
+
+        for spine, recorder in (
+            ("code", "own"),
+            ("memory", "own"),
+            ("code", "other"),
+            ("memory", "other"),
+        ):
+            with self.subTest(spine=spine, recorder=recorder):
+                self._assert_the_vacating_position_is_refused(
+                    spine=spine,
+                    own_leaf=recorder == "own",
+                    code_out=code_out,
+                    memory_foreign=memory_foreign,
+                    memory_out=memory_out,
+                )
+
+    def _assert_the_vacating_position_is_refused(
+        self,
+        *,
+        spine: str,
+        own_leaf: bool,
+        code_out: str,
+        memory_foreign: str,
+        memory_out: str,
+    ) -> None:
+        """One vacating configuration, built so the named spine is the one that must refuse."""
+
+        series = self._series()
+        vacated_code = spine == "code"
+        # The vacating entry is recorded against the spine under test: that spine's leaf base is
+        # advanced onto a commit it never reconciled with (``code_foreign`` / ``memory_foreign``),
+        # while the position the contract records reaches PAST it. The other spine keeps D-45's
+        # admitted shape, so a refusal can only come from the vacated spine.
+        vacating = (
+            {"codeBaseTo": code_out, "memoryBaseTo": self.memory_synced}
+            if vacated_code
+            else {"codeBaseTo": self.code_synced, "memoryBaseTo": memory_out}
+        )
+        first = self._leaf(
+            series,
+            "L1",
+            code=_Side(self.code_first, self.code_second),
+            memory=_Side(self.memory_base, self.memory_first),
+        )
+        second = self._leaf(
+            series,
+            "L2",
+            code=(
+                _Side(self.code_foreign, self.code_foreign)
+                if vacated_code
+                else _Side(self.code_synced, self.code_synced)
+            ),
+            memory=(
+                _Side(memory_foreign, memory_foreign)
+                if not vacated_code
+                else _Side(self.memory_synced, self.memory_second)
+            ),
+            sync_log=(vacating,) if own_leaf else (),
+        )
+        contracts = {"L1": first, "L2": second}
+        if own_leaf:
+            # The series ref sits exactly on the last landing, so no step follows the one under test.
+            _branch(self.code, "series", second.integrated_code_commit or "")
+            _branch(self.memory, "series", second.integrated_memory_content_commit or "")
+        else:
+            # A different ordered leaf records the position, so the union is global rather than
+            # per-step -- the shape L27 introduced and the shape this repair must not admit.
+            third = self._leaf(
+                series,
+                "L3",
+                code=(
+                    _Side(code_out, code_out)
+                    if vacated_code
+                    else _Side(self.code_synced, self.code_synced)
+                ),
+                memory=(
+                    _Side(memory_out, memory_out)
+                    if not vacated_code
+                    else _Side(self.memory_second, self.memory_second)
+                ),
+                sync_log=(vacating,),
+            )
+            contracts["L3"] = third
+            _branch(self.code, "series", code_out if vacated_code else self.code_synced)
+            _branch(self.memory, "series", memory_out if not vacated_code else self.memory_second)
+
+        with self.assertRaises(CloseoutQueueError) as refused:
+            _require_exact_atomic_landing_chain(series, contracts)
+
+        self.assertEqual(refused.exception.status, "atomic-series-leaf-chain-invalid")
+        named = code_out if vacated_code else memory_out
+        foreign = self.code_foreign if vacated_code else self.memory_second
+        self.assertIn(foreign, str(refused.exception))
+        self.assertNotIn(named, str(refused.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

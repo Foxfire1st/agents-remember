@@ -89,7 +89,11 @@ def test_the_option_declarations_state_no_budget_of_their_own() -> None:
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "addini"
     ]
-    assert {_declared_ini_name(node) for node in declarations} == {
+    assert {
+        node.args[0].value
+        for node in declarations
+        if isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+    } == {
         "unit_case_budget",
         "integration_case_budget",
     }

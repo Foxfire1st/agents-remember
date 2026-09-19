@@ -654,11 +654,10 @@ class MeasuringBuildStampTests(unittest.TestCase):
                 ):
                     response = entry(mock.Mock(), mock.Mock())
                 assert isinstance(response, dict)
-                stamp = response["servingBuild"]
-                assert isinstance(stamp, dict)
-                self.assertEqual(stamp["commit"], resolved.commit)
-                self.assertEqual(stamp["sourceDigest"], resolved.source_digest)
-                self.assertTrue(stamp["commit"])
+                stamp = ServingBuildPayload.model_validate(response["servingBuild"])
+                self.assertEqual(stamp.commit, resolved.commit)
+                self.assertEqual(stamp.sourceDigest, resolved.source_digest)
+                self.assertTrue(stamp.commit)
 
     def test_the_stamp_is_declared_on_the_responses_that_carry_it(self) -> None:
         """The field is part of the declared contract, not tolerated drift.

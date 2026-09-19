@@ -67,6 +67,7 @@ from read_scope_test_support import (
     MISMATCH_RECORDED_BLOB,
     RESOLUTION_PATH,
     SYNCHRONIZATION_PATH,
+    UNPARSED_PATH,
     ReadScopeFixture,
     build_read_scope_fixture,
 )
@@ -106,6 +107,7 @@ EVERY_RECORDED_PATH = {
     RESOLUTION_PATH,
     AUXILIARY_PATH,
     MISMATCH_PATH,
+    UNPARSED_PATH,
 }
 GIT_ENVIRONMENT = {
     "PATH": "/usr/bin:/bin:/usr/local/bin",
@@ -350,12 +352,14 @@ def test_an_unavailable_tree_reports_the_unavailable_object_and_substitutes_noth
 def test_an_unsupported_locator_stays_visible_while_its_blob_is_still_observed(
     fixture: ReadScopeFixture,
 ) -> None:
-    """A symbol locator is reported as unsupported, and it does not erase the anchor.
+    """A symbol the shipped extractor cannot read is reported unsupported, and the anchor survives.
 
-    The initial resolver supports exact files and blob-bound ranges, so a recorded symbol is a
-    representable observation rather than a dropped row: the claim and its recorded blob identity
-    survive a locator this increment cannot resolve, and the claim is not reported as a resolved file
-    it never was.
+    The rail observes symbols through the shipped tree-sitter extractor, so a symbol is normally
+    resolved rather than refused. One case is left where it genuinely cannot answer: a path whose
+    language has no grammar, where a definition cannot be told from a mention. That is a fact about
+    the reader and not about the claim, so it is a representable observation rather than a dropped
+    row -- the claim, its recorded blob identity and the blob the tree really holds all survive it,
+    and the claim is never reported as a resolved file it never was.
     """
 
     claim_id = str(uuid4())
@@ -375,13 +379,9 @@ def test_an_unsupported_locator_stays_visible_while_its_blob_is_still_observed(
                 anchor=NewAnchor(
                     anchor=SourceAnchorDraft(
                         anchor_id=UUID(anchor_id),
-                        path=INTEGRATION_PATH,
-                        source_identity=GitBlobIdentity(
-                            object_id=fixture.git_blobs[INTEGRATION_PATH]
-                        ),
-                        locator=SymbolLocator(
-                            language="python", qualified_name="integration.apply"
-                        ),
+                        path=UNPARSED_PATH,
+                        source_identity=GitBlobIdentity(object_id=fixture.git_blobs[UNPARSED_PATH]),
+                        locator=SymbolLocator(language="sql", qualified_name="budget"),
                     )
                 ),
                 provenance=fixture.authorship,
@@ -402,8 +402,11 @@ def test_an_unsupported_locator_stays_visible_while_its_blob_is_still_observed(
     )
     assert item.anchor is not None
     assert item.anchor.resolution == "unsupported_locator"
-    assert item.anchor.recorded_source_identity == fixture.git_blobs[INTEGRATION_PATH]
-    assert item.anchor.observed_source_identity is None
+    assert item.anchor.recorded_source_identity == fixture.git_blobs[UNPARSED_PATH]
+    # The blob IS observed -- the tree holds it and the rail read the entry -- so the observation
+    # carries it. Only the symbol itself is unanswered, and the detail says why.
+    assert item.anchor.observed_source_identity == fixture.git_blobs[UNPARSED_PATH]
+    assert "no grammar" in item.anchor.detail
 
 
 def test_a_non_blob_tree_entry_is_reported_as_an_entry_and_never_read_as_source_bytes(

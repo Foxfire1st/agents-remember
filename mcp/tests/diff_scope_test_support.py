@@ -83,6 +83,7 @@ from read_scope_test_support import (
     MISMATCH_PATH,
     RESOLUTION_PATH,
     SYNCHRONIZATION_PATH,
+    UNPARSED_PATH,
     ReadScopeFixture,
     build_read_scope_fixture,
 )
@@ -122,6 +123,12 @@ _CANDIDATE_TREE_TEXT: tuple[tuple[str, str], ...] = (
     (MISMATCH_PATH, "# timeout\nchanged bytes\n"),
     (SUCCESSOR_PATH, "# retry interval\nfirst refusal\n"),
     (UNMAPPED_PATH, "# unmapped\nthis file carries no recorded realization\n"),
+    # Present, byte for byte, in the baseline too: the read-scope fixture's unparsed-language file is
+    # part of the shared baseline tree, and a candidate that omitted it would read as a deletion of a
+    # path no recorded realization attributes -- which is ``UNMAPPED_PATH``'s measurement, not this
+    # one. Holding the same bytes on both sides keeps the two trees differing in exactly the named
+    # ways.
+    (UNPARSED_PATH, "-- schema\nCREATE TABLE budget (attempts INTEGER);\n"),
 )
 
 

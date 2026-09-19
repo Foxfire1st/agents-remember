@@ -99,7 +99,12 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
 
 
 def _register_knowledge_change(server: FastMCP) -> None:
-    """The record operation: it records caller-authored proposals and authors nothing."""
+    """The record operation's mount point: it declares the shape and writes nothing.
+
+    The tool is still mounted because its *name* is part of the published family -- a caller asking
+    for it must get a typed refusal rather than "no such tool" -- but the handler now says exactly
+    what it does, which is refuse and point at the entry point that can write.
+    """
 
     @server.tool()
     def knowledge_change(
@@ -108,11 +113,12 @@ def _register_knowledge_change(server: FastMCP) -> None:
         recordKind: str,
         request: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Record a caller-authored proposal, claim or assessment, or apply an explicitly specified,
-        already-authorized change. Payload shape, references, expected revisions and existing caller
-        authority are checked; the content is never drafted and its rationale is never judged. This
-        operation adds no gate, no approval and no new authority, and it does not infer an effect
-        label or fill a missing assessment."""
+        """Refuse a mount-side change request and name the entry point that can write it. Do not use
+        this tool to record: it has no admitted write operation for any kind, so every kind is
+        refused with `registration_absent` and nothing is written. The knowledge write plane's
+        reachable entry point is the `agents-remember knowledge-ingest` subcommand, which commits a
+        whole curator hand-off list through the admitted batch; read the committed result back with
+        `knowledge_read`."""
         return knowledge_change_payload(
             ChangeToolRequest(
                 database_path=databasePath,

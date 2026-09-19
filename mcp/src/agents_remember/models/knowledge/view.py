@@ -764,9 +764,12 @@ class SourceContextRow(KnowledgeModel):
     # never the record's identity, so nothing here re-derives or re-anchors one.
     locator: SourceLocator | None = None
     anchor_state: AnchorResolutionState | None = None
-    # "expose claim provenance and missing assessments": a fact whose assessment is absent says so
-    # here, and the absence is never filled with a favourable default.
-    assessment_state: Literal["assessed", "missing", "not_applicable"] = "not_applicable"
+    # There is deliberately no ``assessment_state`` here. The field existed with the comment "a fact
+    # whose assessment is absent says so here", and it said nothing: nothing ever assigned it, so
+    # every row carried the default and ``assessed`` and ``missing`` were unreachable in this view.
+    # A field that can only hold one value is not a report about assessments, it is a claim that one
+    # was made; the assessment fact lives on ``ReviewKnowledgePane`` (``models/knowledge/review.py``)
+    # where it is really derived and where ``unassessed``/``assessed`` are both reachable.
     order: OrderedPosition
     provenance: Provenance
 

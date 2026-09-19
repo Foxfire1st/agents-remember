@@ -51,10 +51,17 @@ from .integration.integration_ref_transaction import (
     IntegratedCommits,
     require_integrated_memory_ancestry,
 )
+from .integration.lifecycle.lifecycle_enclosure_terminal import (
+    restartable_predecessor_contract,
+)
 from .integration.lifecycle.lifecycle_operation_location import (
     LifecycleOperationLocationError,
+    inspect_lifecycle_operation_locator,
     require_terminal_lifecycle_predecessor,
+    reserve_new_lifecycle_operation_location,
+    resume_new_lifecycle_operation_location,
 )
+from .modules.git import branch_commit, branch_exists, require_git, run_git
 from .modules.guidance import (
     RecoveryOperation,
     RecoveryTool,
@@ -62,6 +69,7 @@ from .modules.guidance import (
     status_payload,
 )
 from .modules.models import WorktreeCommandResult
+from .scheduling_mode import TERMINAL_SERIES_CLEANUP
 from .source_lineage import lineage_block_payload, lineage_refusal, parent_source_lineage
 from .task_fact_publication import (
     contract_projection_scopes,
@@ -72,6 +80,7 @@ from .worktree_contract import (
     ContractCells,
     WorktreeContract,
     amend_contract,
+    contract_publication_text,
     load_contract,
     write_contract,
 )
@@ -215,6 +224,8 @@ def _reopened_contract(contract: WorktreeContract) -> WorktreeContract:
 
 def reopen_task(contract_path: Path, *, dry_run: bool = False) -> WorktreeCommandResult:
     contract = load_contract(contract_path)
+    if contract.kind == "series":
+        return reopen_series(contract, dry_run=dry_run)
     refusal = _reopen_preflight_refusal(contract)
     if refusal is not None:
         return refusal
@@ -643,3 +654,450 @@ def _reopen_master_path(task_root: Path, doc: TaskDocument) -> Path | None:
             f"leaf master reference must resolve to a direct child of {root}: {doc.master!r}"
         )
     return candidate
+
+
+# ---------------------------------------------------------------------------
+# The series half: reopening a terminal atomic series (a master).
+#
+# A completed series was a dead end. AR models ``reopened`` as a legal series cleanup state
+# (``scheduling_mode.TERMINAL_SERIES_CLEANUP``) and `series_attach_result` tells the reader to
+# "reopen the task with task_reopen", but ``_reopen_blockers`` returned at its leaf-only kind gate
+# before any other check, so no tool could set that state: on 2026-09-19 starting one repair leaf
+# in this sprint required hand-editing three cells of the master's ``series-contract.md`` and
+# injecting a ``parent_task_name`` edge, leaving `worktree_status` reporting a contract mismatch
+# against the terminal archive -- an unreviewed, unrepeatable transition, which is the one thing
+# this plane exists to prevent (D-49).
+#
+# The reopen is the series spelling of what ``task_reopen`` already does for a leaf, and it uses
+# the same machinery rather than a second implementation of it:
+#
+# 1. the contract becomes the exact restartable tombstone (``cleanup: reopened`` and every
+#    progress cell virgin) -- the state whose predicate the enclosure publication already reads;
+# 2. both integration branches are re-cut at the recorded source tips (never moved, and only
+#    when the cleanup that retired them left them absent), so a child leaf's lineage resolves;
+# 3. the master document is demoted out of ``Completed`` with an audit decision naming the
+#    reopen;
+# 4. the enclosure root, manifest and journal are re-published as the successor generation of the
+#    archived one, which is what tells the terminal archive that this transition was sanctioned
+#    instead of tampering -- the new locator carries the exact archived predecessor, and the
+#    generation's accepted contract bytes are the LIVE series contract (``cleanup: pending``),
+#    because ``reopened`` is itself a terminal series state and would leave the series unable to
+#    own the lane.
+#
+# Steps 1 and 3 publish under the task CAS; step 4 is the guarded enclosure publication that
+# proves the tombstone on disk is the predecessor it accepts. If step 4 is interrupted, the
+# tombstone is already durable and the reopened series' own predicate lets the same call resume
+# exactly that publication rather than rewriting the reset.
+
+SERIES_REOPEN_AUDIT_INTENT = (
+    "task_reopen reset this terminal atomic series and re-published its successor enclosure "
+    "generation"
+)
+
+
+@dataclass(frozen=True)
+class _SeriesRefRecut:
+    """One repository side's integration ref as the reopen found it and would set it."""
+
+    side: str
+    repo: Path
+    branch: str
+    source_branch: str
+    tip: str
+    action: str
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "side": self.side,
+            "repository": self.repo.as_posix(),
+            "branch": self.branch,
+            "sourceBranch": self.source_branch,
+            "tip": self.tip,
+            "action": self.action,
+        }
+
+
+@dataclass(frozen=True)
+class _SeriesReopenPlan:
+    """One reviewed series reopen: the tombstone, the live contract, and the ref plan."""
+
+    contract: WorktreeContract
+    tombstone: WorktreeContract
+    live: WorktreeContract
+    mode: str
+    recuts: tuple[_SeriesRefRecut, ...]
+    document: TaskDocument | None
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "mode": self.mode,
+            "seriesRefs": [recut.payload() for recut in self.recuts],
+            "enclosureGeneration": {
+                "predecessorState": "terminal-archived",
+                "publicationKind": "successor-enclosure",
+                "auditIntent": SERIES_REOPEN_AUDIT_INTENT,
+            },
+            "documentReset": (
+                {
+                    "docPath": (self.contract.task_root / "task.json").as_posix(),
+                    "status": "inProgress",
+                }
+                if self.document is not None
+                else None
+            ),
+        }
+
+
+def _series_is_reset_tombstone(contract: WorktreeContract) -> bool:
+    """Whether this series already carries the exact reopened reset rather than an abandonment."""
+
+    return contract.cleanup == "reopened" and restartable_predecessor_contract(contract)
+
+
+def _series_reopen_sides(contract: WorktreeContract) -> tuple[tuple[str, Path, str, str], ...]:
+    """The repository sides a series integration line spans, in code-then-memory order."""
+
+    sides: list[tuple[str, Path, str, str]] = [
+        ("code", contract.code_repo_path, contract.code_source_branch, contract.code_work_branch)
+    ]
+    if contract.memory_mode == "external" and contract.memory_repo_path is not None:
+        sides.append(
+            (
+                "memory",
+                contract.memory_repo_path,
+                contract.memory_source_branch,
+                contract.memory_work_branch,
+            )
+        )
+    return tuple(sides)
+
+
+def _series_ref_recut(
+    side: str, repo: Path, source_branch: str, work_branch: str
+) -> _SeriesRefRecut | str:
+    """Plan one side's re-cut, or return the blocker that forbids it.
+
+    The reopen only ever CREATES a ref the series' own cleanup retired. A ref that already exists
+    must stand exactly on the recorded source tip: moving a live ref is what a reset must not do
+    silently, and a line that has advanced past its source is a different fact needing a different
+    decision.
+    """
+
+    if not source_branch or not branch_exists(repo, source_branch):
+        return f"the {side} series source branch {source_branch!r} does not exist in {repo}."
+    if not work_branch:
+        return f"the {side} series integration branch is not recorded in the contract."
+    tip = branch_commit(repo, source_branch)
+    if not branch_exists(repo, work_branch):
+        return _SeriesRefRecut(side, repo, work_branch, source_branch, tip, "re-cut")
+    observed = branch_commit(repo, work_branch)
+    if observed == tip:
+        return _SeriesRefRecut(side, repo, work_branch, source_branch, tip, "present")
+    return (
+        f"the {side} integration branch {work_branch!r} stands at {observed}, not the recorded "
+        f"source tip {tip} of {source_branch!r}; the reopen never moves an existing ref."
+    )
+
+
+def _plan_series_document_reset(
+    contract: WorktreeContract,
+) -> tuple[TaskDocument | None, str | None]:
+    """Prevalidate the demotion of the master document the series belongs to."""
+
+    master_path = contract.task_root / "task.json"
+    if not master_path.exists():
+        return (None, f"series task document does not exist: {master_path}")
+    try:
+        master = read_task_doc(master_path)
+    except (OSError, ValueError) as exc:
+        return (None, f"cannot read series task document {master_path}: {exc}")
+    if master.kind != "master":
+        return (None, f"series task document is not a master: {master_path}")
+    if master.status != "Completed":
+        return (None, None)
+    data = master.model_dump(by_alias=True)
+    data["status"] = "inProgress"
+    stamp = datetime.now(UTC).astimezone().strftime("%Y-%m-%dT%H:%M")
+    data.setdefault("decisions", []).append(
+        {
+            "at": stamp,
+            "decision": f"Series {contract.task_name} reopened under its original id.",
+            "rationale": (
+                "task_reopen reset the terminal atomic series contract (review/closeout/"
+                "integration cleared, cleanup=reopened) so it owns the lane again, re-cut its "
+                "integration branches at the recorded source tips, and re-published its "
+                "enclosure generation with the archived one as its predecessor. Child leaves "
+                "start under this master exactly as they did before it completed."
+            ),
+        }
+    )
+    return (TaskDocument.model_validate(data), None)
+
+
+def _series_reopen_plan(
+    contract: WorktreeContract,
+) -> _SeriesReopenPlan | WorktreeCommandResult:
+    """Prevalidate one series reopen without writing any part of it."""
+
+    blockers: list[str] = []
+    if contract.leaf_id:
+        blockers.append(f"series contract carries a leaf id {contract.leaf_id!r}.")
+    if not _series_is_reset_tombstone(contract) and contract.cleanup not in TERMINAL_SERIES_CLEANUP:
+        blockers.append(
+            f"series cleanup is {contract.cleanup!r}, not a terminal series state "
+            f"({', '.join(sorted(TERMINAL_SERIES_CLEANUP))})."
+        )
+    recuts: list[_SeriesRefRecut] = []
+    for side, repo, source_branch, work_branch in _series_reopen_sides(contract):
+        planned = _series_ref_recut(side, repo, source_branch, work_branch)
+        if isinstance(planned, str):
+            blockers.append(planned)
+        else:
+            recuts.append(planned)
+    document, document_blocker = _plan_series_document_reset(contract)
+    if document_blocker is not None:
+        blockers.append(document_blocker)
+    if blockers:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "blocked",
+                **_contract_reopen_facts(contract),
+                "blockers": blockers,
+                "summary": (
+                    "Reopen refused: only a terminal atomic series whose enclosure root was "
+                    "collected after terminal archive proof can be reopened. " + " ".join(blockers)
+                ),
+            },
+        )
+    tombstone = contract if _series_is_reset_tombstone(contract) else _reopened_contract(contract)
+    return _SeriesReopenPlan(
+        contract=contract,
+        tombstone=tombstone,
+        live=amend_contract(tombstone, ContractCells(cleanup="pending")),
+        mode="publish" if tombstone == contract else "reset",
+        recuts=tuple(recuts),
+        document=document,
+    )
+
+
+@dataclass
+class _SeriesReopenPublication:
+    """The CAS-guarded half of one series reopen: refs, tombstone contract, master document."""
+
+    plan: _SeriesReopenPlan
+    documents: tuple[TaskDocument, ...] | None = None
+    recuts: tuple[_SeriesRefRecut, ...] | None = None
+
+    def prepared_documents(self) -> tuple[TaskDocument, ...]:
+        return tuple(self.documents or ())
+
+    def validate(self) -> None:
+        current = load_contract(self.plan.contract.contract_path)
+        if current != self.plan.contract:
+            raise _ReopenTransitionRefusal(
+                "the terminal series contract changed after reopen preflight"
+            )
+        replanned = _series_reopen_plan(current)
+        if isinstance(replanned, WorktreeCommandResult):
+            raise _ReopenTransitionRefusal(str(replanned.payload["summary"]))
+        if replanned.recuts != self.plan.recuts:
+            raise _ReopenTransitionRefusal(
+                "the series integration refs moved after reopen preflight"
+            )
+        self.documents = (replanned.document,) if replanned.document is not None else ()
+        self.recuts = replanned.recuts
+
+    def projection_scopes(self) -> tuple:
+        return contract_projection_scopes(self.plan.contract, self.prepared_documents())
+
+    def publish(self) -> tuple[_SeriesRefRecut, ...]:
+        if self.recuts is None:
+            raise _ReopenTransitionRefusal("series reopen batch was not prepared under task CAS")
+        contract = self.plan.contract
+        originals = self._original_artifacts()
+        created: list[tuple[Path, str]] = []
+        try:
+            for recut in self.recuts:
+                if recut.action == "re-cut":
+                    require_git(recut.repo, ["branch", recut.branch, recut.tip])
+                    created.append((recut.repo, recut.branch))
+            write_contract(contract.contract_path, self.plan.tombstone)
+            docs = self.prepared_documents()
+            if docs:
+                write_task_docs(contract.task_root, list(docs))
+        except BaseException as publish_error:
+            try:
+                self._restore(originals, created)
+            except BaseException as rollback_error:
+                raise RuntimeError(
+                    f"series reopen publication and rollback both failed: {rollback_error}"
+                ) from publish_error
+            raise
+        return self.recuts
+
+    def _original_artifacts(self) -> dict[Path, bytes | None]:
+        contract = self.plan.contract
+        paths = {contract.contract_path}
+        master_path = contract.task_root / "task.json"
+        paths.add(master_path)
+        paths.add(master_path.with_suffix(".md"))
+        return {path: path.read_bytes() if path.exists() else None for path in paths}
+
+    def _restore(
+        self, originals: dict[Path, bytes | None], created: list[tuple[Path, str]]
+    ) -> None:
+        for repo, branch in created:
+            run_git(repo, ["branch", "-D", branch])
+        for path, payload in originals.items():
+            if payload is None:
+                path.unlink(missing_ok=True)
+            else:
+                atomic_write_bytes(path, payload)
+
+
+def _publish_series_successor(plan: _SeriesReopenPlan) -> WorktreeCommandResult | None:
+    """Re-publish the enclosure generation the archived one authorizes, or report the failure."""
+
+    live = plan.live
+    text = contract_publication_text(live.contract_path, live)
+    try:
+        observed = inspect_lifecycle_operation_locator(
+            live.coordination_root,
+            live.contract_path,
+        )
+        if observed.state == "terminal-archived":
+            reserve_new_lifecycle_operation_location(
+                live,
+                contract_text=text,
+                predecessor_contract=plan.tombstone,
+                audit_intent=SERIES_REOPEN_AUDIT_INTENT,
+            )
+        resume_new_lifecycle_operation_location(
+            live,
+            contract_text=text,
+            audit_intent=SERIES_REOPEN_AUDIT_INTENT,
+        )
+    except LifecycleOperationLocationError as error:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "reopen-publication-interrupted",
+                "status": error.status,
+                **_contract_reopen_facts(plan.tombstone),
+                "summary": (
+                    "The series reset is durable but its enclosure generation was not published: "
+                    + error.detail
+                ),
+                "detail": error.detail,
+                "expected": error.expected,
+                "observed": error.observed,
+                "nextAction": "resume-reopen-publication",
+                "nextTool": "task_reopen",
+                "nextArgs": {"contract_path": live.contract_path.as_posix(), "dry_run": False},
+            },
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "reopen-publication-interrupted",
+                **_contract_reopen_facts(plan.tombstone),
+                "summary": (
+                    "The series reset is durable but its enclosure generation could not be "
+                    f"published: {type(exc).__name__}: {exc}"
+                ),
+                "nextAction": "resume-reopen-publication",
+                "nextTool": "task_reopen",
+                "nextArgs": {"contract_path": live.contract_path.as_posix(), "dry_run": False},
+            },
+        )
+    return None
+
+
+def _series_start_guidance(plan: _SeriesReopenPlan, summary: str) -> dict[str, object]:
+    """The next move out of a reopened series: a normal child-leaf start under this master."""
+
+    contract = plan.live
+    repo_task_root = contract.coordination_root / "tasks" / contract.repo_name
+    relative = contract.task_root.relative_to(repo_task_root)
+    args: dict[str, object] = {"repo_id": contract.repo_name, "task_name": contract.task_name}
+    if len(relative.parts) > 1:
+        args["parent_task"] = relative.parts[-2]
+    guidance = recovery_guidance(
+        "start_reopened_task",
+        tool="worktree_start",
+        args=args,
+        required_args=["worktree_name", "leaf_id"],
+    )
+    return {**guidance, "nextStep": {"summary": summary, **guidance}}
+
+
+def reopen_series(contract: WorktreeContract, *, dry_run: bool = False) -> WorktreeCommandResult:
+    """Reopen one terminal atomic series as a single journaled, CAS-guarded operation."""
+
+    plan = _series_reopen_plan(contract)
+    if isinstance(plan, WorktreeCommandResult):
+        return plan
+    if dry_run:
+        summary = (
+            "Reopen preview: this terminal atomic series would be reset, its integration refs "
+            "re-cut at the recorded source tips, and its enclosure generation re-published as the "
+            "successor of the archived one."
+        )
+        return WorktreeCommandResult(
+            0,
+            {
+                **_contract_reopen_facts(plan.live),
+                "state": "would-reopen",
+                **plan.payload(),
+                "summary": summary,
+                **_series_start_guidance(plan, summary),
+            },
+        )
+    publication = _SeriesReopenPublication(plan)
+    try:
+        published = publish_task_fact_mutation(
+            contract.coordination_root,
+            validate=publication.validate,
+            projection_scopes=publication.projection_scopes,
+            publication=publication.publish,
+        )
+    except (OSError, _ReopenTransitionRefusal, RuntimeError) as exc:
+        return WorktreeCommandResult(
+            2,
+            {
+                "state": "blocked",
+                **_contract_reopen_facts(contract),
+                "blockers": [f"reopen-transition: {exc}"],
+                "summary": (
+                    "Reopen refused and restored every contract, ref, and task-document artifact "
+                    f"to its pre-call state: {exc}"
+                ),
+            },
+        )
+    recuts, projection_effects = published.result, published.projection_effects
+    interrupted = _publish_series_successor(plan)
+    if interrupted is not None:
+        return interrupted
+    summary = (
+        "Atomic series reopened under its original id: contract review/closeout/integration "
+        "reset, lifecycle binding cleared, integration branches re-cut at the recorded source "
+        "tips, and the enclosure generation re-published with the archived one as its "
+        "predecessor. Start a child leaf with worktree_start under this master."
+    )
+    return WorktreeCommandResult(
+        0,
+        {
+            **_contract_reopen_facts(plan.live),
+            "state": "reopened",
+            "seriesRefs": [recut.payload() for recut in recuts],
+            "doc": plan.payload()["documentReset"],
+            "enclosureGeneration": plan.payload()["enclosureGeneration"],
+            "projectionEffects": [
+                effect.model_dump(by_alias=True) for effect in projection_effects
+            ],
+            "summary": summary,
+            **_series_start_guidance(plan, summary),
+        },
+    )

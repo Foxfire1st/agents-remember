@@ -738,7 +738,6 @@ def render_source_context(
                 role=candidate.role,  # type: ignore[arg-type]
                 path=candidate.path,
                 locator=candidate.locator,
-                assessment_state="assessed" if candidate.assessment_ids else "not_applicable",
                 order=_position(page.start + index, provenance, request.ordering_input),
                 provenance=provenance,
             )

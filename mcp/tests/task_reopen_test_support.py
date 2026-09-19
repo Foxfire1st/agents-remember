@@ -14,6 +14,7 @@ from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
     contract_publication_text,
     default_contract,
+    default_series_contract,
     write_contract,
 )
 from lifecycle_enclosure_test_support import (
@@ -25,6 +26,69 @@ from test_worktree_support import git, init_repo
 
 def _publish_restamp(task_root: Path, document: TaskDocument) -> object:
     return write_task_doc(task_root, document)
+
+
+def _completed_series_contract(workspace: Path) -> WorktreeContract:
+    """A terminal atomic series: landed, cleaned up, its enclosure root collected.
+
+    The fixture reproduces the state a completed master is left in -- the integration branch is
+    retired by cleanup, the series contract reads ``cleanup: completed``, the enclosure locator
+    is ``terminal-archived`` and its root is gone -- instead of a synthetic variant of it, because
+    the defect this fixture exists for is precisely that no tool could leave that state behind.
+    """
+
+    coordination_root = workspace / "ar-coordination"
+    code_repo = workspace / "repo-a"
+    base = init_repo(code_repo, "main")
+    task = ContractTask(
+        name="260698_demo-series",
+        repo_name="repo-a",
+        coordination_root=coordination_root,
+        workflow_kind="light-task",
+        memory_mode="disabled",
+    )
+    contract = default_series_contract(
+        task,
+        code=RepoBranchPlan(
+            repo_path=code_repo,
+            source_branch="main",
+            work_branch="ar/260698_demo-series",
+            base_commit=base,
+        ),
+    )
+    write_task_doc(
+        contract.task_root,
+        TaskDocument.model_validate(
+            {
+                "id": "260698_DEMO-SERIES",
+                "slug": "task",
+                "title": "Demo Series",
+                "kind": "master",
+                "status": "Completed",
+                "repo": "repo-a",
+                "createdAt": "2026-07-01T09:00",
+                "executionNature": "atomic",
+                "subTasks": [],
+            }
+        ),
+    )
+    contract = replace(
+        contract,
+        human_review_status="approved",
+        approved_for_commit=True,
+        closeout_status="completed",
+        code_commit=base,
+        integration_status="completed",
+        integrated_code_commit=base,
+        cleanup="completed",
+    )
+    write_contract(contract.contract_path, contract)
+    location = publish_test_enclosure(
+        contract,
+        contract.contract_path.read_text(encoding="utf-8"),
+    )
+    terminalize_test_enclosure(location)
+    return contract
 
 
 def _publish_terminal_reopen_predecessor(contract: WorktreeContract) -> None:

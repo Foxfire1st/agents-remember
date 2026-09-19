@@ -345,19 +345,28 @@ def require_successor_generation(
     predecessor_contract: WorktreeContract,
     predecessor: TerminalEnclosurePredecessor,
 ) -> None:
-    """Prove the exact restartable contract authorizes one successor generation."""
+    """Prove the exact restartable contract authorizes one successor generation.
+
+    The successor's kind is read from the contract being cut rather than fixed to ``leaf``: the
+    leaf start path has always been the only producer of a successor generation, so ``"leaf"`` and
+    the successor's own kind were the same string, and hardcoding it made every other restart — the
+    reopen of a terminal atomic series, whose successor is the same series at the same address —
+    fail as a kind mismatch before any other fact was considered. Reading the field keeps the guard
+    exactly as strict: a series successor still cannot advance a leaf predecessor, and the
+    predecessor's own kind and restartable predicate are unchanged.
+    """
 
     expected = _successor_identity(
         contract,
         predecessor.worktreeGroup,
-        kind="leaf",
+        kind=contract.kind,
         restartable=True,
     )
     observed = _successor_identity(
         predecessor_contract,
         predecessor_contract.worktree_group.resolve(strict=False).as_posix(),
         kind=predecessor_contract.kind,
-        restartable=_restartable_predecessor_contract(predecessor_contract),
+        restartable=restartable_predecessor_contract(predecessor_contract),
     )
     if expected != observed:
         raise LifecycleOperationLocationError(
@@ -395,7 +404,14 @@ def _successor_identity(
     }
 
 
-def _restartable_predecessor_contract(contract: WorktreeContract) -> bool:
+def restartable_predecessor_contract(contract: WorktreeContract) -> bool:
+    """Whether this contract is the exact restartable tombstone a successor may advance from.
+
+    One predicate, read by the enclosure publication and by ``task_reopen`` itself: a reopen that
+    writes the tombstone and an enclosure that accepts it must agree on what the tombstone IS, and
+    the only way they can disagree is if one of them restates the rule.
+    """
+
     if contract.cleanup == "abandoned":
         return True
     if contract.cleanup != "reopened":
@@ -419,6 +435,7 @@ def _restartable_predecessor_contract(contract: WorktreeContract) -> bool:
 
 __all__ = [
     "require_successor_generation",
+    "restartable_predecessor_contract",
     "terminal_enclosure_archive_paths",
     "terminal_predecessor",
     "validate_terminal_proof",

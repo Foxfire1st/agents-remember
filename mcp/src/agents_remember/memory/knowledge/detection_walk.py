@@ -478,12 +478,13 @@ def _walk_limitations(
 
 
 def _has_unread_locator(result: KnowledgeDiffResult) -> bool:
-    """Return whether the scan met a recorded locator no extractor in this increment supports.
+    """Return whether the scan met a recorded locator this revision's extractor could not resolve.
 
-    The shipped resolver reports ``unsupported_locator`` with the reason that no symbol extractor
-    supports it (``memory/knowledge/read_anchors.py:132-139``). That is a *declared scope
-    limitation* and not a negative match: the detector reports what it read but could not map, and
-    the anchor still carries its recorded claim and blob identity.
+    The shipped resolver reports ``unsupported_locator`` only for the cases where no answer is
+    available at all -- a recorded path that is not a confined tree path, and a symbol written in a
+    language the shipped extractor has no grammar for (``memory/knowledge/read_anchors.py``). That is
+    a *declared scope limitation* and not a negative match: the detector reports what it read but
+    could not map, and the anchor still carries its recorded claim and blob identity.
     """
 
     return any(

@@ -84,8 +84,15 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from typing import cast
+from unittest import mock
 
-from agents_remember.memory_quality.style.citations import source_index
+from agents_remember.memory_quality.style.citations import (
+    claim_change_router,
+    model,
+    range_resolution,
+    source_index,
+)
 from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.memory_quality.style.citations.source_index_state import (
     MAX_SOURCE_BYTES,
@@ -352,6 +359,125 @@ class ThisCheckoutsCitationIndexBoundsTests(unittest.TestCase):
             [],
             "the default walk indexed a path outside Git's own population for this work tree",
         )
+
+
+class BoundTreeResolutionTests(unittest.TestCase):
+    """D-43: an answer must be a member of a bound tree, for both receiver forms.
+
+    ``Trees.resolve`` is called from thirteen shipped sites in two spellings -- six ``trees.resolve(``
+    and seven ``run.trees.resolve(`` -- and both forms are attribute lookups on this one method, so
+    the guard below is the whole reach and not a second implementation. What it refuses is the old
+    filesystem fallback: when the code tree's candidate lookup missed, ``resolve`` answered
+    ``memory_root / path`` because the file existed, so a caller that bound ONE tree could receive a
+    path from the other root with no tree behind it. ``system/tools.md`` is the measured case: the
+    code repository is gitignored for it, so it is no member of the code tree, while the file exists
+    beside a real ``system/`` directory.
+    """
+
+    def setUp(self) -> None:
+        holder = tempfile.TemporaryDirectory(prefix="ar-citation-bound-trees-")
+        self.addCleanup(holder.cleanup)
+        self.tmp = Path(holder.name)
+        self.code = self.tmp / "code"
+        self.memory = self.tmp / "memory"
+        for root in (self.code, self.memory):
+            root.mkdir()
+            git(root, "init", "--quiet")
+            git(root, "config", "user.email", "fixture@example.invalid")
+            git(root, "config", "user.name", "Fixture")
+        # The code repository ignores its local ``system/tools.md``, exactly as the real one does
+        # (.gitignore line 4), so the file is present on disk and absent from the code tree.
+        (self.code / ".gitignore").write_text("system/tools.md\n", encoding="utf-8")
+        (self.code / "src").mkdir()
+        (self.code / "src" / "tracked.py").write_text("x = 1\n", encoding="utf-8")
+        (self.code / "system").mkdir()
+        (self.code / "system" / "tools.md").write_text("code-local, untracked, ignored\n")
+        git(self.code, "add", "--all")
+        git(self.code, "commit", "--quiet", "-m", "tracked")
+        # The memory repository TRACKS the same relative path, which is where it belongs.
+        (self.memory / "system").mkdir()
+        (self.memory / "system" / "tools.md").write_text("memory-owned\n", encoding="utf-8")
+        git(self.memory, "add", "--all")
+        git(self.memory, "commit", "--quiet", "-m", "memory tools")
+        self.code_tree = git(self.code, "rev-parse", "HEAD^{tree}")
+        self.memory_tree = git(self.memory, "rev-parse", "HEAD^{tree}")
+
+    def test_the_guard_holds_at_the_resolver_and_reaches_both_receiver_forms(self) -> None:
+        """One case, because the resolver and its two receivers are one subject.
+
+        The guard is a property of ``Trees.resolve``; the two receiver spellings are attribute
+        chains onto that same method, so proving them separately would prove one thing twice -- and
+        the unit lane has no budget for a second copy of it.
+        """
+
+        # The defect, at the resolver: ``system/tools.md`` has no blob in the code tree, yet the
+        # old fallback answered the memory root's file as though the code tree had carried it.
+        single = Trees(code_root=self.code, memory_root=self.memory, candidate_tree=self.code_tree)
+        self.assertIsNone(single.resolve("system/tools.md"))
+        self.assertEqual(single.resolve("src/tracked.py"), self.code / "src" / "tracked.py")
+        # The capability is not removed, it is PROVEN: a memory-rooted citation is answered by the
+        # memory tree once the caller says which tree its memory root stood on.
+        both = Trees(
+            code_root=self.code,
+            memory_root=self.memory,
+            candidate_tree=self.code_tree,
+            memory_candidate_tree=self.memory_tree,
+        )
+        self.assertEqual(both.resolve("system/tools.md"), self.memory / "system" / "tools.md")
+        self.assertEqual(both.resolve("src/tracked.py"), self.code / "src" / "tracked.py")
+
+        citation = model.Citation(
+            text="system/tools.md:1-1", path="system/tools.md", start=1, end=1
+        )
+        claim = model.Claim(
+            line=1, anchors=(), citations=(citation,), malformed=(), unchecked_spans=0
+        )
+        single = Trees(code_root=self.code, memory_root=self.memory, candidate_tree=self.code_tree)
+
+        # The bare receiver: ``claim_change_router.classify_citation`` calls ``trees.resolve(...)``.
+        source, error = claim_change_router.classify_citation(single, citation)
+        self.assertIsNone(source)
+        self.assertIsNotNone(error, "a path the bound tree cannot carry is no local citation")
+
+        # The run receiver: ``range_resolution.claim_findings`` calls ``run.trees.resolve(...)``.
+        run = range_resolution.Run(
+            trees=single,
+            index=cast("range_resolution.source_index.RepositoryIndex", mock.MagicMock()),
+            sources=range_resolution.Sources(),
+            tally=range_resolution.Tally(),
+        )
+        findings = range_resolution.claim_findings("onboarding/card.md", claim, run)
+        self.assertEqual(run.tally.citations, 0, "nothing resolved, so nothing was cited")
+        self.assertEqual(run.tally.unresolved, 1)
+        self.assertIn(
+            "citation_source_vanished",
+            [finding.code for finding in findings],
+            "a citation the bound tree cannot carry is the finding a reader must see",
+        )
+        # The same binding with the memory tree bound resolves it, in both forms, from the
+        # memory tree's own member -- so the guard removes a wrong answer, not the capability.
+        both = Trees(
+            code_root=self.code,
+            memory_root=self.memory,
+            candidate_tree=self.code_tree,
+            memory_candidate_tree=self.memory_tree,
+        )
+        resolved, resolved_error = claim_change_router.classify_citation(both, citation)
+        self.assertIsNone(resolved_error)
+        assert resolved is not None
+        self.assertEqual(
+            (resolved.repository, resolved.target), ("memory", self.memory / "system" / "tools.md")
+        )
+        bound_run = range_resolution.Run(
+            trees=both,
+            index=cast("range_resolution.source_index.RepositoryIndex", mock.MagicMock()),
+            sources=range_resolution.Sources(),
+            tally=range_resolution.Tally(),
+        )
+        bound_findings = range_resolution.claim_findings("onboarding/card.md", claim, bound_run)
+        self.assertEqual(bound_run.tally.citations, 1)
+        self.assertEqual(bound_run.tally.unresolved, 0)
+        self.assertNotIn("citation_source_vanished", [finding.code for finding in bound_findings])
 
 
 if __name__ == "__main__":  # pragma: no cover

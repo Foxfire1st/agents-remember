@@ -104,6 +104,33 @@ def symbol_extents(name: str, path: str, lines: list[str]) -> tuple[Extent, ...]
     return occurrence_runs(model.whole_identifier(name), lines)
 
 
+def bound_definitions(name: str, path: str, lines: list[str]) -> tuple[Extent, ...]:
+    """The DEFINITION extents one qualified ``name`` resolves to here, or nothing.
+
+    This is the whole "is this construct defined in these bytes?" rule, in one place, for the two
+    callers that have to agree about it: the curator ingest decides whether a producer's symbol may
+    be stored at all, and the knowledge read rail decides whether a stored one still holds. Both
+    ask this function, so a construct one accepts cannot be one the other refuses.
+
+    A qualified name is resolved by its real halves: the last segment has to be bound and every
+    namespace segment before it has to be bound too, which makes ``Holder.method`` resolve when the
+    class and the method are both there and keeps an invented prefix from borrowing a real method's
+    identity. A mention never counts -- binding comes from the parser in :mod:`grammars`, so a name
+    that occurs only inside a docstring, a comment or a string is bound nowhere. A language with no
+    grammar binds nothing, and that is the caller's signal that the question cannot be answered
+    here rather than an answer of "no": callers check :func:`grammars.parsed` first when the
+    difference matters.
+    """
+
+    parts = [part for part in name.split(".") if part]
+    if not parts:
+        return ()
+    bound = definitions(path, lines)
+    if any(part not in bound for part in parts):
+        return ()
+    return tuple(bound[parts[-1]])
+
+
 def definitions(path: str, lines: list[str]) -> dict[str, list[Extent]]:
     """Every name this file binds at any depth, and the extent of the construct binding it.
 

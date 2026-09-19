@@ -43,6 +43,7 @@ from agents_remember.memory.knowledge.record_envelope import (
     validate_record_payload,
 )
 from agents_remember.memory.knowledge.routes import (
+    AUTHOR_ROUTE_OPERATION,
     RouteDraft,
     normalize_route_path,
     require_acyclic_routes,
@@ -208,7 +209,7 @@ def test_the_payload_seam_registers_one_shape_and_refuses_every_inadmissible_pay
     ["src/pkg", "src", "a/b/c/d", "docs/design/storage-design.md"],
 )
 def test_a_confined_route_path_normalises_to_itself(path: str) -> None:
-    assert normalize_route_path(path) == path
+    assert normalize_route_path(path, operation=routes.AUTHOR_ROUTE_OPERATION) == path
 
 
 @pytest.mark.parametrize(
@@ -230,7 +231,7 @@ def test_a_confined_route_path_normalises_to_itself(path: str) -> None:
 def test_a_route_path_outside_the_admitted_form_is_refused(path: str) -> None:
     """Requirement 4.2: two spellings of one path must not produce two routes."""
 
-    refusal = normalize_route_path(path)
+    refusal = normalize_route_path(path, operation=routes.AUTHOR_ROUTE_OPERATION)
     assert isinstance(refusal, KnowledgeRefusal)
     assert refusal.table == "route"
     assert refusal.observed == path
@@ -265,20 +266,20 @@ def test_the_route_hierarchy_is_acyclic_and_a_cycle_rolls_the_batch_back() -> No
                 "VALUES (?, ?, ?, ?, ?)",
                 (repository_id, route_id, parent, path, "{}"),
             )
-        assert require_acyclic_routes(connection, repository_id) is None
+        assert require_acyclic_routes(connection, repository_id, AUTHOR_ROUTE_OPERATION) is None
 
         connection.execute("BEGIN")
         connection.execute(
             "UPDATE route SET parent_route_id = ? WHERE route_id = ?", ("leaf", "root")
         )
-        refusal = require_acyclic_routes(connection, repository_id)
+        refusal = require_acyclic_routes(connection, repository_id, AUTHOR_ROUTE_OPERATION)
         assert isinstance(refusal, KnowledgeRefusal)
         assert refusal.code == "lineage_cycle"
         assert refusal.table == "route"
         assert refusal.observed is not None and "root" in refusal.observed
         connection.execute("ROLLBACK")
 
-        assert require_acyclic_routes(connection, repository_id) is None
+        assert require_acyclic_routes(connection, repository_id, AUTHOR_ROUTE_OPERATION) is None
         # The one-node cycle is the table's own CHECK rather than this walk.
         with pytest.raises(apsw.ConstraintError):
             connection.execute(

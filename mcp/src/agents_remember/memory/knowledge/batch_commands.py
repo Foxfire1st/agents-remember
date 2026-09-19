@@ -135,10 +135,18 @@ class BatchLedger:
     The ledger is the only mutable state the apply step keeps. It records the exact receipt entries
     and the identities the batch has created, so a receipt reports what happened and a later command
     can cite a record an earlier one created.
+
+    The receipt is **one entry per affected row**, not one per command. Two commands can touch the
+    same row -- ``add_realization_claim`` writes the anchor it cites when the batch did not place
+    that anchor first -- and a consumer that counts entries as distinct rows would then over-count
+    what the batch wrote. A row reported again therefore replaces its earlier entry in place, and
+    because every entry carries the row's post-write digest, the surviving entry is the true last
+    statement about that row (D-42).
     """
 
     changed: list[RecordIdentity] = field(default_factory=list)
     created: set[tuple[str, str]] = field(default_factory=set)
+    _positions: dict[tuple[str, str], int] = field(default_factory=dict, repr=False, compare=False)
 
     def written(self, table: MutableRecordTable, record_id: str, digest: str) -> TouchedRow:
         """Record one written row as a receipt entry and as a batch-created identity."""
@@ -151,13 +159,24 @@ class BatchLedger:
 
         return self._append("removed", table, record_id, digest)
 
+    def record(self, entry: RecordIdentity) -> None:
+        """Accumulate one receipt entry, keeping exactly one per affected row."""
+
+        key = (entry.table, entry.record_id)
+        position = self._positions.get(key)
+        if position is None:
+            self._positions[key] = len(self.changed)
+            self.changed.append(entry)
+            return
+        self.changed[position] = entry
+
     def _append(
         self, state: str, table: MutableRecordTable, record_id: str, digest: str
     ) -> TouchedRow:
         entry = RecordIdentity.model_construct(
             state=state, table=table, record_id=record_id, digest=digest
         )
-        self.changed.append(entry)
+        self.record(entry)
         return (entry,)
 
 
@@ -199,6 +218,9 @@ def apply_commands(
     position and kind of the failing command, because that is what the caller submitted. A failure
     raised by the database instead leaves the loop here, carrying the index and kind that were
     running so the mapped refusal can name the command that actually failed.
+
+    The receipt it returns is one entry per affected row: the ledger collapses a row two commands
+    both touched, so counting entries counts rows written (D-42).
     """
 
     pending = frozenset(pending_identities(commands))
@@ -206,7 +228,7 @@ def apply_commands(
     for index, command in enumerate(commands):
         try:
             for entry in _apply_one(store, index, command, authorship, pending):
-                ledger.changed.append(entry)
+                ledger.record(entry)
         except apsw.Error as error:
             return BatchApplication(
                 ledger=ledger,
@@ -654,8 +676,10 @@ def _apply_removal(
 def _refuse_unreachable(command: ChangeCommand) -> tuple[RecordIdentity, ...]:
     """Refuse a command that reached the apply step without a handler.
 
-    Unreachable by construction -- the union and the dispatch tables are closed over the same twelve
-    kinds -- which is why it is a defect rather than a refusal a caller could provoke.
+    Unreachable by construction -- the union and the dispatch tables are closed over the same kinds,
+    the union being their one declaration -- which is why it is a defect rather than a refusal a
+    caller could provoke. The count is deliberately not restated here: this docstring said "twelve"
+    for as long as the union had thirty-one members (D-40).
     """
 
     raise KnowledgeStorageError(  # pragma: no cover - the union and the dispatch agree
