@@ -1,4 +1,21 @@
-"""Typed lifecycle authority for durable test evidence and shared support."""
+"""Typed lifecycle authority for durable test evidence and shared support.
+
+This module is the **consumer-completeness oracle**. :func:`load_evidence_inventory` answers one
+question: does the catalog agree with the source tree it describes? It derives the repository's real
+dependency graph and requires every ``consumer_scope = "exact"`` artifact's declared ``consumers``
+list to equal the test modules that actually reach it, so it is red exactly when a module starts or
+stops consuming a governed artifact -- with the catalog's own bytes untouched.
+
+That is a *different* gate from the **catalog byte pin** in
+``mcp/tests/test_dependency_ownership_ast_helpers.py`` (``LIFECYCLE_CATALOG_SHA256``,
+``LIFECYCLE_CONTRACT_COUNT``, ``LIFECYCLE_ARTIFACT_COUNT``), which says only that the catalog file is
+byte-for-byte the one that was measured, at the populations it was measured at. The two run in one
+test and therefore read as one gate; they are not. A catalog whose bytes are exactly the pinned ones
+can still be wrong about the tree, and its documented repair is a registry row, not a re-pin -- which
+is why the pin's constants move when a row is *added*, not when the tree drifts.
+``test_evidence_catalog_gate_boundaries.py`` holds the case that reddens this oracle while the pin
+stays green.
+"""
 
 from __future__ import annotations
 

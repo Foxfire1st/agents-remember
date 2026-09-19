@@ -1,0 +1,678 @@
+"""The supported schema generations, as pinned data rather than build-time globals.
+
+A schema generation used to be a singleton: ``SCHEMA_USER_VERSION``, ``CANONICAL_TABLES`` and
+``schema_fingerprint()`` described the running build, and every reader compared a dataset against
+*that*. The moment a second generation exists that becomes false in a way that is worse than
+merely incomplete -- the logical encoder builds its table mapping from the live manifest, so a
+dataset read by newer code would digest over tables it does not have, and an unchanged version-1
+dataset would silently change identity.
+
+This module makes a generation one frozen record, and makes *selection* a read of the dataset:
+
+* :data:`GENERATION_1` is pinned as the exact generation this branch ships today, including the
+  structural fingerprint recorded as a constant. Its declarations stay verbatim in
+  :mod:`agents_remember.memory.knowledge.schema`; nothing here restates them.
+* :data:`GENERATION_2` is generation 1 plus the tables :mod:`…schema_v2` appends.
+* :data:`GENERATION_3` is generation 2 plus the tables :mod:`…schema_v3` appends -- the facet
+  attachments, the decision supersession edge and the explanation pair. It is the created
+  generation, so a *new* store declares version 3 while a generation-2 dataset that already exists
+  keeps declaring version 2 and is read through generation 2's own record.
+* :data:`GENERATION_4` is generation 3 plus the table :mod:`…schema_v4` appends -- the recorded
+  order of one detection run's signals. A generation-3 dataset that already exists keeps declaring
+  version 3 and is read through generation 3's own record. The detection record group's own payload
+  shapes are registered in the record envelope rather than appended as columns, which is why this
+  generation adds one table and not a record group.
+* :data:`GENERATION_5` is generation 4 plus the table :mod:`…schema_v5` appends -- the authored
+  citation binding. A generation-4 dataset that already exists keeps declaring version 4 and is read
+  through generation 4's own record. The binding's payload shape is registered in the record envelope
+  exactly as the facet and detection payloads are, which is again why the generation adds one table:
+  what the envelope cannot express is the binding's *owner-revision/key identity pair* and its own
+  governing route, and those are columns rather than a second record group.
+* :data:`GENERATION_6` is generation 5 plus the six tables :mod:`…schema_v6` appends -- authored
+  family composition between two exact family revisions, its declared traversal policy and version
+  set, the family revision's canonical owning route, and the two tables of its authored explanatory
+  context. A generation-5 dataset that already exists keeps declaring version 5 and is read through
+  generation 5's own record.
+* :data:`GENERATION_7` is generation 6 plus the five tables :mod:`…schema_v7` appends -- the evidence
+  claim, its two subject join tables, its claimed coverage and the verification observation. A
+  generation-6 dataset that already exists keeps declaring version 6 and is read through generation
+  6's own record. Both record groups' payload shapes are registered in the record envelope; the
+  appended tables are the relations an evidence claim resolves and the observation's own recorded
+  columns.
+* :data:`GENERATION_9` is generation 8 plus the six tables :mod:`…schema_v9` appends -- the
+  truth-coverage census's three record kinds (the inventory row, the assessable claim with its
+  kind/applicability/disposition, and the migration disposition) and the three relations they
+  resolve through (a claim's evidence, a claim's realization attribution, and the records a
+  disposition links to). It is the created generation now, so a *new* store declares version 9
+  while a generation-8 dataset that already exists keeps declaring version 8 and is read through
+  generation 8's own record. The census's payload shapes are registered in the record envelope for
+  the same reason the authored-effect group's are: what the envelope cannot express is a relation
+  between records, which is why this generation appends relations and not a wide table.
+* :data:`GENERATION_8` was generation 7 plus the table :mod:`…schema_v8` appended -- the edge by which
+  one semantic change set supersedes another. It is the created generation now, so a *new* store
+  declares version 8 while a generation-7 dataset that already exists keeps declaring version 7 and is
+  read through generation 7's own record. The authored-effect record group's own payload shapes --
+  the effect claim, the preservation claim, the unresolved question and the change set -- are
+  registered in the record envelope for the same reason the detection group's are, which is why this
+  generation adds the one fact the envelope cannot express and not a record group.
+* :func:`require_pinned_generation_1_unchanged` is the gate that fails -- not warns -- when the
+  pinned generation no longer recomputes to its constant. Without it the pin is a comment.
+* :func:`generation_of_database` and :func:`generation_of_artifact` select a generation from what
+  the *dataset* declares. :func:`generation_of_new_store` is the one place a build's own
+  generation decides anything, and it decides only what brand-new data declares (requirement 2.7).
+
+The two key spaces are not interchangeable and that is deliberate. An open SQLite file declares its
+generation through ``PRAGMA user_version`` alone -- the application schema name is not stored in
+the file, and the name :func:`…connection.inspect_schema` reports is the *build's* -- so the open
+path resolves by version. A portable artifact carries ``schema`` as well, so the artifact path
+resolves by pair. Versions are distinct per supported generation precisely so the open path's
+single-key lookup is total over what it can see.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from typing import Protocol
+
+import apsw
+
+from agents_remember.kernel.canonical_json import sha256_digest
+from agents_remember.memory.knowledge import (
+    schema,
+    schema_v2,
+    schema_v3,
+    schema_v4,
+    schema_v5,
+    schema_v6,
+    schema_v7,
+    schema_v8,
+    schema_v9,
+)
+from agents_remember.memory.knowledge.export_refusals import unsupported_schema_refusal
+from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
+from agents_remember.models.knowledge.context import KNOWLEDGE_SCHEMA_NAME
+from agents_remember.models.knowledge.result import KnowledgeOperation, KnowledgeRefusal
+
+
+class _AppendedGeneration(Protocol):
+    """The declarations one appended-table module must expose for a generation to compose it.
+
+    A protocol rather than a base class, so a generation module stays a module of plain declared
+    data: ``schema_v2`` … ``schema_v8`` each publish exactly these names, and the single composition
+    function above reads them without any of them importing the registry back.
+    """
+
+    APPENDED_TABLES: tuple[str, ...]
+    APPENDED_COLUMNS: Mapping[str, tuple[str, ...]]
+    APPENDED_PRIMARY_KEYS: Mapping[str, tuple[str, ...]]
+    APPENDED_JSON_COLUMNS: Mapping[str, frozenset[str]]
+    APPENDED_FEATURES: tuple[str, ...]
+    APPENDED_TABLE_DDL: Mapping[str, str]
+    APPENDED_INDEX_DDL: tuple[str, ...]
+    APPENDED_TRIGGERS: Mapping[str, str]
+
+
+class KnowledgeSchemaPinError(KnowledgeStorageError):
+    """A pinned generation no longer describes itself.
+
+    This is a defect report rather than an expected outcome: generation 1's recorded data was
+    edited, or the encoder changed what it covers. The recovery is to correct the change, never to
+    re-pin the constant to the new value.
+    """
+
+
+@dataclass(frozen=True)
+class SchemaGeneration:
+    """One supported ``(schema name, user_version)`` generation, as data.
+
+    Every field exists because some reader needs it and none is derivable from the others:
+
+    * ``tables``, ``columns``, ``primary_keys`` and ``json_columns`` are what the encoder orders
+      rows by and decodes cells through. They are not recoverable from ``table_ddl``: the typed-JSON
+      columns have no DDL counterpart at all (``json_valid`` appears nowhere in generation 1's DDL),
+      and a primary-key tuple is declared data that the encoder checks *against* the column list.
+    * ``features`` is an input to the manifest and therefore to the fingerprint.
+    * ``fingerprint`` is the structural identity a reader compares. For generation 1 it is a
+      recorded constant, checked by :func:`require_pinned_generation_unchanged`.
+    """
+
+    schema_name: str
+    user_version: int
+    tables: tuple[str, ...]
+    columns: Mapping[str, tuple[str, ...]]
+    primary_keys: Mapping[str, tuple[str, ...]]
+    json_columns: Mapping[str, frozenset[str]]
+    features: tuple[str, ...]
+    table_ddl: Mapping[str, str]
+    index_ddl: tuple[str, ...]
+    triggers: Mapping[str, str]
+    fingerprint: str
+
+
+def structure_manifest(generation: SchemaGeneration) -> dict[str, object]:
+    """Return one generation's structural manifest, in the shipped shape."""
+
+    return {
+        "schema": generation.schema_name,
+        "user_version": generation.user_version,
+        "tables": {name: list(generation.columns[name]) for name in generation.tables},
+        "triggers": sorted(generation.triggers),
+        "indexes": sorted(index_name(statement) for statement in generation.index_ddl),
+        "features": list(generation.features),
+    }
+
+
+def structure_fingerprint(generation: SchemaGeneration) -> str:
+    """Return the fingerprint of one generation's exact structure.
+
+    The fingerprint covers the declared manifest, the DDL text, the trigger set and the index set.
+    Two databases with the same fingerprint can be compared row by row; two with different
+    fingerprints are different schemas whatever ``user_version`` says.
+
+    This is the **one** fingerprint definition. It is a function of a generation record rather
+    than of the running build, which is what lets generation 1's recorded data be recomputed
+    against its constant instead of against the code that produced it.
+    """
+
+    return sha256_digest(
+        {
+            "manifest": structure_manifest(generation),
+            "table_ddl": {name: generation.table_ddl[name] for name in generation.tables},
+            "trigger_ddl": {
+                name: generation.triggers[name] for name in sorted(generation.triggers)
+            },
+            "index_ddl": list(generation.index_ddl),
+        }
+    )
+
+
+def index_name(statement: str) -> str:
+    """Return the name one ``CREATE INDEX`` statement declares."""
+
+    return statement.split(" ON ", 1)[0].removeprefix("CREATE INDEX ").strip()
+
+
+def create_schema_statements(generation: SchemaGeneration) -> tuple[str, ...]:
+    """Return the exact ordered DDL statements that create one generation."""
+
+    statements: list[str] = [generation.table_ddl[name] for name in generation.tables]
+    statements.extend(generation.index_ddl)
+    statements.extend(generation.triggers[name] for name in sorted(generation.triggers))
+    return tuple(statements)
+
+
+# Exactly what ``schema_fingerprint()`` returned for generation 1, read at revision
+# ``420669c459aab3650cdaa5b3e5271e71d7d94c0e`` -- the pre-refactor branch head -- by running,
+# from ``mcp/``:
+#
+#   PYTHONPATH=mcp/src mcp/.venv/bin/python -c \
+#     "from agents_remember.memory.knowledge import schema; print(schema.schema_fingerprint())"
+#
+# It is recorded as measured data, not as an assertion, and it is non-circular by construction:
+# the constant comes from a revision older than this refactor, while
+# :func:`require_pinned_generation_unchanged` recomputes it from the recorded generation-1 record.
+# A value that disagrees with any recorded attestation is a finding, never a re-pin.
+GENERATION_1_FINGERPRINT = "bae805d6443a42ca65f733149cb3dc694ea89d3e40554c56480f17cb51edab0b"
+
+GENERATION_1_SCHEMA_NAME = KNOWLEDGE_SCHEMA_NAME
+GENERATION_2_SCHEMA_NAME = "ar-knowledge-sqlite/v2"
+GENERATION_3_SCHEMA_NAME = "ar-knowledge-sqlite/v3"
+GENERATION_4_SCHEMA_NAME = "ar-knowledge-sqlite/v4"
+GENERATION_5_SCHEMA_NAME = "ar-knowledge-sqlite/v5"
+GENERATION_6_SCHEMA_NAME = "ar-knowledge-sqlite/v6"
+GENERATION_7_SCHEMA_NAME = "ar-knowledge-sqlite/v7"
+GENERATION_8_SCHEMA_NAME = "ar-knowledge-sqlite/v8"
+GENERATION_9_SCHEMA_NAME = "ar-knowledge-sqlite/v9"
+
+GENERATION_1 = SchemaGeneration(
+    schema_name=GENERATION_1_SCHEMA_NAME,
+    user_version=schema.SCHEMA_USER_VERSION,
+    tables=schema.CANONICAL_TABLES,
+    columns=schema.CANONICAL_COLUMNS,
+    primary_keys=schema.PRIMARY_KEYS,
+    json_columns=schema.JSON_COLUMNS,
+    features=schema.REQUIRED_SQLITE_FEATURES,
+    table_ddl=schema.TABLE_DDL,
+    index_ddl=schema.INDEX_DDL,
+    triggers=schema.IMMUTABILITY_TRIGGERS,
+    fingerprint=GENERATION_1_FINGERPRINT,
+)
+
+
+# A generation is composed by *appending one module's declarations to the generation it descends
+# from*, and there is exactly one function that does it. Eight per-generation wrappers follow --
+# generations 2 to 9 -- and seven of them are a single ``_append_generation`` call naming only their
+# base, their schema name, their version and their module. The eighth, generation 5, is a
+# hand-written seventeen-line composition instead: it is the one wrapper that does not go through
+# ``_append_generation``. A leaf that must renumber its generation -- because another leaf landed the
+# same number first on the accumulated line -- changes a name and a base rather than re-deriving a
+# composition.
+def _append_generation(
+    *,
+    base: SchemaGeneration,
+    schema_name: str,
+    user_version: int,
+    appended: _AppendedGeneration,
+) -> SchemaGeneration:
+    """Return one generation: ``base``'s declarations, unchanged, with one module's appended."""
+
+    composed = SchemaGeneration(
+        schema_name=schema_name,
+        user_version=user_version,
+        tables=base.tables + appended.APPENDED_TABLES,
+        columns={**base.columns, **appended.APPENDED_COLUMNS},
+        primary_keys={**base.primary_keys, **appended.APPENDED_PRIMARY_KEYS},
+        json_columns={**base.json_columns, **appended.APPENDED_JSON_COLUMNS},
+        features=base.features + appended.APPENDED_FEATURES,
+        table_ddl={**base.table_ddl, **appended.APPENDED_TABLE_DDL},
+        index_ddl=base.index_ddl + appended.APPENDED_INDEX_DDL,
+        triggers={**base.triggers, **appended.APPENDED_TRIGGERS},
+        fingerprint="",
+    )
+    return replace(composed, fingerprint=structure_fingerprint(composed))
+
+
+def descends_from(
+    generation: SchemaGeneration, base: SchemaGeneration, names: tuple[str, ...]
+) -> bool:
+    """Whether ``generation`` is ``base`` with tables appended and no earlier declaration retyped.
+
+    This is ``KS-R10@v1`` §1.3's additive rule as one predicate, used by the registry's own case:
+    the appended tables follow ``base``'s exactly, and every one of ``base``'s names keeps the exact
+    column tuple, primary key and typed-JSON set the base declared. The ``names`` argument is the
+    base's own ``tables`` tuple, so a caller states *which* base it checked by passing that base's
+    declaration rather than a literal that could drift from it.
+    """
+
+    if generation.tables[: len(base.tables)] != base.tables:
+        return False
+    for table in names:
+        if generation.columns[table] != base.columns[table]:
+            return False
+        if generation.primary_keys[table] != base.primary_keys[table]:
+            return False
+        if generation.json_columns.get(table, frozenset()) != base.json_columns.get(
+            table, frozenset()
+        ):
+            return False
+    return True
+
+
+def _compose_generation_2() -> SchemaGeneration:
+    """Return generation 2: generation 1's declarations with generation 2's tables appended."""
+
+    return _append_generation(
+        base=GENERATION_1,
+        schema_name=GENERATION_2_SCHEMA_NAME,
+        user_version=2,
+        appended=schema_v2,
+    )
+
+
+GENERATION_2 = _compose_generation_2()
+
+
+def _compose_generation_3() -> SchemaGeneration:
+    """Return generation 3: generation 2's declarations with generation 3's tables appended."""
+
+    return _append_generation(
+        base=GENERATION_2,
+        schema_name=GENERATION_3_SCHEMA_NAME,
+        user_version=3,
+        appended=schema_v3,
+    )
+
+
+GENERATION_3 = _compose_generation_3()
+
+
+def _compose_generation_4() -> SchemaGeneration:
+    """Return generation 4: generation 3's declarations with generation 4's table appended."""
+
+    return _append_generation(
+        base=GENERATION_3,
+        schema_name=GENERATION_4_SCHEMA_NAME,
+        user_version=4,
+        appended=schema_v4,
+    )
+
+
+GENERATION_4 = _compose_generation_4()
+
+
+# Generation 5 is generation 4, unchanged, plus the table :mod:`…schema_v5` appends -- the authored
+# citation binding. Its composition is written out in full, where generations 2, 3 and 4 reach the
+# same merge through ``_append_generation``, so ``GENERATION_5.tables[: len(GENERATION_4.tables)] ==
+# GENERATION_4.tables`` and generation 5's columns for each of the first twenty-one names are
+# generation 4's. That prefix equality is the whole of ``KS-R10@v1`` §1.3's additive rule: a
+# generation appends tables and never retypes, reorders or drops an earlier generation's.
+def _compose_generation_5() -> SchemaGeneration:
+    """Return generation 5: generation 4's declarations, unchanged, with this leaf's table appended."""
+
+    composed = SchemaGeneration(
+        schema_name=GENERATION_5_SCHEMA_NAME,
+        user_version=5,
+        tables=GENERATION_4.tables + schema_v5.APPENDED_TABLES,
+        columns={**GENERATION_4.columns, **schema_v5.APPENDED_COLUMNS},
+        primary_keys={**GENERATION_4.primary_keys, **schema_v5.APPENDED_PRIMARY_KEYS},
+        json_columns={**GENERATION_4.json_columns, **schema_v5.APPENDED_JSON_COLUMNS},
+        features=GENERATION_4.features + schema_v5.APPENDED_FEATURES,
+        table_ddl={**GENERATION_4.table_ddl, **schema_v5.APPENDED_TABLE_DDL},
+        index_ddl=GENERATION_4.index_ddl + schema_v5.APPENDED_INDEX_DDL,
+        triggers={**GENERATION_4.triggers, **schema_v5.APPENDED_TRIGGERS},
+        fingerprint="",
+    )
+    return replace(composed, fingerprint=structure_fingerprint(composed))
+
+
+# Generation 6 is generation 5, unchanged, plus the six tables :mod:`…schema_v6` appends -- authored
+# family composition, its declared policy and version set, the family revision's owning route and
+# the two tables of its authored explanatory context. The composition is written as the same
+# explicit append generations 2 to 5 are, so ``GENERATION_6.tables[: len(GENERATION_5.tables)] ==
+# GENERATION_5.tables`` and generation 6's columns for each earlier name are the generation it
+# descends from. That prefix equality is the whole of ``KS-R10@v1`` §1.3's additive rule.
+def _compose_generation_6() -> SchemaGeneration:
+    """Return generation 6: generation 5's declarations with this leaf's six tables appended."""
+
+    return _append_generation(
+        base=GENERATION_5,
+        schema_name=GENERATION_6_SCHEMA_NAME,
+        user_version=6,
+        appended=schema_v6,
+    )
+
+
+GENERATION_5 = _compose_generation_5()
+GENERATION_6 = _compose_generation_6()
+
+
+# Generation 7 is generation 6, unchanged, plus the five tables :mod:`…schema_v7` appends -- the
+# evidence claim, its two subject join tables, its claimed coverage and the verification observation.
+# The composition is written as the same generic append generations 2 to 6 are, so
+# ``GENERATION_7.tables[: len(GENERATION_6.tables)] == GENERATION_6.tables`` and generation 7's
+# columns for each earlier name are the generation it descends from. That prefix equality is the
+# whole of ``KS-R10@v1`` §1.3's additive rule: a generation appends tables and never retypes,
+# reorders or drops an earlier generation's. This leaf's module was authored against generation 4 and
+# renumbered to 7 at its sync, because two leaves landed generations 5 and 6 first: the renumber moved
+# a module name, a constant, a schema name and a base argument, never the append's content.
+def _compose_generation_7() -> SchemaGeneration:
+    """Return generation 7: generation 6's declarations with this leaf's five tables appended."""
+
+    return _append_generation(
+        base=GENERATION_6,
+        schema_name=GENERATION_7_SCHEMA_NAME,
+        user_version=7,
+        appended=schema_v7,
+    )
+
+
+GENERATION_7 = _compose_generation_7()
+
+
+# Generation 8 is generation 7, unchanged, plus the table :mod:`…schema_v8` appends -- the edge by
+# which one semantic change set supersedes another. The composition is written as the same generic
+# append generations 2 to 7 are, so ``GENERATION_8.tables[: len(GENERATION_7.tables)] ==
+# GENERATION_7.tables`` and generation 8's columns for each earlier name are the generation it
+# descends from. That prefix equality is the whole of ``KS-R10@v1`` §1.3's additive rule: a
+# generation appends tables and never retypes, reorders or drops an earlier generation's. This leaf's
+# module was authored against generation 4 and renumbered to 8 at its sync, because three leaves
+# landed generations 5, 6 and 7 first: the renumber moved a module name, a constant, a schema name and
+# a base argument, never the append's content.
+def _compose_generation_8() -> SchemaGeneration:
+    """Return generation 8: generation 7's declarations with this leaf's table appended."""
+
+    return _append_generation(
+        base=GENERATION_7,
+        schema_name=GENERATION_8_SCHEMA_NAME,
+        user_version=8,
+        appended=schema_v8,
+    )
+
+
+GENERATION_8 = _compose_generation_8()
+
+
+# Generation 9 is generation 8, unchanged, plus the six tables :mod:`…schema_v9` appends -- the
+# truth-coverage census's three record kinds and the three relations they resolve through. The
+# composition is written as the same generic append generations 2 to 8 are, so
+# ``GENERATION_9.tables[: len(GENERATION_8.tables)] == GENERATION_8.tables`` and generation 9's
+# columns for each earlier name are the generation it descends from. That prefix equality is the
+# whole of ``KS-R10@v1`` §1.3's additive rule.
+def _compose_generation_9() -> SchemaGeneration:
+    """Return generation 9: generation 8's declarations with this leaf's tables appended."""
+
+    return _append_generation(
+        base=GENERATION_8,
+        schema_name=GENERATION_9_SCHEMA_NAME,
+        user_version=9,
+        appended=schema_v9,
+    )
+
+
+GENERATION_9 = _compose_generation_9()
+
+# The registry. Ordered oldest first, so "the newest generation this build supports" is the last
+# entry rather than a second literal that could drift from the tuple -- and so
+# ``generation_of_new_store()`` declares generation 9 while a generation-8 dataset stays
+# generation 8 (``KS-R10@v1`` §5.1).
+GENERATIONS: tuple[SchemaGeneration, ...] = (
+    GENERATION_1,
+    GENERATION_2,
+    GENERATION_3,
+    GENERATION_4,
+    GENERATION_5,
+    GENERATION_6,
+    GENERATION_7,
+    GENERATION_8,
+    GENERATION_9,
+)
+
+GENERATIONS_BY_VERSION: Mapping[int, SchemaGeneration] = {
+    generation.user_version: generation for generation in GENERATIONS
+}
+
+GENERATIONS_BY_KEY: Mapping[tuple[str, int], SchemaGeneration] = {
+    (generation.schema_name, generation.user_version): generation for generation in GENERATIONS
+}
+
+# What a *created* store declares. This is the only place a build's own generation decides
+# anything, and it decides only what new data says about itself: an empty database has no version
+# to read, so "never from the running build" cannot govern initialization (requirement 2.7).
+CURRENT_GENERATION = GENERATIONS[-1]
+
+
+def require_pinned_generation_unchanged(generation: SchemaGeneration) -> None:
+    """Fail loudly when a pinned generation no longer fingerprints as its recorded constant."""
+
+    recomputed = structure_fingerprint(generation)
+    if recomputed != generation.fingerprint:
+        raise KnowledgeSchemaPinError(
+            f"schema generation {generation.schema_name} no longer fingerprints as pinned: the "
+            f"recorded generation data or the encoder was changed. Pinned "
+            f"{generation.fingerprint}, recomputed {recomputed}. Correct the change; do not "
+            "re-pin the constant to the new value."
+        )
+
+
+def require_pinned_generation_1_unchanged() -> None:
+    """Fail loudly when the pinned generation-1 structure no longer describes itself."""
+
+    require_pinned_generation_unchanged(GENERATION_1)
+
+
+def generation_of_new_store() -> SchemaGeneration:
+    """Declare the generation a store is *created* as. Not a selection: there is no dataset."""
+
+    return CURRENT_GENERATION
+
+
+def generation_of_database(connection: apsw.Connection) -> SchemaGeneration:
+    """Select the generation a dataset declares, from the dataset itself.
+
+    An open database declares its generation through ``PRAGMA user_version`` alone -- the
+    application schema name is not in the file -- so this resolves by version. A dataset whose
+    version is not registered is refused as an unsupported schema: it is not migrated, repaired,
+    re-created, or re-read under a different generation to obtain a green result.
+    """
+
+    declared = int(next(iter(connection.execute("PRAGMA user_version")))[0])
+    generation = generation_for_version(declared)
+    if generation is None:
+        raise KnowledgeStorageError(
+            f"unsupported schema: user_version is {declared}. This build supports "
+            f"{registered_version_listing()}. An unknown generation is refused, never migrated or "
+            "guessed at."
+        )
+    return generation
+
+
+def generation_for_version(user_version: int) -> SchemaGeneration | None:
+    """Return the generation one open-database version resolves to, or ``None``."""
+
+    return GENERATIONS_BY_VERSION.get(user_version)
+
+
+def declared_columns_for(table: str) -> tuple[str, ...] | None:
+    """Return the declared column order one table carries anywhere in the registry, or ``None``.
+
+    This exists for exactly one caller: the portable reader's canonical-form gate, which renders an
+    artifact **before** it has decided whether the artifact's declared generation is one this build
+    supports. The gate is about the *spelling* of a document rather than about which generation it
+    is, so it must be able to render a table the document carries even when the header is one the
+    reader is about to refuse -- otherwise a differently-spelled document with an unsupported header
+    would be refused for the wrong reason (or, worse, not refused for its spelling at all).
+
+    Requirement 1.3's additive rule is what makes a single answer well defined: a table declared by
+    more than one generation declares the same columns in each, and a disagreement here is a
+    registry defect rather than something to resolve by picking one.
+    """
+
+    frames = {
+        generation.columns[table] for generation in GENERATIONS if table in generation.columns
+    }
+    if not frames:
+        return None
+    if len(frames) > 1:
+        raise KnowledgeSchemaPinError(
+            f"the registry declares more than one column order for {table}, which requirement 1.3 "
+            "forbids: a later generation appends tables and never retypes or reorders an earlier "
+            "generation's"
+        )
+    return next(iter(frames))
+
+
+def declared_json_columns_for(table: str) -> frozenset[str] | None:
+    """Return the typed-JSON column set one table carries anywhere in the registry, or ``None``."""
+
+    frames = {
+        generation.json_columns.get(table, frozenset())
+        for generation in GENERATIONS
+        if table in generation.columns
+    }
+    if not frames:
+        return None
+    if len(frames) > 1:
+        raise KnowledgeSchemaPinError(
+            f"the registry declares more than one typed-JSON column set for {table}, which "
+            "requirement 1.3 forbids for an earlier generation's table"
+        )
+    return next(iter(frames))
+
+
+def generation_for_name(schema_name: object) -> SchemaGeneration | None:
+    """Return the generation one application schema name names, or ``None``.
+
+    This is not dispatch: it does not decide which generation a dataset is. It resolves a caller's
+    already-selected generation, spelled by name, to the record an encoder needs -- and it refuses
+    a name no registered generation declares rather than approximating one.
+    """
+
+    if not isinstance(schema_name, str):
+        return None
+    for generation in GENERATIONS:
+        if generation.schema_name == schema_name:
+            return generation
+    return None
+
+
+def generation_for_key(schema_name: object, user_version: object) -> SchemaGeneration | None:
+    """Return the generation one artifact ``(schema, userVersion)`` pair resolves to, or ``None``.
+
+    The lookup is **type-strict on the version** before it is a lookup. In Python ``1 == 1.0 ==
+    True`` and all three hash alike, so an equality- or dict-key-based lookup would resolve the
+    spellings ``1.0`` and ``true`` to generation 1 -- which the shipped reader deliberately
+    refuses. A non-integer spelling is therefore refused by the caller as an unsupported schema,
+    with the observed spelling rendered, exactly as today.
+    """
+
+    if type(user_version) is not int:
+        return None
+    if not isinstance(schema_name, str):
+        return None
+    return GENERATIONS_BY_KEY.get((schema_name, user_version))
+
+
+def registered_version_listing() -> str:
+    """Render every registered generation's own version string, for a refusal's ``expected``."""
+
+    return " | ".join(str(generation.user_version) for generation in GENERATIONS)
+
+
+def registered_key_listing() -> str:
+    """Render every registered ``schema/version`` pair, for an artifact refusal's ``expected``."""
+
+    return " | ".join(
+        f"{generation.schema_name}/{generation.user_version}" for generation in GENERATIONS
+    )
+
+
+def declared_version_string(schema_name: object) -> str | None:
+    """Return the version string of the generation one artifact schema name names, or ``None``.
+
+    This preserves the shipped rendering for a type-strict refusal: a generation-1 artifact's
+    ``expected`` stays that generation's own version string (``"1"``), not the joined registry
+    listing -- the two are different facts. The joined listing belongs to the unregistered-key
+    refusal, which says this build supports no such pair.
+    """
+
+    for generation in GENERATIONS:
+        if generation.schema_name == schema_name:
+            return str(generation.user_version)
+    return None
+
+
+def generation_of_artifact(
+    envelope: Mapping[str, object], operation: KnowledgeOperation
+) -> SchemaGeneration | KnowledgeRefusal:
+    """Select the generation a portable artifact declares, from the artifact itself.
+
+    A portable artifact *does* carry its application schema name, unlike an open file, so this
+    resolves the pair rather than the version -- and it is type-strict on ``userVersion`` before it
+    is a lookup, so the spellings ``1.0`` and ``true`` keep the shipped refusal instead of
+    resolving to generation 1.
+    """
+
+    declared_schema = envelope.get("schema")
+    declared_version = envelope.get("userVersion")
+    if type(declared_version) is not int:
+        # The type-strict path keeps the SHIPPED rendering: for a generation-1 artifact
+        # ``expected`` is that generation's own version string ("1"). It is not the joined
+        # registry listing -- that belongs to the unregistered-key refusal below, which is a
+        # different fact (this build supports no such pair) from a mis-spelled version.
+        return unsupported_schema_refusal(
+            operation,
+            f"the artifact declares user version {declared_version!r}; the supported generation is "
+            f"{declared_version_string(declared_schema)}, spelled as a JSON integer",
+            expected=declared_version_string(declared_schema) or registered_version_listing(),
+            observed=repr(declared_version),
+        )
+    generation = generation_for_key(declared_schema, declared_version)
+    if generation is None:
+        return unsupported_schema_refusal(
+            operation,
+            "the artifact declares a schema generation this build does not support",
+            expected=registered_key_listing(),
+            observed=f"{declared_schema!r}/{declared_version!r}",
+        )
+    return generation

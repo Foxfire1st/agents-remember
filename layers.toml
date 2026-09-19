@@ -210,6 +210,13 @@ present = true
 charter = """
 Memory repository initialization, baseline adoption and carryover. Above memory_quality
 because adopting a baseline asks whether it is current.
+
+Experimental knowledge storage (`memory/knowledge/`) also lives here: the concrete APSW-backed
+SQLite candidate that holds repository, invariant and revision identity. It is a durable record
+store, so it ranks with the record stores rather than with the application that admits its
+writes. Consumers that rank below it -- `worktrees` and `memory_quality` among them -- receive
+`models/knowledge` values or an already-prepared result from `application`, and never import
+this package.
 """
 
 [package.providers]

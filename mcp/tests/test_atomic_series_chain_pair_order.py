@@ -11,6 +11,13 @@ two leaves shared a code commit, so no total order could be built and the master
 ``atomic-series-leaf-chain-invalid``: a complete atomic master containing a memory-only leaf could
 not be landed by any governed route. Found by this master's own promotion attempt (register row
 ``D52``); the twenty-four real contracts that exposed it are named in the leaf report.
+
+The same leaf family has a second, surviving refusal (register row ``D-45``), pinned by the class
+below: the spine's admissible positions were read from the series contract alone, so a base advanced
+by a *leaf-level* sync was invisible and a step to it was refused even though the leaf's own contract
+records that position as synced. The new case is paid for inside this module: the identical-pair case
+now also carries the second fixture pair the module used to assert separately -- the property is over
+the pair, not over either commit's value -- so the module's case count is unchanged by the addition.
 """
 
 from __future__ import annotations
@@ -18,6 +25,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -25,7 +33,12 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.kernel.memory_mode import MemoryMode
-from agents_remember.worktrees.series_closeout import _leaf_landing_precedes
+from agents_remember.worktrees.queue.closeout_queue import CloseoutQueueError
+from agents_remember.worktrees.series_closeout import (
+    _leaf_landing_precedes,
+    _require_exact_atomic_landing_chain,
+)
+from agents_remember.worktrees.task_resolver import leaf_enclosure_path
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 
@@ -51,6 +64,20 @@ def _commit(repo: Path, name: str, body: str) -> str:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-m", body)
     return _git(repo, "rev-parse", "HEAD")
+
+
+def _branch(repo: Path, name: str, commit: str) -> None:
+    """Point a ref the checked-out branch does not own, so the series tip can be placed exactly."""
+
+    _git(repo, "branch", "-f", name, commit)
+
+
+@dataclass(frozen=True)
+class _Side:
+    """One side of a leaf's recorded pair: the base it started from and the commit it landed."""
+
+    base: str
+    landed: str
 
 
 class AtomicSeriesChainPairOrderTests(unittest.TestCase):
@@ -125,24 +152,20 @@ class AtomicSeriesChainPairOrderTests(unittest.TestCase):
         self.assertFalse(_leaf_landing_precedes(series, later, earlier))
 
     def test_an_identical_pair_is_still_one_landing_recorded_twice(self) -> None:
-        """Equality on both sides stays unordered in both directions -- nothing is relaxed here."""
+        """Equality on both sides stays unordered in both directions -- nothing is relaxed here.
 
-        series = self._contract(code=self.code_next, memory=self.memory_second, leaf_id="L1")
-        one = self._contract(code=self.code_next, memory=self.memory_second, leaf_id="L1")
-        two = self._contract(code=self.code_next, memory=self.memory_second, leaf_id="L2")
+        The property is over the pair, not over either commit's value, so both fixture pairs are
+        asserted in this one case: the shared code commit with the second memory commit and with
+        the first.
+        """
 
-        self.assertFalse(_leaf_landing_precedes(series, one, two))
-        self.assertFalse(_leaf_landing_precedes(series, two, one))
+        for memory in (self.memory_second, self.memory_first):
+            series = self._contract(code=self.code_next, memory=memory, leaf_id="L1")
+            one = self._contract(code=self.code_next, memory=memory, leaf_id="L1")
+            two = self._contract(code=self.code_next, memory=memory, leaf_id="L2")
 
-    def test_a_shared_commit_with_the_same_memory_stays_unordered(self) -> None:
-        """Two leaves recording one identical pair have no order to give."""
-
-        series = self._contract(code=self.code_next, memory=self.memory_first, leaf_id="L1")
-        left = self._contract(code=self.code_next, memory=self.memory_first, leaf_id="L1")
-        right = self._contract(code=self.code_next, memory=self.memory_first, leaf_id="L2")
-
-        self.assertFalse(_leaf_landing_precedes(series, left, right))
-        self.assertFalse(_leaf_landing_precedes(series, right, left))
+            self.assertFalse(_leaf_landing_precedes(series, one, two))
+            self.assertFalse(_leaf_landing_precedes(series, two, one))
 
     def test_disabled_memory_keeps_the_code_only_rule(self) -> None:
         """With memory disabled there is no pair to order, so a shared code commit stays unordered."""
@@ -168,6 +191,150 @@ class AtomicSeriesChainPairOrderTests(unittest.TestCase):
 
         self.assertFalse(_leaf_landing_precedes(disabled, one, two))
         self.assertFalse(_leaf_landing_precedes(disabled, two, one))
+
+
+class AtomicSeriesLeafSyncPositionTests(unittest.TestCase):
+    """A leaf-level sync position is admissible; a position no contract recorded is not.
+
+    A sync is journaled on the contract it ran for. When a leaf's own base was advanced -- the
+    memory-only leaf whose base moved to its own landing, which is row ``D-45``'s case -- the entry
+    is on the *leaf's* contract, and the series contract holds only its own syncs. Reading the
+    series contract alone therefore refused a step to a base the leaf's own contract records as
+    synced, and named a commit that is that leaf's recorded base *and* its landing.
+
+    Both directions are pinned here, in one case, because they are one property -- the admissible
+    positions are exactly what the chain's own contracts recorded. The recorded ``codeBaseTo`` and
+    ``memoryBaseTo`` admit their steps; a commit that no contract's sync ever recorded is still
+    refused as history beyond the leaf landing chain.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.code = self.root / "code"
+        self.memory = self.root / "memory"
+        _init_repo(self.code, "line")
+        _init_repo(self.memory, "line")
+        self.code_first = _commit(self.code, "a.txt", "code first")
+        self.code_second = _commit(self.code, "b.txt", "code second")
+        self.code_synced = _commit(self.code, "c.txt", "code synced")
+        self.code_foreign = _commit(self.code, "d.txt", "code foreign")
+        self.memory_base = _commit(self.memory, "m0.txt", "memory base")
+        self.memory_first = _commit(self.memory, "m1.txt", "memory first")
+        self.memory_synced = _commit(self.memory, "m2.txt", "memory synced")
+        self.memory_second = _commit(self.memory, "m3.txt", "memory second")
+        self.memory_third = _commit(self.memory, "m4.txt", "memory third")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _series(self) -> WorktreeContract:
+        return WorktreeContract(
+            task_id="260915_TEST",
+            task_name="chain-leaf-sync",
+            repo_name="agents-remember",
+            workflow_kind="light-task",
+            memory_mode="external",
+            coordination_root=self.root,
+            task_root=self.root / "tasks",
+            contract_path=self.root / "tasks" / "series-contract.md",
+            task_artifact=self.root / "tasks" / "task.md",
+            worktree_group=self.root / "worktrees",
+            code_repo_path=self.code,
+            code_source_branch="line",
+            code_work_branch="series",
+            code_base_commit=self.code_first,
+            code_worktree=self.root / "worktrees" / "series",
+            memory_repo_path=self.memory,
+            memory_source_branch="line",
+            memory_work_branch="series",
+            memory_base_commit=self.memory_base,
+            memory_worktree=self.root / "worktrees" / "series-memory",
+            kind="series",
+        )
+
+    def _leaf(
+        self,
+        series: WorktreeContract,
+        leaf_id: str,
+        *,
+        code: _Side,
+        memory: _Side,
+        sync_log: tuple[dict[str, str], ...] = (),
+    ) -> WorktreeContract:
+        return WorktreeContract(
+            task_id=series.task_id,
+            task_name=series.task_name,
+            repo_name=series.repo_name,
+            workflow_kind=series.workflow_kind,
+            memory_mode=series.memory_mode,
+            coordination_root=series.coordination_root,
+            task_root=series.task_root,
+            contract_path=leaf_enclosure_path(series.task_root, leaf_id),
+            task_artifact=series.task_artifact,
+            worktree_group=series.worktree_group,
+            code_repo_path=self.code,
+            code_source_branch=series.code_work_branch,
+            code_work_branch=f"ar/{leaf_id.lower()}",
+            code_base_commit=code.base,
+            code_worktree=self.root / "worktrees" / leaf_id,
+            memory_repo_path=self.memory,
+            memory_source_branch=series.memory_work_branch,
+            memory_work_branch=f"ar/{leaf_id.lower()}",
+            memory_base_commit=memory.base,
+            memory_worktree=self.root / "worktrees" / f"{leaf_id}-memory",
+            code_commit=code.landed,
+            memory_content_commit=memory.landed,
+            integration_status="completed",
+            integrated_code_commit=code.landed,
+            integrated_memory_content_commit=memory.landed,
+            kind="leaf",
+            leaf_id=leaf_id,
+            parent_task_name=series.task_name,
+            parent_contract_path=series.contract_path,
+            sync_log=sync_log,
+        )
+
+    def test_a_leaf_level_sync_position_is_admitted_and_a_silent_one_is_refused(self) -> None:
+        """The union is the chain's own records: the synced base is admitted, the silent one is not."""
+
+        series = self._series()
+        first = self._leaf(
+            series,
+            "L1",
+            code=_Side(self.code_first, self.code_second),
+            memory=_Side(self.memory_base, self.memory_first),
+        )
+        synced = self._leaf(
+            series,
+            "L2",
+            code=_Side(self.code_synced, self.code_synced),
+            memory=_Side(self.memory_synced, self.memory_second),
+            sync_log=({"codeBaseTo": self.code_synced, "memoryBaseTo": self.memory_synced},),
+        )
+        _branch(self.code, "series", self.code_synced)
+        _branch(self.memory, "series", self.memory_second)
+
+        ordered = _require_exact_atomic_landing_chain(series, {"L1": first, "L2": synced})
+
+        self.assertEqual([leaf.leaf_id for leaf in ordered], ["L1", "L2"])
+
+        unrecorded = self._leaf(
+            series,
+            "L3",
+            code=_Side(self.code_foreign, self.code_foreign),
+            memory=_Side(self.memory_second, self.memory_third),
+        )
+        _branch(self.code, "series", self.code_foreign)
+        _branch(self.memory, "series", self.memory_third)
+
+        with self.assertRaises(CloseoutQueueError) as refused:
+            _require_exact_atomic_landing_chain(
+                series, {"L1": first, "L2": synced, "L3": unrecorded}
+            )
+
+        self.assertEqual(refused.exception.status, "atomic-series-leaf-chain-invalid")
+        self.assertIn(self.code_foreign, str(refused.exception))
 
 
 if __name__ == "__main__":

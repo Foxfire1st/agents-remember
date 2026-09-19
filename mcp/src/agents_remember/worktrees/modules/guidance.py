@@ -4,12 +4,16 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal, NotRequired, TypedDict
 
+from agents_remember.errors import CuratorCoherenceError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.git_freshness import ahead_behind
 from agents_remember.models.worktree import (
     NextOperation,
     NextTool,
     WorktreePhase,
+)
+from agents_remember.worktrees.integration.closeout.curator_coherence import (
+    current_curator_coherence_predecessor,
 )
 from agents_remember.worktrees.modules.git import branch_commit, is_ancestor, worktree_dirty
 from agents_remember.worktrees.modules.landing import landing_refs
@@ -225,6 +229,44 @@ def lifecycle_guidance(contract: WorktreeContract) -> LifecycleGuidance:
     )
 
 
+def _published_coherence_authority(contract: WorktreeContract) -> str:
+    """The digest of this leaf's published curator-coherence authority, or ``""``.
+
+    Never raises, and answers ``""`` for every contract the coherence route does not apply to (a
+    series contract, a leaf without external memory, a leaf with no memory worktree) and for a leaf
+    that has not published yet -- the hint must degrade to the ordinary integration step rather than
+    send an operator to a tool that will refuse.
+    """
+
+    if (
+        contract.kind != "leaf"
+        or contract.memory_mode != "external"
+        or contract.memory_worktree is None
+    ):
+        return ""
+    try:
+        return current_curator_coherence_predecessor(contract)
+    except (CuratorCoherenceError, OSError):
+        return ""
+
+
+def _canonical_curator_caller(contract: WorktreeContract) -> dict[str, object]:
+    """The exact ``caller`` the coherence route expects for this contract, as a plain payload.
+
+    Derived from the contract's own task root and leaf id, which is precisely what the route's
+    caller refusal asks a caller to supply: a hint that names a tool while leaving its one
+    identity argument blank would be the same instructions-do-not-travel defect (D-26) one level up.
+    """
+
+    return {
+        "role": "curator",
+        "task_document_ref": {
+            "repository": contract.repo_name,
+            "path": f"{contract.task_root.name}/{contract.leaf_id}.json",
+        },
+    }
+
+
 def _reclaimed_phase(contract: WorktreeContract) -> LifecycleGuidance | None:
     """Terminal phases: the worktrees are gone, by cleanup or by abandonment."""
     if contract.cleanup == "completed":
@@ -337,6 +379,34 @@ def _pre_integration_phase(contract: WorktreeContract) -> LifecycleGuidance:
     `git status`. A dirty tree falls through to the honest lifecycle-position phase below.
     """
     if contract.closeout_status == "completed":
+        authority_digest = _published_coherence_authority(contract)
+        if authority_digest:
+            # D-25: the documented order is closeout -> prepare -> publish -> **validate** ->
+            # integrate -> finalize, and the validate window closes at finalize, whose automatic
+            # cleanup collects the enclosure root. The hint chain used to walk straight from
+            # closeout to ``worktree_integrate`` and never named the step, so an operator following
+            # the tool's own guidance could not see it -- and a leaf that missed the window could
+            # never re-prove what it had published. The move is still the integration decision; the
+            # validation is its precondition.
+            return {
+                "phase": "integration-pending",
+                "summary": (
+                    "Closeout completed and this leaf's curator-coherence authority is published "
+                    f"({authority_digest[:12]}...). Run its standalone validate now, while the "
+                    "enclosure root still exists: lifecycle_finalize_task's automatic cleanup "
+                    "collects it and the validate window closes with it. Then integrate."
+                ),
+                **next_guidance(
+                    "request_integration_decision",
+                    tool="curator_coherence",
+                    args=contract_next_args(
+                        contract,
+                        action="validate",
+                        caller=_canonical_curator_caller(contract),
+                    ),
+                    required_args=["contract_path", "action", "caller"],
+                ),
+            }
         return {
             "phase": "integration-pending",
             "summary": "Closeout completed; integrate the task branches back into their source branches.",

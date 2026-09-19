@@ -71,7 +71,7 @@ reviewer finding you were handed, say so **with evidence in your report** — th
 
 ## Outputs
 
-Four things, and each follows its own artifact's authority — **do not reinvent an artifact's form**:
+Five things, and each follows its own artifact's authority — **do not reinvent an artifact's form**:
 
 - **The turn report**, at the report path your brief names (default
   `notes/reports/<leaf-id>-worker-report.md`). **Its authority is `../templates/turn-report.md`**: the
@@ -80,6 +80,13 @@ Four things, and each follows its own artifact's authority — **do not reinvent
   experimental-protocol events, the durable-evidence promotion hold point, and the Respawn State that
   lets a successor continue without a transcript. If your report and that template disagree, **the
   template governs**, and a disagreement you cannot resolve is an escalation.
+- **The curator hand-off list** — every requirement-shaped item of your leaf emitted as that list, in
+  the shape `../templates/curator-handoff-list.md` owns. **That list is your hand-off to the curator,
+  not a summary of one:** the items, each with its own statement, kind, place, evidence and verdict,
+  carried in your own wording. Name where each thing lives rather than where you looked — a path and
+  the construct inside it come from one resolution act, and two independent resolutions do not compose
+  into one citation. Never rewrite your own items for the reader: a re-worded statement destroys the
+  evidence the curator is meant to compare against the code.
 - **The requirement attempt record**, appended to the single physical journal your brief names, before a
   review handoff — append-only, one record per exact requirement revision and leaf manifestation, each
   bound to one exact candidate (a Git tree/commit for code, or an artifact digest plus durable anchors;

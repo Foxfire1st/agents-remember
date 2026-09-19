@@ -12,6 +12,7 @@ from agents_remember.application.memory_scope import (
 from agents_remember.application.memory_scope import (
     resolve_memory_scope as _memory_scope,
 )
+from agents_remember.application.runtime.startup import measuring_build_stamp
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.authority import require_repo, require_within_coordination
 from agents_remember.kernel.memory_init import initialize_memory
@@ -239,6 +240,10 @@ def citation_fix_tool(
             only=operation_scope.document,
             expected_snapshot=operation_scope.expected_snapshot,
         ),
+        # D-33: the repair engine is part of the measuring machinery, so the response names the
+        # build whose rules produced these counts rather than leaving the reader to assume it is
+        # the candidate's own code.
+        **measuring_build_stamp(),
     }
 
 
@@ -273,6 +278,9 @@ def citation_migrate_tool(
             only=operation_scope.document,
             expected_snapshot=operation_scope.expected_snapshot,
         ),
+        # Same ruler problem as ``citation_fix``: this rewrites ranges with the serving build's
+        # rules, so the response has to say which build that was (D-33).
+        **measuring_build_stamp(),
     }
 
 

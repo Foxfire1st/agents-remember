@@ -172,6 +172,13 @@ verdict finding, not a style note.
 
 ## Curator handoff input
 - Changed paths and code-diff summary for the curator's affected-onboarding handoff.
+- Your curator hand-off list: every requirement-shaped item of this leaf, emitted in the shape of
+  `skills/l-01-agent-lifecycles/templates/curator-handoff-list.md` — one entry per item, each with its
+  own `statement`, `kind`, `target`, `found_at`, `disposition` and `evidence`; `resolution`,
+  `validated_at`, `record_action` and `supersedes` stay `null`, because those are the curator's to fill.
+  Name where each thing lives (path plus the construct inside it, from one resolution act), keep your own
+  wording rather than re-telling the item for the reader, and let `target: []` stand where a ruling
+  applies nowhere instead of inventing a place for it.
 - Any route/onboarding observations from implementation, clearly marked as observations; the
   curator reconciles them with existing and ruled intent before writing onboarding in its own
   fresh session. Do not present a forward-looking idea or local inference as accepted current truth.

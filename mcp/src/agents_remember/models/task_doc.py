@@ -112,6 +112,29 @@ class TaskDocDiscardEvidence(BaseModel):
     nextArgs: dict[str, Any] | None = Field(default=None, max_length=32)
 
 
+class TaskDocSubStepRead(BaseModel):
+    """One substep's addressing and progress facts, as ``read_steps`` publishes them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    status: str
+    note: str | None = None
+
+
+class TaskDocStepRead(BaseModel):
+    """One top-level step plus its substeps, as ``read_steps`` publishes them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    title: str
+    status: str
+    note: str | None = None
+    substeps: list[TaskDocSubStepRead] = Field(default_factory=list)
+
+
 class TaskDocResponse(ToolResponse):
     """``task_doc``: the document's identity, status, and progress after the op."""
 
@@ -124,14 +147,6 @@ class TaskDocResponse(ToolResponse):
     renderedPath: str
     stepsDone: int = 0
     stepsTotal: int = 0
-    # The focused checklist read (``operation="read_steps"``) returns the authored units
-    # themselves, not a count of them: ``_read_steps`` sets ``result["steps"]`` from
-    # ``task_doc_steps.step_payloads``. Without this declaration the extra=forbid envelope
-    # REJECTED that payload on every call, so the one operation the tool publishes as *the*
-    # way to read a checklist could never return it -- present only on ``read_steps``; every
-    # other operation leaves it None (excluded by exclude_none). Same bug class as
-    # ``removedSubtask`` above and ``documents`` below.
-    steps: list[dict[str, Any]] | None = None
     # dry-run / preview (R5): set only when dry_run=True; a real op leaves these at their defaults.
     dryRun: bool = False
     rendered: str | None = None
@@ -189,6 +204,13 @@ class TaskDocResponse(ToolResponse):
     linkageFacts: list[dict[str, Any]] | None = None
     # Bounded first-review/fix-verification state; absent persisted state is reported as zero.
     reviewState: dict[str, Any] | None = None
+    # ``read_steps``: the focused checklist read. The handler has always emitted this payload
+    # (``task_doc_tools._read_steps`` -> ``task_doc_steps.step_payloads``) and the response model
+    # never declared it, so under ``StrictResponseModel``'s ``extra="forbid"`` the real payload was
+    # REJECTED after the read: ``steps: Extra inputs are not permitted``. The operation was unusable
+    # on every document until the model and the handler agreed. Present only on ``read_steps``;
+    # every other operation leaves it None (excluded by exclude_none).
+    steps: list[TaskDocStepRead] | None = None
     # author_execution_graph: what the batch applied and the derived scheduling view.
     bootstrapped: bool | None = None
     appliedMutations: list[dict[str, Any]] | None = None

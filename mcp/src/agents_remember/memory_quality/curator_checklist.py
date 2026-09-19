@@ -16,6 +16,11 @@ from typing import Any
 
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import run_git
+from agents_remember.memory_quality.knowledge_review import (
+    AssessmentSummary,
+    KnowledgeReview,
+    knowledge_review_section,
+)
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorSourceCandidate,
     memory_quality_attestation_dependencies,
@@ -45,6 +50,13 @@ class CuratorChecklist:
     source_candidates: tuple[CuratorSourceCandidate, ...]
     drift_rows: list[dict[str, Any]]
     report_only_findings: list[dict[str, Any]]
+    # ``KS-R15@v1`` §8.2's factual section input: what the curator-coherence authority currently
+    # holds. It defaults to nothing recorded, so every existing caller is unchanged and the section
+    # renders the explicit "none recorded" state rather than an absent heading. It is NOT an input to
+    # ``actionable_count`` below -- that arithmetic reads repairable findings, missing onboarding and
+    # stale route indexes only, which is §8.2's "does not fold into curatorActionableCount" enforced
+    # by the shape of the function rather than by a comment.
+    knowledge_review: tuple[AssessmentSummary, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -56,6 +68,7 @@ class _ChecklistSections:
     source_candidates: list[dict[str, Any]]
     commit_owned: list[dict[str, Any]]
     report_only: list[dict[str, Any]]
+    knowledge_review: KnowledgeReview
 
 
 def report_path_for(worktree_group: Path) -> Path:
@@ -84,6 +97,19 @@ def split_commit_owned_findings(
     return repairable, commit_owned
 
 
+def curator_actionable_count(repair: int, missing: int, stale: int) -> int:
+    """Return the shipped actionability formula over its exactly three terms.
+
+    Named rather than inlined at the one place that used to compute it, so a second consumer can
+    *consume* the formula instead of restating it, and the "gains no fourth term" property
+    (``KS-R16@v1`` §5.3) becomes a property of one function with one definition. The three terms are
+    repairable findings, missing onboarding and stale route indexes; the ``knowledgeReview`` section is
+    deliberately not among them and is never an input here.
+    """
+
+    return repair + missing + stale
+
+
 def write_curator_checklist(checklist: CuratorChecklist) -> dict[str, Any]:
     """Atomically replace the deterministic checklist and return its compact wire summary."""
     missing = sorted(
@@ -105,7 +131,7 @@ def write_curator_checklist(checklist: CuratorChecklist) -> dict[str, Any]:
         }
         for row in checklist.source_candidates
     ]
-    actionable_count = len(repair) + len(missing) + len(stale)
+    actionable_count = curator_actionable_count(len(repair), len(missing), len(stale))
     status = "ready-for-closeout" if actionable_count == 0 else "action-required"
     sections = _ChecklistSections(
         status=status,
@@ -115,6 +141,7 @@ def write_curator_checklist(checklist: CuratorChecklist) -> dict[str, Any]:
         source_candidates=source_candidates,
         commit_owned=commit_owned,
         report_only=report_only,
+        knowledge_review=knowledge_review_section(checklist.knowledge_review),
     )
     report = _render(checklist, sections)
     report_path = checklist.report_path.resolve()
@@ -235,6 +262,7 @@ def _render(checklist: CuratorChecklist, sections: _ChecklistSections) -> str:
     )
     _append_findings(lines, "Closeout-owned real-commit provenance", sections.commit_owned)
     _append_findings(lines, "Noteworthy report-only findings", sections.report_only)
+    lines.extend(sections.knowledge_review.lines)
     lines.extend(
         [
             "## Completion Rule",

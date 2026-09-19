@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -34,6 +35,18 @@ from agents_remember.models.lifecycles.evidence_dependencies import (
     require_evidence_dependencies,
 )
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
+from agents_remember.models.lifecycles.review_assessment import (
+    AssessmentEntry,
+    ReviewAssessment,
+    SubjectAssessmentState,
+    assessment_state_for,
+    assessment_subject_id,
+)
+from agents_remember.models.lifecycles.review_assessment_store import (
+    assessment_currentness_for_record,
+    assessment_edge_name,
+    recorded_assessment_digest,
+)
 from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.tasks.document_refs import (
     ResolvedTaskDocument,
@@ -69,12 +82,25 @@ class CuratorCoherencePaths:
     canonical: Path
     generations: Path
     snapshots: Path
+    attestations: Path
 
     def generation_record(self, digest: str) -> Path:
         return self.generations / digest / "record.json"
 
     def generation_report(self, digest: str) -> Path:
         return self.generations / digest / "report.md"
+
+    def attestation_copy(self, digest: str) -> Path:
+        """The durable copy of the memory-quality attestation a publication bound.
+
+        Content-addressed by the attestation's own digest and living in the task tree beside the
+        record, because the enclosure path the record binds is reclaimed by
+        ``lifecycle_finalize_task``: without this copy an authority's ``attestationSha256`` commits
+        to bytes no longer recoverable anywhere in the workspace, and nothing can re-derive from the
+        bound attestation why the record's source-candidate list is what it is.
+        """
+
+        return self.attestations / f"{digest}.json"
 
 
 @dataclass(frozen=True)
@@ -140,6 +166,7 @@ def curator_coherence_paths(contract: WorktreeContract) -> CuratorCoherencePaths
         canonical=reports / f"{contract.leaf_id}-curator-coherence.json",
         generations=history / "generations",
         snapshots=history / "attempts",
+        attestations=history / "attestations",
     )
 
 
@@ -373,7 +400,16 @@ def require_current_curator_coherence(
 
 
 def _require_current_dependencies(record: CuratorCoherenceRecord) -> None:
-    """Require the record's declared edges to equal the inputs its validator reads."""
+    """Require the record's declared edges to equal the inputs its validator reads.
+
+    A stored assessment's edge is recomputed from the record the edge points at: the digest in
+    ``review-record`` is the assessment's own content address, so a reader can tell that the stored
+    assessment is the one the record declared rather than a record that was edited beside it. That is
+    the *record's* dependency and it is one-directional -- the assessment's own binding declares the
+    inputs it examined and deliberately does not declare the record it lives in, because a record
+    citing itself is the self-invalidating sequence ``design/retrieval-review-design.md:368`` exists
+    to avoid.
+    """
 
     if not isinstance(record.taskIntent, TaskIntentIdentity):
         raise CuratorCoherenceError(
@@ -382,6 +418,10 @@ def _require_current_dependencies(record: CuratorCoherenceRecord) -> None:
             next_action="publish",
         )
     evidence = {judgment.evidenceRef: judgment.evidenceSha256 for judgment in record.judgments}
+    review_edges = {
+        assessment_edge_name(assessment.assessmentId): recorded_assessment_digest(assessment)
+        for assessment in record.assessments
+    }
     try:
         expected = build_evidence_dependencies(
             "curator-coherence/v1",
@@ -417,6 +457,10 @@ def _require_current_dependencies(record: CuratorCoherenceRecord) -> None:
                 *(
                     dependency("evidence-bytes", path, digest)
                     for path, digest in sorted(evidence.items())
+                ),
+                *(
+                    dependency("review-record", name, digest)
+                    for name, digest in sorted(review_edges.items())
                 ),
                 dependency(
                     "validator",
@@ -554,6 +598,76 @@ def _memory_candidate_tree(contract: WorktreeContract) -> str:
     reports.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=".curator-coherence-memory-", dir=reports) as temporary:
         return worktree_candidate_tree(contract.memory_worktree, Path(temporary) / "index")
+
+
+def curator_coherence_assessments(
+    validated: ValidatedCuratorCoherence,
+    *,
+    current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]] | None = None,
+) -> tuple[AssessmentEntry, ...]:
+    """Project the stored assessment collection without deciding anything about it.
+
+    ``current`` is the caller's measurement of the world -- ``assessmentId -> (kind, name) ->
+    (algorithm, digest)`` -- and an assessment the caller supplied no entry for is reported ``stale``
+    rather than ``current``: "not measured" is never "still matches", which is requirement 5.2's rule
+    read in the direction that matters for a projection. Omitting ``current`` therefore reports the
+    collection itself (identities and dispositions) with every record marked stale, and never
+    silently promotes an unmeasured assessment to current.
+    """
+
+    return assessment_state_for(
+        validated.record.assessments,
+        stale_ids=_stale_assessment_ids(validated.record.assessments, current or {}),
+    ).assessments
+
+
+def curator_coherence_subject_assessment_state(
+    validated: ValidatedCuratorCoherence,
+    subject_id: str,
+    *,
+    current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]] | None = None,
+) -> SubjectAssessmentState:
+    """Report one subject's assessment state as one of the four distinct reportable states.
+
+    A subject with no stored assessment answers ``none-recorded`` with a zero count -- never a
+    disposition, never ``no_concern_found``, never ``compatible``. A subject whose record is
+    ``unresolved`` answers ``unresolved``. A subject whose record no longer matches its recorded
+    inputs answers ``stale`` and stays readable. Those three, plus ``current``, are the whole of the
+    read layer's vocabulary for this question, and no path here manufactures a fourth. ``subject_id``
+    is compared against :func:`assessment_subject_id`, which is the one spelling both a writer and a
+    reader derive rather than two spellings that have to agree.
+    """
+
+    measured = current or {}
+    subject = [
+        assessment
+        for assessment in validated.record.assessments
+        if assessment_subject_id(assessment) == subject_id
+    ]
+    if not subject:
+        return assessment_state_for(())
+    return assessment_state_for(subject, stale_ids=_stale_assessment_ids(subject, measured))
+
+
+def all_assessment_subject_ids(validated: ValidatedCuratorCoherence) -> tuple[str, ...]:
+    """Return every subject the stored collection has an assessment for, in stored order."""
+
+    return tuple(
+        dict.fromkeys(
+            assessment_subject_id(assessment) for assessment in validated.record.assessments
+        )
+    )
+
+
+def _stale_assessment_ids(
+    assessments: Sequence[ReviewAssessment],
+    current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]],
+) -> list[str]:
+    return [
+        currentness.assessmentId
+        for currentness in assessment_currentness_for_record(assessments, current)
+        if currentness.is_stale
+    ]
 
 
 def _require_leaf_external_memory(contract: WorktreeContract) -> None:

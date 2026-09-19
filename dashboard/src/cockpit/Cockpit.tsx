@@ -32,6 +32,7 @@ import {
 import { ModeBar } from "../grammar/ModeBar";
 import { AttentionQueue } from "../panels/AttentionQueue";
 import { ChangeSetViewer, type ChangeSetTarget } from "../panels/changeset/ChangeSetViewer";
+import { ReviewSurface } from "../panels/review/ReviewSurface";
 import type { TaskArtifactReaderTarget as NotesReaderTarget } from "../data/taskArtifacts";
 import { NotesReaderViewer } from "../panels/notes-reader/NotesReaderViewer";
 import { DetailPanel } from "../panels/detail-panel/DetailPanel";
@@ -566,8 +567,22 @@ function ChangeSetTakeover({
 }) {
   return (
     <div className={cx(bodyGrid({ bleed: true }), "shell__body")} data-fullbleed={true}>
-      <main className={cx(viewport, "viewport")} data-view="changeset">
-        <ChangeSetViewer {...target} onBack={onBack} />
+      <main
+        className={cx(viewport, "viewport")}
+        data-view={target.review ? "intent-review" : "changeset"}
+      >
+        {target.review ? (
+          <ReviewSurface
+            repo={target.repo}
+            master={target.master ?? ""}
+            leaf={target.leaf ?? ""}
+            selectorKind={target.review.selectorKind}
+            selectorId={target.review.selectorId}
+            onBack={onBack}
+          />
+        ) : (
+          <ChangeSetViewer {...target} onBack={onBack} />
+        )}
       </main>
     </div>
   );

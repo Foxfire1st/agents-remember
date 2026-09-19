@@ -33,6 +33,24 @@ def mcp_serving_build_payload() -> ServingBuildPayload:
     return process_serving_build().payload()
 
 
+def measuring_build_stamp() -> dict[str, object]:
+    """Which build produced a measurement, as wire JSON (D-33).
+
+    A memory-quality or citation count is produced by ONE build, and the build that answers an MCP
+    tool call need not be the candidate being measured: ``server_info`` reported
+    ``servingBuild.commit f0313143`` while the leaf under curation carried newer code, so a reader
+    of a checklist could not tell a candidate-ruler count from a serving-build-ruler count. This
+    stamp is what makes the ruler nameable, and it costs nothing per call -- ``process_serving_build``
+    resolves the identity once per process, so this is a dict copy rather than a probe. ``dirty``
+    rides along so an uncommitted serving tree reads as such instead of being taken for the commit
+    it names.
+    """
+
+    return {
+        "servingBuild": process_serving_build().payload().model_dump(mode="json", exclude_none=True)
+    }
+
+
 def declare_mcp_process() -> None:
     """Declare trusted MCP execution before authority settings are loaded."""
     declare_process_role("mcp")

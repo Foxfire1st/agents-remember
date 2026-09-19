@@ -31,6 +31,7 @@ from typing import Any
 
 from agents_remember.memory_quality.style.citations import model, repair, source_index
 from agents_remember.memory_quality.style.citations.editing import Site
+from agents_remember.memory_quality.style.update_history import history_order
 
 OPERATION = "citation_deterministic_projection"
 REPAIR_TOOL_VERSION = "ccr-r10@v1"
@@ -244,13 +245,69 @@ def conflicting_write_decline(relative: str, line: int, anchor: str | None) -> P
 
 
 def history_edit(lines: list[str], heading_line: int, bullets: list[str]) -> tuple[Site, str]:
-    """One edit that inserts every generated bullet directly under the heading.
+    """One edit that inserts every generated bullet where the section's INSTANTS place it.
 
-    The heading element is replaced by itself plus the bullets, so the existing blank
-    line and older entries keep their own elements and the inserted bullets sit at the
-    top of the section - newest-first by construction.
+    The generated bullet is stamped in UTC while the document's own entries may carry any offset,
+    so "directly under the heading" is not the same claim as "newest first": an entry stamped
+    ``+02:00`` can be newer than the bullet's instant, and inserting above it manufactures an
+    ``update_history_not_newest_first`` row on a document nobody edited wrongly (D-27). The
+    insertion line is therefore chosen by the parsed instant -- below every offset-bearing entry
+    that is newer than the newest generated bullet, and directly under the heading when none is --
+    which is the same comparison the checker makes. Entries whose instant is not comparable (a
+    naive stamp, a malformed bullet) end the scan instead of being ordered against, because the
+    checker does not compare across frames either. Every element keeps its own bytes either way.
     """
-    element = lines[heading_line - 1]
+    ordered = _newest_first(bullets)
+    line = _insertion_line(lines, heading_line, ordered)
+    element = lines[line - 1]
     separator = "\r\n" if element.endswith("\r") else "\n"
-    text = element.removesuffix("\r") + separator + separator.join(bullets)
-    return Site(line=heading_line, start=0, end=len(element)), text
+    text = element.removesuffix("\r") + separator + separator.join(ordered)
+    return Site(line=line, start=0, end=len(element)), text
+
+
+def _newest_first(bullets: list[str]) -> list[str]:
+    """The generated bullets newest first by the instant the checker will read."""
+    return sorted(
+        bullets,
+        key=lambda one: _bullet_instant(one) or datetime.min,
+        reverse=True,
+    )
+
+
+def _bullet_instant(bullet: str) -> datetime | None:
+    """The instant one generated bullet states, or ``None`` when it states no comparable one."""
+    match = history_order.BULLET_PATTERN.match(bullet)
+    if match is None:
+        return None
+    stamp = history_order.parse_timestamp(match.group("body"))
+    if stamp is None or not history_order.has_offset(stamp):
+        return None
+    try:
+        return history_order.datetime_value(stamp)
+    except ValueError:
+        return None
+
+
+def _insertion_line(lines: list[str], heading_line: int, bullets: list[str]) -> int:
+    """The line the generated bullets are inserted AFTER, by the section's own instants."""
+    newest = next(
+        (instant for instant in map(_bullet_instant, bullets) if instant is not None), None
+    )
+    if newest is None:
+        return heading_line
+    section_end = next(
+        (
+            end
+            for start, end in history_order.update_history_sections(lines)
+            if start == heading_line
+        ),
+        len(lines),
+    )
+    line = heading_line
+    for entry in history_order.parse_entries(lines, heading_line, section_end):
+        if not entry.is_valid or not entry.has_offset:
+            break
+        if entry.value <= newest:
+            break
+        line = entry.line
+    return line

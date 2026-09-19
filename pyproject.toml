@@ -146,6 +146,25 @@ minversion = "9.0"
 # Measured cost on this checkout at the raise:
 # integration 206 cases + 31 subtests in 63.9s; unit 833 cases + 155 subtests in 53.9s; combined
 # 1039 cases + 186 subtests in 105.6s, exit 0.
+# 2026-09-15 -- unit 1000 -> 1100 and integration 250 -> 300, authorized by the orchestrator seat
+# under the developer's standing authority for the LOCR campaign's 28 requirements across 39 leaf
+# documents; the developer was consulted and directed the work to continue. Behavior bought: the
+# campaign's falsifiable case per leaf, each pinning one distinct consequential failure of the
+# lifecycle-owned completion relay rather than a coverage line. This raise is what keeps that work
+# landable: in flight at the raise, L16 contributes +1 unit case, L15 +11 unit cases, and this
+# leaf's L24 module +8, which puts the branch unit population at 1008 against the old ceiling of
+# 1000 -- and an over-budget population does not run partially, `pytest_collection_finish` raises
+# UsageError and the ENTIRE run executes zero tests, so the overflow would have broken every
+# subsequent run for every leaf, with the L39 hardening leaf still to come. Case-count delta: unit
+# 988 -> 1100, integration 247 -> 300 (both measured at the current master tip; this worktree's
+# pre-change base measures 925 unit / 247 integration -- 933 unit with this leaf's own 8 new cases
+# -- and the same 1000 / 250 there, so the raise is a no-op for populations already under the old
+# ceiling). Size delta: one test module per contributing leaf, no new shared support module, no new
+# artifact fixture. Runtime cost, measured on this checkout before the raise (unit lane: 933 cases +
+# 189 subtests in 56.2s, 57.5s wall clock with `-n=4`; integration: 247 cases + 52 subtests in
+# 62.1s, 63.4s wall clock). The raise itself adds no cases and therefore no runtime: it admits cases
+# the campaign branches already authored, and it is headroom, not a target -- do not fill it.
+# 2026-09-16 -- integration 250 -> 300, owner-authorized in the L6 fix round (260915-KS-L6).  The
 #
 # 2026-09-16 -- unit 1000 -> 1500, developer-ruled ("1200 is too few"), superseding the earlier
 # 1200 figure; integration stays 250. The population reached 1119 during the role-capsules
@@ -165,15 +184,65 @@ minversion = "9.0"
 # budget declaration and one place to read it. It remains a ceiling, not a target: 1516 collected
 # against 2000 is headroom the series is not asked to fill, and the consolidation check still applies
 # before any leaf grows the population.
-unit_case_budget = 2000
 #
-# 2026-09-16 -- integration 250 -> 300, from the merged 260831-LOCR line (its own raise,
-# 250 -> 300, authorized for its 28-requirement campaign), taken as the union of the two lines'
-# ceilings after the source line moved. The unit ceiling above is the 2026-09-17 developer ruling of
-# 2000. Both axes take the higher of the two lines' values because the merged
-# tree carries both populations, and an over-budget population does not run partially:
-# `pytest_collection_finish` raises UsageError and the ENTIRE run executes zero tests.
-integration_case_budget = 300
+# 2026-09-18 -- the ceilings this file declares at the merge, MEASURED on the merged candidate.
+# Both sides raised these values while the two lines diverged -- this master's own entries above
+# (unit 1100 -> 1250, then 1250 -> 1500 and integration 300 -> 340, then 1500 -> 1600) and the ias
+# line's own entries above (unit 1000 -> 1500, then 1500 -> 2000).  Both histories are kept
+# byte-for-byte and verbatim.  The merged tree carries BOTH populations, and an over-budget
+# population does not run partially -- `pytest_collection_finish` raises UsageError and the ENTIRE
+# run executes zero tests -- so each axis starts from the HIGHER of the two lines' values and is then
+# measured, exactly as this protocol requires of the seat that resolves the merge:
+#   * integration 400: this master's value, above the ias line's 300, which is also what the ias
+#     entry's own rule asks for ("both axes take the higher of the two lines' values").  Measured on
+#     the merged candidate with `.venv/bin/python -m pytest -m integration --collect-only -q -o
+#     filterwarnings=ignore -n0`: **380 selected, 20 under** -- so 400 is correct and is not raised.
+#   * unit: the higher of the two values is the ias line's 2000, and at this merge it is NOT enough.
+#     Measured with `.venv/bin/python -m pytest --collect-only -q -o filterwarnings=ignore -n0`:
+#     **2035 unit cases (2056 items collected, 21 deselected)**.  The default run refuses, and the
+#     refusal is the whole consequence: `ERROR: unit suite has 2035 cases; budget is 2000. Consolidate
+#     overlapping protection first.` with `21 deselected in 3.29s` -- i.e. the unit lane executed ZERO
+#     tests, so no leaf of either line could obtain a budget signal.  The unit ceiling is therefore
+#     raised ONE further step, **2000 -> 2200**, admitting the measured 2035 plus 165 of headroom for
+#     the requirement leaves of this 260915-KS increment that have not landed yet (L20-L23), each of
+#     which owes its own typed evidence, at the roughly ten-to-fifteen unit cases per leaf the
+#     increment's landed leaves have measured.  This is headroom, never a target: no case, module or
+#     registration was dropped, consolidated or weakened to fit 2000, and the choice between the two
+#     sides' ceilings alone could not have been reported as sufficient without this measurement.
+#   * 2200 / 400 are ceilings, not targets.  A successor measures both populations again rather than
+#     filling them, and L23 states what was actually consumed over the frozen accumulation.
+#
+# 2026-09-18 -- the unit ceiling raised 2200 -> 2300 by the truth-coverage census and staged-migration
+# leaf, MEASURED on its own candidate with the pinned interpreter (`.venv/bin/python -m pytest mcp/tests
+# -m "not integration" -q --collect-only`, i.e. `mcp/.venv/bin/python`):
+#   * the line's population before this leaf, measured the same way at the base it was cut from
+#     (`a7076008`): **2158 collected**.  The 2200 ceiling therefore carried 42 cases of headroom.
+#   * this leaf's own delta: **48 unit cases** in one new module, `mcp/tests/test_migration_census.py`,
+#     each protecting a distinct property of the census's apparatus -- the inventory over the scope
+#     rather than over the corpus, the declared-doc-type authority, the metadata-table boundary that
+#     stops a body table becoming front matter, the three reference states, the fact-only mismatch
+#     report, the four-cell accounting and its eligibility rule, both unique and occurrence counts,
+#     all four slice axes, the unmeasured coverage denominator, the record kinds' generation, and the
+#     cutover's prepared-and-not-executed boundary.  It adds **no** integration case: the census is a
+#     read over records the shipped batch operation wrote, and the fixture composes it in-process, so
+#     there is no boundary the small integration lane would add protection for.
+#   * measured on the candidate: **2206 collected** against 2200, i.e. **six cases over**.  An
+#     over-budget population executes ZERO tests -- `pytest_collection_finish` raises `UsageError`, so
+#     the whole unit lane refuses rather than running 2200 of them -- which is exactly the consequence
+#     this ceiling exists to keep visible and exactly why the overage is not left to the next leaf.
+#   * the raise is to **2300**, which admits the measured 2206 plus 94 of headroom for the two
+#     requirement leaves of this increment that have not landed (L22, L23), at the ten-to-fifteen unit
+#     cases per leaf the increment's landed leaves have measured, with a margin for the coverage
+#     reviews' own cases.  Raise only as far as the projection needs: 2300 is the next hundred, and
+#     the per-leaf growth the projection rests on is the measured 48 and the landed leaves' measured
+#     ten-to-fifteen.
+#   * no case, module, registration or lane member was deleted, deselected, consolidated away or
+#     weakened to fit 2200, and no rail was lowered: the 48 cases were added first and the ceiling was
+#     raised afterwards, from the measurement rather than from the plan.
+#   * integration is **not** raised: measured **394 collected** against 400, unchanged by this leaf,
+#     which adds no integration case.  The six cases of headroom are reported rather than consumed.
+unit_case_budget = 2300
+integration_case_budget = 400
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this
 # key to build its pytest step, so the wrapper no longer carries a second copy that can

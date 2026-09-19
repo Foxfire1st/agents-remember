@@ -19,6 +19,7 @@ MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
 import pytest
+from agents_remember.errors import AgentsRememberError, AtomicReplaceError
 from agents_remember.kernel import atomic_write
 
 pytestmark = pytest.mark.fitness
@@ -110,6 +111,70 @@ class AtomicReplaceTests(unittest.TestCase):
             with mock.patch.object(atomic_write, "_fsync_directory") as _fsync_directory:
                 atomic_write.atomic_replace(spool / "asset", staged / "asset-0")
             self.assertEqual(_fsync_directory.call_args_list, [mock.call(staged), mock.call(spool)])
+
+    def test_a_post_rename_durability_failure_names_its_leg_and_the_destination_state(
+        self,
+    ) -> None:
+        """A failed directory flush is not a failed replace, and a caller must be able to tell.
+
+        The rename and the directory flush fail independently: when the rename fails the destination
+        still holds its previous bytes and nothing was published, while a failed flush happens
+        *after* the destination already holds the new bytes -- the publication is real and only its
+        durability is missing. Reported as one indistinguishable ``OSError`` (what the module did
+        before), the two states were the same failure to every caller. The case fails the flush and
+        then reads the destination, so it asserts the state the failure claims rather than trusting
+        the label.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "staged"
+            destination = root / "live.json"
+            source.write_text("new bytes\n", encoding="utf-8")
+            destination.write_text("previous bytes\n", encoding="utf-8")
+
+            with (
+                mock.patch.object(
+                    atomic_write, "_fsync_directory", side_effect=OSError("flush refused")
+                ),
+                self.assertRaises(AtomicReplaceError) as raised,
+            ):
+                atomic_write.atomic_replace(source, destination)
+
+            failure = raised.exception
+            self.assertEqual(failure.leg, "directory-fsync")
+            self.assertEqual(failure.destination, destination.as_posix())
+            self.assertEqual(failure.destination_state, "source-absent")
+            # The claim the leg makes, measured: the rename already published the new bytes and
+            # consumed the source path, so no caller may read this as "nothing was replaced".
+            self.assertEqual(destination.read_text(encoding="utf-8"), "new bytes\n")
+            self.assertFalse(source.exists())
+            # Both vocabularies keep observing it: the domain family and the OSError the call site
+            # used to catch.
+            self.assertIsInstance(failure, OSError)
+            self.assertIsInstance(failure, AgentsRememberError)
+
+    def test_a_failed_rename_leaves_the_destination_on_its_previous_bytes(self) -> None:
+        """The other leg: nothing was published, and the failure says so instead of implying it was."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "staged"
+            destination = root / "live.json"
+            source.write_text("new bytes\n", encoding="utf-8")
+            destination.write_text("previous bytes\n", encoding="utf-8")
+
+            with (
+                mock.patch.object(
+                    atomic_write.os, "replace", side_effect=OSError("rename refused")
+                ),
+                self.assertRaises(AtomicReplaceError) as raised,
+            ):
+                atomic_write.atomic_replace(source, destination)
+
+            failure = raised.exception
+            self.assertEqual(failure.leg, "replace")
+            self.assertEqual(failure.destination_state, "previous-bytes")
+            self.assertEqual(destination.read_text(encoding="utf-8"), "previous bytes\n")
+            self.assertTrue(source.exists())
 
 
 if __name__ == "__main__":

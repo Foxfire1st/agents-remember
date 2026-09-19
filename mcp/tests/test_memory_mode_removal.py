@@ -61,6 +61,9 @@ from agents_remember.kernel.primitives.runtime_config import default_memory_root
 from agents_remember.mcp.registration import worktrees as worktrees_registration
 from agents_remember.mcp.tools.worktree import worktree_status_payload
 from agents_remember.memory.baseline import _normalize_topology
+from agents_remember.memory_quality.integrity.check_missing_onboarding import (
+    main as check_missing_onboarding_main,
+)
 from agents_remember.tasks import SubTaskRef
 from agents_remember.worktrees.direct_landing import DirectLandingRequest
 from agents_remember.worktrees.modules.args import WorktreeArgs
@@ -807,3 +810,122 @@ def test_the_generated_skill_copy_carries_the_canonical_correction() -> None:
         / "mcp/src/agents_remember/package_data/runtime/skills/c-00-initialize-memory-repo/SKILL.md"
     ).read_bytes()
     assert generated == canonical
+
+
+# --------------------------------------------------------------------------------------
+# D-34: the two shapes an onboarding root legitimately takes
+# --------------------------------------------------------------------------------------
+
+
+def test_a_leaf_enclosures_memory_worktree_is_a_supported_onboarding_root(tmp_path: Path) -> None:
+    """`worktree_group_for` places a leaf's memory at worktrees/<repo>/<group>/memory-<name>.
+
+    That is the exact root the contract-scoped memory-quality route measures -- it takes the root
+    from the contract rather than from path inference -- so refusing it here refused a location the
+    product itself uses, and left a curator who wanted the module's own answer with no route but
+    the MCP tool (D-34).
+    """
+    onboarding_root = (
+        tmp_path
+        / "coordination/worktrees/repo-a/260915-demo-l1-ar/memory-260915-demo-l1/onboarding"
+    )
+    onboarding_root.mkdir(parents=True)
+
+    assert infer_topology_from_onboarding_root(onboarding_root) == "external"
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        # the `worktrees` segment is what makes the shape decidable, so a lookalike is not it
+        "coordination/not-worktrees/repo-a/group-ar/memory-leaf/onboarding",
+        # a leaf enclosure's CODE worktree has no `memory-` prefix
+        "coordination/worktrees/repo-a/group-ar/leaf/onboarding",
+        # an empty name after the prefix names nothing
+        "coordination/worktrees/repo-a/group-ar/memory-/onboarding",
+        # one segment short: this is not an enclosure at all
+        "coordination/worktrees/repo-a/memory-leaf/onboarding",
+    ],
+)
+def test_a_directory_that_merely_resembles_a_memory_worktree_is_refused(
+    tmp_path: Path, relative: str
+) -> None:
+    """Acceptance is decoded structurally, never guessed from a name."""
+    onboarding_root = tmp_path / relative
+    onboarding_root.mkdir(parents=True)
+
+    with pytest.raises(ValueError) as raised:
+        infer_topology_from_onboarding_root(onboarding_root)
+
+    assert raised.value.args[0].startswith("onboarding_root must point to a supported memory")
+
+
+def test_the_onboarding_root_refusal_names_both_shapes_and_the_root_received(
+    tmp_path: Path,
+) -> None:
+    """A refusal that names only the shape that does NOT work sends the caller in a circle."""
+    onboarding_root = tmp_path / "elsewhere/onboarding"
+    onboarding_root.mkdir(parents=True)
+
+    with pytest.raises(ValueError) as raised:
+        infer_topology_from_onboarding_root(onboarding_root)
+
+    detail = raised.value.args[0]
+    assert "memory-repos/ar-<code-repository-name>/onboarding" in detail
+    assert "worktrees/<code-repository-name>/<group>/memory-<worktree-name>/onboarding" in detail
+    assert onboarding_root.as_posix() in detail
+    assert "contract-scoped memory-quality route already measures" in detail
+
+
+def test_the_cli_measures_a_leaf_memory_worktree_and_refuses_an_unsupported_root(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The two answers must differ: one measures the requested tree, the other refuses by name.
+
+    Red before the fix: the worktree-shaped root raised out of the resolver, so a curator running
+    the module for a leaf got a traceback instead of the module's own answer, while the same check
+    inside `memory_quality_check` answered for that exact tree.
+    """
+    code_repository_root = tmp_path / "repo-a"
+    code_repository_root.mkdir()
+    init_repo(code_repository_root)
+    (code_repository_root / "src.py").write_text("VALUE = 1\n", encoding="utf-8")
+    git(code_repository_root, "add", "src.py")
+    git(code_repository_root, "commit", "-qm", "source")
+    official = tmp_path / "coordination/memory-repos/ar-repo-a"
+    (official / "system").mkdir(parents=True)
+    (official / "system" / "settings.md").write_text("# Settings\n", encoding="utf-8")
+    (official / "onboarding").mkdir()
+    enclosure = tmp_path / "coordination/worktrees/repo-a/260915-demo-l1-ar/memory-260915-demo-l1"
+    (enclosure / "onboarding").mkdir(parents=True)
+
+    status = check_missing_onboarding_main(
+        [
+            "--code-repository-root",
+            str(code_repository_root),
+            "--onboarding-root",
+            str(enclosure / "onboarding"),
+            "--format",
+            "json",
+        ]
+    )
+    measured = json.loads(capsys.readouterr().out)
+    assert status == 0
+    assert measured["onboardingRoot"] == (enclosure / "onboarding").resolve().as_posix()
+    assert measured["onboardingRoot"] != (official / "onboarding").resolve().as_posix()
+
+    unsupported = tmp_path / "elsewhere/onboarding"
+    unsupported.mkdir(parents=True)
+    with pytest.raises(ValueError) as raised:
+        check_missing_onboarding_main(
+            [
+                "--code-repository-root",
+                str(code_repository_root),
+                "--onboarding-root",
+                str(unsupported),
+                "--format",
+                "json",
+            ]
+        )
+    assert unsupported.as_posix() in raised.value.args[0]
+    assert measured["onboardingRoot"] != unsupported.as_posix()

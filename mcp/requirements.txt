@@ -1,3 +1,4 @@
 mcp==1.27.1
+apsw==3.53.4.0
 pydantic>=2,<3
 tiktoken>=0.12,<1

@@ -43,6 +43,11 @@ class Extent:
     start: int
     end: int
     kind: str
+    # For a DEFINITION extent, the line the declaration itself begins on. It differs from
+    # ``start`` for a decorated definition, whose extent is widened to cover its decorator: the
+    # anchor names the declaration, and a citation that starts at the declaration's own first
+    # line is about that construct. ``None`` for every other kind, where the two coincide.
+    declaration: int | None = None
 
     def holds(self, start: int, end: int) -> bool:
         """Whether this extent overlaps the range ``start``-``end`` at all."""
@@ -111,8 +116,16 @@ def definitions(path: str, lines: list[str]) -> dict[str, list[Extent]]:
     entirely and raises; see :mod:`grammars`.
     """
     return {
-        name: [Extent(start=start, end=end, kind=DEFINITION) for start, end in spans]
-        for name, spans in grammars.definitions(path, lines).items()
+        name: [
+            Extent(
+                start=binding.span[0],
+                end=binding.span[1],
+                kind=DEFINITION,
+                declaration=binding.declaration,
+            )
+            for binding in items
+        ]
+        for name, items in grammars.bindings(path, lines).items()
     }
 
 

@@ -71,6 +71,13 @@ NextTool = Literal[
     "memory_carryover_plan",
     "worktree_cleanup",
     "lifecycle_finalize_task",
+    # The published curator-coherence authority's standalone ``validate``. It is a registered public
+    # tool, and it is the one step whose window closes at ``lifecycle_finalize_task``: finalize's
+    # automatic cleanup collects the enclosure root, so a leaf that integrates and finalizes without
+    # validating can never re-prove what it published (D-25). The hint names it before integration
+    # for exactly that reason. ``NextOperation`` is deliberately NOT widened for it -- the move is
+    # still the integration decision, with the validation as its precondition.
+    "curator_coherence",
 ]
 SourceLineageState = Literal["current", "blocked", "unavailable"]
 SourceLineageEdgeState = Literal["current", "behind", "diverged", "unavailable"]

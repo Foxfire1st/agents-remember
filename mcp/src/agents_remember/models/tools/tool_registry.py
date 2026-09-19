@@ -108,6 +108,13 @@ from agents_remember.models.terminal import (
     SessionRetireResponse,
     SpawnAgentSessionResponse,
 )
+from agents_remember.models.tools.knowledge_responses import (
+    KnowledgeChangeResponse,
+    KnowledgeDiffResponse,
+    KnowledgeIntegrityCheckResponse,
+    KnowledgeProjectResponse,
+    KnowledgeReadResponse,
+)
 from agents_remember.models.worktree import (
     WorktreeAbandonResponse,
     WorktreeAttachResponse,
@@ -238,6 +245,11 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "role_capsule_compile": RoleCapsuleResponse,
     "skill_catalog_list": SkillCatalogListResponse,
     "skill_catalog_read": SkillCatalogReadResponse,
+    "knowledge_read": KnowledgeReadResponse,
+    "knowledge_change": KnowledgeChangeResponse,
+    "knowledge_diff": KnowledgeDiffResponse,
+    "knowledge_integrity_check": KnowledgeIntegrityCheckResponse,
+    "knowledge_project": KnowledgeProjectResponse,
 }
 
 PUBLIC_TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {

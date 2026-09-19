@@ -26,6 +26,7 @@ from agents_remember.application.memory_scope import (
     resolve_memory_scope,
     revalidate_memory_candidate_scope,
 )
+from agents_remember.application.runtime.startup import measuring_build_stamp
 from agents_remember.errors import (
     CuratorCoherenceError,
     MemoryCandidatePairError,
@@ -56,14 +57,23 @@ from agents_remember.memory_quality.integrity.check_missing_onboarding import (
 from agents_remember.memory_quality.integrity.governing_overview_resolution import (
     check_governing_overview_resolution,
 )
+from agents_remember.memory_quality.knowledge_review import (
+    AssessmentSummary,
+    AssessmentSummaryInput,
+    summarise_assessment_state,
+)
+from agents_remember.models.lifecycles.review_assessment import assessment_subject_id
 from agents_remember.models.memory import (
     MemoryQualityPollRequest,
     MemoryQualityStartRequest,
     MemoryQualitySyncRequest,
 )
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
+    ValidatedCuratorCoherence,
+    all_assessment_subject_ids,
     curator_coherence_no_impact,
     curator_coherence_paths,
+    curator_coherence_subject_assessment_state,
     require_current_curator_coherence,
 )
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
@@ -111,7 +121,7 @@ class _CuratorCandidateInputs:
     memory_tree: str
 
 
-def run_memory_quality_request(
+def _run_memory_quality_request(
     config: McpRuntimeConfig,
     request: MemoryQualitySyncRequest,
 ) -> dict[str, object]:
@@ -124,7 +134,7 @@ def run_memory_quality_request(
     return _execute_or_refuse(execution)
 
 
-def start_memory_quality_request(
+def _start_memory_quality_request(
     config: McpRuntimeConfig,
     request: MemoryQualityStartRequest,
 ) -> dict[str, object]:
@@ -159,7 +169,7 @@ def start_memory_quality_request(
     }
 
 
-def poll_memory_quality_request(
+def _poll_memory_quality_request(
     config: McpRuntimeConfig,
     request: MemoryQualityPollRequest,
 ) -> dict[str, object]:
@@ -222,6 +232,45 @@ def poll_memory_quality_request(
     if result.get("status") == "scope-refused":
         return {**result, "runId": snapshot.run_id}
     return {**result, "status": "completed", "runId": snapshot.run_id}
+
+
+def _stamped(payload: dict[str, object]) -> dict[str, object]:
+    """Name the build that produced this measurement on every memory-quality response (D-33).
+
+    Applied at the three public entry points rather than at each return: the controller answers a
+    sync run, an async admission, a poll, and the refusal envelopes around them, and a stamp added
+    at one return site is a stamp missing from the others. A reader can then tell a count produced
+    by the candidate's own code from one produced by the build the MCP surface happens to serve.
+    """
+
+    return {**payload, **measuring_build_stamp()}
+
+
+def run_memory_quality_request(
+    config: McpRuntimeConfig,
+    request: MemoryQualitySyncRequest,
+) -> dict[str, object]:
+    """Resolve and synchronously execute one explicit sync request."""
+
+    return _stamped(_run_memory_quality_request(config, request))
+
+
+def start_memory_quality_request(
+    config: McpRuntimeConfig,
+    request: MemoryQualityStartRequest,
+) -> dict[str, object]:
+    """Resolve and admit one explicit async-start request."""
+
+    return _stamped(_start_memory_quality_request(config, request))
+
+
+def poll_memory_quality_request(
+    config: McpRuntimeConfig,
+    request: MemoryQualityPollRequest,
+) -> dict[str, object]:
+    """Poll one run only through its configured canonical repository."""
+
+    return _stamped(_poll_memory_quality_request(config, request))
 
 
 def _unfinished_poll_payload(
@@ -437,8 +486,9 @@ def _attach_curator_checklist(
         if isinstance(findings, list)
         else []
     )
-    repair_findings, commit_owned_findings = split_commit_owned_findings(
+    repair_findings, commit_owned_findings = _checklist_finding_sets(
         style_findings,
+        payload,
         scope.onboarding_root,
     )
     # D3/D16: a card whose declared `governingOverview` field or whose `## Governing Overview`
@@ -496,6 +546,12 @@ def _attach_curator_checklist(
     if census is None:
         raise RuntimeError("curator publication requires its complete plane-derived census")
     source_candidates = census_curator_candidates(census)
+    # The knowledge-review summary is derived from the curator-coherence authority, which only the
+    # external-memory leaf path below can read -- but `CuratorChecklist` is built for EVERY scope.
+    # It is therefore initialised here, on the same path as the other two accepted-no-impact
+    # defaults, so a scope that does not enter the block reports "no recorded assessments" instead
+    # of raising UnboundLocalError at the checklist construction below.
+    knowledge_review: tuple[AssessmentSummary, ...] = ()
     if (
         scope.contract is not None
         and scope.contract.memory_mode == "external"
@@ -513,6 +569,7 @@ def _attach_curator_checklist(
             no_impact = curator_coherence_no_impact(coherence)
             accepted_no_impact = no_impact.content_sources
             accepted_route_no_impact = no_impact.source_routes
+            knowledge_review = curator_knowledge_review_summaries(coherence)
         try:
             validate_memory_refresh_attestations(
                 scope.quality_context,
@@ -566,6 +623,7 @@ def _attach_curator_checklist(
             source_candidates=source_candidates,
             drift_rows=drift_rows,
             report_only_findings=report_only,
+            knowledge_review=knowledge_review,
         )
     )
     response.pop("reportOnlyFindings", None)
@@ -578,6 +636,36 @@ def _attach_curator_checklist(
         missing_onboarding=missing_onboarding,
         stale_route_indexes=route_indexes.stale_indexes,
     )
+
+
+def _checklist_finding_sets(
+    style_findings: list[dict[str, Any]],
+    payload: dict[str, Any],
+    onboarding_root: Path,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The repairable findings the curator owns, and the closeout-owned rows beside them.
+
+    D-24/D-29: the citation check classifies the rows no curator edit can ever discharge -- an
+    anchor that resolves more than once in the cited FILE, which no range a curator may write
+    changes -- into its own bucket. They belong in the section the report already keeps for the
+    closing stamp, where the decision they wait on is actually made, not in the repairable set
+    whose count has to reach zero. ``split_commit_owned_findings`` supplies the other half of the
+    same class: a stamp only closeout can write for a card this task created.
+    """
+
+    repair, commit_owned = split_commit_owned_findings(style_findings, onboarding_root)
+    checks = payload.get("checks")
+    declared = (
+        [
+            row
+            for _, result in sorted(checks.items())
+            if isinstance(result, dict)
+            for row in result.get("closeoutOwnedFindings", [])
+        ]
+        if isinstance(checks, dict)
+        else []
+    )
+    return repair, [*commit_owned, *declared]
 
 
 def _attach_final_full_catalog(
@@ -685,6 +773,48 @@ def _require_same_curator_candidate(
             ),
         ),
     )
+
+
+def curator_knowledge_review_summaries(
+    coherence: ValidatedCuratorCoherence,
+) -> tuple[AssessmentSummary, ...]:
+    """Summarise the stored assessment collection for the checklist's factual section.
+
+    This reads the *already published* authority and decides nothing about it. It is deliberately not
+    an input to ``curatorActionableCount`` (see ``CuratorChecklist.knowledge_review``), and a subject
+    with no stored assessment produces no row at all -- it is not rendered as a disposition, which is
+    ``Doc13:104``'s "missing assessments stay missing" expressed at the last place a projection could
+    break it.
+
+    Currentness is not measured here. The checklist is written from the curator's own memory-quality
+    run, which is not a read of the current candidate inputs, so the summary reports the recorded
+    collection and its counted limitations without claiming that any binding still matches. The
+    stale/unresolved limitation counts come from the projection, which is where a measurement of the
+    current world belongs.
+    """
+
+    summaries: list[AssessmentSummary] = []
+    for subject_id in all_assessment_subject_ids(coherence):
+        state = curator_coherence_subject_assessment_state(coherence, subject_id)
+        records = [
+            assessment
+            for assessment in coherence.record.assessments
+            if assessment_subject_id(assessment) == subject_id
+        ]
+        summaries.append(
+            summarise_assessment_state(
+                AssessmentSummaryInput(
+                    subjectId=subject_id,
+                    assessmentCount=state.assessmentCount,
+                    dispositions=tuple(entry.disposition for entry in state.assessments),
+                    comparisonRefs=tuple(dict.fromkeys(item.comparisonRef for item in records)),
+                    scopeRefs=tuple(dict.fromkeys(item.scopeManifestRef for item in records)),
+                    unresolvedCount=state.unresolvedCount,
+                    staleCount=state.staleCount,
+                )
+            )
+        )
+    return tuple(summaries)
 
 
 def _attach_coherence_readiness(scope: MemoryScope, response: dict[str, object]) -> None:

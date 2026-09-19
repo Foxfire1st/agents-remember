@@ -86,10 +86,15 @@ _INTEGRATION_FILES = pytest.StashKey[frozenset[Path]]()
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addini("unit_case_budget", "maximum selected unit cases", type="int", default=1100)
-    parser.addini(
-        "integration_case_budget", "maximum selected integration cases", type="int", default=300
-    )
+    # These two declarations REGISTER the option names; they do not state a rail. The selected-case
+    # rails live once, in the repository-root `pyproject.toml` under `[tool.pytest.ini_options]`,
+    # which is the inifile pytest actually reads -- `mcp/pyproject.toml` declares no
+    # `[tool.pytest.ini_options]`, so a `default=` here would never be in effect and would put a
+    # second, contradictory number in the tree for a terminal reader to find (D-20). With no
+    # `default` the type default is `0`, which `pytest_collection_finish` refuses by name rather
+    # than running an unbounded population.
+    parser.addini("unit_case_budget", "maximum selected unit cases", type="int")
+    parser.addini("integration_case_budget", "maximum selected integration cases", type="int")
     parser.addoption(
         "--certify",
         action="store_true",

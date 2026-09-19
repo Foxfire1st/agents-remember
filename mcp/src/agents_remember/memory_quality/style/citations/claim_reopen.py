@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import re
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +97,21 @@ PROVENANCE_REMEDIATION = (
     "mapped memory commit, or an exact resolved dependency version. Do not replace missing "
     "evidence with a plausible range or a permissive package pin."
 )
+
+
+@dataclass(frozen=True)
+class InvalidReason:
+    """One reason a claim cannot be compared, and whether any edit could ever clear it.
+
+    ``uneditable`` marks the anchor-multiplicity class: the anchor resolves more than once in the
+    cited FILE, so no range a curator may write changes it -- narrowing does not change an
+    occurrence count and splitting adds a row rather than removing one (D-21b correction). Those
+    rows are closeout-owned, where the stamp decision is actually made; every other invalid reason
+    stays repairable curator debt.
+    """
+
+    detail: str
+    uneditable: bool = False
 
 
 @dataclass(frozen=True)
@@ -259,15 +274,23 @@ def provenance_finding(
     claim: model.Claim,
     code: str,
     detail: str,
+    *,
+    closeout_owned: bool = False,
 ) -> QualityFinding:
-    return finding(
-        document,
-        claim,
-        code,
-        f"This claim cannot be compared with its verification provenance: {detail}. "
-        f"Anchors: {[anchor.written for anchor in claim.anchors]}. "
-        f"Sources: {[citation.text for citation in claim.citations]}. "
-        f"{PROVENANCE_REMEDIATION}",
+    """One provenance finding. ``closeout_owned`` marks a row no curator edit can discharge."""
+    return QualityFinding(
+        check=CHECK_NAME,
+        path=document,
+        line=claim.line,
+        severity="error",
+        code=code,
+        message=(
+            f"This claim cannot be compared with its verification provenance: {detail}. "
+            f"Anchors: {[anchor.written for anchor in claim.anchors]}. "
+            f"Sources: {[citation.text for citation in claim.citations]}. "
+            f"{PROVENANCE_REMEDIATION}"
+        ),
+        closeout_owned=closeout_owned,
     )
 
 
@@ -419,10 +442,10 @@ def local_changes(
     views: SourceViews,
     *,
     dependency_sources: bool,
-) -> tuple[list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[InvalidReason]]:
     changed: list[str] = []
     surfaced: list[str] = []
-    invalid: list[str] = []
+    invalid: list[InvalidReason] = []
     if any(source.current is None for source in sources):
         missing = sorted(
             (
@@ -455,18 +478,21 @@ def anchor_change(
     views: SourceViews,
     *,
     dependency_sources: bool,
-) -> tuple[list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[InvalidReason]]:
     before = selected_historical(anchor, sources, views)
     now = selected_current(anchor, sources, views)
     changed: list[str] = []
     surfaced: list[str] = []
-    invalid: list[str] = []
+    invalid: list[InvalidReason] = []
     if before or now or not dependency_sources:
         if len(before) != 1:
             if before:
                 invalid.append(
-                    f"{anchor.written} resolved {len(before)} times at verification; exact "
-                    "historical resolution must be unique"
+                    InvalidReason(
+                        f"{anchor.written} resolved {len(before)} times at verification; exact "
+                        "historical resolution must be unique",
+                        uneditable=True,
+                    )
                 )
             elif now:
                 # The cited evidence did not exist at the stamp -- either a construct added to
@@ -476,7 +502,11 @@ def anchor_change(
                 # else is enforced.
                 if len(now) != 1:
                     invalid.append(
-                        f"{anchor.written} resolves {len(now)} times now; no exact candidate is unique"
+                        InvalidReason(
+                            f"{anchor.written} resolves {len(now)} times now; no exact "
+                            "candidate is unique",
+                            uneditable=True,
+                        )
                     )
                 else:
                     detail = (
@@ -493,7 +523,11 @@ def anchor_change(
         elif len(now) != 1:
             if now:
                 invalid.append(
-                    f"{anchor.written} resolves {len(now)} times now; no exact candidate is unique"
+                    InvalidReason(
+                        f"{anchor.written} resolves {len(now)} times now; no exact candidate "
+                        "is unique",
+                        uneditable=True,
+                    )
                 )
             else:
                 changed.append(
@@ -517,50 +551,138 @@ def _anchor_in_cited_range(candidate: Candidate, sources: list[LocalSource]) -> 
     in several ranges; the de-duplicated winning candidate can carry a range that never held
     the construct, so coverage is judged across every cited range, not only the winner's.
     Clearing needs no commit.
+
+    The line read is the DECLARATION's, not the extent's start. A decorated Python definition's
+    extent is widened to cover its decorator, so a card citing that declaration at exactly its own
+    lines used to reopen its own claim while the identical citation one line earlier passed -- a
+    phantom finding three curator seats paid for by learning to include the decorator line. The
+    reopen rule itself is unchanged: the range must still begin at or before the declaration and
+    still end at or after it, so a range that starts inside the body reopens exactly as before.
     """
-    start = candidate.extent.start
+    declaration = candidate.extent.declaration
+    start = candidate.extent.start if declaration is None else declaration
     return any(source.citation.start <= start <= source.citation.end for source in sources)
+
+
+def _closeout_owned_provenance(
+    findings: list[QualityFinding],
+) -> tuple[list[QualityFinding], list[QualityFinding]]:
+    """Split out the rows no curator edit can ever discharge, which closeout's stamp owns.
+
+    An anchor that resolves more than once in the cited FILE is not a range problem: narrowing does
+    not change an occurrence count and splitting adds a row rather than removing one, so the check's
+    own remediation -- "restore a verifiable provenance ... a real code commit, a ledger-mapped
+    memory commit, or an exact resolved dependency version" -- asks for the one thing a curator
+    cannot write, while the report routes the row under repairable debt it can never repay (D-24,
+    D-29). Those rows move to the class the report already has for them -- ``Real-commit provenance
+    findings -- Closeout-owned`` -- where the stamp decision is actually made. They are REPORTED,
+    never dropped: the bucket is published beside the enforced and debt buckets. Returns
+    ``(remaining, closeout_owned)``.
+    """
+    remaining: list[QualityFinding] = []
+    closeout_owned: list[QualityFinding] = []
+    for finding in findings:
+        (closeout_owned if finding.closeout_owned else remaining).append(finding)
+    return remaining, closeout_owned
 
 
 def _demote_preexisting_provenance_debt(
     findings: list[QualityFinding],
     memory_root: Path,
 ) -> tuple[list[QualityFinding], list[QualityFinding]]:
-    """Ambiguous provenance in documents the task did not touch is debt, not a gate failure.
+    """Ambiguous provenance the task INHERITED is debt, not a gate failure.
 
-    A ``citation_provenance_invalid`` finding predates the task whenever its document is
-    unmodified in the memory tree: the anchor was ambiguous at the stamp long before this run,
-    and ambushing a passing leaf with somebody else's correction wave is how a gate loses its
-    teeth. Those move to the ``debtFindings`` bucket (the standing check lists them for the
-    deliberate correction wave that owns them). Findings in documents the task DID touch stay
-    enforced -- touch it, own it. Missing stamps stay enforced everywhere: a new or stamp-less
+    A ``citation_provenance_invalid`` finding predates the task when the ROW it names is already in
+    the memory commit the run started from: the anchor was ambiguous at the stamp long before this
+    run, and ambushing a passing leaf with somebody else's correction wave is how a gate loses its
+    teeth. Keying that on document dirtiness asked the wrong question -- a curator's correction pass
+    makes every document it touches dirty, so the demotion was structurally unreachable for exactly
+    the rows a curator meets (D-24). Those move to the ``debtFindings`` bucket (the standing check
+    lists them for the deliberate correction wave that owns them). A row the task introduced, or one
+    it EDITED, stays enforced -- touch it, own it -- and so does every row of a document the pre-task
+    revision does not carry at all. Missing stamps stay enforced everywhere: a new or stamp-less
     document has no pre-existing anything. Returns ``(enforced, debt)``.
     """
-    modified = _modified_onboarding_paths(memory_root)
-    if modified is None:
+    revision = _pre_task_revision(memory_root)
+    if revision is None:
         # No git view, no demotion: fail closed and leave every finding enforced.
         return findings, []
+    committed: dict[str, list[str] | None] = {}
     enforced: list[QualityFinding] = []
     debt: list[QualityFinding] = []
     for finding in findings:
         if (
             finding.code == INVALID
             and finding.severity != "warning"
-            and finding.path not in modified
+            and _row_predates_the_task(finding, memory_root, revision, committed)
         ):
-            debt.append(
-                QualityFinding(
-                    check=finding.check,
-                    path=finding.path,
-                    line=finding.line,
-                    severity="warning",
-                    code=finding.code,
-                    message=finding.message,
-                )
-            )
+            debt.append(replace(finding, severity="warning"))
         else:
             enforced.append(finding)
     return enforced, debt
+
+
+def _pre_task_revision(memory_root: Path) -> str | None:
+    """The memory commit this run's working tree started from, or ``None`` without Git truth."""
+    completed = run_git(memory_root, ["rev-parse", "HEAD"])
+    if completed.returncode != 0:
+        return None
+    revision = completed.stdout.strip()
+    return revision or None
+
+
+def _row_predates_the_task(
+    finding: QualityFinding,
+    memory_root: Path,
+    revision: str,
+    committed: dict[str, list[str] | None],
+) -> bool:
+    """Whether the row this finding names was already in ``revision``'s copy of its document.
+
+    The row is read from the working tree at the finding's own line and looked up by exact text in
+    the same document at the pre-task revision, so a line inserted above it changes nothing while
+    correcting the row itself makes the row the leaf's own. Every unusable input fails CLOSED: an
+    unreadable document, a path that escapes ``onboarding/``, a card the task created, a line number
+    past the end of the file, or a blank row all leave the finding enforced.
+    """
+    if finding.path not in committed:
+        committed[finding.path] = _committed_document_lines(memory_root, revision, finding.path)
+    lines = committed[finding.path]
+    if lines is None:
+        return False
+    row = _working_tree_row(memory_root, finding.path, finding.line)
+    return row is not None and row in lines
+
+
+def _committed_document_lines(
+    memory_root: Path,
+    revision: str,
+    relative: str,
+) -> list[str] | None:
+    """``onboarding/<relative>`` as ``revision`` carries it, or ``None`` when it does not."""
+    if Path(relative).is_absolute() or ".." in Path(relative).parts:
+        return None
+    completed = run_git(memory_root, ["show", f"{revision}:onboarding/{relative}"])
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.splitlines()
+
+
+def _working_tree_row(memory_root: Path, relative: str, line: int) -> str | None:
+    """The stripped working-tree text at ``line`` of one onboarding document, or ``None``."""
+    if Path(relative).is_absolute() or ".." in Path(relative).parts:
+        return None
+    try:
+        lines = (
+            (memory_root / "onboarding" / relative)
+            .read_text(encoding="utf-8", errors="replace")
+            .splitlines()
+        )
+    except OSError:
+        return None
+    if not 1 <= line <= len(lines):
+        return None
+    return lines[line - 1].strip() or None
 
 
 def _modified_onboarding_paths(memory_root: Path) -> set[str] | None:
@@ -581,17 +703,19 @@ def _modified_onboarding_paths(memory_root: Path) -> set[str] | None:
 def dependency_changes(
     citations: list[model.Citation],
     evaluation: Evaluation,
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[InvalidReason]]:
     changed: list[str] = []
-    invalid: list[str] = []
+    invalid: list[InvalidReason] = []
     packages: set[tuple[str, str]] = set()
     for citation in citations:
         ecosystem = provenance.ecosystem_from_path(citation.path)
         package = provenance.package_from_path(citation.path)
         if ecosystem is None:
             invalid.append(
-                f"{citation.path} does not identify a Python or npm dependency source, so "
-                f"{package} has no resolved-version namespace"
+                InvalidReason(
+                    f"{citation.path} does not identify a Python or npm dependency source, so "
+                    f"{package} has no resolved-version namespace"
+                )
             )
             continue
         packages.add((package, ecosystem))
@@ -600,7 +724,7 @@ def dependency_changes(
             package, ecosystem, evaluation.code_commit
         )
         if error or before is None or now is None:
-            invalid.append(error or f"{package} has no resolved version provenance")
+            invalid.append(InvalidReason(error or f"{package} has no resolved version provenance"))
             continue
         if before.version != now.version:
             changed.append(
@@ -665,14 +789,14 @@ def evaluate_claim(
         return _route_error_finding(document, claim, route.error or "", evaluation)
     local: list[LocalSource] = []
     dependencies = list(route.dependencies)
-    invalid: list[str] = []
+    invalid: list[InvalidReason] = []
     local_citations = (
         (source.citation for source in route.local) if route.status == "semantic-required" else ()
     )
     for citation in local_citations:
         source, error = evaluation.source(citation)
         if error:
-            invalid.append(error)
+            invalid.append(InvalidReason(error))
         elif source is not None:
             local.append(source)
     changed: list[str] = []
@@ -692,7 +816,15 @@ def evaluate_claim(
         changed.extend(dependency_changed)
         invalid.extend(dependency_invalid)
     if invalid:
-        return provenance_finding(document, claim, INVALID, "; ".join(dict.fromkeys(invalid)))
+        details = list(dict.fromkeys(reason.detail for reason in invalid))
+        uneditable = {reason.detail for reason in invalid if reason.uneditable}
+        return provenance_finding(
+            document,
+            claim,
+            INVALID,
+            "; ".join(details),
+            closeout_owned=bool(uneditable) and uneditable == set(details),
+        )
     if changed:
         return changed_finding(document, claim, changed)
     if surfaced:
@@ -805,22 +937,31 @@ def _gate_result(
     claims_checked: int,
     router: claim_change_router.ClaimChangeRouter,
 ) -> dict[str, Any]:
-    """Assemble the three-bucket gate result: enforced findings plus the two review buckets."""
-    enforced, debt = _demote_preexisting_provenance_debt(findings, memory_root)
+    """Assemble the four-bucket gate result: enforced, review, inherited debt, closeout-owned.
+
+    ``closeoutOwnedFindings`` is a REPORTING bucket rather than a gated one: the rows in it are
+    counted nowhere in ``ok`` or in the curator-actionable arithmetic, because the decision they
+    wait on is the closing stamp's, not the curator's. It is published rather than dropped so a
+    reader sees the population instead of an empty result.
+    """
+
+    def key(finding: QualityFinding) -> tuple[str, str, int]:
+        return (finding.code, finding.path, finding.line)
+
+    remaining, closeout_owned = _closeout_owned_provenance(findings)
+    enforced, debt = _demote_preexisting_provenance_debt(remaining, memory_root)
     surfaced = [finding for finding in enforced if finding.severity == "warning"]
     enforced = [finding for finding in enforced if finding.severity != "warning"]
-    ordered = sorted(enforced, key=lambda one: (one.code, one.path, one.line))
+    ordered = sorted(enforced, key=key)
     result = check_result(
         check=CHECK_NAME,
         files_checked=len(documents),
         findings=ordered,
     )
-    result["surfacedFindings"] = [
-        finding.to_dict()
-        for finding in sorted(surfaced, key=lambda one: (one.code, one.path, one.line))
+    result["surfacedFindings"] = [finding.to_dict() for finding in sorted(surfaced, key=key)]
+    result["debtFindings"] = [finding.to_dict() for finding in sorted(debt, key=key)]
+    result["closeoutOwnedFindings"] = [
+        finding.to_dict() for finding in sorted(closeout_owned, key=key)
     ]
-    result["debtFindings"] = [
-        finding.to_dict()
-        for finding in sorted(debt, key=lambda one: (one.code, one.path, one.line))
-    ]
+    result["closeoutOwnedCount"] = len(closeout_owned)
     return {**result, "claimsChecked": claims_checked, "changeRouting": router.telemetry()}

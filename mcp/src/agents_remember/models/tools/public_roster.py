@@ -88,4 +88,10 @@ PUBLIC_TOOLS = (
     "role_capsule_compile",
     "skill_catalog_list",
     "skill_catalog_read",
+    # The knowledge operation family: read, change, diff, integrity and projection.
+    "knowledge_read",
+    "knowledge_change",
+    "knowledge_diff",
+    "knowledge_integrity_check",
+    "knowledge_project",
 )

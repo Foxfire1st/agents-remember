@@ -10,6 +10,7 @@ import {
   taskChangeset,
 } from "../../data/changeset";
 import { useDashboard } from "../../data/store";
+import type { ReviewSelectorKind } from "../../data/review";
 import type { ChangeSetTarget } from "../changeset/ChangeSetViewer";
 import {
   changeSetBar,
@@ -71,12 +72,17 @@ export function DocChangeSetBar({
   repo,
   master,
   leaf,
+  selectorKind = "invariant",
+  selectorId,
   onOpen,
 }: {
   kind: "master" | "leaf";
   repo: string;
   master: string;
   leaf?: string;
+  /** The recorded subject the reviewer entry reviews. Absent -> no reviewer entry is shown. */
+  selectorKind?: ReviewSelectorKind;
+  selectorId?: string;
   onOpen?: (target: ChangeSetTarget) => void;
 }) {
   const enclosures = useDashboard((s) => s.enclosures);
@@ -107,6 +113,17 @@ export function DocChangeSetBar({
         <ChangeSetButton
           target={{ repo, master, leaf, mode: "working" }}
           label="working"
+          onOpen={onOpen}
+        />
+      ) : null}
+      {live && selectorId ? (
+        // The reviewer entry, added BESIDE the working/committed actions and never in their place.
+        // It is offered only for an admitted live curator candidate -- the same liveness the
+        // working change-set is gated on -- and it carries the reviewed subject's recorded identity
+        // rather than a filesystem path, because the browser never chooses the candidate.
+        <ChangeSetButton
+          target={{ repo, master, leaf, review: { selectorKind, selectorId } }}
+          label="Intent review"
           onOpen={onOpen}
         />
       ) : null}

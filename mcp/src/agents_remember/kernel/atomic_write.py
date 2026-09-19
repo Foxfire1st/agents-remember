@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 
+from agents_remember.errors import AtomicReplaceError
+
 
 def _temp_path_for(path: Path) -> Path:
     """The private temp this module writes before it replaces ``path``.
@@ -85,8 +87,54 @@ def atomic_replace(source: Path, destination: Path) -> None:
 
     Both directories are fsynced because a cross-directory rename changes two of them;
     when they are the same directory it is flushed once.
+
+    The two legs fail independently and are reported separately: a failed rename leaves the
+    destination on its previous bytes, while a failed directory flush happens *after* the
+    rename has already published the new bytes and moves nothing back. One indistinguishable
+    failure cannot tell a caller which of those two states it is in, so each leg raises
+    :class:`~agents_remember.errors.AtomicReplaceError` naming itself and the destination's state.
     """
-    os.replace(source, destination)
-    _fsync_directory(destination.parent)
-    if source.parent != destination.parent:
-        _fsync_directory(source.parent)
+    try:
+        os.replace(source, destination)
+    except OSError as exc:
+        raise AtomicReplaceError(
+            "replace",
+            destination.as_posix(),
+            destination_state="previous-bytes",
+            detail=(
+                f"the rename of {source.as_posix()} onto {destination.as_posix()} failed; the "
+                "destination still holds its previous bytes and nothing was published"
+            ),
+            cause=exc,
+        ) from exc
+    try:
+        _fsync_directory(destination.parent)
+        if source.parent != destination.parent:
+            _fsync_directory(source.parent)
+    except OSError as exc:
+        raise AtomicReplaceError(
+            "directory-fsync",
+            destination.as_posix(),
+            destination_state="source-absent",
+            detail=(
+                f"the rename of {source.as_posix()} onto {destination.as_posix()} succeeded and "
+                "the destination now holds the new bytes; flushing its directory entry to stable "
+                "storage failed, so the rename is published but not durable and a host loss may "
+                "restore the previous name state"
+            ),
+            cause=exc,
+        ) from exc
+
+
+def fsync_file(path: Path) -> None:
+    """Flush one already-written file's data to stable storage.
+
+    The file-data half of this module's durability contract, exposed because a producer that
+    writes a file through another owner -- a database that closes its own handles, for instance
+    -- still has to reach stable storage before a rename publishes it. The directory fsync in
+    :func:`atomic_replace` records that the new *name* exists; it says nothing about the bytes
+    the name points at, so one does not substitute for the other.
+    """
+
+    with path.open("rb") as handle:
+        os.fsync(handle.fileno())

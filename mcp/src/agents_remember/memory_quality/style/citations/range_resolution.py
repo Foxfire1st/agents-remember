@@ -331,29 +331,79 @@ def bounds_findings(scope: ClaimScope) -> list[QualityFinding]:
     ]
 
 
+def moved_extent(scope: ClaimScope, anchor: model.Anchor) -> extents.Extent | None:
+    """The ONE construct a cited file still holds under this anchor, when the range only moved.
+
+    A range that no longer holds its anchor has two very different causes and the check used to
+    bill them the same. A PURE MOVE is the anchor resolving, exactly once, as a construct in one of
+    the FILES this row cites: the file kept the thing and the pointer went stale. That is what an
+    inserted registration does to every citation below it -- one landing staled **90** rows
+    tree-wide at L19, 74 inherited and 16 shifted by the leaf's own new rows (D-23) -- and the
+    mechanical projection rewrites such a range and records the rewrite, so it is not curator work.
+
+    Anything else stays enforced, and the resolution is what decides: an anchor that resolves
+    NOWHERE is gone, and one that resolves more than once is ambiguous. Neither is a range that
+    merely moved, and neither is a repair a projection may make.
+    """
+    found: list[extents.Extent] = []
+    for one in scope.resolved:
+        found.extend(scope.sources.view(one.file, one.citation.path).extents(anchor))
+    return found[0] if len(found) == 1 else None
+
+
 def absent_findings(run: Run) -> list[QualityFinding]:
     """The anchors no range held, each naming EVERY location in the tree that does hold it.
 
     One indexed batch for the whole sweep (L6-R28): a finding that only says the anchor is
     missing leaves the reader to find where it went, which is the thing models are worst at.
     Naming the locations turns "figure out where this went" into "pick from these three".
+
+    A row whose anchor still resolves exactly once in a cited FILE is a stale range rather than a
+    broken claim, and it is REPORTED as such rather than billed as curator work -- reported, never
+    silenced: it rides the check's own ``reportOnlyFindings`` bucket, so it is counted, rendered
+    and reviewed without entering ``findingCount`` or the curator-actionable arithmetic.
     """
     anchors = tuple(anchor for _scope, anchor in run.absent)
     seen = symbol_index.locate(anchors, run.trees, index=run.index)
-    return [
-        finding(
-            scope.document,
-            scope.claim.line,
-            "citation_anchor_absent_from_range",
-            f"The claim names {anchor.written} and cites "
-            f"{', '.join(one.citation.text for one in scope.resolved)}, but no line in those "
-            f"ranges holds it -- {anchor_evidence(anchor, scope)}. In the tree, "
-            f"{symbol_index.described(anchor, seen[anchor])}. Two edits clear this and both "
-            f"state something the author knows: widen the range to the lines that carry it, "
-            f"or name the anchor the range actually holds. {CURATOR_REMEDIATION}",
+    findings: list[QualityFinding] = []
+    for scope, anchor in run.absent:
+        moved = moved_extent(scope, anchor)
+        if moved is not None:
+            findings.append(
+                QualityFinding(
+                    check=CHECK_NAME,
+                    path=scope.document,
+                    line=scope.claim.line,
+                    severity="warning",
+                    code="citation_anchor_absent_from_range",
+                    message=(
+                        f"The claim names {anchor.written} and cites "
+                        f"{', '.join(one.citation.text for one in scope.resolved)}, but no line "
+                        f"in those ranges holds it. The anchor still resolves ONCE in a cited "
+                        f"file, at lines {moved.start}-{moved.end}, so this range is STALE BY A "
+                        f"MOVE rather than wrong about the source: an inserted registration "
+                        f"shifts every row below it, and the mechanical projection rewrites the "
+                        f"range with no claim-content impact. Reported for review; the rewrite "
+                        f"is what closes it, so it is not curator work."
+                    ),
+                    report_only=True,
+                )
+            )
+            continue
+        findings.append(
+            finding(
+                scope.document,
+                scope.claim.line,
+                "citation_anchor_absent_from_range",
+                f"The claim names {anchor.written} and cites "
+                f"{', '.join(one.citation.text for one in scope.resolved)}, but no line in those "
+                f"ranges holds it -- {anchor_evidence(anchor, scope)}. In the tree, "
+                f"{symbol_index.described(anchor, seen[anchor])}. Two edits clear this and both "
+                f"state something the author knows: widen the range to the lines that carry it, "
+                f"or name the anchor the range actually holds. {CURATOR_REMEDIATION}",
+            )
         )
-        for scope, anchor in run.absent
-    ]
+    return findings
 
 
 def vanished_finding(document: str, claim: model.Claim, citation: model.Citation) -> QualityFinding:

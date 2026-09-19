@@ -227,7 +227,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--onboarding-root",
         type=Path,
-        help="Override for the resolved code repository onboarding root.",
+        help=(
+            "The onboarding root to check. Two shapes are supported: an official memory repo's "
+            "<ar-coordination>/memory-repos/ar-<code-repository-name>/onboarding, or a leaf "
+            "enclosure's memory worktree "
+            "<ar-coordination>/worktrees/<code-repository-name>/<group>/memory-<worktree-name>/"
+            "onboarding -- the root the contract-scoped memory-quality route already measures. "
+            "The settings that govern the check come from the coordination root either shape "
+            "implies; --settings-path overrides them."
+        ),
     )
     parser.add_argument(
         "--topology",
@@ -254,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
 
     code_repository_root = args.code_repository_root.resolve()
     code_repository_name = code_repository_name_from_git(code_repository_root)
+    requested_root = None if args.onboarding_root is None else args.onboarding_root.resolve()
     context = resolve_coordination_context(
         code_repository_name=code_repository_name,
         workspace_root=code_repository_root.parent,
@@ -263,16 +272,22 @@ def main(argv: list[str] | None = None) -> int:
                 topology=args.topology,
                 coordination_root=args.coordination_root,
                 settings_path=args.settings_path,
-                onboarding_root=args.onboarding_root,
+                onboarding_root=requested_root,
             ),
             contract_reader=WorktreeContractReader(),
         ),
     )
-    if not filesystem.exists(context.onboarding_root):
-        parser.error(f"onboarding root does not exist: {context.onboarding_root}")
+    # The resolved context supplies the STORAGE settings; the caller's own `--onboarding-root`
+    # supplies the tree measured, exactly as the contract-scoped memory-quality route takes its
+    # root from the contract and its settings from the scope. The two are the same root for an
+    # official memory repo, and they differ for a leaf's memory worktree, whose settings live in
+    # the official repo the enclosure was cut from (D-34).
+    onboarding_root = context.onboarding_root if requested_root is None else requested_root
+    if not filesystem.exists(onboarding_root):
+        parser.error(f"onboarding root does not exist: {onboarding_root}")
     result = check_missing_onboarding(
         code_repository_root=code_repository_root,
-        onboarding_root=context.onboarding_root,
+        onboarding_root=onboarding_root,
         settings=context.storage,
         code_repository_name=code_repository_name,
     )

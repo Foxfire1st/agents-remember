@@ -5,10 +5,19 @@ blocked, and refusal routes). Split from the original single module
 (repository file-size hard limit). Per the repository convention for file-size
 splits (compare test_author_execution_graph importing from
 test_task_execution_topology) this module also owns the shared Gate-5
-fixture scaffold used by the sibling modules test_final_gate_prefix_adapter,
-test_final_catalog_plan_attestation, and
-test_final_catalog_readiness_projection, because a second non-test module
-under mcp/tests would be governed evidence requiring lifecycle metadata.
+fixture scaffold used by the sibling module test_final_catalog_plan_attestation,
+because a second non-test module under mcp/tests would be governed evidence
+requiring lifecycle metadata.
+
+Split a second time at the same hard limit (item 9 of ``260915-KS-L23``), along
+the properties rather than the line count: the ``KS-R24@v1`` publication-
+discoverability cases moved to
+``test_curator_coherence_publication_discoverability.py``, which protects a
+different subject -- whether a caller can discover the curator-coherence
+request's publication inputs from the request, the refusal and the prepare text
+-- while this module keeps the certification orchestration and the scaffold its
+sibling imports. Each half asserts what the whole file asserted before the
+split.
 """
 
 from __future__ import annotations
@@ -112,7 +121,9 @@ from agents_remember.memory_quality.incremental_scope.models import (
 )
 from agents_remember.memory_quality.style.document_shape import tables
 from agents_remember.models.certification.base import GateId, RailIdentity
-from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceRecord
+from agents_remember.models.lifecycles.curator_coherence import (
+    CuratorCoherenceRecord,
+)
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.task_document import CanonicalTaskObservation
 from agents_remember.models.task_document_ref import TaskDocumentRef

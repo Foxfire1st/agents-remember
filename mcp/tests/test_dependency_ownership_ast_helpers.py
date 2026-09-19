@@ -41,19 +41,108 @@ LIFECYCLE_CATALOG = Path("mcp/tests/evidence-lifecycle.toml")
 LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
-LIFECYCLE_CONTRACT_COUNT = 4
-LIFECYCLE_ARTIFACT_COUNT = 54
-LIFECYCLE_CATALOG_SHA256 = "0bf0a2beda972a1757aa50b6afbcc599fac0beb87ba1e87c798c7c7e16c92687"
-"""``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately nine times since its
-first pin -- the ten records below, one per deliberate value, in file order.
+LIFECYCLE_CONTRACT_COUNT = 15
+LIFECYCLE_ARTIFACT_COUNT = 65
+LIFECYCLE_CATALOG_SHA256 = "c25cdb1e0aa4c66c86057fe4b9d73ec8f200f781a59d08d42d6dd49d4802e466"
+"""``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
+The value this line carries is the **merged** catalog's own digest, re-measured after the master synced onto
+its moved super line: fifteen contracts and sixty-five artifacts, of which the super line contributed nine
+artifacts (the eve adapter/capsule/fixture rows, the two codex app-server recordings and the three
+`scripts/e2e_harness/fresh_user_*` rows) and this master contributed ten (its KS knowledge-substrate support
+modules). Both sides' records below are kept in file order, and the five shared rows whose `consumers` lists
+differed carry the union.
+
+The digest was first pinned at the R16 proof's landing (5b7a84f2) as
+``a9d83c375d1bfdcae7d0c46020eba41fbaf305a306fe89bb1b9b479b861c2002``. ``LOCR-R26@v1``'s
+catalog-freeze clause was then amended by explicit developer decision to permit registering
+artifacts that ANOTHER leaf introduced, and the two ``LOCR-L04`` handoff support modules were
+registered, closing the inventory. Value ``293a187f...`` was the LOCR post-registration catalog. ``260915-KS``'s
+L1-L7 leaves then registered their own knowledge-substrate support modules against the same
+amended clause, and this value is the catalog after L7's ``knowledge-read-scope-cases`` support
+module joined it: ten contracts and fifty-one artifacts. L7's fix round 2 then split the over-limit
+integration module and added ``mcp/tests/test_knowledge_read_paths.py`` to that support module's
+consumer list -- a consumer change, not a new artifact: the counts stay ten and fifty-one, and this
+value is the catalog after it. ``260915-KS``'s L8 leaf then registered its own
+``knowledge-diff-cases`` support module against the same amended clause -- a new artifact, and the
+two new diff modules joined the read-scope support module's consumer list because they build on it --
+which is what this value pins: eleven contracts and fifty-two artifacts. ``260915-KS``'s L9-L11
+leaves then registered their own knowledge-substrate support modules and raised the populations to
+thirteen contracts and fifty-four artifacts, which is the value L24 left in place. ``260915-KS``'s
+L14 leaf added no artifact and no contract of its own -- its two detection test modules use the
+existing ``diff_scope_test_support`` and ``read_scope_test_support`` fixtures rather than a third
+one -- so its catalog change is a *consumer* change only: both of those support modules' consumer
+lists gained ``mcp/tests/test_knowledge_detection_runs.py``, the counts stay thirteen and fifty-four,
+and this value is the catalog after that consumer registration. ``260915-KS``'s L15 leaf likewise
+adds no artifact and no contract of its own -- its unit module is ordinary test source and its
+integration module composes the existing ``curator_coherence_test_support`` and
+``test_worktree_support`` fixtures rather than introducing a third shared module -- so its change is
+also a *consumer* change only: ``curator_coherence_test_support``'s consumer list gained
+``mcp/tests/test_curator_review_assessment_publication.py``, the counts stay thirteen and fifty-four,
+and this value is the catalog after that consumer registration. ``260915-KS``'s L19 leaf likewise
+added no artifact and no contract of its own -- its two requirement-revision test modules use the
+existing ``knowledge_fixture_test_support`` and ``generation_test_support`` fixtures rather than a
+third one -- so its catalog change is again a *consumer* change only: both of those support modules'
+consumer lists gained ``mcp/tests/test_knowledge_requirement_revisions.py`` and
+``mcp/tests/test_knowledge_requirement_reference_contract.py``, the counts stay thirteen and
+fifty-four, and this value is the catalog after that consumer registration. ``260915-KS``'s L18 leaf
+added no artifact and no contract of its own either -- its two citation-binding test modules use the
+existing ``knowledge_fixture_test_support``, ``generation_test_support`` and
+``read_scope_test_support`` fixtures rather than a fourth one -- so its catalog change is likewise a
+*consumer* change only: the first two of those support modules' consumer lists gained
+``test_knowledge_citation_bindings.py`` and ``test_knowledge_citation_boundaries.py``, and the
+ambient-role-chat e2e generator's own ``exact-source`` consumer list gained both modules because each
+quotes the real corpus key that generator's run report is written about -- a path-string edge the
+census derives rather than one any import creates, which is also why the repository-owned
+``REPOSITORY_TEST_INPUT_CONSUMERS[AMBIENT_ROLE_RUNNER_PATH]`` entry gained the same two modules: that
+constant overrides the catalog for the *selection* graph while the catalog serves the *census*, so
+both derivations have to be satisfied rather than one standing in for the other. The counts stay
+thirteen and fifty-four, and this value is the catalog after that consumer registration.
+``260915-KS``'s L17 leaf then added further *consumers* -- its two composition modules build their
+admitted candidate through the facet leaf's ``knowledge-facet-cases`` helpers rather than through a
+third fixture of their own, and they read their graphs through the ``knowledge-generation-cases`` and
+``knowledge-read-scope-cases`` support modules the earlier leaves registered -- so the counts stay
+thirteen and fifty-four and this value is the catalog after L17's consumer registration.
 The digest was first pinned at the R16 proof's landing (5b7a84f2) as
 ``a9d83c375d1bfdcae7d0c46020eba41fbaf305a306fe89bb1b9b479b861c2002``. ``LOCR-R26@v1``'s
 catalog-freeze clause was then amended by explicit developer decision to permit registering
 artifacts that ANOTHER leaf introduced, and the two ``LOCR-L04`` handoff support modules were
 registered, closing the inventory. This value is the post-registration catalog. The proof's own
 artifact delta remains exactly empty, so the freeze still forbids the proof adding or widening
+``260915-KS``'s L12 leaf then registered its own supporting-record support module --
+``mcp/tests/evidence_test_support.py``, a new contract and a new artifact -- which was what the
+pre-merge value pinned: fifteen contracts and fifty-five artifacts. ``260915-KS``'s L13 leaf likewise
+adds no artifact and no contract of its own -- its two authored-effect test modules use the existing
+``candidate_batch_test_support``, ``knowledge_fixture_test_support`` and ``generation_test_support``
+fixtures rather than a fourth one -- so its catalog change is again a *consumer* change only:
+``candidate_batch_test_support``'s consumer list gained ``mcp/tests/test_knowledge_change_sets.py``
+and ``mcp/tests/test_knowledge_effect_claims.py``, and ``generation_test_support``'s gained
+``mcp/tests/test_knowledge_effect_claims.py``. Those consumer registrations are in the merged catalog,
+so this leaf's rows are counted in the fifteen and sixty-five this pin carries. The proof's own
+artifact delta remains exactly empty -- none of these rows is the proof's -- so the freeze still
+forbids the proof adding or widening
 anything, and any further catalog change must re-pin this digest deliberately.
+
+``260915-KS-L20`` (``ar/260915-ks-l20``) re-pinned it once more, and adds no governed artifact.
+L20 delivers the five query views and the managed external projection; its two new modules are
+ordinary ``test_`` source (``test_knowledge_views_and_projection.py`` in the unit lane and
+``test_knowledge_projection_vault_safety.py`` in the integration lane), so the inventory stays
+closed at 14 contracts / 64 artifacts and the counts are unchanged. The digest moves for the one
+reason the L19 precedent records: the integration lane's acceptance case builds its dataset through
+the registered ``shared-support`` fixture ``mcp/tests/read_scope_test_support.py``, whose
+``consumer_scope = "exact"`` requires its ``consumers`` list to equal the source-derived consumer
+set, so the new module was appended there -- and a ``consumers`` addition necessarily shifts every
+line below it. Both directions were re-measured on the delivered candidate: the validator prints
+``evidence-lifecycle: PASS (64 governed artifacts)`` and this pin equals
+``sha256sum mcp/tests/evidence-lifecycle.toml``.
+
+The same change repaired the lane manifest: ``mcp/tests/test_atomic_series_chain_pair_order.py`` was
+committed by ``260915-CAPS-L25`` (``f0313143``) with no row in ``mcp/tests/test-evidence-lanes.toml``,
+so ``load_lane_manifest`` raised ``test files without an explicit lane`` -- 288 test modules against
+287 rows. That took the manifest out of service for its consumers without failing an ordinary
+``pytest mcp/tests`` run, because it is loaded by the cadence plugin and ``code_quality/check.py``
+rather than by the default selection. The missing row was added in the unit-regression lane, where
+its neighbours sit; no lane was widened and no module moved between lanes.
 
 **Second deliberate re-pin (260915-CAPS-L16, 2026-09-16).** The first re-pin left the pin behind
 the file: at the source-line convergence merge ``23cc7a72`` the catalog was already
@@ -139,6 +228,35 @@ row. **Nothing was registered, no row was removed and no artifact's identity mov
 own tip (L9 landed first and its ninth re-pin is the base), giving ``0bf0a2be…``, and the measured delta against
 L9's landed catalog is exactly that one consumer path and nothing else. The proof's own artifact delta remains
 exactly empty.
+``260915-KS``'s L12 leaf then registered its own supporting-record support module --
+``mcp/tests/evidence_test_support.py``, a new contract and a new artifact -- which is what that
+line's own value pinned as fourteen contracts and fifty-five artifacts on its own branch. **This is
+the pin in force, and it is the merge's**: at the merge of the two lines the measured merged
+population is **fifteen contracts and sixty-five artifacts** -- this master's ten
+knowledge-substrate rows plus the ias line's nine rows, on top of the forty-five rows both sides
+already carried -- with this master's consumer additions retained alongside the ias line's. Five rows
+both sides touched carry the union of both sides' consumer entries rather than either side's list:
+``mcp/tests/curator_coherence_test_support.py`` (45 + 47 -> 48),
+``mcp/tests/lifecycle_enclosure_test_support.py`` (2 + 3 -> 3),
+``mcp/tests/fixtures/repository_profiles/node/package-lock.json`` (22 + 103 -> 103),
+``scripts/e2e_harness/reporting.py`` (4 + 6 -> 6) and ``scripts/e2e_harness/run.py`` (5 + 3 -> 5,
+the one case where the union is simply this master's list because the ias side's three entries are
+all inside it). The proof's own artifact delta remains exactly empty -- none of these rows is the
+proof's -- so the freeze still forbids the proof adding or widening anything, and any further
+catalog change must re-pin this digest deliberately.
+``260915-KS``'s L16 leaf likewise added no artifact and no contract of its own -- its three test modules
+use the existing ``read_scope_test_support`` and ``diff_scope_test_support`` fixtures rather than a
+third one -- so its catalog change is again a *consumer* change only: both of those support modules'
+consumer lists gained the modules that build on them (``read_scope_test_support`` gained
+``mcp/tests/test_knowledge_registered_scope.py`` and
+``mcp/tests/test_knowledge_family_integrity_pipeline.py``, ``diff_scope_test_support`` gained
+``mcp/tests/test_knowledge_family_integrity_pipeline.py``), so that registration moved no count: they were
+thirteen and fifty-four on this leaf's own pre-sync base and are **fourteen and sixty-four** on the merged base it
+landed against, because L12's supporting-record artifact and the super line's nine arrived in between. This value is
+the catalog after L16's consumer registration **on that merged base**, re-measured on the merged file rather than
+inherited from the leaf's own base. The proof's own artifact delta remains
+exactly empty -- none of these rows is the proof's -- so the freeze still forbids the proof adding or
+widening anything, and any further catalog change must re-pin this digest deliberately.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"
