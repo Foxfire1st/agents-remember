@@ -491,6 +491,13 @@ def _require_admitted_step(
 
     ``--no-merges`` is what makes a merge the reconciliation device rather than a loophole: a merge
     introduces no commit of its own, so only genuinely new non-merge history is refused.
+
+    The step's commits are ENUMERATED and each one is tested for membership in the recorded
+    positions. They are never subtracted from the revision walk: ``--not <a position>`` removes
+    every commit that position reaches, so a single recorded position descending from the step's own
+    endpoint removed the whole step and the check passed vacuously -- which is how a genuinely
+    foreign commit could be admitted. A position that reaches past the step can no longer erase it,
+    and the position still admits the step it actually records.
     """
 
     if earlier == later:
@@ -507,11 +514,15 @@ def _require_admitted_step(
         later,
         "--not",
         earlier,
-        *positions,
     ]
     if step.side == "memory":
         revision_args.extend(["--", ".", ":(top,exclude)memory.md"])
-    foreign = require_git(repository, revision_args).split()
+    admitted = set(positions)
+    foreign = [
+        commit
+        for commit in require_git(repository, revision_args).split()
+        if commit not in admitted
+    ]
     if foreign:
         raise CloseoutQueueError(
             "atomic-series-leaf-chain-invalid",

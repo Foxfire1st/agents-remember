@@ -869,13 +869,26 @@ async def test_the_read_family_refuses_an_ordering_input_it_does_not_admit(
 
 
 @pytest.mark.anyio
-async def test_the_read_family_refuses_a_sixth_view_before_it_touches_a_dataset() -> None:
-    """§1.1 and §6.1: the closed set of five is enforced by the mounted read operation itself.
+async def test_the_read_family_refuses_a_sixth_view_before_it_touches_a_dataset(
+    tmp_path: Path,
+) -> None:
+    """§1.1, §6.1 and M1-3: the closed set of five, and a dataset that cannot be opened at all.
 
-    The database path here does not exist, which is the second half of the assertion: a sixth view
-    is refused from the name alone, so a caller cannot reach a dataset -- or a filesystem error --
-    through a view this surface does not admit. A reader that opened first and checked the name
-    later would fail on the missing file instead, which is the mutation this case catches.
+    The database path in the first half does not exist, which is the second half of that assertion:
+    a sixth view is refused from the name alone, so a caller cannot reach a dataset -- or a
+    filesystem error -- through a view this surface does not admit. A reader that opened first and
+    checked the name later would fail on the missing file instead, which is the mutation the first
+    half catches.
+
+    The last three assertions are the family's own promise measured on the inputs an ordinary caller
+    actually supplies by mistake. ``registration/knowledge.py``'s docstring says each handler
+    "validates its wire request, delegates, and returns the typed shape the response model
+    declares", and ``read_knowledge_scope`` already refuses an absent selection as
+    ``selected_input_unavailable``. Before this half existed, the same three inputs reached a real
+    FastMCP ``server.call_tool`` as ``ToolError``: ``unable to open database file`` for an absent
+    path, ``file is not a database`` for a file that is not one, and a raw ``ValidationError`` for a
+    diff body that does not validate. A handler that lets any of them escape reddens here, and so
+    does one that answers "no rows" for a dataset nobody opened.
     """
 
     body = await _call(
@@ -892,6 +905,63 @@ async def test_the_read_family_refuses_a_sixth_view_before_it_touches_a_dataset(
     assert body["refusalCode"] == "unknown_view", body
     assert body["view"] == "sixth_view", body
     assert "sixth_view" in body["refusalDetail"], body
+
+    absent = tmp_path / "absent" / "knowledge-dataset.db"
+    for view in ("source_context", "review_matrix"):
+        absent_body = await _call(
+            _knowledge_tool_server(),
+            "knowledge_read",
+            {
+                "databasePath": str(absent),
+                "repositoryId": REPOSITORY_ID,
+                "view": view,
+            },
+        )
+        assert absent_body["state"] == "refused", absent_body
+        assert absent_body["refusalCode"] == "selected_input_unavailable", absent_body
+        assert str(absent) in absent_body["refusalDetail"], absent_body
+
+    not_a_database = tmp_path / "not-a-database.db"
+    not_a_database.write_text("this file is not a SQLite database\n", encoding="utf-8")
+    unreadable = await _call(
+        _knowledge_tool_server(),
+        "knowledge_read",
+        {
+            "databasePath": str(not_a_database),
+            "repositoryId": REPOSITORY_ID,
+            "view": "source_context",
+        },
+    )
+    assert unreadable["state"] == "refused", unreadable
+    assert unreadable["refusalCode"] == "snapshot_unavailable", unreadable
+    assert str(not_a_database) in unreadable["refusalDetail"], unreadable
+
+    # The report operation reads a dataset too, so it earns the same typed refusal rather than the
+    # traceback an unopened file used to produce.
+    report = await _call(
+        _knowledge_tool_server(),
+        "knowledge_integrity_check",
+        {"databasePath": str(absent), "repositoryId": REPOSITORY_ID},
+    )
+    assert report["state"] == "refused", report
+    assert report["refusalCode"] == "selected_input_unavailable", report
+
+    # And the comparison family: a body the shipped request model refuses is a caller error this
+    # surface can name, not a transport-level failure.
+    invalid = await _call(
+        _knowledge_tool_server(),
+        "knowledge_diff",
+        {
+            "databasePath": str(absent),
+            "repositoryId": REPOSITORY_ID,
+            "beforePath": str(absent),
+            "afterPath": str(absent),
+            "request": {},
+        },
+    )
+    assert invalid["state"] == "refused", invalid
+    assert invalid["refusalCode"] == "invalid_payload", invalid
+    assert "KnowledgeDiffRequest" in invalid["refusalDetail"], invalid
 
 
 @pytest.mark.anyio

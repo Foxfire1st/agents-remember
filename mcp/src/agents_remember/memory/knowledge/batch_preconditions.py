@@ -1321,7 +1321,7 @@ def _census_check(
     store: OpenedKnowledgeStore,
     index: int,
     command: ChangeCommand,
-    pending: frozenset[tuple[str, str]],
+    pending: set[tuple[str, str]],
 ) -> None:
     """Check one census command against its record group's own shape rules.
 

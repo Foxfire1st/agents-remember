@@ -75,7 +75,13 @@ pytestmark = pytest.mark.evidence_unit
 # path are not the bytes this anchor recorded" is a measurement about the tree and not a constant.
 WRONG_RECORDED_BLOB = "0" * 40
 
-SYMBOL_LOCATOR = SymbolLocator(language="python", qualified_name="integration.retry_budget")
+# The symbol the fixture's ``INTEGRATION_PATH`` really binds, as ``class SharedBudget`` at line 5
+# with its ``retry_budget`` method at 6-7. A qualified name is resolved by its real halves, so this
+# is exactly the shape the ingest stores and the shape the rail has to observe.
+SYMBOL_LOCATOR = SymbolLocator(language="python", qualified_name="SharedBudget.retry_budget")
+# A name the same bytes mention in prose and never bind, so the rail has one symbol it must report
+# as present-but-not-a-definition rather than resolving it off the mention.
+UNBOUND_SYMBOL_LOCATOR = SymbolLocator(language="python", qualified_name="SharedBudget.nowhere")
 RANGE_LOCATOR = LineRangeLocator(start_line=3, end_line=7)
 RATIONALE = "The statement is realized by the construct this recorded anchor names."
 FIXED_REPOSITORY_ID = "7c1f2a4e-9b3d-4f6a-8e21-5d0b7c9a1e33"
@@ -229,20 +235,37 @@ def test_a_symbol_citation_reads_back_with_its_path_identity_and_locator(
     assert stored.source_identity.object_id == blob
     assert isinstance(stored.locator, SymbolLocator), stored.locator
     assert stored.locator.language == "python"
-    assert stored.locator.qualified_name == "integration.retry_budget"
+    assert stored.locator.qualified_name == "SharedBudget.retry_budget"
 
     row = row_for(view_rows(fixture), held.citation.claim_id)
     assert row.path == INTEGRATION_PATH
     assert isinstance(row.locator, SymbolLocator), row.locator
     assert row.locator == SYMBOL_LOCATOR
 
-    # The knowledge lane has no symbol extractor, and it says so rather than resolving the symbol as
-    # a file: an observation that reported a path resolution for a symbol locator would be a
-    # resolution the recorded claim never made.
+    # A symbol locator IS observed, through the shipped tree-sitter extractor the citation fixer,
+    # repair and migration paths already use: the recorded bytes are present at the recorded path
+    # and they bind the qualified name the locator carries, so the resolution is the same
+    # ``exact_recorded_blob`` a file locator earns -- and the detail carries the extent the
+    # extractor found, which is what makes a symbol citation verifiable rather than merely stored.
     observation = observed(fixture, stored)
-    assert observation.resolution == "unsupported_locator"
+    assert observation.resolution == "exact_recorded_blob"
+    assert "src/integration.py:6-7" in observation.detail
     assert observation.locator == SYMBOL_LOCATOR
     assert observation.recorded_source_identity == blob
+
+    # The same bytes, asked about a symbol they do NOT bind: present-but-not-a-definition is its
+    # own answer and not a silent success. This is the distinction the whole observation exists to
+    # make, so the case carries both directions.
+    unbound = authored(
+        path=INTEGRATION_PATH, blob=blob, locator=UNBOUND_SYMBOL_LOCATOR, role="enforcement"
+    )
+    committed(fixture, unbound)
+    unbound_observation = observed(
+        fixture, stored_anchor(fixture, str(unbound.citation.anchor.anchor_id))
+    )
+    assert unbound_observation.resolution == "recorded_blob_mismatch"
+    assert "SharedBudget.nowhere" in unbound_observation.detail
+    assert unbound_observation.recorded_source_identity == blob
 
 
 def test_a_line_range_citation_reads_back_as_its_recorded_extent(

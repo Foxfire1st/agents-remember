@@ -22,7 +22,9 @@ from collections.abc import Callable
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from agents_remember.errors import GrammarUnavailableError
 from agents_remember.kernel.git_command import run_git
+from agents_remember.memory_quality.style.citations import extents, grammars
 from agents_remember.models.knowledge.read import AnchorResolution, KnowledgeReadContext
 
 __all__ = ["anchor_resolver_for", "observe_anchor"]
@@ -129,15 +131,6 @@ def observe_anchor(
                 "claim and its blob identity are reported as authored"
             ),
         )
-    if _locator_kind(locator) == "symbol":
-        return AnchorResolution(
-            **common,
-            resolution="unsupported_locator",
-            detail=(
-                "the recorded locator names a symbol and no symbol extractor supports it in this "
-                "increment; the recorded claim and its blob identity are unchanged"
-            ),
-        )
     if not tree_is_available:
         return AnchorResolution(
             **common,
@@ -169,10 +162,16 @@ def observe_anchor(
                 "tree or HEAD is substituted for it"
             ),
         )
-    return _observed_entry(common, entry)
+    return _observed_entry(common, entry, locator=locator, repository_root=repository_root)
 
 
-def _observed_entry(common: dict[str, Any], entry: tuple[str, str, str] | None) -> AnchorResolution:
+def _observed_entry(
+    common: dict[str, Any],
+    entry: tuple[str, str, str] | None,
+    *,
+    locator: Any,
+    repository_root: Path,
+) -> AnchorResolution:
     """Turn one ``ls-tree`` entry into the observation it supports."""
 
     if entry is None:
@@ -200,6 +199,8 @@ def _observed_entry(common: dict[str, Any], entry: tuple[str, str, str] | None) 
         )
     recorded = str(common["recorded_source_identity"])
     if object_id == recorded:
+        if _locator_kind(locator) == "symbol":
+            return _observed_symbol(common, locator, object_id, repository_root)
         return AnchorResolution(
             **common,
             observed_source_identity=object_id,
@@ -216,6 +217,123 @@ def _observed_entry(common: dict[str, Any], entry: tuple[str, str, str] | None) 
             "realization of the current bytes"
         ),
     )
+
+
+def _observed_symbol(
+    common: dict[str, Any],
+    locator: Any,
+    object_id: str,
+    repository_root: Path,
+) -> AnchorResolution:
+    """Observe a symbol locator against the recorded blob through the shipped extractor.
+
+    The recorded blob is present at the recorded path -- the caller has already proved that -- so
+    the only question left is the one the locator actually asks: does those exact bytes **define**
+    the symbol they name? The answer comes from the same tree-sitter machinery the citation
+    fixer, repair and migration paths use, through :mod:`...style.citations.extents`, so the
+    ingest's notion of "this is a definition" and the reading rail's notion cannot drift apart:
+    there is one definition implementation in the tree and both call it.
+
+    A suffix with no grammar is the one genuine ``unsupported_locator`` left here, and the reason
+    is true of this revision: without a grammar a definition cannot be told from a mention, so the
+    locator is reported unresolved rather than guessed at. A grammar that will not LOAD is
+    reported the same way for the same reason -- the bytes were obtained, the parser was not -- and
+    never silently degrades into occurrence matching, which would resolve a mention as a
+    definition.
+    """
+
+    name = _locator_text(locator, "qualified_name")
+    path = str(common["path"])
+    if not grammars.parsed(path):
+        return AnchorResolution(
+            **common,
+            observed_source_identity=object_id,
+            resolution="unsupported_locator",
+            detail=(
+                f"the recorded path {path!r} is written in a language the shipped extractor has no "
+                "grammar for, so a definition of the recorded symbol cannot be told apart from a "
+                "mention of it; the recorded claim and its blob identity are unchanged"
+            ),
+        )
+    try:
+        lines = _recorded_lines(repository_root, object_id)
+        defined = _defining_extents(name, path, lines)
+    except (GrammarUnavailableError, _BlobUnreadable) as failure:
+        return AnchorResolution(
+            **common,
+            observed_source_identity=object_id,
+            resolution="unsupported_locator",
+            detail=(
+                f"the recorded symbol {name!r} could not be resolved against the recorded bytes at "
+                f"{path!r} ({failure}); the recorded claim and its blob identity are unchanged"
+            ),
+        )
+    if not defined:
+        return AnchorResolution(
+            **common,
+            observed_source_identity=object_id,
+            resolution="recorded_blob_mismatch",
+            detail=(
+                f"the requested tree holds the exact recorded blob at the recorded path, and those "
+                f"bytes do not define {name!r}: the recorded locator names a construct those bytes "
+                "do not bind. The recorded claim and its blob identity are preserved and the "
+                "obligation is not retired"
+            ),
+        )
+    return AnchorResolution(
+        **common,
+        observed_source_identity=object_id,
+        resolution="exact_recorded_blob",
+        detail=(
+            f"the requested tree holds the exact recorded blob at the recorded path, and those "
+            f"bytes define {name!r} at {', '.join(defined)}"
+        ),
+    )
+
+
+class _BlobUnreadable(Exception):
+    """The recorded blob's bytes could not be obtained from the requested tree."""
+
+
+def _recorded_lines(repository_root: Path, object_id: str) -> list[str]:
+    """The recorded blob's own bytes, as the lines the parser reads.
+
+    Git answers with the object's bytes and nothing else: no working tree, no ``HEAD`` and no
+    checkout is substituted, so what is parsed is the blob the record names. The runner decodes
+    with ``surrogateescape``, so a blob that is not valid UTF-8 still yields lines rather than an
+    exception of its own.
+    """
+
+    result = run_git(repository_root, ["cat-file", "blob", object_id])
+    if result.returncode != 0:
+        raise _BlobUnreadable(f"git could not read blob {object_id}")
+    return result.stdout.split("\n")
+
+
+def _defining_extents(name: str, path: str, lines: list[str]) -> tuple[str, ...]:
+    """Where the shipped extractor says ``path`` defines ``name``, in ``path:start-end`` spelling.
+
+    A qualified name is resolved by its real halves, exactly as the extractor's own callers do:
+    the last segment has to be a definition and every namespace segment before it has to be one
+    too, so ``Holder.method`` resolves when both are bound and an invented prefix does not borrow
+    a real method's identity.
+    """
+
+    bound = extents.definitions(path, lines)
+    parts = [part for part in name.split(".") if part]
+    if not parts or any(part not in bound for part in parts):
+        return ()
+    return tuple(
+        dict.fromkeys(f"{path}:{extent.start}-{extent.end}" for extent in bound[parts[-1]])
+    )
+
+
+def _locator_text(locator: Any, field: str) -> str:
+    """Return one string part of a locator, however that locator decoded."""
+
+    if isinstance(locator, dict):
+        return str(locator.get(field, ""))
+    return str(getattr(locator, field, ""))
 
 
 def _locator_kind(locator: Any) -> str | None:

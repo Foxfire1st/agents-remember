@@ -41,10 +41,19 @@ from agents_remember.application.knowledge_curator_ingest import (
     COMMITTED,
     SKIPPED,
     IngestReport,
+    _RouteLedger,
+    _Run,
     ingest_curator_list,
 )
 from agents_remember.application.knowledge_read import open_read_context
 from agents_remember.application.knowledge_views import read_knowledge_view
+from agents_remember.cli.__main__ import main
+from agents_remember.mcp.tools.knowledge import (
+    DECLARED_CHANGE_KINDS,
+    WRITE_ENTRY_POINT,
+    ChangeToolRequest,
+    knowledge_change_payload,
+)
 from agents_remember.models.knowledge.source import SymbolLocator
 from agents_remember.models.knowledge.view import SourceContextView, ViewRequest
 
@@ -866,7 +875,7 @@ def test_the_recorded_blob_identity_is_measured_and_a_working_edit_is_a_typed_re
         authorization_ref=AUTHORIZATION,
     )
     assert [one.entry_id for one in exact.committed] == ["E-exact"]
-    assert exact.counts.anchors_observed_unsupported == 1
+    assert exact.counts.anchors_observed_exact == 1
     assert exact.committed[0].targets[0].source_identity == committed_blob
 
     # An uncommitted edit to the cited file: the working bytes are no longer the bytes the line
@@ -919,9 +928,11 @@ def test_a_producer_symbol_name_is_resolved_stored_and_read_back_typed(
     committed = report.committed[0]
     assert committed.targets[0].locator_kind == "symbol"
     assert committed.targets[0].locator == CODE_SYMBOL
-    # A symbol is observed, and the rail refuses the kind rather than resolving it as a file.
-    assert committed.targets[0].observation == "unsupported_locator"
-    assert report.counts.anchors_observed_unsupported == 1
+    # A symbol IS observed: the rail resolves it through the shipped extractor against the exact
+    # recorded blob, which is the same answer a file locator earns and the answer that makes the
+    # stored citation re-verifiable on the read path.
+    assert committed.targets[0].observation == "exact_recorded_blob"
+    assert report.counts.anchors_observed_exact == 1
 
     database = tmp_path / "candidate" / "knowledge-candidate.sqlite"
     connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
@@ -1159,14 +1170,32 @@ def test_dry_and_real_runs_report_the_same_written_rows_and_a_refused_run_report
         + written["source_anchor_route"]
     ) == real.counts.records_written
 
-    # A refused re-run wrote nothing at all, and says so: the routes already exist, so reporting
-    # them as written would be reporting rows this run did not write.
+    # A refused re-run whose route leg had nothing to author wrote nothing at all, and says so: the
+    # routes already exist, so reporting them as written would be reporting rows this run did not
+    # write.
     refused = run(pair, tmp_path, entries)
     assert refused.batch_state == "refused"
     assert refused.committed == ()
     assert refused.counts.records_written == 0
     assert refused.counts.routes_authored == 0
     assert counts(pair, database) == written
+
+    # But "the batch refused" is not the same claim as "this run wrote nothing", and conflating the
+    # two is the defect pinned next: a route leg runs BEFORE the batch, so a scope it authored is a
+    # row in the candidate even when the batch then refuses. The count is over rows the run wrote,
+    # not over citations it rewrote -- the citation claim is carried by ``committed`` and the batch
+    # state -- and a report saying ``records_written == 0`` while the candidate holds that row is a
+    # count of nothing. ``written`` is asserted directly here because the reachable end-to-end shape
+    # needs a route whose scope changed between runs, which this fixture's shared source tree cannot
+    # produce without a second candidate.
+    ledger = _RouteLedger(
+        expected={"pkg": ""},
+        answered={"pkg": ""},
+        attached={},
+        authored={"pkg"},
+    )
+    assert _Run(batch_state="not_attempted", ledger=ledger).written == 1
+    assert _Run(batch_state="not_attempted").written == 0
 
 
 def test_an_empty_authorization_is_refused_by_name_before_anything_is_read(
@@ -1333,3 +1362,120 @@ def test_the_report_names_the_candidate_its_receipt_the_lane_and_the_exact_input
     assert receipt["repository_id"] == report.repository_id
     assert report.derived_identities
     assert report.entries_read == ("E-named",)
+
+
+# --------------------------------------------------------------------------------------------
+# The production caller: the operator's own entry point, driven end to end
+# --------------------------------------------------------------------------------------------
+
+
+def test_the_cli_subcommand_is_a_production_caller_that_writes_the_rows(
+    pair: SourcePair, tmp_path: Path
+) -> None:
+    """The ingest has an operator-reachable entry point, and it is the one that writes.
+
+    Every case above calls the operation **in process**, which proves the operation works and
+    proves nothing about whether anything can reach it. This case drives the shipped command line
+    instead -- ``agents-remember knowledge-ingest`` through the umbrella ``main``, exactly as an
+    operator runs it -- over the same real enclosure, and then reads the candidate database back
+    to show that rows exist because of that run.
+
+    The exit code, the printed report, the row counts and the dry-run direction are all measured,
+    because "reachable" is a claim about the whole path: an entry point that exists but writes
+    nothing, or that writes without saying so, would still leave the write plane unreachable.
+    """
+
+    list_path = tmp_path / "hand-off-list.json"
+    list_path.write_text(
+        json.dumps(
+            [
+                entry(
+                    "E-cli",
+                    targets=[target(CODE_FILE, locator=symbol(CODE_SYMBOL), route="pkg")],
+                ),
+                entry("E-cli-ruling", kind="decision", disposition="nothing to do"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    candidate = tmp_path / "cli-candidate"
+    argv = [
+        "knowledge-ingest",
+        "--contract",
+        str(pair.contract_path),
+        "--list",
+        str(list_path),
+        "--candidate-directory",
+        str(candidate),
+        "--authorization-ref",
+        AUTHORIZATION,
+    ]
+
+    # The dry run is the default: the command reports and writes nothing, so there is no candidate
+    # database to count rows in afterwards. That is the difference the operator's commit word buys.
+    assert main(argv) == 0
+    assert not (candidate / "knowledge-candidate.sqlite").exists()
+
+    assert main([*argv, "--commit"]) == 0
+    database = candidate / "knowledge-candidate.sqlite"
+    assert database.is_file()
+    written = counts(pair, database)
+    assert written["source_anchor"] == 1
+    assert written["realization_claim"] == 1
+    assert written["route"] == 1
+    # The stored anchor is the co-resolved pair the operator's list named: the path the resolver
+    # chose, and the symbol the shipped extractor bound inside those exact recorded bytes.
+    connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+    try:
+        anchor = connection.execute("SELECT path, locator FROM source_anchor").fetchone()
+    finally:
+        connection.close()
+    assert anchor is not None
+    assert anchor[0] == CODE_FILE
+    assert json.loads(anchor[1]) == {
+        "kind": "symbol",
+        "language": "python",
+        "qualified_name": CODE_SYMBOL,
+    }
+
+    # A refused invocation is its own exit code and writes nothing: an unreadable list is refused
+    # before the contract is even loaded, so no candidate directory is created at all.
+    refused_candidate = tmp_path / "refused-candidate"
+    absent_argv = [
+        *argv[: argv.index("--list")],
+        "--list",
+        str(tmp_path / "absent.json"),
+        "--candidate-directory",
+        str(refused_candidate),
+        "--authorization-ref",
+        AUTHORIZATION,
+        "--commit",
+    ]
+    assert main(absent_argv) == 2
+    assert not refused_candidate.exists()
+
+
+def test_the_mounted_change_tool_says_it_does_not_write(tmp_path: Path) -> None:
+    """The one mounted mutation name is not a write path, and it says so rather than implying one.
+
+    ``knowledge_change`` is published, so a caller reaching for it must get a typed refusal rather
+    than "no such tool" -- but the description used to advertise that it records while every kind
+    returned a refusal telling the caller to supply an argument its signature cannot carry. The
+    description and the refusal now agree with the code, and both name the entry point that does
+    write, which is the subcommand the case above drives.
+    """
+
+    assert DECLARED_CHANGE_KINDS, "the surface declares the kinds it may be asked about"
+    for kind in (*DECLARED_CHANGE_KINDS, "census_claim"):
+        body = knowledge_change_payload(
+            ChangeToolRequest(
+                database_path=str(tmp_path / "knowledge.sqlite"),
+                repository_id="repo",
+                record_kind=kind,
+            )
+        )
+        assert body["ok"] is True
+        assert body["state"] == "refused", body
+        assert body["refusalCode"] == "registration_absent", body
+        assert body["recordKind"] == kind, body
+        assert WRITE_ENTRY_POINT in body["refusalDetail"], body

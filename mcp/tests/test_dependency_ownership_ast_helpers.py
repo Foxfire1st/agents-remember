@@ -43,10 +43,33 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 15
 LIFECYCLE_ARTIFACT_COUNT = 65
-LIFECYCLE_CATALOG_SHA256 = "c25cdb1e0aa4c66c86057fe4b9d73ec8f200f781a59d08d42d6dd49d4802e466"
+LIFECYCLE_CATALOG_SHA256 = "6ec7eb0d33e91c148b25ed64c6b791664446082bdf419bf511635f4ca3cbdd75"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
-The value this line carries is the **merged** catalog's own digest, re-measured after the master synced onto
+The value this line carries is the catalog after ``260915-KS``'s L28 leaf repaired the missing-consumer
+registration that made the repository's own gate fail. L25 registered no artifact and no contract of its
+own -- its ingest drives the shipped batch operation through ``candidate_batch_test_support`` and builds
+its record trees through ``read_scope_test_support`` rather than introducing a third fixture -- so its
+change is a *consumer* change only: those two support modules' consumer lists gained
+``mcp/tests/test_knowledge_curator_ingest.py``. The counts stay fifteen and sixty-five, and the two
+``[[contract]]`` rows named above are untouched, because a consumer registration is not an artifact.
+
+L28 then added one more *consumer* registration to the same value: driving the new
+``agents-remember knowledge-ingest`` subcommand from ``mcp/tests/test_knowledge_curator_ingest_list.py``
+made that module import ``agents_remember.cli.__main__``, and the census's transitive import walk from
+there reaches the portable profile runtime the node lockfile is a declared input of. The row therefore
+gained that module too, and the counts still stay fifteen and sixty-five. Two re-pins inside one leaf is
+the census working as designed: it derives consumers from the tree, so a new import edge is a new
+declared consumer, and the declaration is what the digest pins.
+
+The digest this value replaces was ``c25cdb1e...``, which pinned the merged catalog and was correct for
+it: the omission was in the *catalog*, not in the pin. Two integration cases
+(``test_repository_inputs_reach_their_supported_consumers`` and
+``test_production_proof_adds_no_governed_evidence_artifact``) and the wrapper's own
+``evidence_lifecycle`` gate step all read this one derivation, so the missing rows reddened all three
+from L25 onward -- and ``addopts``' ``-m "not integration"`` is why the unit lane could not see it.
+
+The earlier value is the **merged** catalog's own digest, re-measured after the master synced onto
 its moved super line: fifteen contracts and sixty-five artifacts, of which the super line contributed nine
 artifacts (the eve adapter/capsule/fixture rows, the two codex app-server recordings and the three
 `scripts/e2e_harness/fresh_user_*` rows) and this master contributed ten (its KS knowledge-substrate support

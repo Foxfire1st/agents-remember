@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import tomllib
-from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -55,7 +54,7 @@ def test_the_effective_budgets_are_the_repository_rails(pytestconfig: pytest.Con
     declared = tomllib.loads((conftest.REPOSITORY_ROOT / "pyproject.toml").read_text("utf-8"))[
         "tool"
     ]["pytest"]["ini_options"]
-    assert Path(pytestconfig.inifile) == conftest.REPOSITORY_ROOT / "pyproject.toml"
+    assert pytestconfig.inipath == conftest.REPOSITORY_ROOT / "pyproject.toml"
     assert pytestconfig.getini("unit_case_budget") == declared["unit_case_budget"]
     assert pytestconfig.getini("integration_case_budget") == declared["integration_case_budget"]
 
@@ -76,7 +75,11 @@ def test_the_option_declarations_state_no_budget_of_their_own() -> None:
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "addini"
     ]
-    assert {node.args[0].value for node in declarations} == {
+    assert {
+        node.args[0].value
+        for node in declarations
+        if isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+    } == {
         "unit_case_budget",
         "integration_case_budget",
     }

@@ -9,6 +9,7 @@ import tomllib
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -715,7 +716,7 @@ class DecoratedDeclarationCitationTests(TreeCase):
         self.git(self.tree.memory, "add", "memory.md")
         self.git(self.tree.memory, "commit", "--quiet", "-m", "init")
 
-    def card(self, citation: str) -> str:
+    def card(self, citation: str) -> dict[str, Any]:
         """Commit the declaration, change it, and cite it at ``citation``."""
         self.tree.source("src.py", self.DECORATED)
         self.git(self.tree.code, "add", "src.py")
@@ -798,7 +799,9 @@ class GeneratedHistoryInsertionOrderTests(TreeCase):
 
     def render(self, at: datetime) -> str:
         document = "\n".join(("# card", "", "## Update History", "", *self.ENTRIES, ""))
-        lines = document.split("\n")
+        # The join of literals is a ``LiteralString``, whose ``split`` answers ``list[LiteralString]``;
+        # the projected document is an ordinary ``str`` list, and the two shipped helpers declare it.
+        lines = list[str](document.split("\n"))
         heading = deterministic_projection.history_section_line(lines)
         assert heading is not None
         bullet = deterministic_projection.history_bullet(

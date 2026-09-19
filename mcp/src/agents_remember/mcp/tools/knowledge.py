@@ -23,6 +23,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import apsw
+from pydantic import ValidationError
+
 from agents_remember.application.knowledge_diff import diff_knowledge_scope
 from agents_remember.application.knowledge_projection import (
     ProjectionOptions,
@@ -38,6 +41,7 @@ from agents_remember.memory.knowledge.connection import (
     open_read_only_database,
 )
 from agents_remember.memory.knowledge.detection import read_detection_run
+from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
 from agents_remember.models.knowledge.diff import KnowledgeDiffRequest
 from agents_remember.models.knowledge.projection_manifest import DestinationProfile
@@ -60,11 +64,31 @@ __all__ = [
     "knowledge_read_payload",
 ]
 
-# The record kinds this mounted surface has an admitted write operation for. A kind outside this set
-# is refused as ``registration_absent`` rather than written by a second path: this leaf mounts an
-# application API, and inventing a write seam for a kind another leaf owns would be exactly the
-# authority this packet forbids it to add.
-ADMITTED_CHANGE_KINDS: tuple[str, ...] = ("evidence_claim", "verification_observation")
+# The record kinds this surface is asked about, and the answer every one of them earns.
+#
+# This mounted surface does NOT write. It is a read/render/projection surface: ``knowledge_read``,
+# ``knowledge_diff``, ``knowledge_integrity_check`` and ``knowledge_project`` all answer from a
+# dataset the caller names, and no handler here opens the write path. The knowledge write plane's
+# reachable production entry point is the ``agents-remember knowledge-ingest`` CLI subcommand,
+# which calls the admitted operation directly; a second write seam here would be the authority this
+# packet forbids the surface to add.
+#
+# The earlier spelling advertised two "admitted" kinds and then refused both anyway, which made the
+# tool's own description false and told the caller to supply an input its published signature cannot
+# carry. Both are removed: the set below is what the surface may be *asked* for, the refusal is
+# unconditional for every member of it, and the reason names where the write actually happens.
+DECLARED_CHANGE_KINDS: tuple[str, ...] = (
+    "evidence_claim",
+    "verification_observation",
+    "invariant_revision",
+    "assumption",
+    "semantic_change_set",
+    "requirement_revision",
+)
+
+# The one file this surface can resolve a whole write from, named so a refusal is actionable rather
+# than a dead end. Kept as a constant because two detail strings and a test quote it.
+WRITE_ENTRY_POINT = "agents-remember knowledge-ingest"
 
 
 @dataclass(frozen=True)
@@ -133,6 +157,38 @@ def _refused_read(view: str, repository_id: str, code: str, detail: str) -> dict
     }
 
 
+def _unusable_dataset(database_path: str, error: BaseException) -> tuple[str, str]:
+    """The refusal code and detail one failure to open or read a dataset earns.
+
+    Three facts, and they are different facts: a path that is not a file at all is an *absent
+    selection*, a database SQLite refuses to read (a directory, an empty file, a file that is not a
+    database, a file another process holds) is an *unusable snapshot*, and anything else that
+    surfaces from the file system is unreadable input. Answering any of them with an exception
+    would make the same input a typed refusal on the ``read_knowledge_scope`` seam and a traceback
+    on this one, which is the divergence the family's own docstring forbids.
+
+    The codes are the shipped literals and not surface-local spellings: a caller branches on
+    ``selected_input_unavailable`` or ``snapshot_unavailable`` exactly as it does against the
+    application seam.
+    """
+
+    path = Path(database_path)
+    if not path.is_file():
+        return (
+            "selected_input_unavailable",
+            f"the selected knowledge database is absent or is not a file: {path}",
+        )
+    if isinstance(error, KnowledgeStorageError):
+        return (
+            "snapshot_unavailable",
+            f"the selected snapshot is not this dataset: {error} (at {path})",
+        )
+    return (
+        "snapshot_unavailable",
+        f"the selected snapshot could not be read: {error} (at {path})",
+    )
+
+
 def knowledge_read_payload(request: ReadToolRequest) -> dict[str, Any]:
     """Retrieve one named view at one snapshot, returning its payload or its typed refusal."""
 
@@ -165,18 +221,26 @@ def knowledge_read_payload(request: ReadToolRequest) -> dict[str, Any]:
     ordering_refusal = require_admitted_ordering_input(request.ordering_input)
     if ordering_refusal is not None:
         return _refused_read(view, repositoryId, ordering_refusal.code, ordering_refusal.detail)
-    context = open_read_context(
-        path,
-        repositoryId,
-        repository_root=(
-            None if request.repository_root is None else Path(request.repository_root)
-        ),
-        code_tree_id=request.code_tree_id,
-    )
-    built = _view_request(request)
-    if isinstance(built, ViewRefusal):
-        return _refused_read(view, repositoryId, built.code, built.detail)
-    result = read_knowledge_view(path, context, built)
+    # The dataset is opened inside the boundary, because every failure to open or read it is a fact
+    # about the selection and not a programming error: the application seam this builder delegates
+    # to already turns all three into typed refusals, and a transport that let them escape as
+    # ``ToolError`` would refuse the same input on one surface and raise on another.
+    try:
+        context = open_read_context(
+            path,
+            repositoryId,
+            repository_root=(
+                None if request.repository_root is None else Path(request.repository_root)
+            ),
+            code_tree_id=request.code_tree_id,
+        )
+        built = _view_request(request)
+        if isinstance(built, ViewRefusal):
+            return _refused_read(view, repositoryId, built.code, built.detail)
+        result = read_knowledge_view(path, context, built)
+    except (KnowledgeStorageError, apsw.Error, OSError) as error:
+        code, detail = _unusable_dataset(databasePath, error)
+        return _refused_read(view, repositoryId, code, detail)
     if result.state == "refused" or result.payload is None:
         assert result.refusal is not None
         return _refused_read(view, repositoryId, result.refusal.code, result.refusal.detail)
@@ -221,26 +285,21 @@ def _view_request(request: ReadToolRequest) -> ViewRequest | ViewRefusal:
 
 
 def knowledge_change_payload(request: ChangeToolRequest) -> dict[str, Any]:
-    """Record one caller-authored proposal through the admitted write operation for its kind.
+    """Refuse one mount-side change request, naming the entry point that can actually write it.
 
-    The tool records; it does not author. There is no drafting here and no judgement of a rationale.
-    A kind with no admitted write operation on this surface is refused as ``registration_absent``,
-    naming the owner, rather than written through a second path this leaf would have to invent.
+    This surface records nothing. It has no admitted write operation for any kind, so every kind --
+    declared here or not -- is refused as ``registration_absent``, and the refusal names the
+    operation that owns the write: :func:`agents_remember.application.knowledge_curator_ingest.
+    ingest_curator_list`, reachable as the ``agents-remember knowledge-ingest`` subcommand, which
+    resolves a whole hand-off list against a leaf enclosure contract and commits it through the
+    admitted batch.
+
+    The reason is deliberately the *same* for a declared kind and for one this surface has never
+    heard of: the surface has nothing to add in either case, and two spellings of "this tool does
+    not write" would suggest the first one might.
     """
 
     repositoryId, recordKind = request.repository_id, request.record_kind
-    if recordKind not in ADMITTED_CHANGE_KINDS:
-        return {
-            "ok": True,
-            "state": "refused",
-            "recordKind": recordKind,
-            "repositoryId": repositoryId,
-            "refusalCode": "registration_absent",
-            "refusalDetail": (
-                f"no admitted write operation for {recordKind!r} is mounted on this surface; the "
-                "tool records through an operation another leaf owns and does not author one"
-            ),
-        }
     return {
         "ok": True,
         "state": "refused",
@@ -248,8 +307,10 @@ def knowledge_change_payload(request: ChangeToolRequest) -> dict[str, Any]:
         "repositoryId": repositoryId,
         "refusalCode": "registration_absent",
         "refusalDetail": (
-            "the admitted change destination for this namespace was not supplied, so no row was "
-            "written; supply the admitted destination facts the operation requires"
+            f"this mounted surface does not write, so no {recordKind!r} row was written and no "
+            "destination is missing: the knowledge write plane's reachable entry point is the "
+            f"{WRITE_ENTRY_POINT!r} subcommand, which commits a whole curator hand-off list "
+            "through the admitted batch. Call that, or read the result here with knowledge_read"
         ),
     }
 
@@ -259,11 +320,38 @@ def knowledge_diff_payload(request: DiffToolRequest) -> dict[str, Any]:
 
     repositoryId = request.repository_id
     supplied = _supplied_effect_labels(request.body)
-    result = diff_knowledge_scope(
-        _diff_request(request.body),
-        before_path=Path(request.before_path),
-        after_path=Path(request.after_path),
-    )
+    try:
+        built = _diff_request(request.body)
+    except ValidationError as invalid:
+        # A body the shipped request model refuses is a caller error this surface can *name*: the
+        # validation message lists the exact missing or malformed field, and returning it as a typed
+        # refusal keeps the operation's contract ("the comparison refused, here is why") instead of
+        # converting it into a transport-level tool failure.
+        return {
+            "ok": True,
+            "state": "refused",
+            "repositoryId": repositoryId,
+            "refusalCode": "invalid_payload",
+            "refusalDetail": (
+                "the comparison body is not a valid KnowledgeDiffRequest: "
+                f"{invalid.error_count()} validation error(s); {invalid}"
+            ),
+        }
+    try:
+        result = diff_knowledge_scope(
+            built,
+            before_path=Path(request.before_path),
+            after_path=Path(request.after_path),
+        )
+    except (KnowledgeStorageError, apsw.Error, OSError) as error:
+        code, detail = _unusable_dataset(request.before_path, error)
+        return {
+            "ok": True,
+            "state": "refused",
+            "repositoryId": repositoryId,
+            "refusalCode": code,
+            "refusalDetail": detail,
+        }
     if result.state == "refused":
         return {
             "ok": True,
@@ -327,7 +415,21 @@ def knowledge_integrity_check_payload(
     which is what ``Doc13:186`` writes for it.
     """
 
-    conditions = _recorded_conditions(Path(databasePath), repositoryId, scopeId)
+    # The report is a read of a dataset the caller selected, so a selection that cannot be read is
+    # reported as a refusal with the same shipped code the application seam uses, rather than
+    # escaping as ``ToolError`` -- a report about a file nobody could open is not a report.
+    try:
+        conditions = _recorded_conditions(Path(databasePath), repositoryId, scopeId)
+    except (KnowledgeStorageError, apsw.Error, OSError) as error:
+        code, detail = _unusable_dataset(databasePath, error)
+        return {
+            "ok": True,
+            "state": "refused",
+            "repositoryId": repositoryId,
+            "refusalCode": code,
+            "refusalDetail": detail,
+            "compatible": None,
+        }
     return {
         "ok": True,
         "state": "reported",

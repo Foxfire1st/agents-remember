@@ -56,11 +56,13 @@ and a different route is refused rather than overwritten) -- and the two legs ar
 separately instead of folded into one success. A route that cannot be recorded refuses the list by
 name, before anything is committed.
 
-**What this module does not do.** It adds no symbol extractor: a symbol locator is carried and
-observed, and the rail answers ``unsupported_locator`` for it, which is reported as that answer and
-never as a file resolution. It does not touch onboarding, build an export, or widen the citation
-machinery to a third root -- a path outside the two admitted roots is refused as out of scope by
-name. Publication is the curator's later act and is not reachable from here.
+**What this module does not do.** It adds no symbol extractor: a symbol locator is resolved
+through the one the tree already ships (``memory_quality.style.citations``), by the same helper the
+knowledge read rail asks when it observes one, so a construct accepted here is a construct the rail
+can re-resolve and there is exactly one definition implementation in the tree. It does not touch
+onboarding, build an export, or widen the citation machinery to a third root -- a path outside the
+two admitted roots is refused as out of scope by name. Publication is the curator's later act and is
+not reachable from here.
 """
 
 from __future__ import annotations
@@ -93,6 +95,8 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge import routes
 from agents_remember.memory.knowledge.read_anchors import observe_anchor
 from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
+from agents_remember.memory_quality.style.citations import grammars
+from agents_remember.memory_quality.style.citations.extents import bound_definitions
 from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.memory_quality.style.citations.source_index_state import SourceIndexError
 from agents_remember.models.knowledge.candidate import CandidateResolution, MutationResult
@@ -162,12 +166,12 @@ _REASON_OUTSIDE_BY_SPELLING = "path_outside_admitted_roots"
 _REASON_NOT_CONFINED = "path_not_confined_by_spelling"
 _REASON_INSIDE_BY_SPELLING = "path_inside_admitted_root_spelled_absolutely"
 
-# The locator kinds, and the one the rail refuses by name. D-41 is the whole of the distinction:
-# the rail verifies bytes, and a symbol is carried and honestly refused rather than resolved.
+# The locator kinds. The rail observes all three: a symbol is resolved through the shipped
+# extractor, so the distinction between a file, a range and a symbol is a distinction in what the
+# locator names rather than in whether the rail can answer it.
 _FILE_KIND = "file"
 _RANGE_KIND = "line_range"
 _SYMBOL_KIND = "symbol"
-_UNSUPPORTED_LOCATOR = "unsupported_locator"
 
 # The refusal codes of steps 3 and 4, one per distinct truth rather than one per step. A malformed
 # range, a range that runs backwards, a zero-based range, a range past the end of the file, a missing
@@ -178,6 +182,8 @@ _CODE_LINE_RANGE_MALFORMED = "line_range_not_integer_bounds"
 _CODE_LINE_RANGE_ORDER = "line_range_not_ordered"
 _CODE_LINE_RANGE_ZERO_BASED = "line_range_not_one_based"
 _CODE_LINE_RANGE_PAST_END = "line_range_past_last_line"
+_CODE_TARGET_SHAPE = "target_not_a_mapping"
+_CODE_LOCATOR_SHAPE = "locator_not_a_mapping"
 _CODE_LOCATOR_MISSING = "target_locator_missing"
 _CODE_LOCATOR_KIND = "unsupported_locator_kind"
 _CODE_CONSTRUCT_ABSENT = "construct_not_in_named_file"
@@ -195,14 +201,11 @@ _CODE_OBSERVATION = "observation_"
 _CODE_RESOLUTION_FAILED = "target_resolution_failed"
 _CODE_TREE_UNAVAILABLE = "recorded_tree_unavailable"
 
-# The observation rail's own answers, as the report prints them. ``exact_recorded_blob`` is the only
-# passing answer for a locator the rail can consult; ``unsupported_locator`` passes only for a
-# symbol.
+# The observation rail's own answer, as the report prints it. ``exact_recorded_blob`` is the only
+# passing answer: every other answer the rail can give -- ``unsupported_locator``,
+# ``recorded_blob_mismatch``, ``path_absent``, ``recorded_object_unavailable`` -- is a refusal, and
+# its name travels in the refused entry's code rather than in a count.
 _OBSERVED_EXACT = "exact_recorded_blob"
-_OBSERVED_UNSUPPORTED = "unsupported_locator"
-_OBSERVED_MISMATCH = "recorded_blob_mismatch"
-_OBSERVED_ABSENT = "path_absent"
-_OBSERVED_UNAVAILABLE = "recorded_object_unavailable"
 
 # The one shape an empty target is reported under. Revision 1 describes the honest encoding as
 # ``kind: "decision" | "measurement"``, and the fixture's eight rulings measure that the producer's
@@ -218,7 +221,11 @@ _RULING_SHAPE = "empty_target_ruling"
 # declared.
 _ROUTE_AUTHORED = "authored"
 _ROUTE_REUSED = "reused"
-_ROUTE_ATTACHED = "attached"
+# The state a DRY run's ledger carries. It is not a fourth outcome of a real run: nothing was
+# authored and nothing was attached, and saying "authored" about a run that wrote nothing is a claim
+# about work the run did not do. The projected rows are still counted, because a dry report's row
+# arithmetic is what the commit would carry -- but they are counted under a name that says so.
+_ROUTE_PROJECTED = "projected"
 _ROUTE_UNATTACHED = "authored-not-attached"
 _ROUTE_UNGOVERNED = "ungoverned"
 _ROUTE_REFUSED = "refused"
@@ -227,23 +234,6 @@ _ROUTE_REFUSED = "refused"
 # check confirms the named file defines the construct; it is never a hint that a range relocated, and
 # it never produces an extent the producer did not write.
 #
-# The patterns are read against the file's **code**, with comments and string literals blanked out
-# first, because a name that occurs only inside a docstring or a comment is mentioned and not
-# defined -- which is the distinction the whole check exists to make. A qualified name is checked by
-# its last segment AND by each namespace segment before it, so a genuinely nested construct resolves
-# while an invented prefix does not.
-_PYTHON_DEFINITION = r"^[ \t]*(?:async[ \t]+)?(?:def|class)[ \t]+{name}\b"
-# The script languages this repository cites, each with the declaration form that actually defines a
-# name in it. ``type`` covers a TypeScript alias and an interface; a bare ``name =`` does not, which
-# is why no bare line-start alternative appears here: that alternative is what let a TOML key and a
-# markdown sentence in as "definitions".
-_CODE_DEFINITIONS = {
-    "typescript": r"(?:\b(?:function|class|interface|type|enum|namespace)[ \t]+{name}\b|"
-    r"\b(?:const|let|var)[ \t]+{name}\b)",
-    "javascript": r"(?:\b(?:function|class)[ \t]+{name}\b|\b(?:const|let|var)[ \t]+{name}\b)",
-    "shell": r"(?:^[ \t]*function[ \t]+{name}\b|^[ \t]*{name}[ \t]*\(\))",
-    "sql": r"\b(?:FUNCTION|PROCEDURE|TABLE|VIEW|TYPE)[ \t]+{name}\b",
-}
 # The languages a symbol locator may name at all. A prose file cannot define a construct, and a
 # structured data file's keys are not definitions, so neither may carry a symbol: the refusal says
 # which of the two it is instead of resolving a mention into a citation.
@@ -261,27 +251,6 @@ _LANGUAGES = {
     ".json": "json",
     ".sh": "shell",
     ".sql": "sql",
-}
-
-# The blanking pass that turns one recorded file's bytes into its code: every comment and every
-# string literal is replaced by spaces, so a line and a column keep their position and a name that
-# occurs only inside a docstring, a comment or a string is no longer found as a definition.
-_PYTHON_LITERAL = re.compile(
-    r"(?P<comment>\#[^\n]*)"
-    r"|(?P<string>[rRbBuUfF]{0,3}(?:\"\"\"(?:[^\\]|\\.)*?\"\"\"|'''(?:[^\\]|\\.)*?'''"
-    r"|\"(?:[^\\\"\n]|\\.)*\"|'(?:[^\\'\n]|\\.)*'))",
-    re.DOTALL,
-)
-_SCRIPT_LITERAL = re.compile(
-    r"(?P<comment>//[^\n]*)"
-    r"|(?P<block>/\*.*?\*/)"
-    r"|(?P<string>`(?:[^\\`]|\\.)*`|\"(?:[^\\\"\n]|\\.)*\"|'(?:[^\\'\n]|\\.)*')",
-    re.DOTALL,
-)
-_CODE_LITERALS = {
-    "python": _PYTHON_LITERAL,
-    "typescript": _SCRIPT_LITERAL,
-    "javascript": _SCRIPT_LITERAL,
 }
 
 # The revision and the one authored field every ingested entry is filed under. The hand-off list
@@ -342,17 +311,21 @@ class EntryOutcome:
 
 @dataclass(frozen=True)
 class IngestCounts:
-    """The counts that make one run auditable, each a fact about this module's own work."""
+    """The counts that make one run auditable, each a fact about this module's own work.
+
+    There is exactly ONE observation counter, because exactly one observation answer can reach a
+    committed target: ``anchors_observed_exact``. Every other answer the rail can give --
+    ``unsupported_locator``, ``recorded_blob_mismatch``, ``path_absent``,
+    ``recorded_object_unavailable`` -- is a refusal, and it travels in the refused entry's own code
+    (``observation_<answer>``) where a reader can act on it. Four counters pinned at zero are not an
+    audit trail; they are four claims that something was measured when nothing was.
+    """
 
     entries_read: int
     rulings: int
     targets_completed: int
     locators_resolved: int
     anchors_observed_exact: int
-    anchors_observed_unsupported: int
-    anchors_observed_mismatch: int
-    anchors_observed_absent: int
-    anchors_observed_unavailable: int
     route_paths: int
     routes_authored: int
     routes_reused: int
@@ -592,6 +565,8 @@ class _RouteLedger:
     answered: dict[str, str]
     attached: dict[str, tuple[RouteOutcome, ...]]
     authored: set[str]
+    projected: bool = False
+    projected_scopes: int = 0
 
     @property
     def reused_paths(self) -> frozenset[str]:
@@ -604,6 +579,12 @@ class _RouteLedger:
         case the two ids are equal and only the ledger's own record separates the two facts.
         """
 
+        if self.projected:
+            # A dry run never read the candidate, so it cannot know that any scope's row already
+            # existed. Reporting the projection as "reused" would be a measured-looking number the
+            # run never measured; the projected scopes are counted by ``projected_scopes`` instead,
+            # under a name that says what they are.
+            return frozenset()
         return frozenset(
             path
             for path, route_id in self.answered.items()
@@ -628,9 +609,9 @@ class _RouteLedger:
             1
             for ones in self.attached.values()
             for one in ones
-            if one.state in (_ROUTE_ATTACHED, _ROUTE_REUSED, _ROUTE_AUTHORED)
+            if one.state in (_ROUTE_REUSED, _ROUTE_AUTHORED, _ROUTE_PROJECTED)
         )
-        return len(self.authored) + accepted
+        return len(self.authored) + self.projected_scopes + accepted
 
 
 @dataclass(frozen=True)
@@ -767,12 +748,17 @@ def ingest_curator_list(
     )
     admission = _admitted_candidate(paths.candidate, repository, resolution)
     if admission.state == "refused" or admission.result.identity is None:
+        # The destination itself refused, so nothing was planned and nothing was written -- and the
+        # planned entries are folded into ``refused`` rather than silently dropped. The report says
+        # an entry appears in EXACTLY ONE of committed/rulings/refused, and that promise is what a
+        # caller counts on to know every entry it handed over was accounted for; the admission leg
+        # was the one refusal path that returned the read unchanged and left its entries in no list.
         return _report(
             _ReportTarget(
                 paths,
                 resolution,
                 repository,
-                read,
+                _with_refused(read, _admission_refused(read.planned, admission.result)),
                 source.tree_ids,
                 source.coordination_top_level,
             ),
@@ -1162,6 +1148,17 @@ def _plan_target(
     the other way.
     """
 
+    # A target the reader can *see* is malformed is refused with the reason, not raised on: the
+    # producers write JSON by hand, and ``[null]``, a bare string and a bare mapping all reach here
+    # from a list a human typed. The promise this operation makes is a report for every entry, and
+    # an ``AttributeError`` from ``target.get`` is the one outcome that promise forbids -- it is
+    # neither a refusal nor a defect in this module.
+    if not isinstance(target, Mapping):
+        return None, _Refusal(
+            _CODE_TARGET_SHAPE,
+            f"a target must be a mapping carrying 'path' and 'locator', and this one is "
+            f"{type(target).__name__}: {target!r}",
+        )
     written = str(target.get("path", ""))
     spelling = _spelling_refusal(written, source)
     if spelling is not None:
@@ -1430,7 +1427,7 @@ def _unresolved_reason(
     source, absent by construction.
     """
 
-    if _first_segment_admitted(written, code_tree, memory_tree):
+    if _first_segment_admitted(written, code_tree, memory_tree, top_level):
         return (
             f"{_REASON_GONE}: {written!r} names a real top-level entry of one of the two admitted "
             "roots and the resolved tree holds no file at that path, which is the damage a move or "
@@ -1448,18 +1445,30 @@ def _unresolved_reason(
     )
 
 
-def _first_segment_admitted(written: str, code_tree: Trees, memory_tree: Trees) -> bool:
-    """Whether a path's first segment is a real top-level entry of either admitted **tree**.
+def _first_segment_admitted(
+    written: str, code_tree: Trees, memory_tree: Trees, top_level: frozenset[str]
+) -> bool:
+    """Whether a path's first segment belongs to one of the two admitted **trees**.
 
     Read from the trees rather than from the directories: ``Trees.ours`` asks ``is_dir()`` on the
     working checkout, which answers differently before and after a cleanup and differently again in
     a fresh clone. The recorded tree is the one fact about the repository this run is already
     resolving against, so the question is asked of it -- and a new top-level directory is covered
     the day it is created, because the tree that holds it is the tree being read.
+
+    A name the COORDINATION root owns at its top level settles the question the other way, even when
+    one of the admitted trees happens to own an entry of the same name. The memory layer's
+    ``notes/`` and the coordination root's ``notes/`` are two different directories that share a
+    spelling, and a curator report at ``notes/reports/terminal-report.md`` resolved nowhere in
+    either admitted tree is not "the damage a move or a deletion leaves behind" -- the coordination
+    root is holding the file. Without this the shadowing name made the classifier state a reason
+    that was false of the tree it was reading, which is the one thing a refusal reason may not be.
     """
 
     first = written.split("/", maxsplit=1)[0]
     if not first or first in {".", ".."}:
+        return False
+    if first in top_level:
         return False
     return any(
         any(relative.split("/", maxsplit=1)[0] == first for relative in _members(tree))
@@ -1508,7 +1517,12 @@ def _coordination_top_level(contract: WorktreeContract) -> frozenset[str]:
         entries = list(Path(contract.coordination_root).iterdir())
     except OSError:  # pragma: no cover - an unreadable coordination root owns no directory
         return frozenset()
-    return frozenset(one.name for one in entries if one.is_dir() and one.resolve() not in admitted)
+    # ENTRIES, not directories. A file directly at the coordination root is a coordination-root
+    # place too, and a first segment that names one has to be classifiable as the third root rather
+    # than fall through to "a dependency's source": the directory-only test made
+    # ``<coordination-root>/<file>`` report ``dependency_source_not_ours`` about a file the
+    # coordination root was holding.
+    return frozenset(one.name for one in entries if one.resolve() not in admitted)
 
 
 def _within(base: Path, relative: str) -> Path | None:
@@ -1546,6 +1560,12 @@ def _locator(locator: Mapping[str, Any] | None, resolved: _Resolved) -> SourceLo
     field is evidence rather than a citation.)
     """
 
+    if locator is not None and not isinstance(locator, Mapping):
+        return _Refusal(
+            _CODE_LOCATOR_SHAPE,
+            f"a locator must be a mapping carrying 'kind', and this one is "
+            f"{type(locator).__name__}: {locator!r}",
+        )
     if locator is None:
         return _Refusal(
             _CODE_LOCATOR_MISSING,
@@ -1621,13 +1641,16 @@ def _symbol_locator(locator: Mapping[str, Any], resolved: _Resolved) -> SourceLo
     normalising the producer's ``line_range`` spelling: the language is *derived* from the recorded
     path's own extension, and the qualified name is the name the producer wrote.
 
-    Nothing here is a parser and nothing here searches: the check reads the one file the path already
-    resolved to, blanks its comments and string literals, and confirms the name occurs as a
-    **definition** in what is left. A mention -- in a docstring, in a comment, in a markdown
-    sentence, or as a key in a structured data file -- is not a definition, and each of those is
-    refused with the reason that is true of it rather than with one shared code. Ingest-time
-    verification is the only verification available -- the rail answers ``unsupported_locator`` for
-    the symbol kind and cannot re-verify one -- and the report says so.
+    Nothing here is a parser and nothing here searches: the one file the path already resolved to is
+    handed to the **shipped** tree-sitter extractor, and the name is accepted only when the parser
+    binds it. A mention -- in a docstring, in a comment, in a markdown sentence, or as a key in a
+    structured data file -- is not a definition, and each of those is refused with the reason that
+    is true of it rather than with one shared code.
+
+    The definition rule is :func:`agents_remember.memory_quality.style.citations.extents.
+    bound_definitions` and there is no second one: the knowledge read rail asks the same function
+    when it observes a stored symbol, so a construct accepted here is a construct the rail can
+    resolve, and an accepted symbol citation is re-verifiable rather than merely stored.
     """
 
     written = str(locator.get("value") or locator.get("qualified_name") or "").strip()
@@ -1640,13 +1663,13 @@ def _symbol_locator(locator: Mapping[str, Any], resolved: _Resolved) -> SourceLo
     if isinstance(language, _Refusal):
         return language
     text = _recorded_text(resolved)
-    if not _defines(written, language, text):
+    if not bound_definitions(written, resolved.path, text.split("\n")):
         if _occurs(written, text):
             return _Refusal(
                 _CODE_NOT_A_DEFINITION,
-                f"the symbol {written!r} occurs in the recorded bytes at this path and is not "
-                f"defined there as a {language} construct, so it is a mention rather than the "
-                "definition a citation must name",
+                f"the symbol {written!r} occurs in the recorded bytes at this path and the parsed "
+                f"{language} source does not bind it, so it is a mention rather than the definition "
+                "a citation must name",
             )
         return _Refusal(
             _CODE_CONSTRUCT_ABSENT,
@@ -1686,6 +1709,17 @@ def _symbol_language(written: str, resolved: _Resolved) -> str | _Refusal:
             f"{resolved.path!r} is a {language} data file, where a key is a value's name and not a "
             f"definition of anything, so {written!r} cannot be resolved as a symbol there",
         )
+    if not grammars.parsed(resolved.path):
+        # The path's own extension names a language, and the SHIPPED extractor has no grammar for
+        # it: ``shell``, ``sql`` and ``.pyi`` reach here. Accepting one would store a citation the
+        # read rail can never resolve -- it can only report that a definition cannot be told from a
+        # mention -- so the two surfaces agree by refusing it at the write boundary instead.
+        return _Refusal(
+            _CODE_SYMBOL_LANGUAGE,
+            f"the recorded path {resolved.path!r} is written in {language}, which the shipped "
+            "extractor has no grammar for, so a definition of the named construct cannot be told "
+            "apart from a mention of it and no symbol locator can be verified there",
+        )
     return language
 
 
@@ -1701,36 +1735,6 @@ def _language_of(path: str) -> str | None:
     return _LANGUAGES.get(suffix)
 
 
-def _defines(name: str, language: str, text: str) -> bool:
-    """Whether one name is *defined* in the recorded bytes.
-
-    A qualified name is resolved by its two real halves: the last segment has to be defined, and
-    every segment before it has to be defined too -- the namespace it hangs in and the name inside
-    it. That is what makes ``Holder.method_symbol`` resolvable when the class and the method are both
-    there, and what keeps an invented prefix from borrowing a real method's identity. A bare name is
-    checked against the definition forms of its own language, read against the file's **code** with
-    comments and string literals blanked out, because a name inside a docstring is mentioned and not
-    defined -- which is the distinction this whole check exists to make.
-    """
-
-    body = _code_only(language, text)
-    parts = [part for part in name.split(".") if part]
-    if not parts:
-        return False
-    if not _declares(parts[-1], language, body):
-        return False
-    return all(_declares(part, language, body) for part in parts[:-1])
-
-
-def _declares(name: str, language: str, body: str) -> bool:
-    """Whether one language defines this bare name in this already-blanked body."""
-
-    pattern = _PYTHON_DEFINITION if language == "python" else _CODE_DEFINITIONS.get(language)
-    if pattern is None:
-        return False
-    return bool(re.search(pattern.format(name=re.escape(name)), body, re.MULTILINE))
-
-
 def _occurs(name: str, text: str) -> bool:
     """Whether one name appears anywhere in the recorded bytes, defined or merely mentioned.
 
@@ -1744,29 +1748,6 @@ def _occurs(name: str, text: str) -> bool:
     return bool(re.search(rf"\b{re.escape(name.rsplit('.', maxsplit=1)[-1])}", text))
 
 
-def _code_only(language: str, text: str) -> str:
-    """One file's bytes with its comments and string literals blanked out, positions preserved.
-
-    The blanking is what separates a definition from a mention: a name that occurs only inside a
-    docstring, a comment or a string is a mention, and a check that reads the raw bytes cannot tell
-    the two apart. Matches are replaced by spaces *of the same length*, so every line and column
-    keeps its position and a line-anchored definition pattern still means what it says. Languages
-    with no blanking rule are read as they are, and they are the ones whose definition pattern is
-    already anchored to a construct keyword rather than to a bare line start.
-    """
-
-    pattern = _CODE_LITERALS.get(language)
-    if pattern is None:
-        return text
-    return pattern.sub(lambda one: _blank(one.group(0)), text)
-
-
-def _blank(matched: str) -> str:
-    """One matched comment or literal, replaced by spaces with its newlines kept in place."""
-
-    return "".join("\n" if character == "\n" else " " for character in matched)
-
-
 def _recorded_text(resolved: _Resolved) -> str:
     """The recorded member's own bytes, read from the working file the tree verified."""
 
@@ -1777,9 +1758,12 @@ def _observe(resolved: _Resolved, locator: SourceLocator) -> str | _Refusal:
     """Observe one anchor against the tree its path resolved in, or report the failing answer.
 
     The rail is handed exactly the draft the write path will store, so what the report says was
-    observed is what the record will hold. ``exact_recorded_blob`` is required for every locator the
-    rail can consult, and a symbol is accepted only on the rail's own ``unsupported_locator`` answer
-    -- a symbol reported as a file resolution would be a resolution the recorded claim never made.
+    observed is what the record will hold. ``exact_recorded_blob`` is what every locator this
+    increment can consult has to earn, the symbol kind included: the rail observes a symbol through
+    the shipped extractor and answers ``exact_recorded_blob`` only when those exact recorded bytes
+    bind the name, so an accepted symbol citation is one the read path re-verifies rather than one
+    it can only refuse. A symbol the rail reports as ``unsupported_locator`` is refused here, since
+    a citation nothing can ever observe is not a citation this operation may commit.
 
     The rail signals some of its own boundary conditions by raising, and this is where they stop
     being exceptions: a tree that cannot be read, a path that cannot be addressed and an object store
@@ -1812,10 +1796,6 @@ def _observe(resolved: _Resolved, locator: SourceLocator) -> str | _Refusal:
             "unobservable rather than as observed",
         )
     answer = observation.resolution
-    if locator.kind == _SYMBOL_KIND:
-        if answer == _UNSUPPORTED_LOCATOR:
-            return answer
-        return _Refusal(f"{_CODE_OBSERVATION}{answer}", observation.detail)
     if answer == _OBSERVED_EXACT:
         return answer
     return _Refusal(f"{_CODE_OBSERVATION}{answer}", observation.detail)
@@ -2071,6 +2051,36 @@ def _commit(
     )
 
 
+def _admission_refused(
+    plans: tuple[_Plan, ...], outcome: CandidateResult
+) -> tuple[EntryOutcome, ...]:
+    """The destination admission's refusal, attributed per entry rather than reported only once.
+
+    Nothing was committed and nothing was written: a candidate that was never admitted is not a
+    destination, so every entry the run had already planned is reported refused with the admission's
+    own code. Reporting them nowhere was the third way an entry could vanish from a report that
+    promises an entry appears in exactly one of committed, rulings and refused -- a reader counting
+    those three against ``entries_read`` is how a lost entry is noticed at all.
+    """
+
+    refusal = outcome.refusal
+    code = "candidate_not_admitted" if refusal is None else f"candidate_{refusal.code}"
+    detail = (
+        "the candidate directory could not be admitted"
+        if refusal is None
+        else f"{refusal.code}: {refusal.detail}"
+    )
+    return tuple(
+        _refused_entry(
+            _fields_of(plan),
+            code,
+            "the destination refused admission, so there was no admitted candidate for this "
+            f"entry to be committed into ({detail})",
+        )
+        for plan in plans
+    )
+
+
 def _batch_refused(
     plans: tuple[_Plan, ...], result: MutationResult | None
 ) -> tuple[EntryOutcome, ...]:
@@ -2234,12 +2244,16 @@ def _projected(planned: tuple[_Plan, ...]) -> _Run:
 def _projected_ledger(planned: tuple[_Plan, ...], route_paths: set[str]) -> _RouteLedger:
     """The ledger a dry run would have had, so its row count comes from the same property.
 
-    Every named scope is projected as *authored* and every governed association as *attached*: the
-    dry run did not read the candidate, so it cannot know which scopes already had a row, and
-    claiming "reused" would be a fact the run never measured. The projection is labelled by
-    ``dry_run`` on the report for exactly that reason, and it names the states the real run reaches
-    -- ``authored`` for a scope this run wrote and ``attached`` for an association it took -- so the
-    row arithmetic is the same arithmetic.
+    Every named scope and every governed association is projected as ``projected``, which is why
+    the dry run's ``routes_authored`` is zero: the dry run did not read the candidate, so it cannot
+    know which scopes already had a row, and naming one *authored* would be a claim about work the
+    run did not do. The row arithmetic is still the run's own -- ``route_rows`` counts a projected
+    row exactly as it counts an authored one -- so a dry report's ``records_written`` is what the
+    commit would write. Where it can differ from the real run is the case INC-8 names: a scope whose
+    row already exists contributes a row to the projection and none to the commit, so a dry run
+    over-reports by exactly the number of pre-existing scopes. That delta is now visible in the
+    states rather than hidden behind an ``authored`` label, and ``dry_run`` on the report says which
+    mode produced the number.
     """
 
     return _RouteLedger(
@@ -2247,14 +2261,16 @@ def _projected_ledger(planned: tuple[_Plan, ...], route_paths: set[str]) -> _Rou
         answered={path: "" for path in route_paths},
         attached={
             plan.entry_id: tuple(
-                RouteOutcome(target.route_path, target.route_id, _ROUTE_AUTHORED)
+                RouteOutcome(target.route_path, target.route_id, _ROUTE_PROJECTED)
                 if target.route_path is not None
                 else RouteOutcome(None, None, _ROUTE_UNGOVERNED)
                 for target in plan.targets
             )
             for plan in planned
         },
-        authored=set(route_paths),
+        authored=set(),
+        projected=True,
+        projected_scopes=len(route_paths),
     )
 
 
@@ -2270,7 +2286,7 @@ def _projected_outcomes(planned: tuple[_Plan, ...]) -> tuple[EntryOutcome, ...]:
         _committed_outcome(
             plan,
             tuple(
-                RouteOutcome(target.route_path, target.route_id, _ROUTE_AUTHORED)
+                RouteOutcome(target.route_path, target.route_id, _ROUTE_PROJECTED)
                 if target.route_path is not None
                 else RouteOutcome(None, None, _ROUTE_UNGOVERNED)
                 for target in plan.targets
@@ -2321,13 +2337,18 @@ class _Run:
         per governed anchor whose association the candidate accepted. A refused association left no
         row, and an ungoverned target has none to leave.
 
-        A run with no batch wrote nothing, whatever its route leg did: routes authored before a
-        refused batch are not a rewrite of any citation, and reporting them would be reporting rows
-        the run did not write.
+        The count is over rows the run WROTE, not over citations it rewrote. Those are two
+        different claims, and conflating them is what made this number false: a route leg that ran
+        and committed its rows before a batch that then refused had written real rows, and
+        ``records_written`` reported zero while the candidate held them. The citation-rewrite claim
+        is carried by ``committed`` and by the batch state, which say exactly that; a header that
+        claims "records_written" and then denies rows the file holds is not a count of anything.
         """
 
-        if not self.dry_run and (self.result is None or self.result.state != "changed"):
-            return 0
+        if not self.dry_run and self.result is not None and self.result.state != "changed":
+            # A refused batch is all-or-nothing: it wrote no citation row of its own, whatever the
+            # receipt carries. The route leg's rows are still counted below, because they exist.
+            return self.route_rows
         return self.batch_rows + self.route_rows
 
     @property
@@ -2428,16 +2449,6 @@ def _counts(read: _Read, run: _Run) -> IngestCounts:
         targets_completed=len(every_target),
         locators_resolved=len(committed),
         anchors_observed_exact=sum(1 for one in committed if one.observation == _OBSERVED_EXACT),
-        anchors_observed_unsupported=sum(
-            1 for one in committed if one.observation == _OBSERVED_UNSUPPORTED
-        ),
-        anchors_observed_mismatch=sum(
-            1 for one in committed if one.observation == _OBSERVED_MISMATCH
-        ),
-        anchors_observed_absent=sum(1 for one in committed if one.observation == _OBSERVED_ABSENT),
-        anchors_observed_unavailable=sum(
-            1 for one in committed if one.observation == _OBSERVED_UNAVAILABLE
-        ),
         route_paths=len({one.route_path for one in committed if one.route_path is not None}),
         routes_authored=authored,
         routes_reused=reused,

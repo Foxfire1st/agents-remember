@@ -58,7 +58,15 @@ class LineRangeLocator(KnowledgeModel):
 
 
 class SymbolLocator(KnowledgeModel):
-    """A qualified symbol name; recorded even while no resolver supports it."""
+    """A qualified symbol name, observed through the shipped extractor rather than guessed at.
+
+    The knowledge read rail resolves this kind: it reads the recorded blob out of the requested tree
+    and asks the same tree-sitter machinery the citation fixer, repair and migration paths use
+    whether those exact bytes bind the name. A name they do not bind is reported as a mismatch, and
+    a suffix with no grammar is reported unsupported -- the recorded claim is carried on every
+    outcome, because an observation that cannot be made is a fact about the reader and not about
+    the claim.
+    """
 
     kind: Literal["symbol"] = "symbol"
     language: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)

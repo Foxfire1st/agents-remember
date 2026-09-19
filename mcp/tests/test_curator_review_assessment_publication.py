@@ -829,11 +829,10 @@ class TestPublisherCallerAddress:
         canonical = f"{contract.task_root.name}/{contract.leaf_id}.json"
         assert "<task-slug>/<leaf-document-file>" in detail
         assert canonical in detail
-        assert payload["expected"]["taskDocumentRef"]["path"] == canonical
-        assert (
-            payload["observed"]["taskDocumentRef"]["path"]
-            == f"{contract.leaf_id}-not-the-leaf.json"
-        )
+        expected_ref = _refused_task_document_ref(payload, "expected")
+        observed_ref = _refused_task_document_ref(payload, "observed")
+        assert expected_ref.path == canonical
+        assert observed_ref.path == f"{contract.leaf_id}-not-the-leaf.json"
 
 
 def _tool_publish_bare_name(
@@ -876,6 +875,21 @@ def _tool_publish_bare_name(
             ),
         ),
     )
+
+
+def _refused_task_document_ref(payload: dict[str, object], side: str) -> TaskDocumentRef:
+    """One side of the caller refusal's comparison, as the ref the refusal was built from.
+
+    ``curator_coherence_tool`` answers ``dict[str, object]``, so each envelope level is narrowed
+    here rather than indexed as though it were typed. Both sides genuinely are a
+    ``TaskDocumentRef``: ``_authorized_publisher`` builds ``expected`` and ``observed`` from one
+    (``model_dump(mode="json")``), and validating that value back into the model is what the
+    payload carries -- not a shape this case asserts onto it.
+    """
+
+    envelope = payload[side]
+    assert isinstance(envelope, dict), envelope
+    return TaskDocumentRef.model_validate(envelope["taskDocumentRef"])
 
 
 class TestAttestationDurability:
@@ -928,5 +942,6 @@ class TestAttestationDurability:
         # A second publication over the same bound attestation reuses the same immutable copy.
         _publish(contract, sprint, assessments=[_revision()], attempt="A002")
         second = require_current_curator_coherence(contract).record
+        assert second.attestationCopyPath is not None
         assert second.attestationCopyPath == first.attestationCopyPath
         assert (contract.task_root / second.attestationCopyPath).read_bytes() == before
