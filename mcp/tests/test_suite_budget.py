@@ -10,6 +10,12 @@ from typing import cast
 import conftest
 import pytest
 
+# The declared pair this module's stub mirrors. `test_the_stub_matches_the_declared_pair` below
+# keeps it honest, so a raise cannot leave the screen proving the boundaries of a ceiling that no
+# longer exists.
+STUB_UNIT = 3000
+STUB_INTEGRATION = 600
+
 
 class _Item:
     def __init__(self, integration: bool) -> None:
@@ -20,13 +26,38 @@ class _Item:
         return True if self.integration else None
 
 
+def test_the_stub_matches_the_declared_pair() -> None:
+    """The boundary stub below must be the rail the repository actually declares.
+
+    ``test_selected_case_budgets`` builds its own config from :data:`STUB_UNIT` and
+    :data:`STUB_INTEGRATION` rather than from the running inifile, deliberately: it exists to prove
+    the ENFORCEMENT, so it must be able to hand the hook a population over the line without
+    collecting one. The cost of that choice is a second copy of the numbers, and a second copy that
+    stops matching makes the screen prove the boundaries of a ceiling nobody uses. This case is
+    the tie: red the moment either half drifts from ``pyproject.toml``.
+    """
+
+    declared = tomllib.loads((conftest.REPOSITORY_ROOT / "pyproject.toml").read_text("utf-8"))[
+        "tool"
+    ]["pytest"]["ini_options"]
+    assert declared["unit_case_budget"] == STUB_UNIT
+    assert declared["integration_case_budget"] == STUB_INTEGRATION
+
+
 @pytest.mark.parametrize(
     ("units", "integrations", "exceeded"),
-    [(1000, 250, None), (1001, 0, "unit"), (0, 251, "integration")],
+    [
+        (STUB_UNIT, STUB_INTEGRATION, None),
+        (STUB_UNIT + 1, 0, "unit"),
+        (0, STUB_INTEGRATION + 1, "integration"),
+    ],
 )
 def test_selected_case_budgets(units: int, integrations: int, exceeded: str | None) -> None:
     config = SimpleNamespace(
-        getini={"unit_case_budget": 1000, "integration_case_budget": 250}.__getitem__
+        getini={
+            "unit_case_budget": STUB_UNIT,
+            "integration_case_budget": STUB_INTEGRATION,
+        }.__getitem__
     )
     session = cast(
         pytest.Session,
@@ -78,7 +109,7 @@ def test_the_option_declarations_state_no_budget_of_their_own() -> None:
 
     A ``default=`` here is never in effect -- the root ini value always wins -- so it can only
     mislead: a terminal reader who finds ``default=1100`` concludes the unit rail is 1100 while the
-    tree is judged against 2300. Red the moment a dead number returns to either declaration.
+    tree is judged against 3000. Red the moment a dead number returns to either declaration.
     """
 
     tree = ast.parse((conftest.REPOSITORY_ROOT / "mcp/tests/conftest.py").read_text("utf-8"))
@@ -116,7 +147,7 @@ def test_an_absent_rail_refuses_by_name_instead_of_running_unbounded() -> None:
     """
 
     config = SimpleNamespace(
-        getini={"unit_case_budget": 0, "integration_case_budget": 400}.__getitem__
+        getini={"unit_case_budget": 0, "integration_case_budget": STUB_INTEGRATION}.__getitem__
     )
     session = cast(pytest.Session, SimpleNamespace(items=[_Item(False)], config=config))
     with pytest.raises(pytest.UsageError, match=r"unit suite has 1 cases; budget is 0"):

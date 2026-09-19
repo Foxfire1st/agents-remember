@@ -117,6 +117,7 @@ unit-regression = [
   "mcp/tests/test_memory_attribution_producers.py",
   "mcp/tests/test_memory_backfill.py",
   "mcp/tests/test_memory_branch_authority.py",
+  "mcp/tests/test_memory_citation_agreement.py",
   "mcp/tests/test_memory_citation_fix_scopes.py",
   "mcp/tests/test_memory_citation_grammars.py",
   "mcp/tests/test_memory_citation_resolution.py",

@@ -241,8 +241,27 @@ minversion = "9.0"
 #     raised afterwards, from the measurement rather than from the plan.
 #   * integration is **not** raised: measured **394 collected** against 400, unchanged by this leaf,
 #     which adds no integration case.  The six cases of headroom are reported rather than consumed.
-unit_case_budget = 2300
-integration_case_budget = 400
+#
+# 2026-09-19 -- both ceilings raised, **2300 -> 3000** unit and **400 -> 600** integration, by the
+# 260918-TSIP-L7 agreement leaf under a direct developer decision: *"increase budgets ... the
+# ratchets are a cancer."*  This is the first raise on this line that is a POLICY rather than a
+# measurement, and it is recorded as such: the two paragraphs above earn their increments from a
+# collected population, and this one does not.
+#   * the pair it replaces was the merged line's, not this master's (**T79**): `2300 / 400`, with
+#     usage measured on L6's frozen bytes at **1650 unit / 284 integration**.  So the ceilings
+#     carried 650 and 116 cases of headroom before this change and 1350 and 316 after it.
+#   * the numbers are deliberately round and deliberately not derived from a projection.  The
+#     developer's stated reason is that a ceiling which must be re-earned by measurement before
+#     every leaf taxes exactly the work it is meant to protect; a ceiling far above usage still
+#     fires on the thing it exists for -- a runaway collection -- and stops pretending to be a plan.
+#   * what is NOT relaxed: `pytest_collection_finish` still refuses a population over the ceiling by
+#     name, an absent declaration still resolves to `0` and still refuses rather than running
+#     unbounded, and `test_suite_budget.py` still proves both failure directions -- over-unit and
+#     over-integration -- at whatever pair is declared.  Only the numbers moved.
+#   * no case, module, registration or lane member was deleted, deselected, consolidated away or
+#     weakened by this change, and it adds no case of its own.
+unit_case_budget = 3000
+integration_case_budget = 600
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this
 # key to build its pytest step, so the wrapper no longer carries a second copy that can
