@@ -60,33 +60,59 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 # THE TREE EVERY LIVE NUMBER HERE IS MEASURED AGAINST, named because getting it wrong is this
 # campaign's most-repeated defect (L5's T65, and F1 of this leaf's own review):
 #
-#   memory  the LEAF memory worktree
-#           worktrees/agents-remember/260918-tsip-l7-ar/memory-260918-tsip-l7-ar  @ fd1a024e
-#   code    the LEAF code worktree, base 7879f5b2 -- the checkout the suite runs in
+#   memory  the MASTER memory work branch `ar/260918_tool-surface-and-process-integrity`, at the
+#           tip `260918-TSIP-L11` lands, checked out into a DISPOSABLE worktree, with
+#           `AR_ONBOARDING_ROOT` naming that checkout's `onboarding/`.
+#   code    the checkout this suite runs in -- the repository root `REPOSITORY_ROOT` resolves to
+#           -- whose bytes at the pinned tip are the bytes the memory tree documents.
+#
+# The memory tree is named as a BRANCH and not as a path on purpose. Leaf worktrees are reclaimed
+# at finalize, which is exactly why the header this replaces -- the L7 leaf memory worktree at
+# `fd1a024e` -- could no longer be reached by any runner: the tree it named had been deleted, so
+# the pin described a measurement nobody could reproduce.
+#
+# The pair below was re-derived on the landed line on 2026-09-20 at memory `ee1a16cc` / code
+# `a3050958`, the pair `260918-TSIP-L11` closes out.
 #
 # The OFFICIAL memory checkout (`memory-repos/ar-agents-remember`) is a DIFFERENT tree on a
 # different commit and is refused for exactly this reason by
 # `application/memory_tools.py:100 _refuse_official_memory`. The two are a pair: naming one
 # without the other measures a memory tree against code it was never documented for. Round 1 of
-# this leaf made that mistake; every number below is round 2's, re-derived on the pair.
+# this leaf made that mistake; every number below was re-derived on the pair.
 #
-# T52 / T60 -- 120 rows on the LEAF memory worktree carry a SYMBOL anchor with exactly one
+# THE LIVE ARM SKIPS WITHOUT ``AR_ONBOARDING_ROOT``, so a green lane run is NEVER evidence that
+# these pins hold: the variable is not set by the default selection, and only a run that sets it
+# exercises the numbers below.
+#
+# T52 / T60 -- the REPORT-ONLY population. 123 rows carry a SYMBOL anchor with exactly one
 # definition across the claim's cited files, inside no cited range, while the name still occurs
-# inside one. The enforced population on the same tree is 283. Owner: the checker's own report
-# (``citation_anchor_definition_outside_range``, now emitted by the product) plus each route's
-# curator for the re-read. An independent pairing probe
-# (``notes/reports/tsip-instruments/l7-t52-population.py``) reads 116 on the same pair, its rule
-# being narrower; the product's own counter is the pin, because it is the number the product
-# emits. Reproduced by ``python -m pytest mcp/tests/test_memory_citation_agreement.py -q`` with
-# ``AR_ONBOARDING_ROOT`` naming the leaf memory worktree's ``onboarding``.
+# inside one. This figure is a REPORT and not a gate: `definitionsOutsideCitedRanges` is the
+# product's own counter and every row rides `reportOnlyFindings`, so it is counted, rendered and
+# reviewed without entering `findingCount`. The rows that entered it under `260918-TSIP-L10` --
+# which is what moved the number from 120 -- are
+# `mcp/src/agents_remember/mcp/tools/knowledge.py.md:71`, `mcp/tests/overview.md:2788` and
+# `mcp/tests/test_tool_refusal_conformance.py.md:114-115`. A future move of this constant should
+# be traced the same way, row by row, and never adjusted to fit. Owner: the checker's own report
+# (``citation_anchor_definition_outside_range``, emitted by the product) plus each route's
+# curator for the re-read.
+#
+# T52 -- THE ENFORCED PIN IS ZERO, and zero is the assertion: every cited anchor in the memory
+# tree resolves to a line inside a cited range, so the check reports ``ok: true``. A FUTURE
+# NONZERO READING MEANS THE ENFORCED POPULATION REGREW -- a range was moved, a construct was
+# added below an existing citation, or a landing inserted a registry row -- and that is curator
+# work, not a number to update: read the finding, re-derive the range from the construct's real
+# extent, and only then revisit this constant. It read 283 when this module was written, 292
+# after L8 landed, 53 after L10 landed, and 0 once the last twelve rows had been re-read against
+# the constructs they cite.
 #
 # T58 -- 3 wrapped ``cit:`` constructs at 2 documents on the same pair
 # (``models/worktree.py.md`` line 99, ``serving/conversation/active/service.py.md`` lines 30 and
 # 43). The checker parses them (it joins the paragraph), the fixer counts them in
 # ``claimsNotOnOneLine`` and can rewrite none of them, so the finding is reported by a route that
-# never closes it. Owner: the product's citation fixer, this register row.
-T52_DEFINITION_OUTSIDE_RANGE = 120
-T52_ENFORCED_POPULATION = 283
+# never closes it. Owner: the product's citation fixer, this register row. Re-measured unchanged
+# on the landed pair, so the pin holds rather than being carried.
+T52_DEFINITION_OUTSIDE_RANGE = 123
+T52_ENFORCED_POPULATION = 0
 T58_WRAPPED_CITATIONS = 3
 T58_WRAPPED_DOCUMENTS = 2
 
@@ -464,12 +490,16 @@ class WrappedCitationPopulationTests(WorldCase):
         self.assertEqual(found, 0, f"{found} wrapped cit: construct(s) in the repository")
 
     def test_the_live_memory_tree_matches_the_pins(self) -> None:
-        """Both live populations the fixer's own counter cannot close, on the LEAF memory tree.
+        """Both live populations the fixer's own counter cannot close, on the MASTER memory tree.
 
-        The tree every number is measured against is named at the head of this module: the leaf
-        memory worktree at ``fd1a024e``, paired with the code checkout the suite runs in. Round 1
+        The tree every number is measured against is named at the head of this module: the master
+        memory work branch at the tip this leaf lands, checked out into a disposable worktree and
+        named by ``AR_ONBOARDING_ROOT``, paired with the code checkout the suite runs in. Round 1
         of this leaf measured the OFFICIAL checkout instead and every figure moved, which is
         ``T65``'s defect and the reason the pairing is written down rather than assumed.
+
+        This case SKIPS when ``AR_ONBOARDING_ROOT`` names no tree, so a green run of the lane is
+        not evidence that the pins hold; it is evidence that nothing contradicted them here.
 
         ``T58`` is derived by ENUMERATION of the documents (the same detector the synthetic cases
         prove fires) rather than from ``claimsNotOnOneLine``, because that counter is the fixer's
@@ -531,7 +561,8 @@ class BudgetAgreementTests(unittest.TestCase):
     #: records of an older state, honest about what they measured, and are NOT repaired -- the
     #: distinction is the whole reason a prose figure needs a ceiling named beside it (T79).
     #: The complete population of ``1,000 unit`` occurrences OUTSIDE ``## Update History`` on the
-    #: LEAF memory worktree (`fd1a024e`), split into the two states such a site can be in. Both
+    #: MASTER memory branch at the tip this leaf lands (measured at memory `ee1a16cc`), split into
+    #: the two states such a site can be in. Both
     #: buckets are asserted below, so a NEW occurrence fails here until it is classified -- which
     #: is what makes this a population rather than a remembered list.
     #:
