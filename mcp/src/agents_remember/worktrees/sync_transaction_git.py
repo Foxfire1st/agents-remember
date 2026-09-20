@@ -10,6 +10,7 @@ from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
+from agents_remember.worktrees.knowledge_conflict import settle_knowledge_conflicts
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     current_branch,
@@ -338,11 +339,28 @@ def _require_active_merge(side: SyncSideRecord) -> None:
 
 
 def _continue_memory_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str]:
+    """Settle the memory merge: knowledge datasets route, everything else stays the agent's.
+
+    A knowledge database is binary to Git, so an ordinary merge can only declare the whole file
+    conflicted and no amount of staging resolves it. Those paths are routed through the merge adapter
+    by :mod:`agents_remember.worktrees.knowledge_conflict` -- which republishes the union into the
+    worktree and stages it -- so the transaction finishes what Git cannot. Whatever the adapter will
+    not decide (a schema disagreement above all) comes back as a content conflict and is still the
+    agent's to resolve, so this narrows the agent's work rather than hiding any of it. A merged dataset
+    is structurally valid and nothing more; no compatibility verdict is taken here.
+    """
+
     _require_active_merge(side)
     _remove_memory_cache_from_index(side)
     conflicts = content_conflicts(side)
     if conflicts:
-        return "resolution-required", conflicts, ""
+        # ``ours`` is the work branch tip the merge started from and ``theirs`` is the source commit
+        # being merged in, which is exactly the left/right pair the adapter's request names.
+        remaining = settle_knowledge_conflicts(
+            Path(side.worktree), conflicts, side.preSyncHead, side.sourceCommit
+        )
+        if remaining:
+            return "resolution-required", remaining, ""
     validate_staged_resolution(side)
     return _finish_staged_memory_merge(side)
 
