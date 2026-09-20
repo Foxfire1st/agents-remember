@@ -19,6 +19,7 @@ short:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -108,6 +109,7 @@ class ReadToolRequest:
     continuation: str | None = None
     invariant_revision_id: str | None = None
     family_revision_id: str | None = None
+    source_path: str | None = None
     repository_root: str | None = None
     code_tree_id: str | None = None
 
@@ -278,6 +280,7 @@ def _view_request(request: ReadToolRequest) -> ViewRequest | ViewRefusal:
         repository_id=request.repository_id,
         invariant_revision_id=request.invariant_revision_id,
         family_revision_id=request.family_revision_id,
+        source_path=request.source_path,
         ordering_input=request.ordering_input,  # type: ignore[arg-type]
         limit=request.limit,
         continuation=token,
@@ -446,7 +449,19 @@ def knowledge_integrity_check_payload(
 def _recorded_conditions(
     database_path: Path, repository_id: str, scope_id: str | None
 ) -> dict[str, Any]:
-    """The recorded detection conditions for one namespace, with their recorded limitations."""
+    """The recorded detection conditions for the requested scope, with their recorded limitations.
+
+    The scope SELECTS the run; it is not echoed beside one. Before this, every ``detection_run``
+    record was read in ``record_id`` order and the first was reported, whatever scope the caller
+    asked for -- so with more than one run recorded the answer was whichever run happened to sort
+    first, while the response still named the requested scope. A caller reading "scope X" beside
+    conditions measured over scope Y was told something false about a real dataset.
+
+    The run's own ``governing_route_id`` is the registered traversal scope the tool documents, so the
+    match is against that. A caller that names no scope keeps the previous behaviour -- the first
+    recorded run -- and a caller whose scope matches no run is told so rather than handed a different
+    run's conditions.
+    """
 
     connection = open_read_only_database(database_path)
     try:
@@ -466,7 +481,9 @@ def _recorded_conditions(
             connection=connection,
             resource_lock_path=database_path.with_name(f"{database_path.name}.lock"),
         )
-        result = read_detection_run(store, str(rows[0][0]))
+        result = _run_for_scope(store, (str(row[0]) for row in rows), scope_id)
+        if result is None:
+            return _no_run_for_scope(scope_id)
     finally:
         connection.close()
     return _condition_report(result, scope_id)
@@ -480,6 +497,39 @@ def _no_detection_run(scope_id: str | None) -> dict[str, Any]:
         "scope": scope_id or "registered",
         "limitations": ["no detection run is recorded for this namespace at this snapshot"],
         "unresolved": ["no recorded detection run to report conditions from"],
+    }
+
+
+def _run_for_scope(store: OpenedKnowledgeStore, run_ids: Iterator[str], scope_id: str | None) -> Any:
+    """The first recorded run whose registered traversal scope is the one asked for, or ``None``.
+
+    With no scope named, the first recorded run is the answer -- the behaviour this operation always
+    had, kept so a caller that does not scope its request is not newly refused. With one named, a run
+    measured over a different scope is not a weaker answer but the wrong one, so the search continues
+    and a namespace with no matching run reports that instead.
+    """
+
+    for run_id in run_ids:
+        result = read_detection_run(store, run_id)
+        if scope_id is None:
+            return result
+        run = result.run
+        if run is not None and run.governing_route_id == scope_id:
+            return result
+    return None
+
+
+def _no_run_for_scope(scope_id: str | None) -> dict[str, Any]:
+    """The honest report when no recorded run measured the requested scope."""
+
+    return {
+        "conditions": [],
+        "scope": scope_id or "registered",
+        "limitations": [
+            f"no recorded detection run measured the requested scope {scope_id!r}; the conditions "
+            "of another scope's run are not reported in its place"
+        ],
+        "unresolved": [f"no recorded detection run for scope {scope_id!r}"],
     }
 
 

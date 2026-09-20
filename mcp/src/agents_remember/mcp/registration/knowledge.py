@@ -71,6 +71,7 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         continuation: str | None = None,
         invariantRevisionId: str | None = None,
         familyRevisionId: str | None = None,
+        sourcePath: str | None = None,
         repositoryRoot: str | None = None,
         codeTreeId: str | None = None,
     ) -> dict[str, Any]:
@@ -90,6 +91,7 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
                 continuation=continuation,
                 invariant_revision_id=invariantRevisionId,
                 family_revision_id=familyRevisionId,
+                source_path=sourcePath,
                 repository_root=(
                     repositoryRoot if repositoryRoot is not None else str(config.workspace_root)
                 ),
