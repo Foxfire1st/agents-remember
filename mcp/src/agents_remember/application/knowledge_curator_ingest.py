@@ -298,6 +298,16 @@ _ROUTE_UNATTACHED = "authored-not-attached"
 _ROUTE_UNGOVERNED = "ungoverned"
 _ROUTE_REFUSED = "refused"
 
+# How a replayed target whose candidate holds no association reads. The state is the route leg's own
+# "authored, not attached", because that is the fact about the anchor: it carries no governing route.
+# The declared path is deliberately absent from the route columns -- naming it beside a derived id
+# would be the invented row the stored read exists to stop, and naming it beside no id would claim
+# this run authored a scope it never wrote.
+_NO_STORED_ROUTE = (
+    "the candidate holds no governing route association for this anchor, so this replay has no "
+    "route row of its own to name"
+)
+
 # The words the construct check uses to answer "is this name defined in the recorded bytes". The
 # check confirms the named file defines the construct; it is never a hint that a range relocated, and
 # it never produces an extent the producer did not write.
@@ -1154,9 +1164,17 @@ def _run(target: _ReportTarget, destination: AdmittedKnowledgeDestination) -> In
 
     resolution, repository, read = target.resolution, target.repository, target.read
     fresh = tuple(plan for plan in read.planned if not plan.replayed)
+    # A replay's route facts are the candidate's own rows, so they are read from it once and used for
+    # both the ledger's seeds and the entries' receipts: a second read could disagree with the first,
+    # and the id this run derives for a declared path is not a row any dataset has to hold.
+    stored = _stored_route_outcomes(
+        destination.database_path,
+        repository,
+        tuple(plan for plan in read.planned if plan.replayed),
+    )
     ledger = _RouteLedger(
         expected=_distinct_routes(read.planned),
-        answered=_replayed_routes(read.planned),
+        answered=_ledger_scopes(stored),
         attached={},
         authored=set(),
     )
@@ -1167,7 +1185,9 @@ def _run(target: _ReportTarget, destination: AdmittedKnowledgeDestination) -> In
         return _report(
             target,
             _Run(batch_state=_REPLAYED_BATCH_STATE, ledger=ledger),
-            committed=tuple(_replayed_outcome(plan) for plan in read.planned),
+            committed=tuple(
+                _replayed_outcome(plan, stored.get(plan.entry_id, ())) for plan in read.planned
+            ),
         )
     route_refusals = _author_routes(destination, repository, ledger, fresh)
     if route_refusals:
@@ -1183,7 +1203,7 @@ def _run(target: _ReportTarget, destination: AdmittedKnowledgeDestination) -> In
         )
     _attach_routes(destination, repository, fresh, ledger)
     committed = tuple(
-        _replayed_outcome(plan)
+        _replayed_outcome(plan, stored.get(plan.entry_id, ()))
         if plan.replayed
         else _committed_outcome(plan, ledger.attached.get(plan.entry_id, ()))
         for plan in read.planned
@@ -1527,7 +1547,16 @@ def _content_digest(fields: _EntryFields, targets: Sequence[_TargetPlan]) -> str
     realization and attribution: the kind, the statement, the evidence, the producer's disposition
     **and the source it rules from**, which invariant an entry revises when it names one, the
     predecessor edges it declares, the authored realization role and its rationale, and each resolved
-    place with the locator that names the construct inside it.
+    place with the locator that names the construct inside it **and the governing route the producer
+    declared for it**.
+
+    The route path belongs in that list and is not generated metadata: it is producer-authored, it is
+    stored with the authorship envelope, and it is read back by the public surface. A target whose
+    declared route moved under one key is a different operation -- it authors a scope the stored truth
+    never named, or re-points an anchor at one -- so it is refused as a changed intent rather than
+    answered as a replay of the admitted one (measured: a replay accepted ``pkg`` -> ``pkg/other``
+    while the dataset went on holding ``pkg``, and the receipt named a route row that existed
+    nowhere).
 
     Two things are deliberately out. ``entry_id`` is the key's own scoping half rather than content:
     it is what :func:`_retry_key` normalizes into the question a retry asks, so digesting it would
@@ -1552,7 +1581,11 @@ def _content_digest(fields: _EntryFields, targets: Sequence[_TargetPlan]) -> str
             "role": fields.role,
             "roleRationale": fields.role_rationale,
             "targets": [
-                {"path": one.completed_path, "locator": _locator_text(one.locator)}
+                {
+                    "path": one.completed_path,
+                    "locator": _locator_text(one.locator),
+                    "route": one.route_path,
+                }
                 for one in targets
             ],
         }
@@ -2766,15 +2799,85 @@ def _distinct_routes(plans: tuple[_Plan, ...]) -> dict[str, str]:
     return wanted
 
 
-def _replayed_routes(plans: Sequence[_Plan]) -> dict[str, str]:
-    """The scopes the *replayed* entries name, whose rows the runs that admitted them already wrote.
+def _stored_route_outcomes(
+    database: Path, repository: RepositoryIdentity, plans: Sequence[_Plan]
+) -> dict[str, tuple[RouteOutcome, ...]]:
+    """Every replayed entry's route association, READ from the candidate that recorded it.
+
+    A replay writes nothing, so each route fact its receipt carries has to be a fact about the
+    dataset rather than about this run. The id a run *derives* for a declared path is not that fact:
+    a scope's row belongs to whichever run authored it first, so a repeat whose places were admitted
+    under another entry's route derives an identity no row holds (measured: a receipt naming
+    ``ccb1726c-...`` for the ``pkg`` row this dataset stores as ``15a1c802-...``). The association
+    the anchor carries is therefore read, and the row's own path with it, so the only route a replay
+    can report is one the candidate really holds.
+
+    One connection serves every plan because they are one question asked of one dataset. Nothing
+    here writes: a replay that opened a transaction would be doing something other than repeating an
+    operation that already succeeded.
+    """
+
+    if not plans:
+        # Nothing is being replayed, so there is no stored route fact to read: a run that must write
+        # does not open the candidate merely to be told it holds nothing for it.
+        return {}
+    connection = open_read_only_database(database)
+    try:
+        return {
+            plan.entry_id: tuple(
+                _stored_route_outcome(connection, repository, target) for target in plan.targets
+            )
+            for plan in plans
+        }
+    finally:
+        connection.close()
+
+
+def _stored_route_outcome(
+    connection: apsw.Connection, repository: RepositoryIdentity, target: _TargetPlan
+) -> RouteOutcome:
+    """One replayed target's route: the association the candidate holds, or that it holds none.
+
+    A target whose producer declared no route is ungoverned, which is a fact and not a default. Every
+    other target is answered from two reads of the stored rows and never from the arriving request:
+    which route the anchor is associated with, and what path that route's own row governs.
+    """
+
+    if target.route_path is None:
+        return RouteOutcome(None, None, _ROUTE_UNGOVERNED)
+    held = routes.find_governing_route(
+        connection, repository.repository_id, "source_anchor", str(target.anchor_id)
+    )
+    path = (
+        None
+        if held is None
+        else routes.route_path_for_id(connection, repository.repository_id, held)
+    )
+    if held is None or path is None:
+        # No association for this anchor, or an association whose route row is not stored at all
+        # (which the foreign key makes unreachable). Either way the candidate holds no scope this
+        # replay can name, and the declared path beside a derived id would be the invented row this
+        # read exists to stop.
+        return RouteOutcome(None, None, _ROUTE_UNATTACHED, _NO_STORED_ROUTE)
+    return RouteOutcome(path, held, _ROUTE_REUSED)
+
+
+def _ledger_scopes(stored: Mapping[str, tuple[RouteOutcome, ...]]) -> dict[str, str]:
+    """The scopes a replay's ledger already answers: the paths the candidate holds, with their ids.
 
     Seeding the ledger with them is what makes ``routes_reused`` tell the truth about a repeat: the
     scopes' rows did exist before this run, and this run authored none of them. They are seeded in
     ``answered`` only, never in ``attached``, so the row count stays a count of rows this run wrote.
+    The ids are the stored rows' own, read beside the paths, because an ``answered`` map carrying an
+    id no row holds is the same contradiction in the ledger that this repair removes from the report.
     """
 
-    return _distinct_routes(tuple(plan for plan in plans if plan.replayed))
+    return {
+        one.route_path: one.route_id
+        for ones in stored.values()
+        for one in ones
+        if one.route_path is not None and one.route_id is not None
+    }
 
 
 def _author_route_rows(
@@ -3135,24 +3238,20 @@ def _committed_outcome(plan: _Plan, routes: tuple[RouteOutcome, ...]) -> EntryOu
     )
 
 
-def _replayed_outcome(plan: _Plan) -> EntryOutcome:
+def _replayed_outcome(plan: _Plan, routes: tuple[RouteOutcome, ...]) -> EntryOutcome:
     """One entry an earlier run of this operation already stored: the same ids, and no second write.
 
     It is reported **committed** because that is what the operation's outcome is -- the truth is
-    committed and its identities are the ones it was allocated -- and the route each anchor carries is
-    rendered ``reused`` because that is the fact: the association was recorded when the creation was
-    admitted, and this run neither authored nor re-attached it.
+    committed and its identities are the ones it was allocated -- and the route each anchor carries
+    is the association the candidate holds, read by :func:`_stored_route_outcomes` and rendered
+    ``reused`` because that is the fact: the association was recorded when the creation was admitted,
+    and this run neither authored nor re-attached it. Reading it rather than re-deriving it is the
+    point of passing it in: a route row belongs to whichever run authored that scope first, so the id
+    this run derives for the declared path can be an identity no dataset holds, and a receipt naming
+    it would report a route the store does not have.
     """
 
-    return _committed_outcome(
-        plan,
-        tuple(
-            RouteOutcome(target.route_path, target.route_id, _ROUTE_REUSED)
-            if target.route_path is not None
-            else RouteOutcome(None, None, _ROUTE_UNGOVERNED)
-            for target in plan.targets
-        ),
-    )
+    return _committed_outcome(plan, routes)
 
 
 def _target_outcome(

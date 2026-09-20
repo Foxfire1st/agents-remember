@@ -263,10 +263,17 @@ def _capture_baseline(args: argparse.Namespace) -> _CapturedBaseline | str | Non
         return f"not-captured: the named baseline dataset {source} could not be read ({error})"
 
 
-def _placement_refusal(
+def _placeable_baseline(
     report: IngestReport, captured: _CapturedBaseline | str | None
-) -> str | None:
-    """Why this run must not place a baseline, or ``None`` when it may place one.
+) -> _CapturedBaseline | str:
+    """The captured baseline this run may place, or the reason it must not place one.
+
+    The answer and the value are one object rather than a refusal beside an unnarrowed union. That is
+    the whole point of this signature: the caller has to read ``payload`` and ``origin`` off the
+    captured baseline, and a helper that answers only "may I?" in a separate string leaves the union
+    standing at those reads -- the split this function was extracted by introduced exactly that, and
+    a static checker rightly refuses to assume the string branch cannot reach them. Returning the
+    narrowed value makes the guard a real ``isinstance`` branch that reader and checker both follow.
 
     Each condition states only what it established, and the two that concern the batch are separate
     on purpose. The state alone cannot carry the second: a batch whose every entry REFUSED also
@@ -287,7 +294,7 @@ def _placement_refusal(
         )
     if not isinstance(captured, _CapturedBaseline):
         return captured or "not-placed: the baseline was not captured"
-    return None
+    return captured
 
 
 def _place_review_baseline(
@@ -320,16 +327,16 @@ def _place_review_baseline(
 
     if args.baseline is None:
         return None
-    refused = _placement_refusal(report, captured)
-    if refused is not None:
-        return refused
+    placeable = _placeable_baseline(report, captured)
+    if not isinstance(placeable, _CapturedBaseline):
+        return placeable
     destination = review_root / REVIEW_BASELINE_DIRECTORY / CANDIDATE_DATABASE_NAME
-    already = destination.is_file() and destination.read_bytes() == captured.payload
+    already = destination.is_file() and destination.read_bytes() == placeable.payload
     if already:
         return f"present: {destination}"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(captured.payload)
-    return f"placed: {destination} (captured from {captured.origin} before this run)"
+    destination.write_bytes(placeable.payload)
+    return f"placed: {destination} (captured from {placeable.origin} before this run)"
 
 
 def run(args: argparse.Namespace) -> int:

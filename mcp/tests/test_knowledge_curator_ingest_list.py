@@ -1133,6 +1133,13 @@ def test_a_second_run_resolves_to_the_identities_the_operation_was_allocated(
     because a derived id makes one repository answer one label with one record no matter how many
     independent tasks number an entry that way. What must not change is the observation itself: a
     repeat files no second invariant, no second revision and no second anchor.
+
+    The key guards the **whole** semantic write intent, and the target's ``governing_route`` is part
+    of it: it is producer-authored, it is stored with the authorship envelope and it is read back
+    publicly, so a target authoring ``pkg`` and the same target authoring ``pkg/other`` are two
+    operations. Held under one key, that change is refused rather than answered as a replay of the
+    admitted one -- the defect measured here, where the changed route was accepted, the dataset went
+    on holding ``pkg``, and the receipt named a route row that existed nowhere.
     """
 
     entries = [
@@ -1166,6 +1173,28 @@ def test_a_second_run_resolves_to_the_identities_the_operation_was_allocated(
     # The identity the first run wrote is the one the file's own bytes hash to, so the anchor
     # attributes the statement to the code it names rather than to a freshly drawn id.
     assert first_anchor == pair.code_blobs[CODE_FILE]
+
+    # The SAME creation operation, one authored field changed: the target's governing route. The
+    # digest covers it, so the entry is refused by name and the destination is left exactly as the
+    # admitted run left it -- no second route row, no re-pointed anchor, and no receipt claiming an
+    # association the dataset does not hold.
+    moved = [
+        entry(
+            "E-derived", targets=[target(CODE_FILE, locator=symbol(CODE_SYMBOL), route="pkg/other")]
+        )
+    ]
+    changed = run(pair, tmp_path, moved)
+    assert changed.batch_state == "no_change"
+    assert changed.committed == ()
+    assert [one.entry_id for one in changed.refused] == ["E-derived"]
+    assert changed.refused[0].refusal.startswith("allocation_content_conflict: "), (
+        "a changed governing route under a held retry key must be refused as changed intent, not "
+        "answered as a replay of the admitted one"
+    )
+    assert changed.counts.records_written == 0
+    assert changed.counts.routes_authored == 0
+    assert counts(pair, database) == before
+    assert _cycle01_candidate_rows(database) == allocated
 
 
 def test_dry_and_real_runs_report_the_same_written_rows_and_a_repeat_writes_none(
@@ -1353,6 +1382,13 @@ def test_re_authoring_an_existing_route_reuses_its_row_rather_than_writing_a_sec
     ``author_route`` is idempotent by path and ``set_governing_route`` is idempotent for the same
     association, so the same route leg is safe to repeat -- and the report says which leg answered
     rather than calling every outcome "authored".
+
+    A repeat of the second entry adds the other half of that fact. A replay writes nothing, so every
+    route it reports has to be a row the candidate holds: a scope's row belongs to whichever run
+    authored it first, which here is ``E-first``, so the repeat must not name the identity
+    ``E-second`` would have derived for that path. That is the measured defect -- a replay receipt
+    naming ``ccb1726c-...`` for a ``pkg`` row the dataset stored as ``15a1c802-...``, a route that
+    exists nowhere -- and the assertion below is made against the stored rows themselves.
     """
 
     first = run(
@@ -1363,21 +1399,32 @@ def test_re_authoring_an_existing_route_reuses_its_row_rather_than_writing_a_sec
     assert first.counts.routes_authored == 1
 
     # A second, different entry naming the same scope: the route row already exists.
-    second = run(
-        pair,
-        tmp_path,
-        [
-            entry(
-                "E-second", targets=[target("pkg/batch.py", locator={"kind": "file"}, route="pkg")]
-            )
-        ],
-    )
+    second_entries = [
+        entry("E-second", targets=[target("pkg/batch.py", locator={"kind": "file"}, route="pkg")])
+    ]
+    second = run(pair, tmp_path, second_entries)
     assert second.counts.route_paths == 1
     assert second.counts.routes_authored == 0
     assert second.counts.routes_reused == 1
     assert second.committed[0].targets[0].route_state == "reused"
 
     database = tmp_path / "candidate" / "knowledge-candidate.sqlite"
+    assert counts(pair, database)["route"] == 1
+    stored = _stored_route_rows(database)
+    assert len(stored) == 1
+    stored_id, stored_path = stored[0]
+
+    # The repeat of the second entry is a replay, and the route it reports is the stored row: its
+    # path and the stored row's own id, never the id this run derives for the declared path.
+    replayed = run(pair, tmp_path, second_entries)
+    assert replayed.batch_state == "replayed"
+    assert replayed.refused == ()
+    assert replayed.counts.records_written == 0
+    assert [(one.route_path, one.route_id, one.state) for one in replayed.committed[0].routes] == [
+        (stored_path, stored_id, "reused")
+    ]
+    assert replayed.committed[0].targets[0].route_path == stored_path
+    assert replayed.committed[0].targets[0].route_state == "reused"
     assert counts(pair, database)["route"] == 1
 
 
@@ -1827,6 +1874,23 @@ def _cycle01_candidate_rows(database: Path) -> tuple[set[str], set[str]]:
                 for row in connection.execute("SELECT revision_id FROM invariant_revision")
             },
         )
+    finally:
+        connection.close()
+
+
+def _stored_route_rows(database: Path) -> list[tuple[str, str]]:
+    """The route rows one candidate database actually holds, as ``(route_id, path)``.
+
+    The rows are the authority a receipt's route columns are compared against: a replay writes
+    nothing, so the only route it may report is one of these.
+    """
+
+    connection = open_read_only_database(database)
+    try:
+        return [
+            (str(row[0]), str(row[1]))
+            for row in connection.execute("SELECT route_id, path FROM route ORDER BY path")
+        ]
     finally:
         connection.close()
 

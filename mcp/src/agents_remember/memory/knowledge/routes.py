@@ -238,6 +238,7 @@ _ROUTE_INSERT = (
 
 _ROUTE_BY_PATH = "SELECT route_id FROM route WHERE repository_id = ? AND path = ?"
 _ROUTE_BY_ID = "SELECT 1 FROM route WHERE repository_id = ? AND route_id = ?"
+_ROUTE_PATH_BY_ID = "SELECT path FROM route WHERE repository_id = ? AND route_id = ?"
 
 
 def _route_for_path(connection: apsw.Connection, repository_id: str, path: str) -> str | None:
@@ -263,6 +264,22 @@ def route_for_path(connection: apsw.Connection, repository_id: str, path: str) -
     if isinstance(admitted, KnowledgeRefusal):
         return None
     return _route_for_path(connection, repository_id, admitted)
+
+
+def route_path_for_id(connection: apsw.Connection, repository_id: str, route_id: str) -> str | None:
+    """Return the path a stored route row governs, or ``None`` when no such row is stored.
+
+    Public because a caller reporting *the row the repository holds* needs this direction.
+    ``route_for_path`` answers "which row does this scope already have" for the authoring leg, and
+    the id a run would have derived for a scope it did not author is not that row: a route row
+    belongs to whichever run authored it first, so a repeat that named its own derived id would name
+    a route the dataset does not hold. Reading the path back from the identity the store holds is
+    what keeps such a receipt about a row that exists.
+    """
+
+    for row in connection.execute(_ROUTE_PATH_BY_ID, (repository_id, route_id)):
+        return str(row[0])
+    return None
 
 
 def route_exists(connection: apsw.Connection, repository_id: str, route_id: str) -> bool:
