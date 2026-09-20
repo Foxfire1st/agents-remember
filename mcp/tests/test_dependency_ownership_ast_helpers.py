@@ -43,7 +43,7 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 15
 LIFECYCLE_ARTIFACT_COUNT = 65
-LIFECYCLE_CATALOG_SHA256 = "6ec7eb0d33e91c148b25ed64c6b791664446082bdf419bf511635f4ca3cbdd75"
+LIFECYCLE_CATALOG_SHA256 = "73cdd2183e153af752773e8a4c6076e5e2eb7053d9e0ce5fa6538a69c907cefe"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
 The value this line carries is the catalog after ``260915-KS``'s L28 leaf repaired the missing-consumer

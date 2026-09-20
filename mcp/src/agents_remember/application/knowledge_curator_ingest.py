@@ -61,8 +61,15 @@ through the one the tree already ships (``memory_quality.style.citations``), by 
 knowledge read rail asks when it observes one, so a construct accepted here is a construct the rail
 can re-resolve and there is exactly one definition implementation in the tree. It does not touch
 onboarding, build an export, or widen the citation machinery to a third root -- a path outside the
-two admitted roots is refused as out of scope by name. Publication is the curator's later act and is
-not reachable from here.
+two admitted roots is refused as out of scope by name.
+
+**Publication is not the curator's later act any more.** A run that selects an
+:class:`IngestPublication` publishes the candidate it just committed, through the shipped publication
+owner, into the destination the caller admitted. It runs HERE and not in the caller because this is
+the only place that holds both facts publication needs: the admitted candidate destination the
+admission already built, and the candidate's LIVE identity, which changes with every row the batch
+writes and therefore cannot be supplied before the run. A run that selects none behaves exactly as
+before and reports no publication, and a batch that did not commit is never published.
 """
 
 from __future__ import annotations
@@ -70,10 +77,12 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid5
+
+import apsw
 
 from agents_remember.application.knowledge import (
     open_admitted_knowledge_store,
@@ -88,25 +97,39 @@ from agents_remember.application.knowledge_ingest import (
 from agents_remember.application.knowledge_snapshot import (
     admitted_candidate_destination,
     candidate_write_destination,
+    clone_knowledge_candidate,
     create_knowledge_candidate,
     open_knowledge_candidate,
+    publish_knowledge_snapshot,
 )
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge import routes
+from agents_remember.memory.knowledge.connection import open_read_only_database
+from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.read_anchors import observe_anchor
+from agents_remember.memory.knowledge.records import decode_repository_row
 from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
 from agents_remember.memory_quality.style.citations import grammars
 from agents_remember.memory_quality.style.citations.extents import bound_definitions
 from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.memory_quality.style.citations.source_index_state import SourceIndexError
-from agents_remember.models.knowledge.candidate import CandidateResolution, MutationResult
+from agents_remember.models.knowledge.candidate import (
+    CandidateResolution,
+    MutationResult,
+    SnapshotIdentity,
+)
 from agents_remember.models.knowledge.context import AdmittedKnowledgeDestination
 from agents_remember.models.knowledge.graph import RealizationRole
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.result import KnowledgeRefusal
 from agents_remember.models.knowledge.snapshot import (
     CANDIDATE_RECEIPT_NAME,
+    AdmittedCandidateDestination,
+    CandidateBaseline,
     CandidateResult,
+    PublishSnapshotRequest,
+    SnapshotDestinationRequest,
+    SnapshotPublicationResult,
 )
 from agents_remember.models.knowledge.source import (
     FileLocator,
@@ -124,6 +147,7 @@ __all__ = [
     "SKIPPED",
     "EntryOutcome",
     "IngestCounts",
+    "IngestPublication",
     "IngestReport",
     "RouteOutcome",
     "TargetOutcome",
@@ -346,6 +370,11 @@ class IngestReport:
     and every target's ``source_identity`` is that tree's blob id at the target's path.
     ``code_base_commit`` and ``code_tree_source`` name where that tree came from, so a reader can
     tell a run that resolved the leaf's line from one that fell back to the recorded base.
+
+    ``publication`` is the publication this run performed, when it selected one and its batch
+    committed; ``None`` means nothing was published, and ``batch_state`` says why: either the caller
+    selected no destination, or the batch did not commit and a candidate that did not change is not
+    published.
     """
 
     contract_path: str
@@ -368,6 +397,7 @@ class IngestReport:
     batch_digest_before: str | None
     batch_digest_after: str | None
     batch_refusal: KnowledgeRefusal | None
+    publication: SnapshotPublicationResult | None = None
 
 
 @dataclass(frozen=True)
@@ -384,6 +414,8 @@ class _Plan:
     revision_id: str
     targets: tuple[_TargetPlan, ...]
     ruling: bool
+    declares_invariant: bool = True
+    predecessors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -401,6 +433,19 @@ class _TargetPlan:
     route_id: str
     anchor_id: UUID
     claim_id: str
+
+    @property
+    def target_key(self) -> tuple[str, str, str]:
+        """What makes two targets the SAME place, for the duplicate guard.
+
+        A path alone is not it: two symbols in one file are two realizations, and refusing the second
+        as a duplicate of the first is what kept a file with more than one anchor out of the ingest.
+        A symbol therefore contributes its qualified name, and a range or whole-file citation
+        contributes only the kind it already carried.
+        """
+
+        within = self.locator.qualified_name if isinstance(self.locator, SymbolLocator) else ""
+        return (self.completed_path, self.locator.kind, within)
 
     @property
     def anchor(self) -> SourceAnchorDraft:
@@ -488,10 +533,27 @@ class _EntryFields:
     disposition_source: str | None
     statement: str
     evidence: str
+    declares_invariant: bool = True
+    predecessors: tuple[str, ...] = ()
+    named_invariant_id: str | None = None
 
     @classmethod
     def read(cls, raw: Mapping[str, Any]) -> _EntryFields:
         source = raw.get("disposition_source")
+        # A producer that names the invariant it is revising is declaring a successor, not a new
+        # invariant. That distinction is what the mapper used to be unable to express: it always
+        # emitted AddInvariant followed by AddInvariantRevision, so re-running a changed entry was
+        # refused with `batch_stale_precondition` ("expecting the existing invariant to be absent")
+        # and the repository could never evolve an obligation it already held. An entry that names no
+        # invariant keeps the original behaviour, which is the correct one for a first authoring.
+        predecessors = tuple(
+            str(one) for one in (raw.get("predecessor_revision_ids") or ()) if str(one).strip()
+        )
+        # The other half of naming a successor: WHICH invariant is being revised. Deriving it from
+        # the entry's local id keeps identity per-enclosure, so a producer revising an obligation the
+        # repository already holds must be able to name that invariant outright.
+        declared = raw.get("invariant_id")
+        named = str(declared).strip() if declared is not None and str(declared).strip() else None
         return cls(
             entry_id=str(raw["id"]),
             kind=str(raw.get("kind", "")),
@@ -499,6 +561,9 @@ class _EntryFields:
             disposition_source=None if source is None else str(source),
             statement=str(raw.get("statement", "")),
             evidence=str(raw.get("evidence", "")),
+            declares_invariant=not predecessors,
+            predecessors=predecessors,
+            named_invariant_id=named,
         )
 
 
@@ -678,13 +743,48 @@ class _Source:
 # --------------------------------------------------------------------------------------------
 
 
+
+@dataclass(frozen=True)
+class IngestPublication:
+    """Where a committed run publishes its candidate, and what the caller admitted is there.
+
+    Selecting one is what makes publication reachable from the curation workflow: the run holds the
+    admitted candidate destination and reads the candidate's live identity itself, so the curator
+    never has to re-derive a namespace, a resolution or a digest by hand to reach the publication
+    owner. ``expected_destination`` is the exact logical identity the caller observed at the
+    destination, or ``None`` for "the destination is expected to be absent" -- the publication
+    owner's own two modes, carried rather than reinterpreted here, so a publication can never
+    overwrite a file the caller never admitted.
+    """
+
+    destination_path: Path
+    expected_destination: SnapshotIdentity | None = None
+
+
+@dataclass(frozen=True)
+class IngestSelection:
+    """Everything one run selects: where it writes, who authorized it, what it forks, and whether.
+
+    Grouped rather than passed as four trailing arguments for a substantive reason, not to satisfy a
+    linter: ``baseline`` and ``candidate_directory`` are the two halves of one decision -- the dataset
+    this task forks FROM and the candidate it writes TO -- and a run that names one without being
+    able to name the other is how continuity was lost in the first place. Keeping them in one value
+    makes that pairing visible at every call site. ``publication`` joins them because it is the third
+    half of the same decision: a candidate the caller cannot publish is knowledge the repository
+    never receives.
+    """
+
+    candidate_directory: Path
+    authorization_ref: str
+    dry_run: bool
+    baseline: Path | None = None
+    publication: IngestPublication | None = None
+
+
 def ingest_curator_list(
     contract_path: str | Path,
     entries: Sequence[Mapping[str, Any]] | str | Path,
-    *,
-    candidate_directory: str | Path,
-    authorization_ref: str,
-    dry_run: bool = False,
+    selection: IngestSelection,
 ) -> IngestReport:
     """Commit one hand-off list into the enclosure's candidate, or report why it was not.
 
@@ -705,6 +805,10 @@ def ingest_curator_list(
     the caller receives a report rather than a traceback for exactly those inputs.
     """
 
+    authorization_ref = selection.authorization_ref
+    candidate_directory = selection.candidate_directory
+    baseline = selection.baseline
+    dry_run = selection.dry_run
     _require_authorization(authorization_ref)
     paths = _Paths(contract_path=Path(contract_path), candidate=Path(candidate_directory))
     contract = load_contract(paths.contract_path)
@@ -716,7 +820,7 @@ def ingest_curator_list(
         tree_ids=_tree_ids(contract, code_root, memory_root),
         coordination_top_level=_coordination_top_level(contract),
     )
-    repository = _repository_identity(contract)
+    repository = _repository_identity(contract, baseline)
     resolution = _resolution(contract, source.tree_ids)
     raw = _read_entries(entries)
     plans, refused, resolved_before_refusal = _plan_entries(raw, source)
@@ -746,7 +850,9 @@ def ingest_curator_list(
         authorization_ref=authorization_ref,
         origin_refs=("curator-handoff:revision-1",),
     )
-    admission = _admitted_candidate(paths.candidate, repository, resolution)
+    admission = _admitted_candidate(
+        paths.candidate, repository, resolution, baseline=baseline
+    )
     if admission.state == "refused" or admission.result.identity is None:
         # The destination itself refused, so nothing was planned and nothing was written -- and the
         # planned entries are folded into ``refused`` rather than silently dropped. The report says
@@ -764,10 +870,9 @@ def ingest_curator_list(
             ),
             _Run(batch_state="not_attempted", refusal=admission.refusal),
         )
-    destination = candidate_write_destination(
-        admitted_candidate_destination(paths.candidate, repository, resolution), authorship
-    )
-    return _run(
+    admitted = admitted_candidate_destination(paths.candidate, repository, resolution)
+    destination = candidate_write_destination(admitted, authorship)
+    report = _run(
         _ReportTarget(
             paths,
             resolution,
@@ -778,6 +883,12 @@ def ingest_curator_list(
         ),
         destination,
     )
+    # Publication runs last and only over a candidate this run actually committed into: an entry in
+    # ``committed`` is the run's own statement that the batch landed, so a refused or un-attempted
+    # batch is never published and the caller is never handed a dataset change it did not make.
+    if selection.publication is None or not report.committed:
+        return report
+    return replace(report, publication=_publish_candidate(admitted, selection.publication))
 
 
 def _run(target: _ReportTarget, destination: AdmittedKnowledgeDestination) -> IngestReport:
@@ -813,6 +924,44 @@ def _run(target: _ReportTarget, destination: AdmittedKnowledgeDestination) -> In
         target,
         _Run(result=result, commands=commands, records=projected, ledger=ledger),
         committed=committed,
+    )
+
+
+def _publish_candidate(
+    admitted: AdmittedCandidateDestination, publication: IngestPublication
+) -> SnapshotPublicationResult:
+    """Publish the candidate this run just committed, into the destination the caller admitted.
+
+    The candidate's identity is READ here rather than taken from the run's own admission, and that is
+    the whole reason publication belongs to this operation: a ``SnapshotIdentity`` carries the
+    dataset's logical digest, so the batch that just committed changed it, and a caller cannot name a
+    value that only exists after the write. ``open_knowledge_candidate`` is the product's own
+    non-raising read of exactly that value, so a candidate that cannot be read arrives as a refused
+    publication carrying that refusal rather than as a traceback.
+
+    A candidate that was admitted without an identity and without a refusal is not representable --
+    ``CandidateResult``'s own validator refuses that shape -- so it is raised as the defect it is
+    rather than dressed as a refusal.
+    """
+
+    opened = open_knowledge_candidate(admitted)
+    if opened.refusal is not None:
+        return SnapshotPublicationResult(state="refused", refusal=opened.refusal)
+    if opened.identity is None:  # pragma: no cover - CandidateResult admits no such shape
+        raise ValueError(
+            "the committed candidate was admitted with neither an identity nor a refusal, which "
+            "CandidateResult does not admit: the admission read is defective, and this is not a "
+            "refusal this operation can report"
+        )
+    return publish_knowledge_snapshot(
+        admitted,
+        PublishSnapshotRequest(
+            expected_candidate=opened.identity,
+            destination=SnapshotDestinationRequest(
+                destination_path=publication.destination_path,
+                expected_destination=publication.expected_destination,
+            ),
+        ),
     )
 
 
@@ -861,36 +1010,116 @@ class _Admission:
 
 
 def _admitted_candidate(
-    candidate: Path, repository: RepositoryIdentity, resolution: CandidateResolution
+    candidate: Path,
+    repository: RepositoryIdentity,
+    resolution: CandidateResolution,
+    *,
+    baseline: Path | None = None,
 ) -> _Admission:
-    """Resume the candidate this admission names, or create it when its directory is absent.
+    """Resume the candidate this admission names, or create it -- forking the selected baseline.
 
     An existing destination is a resume attempt, never permission to initialize over it, so the
     product's own open answers first and the operation acts on that answer. A directory the open
     refused and that does exist is this operation's refusal too: the bytes there are unpublished
     authored work, and only an explicitly authorized reconciliation may touch them.
+
+    When the directory is absent the candidate is **forked from the selected baseline** rather than
+    initialized empty. That distinction is the whole of the continuity defect: an empty candidate
+    holds only this task's new entry, so the repository's existing invariants are absent from it and
+    the next task starts from nothing. ``clone_knowledge_candidate`` already shipped and was never
+    called from here -- the baseline is what it needs, and a run that selected none still creates an
+    empty candidate, which is the correct behaviour for a repository's first task.
+
+    ``CandidateBaseline.expected_identity`` is the baseline's own identity re-read and compared
+    before a byte is copied, so a baseline that moved since it was selected is caught rather than
+    silently cloned from.
     """
 
     destination = admitted_candidate_destination(candidate, repository, resolution)
     if candidate.exists():
         opened = open_knowledge_candidate(destination)
         return _Admission(opened.state, opened)
+    if baseline is not None:
+        selected = Path(baseline)
+        forked = clone_knowledge_candidate(
+            destination,
+            CandidateBaseline(
+                database_path=selected, expected_identity=dataset_identity(selected)
+            ),
+        )
+        if forked.state == "created":
+            return _Admission("created", forked)
+        return _Admission("refused", forked)
     created = create_knowledge_candidate(destination)
     if created.state == "created":
         return _Admission("created", created)
     return _Admission("refused", created)
 
 
-def _repository_identity(contract: WorktreeContract) -> RepositoryIdentity:
-    """The namespace one enclosure's candidate is created under, derived from the enclosure.
+def _repository_namespace(database_path: Path | None) -> RepositoryIdentity | None:
+    """The namespace one knowledge database already records, or ``None`` when it records none.
 
-    ``RepositoryIdentity`` is supplied on creation and read from the database afterwards, so it is
-    derived once here rather than drawn: two runs of one enclosure must name one namespace, and the
-    enclosure's recorded code base commit is the fact that distinguishes it from another's.
+    This is the durable anchor, and it is read rather than derived. ``models/knowledge/repository.py``
+    requires a namespace to be a *stored* identifier, and the contract a run is handed carries no
+    stable repository key to derive one from -- ``code_repo_path`` differs per worktree,
+    ``code_source_branch`` is a branch name, and ``repo_name`` is the display name that module names
+    as explicitly not an identity. So the value that survives a baseline change cannot come from the
+    contract; it comes from the repository's own dataset.
+
+    An absent, unreadable or repository-less database is not an error here: it means this repository
+    has no stored namespace yet, and the caller derives one. ``apsw`` is caught narrowly because a
+    path that is not a database at all is an ordinary input in an operation that is allowed to
+    create one.
     """
 
+    if database_path is None or not database_path.is_file():
+        return None
+    try:
+        connection = open_read_only_database(Path(database_path))
+    except (apsw.Error, OSError):
+        return None
+    try:
+        rows = list(connection.execute("SELECT repository_id, authority_home FROM repository"))
+    except apsw.Error:
+        return None
+    finally:
+        connection.close()
+    if not rows:
+        return None
+    return decode_repository_row(rows[0])
+
+
+def _repository_identity(
+    contract: WorktreeContract, baseline: Path | None = None
+) -> RepositoryIdentity:
+    """The namespace this repository's candidates are created under, read then derived.
+
+    ``RepositoryIdentity`` is supplied on creation and read from the database afterwards, so the
+    order here is the product's own: **read the stored value first, derive only when there is none
+    to read.** A repository that already holds knowledge keeps the namespace that knowledge lives
+    under, whatever baseline the next task starts from.
+
+    This used to derive from ``_enclosure(contract)``, which is the enclosure's recorded code base
+    commit. That made the namespace a function of the baseline, so one repository ingested at a
+    later baseline was handed a *different* namespace, its candidate held only the new entry, and
+    every revision recorded at the earlier baseline was stranded under a namespace nothing would
+    look in again -- while two different repositories that shared a base commit were handed the
+    *same* namespace. ``models/knowledge/repository.py`` states the rule this violated: a namespace
+    "is not a filesystem root, a branch name or a repository display name: those all change while
+    the knowledge they scope does not".
+
+    The derivation that remains is the cold-start fallback, and it is keyed on ``authority_home``
+    rather than on the baseline. It is stable for one repository across baselines, which is what
+    the finding needs; it deliberately claims nothing about telling two repositories apart, because
+    the contract cannot supply that distinction -- the stored namespace is what does, and the first
+    run that publishes one makes it authoritative from then on.
+    """
+
+    stored = _repository_namespace(baseline)
+    if stored is not None:
+        return stored
     return RepositoryIdentity(
-        repository_id=str(uuid5(_INGEST_NAMESPACE, f"repository:{_enclosure(contract)}")),
+        repository_id=str(uuid5(_INGEST_NAMESPACE, f"repository:{contract.repo_name}")),
         authority_home=contract.repo_name,
     )
 
@@ -1061,7 +1290,7 @@ def _plan_entry(
     if not targets:
         return _ruling_plan(fields), None
     planned: list[_TargetPlan] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str, str]] = set()
     for target in targets:
         plan, refusal = _plan_target(fields.entry_id, target, source)
         if refusal is not None:
@@ -1076,7 +1305,7 @@ def _plan_entry(
             )
         if plan is None:  # pragma: no cover - a plan and its refusal are exclusive
             continue
-        if plan.completed_path in seen:
+        if plan.target_key in seen:
             return None, _Refusal(
                 "duplicate_target_path",
                 f"the entry names {plan.completed_path!r} twice, so one of the two places the "
@@ -1084,7 +1313,7 @@ def _plan_entry(
                 _refused_targets(planned),
                 tuple(planned),
             )
-        seen.add(plan.completed_path)
+        seen.add(plan.target_key)
         planned.append(plan)
     return (
         _Plan(
@@ -1094,10 +1323,13 @@ def _plan_entry(
             disposition_source=fields.disposition_source,
             statement=fields.statement,
             evidence=fields.evidence,
-            invariant_id=_identity(source.contract, "invariant", fields.entry_id),
+            invariant_id=fields.named_invariant_id
+            or _identity(source.contract, "invariant", fields.entry_id),
             revision_id=_identity(source.contract, "revision", fields.entry_id),
             targets=tuple(planned),
             ruling=False,
+            declares_invariant=fields.declares_invariant,
+            predecessors=fields.predecessors,
         ),
         None,
     )
@@ -1802,9 +2034,24 @@ def _observe(resolved: _Resolved, locator: SourceLocator) -> str | _Refusal:
 
 
 def _observation_id(resolved: _Resolved, locator: SourceLocator) -> str:
-    """A well-formed anchor id for the observation, so the rail sees a real UUID."""
+    """A well-formed anchor id for the observation, so the rail sees a real UUID.
 
-    return str(uuid5(_INGEST_NAMESPACE, f"observation:{resolved.path}|{locator.kind}"))
+    The discriminator must name **what within the file** the locator points at, not only the kind of
+    thing it is. Keying on the path and the kind alone gave two symbols in one source file the same
+    anchor id -- and two different constructs in one file are two different realizations, which this
+    substrate exists to record separately. That collision is why the entry mapper refused the second
+    symbol of a file as ``duplicate_target_path``: the guard was telling the truth about the identity
+    it was handed.
+
+    A symbol's qualified name is the semantic part of it, so it is the discriminator: it survives the
+    file being edited above the definition, where a line number would not. A range and a whole-file
+    citation keep the coarser key, which is their existing behaviour and is deliberate -- a range
+    citation is meant to stay stable as lines move, and widening that derivation is a separate
+    question from this one.
+    """
+
+    within = f"|{locator.qualified_name}" if isinstance(locator, SymbolLocator) else ""
+    return str(uuid5(_INGEST_NAMESPACE, f"observation:{resolved.path}|{locator.kind}{within}"))
 
 
 # --------------------------------------------------------------------------------------------
@@ -2022,6 +2269,8 @@ def _curator_entry(plan: _Plan) -> CuratorEntry:
         statement=plan.statement,
         applicability=_APPLICABILITY,
         conditions=_conditions(plan),
+        predecessors=plan.predecessors,
+        declares_invariant=plan.declares_invariant,
         citations=tuple(target.citation() for target in plan.targets),
     )
 

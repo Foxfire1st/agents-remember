@@ -99,6 +99,7 @@ class CuratorEntry:
     exclusions: tuple[str, ...] = ()
     predecessors: tuple[str, ...] = ()
     citations: tuple[CuratorCitation, ...] = ()
+    declares_invariant: bool = True
 
 
 def curator_entry_commands(
@@ -108,12 +109,23 @@ def curator_entry_commands(
 
     The order is load-bearing and is the batch's own contract: an anchor is written before the claim
     that cites it, so the claim's anchor endpoint resolves against a row this same batch declared.
+
+    ``AddInvariant`` is emitted only when the entry is actually *declaring* the invariant. An entry
+    that names predecessor revisions is authoring a successor of an invariant the repository already
+    holds, and re-declaring that invariant is not a harmless no-op -- it is refused outright with
+    ``batch_stale_precondition``, because the batch's precondition for creating an invariant is that
+    the invariant is ABSENT. Emitting both commands unconditionally is what made the ingest unable to
+    evolve an obligation it already had: the second run over a changed statement was refused, so the
+    repository could accumulate new invariants but never revise one. A successor therefore carries
+    its revision and its predecessor edges, and the invariant row it revises is left as it stands.
     """
 
-    commands: list[ProposedCommand] = [
-        AddInvariant(invariant_id=entry.invariant_id, display_label=entry.display_label),
-        AddInvariantRevision(revision=_revision_draft(destination, entry)),
-    ]
+    commands: list[ProposedCommand] = []
+    if entry.declares_invariant:
+        commands.append(
+            AddInvariant(invariant_id=entry.invariant_id, display_label=entry.display_label)
+        )
+    commands.append(AddInvariantRevision(revision=_revision_draft(destination, entry)))
     for citation in entry.citations:
         commands.append(AddSourceAnchor(anchor=citation.anchor))
         commands.append(
