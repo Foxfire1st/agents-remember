@@ -81,9 +81,9 @@ from read_scope_test_support import (
     EXCLUSIONS,
     INTEGRATION_PATH,
     MISMATCH_PATH,
-    UNPARSED_PATH,
     RESOLUTION_PATH,
     SYNCHRONIZATION_PATH,
+    UNPARSED_PATH,
     ReadScopeFixture,
     build_read_scope_fixture,
 )

@@ -17,6 +17,7 @@ from agents_remember.kernel.atomic_write import (
     atomic_write_bytes,
     atomic_write_text,
 )
+from agents_remember.models.knowledge.merge import AuthoredReconciliation
 from agents_remember.models.worktree import (
     MemorySyncChoice,
     SyncKnowledgeConflict,
@@ -65,6 +66,13 @@ class SyncSideRecord(BaseModel):
     # a resumed sync re-projects this side's state from the journal, and the diagnosis has to be
     # there for that projection to say what to reconcile instead of only which file is unresolved.
     knowledgeConflict: SyncKnowledgeConflict | None = None
+    # Every authored decision this side's retained knowledge merge has already accepted, in the
+    # order they were accepted. They travel together into the next attempt because a decision
+    # that settled one conflict has to still hold when the merge goes on to the next one: with
+    # only the newest decision carried, a two-conflict merge alternates between the same two
+    # rows forever and re-offers a decision that has already been made and already had its
+    # effect. Cleared with the conflict it belongs to.
+    knowledgeReconciliations: tuple[AuthoredReconciliation, ...] = ()
     # The exact parked candidate: its stash identity is journaled with the transaction, so
     # a crash mid-carry can always return the WIP it parked.
     wipState: SyncWipState = ""

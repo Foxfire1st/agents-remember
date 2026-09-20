@@ -309,7 +309,7 @@ def _apply_and_validate(run: MergeRun) -> MergeOutcome:
         right,
         merged_path,
         within_transaction=run.acyclic_routes,
-        reconciliation=run.request.reconciliation,
+        reconciliations=run.request.reconciliations,
     )
     if applied.refusal is not None:
         return run.refused(applied.refusal)
@@ -396,7 +396,7 @@ def _retracts_arriving_rows(delta: Delta, probe: Path) -> bool:
     probe_result = apply_changeset(
         delta,
         probe,
-        reconciliation=AuthoredReconciliation(decision="keep-left"),
+        reconciliations=(AuthoredReconciliation(decision="keep-left"),),
     )
     return not probe_result.conflicted and not probe_result.detail
 
@@ -720,7 +720,7 @@ def _conflict_refusal(applied: AppliedChangeset, delta: Delta) -> KnowledgeRefus
                 observed="the row the left side removed",
             ),
         )
-    builder = _TAXONOMY.get((code, code == _CONFLICT_CONSTRAINT and table in _RELATIONSHIP_TABLES))
+    builder = _TAXONOMY.get(_conflict_key(code, table))
     if builder is not None:
         return builder(table, record_id)
     return changeset_incomplete_refusal(
@@ -779,8 +779,9 @@ def _relationship_duplicate_refusal(table: str, record_id: str) -> KnowledgeRefu
     )
 
 
-# The conflict taxonomy as data: one entry per (SQLite code, whether the table's unique declaration
-# is a relationship) pair, so the mapping is readable in one place instead of as a branch ladder.
+# The conflict taxonomy as data: one entry per (SQLite code, whether the conflict is the
+# relationship-constraint one) pair, so the mapping is readable in one place instead of as a branch
+# ladder.
 _TAXONOMY: dict[tuple[int, bool], Callable[[str, str], KnowledgeRefusal]] = {
     (_CONFLICT_NOTFOUND, False): _recorded_row_refusal,
     (_CONFLICT_CONFLICT, False): _independent_insert_refusal,
@@ -797,6 +798,33 @@ _CONFLICT_NAMES: dict[tuple[int, bool], str] = {
     (_CONFLICT_CONSTRAINT, False): "relationship_constraint",
     (_CONFLICT_FOREIGN_KEY, False): "delete_reference_conflict",
 }
+
+
+def _conflict_key(code: int, table: str) -> tuple[int, bool]:
+    """The taxonomy key for one conflict: its SQLite code, and whether it is the relationship one.
+
+    **One predicate, because there are two lookups over it.** ``_TAXONOMY`` selects the refusal
+    builder and ``_CONFLICT_NAMES`` selects the name the operator reads, and both tables are keyed by
+    this pair -- so asking the question differently at the two call sites made them disagree about
+    what one conflict *is*. They did: the builder asked
+    ``code == _CONFLICT_CONSTRAINT and table in _RELATIONSHIP_TABLES`` while the name lookup asked
+    ``table in _RELATIONSHIP_TABLES`` alone. ``realization_claim`` is a relationship table, so a
+    ``duplicate_identity`` on it was refused as ``duplicate_identity`` and simultaneously *named*
+    ``unmapped_conflict_3`` -- the operator was told the taxonomy does not name a conflict it maps,
+    which is a false statement about the tool rather than a fact about the data.
+
+    The pair is what it is because the relationship answer exists only for the constraint code: a
+    unique-declaration violation is ``duplicate_relationship``, while the same table colliding on a
+    primary key is two independent insertions of one identity like any other table's.
+    """
+
+    return (code, code == _CONFLICT_CONSTRAINT and table in _RELATIONSHIP_TABLES)
+
+
+def _conflict_name(code: int, table: str) -> str:
+    """The name one conflict is reported under, or the explicit fallback when nothing names it."""
+
+    return _CONFLICT_NAMES.get(_conflict_key(code, table), f"unmapped_conflict_{code}")
 
 
 def _conflict_record(applied: AppliedChangeset) -> str:
@@ -830,10 +858,9 @@ def _conflict_facts(
     del delta
     code = int(applied.conflict_code or 0)
     table = applied.conflict_table
-    is_relationship = table in _RELATIONSHIP_TABLES
     if table is None or applied.conflict_operation is None:
         return MergeConflict(
-            code=_CONFLICT_NAMES.get((code, False), f"unmapped_conflict_{code}"),
+            code=_conflict_name(code, ""),
             attribution="engine_reported_without_row",
             detail=(
                 "the engine reported this conflict without a row: the conflict callback receives a "
@@ -842,7 +869,7 @@ def _conflict_facts(
             precondition=precondition,
         )
     return MergeConflict(
-        code=_CONFLICT_NAMES.get((code, is_relationship), f"unmapped_conflict_{code}"),
+        code=_conflict_name(code, table),
         attribution="engine_attributed",
         table=table,
         operation=applied.conflict_operation,

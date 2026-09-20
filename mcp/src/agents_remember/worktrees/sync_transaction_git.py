@@ -6,6 +6,7 @@ identity. Code-side files keep ordinary Git semantics, including a file named me
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -395,7 +396,7 @@ def _continue_memory_merge(side: SyncSideRecord) -> SideMergeOutcome:
 
 
 def reconcile_side_merge(
-    side: SyncSideRecord, path: str, reconciliation: AuthoredReconciliation
+    side: SyncSideRecord, path: str, reconciliations: Sequence[AuthoredReconciliation]
 ) -> RefusedKnowledgeStage | None:
     """Author the caller's decision for one retained knowledge conflict, and stage the result.
 
@@ -419,7 +420,7 @@ def reconcile_side_merge(
         path,
         side.preSyncHead,
         side.sourceCommit,
-        reconciliation=reconciliation,
+        reconciliations=tuple(reconciliations),
     )
 
 

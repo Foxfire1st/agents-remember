@@ -47,6 +47,7 @@ from agents_remember.application.knowledge_curator_ingest import (
     IngestReport,
     IngestSelection,
     _admitted_candidate,
+    _Authoring,
     _EntryFields,
     _identity,
     _observation_id,
@@ -78,6 +79,9 @@ from snapshot_lifecycle_test_support import build_case, create, write_record
 pytestmark = pytest.mark.evidence_unit
 
 AUTHORIZATION = "authorization:ks-l25-ingest-case"
+# The one leaf id the fixture contract records, named once so a case that needs a SECOND enclosure
+# can spell a sibling contract by replacing it rather than by re-deriving the whole text.
+CONTRACT_LEAF_ID = "260915-INGEST-CASE-L1"
 CODE_FILE = "pkg/module.py"
 CODE_SYMBOL = "resolve_budget"
 # The SECOND construct in the same controlled file. Two symbols of one file are two realizations, so
@@ -296,7 +300,7 @@ def _contract_text(layout: _Layout, code: str, memory: str) -> str:
         f"  task_root: {task_root}\n"
         f"  task_artifact: {task_root / 'task.md'}\n"
         f"  worktree_group: {root}\n"
-        "  leaf_id: 260915-INGEST-CASE-L1\n"
+        "  leaf_id: " + CONTRACT_LEAF_ID + "\n"
         "  parent_task_name: ingest_case\n"
         "\n"
         "code:\n"
@@ -1109,14 +1113,19 @@ def test_a_path_in_the_memory_root_carries_the_memory_tree_identity(
 # --------------------------------------------------------------------------------------------
 
 
-def test_identity_is_derived_from_the_enclosure_so_a_second_run_is_diagnosable(
+def test_a_second_run_resolves_to_the_identities_the_operation_was_allocated(
     pair: SourcePair, tmp_path: Path
 ) -> None:
-    """The same list mints the same identities, and a re-run refuses instead of duplicating.
+    """A repeat of one creation operation returns the identities it holds and files no second record.
 
-    A run that failed must still name what it would have written, and a second run must not file a
-    second invariant under a fresh identity: both follow from deriving the ids rather than drawing
-    them.
+    The rule is the ruling's own: "repeating the same operation returns the same IDs". The first run
+    *allocates* the identity pair and records it under an idempotency key scoped by the enclosure, so
+    the second run resolves to that pair and the candidate holds exactly the rows the first run left.
+    This case used to protect the same observation through a different mechanism -- ids *derived*
+    from the entry's local hand-off label -- which is the reading the developer's ruling replaced,
+    because a derived id makes one repository answer one label with one record no matter how many
+    independent tasks number an entry that way. What must not change is the observation itself: a
+    repeat files no second invariant, no second revision and no second anchor.
     """
 
     entries = [
@@ -1129,23 +1138,30 @@ def test_identity_is_derived_from_the_enclosure_so_a_second_run_is_diagnosable(
     database = tmp_path / "candidate" / "knowledge-candidate.sqlite"
     before = counts(pair, database)
     assert before["invariant"] == 1
+    allocated = _cycle01_candidate_rows(database)
+    assert len(allocated[0]) == 1 and len(allocated[1]) == 1
 
     second = run(pair, tmp_path, entries)
-    # The batch is all-or-nothing, so a re-run that would re-assert the same rows refuses: the
-    # second run is diagnosable, and the refusal names the precondition rather than a duplicate.
-    assert second.batch_state == "refused"
-    assert second.batch_refusal is not None
-    assert second.batch_refusal.code == "stale_precondition"
-    assert second.committed == ()
-    assert {one.entry_id for one in second.refused} == {"E-derived"}
-    assert second.refused[0].refusal.startswith("batch_stale_precondition")
+    # The repeat is not a refusal: the batch's insert-absence precondition would refuse the same
+    # rows, and a refusal is not what repeating an operation that already succeeded means. It is a
+    # replay -- the same ids, no command, no row -- and it is diagnosable as exactly that.
+    assert second.batch_state == "replayed"
+    assert second.batch_refusal is None
+    assert {one.entry_id for one in second.committed} == {"E-derived"}
+    assert second.refused == ()
+    assert second.counts.commands_sent == 0
+    assert second.counts.records_written == 0
+    assert _cycle01_candidate_rows(database) == allocated, (
+        "the repeat of one creation operation minted a second record instead of resolving to the "
+        "identities the operation already holds"
+    )
     assert counts(pair, database) == before
     # The identity the first run wrote is the one the file's own bytes hash to, so the anchor
     # attributes the statement to the code it names rather than to a freshly drawn id.
     assert first_anchor == pair.code_blobs[CODE_FILE]
 
 
-def test_dry_and_real_runs_report_the_same_written_rows_and_a_refused_run_reports_none(
+def test_dry_and_real_runs_report_the_same_written_rows_and_a_repeat_writes_none(
     pair: SourcePair, tmp_path: Path
 ) -> None:
     """``records_written`` is what the run wrote, in both modes, and zero when it wrote nothing.
@@ -1153,8 +1169,9 @@ def test_dry_and_real_runs_report_the_same_written_rows_and_a_refused_run_report
     Three facts share one subject here, which is why they are one case rather than three: the
     number's meaning. It has to agree between the dry run and the real one that follows it, it has
     to include the route leg's rows (which are not candidate commands and so are absent from the
-    batch receipt), and a run that refused has to report zero rather than the rows it did not write.
-    A count that failed any of the three would be unusable as the number a reader sizes work with.
+    batch receipt), and a run that wrote nothing has to report zero rather than rows it did not
+    write. A count that failed any of the three would be unusable as the number a reader sizes work
+    with.
     """
 
     entries = [
@@ -1202,14 +1219,18 @@ def test_dry_and_real_runs_report_the_same_written_rows_and_a_refused_run_report
         + written["source_anchor_route"]
     ) == real.counts.records_written
 
-    # A refused re-run whose route leg had nothing to author wrote nothing at all, and says so: the
-    # routes already exist, so reporting them as written would be reporting rows this run did not
-    # write.
-    refused = run(pair, tmp_path, entries)
-    assert refused.batch_state == "refused"
-    assert refused.committed == ()
-    assert refused.counts.records_written == 0
-    assert refused.counts.routes_authored == 0
+    # A repeat of an operation that already committed wrote nothing at all, and says so: the repeat
+    # resolves to the identities the first run was allocated, so there is no row left to write -- the
+    # routes already exist, and reporting them as written would be reporting rows this run did not
+    # write. The state is ``replayed`` rather than ``refused``, because a refusal is not what
+    # repeating a creation operation that already succeeded means.
+    replayed = run(pair, tmp_path, entries)
+    assert replayed.batch_state == "replayed"
+    assert {one.entry_id for one in replayed.committed} == {"E-dry"}
+    assert replayed.refused == ()
+    assert replayed.counts.commands_sent == 0
+    assert replayed.counts.records_written == 0
+    assert replayed.counts.routes_authored == 0
     assert counts(pair, database) == written
 
     # But "the batch refused" is not the same claim as "this run wrote nothing", and conflating the
@@ -1789,26 +1810,36 @@ class RepositoryIdentityStabilityTests:
 
 
 def _cycle01_public_identities(build_pair: Callable[..., SourcePair], tmp_path: Path) -> None:
-    """Two symbols in one file, the selected baseline, and the reused-label sibling identity.
+    """Two symbols in one file, the selected baseline, and what a reused local label resolves to.
 
     (f) the identities the WRITE PATH stores distinguish the two symbols, which the observation
-        identity alone does not decide: the anchor and the claim are minted from the locator's own
-        qualified name, while the route stays one scope per path.
+        identity alone does not decide: the anchor is minted from the locator's own qualified name,
+        the claim is keyed on the revision whose edge it records, and the route stays one scope per
+        path.
     (g) the identities the CLI actually COMMITTED, with a real SQLite store, for the three remaining
         CYCLE-01 points.
-    (h) a reused local label resolves to the REPOSITORY's record, so one repository answers the same
-        identity at two baselines rather than minting a new one when the baseline moves.
+    (h) a reused local label is **not** an identity input, so two independent tasks numbering an entry
+        ``R-LOCAL`` publish two truths with two distinct identity pairs, while continuity across a
+        task boundary is reached by explicitly naming the stored invariant id.
     """
 
     repository = RepositoryIdentity(
         repository_id=str(uuid5(_INGEST_NAMESPACE, "cycle01-identities")),
         authority_home="agents-remember",
     )
+    one_revision = str(uuid4())
+    another_revision = str(uuid4())
     alpha_ids = _target_identities(
-        repository, "E1", CODE_FILE, SymbolLocator(language="python", qualified_name="alpha")
+        repository,
+        CODE_FILE,
+        SymbolLocator(language="python", qualified_name="alpha"),
+        _Authoring(entry_id="E1", revision_id=one_revision),
     )
     beta_ids = _target_identities(
-        repository, "E1", CODE_FILE, SymbolLocator(language="python", qualified_name="beta")
+        repository,
+        CODE_FILE,
+        SymbolLocator(language="python", qualified_name="beta"),
+        _Authoring(entry_id="E1", revision_id=one_revision),
     )
     assert alpha_ids.anchor_id != beta_ids.anchor_id, (
         "two constructs in one file are still handed ONE stored anchor identity, so the batch "
@@ -1821,9 +1852,58 @@ def _cycle01_public_identities(build_pair: Callable[..., SourcePair], tmp_path: 
         "a route governs a path: two constructs in one file are two associations with ONE route "
         "row, not two routes"
     )
+    # The anchor is keyed on the CREATION that authored it and the claim on the edge it records, so
+    # ONE revision citing two constructs is two anchors and two claims while TWO revisions citing one
+    # construct are two anchors and two claims as well. The second of those is the CYCLE-01 residue at
+    # the citation layer: keyed on the entry's local label, both sides of a sibling pair were handed
+    # ONE anchor identity and ONE claim identity for two genuinely different realizations, and
+    # production sync then refused duplicate_identity on both rows instead of keeping both truths.
+    same_place_other_revision = _target_identities(
+        repository,
+        CODE_FILE,
+        SymbolLocator(language="python", qualified_name="alpha"),
+        _Authoring(entry_id="E1", revision_id=another_revision),
+    )
+    assert same_place_other_revision.claim_id != alpha_ids.claim_id, (
+        "two different realizations at ONE place still share one stored claim identity, so an "
+        "independent task revising the same construct is filed as the same claim"
+    )
+    assert same_place_other_revision.anchor_id != alpha_ids.anchor_id, (
+        "two different realizations at ONE place still share one stored anchor identity, so two "
+        "independent truths citing one construct alias onto one row and production sync refuses "
+        "duplicate_identity instead of keeping both"
+    )
+    assert (
+        _target_identities(
+            repository,
+            CODE_FILE,
+            SymbolLocator(language="python", qualified_name="alpha"),
+            _Authoring(entry_id="E1", revision_id=one_revision),
+        ).anchor_id
+        == alpha_ids.anchor_id
+    ), "the same creation at the same place is the same anchor, so a retry recomputes one id"
+
+    # The explicit-reuse route: a producer citing a place the repository already records names that
+    # stored identity outright, and it is retained verbatim -- the same shape ``invariant_id`` has for
+    # an invariant being revised.
+    reused = str(uuid4())
+    named = _target_identities(
+        repository,
+        CODE_FILE,
+        SymbolLocator(language="python", qualified_name="alpha"),
+        _Authoring(entry_id="E1", revision_id=another_revision, named_anchor_id=reused),
+    )
+    assert named.anchor_id == reused, (
+        "naming a stored anchor did not retain its identity, so a producer cannot reuse a place the "
+        "repository already records"
+    )
+    assert named.claim_id != same_place_other_revision.claim_id, (
+        "a later revision citing a stored anchor is a new edge, so it is not the claim of the "
+        "revision that authored the anchor"
+    )
 
     _cycle01_cli_baseline_journey(build_pair, tmp_path)
-    _cycle01_reused_label_identity(tmp_path)
+    _cycle01_reused_label_identity(build_pair, tmp_path)
 
 
 def _cycle01_hand_off(
@@ -1992,6 +2072,26 @@ def _cycle01_candidate_revisions(database: Path, label: str) -> tuple[tuple[str,
         connection.close()
 
 
+def _cycle01_revisions_of(database: Path, invariant_id: str) -> set[str]:
+    """Every revision id one invariant holds, read from the database itself.
+
+    A successor entry declares no new invariant, so it cannot be found by its own label: it is found
+    under the invariant the producer explicitly named, which is the point of the case that reads this.
+    """
+
+    connection = open_read_only_database(database)
+    try:
+        return {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT revision_id FROM invariant_revision WHERE invariant_id = ?",
+                (invariant_id,),
+            )
+        }
+    finally:
+        connection.close()
+
+
 def _cycle01_candidate_anchors(database: Path) -> tuple[tuple[str, str, str], ...]:
     """Every stored anchor as (identity, path, locator), read from the candidate itself."""
 
@@ -2050,19 +2150,164 @@ def _cycle01_cli_baseline_journey(build_pair: Callable[..., SourcePair], tmp_pat
     assert report_b.counts.entries_read == 2
 
 
-def _cycle01_reused_label_identity(tmp_path: Path) -> None:
-    """Two baselines, one repository, one reused local label: one record, not two.
+def _cycle01_reused_label_identity(build_pair: Callable[..., SourcePair], tmp_path: Path) -> None:
+    """(h) A reused local hand-off label is not an identity input; naming the stored id is.
 
-    Identity is anchored to the repository, so the same label at a later baseline names the SAME
-    record -- which is what lets the next task find what the previous one recorded. Keying it on the
-    code base commit made the label's meaning a function of the baseline, and this is the assertion
-    that fails when it is.
+    This case used to assert the opposite: that one reused label at two baselines mints ONE record,
+    "which is what lets the next task find what the previous one recorded". The developer's ruling
+    measured that reading against the code and rejected it -- ``R-LOCAL`` is a **local hand-off
+    label**, so two independent tasks numbering an entry that way are two creation operations and
+    their truths must be two records, and the identity a truth gets must not be a function of the
+    label at all. The concern the old assertion was reaching for is real, and it is proved here the
+    way the ruling names it: continuity across a task boundary happens by the next task **explicitly
+    naming the stored invariant id**, which is the route it actually has.
+
+    The measurement is the public operation on real SQLite, not an assertion about ``_identity``: a
+    published baseline, two sibling enclosures that differ in nothing but their leaf id, one reused
+    label, two different statements. Their stored ids must differ and both snapshots must publish.
+    A third enclosure then names the first side's stored invariant and must evolve THAT record, with
+    its identity preserved and a revision id of its own.
     """
 
-    first = _repository_identity(_cycle01_contract(tmp_path, code="a" * 40, memory="c" * 40))
-    later = _repository_identity(_cycle01_contract(tmp_path, code="b" * 40, memory="d" * 40))
-    assert _identity(first, "invariant", "R-SIB") == _identity(later, "invariant", "R-SIB"), (
-        "one repository read at two code baselines minted two identities for one local label, so "
-        "the obligation recorded at the first baseline is a different record at the second"
+    pair = build_pair(cast("Any", _JourneyFactory)(tmp_path / "cycle01-reused-label"))
+    published = pair.memory_root / "knowledge.sqlite"
+    base_identity = _cycle01_publish_baseline(pair, tmp_path, published)
+    stored: dict[str, tuple[str, str]] = {}
+    products: dict[str, Path] = {}
+    for side, code_symbol, statement in (
+        ("left", CODE_SYMBOL, "The left task adds an independent budget truth."),
+        ("right", CODE_OTHER_SYMBOL, "The right task adds an independent cleanup truth."),
+    ):
+        # The sibling's own published line: a fork of the one baseline, exactly what a second leaf
+        # worktree cut from the published line holds.
+        dest = tmp_path / f"{side}.sqlite"
+        shutil.copyfile(published, dest)
+        products[side] = dest
+        report = cast("Any", ingest_curator_list)(
+            _cycle01_sibling_contract(pair, tmp_path, side),
+            [
+                _cycle01_hand_off(
+                    "R-LOCAL",
+                    statement,
+                    [target(CODE_FILE, locator=symbol(code_symbol), route="pkg")],
+                )
+            ],
+            IngestSelection(
+                candidate_directory=tmp_path / f"candidate-{side}",
+                authorization_ref=AUTHORIZATION,
+                dry_run=False,
+                baseline=dest,
+                publication=IngestPublication(
+                    destination_path=dest, expected_destination=base_identity
+                ),
+            ),
+        )
+        assert report.batch_state == "changed", (
+            f"the {side} task could not record its own truth: {report.batch_refusal!r}"
+        )
+        assert report.committed and report.publication is not None, report.publication
+        assert report.publication.state == "published", report.publication.refusal
+        rows = _cycle01_candidate_revisions(
+            candidate_database_path(tmp_path / f"candidate-{side}"), "R-LOCAL"
+        )
+        assert len(rows) == 1, f"one label, one authored truth, and the {side} run stored {rows}"
+        stored[side] = rows[0]
+
+    assert stored["left"][0] != stored["right"][0], (
+        "two independent tasks that both numbered an entry R-LOCAL were handed ONE stored invariant "
+        f"identity ({stored['left'][0]}), so the two authored truths alias onto one record and the "
+        "merge refuses them as duplicate_identity instead of keeping both"
     )
-    assert _identity(first, "revision", "R-SIB") == _identity(later, "revision", "R-SIB")
+    assert stored["left"][1] != stored["right"][1], (
+        "two independent tasks that both numbered an entry R-LOCAL were handed ONE stored revision "
+        f"identity ({stored['left'][1]}), so the second truth's revision is the first truth's record"
+    )
+
+    # Continuity, the way the ruling names it: a later enclosure that NAMES the stored invariant is
+    # handed that record, keeps its identity, and files its own distinct revision underneath it.
+    successor = tmp_path / "successor.sqlite"
+    shutil.copyfile(products["left"], successor)
+    evolved = cast("Any", ingest_curator_list)(
+        _cycle01_sibling_contract(pair, tmp_path, "successor"),
+        [
+            _cycle01_hand_off(
+                "R-SUCCESSOR",
+                "The left task's budget truth, evolved by the next task.",
+                [target(LEAF_EDITED_FILE, locator=symbol(LEAF_EDITED_SYMBOL), route="pkg")],
+                invariant_id=stored["left"][0],
+                predecessor_revision_ids=[stored["left"][1]],
+            )
+        ],
+        IngestSelection(
+            candidate_directory=tmp_path / "candidate-successor",
+            authorization_ref=AUTHORIZATION,
+            dry_run=False,
+            baseline=successor,
+            publication=IngestPublication(destination_path=successor),
+        ),
+    )
+    assert evolved.batch_state == "changed", (
+        f"naming the stored invariant did not continue it: {evolved.batch_refusal!r}"
+    )
+    evolved_candidate = candidate_database_path(tmp_path / "candidate-successor")
+    under_named = _cycle01_revisions_of(evolved_candidate, stored["left"][0])
+    assert stored["left"][1] in under_named, (
+        "the dataset the next task forked does not hold the revision the producer named, so the "
+        "stored identity it named does not reach the record it was minted for"
+    )
+    assert len(under_named) == 2, (
+        "the successor was not filed under the invariant the producer named, so a later task cannot "
+        f"continue what an earlier one recorded ({under_named})"
+    )
+    successor_revision = next(one for one in under_named if one != stored["left"][1])
+    edges = _cycle01_predecessor_edges(evolved_candidate)
+    assert (successor_revision, stored["left"][1]) in edges, (
+        "the successor revision records no edge to the revision it evolved, so the evolution is not "
+        f"readable from the dataset ({edges})"
+    )
+    assert stored["left"][0] in _cycle01_candidate_rows(evolved_candidate)[0], (
+        "the invariant the first task recorded is gone from the dataset the next task forked"
+    )
+
+
+def _cycle01_sibling_contract(pair: SourcePair, tmp_path: Path, side: str):
+    """One more enclosure beside the fixture's, differing in its leaf id and in nothing else.
+
+    The leaf id is what an operation's retry key is scoped by, so this is the whole of what makes
+    two runs two creation operations rather than one operation repeating itself.
+    """
+
+    contract = tmp_path / f"{side}-contract.md"
+    contract.write_text(
+        pair.contract_path.read_text(encoding="utf-8").replace(
+            f"leaf_id: {CONTRACT_LEAF_ID}", f"leaf_id: {CONTRACT_LEAF_ID[:-2]}{side.upper()}"
+        ),
+        encoding="utf-8",
+    )
+    return contract
+
+
+def _cycle01_publish_baseline(pair: SourcePair, tmp_path: Path, published: Path):
+    """Publish one baseline truth through the public operation, and return its dataset identity."""
+
+    report = cast("Any", ingest_curator_list)(
+        _cycle01_sibling_contract(pair, tmp_path, "baseline"),
+        [
+            _cycle01_hand_off(
+                "BASE",
+                "The published baseline truth.",
+                [target(CODE_FILE, locator=symbol(CODE_SYMBOL), route="pkg")],
+            )
+        ],
+        IngestSelection(
+            candidate_directory=tmp_path / "candidate-base",
+            authorization_ref=AUTHORIZATION,
+            dry_run=False,
+            publication=IngestPublication(destination_path=published),
+        ),
+    )
+    assert report.batch_state == "changed", (
+        f"the baseline could not be published: {report.batch_refusal!r}"
+    )
+    assert report.publication is not None and report.publication.identity is not None
+    return report.publication.identity

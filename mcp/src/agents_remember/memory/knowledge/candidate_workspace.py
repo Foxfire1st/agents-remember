@@ -4,7 +4,10 @@ A candidate is a **directory** holding one writable SQLite database, the immutab
 binds it to its admission, and the database's own resource lock. That layout is fixed by
 :mod:`agents_remember.models.knowledge.snapshot` so the admission that opens the candidate for
 writes and the publication that reads it cannot disagree about which file is the working
-database, and so no absolute path is ever stored as knowledge.
+database, and so no absolute path is ever stored as knowledge. An operation that owns the
+candidate may add its own local record beside those two -- the curator ingest writes the
+allocations it has made into ``curator-allocation-journal.json`` there -- because that is the same
+kind of fact the receipt is: a local, operation-scoped record, never knowledge the repository holds.
 
 Four properties are load-bearing:
 

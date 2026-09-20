@@ -71,12 +71,18 @@ class CuratorCitation:
     The anchor is the shipped draft, unmodified: a path, the source identity it was resolved at and
     the locator. The claim identity, its role and its rationale are authored alongside it, because a
     stored anchor with nothing citing it attributes nothing to the statement.
+
+    ``declares_anchor`` says whether this citation is writing that anchor or citing one the dataset
+    already holds. A producer that means to reuse a stored anchor names its identity outright, and
+    re-declaring a row that is already there is refused outright by the batch -- so the reuse half has
+    to be expressible, exactly as an entry revising an invariant does not re-declare it.
     """
 
     anchor: SourceAnchorDraft
     claim_id: str
     role: RealizationRole
     rationale: str
+    declares_anchor: bool = True
 
 
 @dataclass(frozen=True)
@@ -118,6 +124,12 @@ def curator_entry_commands(
     evolve an obligation it already had: the second run over a changed statement was refused, so the
     repository could accumulate new invariants but never revise one. A successor therefore carries
     its revision and its predecessor edges, and the invariant row it revises is left as it stands.
+
+    ``AddSourceAnchor`` is emitted on the same rule and for the same reason: a citation whose
+    ``declares_anchor`` is false names an anchor the dataset already holds, so the batch writes the
+    claim that cites it and leaves the anchor row as it stands. Re-declaring it would be refused with
+    the same ``batch_stale_precondition``, which is what makes "reuse a stored anchor" expressible at
+    all rather than a second spelling of "insert a duplicate of it".
     """
 
     commands: list[ProposedCommand] = []
@@ -127,7 +139,8 @@ def curator_entry_commands(
         )
     commands.append(AddInvariantRevision(revision=_revision_draft(destination, entry)))
     for citation in entry.citations:
-        commands.append(AddSourceAnchor(anchor=citation.anchor))
+        if citation.declares_anchor:
+            commands.append(AddSourceAnchor(anchor=citation.anchor))
         commands.append(
             AddRealizationClaim(
                 claim=RealizationClaimDraft(

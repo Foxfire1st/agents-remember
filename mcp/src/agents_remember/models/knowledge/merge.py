@@ -295,11 +295,17 @@ class MergeRequest(KnowledgeModel):
     outcome without publishing anything; when it does publish, the install goes through the same
     destination-admitted contract every other closed snapshot uses.
 
-    ``reconciliation`` is the one place an *authored* decision enters the merge, and it is optional
-    because a merge that resolves nothing by itself is the whole point of this operation. When it is
-    present the caller has named the exact record it refuses to let the engine refuse, and has said
-    which side's authored value is the reconciled one. It cannot express a policy: it names one
-    row, and every conflict it does not name is still refused exactly as it is today.
+    ``reconciliations`` is the one place an *authored* decision enters the merge, and it is optional
+    because a merge that resolves nothing by itself is the whole point of this operation. Each entry
+    names the exact record the caller refuses to let the engine refuse, and says which side's authored
+    value is the reconciled one. It cannot express a policy: every entry names one row, and every
+    conflict none of them names is still refused exactly as it is today.
+
+    It is a **sequence** rather than one decision because a retained merge is answered one conflict at
+    a time and the answer to the second has to carry the first. A single decision per attempt made a
+    two-conflict merge alternate between the same two rows forever: each attempt retracted one row,
+    aborted on the other, and re-offered a decision the caller had already made and that had already
+    had its effect.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
@@ -307,7 +313,7 @@ class MergeRequest(KnowledgeModel):
     resolution: MergeBaseResolution
     databases: Mapping[MergeInputRole, Path]
     destination: SnapshotDestinationRequest | None = None
-    reconciliation: AuthoredReconciliation | None = None
+    reconciliations: tuple[AuthoredReconciliation, ...] = ()
 
     @model_validator(mode="after")
     def _require_every_role(self) -> MergeRequest:

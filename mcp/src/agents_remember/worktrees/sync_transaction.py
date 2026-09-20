@@ -637,6 +637,7 @@ def _finish_retained_merge(
             "resultHead": result_head,
             "conflictFiles": (),
             "knowledgeConflict": None,
+            "knowledgeReconciliations": (),
         }
     )
     record, completed, conflicted = restore_parked_wip(store, record, side_name, completed)
@@ -659,8 +660,21 @@ def _reconcile_knowledge_resolution(
     it names must be the record the engine refused, and the decision must be one that conflict
     admits. A decision naming another row, or an overwrite on a conflict with no row, is refused
     here with the reason instead of being carried into a merge that would ignore it and hand back the
-    same conflict. A decision that settles this conflict may reveal the next one; that one is
-    journaled and reported exactly as this one was, so the agent reconciles until the merge lands.
+    same conflict.
+
+    **Accepted decisions persist.** A decision that settles this conflict may reveal the next one, and
+    the attempt that answers the next one carries every decision this side has already accepted --
+    the journaled ones plus the one just authored. Each attempt therefore starts from the conflict
+    the previous attempt actually reached rather than from the first one again. Without that, a merge
+    with two conflicts alternated between the same two rows forever: the attempt answering the second
+    re-refused the first, and the caller was offered a decision it had already made and that had
+    already had its effect.
+
+    **Progress or an actionable refusal.** A conflict that survives the attempt is compared against
+    the decisions already accepted for it. A row a decision has already answered and that comes back
+    anyway means the retraction could not hold this conflict, so the operation stops with the reason
+    and the exact row instead of journaling the same decision a second time -- see
+    :func:`_reconcile_progress_refusal`.
     """
 
     side = _retained_side(record)
@@ -670,20 +684,61 @@ def _reconcile_knowledge_resolution(
     if invalid is not None:
         return invalid
     assert refused is not None and args.knowledge_resolution is not None
+    accepted = (*side.knowledgeReconciliations, args.knowledge_resolution)
     try:
-        remaining = reconcile_side_merge(side, refused.path, args.knowledge_resolution)
+        remaining = reconcile_side_merge(side, refused.path, accepted)
     except SyncGitProofError as error:
         return manual_repair_result("sync-resolution-incomplete", str(error), record, fetch)
     if remaining is not None:
+        cycling = _reconcile_progress_refusal(remaining, side.knowledgeReconciliations)
+        if cycling is not None:
+            refreshed = side.model_copy(
+                update={"knowledgeConflict": _knowledge_conflict(remaining)}
+            )
+            record = update_record(store, record, phase=record.phase, side=refreshed)
+            return manual_repair_result("sync-resolution-cycling", cycling, record, fetch)
         refreshed = side.model_copy(
             update={
                 "conflictFiles": content_conflicts(side),
                 "knowledgeConflict": _knowledge_conflict(remaining),
+                "knowledgeReconciliations": accepted,
             }
         )
         record = update_record(store, record, phase=record.phase, side=refreshed)
         return resolution_required(record, fetch)
     return _finish_retained_merge(contract, store, record, fetch)
+
+
+def _reconcile_progress_refusal(
+    remaining: RefusedKnowledgeStage, accepted: tuple[AuthoredReconciliation, ...]
+) -> str | None:
+    """The refusal for a conflict an already-accepted decision answered and that came back anyway.
+
+    ``accepted`` is what this side held **before** the attempt, so a row in it is a row a decision has
+    already been applied to. Finding it here means the retraction did not hold -- the arriving change
+    it retracted is required by another arriving change, so removing one re-exposes the other -- and
+    the honest answer is to say that rather than to offer the same decision again. A row no accepted
+    decision named is ordinary progress: the merge moved on to a conflict nobody has answered yet.
+    """
+
+    conflict = remaining.conflict
+    if conflict is None or conflict.table is None or conflict.record_id is None:
+        return None
+    answered = {
+        (one.table, one.record_id)
+        for one in accepted
+        if one.table is not None and one.record_id is not None
+    }
+    if (conflict.table, conflict.record_id) not in answered:
+        return None
+    return (
+        f"The decision this merge already accepted for {conflict.table} {conflict.record_id} does "
+        f"not settle it: the engine reports {conflict.code} on that row again after the authored "
+        "decision was applied and retracted the arriving change, so retracting it re-exposes another "
+        "arriving change that needs the same row. No further authored decision will make this merge "
+        "converge; resolve the row in the worktree, stage it, then continue, or cancel the sync. The "
+        "retained dataset is unchanged."
+    )
 
 
 def _reconcile_refusal(

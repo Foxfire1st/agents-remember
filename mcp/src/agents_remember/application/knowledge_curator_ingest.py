@@ -19,17 +19,29 @@ an entry is committed only when every one of its targets resolved, verified and 
 empty citation list here arrives only from an entry with no targets, which is the skipped case and
 is not committed at all.
 
-**Identity is derived, not random.** Every identity this module mints is a ``uuid5`` under one fixed
-namespace over the **repository's own namespace** joined with the entry's own ``id`` from the
-hand-off list -- and, for a target, what inside the named path the citation is about: a symbol's
-qualified name, or the locator kind when there is nothing finer. Two runs of the same list therefore
-mint the same ids, and the ids are real UUIDs because the write path stores UUID-shaped identities.
-The stable half is the repository and never the code base commit, because a baseline is exactly the
-kind of value ``models/knowledge/repository.py`` says a namespace must not move with: keyed on the
-base commit, one repository's obligation became a different record at each baseline while two
-different repositories that shared a base commit were handed the same record identity. Note that the
-*resolution* tree and the *identity* anchor are two different commits on purpose: see the next
-paragraph.
+**The API allocates a new truth's identity; the label is never an input to it.** An invariant and its
+first revision are the two identities this module *allocates*: fresh ``uuid4`` values, minted here
+and recorded in the candidate's own allocation journal, so they carry no task, no branch, no baseline
+and no label. A hand-off label is a **local hand-off label** -- two independent tasks numbering an
+entry ``R-LOCAL`` are two creation operations, and they now mint two distinct truths instead of
+aliasing onto one record and colliding in the merge. What makes a *repeat* of one operation resolve
+to the identities it already holds is the **retry key** recorded beside them: the enclosure's own task
+identity joined with the entry's id inside that list. The enclosure scopes the *key* and never the
+identity, because a stored identity has to stay usable from any task, branch or later baseline --
+``models/knowledge/repository.py`` says a namespace "is not a filesystem root, a branch name or a
+repository display name". Repeating that operation returns the same ids; the same key carrying
+different content is refused rather than silently overwritten.
+
+A **citation's** identities stay derived: ``uuid5`` under one fixed namespace over the **repository's
+own namespace** joined with the entry's own ``id`` from the hand-off list -- and, for a target, what
+inside the named path the citation is about: a symbol's qualified name, or the locator kind when
+there is nothing finer. Two runs of the same list therefore mint the same ids, and the ids are real
+UUIDs because the write path stores UUID-shaped identities. The stable half is the repository and
+never the code base commit, because a baseline is exactly the kind of value
+``models/knowledge/repository.py`` says a namespace must not move with: keyed on the base commit, one
+repository's obligation became a different record at each baseline while two different repositories
+that shared a base commit were handed the same record identity. Note that the *resolution* tree and
+the *identity* anchor are two different commits on purpose: see the next paragraph.
 
 **A producer may cite the code its own leaf is producing.** The objective commits into the leaf's
 draft-candidate, and a draft is unlanded work by definition, so the tree a target is resolved against
@@ -85,7 +97,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast, get_args
-from uuid import UUID, uuid5
+from uuid import UUID, uuid4, uuid5
 
 import apsw
 
@@ -107,6 +119,8 @@ from agents_remember.application.knowledge_snapshot import (
     open_knowledge_candidate,
     publish_knowledge_snapshot,
 )
+from agents_remember.kernel.atomic_write import atomic_write_bytes
+from agents_remember.kernel.canonical_json import canonical_json_bytes, decoded_json, sha256_digest
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge import routes
 from agents_remember.memory.knowledge.connection import open_read_only_database
@@ -174,6 +188,21 @@ _CANDIDATE_LANE = "draft-candidate"
 # derived identity is stable within, so changing it would silently re-mint each entry's identity.
 _INGEST_NAMESPACE = UUID("6f2a1c94-6b0d-5e77-9a41-2d1f8c3b7e50")
 
+# The candidate-local record of which creation operations already hold allocated identities. It sits
+# beside ``candidate-receipt.json`` in the candidate directory because that is the same kind of fact:
+# a local, operation-scoped record of what this candidate is, not knowledge the repository holds.
+_ALLOCATION_JOURNAL_NAME = "curator-allocation-journal.json"
+
+# Two refusal codes for the allocation seam, and neither is a weaker duplicate check. The first is
+# "this idempotency key already names a different truth": a key identifies one creation operation, so
+# a second content wearing it is a second operation, and silently minting a fresh identity for it (or
+# silently revising the stored one) are the two things the ruling forbids. The second is "the record
+# that would answer that question cannot be read": minting without knowing whether this operation
+# already has identities is exactly how a retry becomes a duplicate truth, so the entry is refused
+# rather than guessed at.
+_CODE_ALLOCATION_CONFLICT = "allocation_content_conflict"
+_CODE_ALLOCATION_UNREADABLE = "allocation_journal_unreadable"
+
 # The completion steps, in the order the resolver answers them. Each is a name the report prints,
 # so "which root answered" is never inferred from a path's spelling.
 _CODE_TREE = "code-tree"
@@ -220,6 +249,7 @@ _CODE_NOT_A_DEFINITION = "symbol_not_a_definition"
 _CODE_NO_DEFINITIONS_IN_PROSE = "symbol_target_is_prose"
 _CODE_SYMBOL_LANGUAGE = "symbol_language_underdetermined"
 _CODE_SYMBOL_NAME_MISSING = "symbol_name_missing"
+_CODE_ANCHOR_ID_SHAPE = "anchor_id_not_a_uuid"
 
 # The one refusal code for a target whose identity the tree and the working bytes disagree about, and
 # the two observation answers that mean the recorded identity could not be confirmed. The first is
@@ -296,6 +326,13 @@ _NO_REFUSAL = ""
 # state says exactly that. The entry outcomes and the counts beside it are what the batch *would*
 # carry, so the dry report is the run's report with the commit withheld rather than a different one.
 _DRY_BATCH_STATE = "dry_run_not_committed"
+
+# The batch state a repeat of an already-admitted creation operation reports. It is deliberately not
+# "refused", which is what re-issuing the same inserts earns and is the wrong answer to "repeat the
+# operation that already wrote them", and not "changed", because nothing moved. The report's entries
+# still carry COMMITTED with the identities they already hold, so a caller sees the repeat succeed
+# with the same ids and no second truth.
+_REPLAYED_BATCH_STATE = "replayed"
 
 
 @dataclass(frozen=True)
@@ -407,7 +444,20 @@ class IngestReport:
 
 @dataclass(frozen=True)
 class _Plan:
-    """One entry as the ingest read it, before anything was written."""
+    """One entry as the ingest read it, before anything was written.
+
+    ``invariant_id`` and ``revision_id`` are the two identities this run will write, and for a newly
+    declared truth they are the ones :func:`_creation` allocated for this creation operation rather
+    than anything derived from the entry's label. ``allocation`` is that allocation, carried so the
+    run can record it before the batch and so a repeat of the same operation is recognisable at all;
+    an entry naming an existing invariant still allocates (its revision is new), while a ruling
+    allocates nothing because it writes nothing.
+
+    ``replayed`` says the candidate this run was admitted against **already holds** this plan's
+    revision, so an earlier run of the same operation wrote it and this run writes nothing for it:
+    the batch's own insert-absence precondition would refuse that row, and a refusal is not what
+    repeating a creation operation that already succeeded means.
+    """
 
     entry_id: str
     kind: str
@@ -421,11 +471,20 @@ class _Plan:
     ruling: bool
     declares_invariant: bool = True
     predecessors: tuple[str, ...] = ()
+    allocation: _Allocation | None = None
+    replayed: bool = False
 
 
 @dataclass(frozen=True)
 class _TargetPlan:
-    """One resolved target: the step that answered, the blob it holds, the anchor to write."""
+    """One resolved target: the step that answered, the blob it holds, the anchor to write.
+
+    ``declares_anchor`` is the explicit-reuse half: a target that named a stored anchor identity is
+    citing a row the repository already holds, so the batch writes the claim and not the anchor. It
+    is the target-level counterpart of ``_Plan.declares_invariant``, and it exists for the same
+    reason -- re-declaring a row that is already stored is refused outright, so an entry that means
+    to *reuse* one has to say so.
+    """
 
     entry_id: str
     path: str
@@ -440,6 +499,7 @@ class _TargetPlan:
     route_id: str
     anchor_id: UUID
     claim_id: str
+    declares_anchor: bool = True
 
     @property
     def target_key(self) -> tuple[str, str, str]:
@@ -473,6 +533,7 @@ class _TargetPlan:
             claim_id=self.claim_id,
             role=self.role,
             rationale=self.rationale or f"The statement is realized at {self.completed_path}.",
+            declares_anchor=self.declares_anchor,
         )
 
 
@@ -491,23 +552,126 @@ class _TargetIdentities:
     claim_id: str
 
 
-def _target_identities(
-    repository: RepositoryIdentity, entry_id: str, written: str, locator: SourceLocator
-) -> _TargetIdentities:
-    """The route, anchor and claim identities for one target, disambiguated by what it names.
+@dataclass(frozen=True)
+class _Allocation:
+    """The canonical identity one creation operation holds, and the content it was minted for.
 
-    The route is a **scope**, not a place inside one: it stays keyed on the path it governs, so N
-    anchors in one file are N associations with the one route row rather than N rows. The anchor and
-    the claim are the two records the citation itself creates, so both carry the symbol's own
-    qualified name -- the same discriminator the observation identity uses, and the one that survives
-    the file being edited above the definition.
+    The two identities are **allocated**, not derived: fresh ``uuid4`` values that carry no task, no
+    enclosure, no branch, no baseline and no label, which is what makes them usable from any of those
+    later. What makes a repeat of one operation resolve to them is the retry key recorded beside them
+    -- the enclosure's own task identity joined with the entry's id inside that list -- so two
+    independent tasks numbering an entry alike are two operations with two keys and two identities,
+    while a rerun of one task's operation finds its own key and is handed back what it already holds.
+
+    ``content_digest`` is the third fact and the guard: the key names ONE creation operation, so the
+    same key arriving with different content is refused rather than silently re-allocated or silently
+    folded into the stored truth. It is ``None`` between the moment the pair is minted (which must
+    happen before the targets are planned, because a claim's identity is the edge it records and that
+    edge names the revision) and the moment the places it covers are resolved.
     """
 
+    retry_key: str
+    invariant_id: str
+    revision_id: str
+    content_digest: str | None = None
+
+    def as_record(self) -> dict[str, str]:
+        """The exact JSON object the journal stores for this allocation."""
+
+        if self.content_digest is None:  # pragma: no cover - a planned entry settles its content
+            raise ValueError(
+                "an allocation whose content was never settled cannot be journalled: the journal is "
+                "what a retry is refused against, and a record with no content guards nothing"
+            )
+        return {
+            "retryKey": self.retry_key,
+            "invariantId": self.invariant_id,
+            "revisionId": self.revision_id,
+            "contentDigest": self.content_digest,
+        }
+
+
+@dataclass(frozen=True)
+class _Allocations:
+    """What one candidate's allocation journal holds, and whether it could be read at all.
+
+    An absent journal is the ordinary first-run case and reads as no records. A journal that is there
+    and cannot be read is **not** the same fact and is not treated as empty: every entry that would
+    have to mint an identity is refused with ``allocation_journal_unreadable``, because minting
+    without answering "does this operation already hold one?" is how a retry becomes a duplicate.
+    """
+
+    path: Path
+    records: Mapping[str, _Allocation]
+    unreadable: str | None = None
+
+
+@dataclass(frozen=True)
+class _Authoring:
+    """Which entry and which creation author one target, and which stored anchor it reuses.
+
+    Grouped rather than passed as three arguments because they are one decision -- whose creation this
+    citation belongs to, and whether it is writing an anchor or reusing one -- and because the entry
+    that names the route is a different fact from the creation that keys the anchor and the claim.
+    """
+
+    entry_id: str
+    revision_id: str
+    named_anchor_id: str | None = None
+
+
+def _target_identities(
+    repository: RepositoryIdentity,
+    written: str,
+    locator: SourceLocator,
+    authoring: _Authoring,
+) -> _TargetIdentities:
+    """The route, anchor and claim identities for one target, each keyed on what it actually is.
+
+    The route is a **scope**, not a place inside one: it stays keyed on the path it governs, so N
+    anchors in one file are N associations with the one route row rather than N rows.
+
+    The anchor is the **place** the citation names, and it is keyed on the creation that authored it
+    -- the allocated revision id -- rather than on the entry's local hand-off label, with the
+    symbol's own qualified name as the disambiguator *inside* that creation (the same discriminator
+    the observation identity uses, and the one that survives the file being edited above the
+    definition). Two constructs in one file are still two anchors, and two independent tasks that
+    both numbered an entry ``R-LOCAL`` and cited one construct now mint two anchors instead of
+    aliasing onto one row. What makes a retry recompute the identical anchor id is the revision id:
+    it is allocated once and recorded in the candidate's allocation journal, so repeating the
+    operation derives the same anchor from the same input, and nothing else has to be persisted.
+
+    The claim is neither a scope nor a place: it is the authored **edge** from one exact revision to
+    one exact anchor, and it is keyed on exactly those two endpoints rather than on the entry's local
+    hand-off label. That distinction is the ruling, one layer down. Keyed on the label, two
+    independent tasks that both numbered an entry ``R-LOCAL`` and cited one construct minted ONE
+    claim identity for two genuinely different realizations -- same claim, same role, same rationale,
+    different ``invariant_revision_id`` -- and production sync then refused ``duplicate_identity`` on
+    that row. A label says nothing about whether two entries represent the same truth, and a claim
+    whose endpoints are distinct is a distinct claim. Keyed on the edge, the same revision citing the
+    same anchor is the same claim (so a repeat is an idempotent insert of one row), two revisions at
+    one place are two claims, and one revision citing two places is two claims.
+
+    ``named_anchor_id`` is the explicit-reuse half: a producer citing a place the repository already
+    records names that stored identity outright, and then the anchor is that row verbatim rather than
+    a new one. The claim is still keyed on the pair, so citing a stored anchor from a new revision is
+    a new edge to a known place.
+    """
+
+    if authoring.named_anchor_id is not None:
+        return _TargetIdentities(
+            route_id=_identity(repository, f"route:{written}", authoring.entry_id),
+            anchor_id=authoring.named_anchor_id,
+            claim_id=_identity(
+                repository, "claim", authoring.revision_id, authoring.named_anchor_id
+            ),
+        )
     within = locator.qualified_name if isinstance(locator, SymbolLocator) else ""
+    anchor_id = _identity(repository, f"anchor:{written}", authoring.revision_id, within)
     return _TargetIdentities(
-        route_id=_identity(repository, f"route:{written}", entry_id),
-        anchor_id=_identity(repository, f"anchor:{written}", entry_id, within),
-        claim_id=_identity(repository, f"claim:{written}", entry_id, within),
+        route_id=_identity(repository, f"route:{written}", authoring.entry_id),
+        anchor_id=anchor_id,
+        claim_id=_identity(repository, "claim", authoring.revision_id, anchor_id),
     )
 
 
@@ -593,9 +757,10 @@ class _EntryFields:
         predecessors = tuple(
             str(one) for one in (raw.get("predecessor_revision_ids") or ()) if str(one).strip()
         )
-        # The other half of naming a successor: WHICH invariant is being revised. Deriving it from
-        # the entry's local id keeps identity per-enclosure, so a producer revising an obligation the
-        # repository already holds must be able to name that invariant outright.
+        # The other half of naming a successor: WHICH invariant is being revised. A producer revising
+        # an obligation the repository already holds must be able to name that invariant outright,
+        # because the entry's local id is a hand-off label and not an identity: it is the key a retry
+        # is found by, never the name of a stored truth.
         declared = raw.get("invariant_id")
         named = str(declared).strip() if declared is not None and str(declared).strip() else None
         # The role a producer authors for this realization, validated against the SHIPPED vocabulary
@@ -615,19 +780,6 @@ class _EntryFields:
             role=cast("RealizationRole", stated) if stated in get_args(RealizationRole) else None,
             role_rationale=str(raw.get("realization_rationale") or ""),
         )
-
-
-@dataclass(frozen=True)
-class _Authored:
-    """The two semantic facts a producer states about one realization, kept together.
-
-    Grouped rather than passed as separate arguments because they are one statement of intent -- the
-    role and why -- and because a role without its rationale is exactly the unattributed claim this
-    repair exists to stop producing.
-    """
-
-    role: RealizationRole | None = None
-    rationale: str = ""
 
 
 @dataclass(frozen=True)
@@ -887,7 +1039,8 @@ def ingest_curator_list(
     )
     resolution = _resolution(contract, source.tree_ids)
     raw = _read_entries(entries)
-    plans, refused, resolved_before_refusal = _plan_entries(raw, source)
+    allocations = _read_allocations(paths.candidate)
+    plans, refused, resolved_before_refusal = _plan_entries(raw, source, allocations)
     read = _Read(
         ids=tuple(str(one["id"]) for one in raw),
         rulings=tuple(_ruling_outcome(plan) for plan in plans if plan.ruling),
@@ -934,6 +1087,15 @@ def ingest_curator_list(
         )
     admitted = admitted_candidate_destination(paths.candidate, repository, resolution)
     destination = candidate_write_destination(admitted, authorship)
+    # The allocation is recorded BEFORE the batch, and it is recorded only now: the candidate that
+    # holds the journal is the one admission just produced, so this never creates the destination it
+    # writes into. A batch that then refuses has still made this creation operation's allocation, and
+    # the retry of that operation resolves to it instead of minting a second identity for one truth.
+    _record_allocations(allocations, read.planned)
+    # ... and only a candidate that already HOLDS a plan's revision makes that plan a replay, which
+    # is a question the dataset answers and the journal cannot: the journal cannot know whether the
+    # batch that ran after it was written committed.
+    read = _with_replays(read, admitted.database_path)
     report = _run(
         _ReportTarget(
             paths,
@@ -954,34 +1116,55 @@ def ingest_curator_list(
 
 
 def _run(target: _ReportTarget, destination: AdmittedKnowledgeDestination) -> IngestReport:
-    """Author the routes, commit the one batch, attach the routes, and report every outcome."""
+    """Author the routes, commit the one batch, attach the routes, and report every outcome.
+
+    The batch carries only the plans this run must **write**. A replayed plan's revision is already
+    in the candidate, so re-issuing its commands would be refused by the batch's own insert-absence
+    precondition -- which is the right answer to "write this again" and the wrong answer to "repeat
+    the operation that already wrote it". A replay is therefore reported committed with the identities
+    it already holds and contributes no command, no row and no route attachment.
+    """
 
     resolution, repository, read = target.resolution, target.repository, target.read
+    fresh = tuple(plan for plan in read.planned if not plan.replayed)
     ledger = _RouteLedger(
-        expected=_distinct_routes(read.planned), answered={}, attached={}, authored=set()
+        expected=_distinct_routes(read.planned),
+        answered=_replayed_routes(read.planned),
+        attached={},
+        authored=set(),
     )
-    route_refusals = _author_routes(destination, repository, ledger, read.planned)
+    if read.planned and not fresh:
+        # Every plan this run was handed is already in the candidate. There is no batch to run: the
+        # routes are the ones the admitting runs wrote, so the ledger answers them as reused and
+        # accepts nothing, which is exactly the rows this run wrote -- none.
+        return _report(
+            target,
+            _Run(batch_state=_REPLAYED_BATCH_STATE, ledger=ledger),
+            committed=tuple(_replayed_outcome(plan) for plan in read.planned),
+        )
+    route_refusals = _author_routes(destination, repository, ledger, fresh)
     if route_refusals:
         return _report(
             target.with_read(_with_refused(read, route_refusals)),
             _Run(batch_state="not_attempted"),
         )
-    result = _commit(destination, resolution, read.planned)
+    result = _commit(destination, resolution, fresh)
     if result is None or result.state == "refused":
         return _report(
-            target.with_read(_with_refused(read, _batch_refused(read.planned, result))),
+            target.with_read(_with_refused(read, _batch_refused(fresh, result))),
             _Run(result=result, ledger=ledger),
         )
-    _attach_routes(destination, repository, read.planned, ledger)
+    _attach_routes(destination, repository, fresh, ledger)
     committed = tuple(
-        _committed_outcome(plan, ledger.attached.get(plan.entry_id, ())) for plan in read.planned
+        _replayed_outcome(plan)
+        if plan.replayed
+        else _committed_outcome(plan, ledger.attached.get(plan.entry_id, ()))
+        for plan in read.planned
     )
-    commands = sum(
-        len(curator_entry_commands(destination, _curator_entry(plan))) for plan in read.planned
-    )
+    commands = sum(len(curator_entry_commands(destination, _curator_entry(plan))) for plan in fresh)
     # The same projection the dry mode reports, so the two modes agree on what the batch carries
     # before the receipt is read: four rows per citation, one per command.
-    projected = _projected(read.planned).batch_rows
+    projected = _projected(fresh).batch_rows
     return _report(
         target,
         _Run(result=result, commands=commands, records=projected, ledger=ledger),
@@ -1196,7 +1379,7 @@ def _resolution(contract: WorktreeContract, tree_ids: _TreeIds) -> CandidateReso
         candidate_ref=f"curator-ingest:{leaf}",
         code_commit_id=contract.code_base_commit,
         memory_commit_id=contract.memory_base_commit,
-        task_ref=contract.leaf_id or contract.task_name,
+        task_ref=_retry_scope(contract),
     )
 
 
@@ -1281,6 +1464,228 @@ def _tree_of(root: Path, commit: str, contract_path: Path) -> str:
 
 
 # --------------------------------------------------------------------------------------------
+# Step 0: the identity this creation operation is allocated, and the key a retry finds it by
+# --------------------------------------------------------------------------------------------
+
+
+def _retry_scope(contract: WorktreeContract) -> str:
+    """The enclosure's own name for this operation's task, as the retry key's scoping half.
+
+    One declaration, used by the candidate resolution and by the retry key, because the two are the
+    same fact about the enclosure and a second spelling of it could drift from the one the rest of
+    the operation already reports.
+    """
+
+    return contract.leaf_id or contract.task_name
+
+
+def _retry_key(contract: WorktreeContract, entry_id: str) -> str:
+    """The idempotency key of one entry's creation operation.
+
+    It is **not** an identity input and never becomes one. It is the question a retry asks -- "has
+    this operation already been allocated?" -- and it is scoped by the enclosure's own task identity,
+    which is exactly what the ruling permits enclosure identity to scope. Two independent tasks
+    numbering an entry ``R-LOCAL`` therefore ask two different questions and receive two different
+    identities, while a rerun of one task's operation asks its own question and receives what it
+    already holds.
+    """
+
+    return f"{_retry_scope(contract)}|{entry_id}"
+
+
+def _content_digest(fields: _EntryFields, targets: Sequence[_TargetPlan]) -> str:
+    """A digest over the content one creation operation is minting an identity for.
+
+    It covers every fact the stored truth is made of and every fact a replay would silently drop if
+    the key's content were allowed to change: the kind, the statement, the evidence, the producer's
+    disposition and each resolved place with the locator that names the construct inside it. It is
+    deliberately *not* an identity: two entries with different content are two operations even under
+    one key, and the digest is what lets that be refused instead of absorbed.
+    """
+
+    return sha256_digest(
+        {
+            "kind": fields.kind,
+            "statement": fields.statement,
+            "evidence": fields.evidence,
+            "disposition": fields.disposition,
+            "targets": [
+                {"path": one.completed_path, "locator": _locator_text(one.locator)}
+                for one in targets
+            ],
+        }
+    )
+
+
+def _allocation_journal(directory: Path) -> Path:
+    """The candidate-local journal one run's allocations are recorded in."""
+
+    return Path(directory) / _ALLOCATION_JOURNAL_NAME
+
+
+def _read_allocations(directory: Path) -> _Allocations:
+    """Read the journal this candidate holds, and say plainly when it cannot be read.
+
+    An absent journal is the ordinary case for a candidate nothing has ingested into yet, and it
+    reads as no records. A journal that is present and unreadable -- truncated, edited, written by
+    something else -- is reported as unreadable rather than as empty, because those two answers lead
+    to opposite actions and only one of them is safe.
+    """
+
+    path = _allocation_journal(directory)
+    if not path.is_file():
+        return _Allocations(path, {})
+    try:
+        loaded = decoded_json(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        return _Allocations(path, {}, f"the journal is not readable JSON: {error}")
+    if not isinstance(loaded, list):
+        return _Allocations(path, {}, "the journal is not a list of allocations")
+    records: dict[str, _Allocation] = {}
+    for one in loaded:
+        record = _allocation_record(one)
+        if record is None:
+            return _Allocations(path, {}, "the journal carries a record this code cannot read")
+        records[record.retry_key] = record
+    return _Allocations(path, records)
+
+
+def _allocation_record(raw: object) -> _Allocation | None:
+    """One journal entry as an allocation, or ``None`` when it is not one this code wrote."""
+
+    if not isinstance(raw, Mapping):
+        return None
+    names = ("retryKey", "invariantId", "revisionId", "contentDigest")
+    values = [raw.get(name) for name in names]
+    if not all(isinstance(value, str) and value for value in values):
+        return None
+    return _Allocation(*(cast("str", value) for value in values))
+
+
+def _record_allocations(allocations: _Allocations, plans: Sequence[_Plan]) -> None:
+    """Record the identities this run allocated, **before** the batch that could still refuse.
+
+    The order is the whole point. A run whose batch refuses has still *made* this creation
+    operation's allocation, and the retry of that operation has to resolve to it rather than mint a
+    second identity for one truth -- so the record is written ahead of the commit, and it is written
+    only into a candidate that admission already produced, so this never creates the destination it
+    names. A run that allocated nothing writes nothing, which is why a replay leaves the file alone.
+    """
+
+    minted = {one.retry_key: one for one in (plan.allocation for plan in plans) if one is not None}
+    merged = {**allocations.records, **minted}
+    if merged.keys() == allocations.records.keys():
+        return
+    payload = canonical_json_bytes([merged[key].as_record() for key in sorted(merged)])
+    atomic_write_bytes(allocations.path, payload)
+    if allocations.path.read_bytes() != payload:
+        raise ValueError(
+            f"the allocation journal at {allocations.path} did not read back as it was written, so "
+            "the identities this run allocated are not durably recorded and a retry could not find "
+            "them"
+        )
+
+
+def _creation(
+    source: _Source,
+    fields: _EntryFields,
+    allocations: _Allocations,
+) -> tuple[_Allocation | None, _Refusal | None]:
+    """The identity pair one entry's creation operation holds: recorded if it has one, else minted.
+
+    A key the journal already carries is this operation repeating itself, so the identities it was
+    allocated are handed back. A key the journal does not carry is a **new** truth: it gets fresh
+    identities of its own, allocated here and never derived from the label, the enclosure, the branch
+    or the baseline.
+
+    An entry that names an existing invariant keeps the producer's identity and still allocates a
+    revision: the invariant is the producer's to name, and each new revision is a new immutable
+    record with an identity of its own that references its predecessors.
+
+    This runs **before** the targets are planned, because a claim's identity is the edge it records
+    and that edge names the revision. The content the key was minted for is settled afterwards, by
+    :func:`_require_minted_content`, once the places it covers are resolved.
+    """
+
+    retry_key = _retry_key(source.contract, fields.entry_id)
+    held = allocations.records.get(retry_key)
+    if held is None and allocations.unreadable is not None:
+        return None, _Refusal(
+            _CODE_ALLOCATION_UNREADABLE,
+            f"{allocations.unreadable}, so this entry cannot be told whether its creation operation "
+            f"already holds an identity and no new one is minted over an answer that is not known "
+            f"({allocations.path})",
+        )
+    if held is not None:
+        return held, None
+    return (
+        _Allocation(
+            retry_key=retry_key,
+            invariant_id=fields.named_invariant_id or str(uuid4()),
+            revision_id=str(uuid4()),
+        ),
+        None,
+    )
+
+
+def _require_minted_content(
+    allocation: _Allocation,
+    fields: _EntryFields,
+    targets: Sequence[_TargetPlan],
+) -> tuple[_Allocation, _Refusal | None]:
+    """Settle the content one allocation was minted for, and refuse a key whose content moved.
+
+    A newly minted allocation has no recorded content yet, so the digest is stamped here. An
+    allocation the journal handed back already carries one, and a different digest under the same key
+    is refused: one idempotency key names one creation operation, and a different truth wearing it is
+    a different operation -- neither the stored truth nor this entry is overwritten by the other.
+    """
+
+    digest = _content_digest(fields, targets)
+    if allocation.content_digest is None:
+        return replace(allocation, content_digest=digest), None
+    if allocation.content_digest != digest:
+        return allocation, _Refusal(
+            _CODE_ALLOCATION_CONFLICT,
+            f"the creation operation {allocation.retry_key!r} was allocated "
+            f"{allocation.invariant_id}/{allocation.revision_id} for content whose digest is "
+            f"{allocation.content_digest}, and this entry arrives under the same key with the "
+            f"different digest {digest}; one idempotency key names one creation operation, and "
+            "neither the stored truth nor this entry is overwritten by the other",
+        )
+    return allocation, None
+
+
+def _stored_revisions(database: Path) -> dict[str, str]:
+    """Every revision the candidate already holds, by revision id, with the statement it records.
+
+    This is what makes a repeat of an operation a **replay** rather than a second write. The identity
+    a repeat resolves to is the same one, so the candidate that already holds that revision is
+    answering the question "was this creation admitted?" from the dataset itself -- not from the
+    journal, which cannot know whether a batch that ran after the record was written committed.
+    """
+
+    connection = open_read_only_database(database)
+    try:
+        return {
+            str(row[0]): str(row[1])
+            for row in connection.execute("SELECT revision_id, statement FROM invariant_revision")
+        }
+    finally:
+        connection.close()
+
+
+def _with_replays(read: _Read, database: Path) -> _Read:
+    """Mark every plan an earlier run of this same operation already stored as a replay."""
+
+    held = _stored_revisions(database)
+    return replace(
+        read,
+        planned=tuple(replace(plan, replayed=plan.revision_id in held) for plan in read.planned),
+    )
+
+
+# --------------------------------------------------------------------------------------------
 # Step 1: the list as data
 # --------------------------------------------------------------------------------------------
 
@@ -1316,7 +1721,7 @@ def _read_entries(
 
 
 def _plan_entries(
-    entries: Sequence[Mapping[str, Any]], source: _Source
+    entries: Sequence[Mapping[str, Any]], source: _Source, allocations: _Allocations
 ) -> tuple[tuple[_Plan, ...], tuple[EntryOutcome, ...], tuple[_TargetPlan, ...]]:
     """Read every entry into a plan, keeping each entry's own refusals beside the plans.
 
@@ -1330,7 +1735,7 @@ def _plan_entries(
     refused: list[EntryOutcome] = []
     resolved_before_refusal: list[_TargetPlan] = []
     for raw in entries:
-        plan, refusal = _plan_entry(raw, source)
+        plan, refusal = _plan_entry(raw, source, allocations)
         if refusal is not None:
             refused.append(refusal.entry(_EntryFields.read(raw)))
             resolved_before_refusal.extend(refusal.planned)
@@ -1342,21 +1747,36 @@ def _plan_entries(
 def _plan_entry(
     raw: Mapping[str, Any],
     source: _Source,
+    allocations: _Allocations,
 ) -> tuple[_Plan | None, _Refusal | None]:
-    """Read one entry: its ruling, or its targets completed and each anchor observed."""
+    """Read one entry: its ruling, or its targets completed, each anchor observed, and its identity.
+
+    The identity pair is decided **first**, before any target is planned, because a claim's identity
+    is the edge it records and that edge names the revision: a claim keyed on the entry's local
+    hand-off label is exactly the defect this seam repairs one layer down. The *content* the key was
+    minted for is settled last, once the places are resolved, so the guard against a changed entry
+    arriving under one idempotency key is unchanged.
+
+    A ruling decides nothing: it writes nothing, so it is allocated nothing.
+    """
 
     fields = _EntryFields.read(raw)
     targets = list(raw.get("target") or [])
     if not targets:
         return _ruling_plan(fields), None
+    allocation, refusal = _creation(source, fields, allocations)
+    if refusal is not None:
+        return None, _Refusal(refusal.code, refusal.reason)
+    if allocation is None:  # pragma: no cover - a creation and its refusal are exclusive
+        raise ValueError("an entry with targets resolved without a creation or a refusal")
     planned: list[_TargetPlan] = []
     seen: set[tuple[str, str, str]] = set()
     for target in targets:
         plan, refusal = _plan_target(
-            fields.entry_id,
+            fields,
             target,
             source,
-            authored=_Authored(role=fields.role, rationale=fields.role_rationale),
+            allocation.revision_id,
         )
         if refusal is not None:
             # The refusal carries the places this entry's earlier targets already resolved, so an
@@ -1380,6 +1800,14 @@ def _plan_entry(
             )
         seen.add(plan.target_key)
         planned.append(plan)
+    allocation, refusal = _require_minted_content(allocation, fields, planned)
+    if refusal is not None:
+        return None, _Refusal(
+            refusal.code,
+            refusal.reason,
+            _refused_targets(planned),
+            tuple(planned),
+        )
     return (
         _Plan(
             entry_id=fields.entry_id,
@@ -1388,13 +1816,13 @@ def _plan_entry(
             disposition_source=fields.disposition_source,
             statement=fields.statement,
             evidence=fields.evidence,
-            invariant_id=fields.named_invariant_id
-            or _identity(source.repository, "invariant", fields.entry_id),
-            revision_id=_identity(source.repository, "revision", fields.entry_id),
+            invariant_id=allocation.invariant_id,
+            revision_id=allocation.revision_id,
             targets=tuple(planned),
             ruling=False,
             declares_invariant=fields.declares_invariant,
             predecessors=fields.predecessors,
+            allocation=allocation,
         ),
         None,
     )
@@ -1430,11 +1858,10 @@ def _ruling_plan(fields: _EntryFields) -> _Plan:
 
 
 def _plan_target(
-    entry_id: str,
+    fields: _EntryFields,
     target: Mapping[str, Any],
     source: _Source,
-    *,
-    authored: _Authored | None = None,
+    revision_id: str,
 ) -> tuple[_TargetPlan | None, _Refusal | None]:
     """Complete one target's path, read its identity, verify its locator, and observe the anchor.
 
@@ -1463,9 +1890,7 @@ def _plan_target(
     if spelling is not None:
         return None, spelling
     try:
-        return _plan_target_inner(
-            entry_id, target, source, _confined(written), authored or _Authored()
-        )
+        return _plan_target_inner(fields, target, source, _confined(written), revision_id)
     except (SourceIndexError, OSError) as error:
         return None, _Refusal(
             _CODE_RESOLUTION_FAILED,
@@ -1542,12 +1967,37 @@ def _confined(written: str) -> str:
     return relative or written
 
 
+def _named_anchor_id(target: Mapping[str, Any]) -> str | UUID | _Refusal:
+    """The stored anchor identity one target names, or the refusal its own spelling earns.
+
+    A producer that means to cite a place the dataset already records names that identity here, the
+    way ``invariant_id`` names an invariant an entry is revising. It must be a UUID, and it is
+    checked here rather than at the schema for the same reason every other locator is: a target the
+    reader can *see* is malformed is refused with the reason, and the run continues to the next entry.
+    """
+
+    declared = target.get("anchor_id")
+    if declared is None:
+        return ""
+    text = str(declared).strip()
+    if not text:
+        return ""
+    try:
+        return UUID(text)
+    except ValueError:
+        return _Refusal(
+            _CODE_ANCHOR_ID_SHAPE,
+            f"a target's anchor_id must be the stored identity of a source_anchor, and this one is "
+            f"{declared!r}; cite a place the dataset holds, or omit anchor_id to author a new one",
+        )
+
+
 def _plan_target_inner(
-    entry_id: str,
+    fields: _EntryFields,
     target: Mapping[str, Any],
     source: _Source,
     written: str,
-    authored: _Authored,
+    revision_id: str,
 ) -> tuple[_TargetPlan | None, _Refusal | None]:
     """One target's whole read, with the failure boundary of :func:`_plan_target` around it."""
 
@@ -1560,23 +2010,36 @@ def _plan_target_inner(
     observation = _observe(resolved, locator)
     if isinstance(observation, _Refusal):
         return None, observation.at(written)
+    named = _named_anchor_id(target)
+    if isinstance(named, _Refusal):
+        return None, named.at(written)
     route_path = target.get("governing_route")
-    identities = _target_identities(source.repository, entry_id, written, locator)
+    identities = _target_identities(
+        source.repository,
+        written,
+        locator,
+        _Authoring(
+            entry_id=fields.entry_id,
+            revision_id=revision_id,
+            named_anchor_id=None if named == "" else str(named),
+        ),
+    )
     return (
         _TargetPlan(
-            entry_id=entry_id,
+            entry_id=fields.entry_id,
             path=written,
             step=resolved.step,
             completed_path=resolved.path,
             blob=resolved.blob,
             locator=locator,
             observation=observation,
-            role=_authored_role(None if authored is None else authored.role),
-            rationale="" if authored is None else authored.rationale,
+            role=_authored_role(fields.role),
+            rationale=fields.role_rationale,
             route_path=None if route_path is None else str(route_path),
             route_id=identities.route_id,
             anchor_id=UUID(identities.anchor_id),
             claim_id=identities.claim_id,
+            declares_anchor=named == "",
         ),
         None,
     )
@@ -2174,6 +2637,17 @@ def _distinct_routes(plans: tuple[_Plan, ...]) -> dict[str, str]:
     return wanted
 
 
+def _replayed_routes(plans: Sequence[_Plan]) -> dict[str, str]:
+    """The scopes the *replayed* entries name, whose rows the runs that admitted them already wrote.
+
+    Seeding the ledger with them is what makes ``routes_reused`` tell the truth about a repeat: the
+    scopes' rows did exist before this run, and this run authored none of them. They are seeded in
+    ``answered`` only, never in ``attached``, so the row count stays a count of rows this run wrote.
+    """
+
+    return _distinct_routes(tuple(plan for plan in plans if plan.replayed))
+
+
 def _author_route_rows(
     store: OpenedKnowledgeStore,
     repository: RepositoryIdentity,
@@ -2434,8 +2908,20 @@ def _batch_refused(
 # --------------------------------------------------------------------------------------------
 
 
-def _identity(repository: RepositoryIdentity, kind: str, entry_id: str, within: str = "") -> str:
-    """One derived identity: the repository it belongs to, which identity it is, and the entry.
+def _identity(
+    repository: RepositoryIdentity, kind: str, discriminator: str, within: str = ""
+) -> str:
+    """One **derived citation** identity: its repository, which identity it is, and its discriminator.
+
+    This is the derivation the route, the anchor and the claim are minted by, and it is deliberately
+    not the derivation an invariant or a revision uses any more: those two are **allocated** by
+    :func:`_creation`, because a stored truth's identity must not be a function of the local hand-off
+    label two independent tasks may both have numbered.
+
+    ``discriminator`` is what the identity is *about*, and it differs by kind on purpose: a route and
+    an anchor are keyed on the entry that names the place, while a claim is keyed on the exact
+    revision whose edge it records, so two independent tasks that reuse a label and cite one construct
+    mint two claims rather than one. The label is never an input to a claim.
 
     The stable half is the **repository's own namespace**, never the code base commit. Deriving from
     the base commit made one repository's knowledge a function of the baseline it happened to be read
@@ -2456,7 +2942,9 @@ def _identity(repository: RepositoryIdentity, kind: str, entry_id: str, within: 
     contributes only the kind it already carried, which is its existing behaviour.
     """
 
-    return str(uuid5(_INGEST_NAMESPACE, f"{repository.repository_id}|{kind}|{entry_id}|{within}"))
+    return str(
+        uuid5(_INGEST_NAMESPACE, f"{repository.repository_id}|{kind}|{discriminator}|{within}")
+    )
 
 
 def _authored_role(authored: RealizationRole | None) -> RealizationRole:
@@ -2515,6 +3003,26 @@ def _committed_outcome(plan: _Plan, routes: tuple[RouteOutcome, ...]) -> EntryOu
             _target_outcome(target, routes, index) for index, target in enumerate(plan.targets)
         ),
         routes=routes,
+    )
+
+
+def _replayed_outcome(plan: _Plan) -> EntryOutcome:
+    """One entry an earlier run of this operation already stored: the same ids, and no second write.
+
+    It is reported **committed** because that is what the operation's outcome is -- the truth is
+    committed and its identities are the ones it was allocated -- and the route each anchor carries is
+    rendered ``reused`` because that is the fact: the association was recorded when the creation was
+    admitted, and this run neither authored nor re-attached it.
+    """
+
+    return _committed_outcome(
+        plan,
+        tuple(
+            RouteOutcome(target.route_path, target.route_id, _ROUTE_REUSED)
+            if target.route_path is not None
+            else RouteOutcome(None, None, _ROUTE_UNGOVERNED)
+            for target in plan.targets
+        ),
     )
 
 
@@ -2745,12 +3253,18 @@ def _report(
         code_tree_source=target.trees.code_source,
         repository_id=repository.repository_id,
         derived_identities=(
-            "uuid5 over one fixed curator-ingest namespace, the repository's own namespace "
-            "identity, which identity it is (invariant, revision, anchor, claim, route), and the "
-            "entry's own id -- plus, for a target, what inside the written path the citation is "
-            "about: a symbol's qualified name, or the locator kind when there is nothing finer. The "
-            "stable half is the repository namespace and never the enclosure's recorded code base "
-            "commit, because identity must not move when the baseline or the line advances"
+            "an invariant and its first revision are ALLOCATED by this API -- a fresh uuid4 each, "
+            "recorded in the candidate's allocation journal under an idempotency key scoped by the "
+            "enclosure's own task identity, so an independent task reusing a local hand-off label "
+            "mints a truth of its own while a repeat of one operation resolves to the identities it "
+            "already holds; a citation's route, anchor and claim are derived as uuid5 over one fixed "
+            "curator-ingest namespace, the repository's own namespace identity, which identity it is, "
+            "and the entry's own id -- plus, for a target, what inside the written path the citation "
+            "is about: a symbol's qualified name, or the locator kind when there is nothing finer. No "
+            "allocated identity contains the enclosure, the branch, the baseline or the label, because "
+            "a stored identity must stay usable from any task; the derived half's stable component is "
+            "the repository namespace and never the enclosure's recorded code base commit, because "
+            "identity must not move when the baseline or the line advances"
         ),
         dry_run=dry_run,
         entries_read=read.ids,
@@ -2791,15 +3305,20 @@ def _counts(read: _Read, run: _Run) -> IngestCounts:
     ledger = run.ledger
     reused = 0 if ledger is None else len(ledger.reused_paths)
     authored = 0 if ledger is None else len(ledger.authored)
-    committed = read.targets
-    every_target = (*committed, *read.resolved_before_refusal)
+    # ``locators_resolved`` is the set the anchor rows are written from, so a replayed plan is not in
+    # it: its anchor rows were written by the run that admitted the creation, and counting them here
+    # would claim this run handed the batch a construct it did not hand it. ``targets_completed`` and
+    # ``anchors_observed_exact`` are still counted over every planned target, because resolving and
+    # observing a place is work this run really did whatever became of the entry afterwards.
+    fresh = tuple(one for plan in read.planned if not plan.replayed for one in plan.targets)
+    every_target = (*read.targets, *read.resolved_before_refusal)
     return IngestCounts(
         entries_read=len(read.ids),
         rulings=len(read.rulings),
         targets_completed=len(every_target),
-        locators_resolved=len(committed),
-        anchors_observed_exact=sum(1 for one in committed if one.observation == _OBSERVED_EXACT),
-        route_paths=len({one.route_path for one in committed if one.route_path is not None}),
+        locators_resolved=len(fresh),
+        anchors_observed_exact=sum(1 for one in read.targets if one.observation == _OBSERVED_EXACT),
+        route_paths=len({one.route_path for one in read.targets if one.route_path is not None}),
         routes_authored=authored,
         routes_reused=reused,
         commands_sent=run.commands,

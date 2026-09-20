@@ -17,7 +17,7 @@ seam such a change would call.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -116,7 +116,7 @@ def merge_conflicted_stages(
     stages: Mapping[MergeInputRole, Path],
     repository_root: Path,
     commits: ConflictCommits,
-    reconciliation: AuthoredReconciliation | None = None,
+    reconciliations: Sequence[AuthoredReconciliation] = (),
 ) -> KnowledgeStageSettlement:
     """Merge three materialised index stages and publish the union into ``destination``.
 
@@ -171,7 +171,7 @@ def merge_conflicted_stages(
                 destination_path=destination,
                 expected_destination=identities["left"],
             ),
-            reconciliation=reconciliation,
+            reconciliations=tuple(reconciliations),
         )
     )
     if outcome.state == "structurally_merged" and outcome.publication_state == "published":

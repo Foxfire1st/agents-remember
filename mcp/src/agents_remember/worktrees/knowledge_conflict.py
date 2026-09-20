@@ -42,6 +42,7 @@ it nowhere, and never invents one.
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -202,7 +203,7 @@ def settle_knowledge_conflict(
     path: str,
     left: str,
     right: str,
-    reconciliation: AuthoredReconciliation | None = None,
+    reconciliations: Sequence[AuthoredReconciliation] = (),
 ) -> RefusedKnowledgeStage | None:
     """Route one conflicted knowledge dataset through the adapter, publishing into the worktree.
 
@@ -221,7 +222,7 @@ def settle_knowledge_conflict(
         stages=settlement.stages,
         repository_root=worktree,
         commits=ConflictCommits(base=settlement.base_commit, left=left, right=right),
-        reconciliation=reconciliation,
+        reconciliations=tuple(reconciliations),
     )
     if not outcome.settled:
         return RefusedKnowledgeStage(

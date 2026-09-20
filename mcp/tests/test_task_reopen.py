@@ -143,7 +143,9 @@ class SeriesReopenTests(unittest.TestCase):
             # A line that has advanced past its source is refused, and nothing at all is written.
             git(contract.code_repo_path, "branch", contract.code_work_branch)
             git(contract.code_repo_path, "checkout", "-q", contract.code_work_branch)
-            advanced = commit_file(contract.code_repo_path, "late.txt", "late\n", "Advance the line")
+            advanced = commit_file(
+                contract.code_repo_path, "late.txt", "late\n", "Advance the line"
+            )
             git(contract.code_repo_path, "checkout", "-q", contract.code_source_branch)
             before = contract.contract_path.read_bytes()
 

@@ -750,7 +750,10 @@ class _SeriesReopenPlan:
                 "auditIntent": SERIES_REOPEN_AUDIT_INTENT,
             },
             "documentReset": (
-                {"docPath": (self.contract.task_root / "task.json").as_posix(), "status": "inProgress"}
+                {
+                    "docPath": (self.contract.task_root / "task.json").as_posix(),
+                    "status": "inProgress",
+                }
                 if self.document is not None
                 else None
             ),
@@ -941,9 +944,7 @@ def _series_reopen_plan(
     in_flight = _series_in_flight(contract)
     recuts: list[_SeriesRefRecut] = []
     for side, repo, source_branch, work_branch in _series_reopen_sides(contract):
-        planned = _series_ref_recut(
-            side, repo, source_branch, work_branch, in_flight=in_flight
-        )
+        planned = _series_ref_recut(side, repo, source_branch, work_branch, in_flight=in_flight)
         if isinstance(planned, str):
             blockers.append(planned)
         else:
@@ -966,9 +967,7 @@ def _series_reopen_plan(
                 ),
             },
         )
-    tombstone = (
-        contract if _series_is_reset_tombstone(contract) else _reopened_contract(contract)
-    )
+    tombstone = contract if _series_is_reset_tombstone(contract) else _reopened_contract(contract)
     return _SeriesReopenPlan(
         contract=contract,
         tombstone=tombstone,
@@ -1202,7 +1201,9 @@ def reopen_series(contract: WorktreeContract, *, dry_run: bool = False) -> Workt
             "seriesRefs": [recut.payload() for recut in recuts],
             "doc": plan.payload()["documentReset"],
             "enclosureGeneration": plan.payload()["enclosureGeneration"],
-            "projectionEffects": [effect.model_dump(by_alias=True) for effect in projection_effects],
+            "projectionEffects": [
+                effect.model_dump(by_alias=True) for effect in projection_effects
+            ],
             "summary": summary,
             **_series_start_guidance(plan, summary),
         },

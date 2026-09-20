@@ -87,7 +87,12 @@ from pathlib import Path
 from typing import cast
 from unittest import mock
 
-from agents_remember.memory_quality.style.citations import source_index
+from agents_remember.memory_quality.style.citations import (
+    claim_change_router,
+    model,
+    range_resolution,
+    source_index,
+)
 from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.memory_quality.style.citations.source_index_state import (
     MAX_SOURCE_BYTES,
@@ -405,17 +410,9 @@ class BoundTreeResolutionTests(unittest.TestCase):
         the unit lane has no budget for a second copy of it.
         """
 
-        from agents_remember.memory_quality.style.citations import (
-            claim_change_router,
-            model,
-            range_resolution,
-        )
-
         # The defect, at the resolver: ``system/tools.md`` has no blob in the code tree, yet the
         # old fallback answered the memory root's file as though the code tree had carried it.
-        single = Trees(
-            code_root=self.code, memory_root=self.memory, candidate_tree=self.code_tree
-        )
+        single = Trees(code_root=self.code, memory_root=self.memory, candidate_tree=self.code_tree)
         self.assertIsNone(single.resolve("system/tools.md"))
         self.assertEqual(single.resolve("src/tracked.py"), self.code / "src" / "tracked.py")
         # The capability is not removed, it is PROVEN: a memory-rooted citation is answered by the
@@ -429,7 +426,9 @@ class BoundTreeResolutionTests(unittest.TestCase):
         self.assertEqual(both.resolve("system/tools.md"), self.memory / "system" / "tools.md")
         self.assertEqual(both.resolve("src/tracked.py"), self.code / "src" / "tracked.py")
 
-        citation = model.Citation(text="system/tools.md:1-1", path="system/tools.md", start=1, end=1)
+        citation = model.Citation(
+            text="system/tools.md:1-1", path="system/tools.md", start=1, end=1
+        )
         claim = model.Claim(
             line=1, anchors=(), citations=(citation,), malformed=(), unchecked_spans=0
         )
@@ -478,9 +477,7 @@ class BoundTreeResolutionTests(unittest.TestCase):
         bound_findings = range_resolution.claim_findings("onboarding/card.md", claim, bound_run)
         self.assertEqual(bound_run.tally.citations, 1)
         self.assertEqual(bound_run.tally.unresolved, 0)
-        self.assertNotIn(
-            "citation_source_vanished", [finding.code for finding in bound_findings]
-        )
+        self.assertNotIn("citation_source_vanished", [finding.code for finding in bound_findings])
 
 
 if __name__ == "__main__":  # pragma: no cover

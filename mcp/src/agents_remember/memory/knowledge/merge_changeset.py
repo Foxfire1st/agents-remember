@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -293,7 +293,7 @@ def apply_changeset(
     target_path: Path,
     *,
     within_transaction: Callable[[apsw.Connection], KnowledgeRefusal | None] | None = None,
-    reconciliation: AuthoredReconciliation | None = None,
+    reconciliations: Sequence[AuthoredReconciliation] = (),
 ) -> AppliedChangeset:
     """Apply one delta to one private target with a conflict callback that aborts.
 
@@ -302,12 +302,18 @@ def apply_changeset(
     blocking conflict is captured and the whole application is rolled back, rather than continuing
     with ``OMIT`` to collect a cosmetically complete list.
 
-    ``reconciliation`` is the single exception, and it is the caller's decision rather than this
-    operation's: when it names exactly the row the engine just refused, the callback applies that
-    row's authored decision -- ``keep-left`` retracts the arriving change, ``keep-right`` applies it
-    over the stored value -- records the decision in ``resolved``, and lets the application continue
-    to the *next* conflict, which is refused exactly as before. A row the caller did not name is
-    never touched, so nothing here becomes an automatic resolution policy.
+    ``reconciliations`` are the caller's decisions rather than this operation's: when one names
+    exactly the row the engine just refused, the callback applies that row's authored decision --
+    ``keep-left`` retracts the arriving change, ``keep-right`` applies it over the stored value --
+    records the decision in ``resolved``, and lets the application continue to the *next* conflict,
+    which is refused exactly as before. A row no decision names is never touched, so nothing here
+    becomes an automatic resolution policy.
+
+    It is a **sequence** because one retained conflict is rarely the last one. A decision that
+    settles the first conflict reveals the second, and the attempt that answers the second has to
+    carry the first with it: without it the merge re-refuses the row the first decision already
+    answered, the two conflicts alternate, and the caller is offered a decision it has already made
+    and that has already had its effect. Each decision still answers only the row it named.
 
     The key is copied here rather than looked up afterwards for two reasons: an APSW ``TableChange``
     expires when the iterator advances, and this is the only place the engine names the row it
@@ -329,9 +335,9 @@ def apply_changeset(
     target = Path(target_path)
 
     def conflict(code: int, change: object) -> int:
-        decision = _authored_decision(reconciliation, int(code), change)
+        decision = _authored_decision(reconciliations, int(code), change)
         if decision is not None:
-            if reconciliation is not None and reconciliation.record_id is None:
+            if any(one.record_id is None for one in reconciliations):
                 rowless.append(int(code))
             settled.append(
                 ResolvedConflict(
@@ -496,7 +502,7 @@ def _row_record_id(connection: apsw.Connection, table: str, rowid: int) -> str |
 
 
 def _authored_decision(
-    reconciliation: AuthoredReconciliation | None, code: int, change: object
+    reconciliations: Sequence[AuthoredReconciliation], code: int, change: object
 ) -> AuthoredDecision | None:
     """Return the caller's decision for exactly this conflict, or ``None``.
 
@@ -505,21 +511,27 @@ def _authored_decision(
     table and rendered key both -- and a conflict the engine reported without a change is answered
     only by the row-less decision. Nothing else matches, so a decision always applies to the conflict
     the caller read and never to a neighbouring one.
+
+    ``reconciliations`` is a sequence because one retained conflict is rarely the last one, and the
+    attempt that answers the second has to carry the first -- see
+    :func:`~agents_remember.memory.knowledge.merge_changeset.apply_changeset`. It is still not a
+    policy: each decision answers only the row it named, and every conflict no decision names is
+    refused exactly as it was.
     """
 
-    if reconciliation is None:
-        return None
     table = getattr(change, "name", None)
-    if reconciliation.record_id is None:
-        if table is not None or code != _FOREIGN_KEY_CONFLICT:
-            return None
+    for reconciliation in reconciliations:
+        if reconciliation.record_id is None:
+            if table is None and code == _FOREIGN_KEY_CONFLICT:
+                return reconciliation.decision
+            continue
+        key = _conflicting_key(change)
+        if table is None or key is None or str(table) != reconciliation.table:
+            continue
+        if "/".join(key) != reconciliation.record_id:
+            continue
         return reconciliation.decision
-    key = _conflicting_key(change)
-    if table is None or key is None or str(table) != reconciliation.table:
-        return None
-    if "/".join(key) != reconciliation.record_id:
-        return None
-    return reconciliation.decision
+    return None
 
 
 def _rendered_key(change: object) -> str:

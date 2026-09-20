@@ -303,9 +303,7 @@ def test_a_receipt_reports_the_rows_the_store_now_holds(
             ),
             AddSourceAnchor(anchor=anchor_draft(claim_seeds.anchor_id)),
             AddRealizationClaim(
-                claim=claim_draft(
-                    claim_id=claim_seeds.claim_id, revision_id=seeds.successor_id
-                ),
+                claim=claim_draft(claim_id=claim_seeds.claim_id, revision_id=seeds.successor_id),
                 anchor=AnchorReference(anchor_id=str(claim_seeds.anchor_id)),
             ),
         )
