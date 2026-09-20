@@ -498,6 +498,16 @@ def _require_admitted_step(
     endpoint removed the whole step and the check passed vacuously -- which is how a genuinely
     foreign commit could be admitted. A position that reaches past the step can no longer erase it,
     and the position still admits the step it actually records.
+
+    "Admits the step it actually records" is why a position INSIDE the step admits its own ancestry
+    too. The shape this rule names is one landing merged with an official position the contract
+    itself synced with, and when that merge is the step's own endpoint the whole step IS that
+    position's history: ``8dfc11b8`` on the 260915-KS master is exactly that merge -- its parents are
+    the previous landing ``7db50f8f`` and the synced position ``8dd62345``, and every commit the step
+    adds is reachable from ``8dd62345``. Admitting the position while refusing the line it introduced
+    refused the very shape the rule exists to allow. The admission stays bounded to the positions
+    this call was given: a position that merely descends FROM the step is not inside it, so it still
+    cannot vacate a commit the step genuinely introduced.
     """
 
     if earlier == later:
@@ -518,10 +528,12 @@ def _require_admitted_step(
     if step.side == "memory":
         revision_args.extend(["--", ".", ":(top,exclude)memory.md"])
     admitted = set(positions)
+    official = _positions_inside_the_step(repository, earlier, later, admitted)
     foreign = [
         commit
         for commit in require_git(repository, revision_args).split()
         if commit not in admitted
+        and not _reached_by_an_official_position(repository, commit, official)
     ]
     if foreign:
         raise CloseoutQueueError(
@@ -529,6 +541,39 @@ def _require_admitted_step(
             f"atomic series {step.side} ref adds history beyond the exact leaf landing chain and the "
             f"reconciled source line at {step.step}: {', '.join(foreign[:5])}",
         )
+
+
+def _positions_inside_the_step(
+    repository: Path,
+    earlier: str,
+    later: str,
+    positions: set[str],
+) -> tuple[str, ...]:
+    """The recorded positions INSIDE this step: strictly after its start, at or before its end.
+
+    A position past the step is deliberately excluded, and so is the start itself. Excluding the
+    start costs nothing -- the revision walk already removes everything the start reaches -- while
+    excluding a position past the step is what keeps the enumeration honest: such a position reaches
+    the whole step and would erase a commit the step genuinely introduced.
+    """
+
+    return tuple(
+        position
+        for position in sorted(positions)
+        if position != earlier
+        and is_ancestor(repository, earlier, position)
+        and is_ancestor(repository, position, later)
+    )
+
+
+def _reached_by_an_official_position(
+    repository: Path,
+    commit: str,
+    official: tuple[str, ...],
+) -> bool:
+    """Whether a position inside this step reaches the commit, so the step is that position's line."""
+
+    return any(is_ancestor(repository, commit, position) for position in official)
 
 
 def _landing_source_positions(

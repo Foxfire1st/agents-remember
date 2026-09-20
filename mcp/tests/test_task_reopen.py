@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 from unittest import mock
 
 from agents_remember.tasks import (
+    ReviewState,
     read_task_doc,
+    write_task_doc,
 )
 from agents_remember.worktrees import reopen as reopen_module
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_location import (
@@ -20,6 +23,7 @@ from agents_remember.worktrees.reopen import SERIES_REOPEN_AUDIT_INTENT, reopen_
 from agents_remember.worktrees.scheduling_mode import TERMINAL_SERIES_CLEANUP
 from agents_remember.worktrees.worktree_contract import (
     load_contract,
+    write_contract,
 )
 from task_reopen_test_support import (
     _completed_leaf_contract,
@@ -111,13 +115,15 @@ class SeriesReopenTests(unittest.TestCase):
     """
 
     def test_a_terminal_series_is_reopened_without_ever_moving_a_live_ref(self) -> None:
-        """One case, two facts: a live ref is never moved, and the reset is otherwise complete.
+        """One case, four facts, because they are one promise told from both of its arrivals.
 
-        They are one subject because they are the two halves of the same promise -- the reopen
-        re-cuts only the ref the series' own cleanup retired, and it performs the whole sanctioned
-        transition (contract cells, integration ref, master document, enclosure generation) when
-        that ref is genuinely absent -- and splitting them would have cost a budget slot the
-        integration lane did not have.
+        A live ref is never moved, the reset is otherwise complete, a series that is *already* live
+        at a collected address is re-addressed instead of refused, and the review counter the
+        completion spent is cleared. Splitting them would have cost budget slots the lanes did not
+        have, and none of them stands alone: the ref rule and the reset are the two halves of "a
+        reopen never moves an existing ref"; the live arrival is the same publication entered
+        without a reset, which is why it must leave the branch exactly where it is; and the counter
+        is the same reset applied to the document instead of the contract (D-58).
         """
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -212,6 +218,142 @@ class SeriesReopenTests(unittest.TestCase):
             master = read_task_doc(contract.task_root / "task.json")
             self.assertEqual(master.status, "inProgress")
             self.assertTrue(any("reopened" in d.decision for d in master.decisions))
+
+        # The other way to arrive (D-58) is the same publication entered without a reset.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._assert_a_live_unaddressed_series_is_re_addressed(Path(tmp))
+
+        # And the state the first attempt of that publication leaves behind.
+        with tempfile.TemporaryDirectory() as tmp:
+            self._assert_an_interrupted_series_reset_is_resumed(Path(tmp))
+
+    def _assert_an_interrupted_series_reset_is_resumed(self, workspace: Path) -> None:
+        """The reset is durable on disk while the locator is still the collected generation.
+
+        That is the state a publication which was refused or interrupted leaves behind, and the
+        state the 260915-KS master itself was found in. A resume must finish the transition rather
+        than refuse the branches the series is standing on, which is the whole difference between
+        an interrupted reopen being recoverable and being stranded. A plain method for the same
+        reason as its sibling: a second collected subject would have cost a slot no lane had.
+        """
+
+        contract = _completed_series_contract(workspace)
+        git(contract.code_repo_path, "branch", contract.code_work_branch)
+        git(contract.code_repo_path, "checkout", "-q", contract.code_work_branch)
+        landed = commit_file(contract.code_repo_path, "landed.txt", "landed\n", "Land the work")
+        git(contract.code_repo_path, "checkout", "-q", contract.code_source_branch)
+        write_contract(contract.contract_path, reopen_module._reopened_contract(contract))
+        self.assertEqual(load_contract(contract.contract_path).cleanup, "reopened")
+
+        resumed = reopen_task(contract.contract_path)
+
+        self.assertEqual((resumed.returncode, resumed.payload["state"]), (0, "reopened"))
+        self.assertEqual(resumed.payload["mode"], "publish")
+        self.assertEqual(
+            branch_commit(contract.code_repo_path, contract.code_work_branch),
+            landed,
+            "a resumed reopen finishes the publication without moving the branch",
+        )
+        resumed_location = resolve_lifecycle_operation_location(
+            contract.coordination_root, contract.contract_path
+        )
+        self.assertEqual(resumed_location.locator.publicationKind, "successor-enclosure")
+        self.assertIsNone(resumed_location.locator.terminalArchivePath)
+
+    def _assert_a_live_unaddressed_series_is_re_addressed(self, workspace: Path) -> None:
+        """D-58: the series is ALREADY live, and only its enclosure generation is missing.
+
+        Reopened by hand before this route existed, or by a reopen whose successor publication
+        never ran, the series is live on disk and its integration branch carries the series' own
+        landed work. Nothing here is a reset -- there is nothing terminal to cut -- so the same
+        call must recognise the state, leave the branch exactly where the work put it, publish the
+        successor generation, and clear the review counter the completion spent. It is a plain
+        method because the case above is the one collected subject; a second collected subject
+        would have cost a budget slot neither lane had.
+        """
+
+        contract = _completed_series_contract(workspace)
+        git(contract.code_repo_path, "branch", contract.code_work_branch)
+        git(contract.code_repo_path, "checkout", "-q", contract.code_work_branch)
+        landed = commit_file(contract.code_repo_path, "landed.txt", "landed\n", "Land the work")
+        git(contract.code_repo_path, "checkout", "-q", contract.code_source_branch)
+        terminal = inspect_lifecycle_operation_locator(
+            contract.coordination_root, contract.contract_path
+        )
+        archived = terminal.locator
+        assert archived is not None and archived.publicationRequestId
+        # The state the hand reopen left: live, every progress cell untouched, and an approval
+        # note that belonged to the completion rather than to the landing still to come.
+        write_contract(
+            contract.contract_path,
+            replace(
+                contract,
+                cleanup="pending",
+                closeout_status="not-started",
+                integration_status="not-started",
+                code_commit="",
+                integrated_code_commit="",
+                commit_approval_note="the completion's own approval note",
+                lifecycle_id="",
+            ),
+        )
+        # A completion that spent three review rounds, so the counter has something to clear.
+        master_path = contract.task_root / "task.json"
+        write_task_doc(
+            contract.task_root,
+            read_task_doc(master_path).model_copy(
+                update={"status": "Completed", "reviewState": ReviewState(round=3)}
+            ),
+        )
+
+        result = reopen_task(contract.contract_path)
+
+        self.assertEqual((result.returncode, result.payload["state"]), (0, "reopened"))
+        self.assertEqual(result.payload["mode"], "publish")
+        self.assertEqual(
+            [
+                recut["action"]
+                for recut in cast("list[dict[str, object]]", result.payload["seriesRefs"])
+            ],
+            ["advance"],
+        )
+        self.assertEqual(
+            branch_commit(contract.code_repo_path, contract.code_work_branch),
+            landed,
+            "a series that is already live keeps the work it landed",
+        )
+        re_addressed = load_contract(contract.contract_path)
+        self.assertEqual(re_addressed.cleanup, "pending")
+        self.assertNotIn(re_addressed.cleanup, TERMINAL_SERIES_CLEANUP)
+        location = resolve_lifecycle_operation_location(
+            contract.coordination_root, contract.contract_path
+        )
+        self.assertEqual(location.locator.publicationKind, "successor-enclosure")
+        successor_predecessor = location.locator.predecessorTerminal
+        assert successor_predecessor is not None, "a successor must cite its predecessor"
+        self.assertEqual(
+            successor_predecessor.publicationRequestId,
+            archived.publicationRequestId,
+        )
+        self.assertEqual(location.manifest.auditIntent, SERIES_REOPEN_AUDIT_INTENT)
+        self.assertIsNone(location.locator.terminalArchivePath)
+        reattached = series_attach_result(re_addressed)
+        self.assertEqual((reattached.returncode, reattached.payload["state"]), (0, "attached"))
+        # The reopen clears the counter the completion spent, so the next round is the first.
+        cleared = read_task_doc(master_path)
+        self.assertEqual(cleared.status, "inProgress")
+        assert cleared.reviewState is not None
+        self.assertEqual(
+            (
+                cleared.reviewState.round,
+                cleared.reviewState.pending,
+                cleared.reviewState.additionalRounds,
+                cleared.reviewState.developerApproval,
+                cleared.reviewState.baselineFindings,
+                cleared.reviewState.remainingFindingIds,
+            ),
+            (0, False, 0, None, [], []),
+        )
 
 
 if __name__ == "__main__":

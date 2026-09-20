@@ -43,7 +43,7 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "ce2927584b6f35b8bb58458d5bd3d0474d42ee777aa317f6581b0f542bc6700f"
+LIFECYCLE_CATALOG_SHA256 = "c189cf5fbd79f304e99a34763f24876c8639bbab8819a3372d813b7bf387bb7c"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
 ``260918-TSIP-L10`` registered the module this leaf's own red base exposed as ungoverned:
@@ -70,6 +70,16 @@ input is the node lockfile, so ``mcp/tests/fixtures/repository_profiles/node/pac
 gained those same two consumers -- a consumer change, not a new artifact, exactly as the sibling
 leaves' registrations each moved theirs. Contract count **15 -> 16**, artifact count **65 -> 66**;
 the digest this value replaces was ``6ec7eb0d…``.
+
+**Re-derived at the sync.** This master then merged onto the advanced sprint line (``756c47b3``),
+whose own catalog value read fifteen contracts and sixty-five artifacts at ``825abfd6…``. Both
+lines changed this file and git merged it cleanly, so **neither side's pin described the merged
+bytes**: the merged catalog carries this master's ``tool-refusal-census-cases`` contract and its
+shared-support artifact *and* the sibling line's consumer re-registrations, and its digest is
+neither side's. The three values were re-derived from the merged file itself
+(``sha256sum mcp/tests/evidence-lifecycle.toml``) rather than chosen from a side. The counts happen
+to equal this line's because the sibling line's changes were all consumer lists; the digest does
+not.
 
 The value this line carried before is the catalog after ``260915-KS``'s L28 leaf repaired the missing-consumer
 registration that made the repository's own gate fail. L25 registered no artifact and no contract of its

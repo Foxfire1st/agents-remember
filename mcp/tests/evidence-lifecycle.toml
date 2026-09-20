@@ -1262,6 +1262,7 @@ replacement_contract = "contract:knowledge-snapshot-lifecycle-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_candidate_workspace.py",
+  "mcp/tests/test_knowledge_curator_ingest_list.py",
   "mcp/tests/test_knowledge_portable_boundaries.py",
   "mcp/tests/test_knowledge_snapshot_publication.py",
 ]
@@ -1286,6 +1287,8 @@ consumers = [
   "mcp/tests/test_knowledge_portable_boundaries.py",
   "mcp/tests/test_knowledge_portable_roundtrip.py",
   "mcp/tests/test_knowledge_merge_right_side_writes.py",
+  "mcp/tests/test_sync_parked_candidate.py",
+  "mcp/tests/test_worktree_sync.py",
 ]
 
 [[artifact]]

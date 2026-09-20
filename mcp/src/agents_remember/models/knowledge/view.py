@@ -36,10 +36,11 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Annotated, Literal, Protocol, get_args, runtime_checkable
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from agents_remember.models.knowledge.base import (
     LABEL_MAX_LENGTH,
+    PATH_MAX_LENGTH,
     PROSE_MAX_LENGTH,
     REFERENCE_MAX_LENGTH,
     SHA256_PATTERN,
@@ -54,7 +55,11 @@ from agents_remember.models.knowledge.classification import (
     mechanical_rule,
 )
 from agents_remember.models.knowledge.graph import RealizationRole
-from agents_remember.models.knowledge.read import AnchorResolutionState, KnowledgeReadSnapshot
+from agents_remember.models.knowledge.read import (
+    AnchorResolutionState,
+    KnowledgeReadSnapshot,
+    PathSeed,
+)
 from agents_remember.models.knowledge.source import SourceLocator
 
 __all__ = [
@@ -1083,10 +1088,25 @@ class ViewRequest(KnowledgeModel):
     repository_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     invariant_revision_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     family_revision_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+    source_path: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
     record_kinds: tuple[str, ...] = ()
     ordering_input: OrderingInput = "stable_ordering"
     limit: int = Field(default=MAX_VIEW_ROWS, ge=1, le=MAX_VIEW_ROWS)
     continuation: ViewContinuation | None = None
+
+    @field_validator("source_path")
+    @classmethod
+    def _require_a_confined_path_seed(cls, value: str | None) -> str | None:
+        """The source-path seed, validated by the SHIPPED path-seed rule rather than a copy of it.
+
+        ``PathSeed`` already refuses a seed that is not a confined repository-relative POSIX path --
+        "a seed is not a filesystem address, and a path that no stored anchor could carry selects
+        nothing by construction rather than by a lookup that happens to miss". Constructing one here
+        keeps that one rule in one place: a spelling the write path refuses cannot become a read seed
+        that is merely answered with an absence.
+        """
+
+        return None if value is None else PathSeed(path=value).path
 
 
 class ViewResult(KnowledgeModel):

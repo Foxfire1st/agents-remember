@@ -103,6 +103,7 @@ PRIORITY_OUTCOME_PREFIX = "declared_priority: "
 # The rule every generated row's *content* is classified under when its own record is mechanical.
 DETECTION_RULE = ("ordering.trigger-rule", 1)
 CONSEQUENCE_RULE = ("consequence.record-payload-byte-equal", 1)
+REGISTERED_ROLE_RULE = ("ordering.registered-role", 1)
 
 
 @dataclass(frozen=True)
@@ -442,15 +443,51 @@ def _priority_of(decisions: Sequence[AuthoredDecision]) -> int | None:
     return next(iter(positions))
 
 
+def _seed_revisions(reader: KnowledgeViewReader, request: ViewRequest) -> set[str] | None:
+    """The revisions realized at the request's source path, or ``None`` when it names no path.
+
+    This is the front door's path seed: a caller that knows only a file -- which is what an ordinary
+    code hit knows -- can ask what governs it without first discovering an invariant or family
+    revision id. ``None`` means "no restriction", which keeps every existing caller's behaviour, and
+    an empty set means the path is recorded as realized nowhere, which is an answer rather than a
+    fallback to everything.
+    """
+
+    if not request.source_path:
+        return None
+    return {
+        row.revision_id
+        for row in reader.realization_rows()
+        if _string(row.payload.get("path")) == request.source_path and row.revision_id
+    }
+
+
 def _invariant_candidates(
     reader: KnowledgeViewReader, request: ViewRequest
 ) -> tuple[Candidate, ...]:
-    """The recorded facts the invariant view selects for one invariant revision."""
+    """The recorded facts the invariant view selects for one invariant revision.
+
+    Both loops below select on the SAME frontier, and that is the repair rather than a detail. The
+    invariant rows were always filtered by the requested revision while every realization row in the
+    namespace was appended unconditionally, so an exact invariant-revision read returned the requested
+    statement *plus* realizations belonging to other invariants -- including ones in a different
+    family. A realization answers "where is this realized", so one that realizes a revision this view
+    did not select is a different subject's answer, and reporting it attributes a location to the
+    wrong statement.
+
+    With no revision requested the frontier is every revision, which is exactly the broader view this
+    operation already offered, so the filter restricts only where the caller asked it to.
+    """
 
     candidates: list[Candidate] = []
+    selected: set[str] = set()
+    seeded = _seed_revisions(reader, request)
     for row in reader.invariant_rows():
         if request.invariant_revision_id and row.revision_id != request.invariant_revision_id:
             continue
+        if seeded is not None and (row.revision_id or "") not in seeded:
+            continue
+        selected.add(row.revision_id or "")
         decisions = _decisions_for(reader, "invariant_revision", row.revision_id or "")
         candidates.append(
             Candidate(
@@ -471,6 +508,10 @@ def _invariant_candidates(
             )
         )
     for row in reader.realization_rows():
+        if row.revision_id not in selected:
+            # The revision this realizes is not on the selected frontier, so this is another
+            # subject's location and carrying it would answer a question nobody asked.
+            continue
         candidates.append(
             Candidate(
                 subject=SubjectRef(
@@ -537,7 +578,19 @@ def _source_context_candidates(
 
 
 def _family_candidates(reader: KnowledgeViewReader, request: ViewRequest) -> tuple[Candidate, ...]:
-    """The family view's rows, keeping member-record and attributed-source changes apart."""
+    """The family view's rows: the joint guarantee, its members, and where those members live.
+
+    A family read used to return the joint guarantee and the detection signals and nothing else, so a
+    caller asking which obligations a family admits -- and where they are implemented -- was told it
+    had a complete declared view while being shown neither. The two things missing are the two a
+    planner actually needs: the members, and the locations of the revisions those members name.
+
+    Membership is recorded rather than authored (``family_member`` carries both ids and its own
+    provenance), so a member row and the locations it points at are mechanical rows. The locations are
+    filtered to the members this read selected -- the same frontier discipline the invariant view
+    applies to realizations, for the same reason: a location belonging to a revision the view did not
+    select is another subject's answer.
+    """
 
     candidates: list[Candidate] = []
     for row in reader.family_rows():
@@ -561,9 +614,75 @@ def _family_candidates(reader: KnowledgeViewReader, request: ViewRequest) -> tup
                 change_locus="member_record",
             )
         )
+    members = _family_members(reader, request, candidates)
+    _member_locations(reader, members, candidates)
     for row in reader.rows("detection_signal"):
         candidates.append(_signal_candidate(row))
     return tuple(candidates)
+
+
+def _family_members(
+    reader: KnowledgeViewReader, request: ViewRequest, candidates: list[Candidate]
+) -> set[str]:
+    """Append this family's members and return the invariant revisions they name."""
+
+    members: set[str] = set()
+    seeded = _seed_revisions(reader, request)
+    for row in reader.rows("family_member"):
+        member_family = _string(row.payload.get("family_revision_id"))
+        if request.family_revision_id and member_family != request.family_revision_id:
+            continue
+        member_seed = _string(row.payload.get("invariant_revision_id"))
+        if seeded is not None and member_seed not in seeded:
+            continue
+        member_revision = _string(row.payload.get("invariant_revision_id"))
+        if member_revision:
+            members.add(member_revision)
+        candidates.append(
+            Candidate(
+                subject=SubjectRef(
+                    record_kind="family_member",
+                    record_id=row.record_id,
+                    revision_id=member_family,
+                ),
+                label=member_revision or row.record_id,
+                authored=None,
+                mechanical_rule_id=REGISTERED_ROLE_RULE,
+                fact_kind="family_member",
+                statement=member_revision,
+                lifecycle=row.lifecycle,
+                change_locus="member_record",
+            )
+        )
+    return members
+
+
+def _member_locations(
+    reader: KnowledgeViewReader, members: set[str], candidates: list[Candidate]
+) -> None:
+    """Append where the selected members are realized, and nowhere else."""
+
+    for row in reader.realization_rows():
+        if row.revision_id not in members:
+            continue
+        candidates.append(
+            Candidate(
+                subject=SubjectRef(
+                    record_kind="realization_claim",
+                    record_id=row.record_id,
+                    revision_id=row.revision_id,
+                ),
+                label=str(row.payload.get("path") or row.record_id),
+                authored=None,
+                mechanical_rule_id=REGISTERED_ROLE_RULE,
+                role=_string(row.payload.get("role")),
+                fact_kind="registered_realization",
+                statement=_string(row.payload.get("rationale")),
+                path=_string(row.payload.get("path")),
+                locator=_locator(row.payload.get("locator")),
+                change_locus="attributed_source",
+            )
+        )
 
 
 def _signal_candidate(row: object) -> Candidate:

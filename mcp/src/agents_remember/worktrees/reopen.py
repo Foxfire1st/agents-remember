@@ -36,6 +36,7 @@ from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.kernel.primitives.observer_paths import LANDING_FINAL_BASENAME
+from agents_remember.tasks import ReviewState
 from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.leaf_doc import find_leaf_doc
 from agents_remember.tasks.master_sync import demote_completed_master_if_unresolved
@@ -676,7 +677,7 @@ def _reopen_master_path(task_root: Path, doc: TaskDocument) -> Path | None:
 # 2. both integration branches are re-cut at the recorded source tips (never moved, and only
 #    when the cleanup that retired them left them absent), so a child leaf's lineage resolves;
 # 3. the master document is demoted out of ``Completed`` with an audit decision naming the
-#    reopen;
+#    reopen, and a review counter the completion spent is cleared;
 # 4. the enclosure root, manifest and journal are re-published as the successor generation of the
 #    archived one, which is what tells the terminal archive that this transition was sanctioned
 #    instead of tampering -- the new locator carries the exact archived predecessor, and the
@@ -688,6 +689,17 @@ def _reopen_master_path(task_root: Path, doc: TaskDocument) -> Path | None:
 # proves the tombstone on disk is the predecessor it accepts. If step 4 is interrupted, the
 # tombstone is already durable and the reopened series' own predicate lets the same call resume
 # exactly that publication rather than rewriting the reset.
+#
+# There is a second way to arrive here, and it is the one D-58 named. A series reopened by hand
+# before step 4 existed -- or by a reopen whose publication was interrupted and then forgotten --
+# is already live on disk: ``cleanup: pending``, every progress cell virgin, its integration
+# branches carrying the series' own landed work, and a locator that is still terminal-archived.
+# The gates above refuse it, correctly for a reset (there is nothing terminal to cut) and
+# uselessly in fact, because the only missing half is step 4. So the same call recognises that
+# state -- ``_series_is_live_unaddressed`` reads the locator, which is the one fact that separates
+# "the generation was collected" from "somebody is mid-transition" -- leaves the branches exactly
+# where the series' own work put them, and publishes the successor generation. The publication
+# itself is unchanged: the same tombstone proof, the same guards, the same archive citation.
 
 SERIES_REOPEN_AUDIT_INTENT = (
     "task_reopen reset this terminal atomic series and re-published its successor enclosure "
@@ -837,9 +849,14 @@ def _series_landing_reachability(side: _SeriesSide) -> str | None:
     """The blocker when this side's landing cannot be placed on the line, or ``None``.
 
     A *missing* recorded landing is a defect in the record, and there is nothing to rebuild from:
-    that is a blocker on every arm. A landing that is present but not an ancestor of the source tip
-    is a different fact -- the line moved out from under it -- and it is answered below rather than
+    that is a blocker on every arm that has to **build** a ref, because a branch created from
+    nothing would be a fiction. A landing that is present but not an ancestor of the source tip is
+    a different fact -- the line moved out from under it -- and it is answered below rather than
     refused here, because the series' own work still exists in this repository.
+
+    The blocker is asked for only on the creating arm. A branch that already exists and is left
+    exactly where it stands needs no landing to stand on, which is what lets a series reopened by
+    hand -- whose reset blanked all four landing cells -- be re-addressed rather than refused.
     """
 
     if not side.recorded_landing:
@@ -850,20 +867,50 @@ def _series_landing_reachability(side: _SeriesSide) -> str | None:
     return None
 
 
-def _series_landing_reconstruction(side: _SeriesSide, tip: str) -> str | None:
-    """The blocker when an *existing* branch cannot be left where it is, or ``None``.
+def _series_landing_reconstruction(
+    side: _SeriesSide, tip: str, *, in_flight: bool
+) -> _SeriesRefRecut | str | None:
+    """What to do with an *existing* integration branch, or ``None`` when there is none.
 
-    The reopen never moves an existing ref, so a branch that already exists and does not stand on
-    the source tip is refused whatever the landing says: rewinding or advancing someone else's
-    branch is the one thing a reset must not do silently. This is the arm that keeps the
-    reconstruction below from becoming a licence to move a live ref.
+    The reopen never moves an existing ref, and that promise is one rule in both worlds this route
+    serves -- which is why both decisions are taken here, on the same three facts:
+
+    * A **completed** series (``in_flight`` false) recorded its own integration and its cleanup
+      retired these branches, so a branch that exists and does not stand on the recorded source tip
+      can only be a ref somebody moved. Rewinding or advancing it is exactly what a reset must not
+      do silently, so it is refused whatever the landing says.
+    * A series that has **not** closed out is in flight: its integration branches are the line it is
+      standing on, so a branch ahead of its source tip is the series' own committed work rather
+      than a moved ref. ``advance`` records that it is left exactly where it is and nothing is
+      created; refusing there would strand the very line the series is landing on.
+
+    Ancestry is what separates the facts: standing on the source tip is ``present``, ahead of it is
+    ``advance`` when the series is in flight, and diverged or lagging is refused in both worlds.
     """
 
     if not branch_exists(side.repo, side.work_branch):
         return None
     observed = branch_commit(side.repo, side.work_branch)
     if observed == tip:
-        return None
+        return _SeriesRefRecut(
+            side.side,
+            side.repo,
+            side.work_branch,
+            side.source_branch,
+            tip,
+            "present",
+            side.recorded_landing,
+        )
+    if in_flight and is_ancestor(side.repo, tip, observed):
+        return _SeriesRefRecut(
+            side.side,
+            side.repo,
+            side.work_branch,
+            side.source_branch,
+            observed,
+            "advance",
+            side.recorded_landing,
+        )
     return (
         f"the {side.side} integration branch {side.work_branch!r} stands at {observed}, not the "
         f"recorded source tip {tip} of {side.source_branch!r}; the reopen never moves an existing "
@@ -871,17 +918,19 @@ def _series_landing_reconstruction(side: _SeriesSide, tip: str) -> str | None:
     )
 
 
-def _series_ref_recut(side: _SeriesSide) -> _SeriesRefRecut | str:
-    """Plan one side's re-cut, reconstruction, or adoption -- or return the blocker that forbids it.
+def _series_ref_recut(side: _SeriesSide, *, in_flight: bool) -> _SeriesRefRecut | str:
+    """Plan one side's re-cut, reconstruction, or adoption -- or return the blocker forbidding it.
 
-    Three decisions, in this order, and the order is the whole design:
+    Four decisions, in this order, and the order is the whole design:
 
-    1. **An existing ref is never moved.** A branch that exists and does not stand on the source tip
-       is refused; adopting it as ``present`` when it *does* stand there is the ordinary re-opened
-       state.
-    2. **A missing landing is a blocker.** There is nothing to rebuild from, and a branch created
-       from nothing would be a fiction.
-    3. **A retired branch is re-created at the source tip when the landing is still on that line**
+    1. **The source branch must exist and the work branch must be recorded.** Nothing below can be
+       decided without them, and each refusal names which side is missing what.
+    2. **An existing ref is never moved** (``_series_landing_reconstruction``): adopted as
+       ``present`` when it stands on the source tip, reported as ``advance`` when an in-flight
+       series is standing on its own committed work, and refused otherwise. The landing is *not*
+       consulted here, because a branch that is left where it stands needs nothing to stand on.
+    3. **A missing landing is a blocker** on the creating arm: there is nothing to rebuild from.
+    4. **A retired branch is re-created at the source tip when the landing is still on that line**
        -- the case the reopen was built for -- and **at the recorded landing when it is not**
        (``reconstructed``). The re-cut target is the source tip because a work branch recreated at
        the old landing would sit *behind* the source and the next integration could not
@@ -901,22 +950,20 @@ def _series_ref_recut(side: _SeriesSide) -> _SeriesRefRecut | str:
     if not side.work_branch:
         return f"the {side.side} series integration branch is not recorded in the contract."
     tip = branch_commit(side.repo, side.source_branch)
+    decision = _series_landing_reconstruction(side, tip, in_flight=in_flight)
+    if decision is not None:
+        return decision
     blocker = _series_landing_reachability(side)
     if blocker is not None:
         return blocker
-    blocker = _series_landing_reconstruction(side, tip)
-    if blocker is not None:
-        return blocker
-    reachable = is_ancestor(side.repo, side.recorded_landing, tip)
-    if not branch_exists(side.repo, side.work_branch):
-        action = "re-cut" if reachable else "reconstructed"
+    if is_ancestor(side.repo, side.recorded_landing, tip):
         return _SeriesRefRecut(
             side.side,
             side.repo,
             side.work_branch,
             side.source_branch,
             tip,
-            action,
+            "re-cut",
             side.recorded_landing,
         )
     return _SeriesRefRecut(
@@ -925,23 +972,93 @@ def _series_ref_recut(side: _SeriesSide) -> _SeriesRefRecut | str:
         side.work_branch,
         side.source_branch,
         tip,
-        "present",
+        "reconstructed",
         side.recorded_landing,
     )
 
 
 def _landing_rationale(previous_status: str, previous_landing: dict[str, str]) -> str:
-    """The audit sentence recording what the reopen reset, and what it landed on."""
+    """The audit sentence recording what the reopen reset, and what it landed on.
+
+    Both arrivals write this same decision, so both are named in it: the reset cuts, rebuilds or
+    advances the integration branches without ever moving an existing ref, and the re-addressing
+    arrival leaves them exactly where the series' own landed work put them. The review counter the
+    completion spent is cleared with the status, so the next round is an ordinary first round rather
+    than one billed against a budget the reopened series never spent.
+    """
 
     return (
         f"task_reopen reset the terminal atomic series contract (review/closeout/integration "
-        f"cleared, cleanup=reopened) so it owns the lane again, re-cut or rebuilt its integration "
-        f"branches from the recorded landing at the recorded source tips, and re-published its "
-        f"enclosure generation with the archived one as its predecessor. Child leaves start under "
-        f"this master exactly as they did before it completed. Document status before the reopen: "
-        f"{previous_status!r}. Recorded landing before the reset: code {previous_landing['code']!r}, "
-        f"memory {previous_landing['memory']!r}; the reset blanks those cells, so they are recorded "
-        f"here rather than lost."
+        f"cleared, cleanup=reopened) so it owns the lane again, re-cut, rebuilt or advanced its "
+        f"integration branches without ever moving an existing ref, cleared the review counter the "
+        f"completion had spent, and re-published its enclosure generation with the archived one as "
+        f"its predecessor. Child leaves start under this master exactly as they did before it "
+        f"completed. Document status before the reopen: {previous_status!r}. Recorded landing "
+        f"before the reset: code {previous_landing['code']!r}, memory "
+        f"{previous_landing['memory']!r}; the reset blanks those cells, so they are recorded here "
+        f"rather than lost."
+    )
+
+
+def _series_in_flight(contract: WorktreeContract) -> bool:
+    """Whether the series still owns its integration line rather than having completed it.
+
+    Read from the two progress cells a completion itself writes. ``cleanup`` deliberately cannot
+    decide this: the reopen rewrites that marker as its own first durable step, so keying the ref
+    rule on it would make the rule's answer depend on whether the reset had already been written --
+    which is exactly the difference between the first attempt and its resume.
+    """
+
+    return contract.closeout_status != "completed" and contract.integration_status != "completed"
+
+
+def _series_is_live_unaddressed(contract: WorktreeContract) -> bool:
+    """Whether this series is live but the enclosure generation at its address was collected.
+
+    ``cleanup: pending`` is not a terminal series state, so the ordinary gate refuses it -- and
+    that is right for a reset, which may only cut a retired line. But there is a second way to
+    arrive here: the series *was* reopened (by hand, before this route existed, or by a reopen
+    whose successor publication was interrupted) and then kept landing work. Its contract is live,
+    its integration branches carry that work, and the only thing missing is the successor
+    generation the reopen's last step publishes.
+
+    The locator is what tells the two apart. A series is only in this state when the generation at
+    its exact address is terminal-archived -- collected after terminal archive proof -- and its
+    closeout and integration are both untouched, so nothing is mid-transition underneath the
+    publication. Every other live contract is somebody else's business and stays refused.
+    """
+
+    if contract.kind != "series" or contract.cleanup != "pending":
+        return False
+    if contract.closeout_status != "not-started" or contract.integration_status != "not-started":
+        return False
+    observation = inspect_lifecycle_operation_locator(
+        contract.coordination_root,
+        contract.contract_path,
+    )
+    return observation.state == "terminal-archived"
+
+
+def _review_state_carries_history(state: ReviewState | None) -> bool:
+    """Whether a series reopen has a review counter to clear.
+
+    The rule is that a reopened master's counter is 0: the rounds that ran belong to the
+    completion being reopened, and carrying them forward would bill the next review against a
+    budget it never spent -- and at the cap would make the ordinary three rounds read as an
+    exhausted one, which is the difference between an ordinary first round and a round the
+    developer had to authorize. A document that carries no review state, or an all-zero one, has
+    nothing to clear and is left exactly as it is.
+    """
+
+    if state is None:
+        return False
+    return bool(
+        state.round
+        or state.pending
+        or state.baselineFindings
+        or state.remainingFindingIds
+        or state.developerApproval is not None
+        or state.additionalRounds
     )
 
 
@@ -964,6 +1081,10 @@ def _plan_series_document_reset(
     do that. A document that exists and is *not* a master is still refused, because a series
     contract whose task root holds a leaf document is a different task than the one this reopen
     would reset.
+
+    A document that is already open and whose review state carries no history is left exactly as it
+    is. One that carries history is written even when its status needs no change, to clear that
+    history: the reopened master's counter is zero, and a counter is not the lane.
     """
 
     master_path = contract.task_root / "task.json"
@@ -976,12 +1097,16 @@ def _plan_series_document_reset(
     if master.kind != "master":
         return (None, f"series task document is not a master: {master_path}", "", "", "")
     stamp = datetime.now(UTC).astimezone().strftime("%Y-%m-%dT%H:%M")
-    if master.status != "Completed":
-        # Already open: the reopen still publishes its successor generation, and the master's
-        # own status is not this operation's to change.
+    reopen_document = master.status == "Completed"
+    clear_review = _review_state_carries_history(master.reviewState)
+    if not reopen_document and not clear_review:
+        # Already open with nothing spent: the reopen still publishes its successor generation,
+        # and the master's own status is not this operation's to change.
         return (None, None, stamp, master.status, "")
     data = master.model_dump(by_alias=True)
     data["status"] = "inProgress"
+    if clear_review:
+        data["reviewState"] = ReviewState().model_dump(by_alias=True)
     data.setdefault("decisions", []).append(
         {
             "at": stamp,
@@ -1000,14 +1125,20 @@ def _series_reopen_plan(
     blockers: list[str] = []
     if contract.leaf_id:
         blockers.append(f"series contract carries a leaf id {contract.leaf_id!r}.")
-    if not _series_is_reset_tombstone(contract) and contract.cleanup not in TERMINAL_SERIES_CLEANUP:
+    live = _series_is_live_unaddressed(contract)
+    if (
+        not live
+        and not _series_is_reset_tombstone(contract)
+        and contract.cleanup not in TERMINAL_SERIES_CLEANUP
+    ):
         blockers.append(
             f"series cleanup is {contract.cleanup!r}, not a terminal series state "
             f"({', '.join(sorted(TERMINAL_SERIES_CLEANUP))})."
         )
+    in_flight = _series_in_flight(contract)
     recuts: list[_SeriesRefRecut] = []
     for side in _series_reopen_sides(contract):
-        planned = _series_ref_recut(side)
+        planned = _series_ref_recut(side, in_flight=in_flight)
         if isinstance(planned, str):
             blockers.append(planned)
         else:
@@ -1036,8 +1167,10 @@ def _series_reopen_plan(
                 "blockers": blockers,
                 "summary": (
                     "Reopen refused: a terminal atomic series is reopened when its enclosure "
-                    "root was collected after terminal archive proof and its recorded landing "
-                    "can be rebuilt; this one cannot. " + " ".join(blockers)
+                    "root was collected after terminal archive proof and its recorded landing can "
+                    "be rebuilt, and a series that is already live at an address whose generation "
+                    "was collected is re-addressed instead; this one is neither. "
+                    + " ".join(blockers)
                 ),
             },
         )
@@ -1046,7 +1179,7 @@ def _series_reopen_plan(
         contract=contract,
         tombstone=tombstone,
         live=amend_contract(tombstone, ContractCells(cleanup="pending")),
-        mode="publish" if tombstone == contract else "reset",
+        mode="publish" if (live or tombstone == contract) else "reset",
         recuts=tuple(recuts),
         document=document,
         reopened_at=reopened_at,
@@ -1235,9 +1368,9 @@ def reopen_series(contract: WorktreeContract, *, dry_run: bool = False) -> Workt
         return plan
     if dry_run:
         summary = (
-            "Reopen preview: this terminal atomic series would be reset, its integration refs "
-            "re-cut at the recorded source tips, and its enclosure generation re-published as the "
-            "successor of the archived one."
+            "Reopen preview: this series would be reset where a reset is due, its integration "
+            "branches advanced or re-cut without moving an existing ref, and its enclosure "
+            "generation re-published as the successor of the archived one."
         )
         return WorktreeCommandResult(
             0,
@@ -1275,17 +1408,27 @@ def reopen_series(contract: WorktreeContract, *, dry_run: bool = False) -> Workt
     interrupted = _publish_series_successor(plan)
     if interrupted is not None:
         return interrupted
-    summary = (
-        "Atomic series reopened under its original id: contract review/closeout/integration "
-        "reset, lifecycle binding cleared, integration branches re-cut at the recorded source "
-        "tips, and the enclosure generation re-published with the archived one as its "
-        "predecessor. Start a child leaf with worktree_start under this master."
-    )
+    if plan.mode == "publish":
+        summary = (
+            "Atomic series re-addressed under its original id: its enclosure generation was "
+            "re-published with the archived one as its predecessor, and its integration branches "
+            "were left exactly where the series' own landed work put them. Start a child leaf "
+            "with worktree_start under this master."
+        )
+    else:
+        summary = (
+            "Atomic series reopened under its original id: contract review/closeout/integration "
+            "reset, lifecycle binding cleared, review counter cleared, integration branches re-cut "
+            "at the recorded source tips, and the enclosure generation re-published with the "
+            "archived one as its predecessor. Start a child leaf with worktree_start under this "
+            "master."
+        )
     return WorktreeCommandResult(
         0,
         {
             **_contract_reopen_facts(plan.live),
             "state": "reopened",
+            "mode": plan.mode,
             "seriesRefs": [recut.payload() for recut in recuts],
             "previousLanding": plan.previous_landing(),
             "reopenedAt": plan.reopened_at,

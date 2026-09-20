@@ -296,7 +296,14 @@ class AtomicSeriesLeafSyncPositionTests(unittest.TestCase):
         )
 
     def test_a_leaf_level_sync_position_is_admitted_and_a_silent_one_is_refused(self) -> None:
-        """The union is the chain's own records: the synced base is admitted, the silent one is not."""
+        """The union is the chain's own records: the synced base is admitted, the silent one is not.
+
+        Three directions of one property are pinned here. The recorded position admits its step; a
+        commit no contract recorded is refused; and -- the shape the 260915-KS master itself is in --
+        a step whose endpoint is the MERGE of the previous landing with a recorded position admits
+        that position's whole line, because that line IS what the step added. Admitting the position
+        while refusing the line it introduced refused exactly what the rule names (``D-60``).
+        """
 
         series = self._series()
         first = self._leaf(
@@ -335,6 +342,39 @@ class AtomicSeriesLeafSyncPositionTests(unittest.TestCase):
 
         self.assertEqual(refused.exception.status, "atomic-series-leaf-chain-invalid")
         self.assertIn(self.code_foreign, str(refused.exception))
+
+        # Now the third direction: a step whose ENDPOINT is the merge of the previous landing with a
+        # recorded official position. Its commits are that position's own line, none of which is
+        # itself a recorded position -- so a validator that admits only the positions refuses the
+        # whole line, which is the 260915-KS master's real history at its L5 -> L6 step.
+        line_a = _commit(self.code, "e.txt", "line a")
+        line_b = _commit(self.code, "f.txt", "line b")
+        self.assertNotIn(line_a, (self.code_first, self.code_synced))
+        _branch(self.code, "series", self.code_second)
+        _git(self.code, "checkout", "-q", "series")
+        _git(self.code, "merge", "--no-ff", "--no-edit", "-m", "Merge the reconciled line", line_b)
+        merged = _git(self.code, "rev-parse", "HEAD")
+        reconciled = self._leaf(
+            series,
+            "L2",
+            code=_Side(merged, merged),
+            memory=_Side(self.memory_synced, self.memory_second),
+            sync_log=({"codeBaseTo": merged, "memoryBaseTo": self.memory_synced},),
+        )
+        # `series` is the checked-out branch here, so the merge itself is what stands it on the
+        # merged commit; only the memory side is a ref this worktree does not own.
+        _branch(self.memory, "series", self.memory_second)
+
+        reconciled_ordered = _require_exact_atomic_landing_chain(
+            series, {"L1": first, "L2": reconciled}
+        )
+
+        self.assertEqual([leaf.leaf_id for leaf in reconciled_ordered], ["L1", "L2"])
+        self.assertEqual(
+            _git(self.code, "rev-list", "--no-merges", "--count", f"{self.code_second}..{merged}"),
+            "4",
+            "the step must carry the merged line's own commits for this direction to mean anything",
+        )
 
     def test_a_position_that_descends_from_a_step_does_not_vacate_it(self) -> None:
         """A recorded position reaching PAST a step cannot erase the foreign commit inside it.

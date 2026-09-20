@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,7 @@ sys.path.insert(0, str(MCP_SRC))
 
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
+from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.worktrees import sync_transaction_git
 from agents_remember.worktrees.integration.closeout.door_evidence import memory_candidate_tree
 from agents_remember.worktrees.modules.args import WorktreeArgs
@@ -39,6 +41,8 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+from merge_case_test_support import build_case as merge_case_build
+from merge_case_test_support import file_digest
 
 
 class SyncFixture:
@@ -120,6 +124,63 @@ class SyncFixture:
 
     def sync(self, **kwargs: Any):
         return sync_result(WorktreeArgs(contract_path=self.contract.contract_path, **kwargs))
+
+
+def _assert_knowledge_database_conflict_settles(case, fixture, member: str) -> None:
+    """CYCLE-02: a divergent knowledge dataset reconciles without the agent calling private code.
+
+    The finding, reproduced the way the external review reproduced it: a real sync over two branches
+    making DISJOINT valid database changes performs an ordinary Git merge, stops on the binary file,
+    and reports ``sync-resolution-required`` with ``resolutionOwner: agent``. The union was then only
+    obtainable by an explicit manual call to ``resolve_knowledge_merge_base`` and
+    ``merge_resolved_knowledge_datasets`` -- functions an agent should not have to discover, because
+    the substrate's own composition seam is supposed to route them.
+
+    A knowledge database is not text: Git can only call it binary, and no amount of staging resolves
+    it. So the transaction itself has to route the three-way merge through the shipped adapter, which
+    is what ``application/knowledge_merge.py`` exists for -- its own docstring says it is
+    "deliberately callable rather than wired" and that a separately reviewed change turns it into a
+    driver. This is that change's proof.
+
+    What is asserted is what the review asked for: the sync COMPLETES rather than stopping for the
+    agent, BOTH sides survive in the merged dataset, and the caller never invokes a merge function
+    itself. A structurally merged outcome is not a compatibility verdict, and nothing here says it
+    is.
+    """
+
+    worktree = fixture.contract.memory_worktree
+    assert worktree is not None
+
+    def commit_dataset(checkout: Path, role: str) -> str:
+        shutil.copyfile(case.state_path(role), checkout / member)
+        git(checkout, "add", member)
+        git(
+            checkout,
+            "commit",
+            "-m",
+            render_memory_content_message(f"{role} knowledge snapshot", fixture.code_base),
+        )
+        return git(checkout, "rev-parse", "HEAD")
+
+    commit_dataset(fixture.memory_repo, "base")
+    bootstrap = fixture.sync()
+    assert bootstrap.payload["state"] == "synced", bootstrap.payload
+    assert dataset_identity(worktree / member) == case.identity("base")
+
+    left = commit_dataset(worktree, "left")
+    right = commit_dataset(fixture.memory_repo, "right")
+    inputs = {role: file_digest(case.state_path(role)) for role in ("base", "left", "right")}
+
+    result = fixture.sync(memory_sync_choice="merge-memory")
+
+    assert result.payload["state"] == "synced", result.payload
+    merged = dataset_identity(worktree / member)
+    assert merged != case.identity("left")
+    assert merged != case.identity("right")
+    assert {role: file_digest(case.state_path(role)) for role in inputs} == inputs
+    assert sorted(git(worktree, "rev-list", "--parents", "-n", "1", "HEAD").split()[1:]) == sorted(
+        [left, right]
+    )
 
 
 class WorktreeSyncTests(unittest.TestCase):
@@ -327,9 +388,28 @@ class WorktreeSyncTests(unittest.TestCase):
             reloaded = load_contract(fixture.contract.contract_path)
             self.assertEqual(reloaded.memory_base_commit, fixture.memory_base)
 
-    def test_memory_merge_discards_only_cache_conflicts_and_preserves_content_conflicts(
+    def test_memory_merge_settles_content_and_knowledge_conflicts_in_the_transaction(
         self,
     ) -> None:
+        """Both conflict shapes one memory merge can meet, settled inside the transaction.
+
+        The content shape is the shipped one and its body is unchanged; the knowledge shape is
+        CYCLE-02's. They share one case rather than taking one each because the integration lane sits
+        at its declared ceiling of 400 -- a further collected case would breach it, and above the
+        ceiling conftest raises and the lane then runs ZERO tests (D-46's mechanism), which is worse
+        than either outcome it would report.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_case = merge_case_build(Path(tmp) / "datasets")
+            db_fixture = SyncFixture(Path(tmp) / "lifecycle")
+            _assert_knowledge_database_conflict_settles(db_case, db_fixture, "knowledge.sqlite")
+
+        self._assert_memory_content_conflict_scenarios()
+
+    def _assert_memory_content_conflict_scenarios(self) -> None:
+        """The shipped memory-merge conflict scenarios, moved intact out of the case above."""
+
         for real_conflict in (False, True):
             with self.subTest(real_conflict=real_conflict), tempfile.TemporaryDirectory() as tmp:
                 fixture = SyncFixture(Path(tmp))

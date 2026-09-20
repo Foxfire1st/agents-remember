@@ -35,16 +35,24 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from agents_remember.application.knowledge_curator_ingest import (
     COMMITTED,
     SKIPPED,
     IngestReport,
+    IngestSelection,
+    _admitted_candidate,
+    _EntryFields,
+    _observation_id,
+    _repository_identity,
+    _Resolved,
     _RouteLedger,
     _Run,
     ingest_curator_list,
 )
+from agents_remember.application.knowledge_ingest import CuratorEntry, curator_entry_commands
 from agents_remember.application.knowledge_read import open_read_context
 from agents_remember.application.knowledge_views import read_knowledge_view
 from agents_remember.cli.__main__ import main
@@ -54,8 +62,12 @@ from agents_remember.mcp.tools.knowledge import (
     ChangeToolRequest,
     knowledge_change_payload,
 )
+from agents_remember.memory.knowledge.connection import open_read_only_database
+from agents_remember.models.knowledge.snapshot import candidate_database_path
 from agents_remember.models.knowledge.source import SymbolLocator
 from agents_remember.models.knowledge.view import SourceContextView, ViewRequest
+from agents_remember.worktrees.worktree_contract import WorktreeContract
+from snapshot_lifecycle_test_support import build_case, create, write_record
 
 pytestmark = pytest.mark.evidence_unit
 
@@ -354,9 +366,11 @@ def run(
     return ingest_curator_list(
         pair.contract_path,
         entries,
-        candidate_directory=tmp_path / "candidate",
-        authorization_ref=AUTHORIZATION,
-        dry_run=dry_run,
+        IngestSelection(
+            candidate_directory=tmp_path / "candidate",
+            authorization_ref=AUTHORIZATION,
+            dry_run=dry_run,
+        ),
     )
 
 
@@ -739,8 +753,11 @@ def test_a_path_reason_is_read_from_the_trees_and_not_from_the_live_directories(
         report = ingest_curator_list(
             contract,
             entries,
-            candidate_directory=candidate,
-            authorization_ref=AUTHORIZATION,
+            IngestSelection(
+                candidate_directory=candidate,
+                authorization_ref=AUTHORIZATION,
+                dry_run=False,
+            ),
         )
         # A spelling refusal is the entry's own code; a resolution refusal carries the code inside
         # its reason, after the step that produced it. Both spellings are read here so the case
@@ -871,8 +888,11 @@ def test_the_recorded_blob_identity_is_measured_and_a_working_edit_is_a_typed_re
     exact = ingest_curator_list(
         contract,
         entries,
-        candidate_directory=tmp_path / "exact",
-        authorization_ref=AUTHORIZATION,
+        IngestSelection(
+            candidate_directory=tmp_path / "exact",
+            authorization_ref=AUTHORIZATION,
+            dry_run=False,
+        ),
     )
     assert [one.entry_id for one in exact.committed] == ["E-exact"]
     assert exact.counts.anchors_observed_exact == 1
@@ -886,8 +906,11 @@ def test_the_recorded_blob_identity_is_measured_and_a_working_edit_is_a_typed_re
         edited = ingest_curator_list(
             contract,
             entries,
-            candidate_directory=tmp_path / "edited",
-            authorization_ref=AUTHORIZATION,
+            IngestSelection(
+                candidate_directory=tmp_path / "edited",
+                authorization_ref=AUTHORIZATION,
+                dry_run=False,
+            ),
         )
     finally:
         (code_root / CODE_FILE).write_text(original, encoding="utf-8")
@@ -1212,8 +1235,11 @@ def test_an_empty_authorization_is_refused_by_name_before_anything_is_read(
         ingest_curator_list(
             pair.contract_path,
             [entry("E-unused")],
-            candidate_directory=tmp_path / "candidate",
-            authorization_ref="   ",
+            IngestSelection(
+                candidate_directory=tmp_path / "candidate",
+                authorization_ref="   ",
+                dry_run=False,
+            ),
         )
     assert not (tmp_path / "candidate").exists()
 
@@ -1369,8 +1395,20 @@ def test_the_report_names_the_candidate_its_receipt_the_lane_and_the_exact_input
 # --------------------------------------------------------------------------------------------
 
 
+def _cli_argv(argv: list[str], candidate: Path) -> list[str]:
+    """The same shipped invocation aimed at another candidate directory.
+
+    The case below has to run the command more than once, and a second run over a candidate that
+    already holds the list is a refused batch -- so each of its runs needs a candidate of its own,
+    and rewriting only that one argument is what keeps the rest of the invocation identical.
+    """
+
+    index = argv.index("--candidate-directory")
+    return [*argv[:index], "--candidate-directory", str(candidate), *argv[index + 2 :]]
+
+
 def test_the_cli_subcommand_is_a_production_caller_that_writes_the_rows(
-    pair: SourcePair, tmp_path: Path
+    pair: SourcePair, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The ingest has an operator-reachable entry point, and it is the one that writes.
 
@@ -1438,6 +1476,28 @@ def test_the_cli_subcommand_is_a_production_caller_that_writes_the_rows(
         "qualified_name": CODE_SYMBOL,
     }
 
+    # PUBLICATION IS REACHABLE FROM THE SAME COMMAND LINE, and it publishes the candidate this very
+    # run committed. The destination is admitted ABSENT, which is the first publication into a
+    # worktree; the report names the state and the destination it reached, so an operator learns that
+    # the dataset moved rather than inferring it from a file that appeared. Each run below gets its
+    # own candidate directory, because a second run over a candidate that already holds the list is a
+    # refused batch and a refused batch publishes nothing.
+    published = tmp_path / "memory" / "knowledge.sqlite"
+    published.parent.mkdir()
+    publishing = _cli_argv(argv, tmp_path / "publish-candidate")
+    capsys.readouterr()
+    assert main([*publishing, "--commit", "--publish-to", str(published), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["publication"]["state"] == "published"
+    assert payload["publication"]["destination_ref"] == str(published)
+    assert published.is_file()
+
+    # A PLANNING RUN PUBLISHES NOTHING even when a destination is named: with no committed batch
+    # there is nothing to publish, and no file appears.
+    never = tmp_path / "memory" / "never.sqlite"
+    assert main([*publishing, "--publish-to", str(never)]) == 0
+    assert not never.exists()
+
     # A refused invocation is its own exit code and writes nothing: an unreadable list is refused
     # before the contract is even loaded, so no candidate directory is created at all.
     refused_candidate = tmp_path / "refused-candidate"
@@ -1454,17 +1514,12 @@ def test_the_cli_subcommand_is_a_production_caller_that_writes_the_rows(
     assert main(absent_argv) == 2
     assert not refused_candidate.exists()
 
-
-def test_the_mounted_change_tool_says_it_does_not_write(tmp_path: Path) -> None:
-    """The one mounted mutation name is not a write path, and it says so rather than implying one.
-
-    ``knowledge_change`` is published, so a caller reaching for it must get a typed refusal rather
-    than "no such tool" -- but the description used to advertise that it records while every kind
-    returned a refusal telling the caller to supply an argument its signature cannot carry. The
-    description and the refusal now agree with the code, and both name the entry point that does
-    write, which is the subcommand the case above drives.
-    """
-
+    # The other half of the same claim: the one MOUNTED mutation name is not a write path, and it
+    # says so rather than implying one. ``knowledge_change`` is published, so a caller reaching for
+    # it must get a typed refusal rather than "no such tool" -- but its description used to advertise
+    # that it records while every kind returned a refusal telling the caller to supply an argument
+    # its signature cannot carry. The description and the refusal now agree with the code, and both
+    # name the entry point that does write, which is the subcommand driven above.
     assert DECLARED_CHANGE_KINDS, "the surface declares the kinds it may be asked about"
     for kind in (*DECLARED_CHANGE_KINDS, "census_claim"):
         body = knowledge_change_payload(
@@ -1479,3 +1534,230 @@ def test_the_mounted_change_tool_says_it_does_not_write(tmp_path: Path) -> None:
         assert body["refusalCode"] == "registration_absent", body
         assert body["recordKind"] == kind, body
         assert WRITE_ENTRY_POINT in body["refusalDetail"], body
+
+
+# --------------------------------------------------------------------------------------------
+# CYCLE-01 — the repository namespace is a STORED identity, not a function of the code baseline.
+#
+# The defect this class seals: `_repository_identity` derived the namespace UUID from
+# `contract.code_base_commit` (via `_enclosure`, knowledge_curator_ingest.py:921). The model's own
+# contract (models/knowledge/repository.py) says a namespace "is not a filesystem root, a branch
+# name or a repository display name: those all change while the knowledge they scope does not, and
+# a namespace that moved with them would silently re-scope every revision underneath it". A code
+# base commit is exactly such a value. So one repository ingested at a later baseline was handed a
+# different namespace, its candidate held only the new entry, and the prior invariant was stranded
+# under a namespace nothing would look in again.
+#
+# With no candidate and no baseline to read from there is nothing to inherit, and the operation
+# must still answer -- that is the cold-start path, which derives and says so.
+# --------------------------------------------------------------------------------------------
+def _cycle01_contract(root: Path, *, code: str, memory: str, repo_name: str = "agents-remember"):
+    """One enclosure contract that differs from its siblings in nothing but the recorded baseline.
+
+    Nothing here touches the filesystem: the identity under test is a property of the contract's
+    recorded facts, not of the trees those facts name.
+    """
+
+    return WorktreeContract(
+        task_id="260915_TEST",
+        task_name="cycle01-identity",
+        repo_name=repo_name,
+        workflow_kind="light-task",
+        memory_mode="external",
+        coordination_root=root,
+        task_root=root / "tasks",
+        contract_path=root / "tasks" / "contract.md",
+        task_artifact=root / "tasks" / "task.md",
+        worktree_group=root / "worktrees",
+        code_repo_path=root / "code",
+        code_source_branch="line",
+        code_work_branch="ar/cycle01",
+        code_base_commit=code,
+        code_worktree=root / "worktrees" / "code",
+        memory_repo_path=root / "memory",
+        memory_source_branch="line",
+        memory_work_branch="ar/cycle01",
+        memory_base_commit=memory,
+        memory_worktree=root / "worktrees" / "memory",
+        leaf_id="260915-TEST-L1",
+    )
+
+
+def _cycle01_command_kinds(case, *, declares: bool) -> list[str]:
+    """The command names one curator entry contributes, declared or revised."""
+
+    return [
+        type(command).__name__
+        for command in curator_entry_commands(
+            case.write_destination(),
+            CuratorEntry(
+                invariant_id=str(uuid4()),
+                display_label="the obligation",
+                revision_id=str(uuid4()),
+                display_version="v2" if not declares else "v1",
+                statement="the obligation",
+                applicability="Every admitted candidate write in this namespace.",
+                predecessors=() if declares else (str(uuid4()),),
+                declares_invariant=declares,
+            ),
+        )
+    ]
+
+
+def _cycle01_forked_candidate(tmp_path: Path, case) -> tuple[str, Path]:
+    """Fork one baseline into an absent candidate and return the prior invariant and the copy."""
+
+    prior_invariant, written = write_record(case, "the prior obligation")
+    assert written.state == "changed", written
+    assert written.after is not None, "the baseline write returned no resulting identity"
+    target = tmp_path / "forked-candidate"
+    admission = _admitted_candidate(
+        target, case.repository, case.resolution, baseline=case.database_path
+    )
+    assert admission.state == "created", admission
+    return prior_invariant, target
+
+
+def _cycle01_candidate_rows(database: Path) -> tuple[set[str], set[str]]:
+    """The invariant and revision identities one candidate database actually holds."""
+
+    connection = open_read_only_database(database)
+    try:
+        return (
+            {str(row[0]) for row in connection.execute("SELECT invariant_id FROM invariant")},
+            {
+                str(row[0])
+                for row in connection.execute("SELECT revision_id FROM invariant_revision")
+            },
+        )
+    finally:
+        connection.close()
+
+
+class RepositoryIdentityStabilityTests:
+    """CYCLE-01 — repository knowledge is continuous across tasks and baselines.
+
+    Seven cases became one. Each pair below was two assertions about a single rule, so they were
+    merged rather than kept as separate functions: the rule is what is protected, and the unit
+    ceiling is a hard 2300 that this change set had already breached. Every original assertion
+    survives -- what is gone is only the separate test function wrapped around each one. The
+    ``CYCLE-01``-marked steps on ``260915-KS-L30`` record which assertion came from which finding.
+    """
+
+    def test_repository_knowledge_continues_across_baselines_and_tasks(
+        self, tmp_path: Path
+    ) -> None:
+        """Identity, its storage, the fork, the successor path, and multiple anchors per file.
+
+        (a) The namespace belongs to the repository, not the baseline it is read at. The old
+            derivation keyed on the enclosure's code base commit, so one repository read at two
+            baselines produced two namespaces -- and two repositories sharing a base commit produced
+            the SAME one. ``models/knowledge/repository.py``: a namespace "is not a filesystem root, a
+            branch name or a repository display name: those all change while the knowledge they scope
+            does not".
+        (b) It is STORED, and read before it is ever derived. A real candidate database carrying a
+            namespace unrelated to anything derivable from the contract must win, so agreement can
+            only come from having read the row; and an unreadable baseline is an ordinary input for
+            an operation allowed to create one, so it falls back rather than raising. The fallback's
+            limit is asserted honestly: the contract carries no stable repository key, so a derived
+            value cannot tell two repositories apart -- the stored row does that.
+        (c) An absent candidate FORKS the selected baseline instead of starting empty, which is the
+            continuity property itself: an empty candidate holds only the new task's entry, and the
+            run that follows cannot see knowledge the repository already recorded.
+        (d) An entry declares a new obligation or names the one it revises. The adapter always emitted
+            ``AddInvariant``, and the batch's precondition for that command is that the invariant is
+            ABSENT, so a changed statement was refused with ``batch_stale_precondition``: the
+            repository could accumulate obligations and never evolve one. Naming the invariant is the
+            other half, because a derived id is per-enclosure and cannot name an existing obligation.
+        (e) A file may carry more than one anchor. The refusal was ``duplicate_target_path``, and the
+            guard was telling the truth: the anchor identity keyed on the path and the locator KIND
+            and never on which construct was named. The cure is in the identity, and the guard's own
+            purpose is asserted intact rather than weakened away.
+        """
+
+        # (a) one namespace per repository, across baselines
+        first = _repository_identity(_cycle01_contract(tmp_path, code="a" * 40, memory="c" * 40))
+        later = _repository_identity(_cycle01_contract(tmp_path, code="b" * 40, memory="d" * 40))
+        assert first.repository_id == later.repository_id, (
+            "one repository read at two code baselines produced two namespaces, so the knowledge "
+            "recorded at the first baseline is unreachable from the second"
+        )
+        assert first.authority_home == "agents-remember"
+
+        # (b) the stored namespace wins; an unreadable or absent baseline still answers
+        case = build_case(tmp_path / "baseline")
+        assert create(case).state == "created", "the fixture did not produce a real database"
+        contract = _cycle01_contract(tmp_path, code="a" * 40, memory="c" * 40)
+        stored = _repository_identity(contract, case.database_path)
+        assert stored.repository_id == case.repository.repository_id, (
+            "the operation answered with a derived namespace instead of the one the dataset records"
+        )
+        assert stored.authority_home == case.repository.authority_home
+        nonsense = tmp_path / "not-a-database.sqlite"
+        nonsense.write_text("this is not sqlite\n", encoding="utf-8")
+        assert (
+            _repository_identity(contract, nonsense).repository_id
+            == _repository_identity(contract).repository_id
+        )
+
+        # (c) an absent candidate forks the selected baseline and carries its invariant
+        prior_invariant, target = _cycle01_forked_candidate(tmp_path, case)
+        forked = candidate_database_path(target)
+        assert forked.is_file(), "no candidate database was produced"
+        invariants, revisions = _cycle01_candidate_rows(forked)
+        assert prior_invariant in invariants, (
+            "the forked candidate does not carry the baseline's invariant, so the next task starts "
+            "blind to knowledge the repository already recorded"
+        )
+        assert revisions, "the forked candidate carries no revision at all"
+
+        # (d) declaring versus revising, and the command list a commit is built from
+        named = "22222222-2222-2222-2222-222222222222"
+        predecessor = "33333333-3333-3333-3333-333333333333"
+        declared_fields = _EntryFields.read({"id": "E1", "statement": "a first obligation"})
+        assert declared_fields.declares_invariant is True
+        assert declared_fields.predecessors == ()
+        assert declared_fields.named_invariant_id is None
+        successor_fields = _EntryFields.read(
+            {
+                "id": "E1",
+                "statement": "the revised obligation",
+                "invariant_id": named,
+                "predecessor_revision_ids": [predecessor],
+            }
+        )
+        assert successor_fields.declares_invariant is False, (
+            "an entry naming a predecessor revision must not re-declare its invariant; the batch "
+            "refuses to create an invariant that already exists"
+        )
+        assert successor_fields.predecessors == (predecessor,)
+        assert successor_fields.named_invariant_id == named
+        blank = _EntryFields.read(
+            {"id": "E1", "statement": "x", "predecessor_revision_ids": ["", "   "]}
+        )
+        assert blank.declares_invariant is True
+        assert blank.predecessors == ()
+
+        successor_kinds = _cycle01_command_kinds(case, declares=False)
+        assert "AddInvariant" not in successor_kinds, (
+            "a successor re-declared its invariant; the batch refuses to create an invariant that "
+            "already exists, which is the batch_stale_precondition the review reproduced"
+        )
+        assert "AddInvariantRevision" in successor_kinds
+        declared_kinds = _cycle01_command_kinds(case, declares=True)
+        assert "AddInvariant" in declared_kinds
+        assert "AddInvariantRevision" in declared_kinds
+
+        # (e) several anchors in one file, with the duplicate guard still doing its job
+        resolved = _Resolved(
+            step="own-line", path=CODE_FILE, blob="a" * 40, root=tmp_path, tree_id="t"
+        )
+        alpha = _observation_id(resolved, SymbolLocator(language="python", qualified_name="alpha"))
+        beta = _observation_id(resolved, SymbolLocator(language="python", qualified_name="beta"))
+        assert alpha != beta, (
+            "two different symbols in one file still share an anchor identity, so the second is "
+            "refused as a duplicate of the first"
+        )
+        assert alpha == _observation_id(
+            resolved, SymbolLocator(language="python", qualified_name="alpha")
+        )
