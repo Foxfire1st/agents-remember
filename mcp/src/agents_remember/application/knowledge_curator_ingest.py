@@ -79,7 +79,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast, get_args
 from uuid import UUID, uuid5
 
 import apsw
@@ -119,7 +119,7 @@ from agents_remember.models.knowledge.candidate import (
     SnapshotIdentity,
 )
 from agents_remember.models.knowledge.context import AdmittedKnowledgeDestination
-from agents_remember.models.knowledge.graph import RealizationRole
+from agents_remember.models.knowledge.graph import UNCLASSIFIED_ROLE, RealizationRole
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.result import KnowledgeRefusal
 from agents_remember.models.knowledge.snapshot import (
@@ -429,6 +429,8 @@ class _TargetPlan:
     blob: str
     locator: SourceLocator
     observation: str
+    role: RealizationRole
+    rationale: str
     route_path: str | None
     route_id: str
     anchor_id: UUID
@@ -464,8 +466,8 @@ class _TargetPlan:
         return CuratorCitation(
             anchor=self.anchor,
             claim_id=self.claim_id,
-            role=_role_for(self.locator),
-            rationale=f"The statement is realized at {self.completed_path}.",
+            role=self.role,
+            rationale=self.rationale or f"The statement is realized at {self.completed_path}.",
         )
 
 
@@ -536,6 +538,8 @@ class _EntryFields:
     declares_invariant: bool = True
     predecessors: tuple[str, ...] = ()
     named_invariant_id: str | None = None
+    role: RealizationRole | None = None
+    role_rationale: str = ""
 
     @classmethod
     def read(cls, raw: Mapping[str, Any]) -> _EntryFields:
@@ -554,6 +558,10 @@ class _EntryFields:
         # repository already holds must be able to name that invariant outright.
         declared = raw.get("invariant_id")
         named = str(declared).strip() if declared is not None and str(declared).strip() else None
+        # The role a producer authors for this realization, validated against the SHIPPED vocabulary
+        # rather than a second copy of it. An unrecognised spelling becomes no role at all: a word
+        # this code does not know must not be stored as a semantic claim about the knowledge.
+        stated = str(raw.get("realization_role") or "").strip()
         return cls(
             entry_id=str(raw["id"]),
             kind=str(raw.get("kind", "")),
@@ -564,7 +572,22 @@ class _EntryFields:
             declares_invariant=not predecessors,
             predecessors=predecessors,
             named_invariant_id=named,
+            role=cast("RealizationRole", stated) if stated in get_args(RealizationRole) else None,
+            role_rationale=str(raw.get("realization_rationale") or ""),
         )
+
+
+@dataclass(frozen=True)
+class _Authored:
+    """The two semantic facts a producer states about one realization, kept together.
+
+    Grouped rather than passed as separate arguments because they are one statement of intent -- the
+    role and why -- and because a role without its rationale is exactly the unattributed claim this
+    repair exists to stop producing.
+    """
+
+    role: RealizationRole | None = None
+    rationale: str = ""
 
 
 @dataclass(frozen=True)
@@ -1292,7 +1315,12 @@ def _plan_entry(
     planned: list[_TargetPlan] = []
     seen: set[tuple[str, str, str]] = set()
     for target in targets:
-        plan, refusal = _plan_target(fields.entry_id, target, source)
+        plan, refusal = _plan_target(
+            fields.entry_id,
+            target,
+            source,
+            authored=_Authored(role=fields.role, rationale=fields.role_rationale),
+        )
         if refusal is not None:
             # The refusal carries the places this entry's earlier targets already resolved, so an
             # entry refused at its second target still shows the first one: the report's entry
@@ -1368,6 +1396,8 @@ def _plan_target(
     entry_id: str,
     target: Mapping[str, Any],
     source: _Source,
+    *,
+    authored: _Authored | None = None,
 ) -> tuple[_TargetPlan | None, _Refusal | None]:
     """Complete one target's path, read its identity, verify its locator, and observe the anchor.
 
@@ -1396,7 +1426,9 @@ def _plan_target(
     if spelling is not None:
         return None, spelling
     try:
-        return _plan_target_inner(entry_id, target, source, _confined(written))
+        return _plan_target_inner(
+            entry_id, target, source, _confined(written), authored or _Authored()
+        )
     except (SourceIndexError, OSError) as error:
         return None, _Refusal(
             _CODE_RESOLUTION_FAILED,
@@ -1478,6 +1510,7 @@ def _plan_target_inner(
     target: Mapping[str, Any],
     source: _Source,
     written: str,
+    authored: _Authored,
 ) -> tuple[_TargetPlan | None, _Refusal | None]:
     """One target's whole read, with the failure boundary of :func:`_plan_target` around it."""
 
@@ -1500,6 +1533,8 @@ def _plan_target_inner(
             blob=resolved.blob,
             locator=locator,
             observation=observation,
+            role=_authored_role(None if authored is None else authored.role),
+            rationale="" if authored is None else authored.rationale,
             route_path=None if route_path is None else str(route_path),
             route_id=_identity(source.contract, f"route:{written}", entry_id),
             anchor_id=UUID(_identity(source.contract, f"anchor:{written}", entry_id)),
@@ -2367,15 +2402,22 @@ def _identity(contract: WorktreeContract, kind: str, entry_id: str) -> str:
     return str(uuid5(_INGEST_NAMESPACE, f"{_enclosure(contract)}|{kind}|{entry_id}"))
 
 
-def _role_for(locator: SourceLocator) -> RealizationRole:
-    """How the citation realizes the statement, from what the locator names.
+def _authored_role(authored: RealizationRole | None) -> RealizationRole:
+    """The role the producer authored for this realization, or an explicit non-answer.
 
-    The hand-off list carries no role, so the ingest states the one it authored rather than leaving
-    the edge's meaning to a reader. A whole file or a range names the obligation's own place, which
-    is its primary authority; a symbol names a construct that carries it.
+    This used to be inferred from the locator's kind -- ``primary-authority`` for a whole file or a
+    range, ``enforcement`` for a symbol -- which locator syntax cannot establish. A symbol can be
+    presentation, propagation, support or enforcement, and so can a range; the spelling of a locator
+    says where to look, never what the thing found there means. Persisting an inferred role inside a
+    valid provenance envelope did not make the attribution sound, and later family review and
+    relevance filtering inherited the false premise from it.
+
+    So a role is now a fact the producer states or it is absent. ``UNCLASSIFIED_ROLE`` is the shipped
+    vocabulary's own answer for an unassessed edge, which is why nothing had to be widened to say so:
+    an unclassified realization is a claim about what is known, not a default standing in for one.
     """
 
-    return "primary-authority" if locator.kind != _SYMBOL_KIND else "enforcement"
+    return authored if authored is not None else UNCLASSIFIED_ROLE
 
 
 def _fields_of(plan: _Plan) -> _EntryFields:
