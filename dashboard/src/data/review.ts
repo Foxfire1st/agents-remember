@@ -223,3 +223,38 @@ export const intentReview = (
   getJson<ReviewResult>(
     `${base}/api/review/intent?${qs({ repo, master, leaf, selectorKind, selectorId })}`,
   );
+
+// One subject the resolved candidate pair can be reviewed on, as the server selected it. This is
+// the ONLY legitimate source of the entry's selector: the id is a recorded identity inside the
+// candidate the server resolved from task context, so the browser is handed a subject rather than
+// choosing a candidate. There is no path field here on purpose.
+export interface ReviewEntry {
+  selector_kind: ReviewSelectorKind;
+  selector_id: string;
+  label: string;
+  selected_item_count: number;
+}
+
+export interface ReviewEntryListResult {
+  state: "entries" | "refused";
+  operation: string;
+  repository_id: string;
+  master: string;
+  leaf_id: string;
+  entries?: ReviewEntry[];
+  refusal?: ReviewRefusal;
+}
+
+// The entry read the task view makes before it can offer the Intent review button. It takes the
+// same task context the review itself takes and nothing else. A refused read is a normal outcome
+// (no live candidate, no dataset yet): it yields no entry and the caller renders no button, which
+// is the existing `live && selectorId` semantics and stays correct.
+export const intentReviewEntries = (
+  repo: string,
+  master: string,
+  leaf: string,
+  base = "",
+): Promise<ReviewEntryListResult> =>
+  getJson<ReviewEntryListResult>(
+    `${base}/api/review/intent/entries?${qs({ repo, master, leaf })}`,
+  );

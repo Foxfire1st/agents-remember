@@ -47,6 +47,8 @@ __all__ = [
     "ReviewAssessmentDisplay",
     "ReviewAuthoredEffect",
     "ReviewCandidateRef",
+    "ReviewEntry",
+    "ReviewEntryListResult",
     "ReviewEvidenceLink",
     "ReviewEvidencePane",
     "ReviewFieldChange",
@@ -61,6 +63,7 @@ __all__ = [
     "ReviewSourceLocation",
     "ReviewSourcePane",
     "ReviewStaleness",
+    "ReviewSubjectKind",
     "ReviewSubmission",
     "ReviewSurfaceRequest",
     "ReviewUnresolvedReference",
@@ -85,9 +88,15 @@ ReviewRefusalCode = Literal[
     "candidate_unresolved",
     "candidate_not_live",
     "candidate_dataset_absent",
+    "subject_unresolved",
     "comparison_refused",
     "review_adapter_unavailable",
 ]
+
+# The two subject kinds the surface reviews, declared once here so the transport, the entry list and
+# the panes cannot come to disagree about which identities are reviewable. The name is the server's;
+# the browser's ``ReviewSelectorKind`` is the same two spellings on the wire.
+ReviewSubjectKind = Literal["invariant", "family"]
 
 ReviewSideState = Literal["present", "absent", "binary", "unresolved"]
 
@@ -161,6 +170,25 @@ class ReviewCandidateRef(KnowledgeModel):
     master: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     leaf_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     task_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+
+
+class ReviewEntry(KnowledgeModel):
+    """One subject the resolved pair can be compared on, as the comparison itself selected it.
+
+    This is the value the task-view entry carries, and it exists so that entry never has to invent
+    one: ``selector_id`` is the recorded identity of a subject the shipped comparison reached on
+    both of the candidate's own sides, and ``label`` is that identity's own recorded display label.
+    There is no field here for a path, a file, a display version or a ranking, so an entry cannot
+    point at a dataset the resolution did not select and cannot be ordered by a preference this
+    list invented.
+    """
+
+    selector_kind: ReviewSubjectKind
+    selector_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
+    label: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
+    # How many of the comparison's own items the subject's selection reached. It is the operation's
+    # count and not a score: a subject with zero reached items is not offered at all.
+    selected_item_count: int = Field(ge=0)
 
 
 class ComparisonIdentity(KnowledgeModel):
@@ -558,4 +586,35 @@ class KnowledgeReviewResult(KnowledgeModel):
             raise ValueError("a review result carries a payload and no refusal")
         if self.state == "refused" and (self.refusal is None or self.payload is not None):
             raise ValueError("a refused result carries its refusal and no payload")
+        return self
+
+
+class ReviewEntryListResult(KnowledgeModel):
+    """The typed outcome of one entry read: the subjects the pair can be opened on, or a refusal.
+
+    ``entries`` is empty exactly when the read is refused, and a refused read carries its refusal --
+    so a caller cannot read "no entry was offered" as "there is nothing to review". An empty
+    ``entries`` on an ``entries`` state is a pair that selected no reviewable subject, which is a
+    fact about the datasets and is stated as one.
+    """
+
+    state: Literal["entries", "refused"]
+    operation: Literal["list_knowledge_review_entries"] = "list_knowledge_review_entries"
+    repository_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
+    master: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
+    leaf_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
+    entries: tuple[ReviewEntry, ...] = ()
+    refusal: ReviewRefusal | None = None
+
+    @model_validator(mode="after")
+    def _require_one_outcome(self) -> ReviewEntryListResult:
+        if self.state == "refused" and self.refusal is None:
+            raise ValueError("a refused entry read carries its refusal")
+        if self.state == "entries" and self.refusal is not None:
+            raise ValueError("an entry read that answered carries no refusal")
+        if self.state == "refused" and self.entries:
+            raise ValueError(
+                "a refused entry read offers no subject; an entry beside a refusal is "
+                "how a caller comes to review a subject nothing admitted"
+            )
         return self

@@ -34,11 +34,14 @@ from agents_remember.models.knowledge.read import (
 )
 from agents_remember.models.knowledge.review import (
     KnowledgeReviewResult,
+    ReviewEntryListResult,
     ReviewSurfaceRequest,
 )
 
 __all__ = [
+    "KNOWLEDGE_REVIEW_ENTRIES_ROUTE",
     "KNOWLEDGE_REVIEW_ROUTE",
+    "KnowledgeReviewEntriesPort",
     "KnowledgeReviewPort",
     "register_review_routes",
     "review_request_from_query",
@@ -48,12 +51,33 @@ __all__ = [
 # record, and the assessment path this increment does not ship would not be reached from here.
 KNOWLEDGE_REVIEW_ROUTE = "/api/review/intent"
 
+# The entry route: the subjects the row above can be opened on. It is a second path rather than a
+# second adapter, because the two answer different questions from one resolution -- which subjects
+# the pair can be compared on, and what one such comparison renders -- and a caller that had to
+# guess a subject id to reach the first would be choosing the candidate, which the browser may not.
+KNOWLEDGE_REVIEW_ENTRIES_ROUTE = "/api/review/intent/entries"
+
 # The two selector kinds the surface reviews. They are the two identity seeds R07 declares; every
 # other seed kind addresses a revision, a membership or a claim rather than a subject a curator
 # reviews, and is refused rather than mapped onto one of these.
 SELECTOR_KINDS: tuple[str, ...] = ("invariant", "family")
 
 KnowledgeReviewPort = Callable[[ReviewSurfaceRequest], KnowledgeReviewResult]
+KnowledgeReviewEntriesPort = Callable[[str, str, str], ReviewEntryListResult]
+
+# The entry route's own unwired answer. It says which adapter is missing rather than reporting an
+# empty list, because "no subject is reviewable here" and "nothing can answer that question" are
+# different facts and only one of them is true when the process was composed without the port.
+_UNWIRED_ENTRIES: dict[str, Any] = {
+    "status": "unavailable",
+    "detail": (
+        "no review adapter is wired into this process, so the review entry list cannot resolve a "
+        "candidate; the surface is not served rather than served empty"
+    ),
+    "nextAction": (
+        "start the dashboard through its composition root, which supplies the review adapter"
+    ),
+}
 
 
 def review_request_from_query(
@@ -75,31 +99,48 @@ def review_request_from_query(
     )
 
 
-def _status_for(result: KnowledgeReviewResult) -> int:
+def _status_for(result: KnowledgeReviewResult | ReviewEntryListResult) -> int:
     """The status one result maps onto, in the change-set routes' own two-shape idiom."""
 
-    if result.state == "review":
+    if result.refusal is None:
         return 200
-    assert result.refusal is not None
     code = result.refusal.code
     if code == "review_adapter_unavailable":
         return 503
-    if code in {"candidate_unresolved", "candidate_not_live", "candidate_dataset_absent"}:
+    if code in {
+        "candidate_unresolved",
+        "candidate_not_live",
+        "candidate_dataset_absent",
+        "subject_unresolved",
+    }:
         return 404
     return 400
 
 
 def register_review_routes(
-    app: FastAPI, config: McpRuntimeConfig, port: KnowledgeReviewPort | None
+    app: FastAPI,
+    config: McpRuntimeConfig,
+    port: KnowledgeReviewPort | None,
+    entries_port: KnowledgeReviewEntriesPort | None = None,
 ) -> None:
-    """Register the read-only reviewer route. Must be called BEFORE the greedy static mount.
+    """Register the read-only reviewer routes. Must be called BEFORE the greedy static mount.
 
     ``config`` is accepted for symmetry with the other route registrars and for the workspace facts
-    a port may need; the route itself resolves nothing from it, because resolution belongs to the
-    port's own tier.
+    a port may need; the routes themselves resolve nothing from it, because resolution belongs to
+    the port's own tier. Both ports are the composition root's, so a process that wires neither
+    refuses by name instead of serving a surface with nothing behind it.
     """
 
     del config
+
+    @app.get(KNOWLEDGE_REVIEW_ENTRIES_ROUTE)
+    def api_review_intent_entries(repo: str, master: str, leaf: str) -> Response:
+        if entries_port is None:
+            return JSONResponse(_UNWIRED_ENTRIES, status_code=503)
+        result = entries_port(repo, master, leaf)
+        return JSONResponse(
+            _json(result), status_code=200 if result.state == "entries" else _status_for(result)
+        )
 
     @app.get(KNOWLEDGE_REVIEW_ROUTE)
     def api_review_intent(
@@ -149,7 +190,7 @@ def register_review_routes(
         return JSONResponse(_json(result), status_code=_status_for(result))
 
 
-def _json(result: KnowledgeReviewResult) -> dict[str, Any]:
+def _json(result: KnowledgeReviewResult | ReviewEntryListResult) -> dict[str, Any]:
     """Serialize one typed result once, through the model that declares its shape."""
 
     return result.model_dump(mode="json", exclude_none=True)

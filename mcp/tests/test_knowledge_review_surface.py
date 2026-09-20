@@ -37,7 +37,10 @@ from agents_remember.application.knowledge_read import read_row_counts
 from agents_remember.application.knowledge_review import (
     ReviewCandidateResolution,
     ReviewRecordInputs,
+    _reviewable_entries,
+    _selected_item_count,
     compose_review,
+    list_knowledge_review_entries,
     resolve_review_candidate,
     review_records_for,
 )
@@ -843,7 +846,14 @@ def test_the_route_serves_the_typed_result_and_refuses_by_name_with_no_adapter(
 
 
 def test_the_published_assessment_loader_returns_nothing_for_an_unresolvable_candidate() -> None:
-    """A candidate with no readable authority yields an empty collection, not a fabricated record."""
+    """A candidate with no readable authority yields an empty collection, not a fabricated record.
+
+    The same unresolvable context is asked for the surface's *entry* list (260915-KS-L45 S2): the
+    entry read resolves through the identical operation the review does, so it refuses with the same
+    code rather than answering with an empty list. An empty list would read as "this candidate
+    records nothing to review", which is a different fact from "no candidate resolves here", and the
+    task view renders no entry for either -- but only one of the two is what happened.
+    """
 
     config = review_config()
     request = ReviewSurfaceRequest(
@@ -854,9 +864,26 @@ def test_the_published_assessment_loader_returns_nothing_for_an_unresolvable_can
     )
     assert review_records_for(config, request).assessments == ()
 
+    entries = list_knowledge_review_entries(
+        config, request.repository_id, request.master, request.leaf_id
+    )
+    assert entries.state == "refused"
+    assert entries.refusal is not None
+    assert entries.refusal.code == "candidate_unresolved"
+    assert entries.entries == ()
 
-def test_the_rendered_pane_types_are_the_three_the_design_names() -> None:
-    """The three panes exist as three distinct types, so a rendering cannot merge their contents."""
+
+def test_the_rendered_pane_types_are_the_three_the_design_names(fixture: DiffFixture) -> None:
+    """The three panes exist as three distinct types, so a rendering cannot merge their contents.
+
+    The entry read (260915-KS-L45 S2) is measured in the same case because it is the same surface's
+    other half and exists for one reason: ``changeSetBar`` offers the Intent review entry only when
+    it holds a reviewed subject, and that subject must be a recorded identity inside the candidate
+    the *server* resolved -- the browser never chooses the candidate. So the entry the resolver
+    offers is measured against the shipped comparison's own answer for the same identity, item for
+    item, and a subject the comparison cannot answer for is absent from the list rather than offered
+    with a count nobody measured.
+    """
 
     panes = KnowledgeReviewPayload.model_fields
     assert {"knowledge", "source", "evidence"} <= set(panes)
@@ -870,3 +897,50 @@ def test_the_rendered_pane_types_are_the_three_the_design_names() -> None:
     fields = ReviewKnowledgePane.model_fields
     assert "authored_effects" in fields and "signals" in fields
     assert fields["authored_effects"].annotation != fields["signals"].annotation
+
+    resolved = resolution_for(fixture)
+    offered = _reviewable_entries(resolved, probe=None)
+    # The reviewed subject is one of the candidate's own recorded identities -- the fixture records
+    # several -- and every identity offered is one the comparison answered for.
+    by_id = {entry.selector_id: entry for entry in offered}
+    assert fixture.retry_invariant_id in by_id
+    assert all(entry.selector_kind in ("invariant", "family") for entry in offered)
+    assert all(entry.label for entry in offered)
+    assert all(entry.selected_item_count > 0 for entry in offered)
+
+    # The count is the comparison's own total for that identity, re-read here through the shipped
+    # operation rather than trusted: an entry advertising a number the review would not show is how
+    # a caller comes to believe a subject was reviewed when it was not.
+    comparison = diff_knowledge_scope(
+        KnowledgeDiffRequest(
+            selector=InvariantIdentitySeed(invariant_id=fixture.retry_invariant_id),
+            before=KnowledgeDiffSide(
+                context=open_diff_side(
+                    resolved.baseline_database,
+                    resolved.repository_id,
+                    repository_root=resolved.baseline_code_root,
+                    code_tree_id=resolved.baseline_code_tree_id,
+                )
+            ),
+            after=KnowledgeDiffSide(
+                context=open_diff_side(
+                    resolved.candidate_database,
+                    resolved.repository_id,
+                    repository_root=resolved.candidate_code_root,
+                    code_tree_id=resolved.candidate_code_tree_id,
+                )
+            ),
+        ),
+        before_path=resolved.baseline_database,
+        after_path=resolved.candidate_database,
+    )
+    assert comparison.page is not None
+    assert (
+        by_id[fixture.retry_invariant_id].selected_item_count == comparison.page.counts.items_total
+    )
+
+    # An identity the candidate does not record is not offered at all, and a subject the comparison
+    # cannot answer for is dropped rather than listed with a zero.
+    absent = "11111111-1111-1111-1111-111111111111"
+    assert absent not in by_id
+    assert _selected_item_count(resolved, "invariant", absent, probe=None) is None

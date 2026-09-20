@@ -33,7 +33,7 @@ from agents_remember.serving.launch_capsule import (
 )
 from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.projector import ProjectionReplay, Projector
-from agents_remember.serving.review import KnowledgeReviewPort
+from agents_remember.serving.review import KnowledgeReviewEntriesPort, KnowledgeReviewPort
 from agents_remember.serving.served_state import served_state_tail
 from agents_remember.serving.terminal import TerminalHost, TerminalSessionSpec
 from agents_remember.serving.terminal_liveness import (
@@ -462,6 +462,16 @@ class ServingCollaborators:
     :mod:`agents_remember.cli.dashboard`; a process that omits it refuses the review route by name
     rather than serving an empty surface, because an empty pane and an unreachable adapter are
     different facts and only one of them is true.
+    """
+
+    knowledge_review_entries: KnowledgeReviewEntriesPort | None = None
+    """The same adapter's entry half: the subjects the resolved pair can be reviewed on.
+
+    It is one port beside the first rather than a mode of it, because the two answer different
+    questions from one resolution, and the entry route is the only one a task view can call before
+    it knows a subject. Omitting it refuses that route by name for the same reason the review route
+    is refused: an empty entry list would say "nothing is reviewable here", which is a different
+    fact from "this process cannot answer".
     """
 
     capsule_launch: LaunchCapsuleResolverPort | None = None

@@ -1,7 +1,7 @@
 """CLI adapter: ingest an orchestrator's curator hand-off list into a leaf's candidate.
 
     agents-remember knowledge-ingest --contract <leaf enclosure contract>
-        --list <hand-off list> --candidate-directory <dir>
+        --list <hand-off list> [--candidate-directory <dir>]
         --authorization-ref <ref> [--commit] [--baseline <published dataset>]
         [--publish-to <memory dataset path> [--expected-destination <identity JSON>]]
 
@@ -9,6 +9,14 @@
 ``memory-backfill`` use it: the operation reads the code and memory repositories the contract
 names and writes into the candidate directory the caller supplies, so there is no argument list
 that can aim a knowledge write at another leaf's line.
+
+``--candidate-directory`` is OPTIONAL and defaults to the leaf's canonical review candidate root,
+``<worktree-group>/provider-runtime/dev-ar-coordination/knowledge/candidate``, derived from the
+contract's own recorded worktree group. That default is what connects the write side to the read
+side: the Intent Reviewer resolves its candidate from the same root through the same published
+names, so an ingest that names no directory authors the candidate the review then opens. Naming a
+directory still writes there -- a scratch draft stays possible -- and that draft is then not the
+leaf's review candidate, which the report echoes either way.
 
 ``--authorization-ref`` is REQUIRED for the same reason the operation requires one: an admitted
 write needs an authorship envelope, and ``Authorship`` refuses a blank reference. The same
@@ -52,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -62,10 +71,23 @@ from agents_remember.application.knowledge_curator_ingest import (
     IngestSelection,
     ingest_curator_list,
 )
+from agents_remember.application.knowledge_review import (
+    REVIEW_BASELINE_DIRECTORY,
+    REVIEW_CANDIDATE_DIRECTORY,
+    REVIEW_CANDIDATE_RELATIVE_ROOT,
+)
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
+from agents_remember.models.knowledge.snapshot import CANDIDATE_DATABASE_NAME
+from agents_remember.worktrees.worktree_contract import load_contract
 
 EXIT_REPORTED = 0
 EXIT_REFUSED = 2
+
+# The two batch states that mean the candidate was actually committed. ``changed`` is a batch that
+# wrote rows; ``no_change`` is a batch whose rows were already stored, which committed and changed
+# nothing -- both have a candidate on disk, and a batch that refused, was never attempted or ran in
+# planning mode has none.
+COMMITTED_BATCH_STATES = frozenset({"changed", "no_change"})
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -83,9 +105,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--candidate-directory",
-        required=True,
-        help="Directory holding the leaf's draft candidate. Named by the caller: a durable "
-        "convention for it belongs in the memory layer's settings, not in this operation.",
+        default=None,
+        help="Directory holding the leaf's draft candidate. Omit to use the leaf's canonical "
+        "review candidate root -- <worktree-group>/provider-runtime/dev-ar-coordination/knowledge/"
+        "candidate -- which is the directory the Intent Reviewer resolves for this leaf. Naming "
+        "another directory ingests into it without placing it where the review looks.",
     )
     parser.add_argument(
         "--authorization-ref",
@@ -162,6 +186,65 @@ def _publication(args: argparse.Namespace) -> IngestPublication | None:
     )
 
 
+def _review_root(args: argparse.Namespace) -> Path:
+    """The leaf's canonical review knowledge root, derived from the contract.
+
+    Derived from the contract's own recorded worktree group rather than from the caller and rather
+    than from the process's working directory, so the directory the Intent Reviewer resolves and the
+    directory this run writes are the same path by construction rather than by two spellings
+    agreeing.
+    """
+
+    return load_contract(Path(args.contract)).worktree_group / REVIEW_CANDIDATE_RELATIVE_ROOT
+
+
+def _candidate_directory(args: argparse.Namespace, review_root: Path) -> Path:
+    """The candidate directory this run writes into: the caller's, or the leaf's canonical one.
+
+    Naming ``--candidate-directory`` still wins: a caller that wants a scratch draft gets one, and
+    that draft is then simply not the leaf's review candidate.
+    """
+
+    if args.candidate_directory is not None:
+        return Path(args.candidate_directory)
+    return review_root / REVIEW_CANDIDATE_DIRECTORY
+
+
+def _place_review_baseline(
+    args: argparse.Namespace, review_root: Path, report: IngestReport
+) -> str | None:
+    """Put the dataset this task forks from into the review's baseline half, or say why not.
+
+    ``--baseline`` is the one production input that names the fork-point dataset, and the ruling this
+    function implements is that the run which authors the candidate is the run that places the
+    baseline: same run, same explicit caller input, no new owner and no recorded contract. The bytes
+    are **copied**, not moved or linked, because the review's own recorded decision is that both
+    halves sit inside the leaf's disposable local root "so a review reads no candidate out of the
+    live coordination tree" -- the published dataset keeps serving its own lane.
+
+    Nothing is invented on the ways out: a planning run and a batch that did not commit place
+    nothing, a caller that named no baseline leaves the half absent (where ``candidate_dataset_absent``
+    is then the truthful answer), and a destination already holding an identical dataset is left
+    alone rather than rewritten.
+    """
+
+    if args.baseline is None:
+        return None
+    if report.dry_run:
+        return "not-placed: planning run (the baseline is placed by the run that commits)"
+    if report.batch_state not in COMMITTED_BATCH_STATES:
+        return f"not-placed: the batch did not commit ({report.batch_state})"
+    source = Path(args.baseline)
+    if not source.is_file():
+        return f"not-placed: the named baseline dataset {source} is not a file"
+    destination = review_root / REVIEW_BASELINE_DIRECTORY / CANDIDATE_DATABASE_NAME
+    if destination.is_file() and destination.read_bytes() == source.read_bytes():
+        return f"present: {destination}"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+    return f"placed: {destination}"
+
+
 def run(args: argparse.Namespace) -> int:
     """Run one ingest and print its report; the report IS the result."""
 
@@ -173,11 +256,17 @@ def run(args: argparse.Namespace) -> int:
         print("--authorization-ref must not be blank: an admitted write needs an authorization")
         return EXIT_REFUSED
     try:
+        review_root = _review_root(args)
+        candidate_directory = _candidate_directory(args, review_root)
+    except (ValueError, OSError) as error:
+        print(f"the ingest was refused before it read the list: {error}")
+        return EXIT_REFUSED
+    try:
         report = ingest_curator_list(
             args.contract,
             list_path,
             IngestSelection(
-                candidate_directory=args.candidate_directory,
+                candidate_directory=candidate_directory,
                 authorization_ref=args.authorization_ref,
                 dry_run=not args.commit,
                 baseline=None if args.baseline is None else Path(args.baseline),
@@ -187,14 +276,15 @@ def run(args: argparse.Namespace) -> int:
     except (ValueError, OSError) as error:
         print(f"the ingest was refused before it read the list: {error}")
         return EXIT_REFUSED
+    review_baseline = _place_review_baseline(args, review_root, report)
     if args.as_json:
-        print(json.dumps(_payload(report), indent=2, sort_keys=True))
+        print(json.dumps(_payload(report, review_baseline), indent=2, sort_keys=True))
     else:
-        print(_summary(report))
+        print(_summary(report, review_baseline))
     return EXIT_REPORTED
 
 
-def _summary(report: IngestReport) -> str:
+def _summary(report: IngestReport, review_baseline: str | None) -> str:
     """The report as a reader scans it: the mode, the counts, and one line per outcome."""
 
     lines = [
@@ -215,6 +305,8 @@ def _summary(report: IngestReport) -> str:
             f"  refusal: {publication.refusal.code}" if publication.refusal is not None else ""
         )
         lines.append(f"  publication: {publication.state}{published_to}{refusal}")
+    if review_baseline is not None:
+        lines.append(f"  review baseline: {review_baseline}")
     for outcome in report.committed:
         lines.append(f"  committed {outcome.entry_id}: {_targets(outcome)}")
     for outcome in report.rulings:
@@ -231,17 +323,21 @@ def _targets(outcome: EntryOutcome) -> str:
     )
 
 
-def _payload(report: IngestReport) -> dict[str, Any]:
+def _payload(report: IngestReport, review_baseline: str | None) -> dict[str, Any]:
     """The whole report as one JSON object, so a caller branches on facts and not on prose.
 
     Every tuple becomes a list and every dataclass a mapping; nothing is summarised away, because
     the report is the operation's product and a caller that has to re-read the database to learn
-    what happened has been given a message rather than a result.
+    what happened has been given a message rather than a result. ``reviewBaseline`` is the report's
+    own line about the review handoff: what this run placed in the baseline half, or why it placed
+    nothing. It is a string and not a boolean because "not placed" has several reasons and a caller
+    that has to guess which one is being given a message rather than a result.
     """
 
     return {
         "contractPath": report.contract_path,
         "candidateDirectory": report.candidate_directory,
+        "reviewBaseline": review_baseline,
         "candidateReceipt": report.candidate_receipt,
         "lane": report.lane,
         "repositoryId": report.repository_id,

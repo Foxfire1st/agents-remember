@@ -35,7 +35,13 @@ from typing import Literal
 from agents_remember.application.knowledge_diff import diff_knowledge_scope, open_diff_side
 from agents_remember.application.knowledge_views import read_knowledge_view
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.memory.knowledge.candidate_receipt import read_candidate_receipt
 from agents_remember.memory.knowledge.diff_display import TreeDifferenceProbe
+from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
+from agents_remember.memory.knowledge.store import (
+    OpenedKnowledgeStore,
+    open_existing_knowledge_store,
+)
 from agents_remember.models.knowledge.detection import DetectionSignalPayload
 from agents_remember.models.knowledge.diff import (
     KnowledgeDiffItem,
@@ -44,7 +50,13 @@ from agents_remember.models.knowledge.diff import (
     KnowledgeDiffSide,
 )
 from agents_remember.models.knowledge.evidence import VerificationObservationPayload
-from agents_remember.models.knowledge.read import ItemKind, KnowledgeReadSeed, ReadItem
+from agents_remember.models.knowledge.read import (
+    FamilyIdentitySeed,
+    InvariantIdentitySeed,
+    ItemKind,
+    KnowledgeReadSeed,
+    ReadItem,
+)
 from agents_remember.models.knowledge.review import (
     PROPOSED_ASSESSMENT_DISPOSITIONS,
     ComparisonIdentity,
@@ -53,6 +65,8 @@ from agents_remember.models.knowledge.review import (
     ReviewAssessmentDisplay,
     ReviewAuthoredEffect,
     ReviewCandidateRef,
+    ReviewEntry,
+    ReviewEntryListResult,
     ReviewEvidenceLink,
     ReviewEvidencePane,
     ReviewFieldChange,
@@ -67,11 +81,15 @@ from agents_remember.models.knowledge.review import (
     ReviewSourceLocation,
     ReviewSourcePane,
     ReviewStaleness,
+    ReviewSubjectKind,
     ReviewSubmission,
     ReviewSurfaceRequest,
     ReviewUnresolvedReference,
 )
-from agents_remember.models.knowledge.snapshot import CANDIDATE_DATABASE_NAME
+from agents_remember.models.knowledge.snapshot import (
+    CANDIDATE_DATABASE_NAME,
+    CANDIDATE_RECEIPT_NAME,
+)
 from agents_remember.models.knowledge.view import ReviewMatrixRow, ViewRequest
 from agents_remember.models.lifecycles.review_assessment import (
     ReviewAssessment,
@@ -91,12 +109,15 @@ from agents_remember.worktrees.worktree_contract import (
 
 __all__ = [
     "EMPTY_REVIEW_RECORDS",
+    "REVIEW_BASELINE_DIRECTORY",
+    "REVIEW_CANDIDATE_DIRECTORY",
     "REVIEW_CANDIDATE_RELATIVE_ROOT",
     "REVIEW_MATRIX_KINDS",
     "ReviewCandidateResolution",
     "ReviewRecordInputs",
     "ReviewSurfaceRequest",
     "compose_review",
+    "list_knowledge_review_entries",
     "read_knowledge_review",
     "resolve_review_candidate",
     "review_records_for",
@@ -110,8 +131,12 @@ __all__ = [
 # (This layout is the review surface's own recorded decision for this increment.)
 REVIEW_CANDIDATE_RELATIVE_ROOT = Path("provider-runtime") / "dev-ar-coordination" / "knowledge"
 
-_BASELINE_DIRECTORY = "baseline"
-_CANDIDATE_DIRECTORY = "candidate"
+# The two halves are named once, here, because two owners read them: this adapter resolves the pair
+# it reviews from them, and the ingest CLI derives the candidate directory it authors into from the
+# same two names. One spelling is what makes "the candidate the leaf authored" and "the candidate the
+# review resolved" the same directory rather than two conventions that happen to agree today.
+REVIEW_BASELINE_DIRECTORY = "baseline"
+REVIEW_CANDIDATE_DIRECTORY = "candidate"
 
 # The record kinds the review matrix is asked for. They are an input to L20's view rather than a
 # selection policy of this leaf's: the view applies its own registered traversal over them.
@@ -217,14 +242,69 @@ def resolve_review_candidate(
     return ReviewCandidateResolution(
         repository_id=repository_id,
         leaf_id=contract.leaf_id,
-        baseline_database=root / _BASELINE_DIRECTORY / CANDIDATE_DATABASE_NAME,
-        candidate_database=root / _CANDIDATE_DIRECTORY / CANDIDATE_DATABASE_NAME,
+        baseline_database=root / REVIEW_BASELINE_DIRECTORY / CANDIDATE_DATABASE_NAME,
+        candidate_database=root / REVIEW_CANDIDATE_DIRECTORY / CANDIDATE_DATABASE_NAME,
         baseline_code_root=contract.code_repo_path,
-        candidate_code_root=contract.code_worktree,
+        # The candidate side resolves to **both** a root and a tree id or to neither. The read
+        # context refuses a root without a tree id, and correctly so: that is an incomplete source
+        # resolution rather than a licence to read a working tree. A live leaf has no commit for its
+        # own uncommitted line -- ``candidate_code_tree_id`` is ``None`` by this module's own recorded
+        # decision -- so this side supplies no root either, and the comparison reports the source
+        # expansion it could not make instead of resolving one against a tree nothing named.
+        candidate_code_root=None,
         baseline_code_tree_id=contract.code_base_commit or None,
         candidate_code_tree_id=None,
         contract=contract,
     )
+
+
+def missing_dataset_half(resolved: ReviewCandidateResolution) -> tuple[str, Path] | None:
+    """The half of the candidate pair that is absent, or ``None`` when both are on disk.
+
+    A comparison is *between* two datasets, so an absent half is not a smaller comparison -- the
+    shipped operation refuses a side whose database is not a file, and it refuses it by returning a
+    typed result. Preflighting here is what keeps that refusal a named state instead of a storage
+    exception raised from inside a read-context construction, and it is also what lets the refusal
+    say *which* half is missing: ``baseline`` and ``candidate`` are different facts about a leaf, and
+    a reader who is told "the datasets are absent" cannot tell whether to author a candidate or to
+    place the dataset it forks from.
+    """
+
+    for half, database in (
+        ("baseline", resolved.baseline_database),
+        ("candidate", resolved.candidate_database),
+    ):
+        if not database.is_file():
+            return half, database
+    return None
+
+
+def review_namespace(requested: str, candidate_database: Path) -> str:
+    """The namespace to read the candidate's datasets under, from its receipt when it has one.
+
+    The namespace and the requested repository are not the same string: a request names a
+    *repository* ("agents-remember"), while a candidate the write plane admitted is bound to a
+    *namespace* id derived from it, and a side opened under the requested spelling refuses against
+    the dataset's own binding. So the candidate's own **receipt** is the authority -- the admission
+    that created it wrote the receipt beside the working database and sealed it -- and a review of an
+    admitted candidate reads the namespace that candidate actually holds.
+
+    A candidate with **no** receipt beside its database is a dataset this surface was handed directly
+    rather than one an admission produced (a fixture, a comparison a caller assembled from two
+    named files). For that shape the requested repository *is* the available identity and is read as
+    it always was, because the alternative -- refusing every caller-assembled pair -- would break the
+    comparison contract for inputs that were never candidates.
+
+    A receipt that **exists but cannot be read** is a different fact and is refused: something wrote
+    a receipt here and it does not say which namespace this dataset belongs to, so standing in the
+    caller's word for the dataset's own record is exactly how a review comes to read a namespace
+    nothing admitted.
+    """
+
+    receipt_path = candidate_database.parent / CANDIDATE_RECEIPT_NAME
+    if not receipt_path.exists():
+        return requested
+    return read_candidate_receipt(receipt_path).repository_id
 
 
 def _leaf_contract(
@@ -281,6 +361,177 @@ def read_knowledge_review(
     )
 
 
+def list_knowledge_review_entries(
+    config: McpRuntimeConfig,
+    repository_id: str,
+    master: str,
+    leaf_id: str,
+    *,
+    probe: TreeDifferenceProbe | None = None,
+) -> ReviewEntryListResult:
+    """The subjects the resolved pair can be reviewed on, or the one refusal that says why not.
+
+    This is the *entry* half of the surface, and it exists because the reviewed subject is the one
+    input a reader cannot supply from the task view: the subject is a recorded identity inside the
+    candidate, and the browser must not choose the candidate. The resolution is the same one
+    :func:`read_knowledge_review` performs -- canonical task context only, one contract, one derived
+    root -- so the list a caller is offered and the review it then opens cannot disagree about which
+    datasets are being compared.
+
+    A subject is offered exactly when the **shipped comparison** reaches it: the candidate's own
+    recorded invariant and family identities are each compared through
+    :func:`~agents_remember.application.knowledge_diff.diff_knowledge_scope`, and only the ones the
+    operation answers with a page are listed. Nothing is recorded to make that true and no ranking
+    is applied here -- a candidate that records no identity the pair can compare yields an empty
+    list, which the caller renders as no entry rather than as an invitation to name one.
+    """
+
+    resolved = resolve_review_candidate(config, repository_id, master, leaf_id)
+    if isinstance(resolved, ReviewRefusal):
+        return _entry_refused(repository_id, master, leaf_id, resolved)
+    absent = missing_dataset_half(resolved)
+    if absent is not None:
+        half, database = absent
+        return _entry_refused(
+            repository_id,
+            master,
+            leaf_id,
+            refusal(
+                "candidate_dataset_absent",
+                (
+                    f"the resolved {half} dataset is absent, so the pair has nothing to compare; "
+                    "the review reads neither of its two halves out of the live coordination tree "
+                    "and substitutes no other dataset"
+                ),
+                next_action=(
+                    "author the candidate's knowledge in the leaf's disposable knowledge root, and "
+                    "place the dataset it forks from in the baseline half if this leaf has one; the "
+                    "surface substitutes no other dataset"
+                ),
+                offending_input=database.name,
+            ),
+        )
+    try:
+        entries = _reviewable_entries(resolved, probe=probe)
+    except KnowledgeStorageError as error:
+        return _entry_refused(
+            repository_id,
+            master,
+            leaf_id,
+            refusal(
+                "candidate_dataset_absent",
+                f"the resolved candidate could not be opened for review: {error}",
+                next_action=(
+                    "repair the candidate's receipt and dataset in the leaf's disposable knowledge "
+                    "root, then reopen the review; the surface substitutes no other dataset"
+                ),
+                offending_input=resolved.candidate_database.parent.name,
+            ),
+        )
+    return ReviewEntryListResult(
+        state="entries",
+        repository_id=repository_id,
+        master=master,
+        leaf_id=resolved.leaf_id,
+        entries=entries,
+    )
+
+
+def _reviewable_entries(
+    resolved: ReviewCandidateResolution, *, probe: TreeDifferenceProbe | None
+) -> tuple[ReviewEntry, ...]:
+    """Every identity the shipped comparison reaches on this pair, as the entry list's own values.
+
+    The namespace is read once and threaded into every comparison, so one entry read cannot compare
+    its subjects under two different namespaces: the recorded one is what the list and the review it
+    opens both use.
+    """
+
+    namespace = review_namespace(resolved.repository_id, resolved.candidate_database)
+    store = open_existing_knowledge_store(resolved.candidate_database, namespace)
+    try:
+        recorded = _recorded_identities(store)
+    finally:
+        store.close()
+    entries: list[ReviewEntry] = []
+    for kind, identity_id, label in recorded:
+        selected = _selected_item_count(
+            resolved, kind, identity_id, probe=probe, namespace=namespace
+        )
+        if selected is None:
+            continue
+        entries.append(
+            ReviewEntry(
+                selector_kind=kind,
+                selector_id=identity_id,
+                label=label,
+                selected_item_count=selected,
+            )
+        )
+    return tuple(entries)
+
+
+def _recorded_identities(
+    store: OpenedKnowledgeStore,
+) -> tuple[tuple[ReviewSubjectKind, str, str], ...]:
+    """Every reviewable identity one candidate records, invariants before families.
+
+    Read through the store's own two list operations rather than through a query written here, so
+    the identities this list offers are the ones the namespace records and not the ones a second
+    reader of the same tables believes it finds.
+    """
+
+    invariants: tuple[tuple[ReviewSubjectKind, str, str], ...] = tuple(
+        ("invariant", invariant.invariant_id, invariant.display_label)
+        for invariant in store.list_invariants()
+    )
+    families: tuple[tuple[ReviewSubjectKind, str, str], ...] = tuple(
+        ("family", family.family_id, family.display_label) for family in store.list_families()
+    )
+    return invariants + families
+
+
+def _selected_item_count(
+    resolved: ReviewCandidateResolution,
+    subject_kind: ReviewSubjectKind,
+    selector_id: str,
+    *,
+    probe: TreeDifferenceProbe | None,
+    namespace: str | None = None,
+) -> int | None:
+    """How many items the pair's comparison reached for one subject, or ``None`` when it refused.
+
+    A refusal is not a zero: a subject the comparison could not answer for is absent from the list
+    rather than offered with a count this reader made up, because an entry that opens a refusal is
+    worse than no entry at all.
+    """
+
+    selector: KnowledgeReadSeed = (
+        InvariantIdentitySeed(invariant_id=selector_id)
+        if subject_kind == "invariant"
+        else FamilyIdentitySeed(family_id=selector_id)
+    )
+    comparison = _compare(resolved, selector, probe=probe, namespace=namespace)
+    page = comparison.page
+    if comparison.state != "page" or page is None or comparison.binding is None:
+        return None
+    return page.counts.items_total
+
+
+def _entry_refused(
+    repository_id: str, master: str, leaf_id: str, refusal_value: ReviewRefusal
+) -> ReviewEntryListResult:
+    """One refused entry read, carrying the resolution's own refusal verbatim."""
+
+    return ReviewEntryListResult(
+        state="refused",
+        repository_id=repository_id,
+        master=master,
+        leaf_id=leaf_id,
+        refusal=refusal_value,
+    )
+
+
 def compose_review(
     resolved: ReviewCandidateResolution,
     request: ReviewSurfaceRequest,
@@ -291,21 +542,39 @@ def compose_review(
 ) -> KnowledgeReviewResult:
     """Render one review over two already-resolved datasets. Selects nothing; calls the operations."""
 
-    if not resolved.candidate_database.is_file():
+    absent = missing_dataset_half(resolved)
+    if absent is not None:
+        half, database = absent
         return _refused(
             request.repository_id,
             refusal(
                 "candidate_dataset_absent",
-                "the resolved candidate dataset is absent, so there is nothing to compare",
+                f"the resolved {half} dataset is absent, so there is nothing to compare",
                 next_action=(
-                    "author the candidate's knowledge in the leaf's disposable knowledge root and "
-                    "reopen the review; the surface substitutes no other dataset"
+                    "author the candidate's knowledge in the leaf's disposable knowledge root, and "
+                    "place the dataset it forks from in the baseline half if this leaf has one; the "
+                    "surface substitutes no other dataset"
                 ),
-                offending_input=resolved.candidate_database.name,
+                offending_input=database.name,
+            ),
+        )
+    try:
+        namespace = review_namespace(resolved.repository_id, resolved.candidate_database)
+    except KnowledgeStorageError as error:
+        return _refused(
+            request.repository_id,
+            refusal(
+                "candidate_dataset_absent",
+                f"the resolved candidate could not be opened for review: {error}",
+                next_action=(
+                    "repair the candidate's receipt and dataset in the leaf's disposable knowledge "
+                    "root, then reopen the review; the surface substitutes no other dataset"
+                ),
+                offending_input=resolved.candidate_database.parent.name,
             ),
         )
 
-    comparison = _compare(resolved, request.selector, probe=probe)
+    comparison = _compare(resolved, request.selector, probe=probe, namespace=namespace)
     page = comparison.page
     if comparison.state != "page" or page is None or comparison.binding is None:
         return _refused(
@@ -317,13 +586,13 @@ def compose_review(
         resolved.candidate_database,
         open_diff_side(
             resolved.candidate_database,
-            request.repository_id,
+            namespace,
             repository_root=resolved.candidate_code_root,
             code_tree_id=resolved.candidate_code_tree_id,
         ),
         ViewRequest(
             view="review_matrix",
-            repository_id=request.repository_id,
+            repository_id=namespace,
             record_kinds=REVIEW_MATRIX_KINDS,
         ),
     )
@@ -370,16 +639,24 @@ def _compare(
     selector: KnowledgeReadSeed,
     *,
     probe: TreeDifferenceProbe | None,
+    namespace: str | None = None,
 ) -> KnowledgeDiffResult:
-    """Run the shipped comparison over the two resolved datasets, adding no side and no selector."""
+    """Run the shipped comparison over the two resolved datasets, adding no side and no selector.
 
+    The namespace the two sides are opened under is the candidate's **own recorded** one
+    (:func:`review_namespace`), not the repository name the request carried: the datasets are bound
+    to an id, and a side opened under the requested spelling refuses against its own binding.
+    """
+
+    if namespace is None:
+        namespace = review_namespace(resolved.repository_id, resolved.candidate_database)
     return diff_knowledge_scope(
         KnowledgeDiffRequest(
             selector=selector,
             before=KnowledgeDiffSide(
                 context=open_diff_side(
                     resolved.baseline_database,
-                    resolved.repository_id,
+                    namespace,
                     repository_root=resolved.baseline_code_root,
                     code_tree_id=resolved.baseline_code_tree_id,
                 )
@@ -387,7 +664,7 @@ def _compare(
             after=KnowledgeDiffSide(
                 context=open_diff_side(
                     resolved.candidate_database,
-                    resolved.repository_id,
+                    namespace,
                     repository_root=resolved.candidate_code_root,
                     code_tree_id=resolved.candidate_code_tree_id,
                 )

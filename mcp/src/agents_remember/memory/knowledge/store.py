@@ -66,6 +66,7 @@ from agents_remember.memory.knowledge.schema_generations import (
 from agents_remember.models.knowledge.authorship import Authorship
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.context import KnowledgeSchemaIdentity
+from agents_remember.models.knowledge.family import FamilyIdentity
 from agents_remember.models.knowledge.invariant import (
     InvariantIdentity,
     InvariantRevision,
@@ -176,6 +177,41 @@ class OpenedKnowledgeStore:
             None,
         )
         return None if row is None else records.decode_invariant_row(row)
+
+    def list_invariants(self) -> tuple[InvariantIdentity, ...]:
+        """Return every invariant identity this namespace records, in stable order.
+
+        The Intent Reviewer's subject is one of these identities, and a reader that must be handed
+        a subject before it can list the candidates cannot enumerate a candidate it was not pointed
+        at. The order is the identity's own column, so two runs over one snapshot agree without a
+        tiebreak this reader chose.
+        """
+
+        return tuple(
+            records.decode_invariant_row(row)
+            for row in self.connection.execute(
+                "SELECT repository_id, invariant_id, display_label, label_provenance "
+                "FROM invariant WHERE repository_id = ? ORDER BY invariant_id",
+                (self.repository_id,),
+            )
+        )
+
+    def list_families(self) -> tuple[FamilyIdentity, ...]:
+        """Return every family identity this namespace records, in stable order.
+
+        The same enumeration as :meth:`list_invariants`, for the surface's other admitted subject
+        kind. A family identity is the second thing the reviewer can be opened on, so both lists
+        are read the same way rather than one being derived from the other.
+        """
+
+        return tuple(
+            records.decode_family_row(row)
+            for row in self.connection.execute(
+                "SELECT repository_id, family_id, display_label, label_provenance "
+                "FROM family WHERE repository_id = ? ORDER BY family_id",
+                (self.repository_id,),
+            )
+        )
 
     def list_revision_ids(self, invariant_id: str) -> tuple[str, ...]:
         """Return every revision identity of one invariant, in stable order."""

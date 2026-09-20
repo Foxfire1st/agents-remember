@@ -74,6 +74,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     """
 
     from agents_remember.application.knowledge_review import (  # noqa: PLC0415 - composition
+        list_knowledge_review_entries,
         read_knowledge_review,
         review_records_for,
     )
@@ -92,10 +93,21 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
 
         return read_knowledge_review(config, request, review_records_for(config, request))
 
+    def review_entries_port(repository_id, master, leaf_id):
+        """List the subjects the same resolution can be reviewed on, through the same adapter.
+
+        The task view calls this before any subject exists, so it takes the task context alone. It
+        resolves through the identical operation the review route uses, which is what keeps the
+        entry a caller is offered and the review it then opens on one candidate.
+        """
+
+        return list_knowledge_review_entries(config, repository_id, master, leaf_id)
+
     return replace(
         EXECUTION_REGISTRATION_COLLABORATORS,
         capsule_launch=partial(compile_launch_capsule, config),
         knowledge_review=review_port,
+        knowledge_review_entries=review_entries_port,
     )
 
 

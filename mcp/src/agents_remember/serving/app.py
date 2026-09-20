@@ -292,7 +292,9 @@ def create_app(
     register_changeset_routes(app, config)
     register_notes_routes(app, config)
     register_requirements_routes(app, config)
-    register_review_routes(app, config, collaborators.knowledge_review)
+    register_review_routes(
+        app, config, collaborators.knowledge_review, collaborators.knowledge_review_entries
+    )
     register_harness_control_routes(
         app,
         ConversationRuntime(
