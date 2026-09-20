@@ -36,6 +36,7 @@ from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.kernel.primitives.observer_paths import LANDING_FINAL_BASENAME
+from agents_remember.tasks import ReviewState
 from agents_remember.tasks.document import TaskDocument
 from agents_remember.tasks.leaf_doc import find_leaf_doc
 from agents_remember.tasks.master_sync import demote_completed_master_if_unresolved
@@ -61,7 +62,7 @@ from .integration.lifecycle.lifecycle_operation_location import (
     reserve_new_lifecycle_operation_location,
     resume_new_lifecycle_operation_location,
 )
-from .modules.git import branch_commit, branch_exists, require_git, run_git
+from .modules.git import branch_commit, branch_exists, is_ancestor, require_git, run_git
 from .modules.guidance import (
     RecoveryOperation,
     RecoveryTool,
@@ -676,7 +677,7 @@ def _reopen_master_path(task_root: Path, doc: TaskDocument) -> Path | None:
 # 2. both integration branches are re-cut at the recorded source tips (never moved, and only
 #    when the cleanup that retired them left them absent), so a child leaf's lineage resolves;
 # 3. the master document is demoted out of ``Completed`` with an audit decision naming the
-#    reopen;
+#    reopen, and a review counter the completion spent is cleared;
 # 4. the enclosure root, manifest and journal are re-published as the successor generation of the
 #    archived one, which is what tells the terminal archive that this transition was sanctioned
 #    instead of tampering -- the new locator carries the exact archived predecessor, and the
@@ -688,6 +689,17 @@ def _reopen_master_path(task_root: Path, doc: TaskDocument) -> Path | None:
 # proves the tombstone on disk is the predecessor it accepts. If step 4 is interrupted, the
 # tombstone is already durable and the reopened series' own predicate lets the same call resume
 # exactly that publication rather than rewriting the reset.
+#
+# There is a second way to arrive here, and it is the one D-58 named. A series reopened by hand
+# before step 4 existed -- or by a reopen whose publication was interrupted and then forgotten --
+# is already live on disk: ``cleanup: pending``, every progress cell virgin, its integration
+# branches carrying the series' own landed work, and a locator that is still terminal-archived.
+# The gates above refuse it, correctly for a reset (there is nothing terminal to cut) and
+# uselessly in fact, because the only missing half is step 4. So the same call recognises that
+# state -- ``_series_is_live_unaddressed`` reads the locator, which is the one fact that separates
+# "the generation was collected" from "somebody is mid-transition" -- leaves the branches exactly
+# where the series' own work put them, and publishes the successor generation. The publication
+# itself is unchanged: the same tombstone proof, the same guards, the same archive citation.
 
 SERIES_REOPEN_AUDIT_INTENT = (
     "task_reopen reset this terminal atomic series and re-published its successor enclosure "
@@ -770,7 +782,7 @@ def _series_reopen_sides(contract: WorktreeContract) -> tuple[tuple[str, Path, s
 
 
 def _series_ref_recut(
-    side: str, repo: Path, source_branch: str, work_branch: str
+    side: str, repo: Path, source_branch: str, work_branch: str, *, in_flight: bool
 ) -> _SeriesRefRecut | str:
     """Plan one side's re-cut, or return the blocker that forbids it.
 
@@ -778,6 +790,14 @@ def _series_ref_recut(
     must stand exactly on the recorded source tip: moving a live ref is what a reset must not do
     silently, and a line that has advanced past its source is a different fact needing a different
     decision.
+
+    ``in_flight`` is that decision's other half. A **completed** series has recorded its own
+    integration and its cleanup retired these branches, so a branch that exists and stands ahead of
+    its source can only be a ref somebody moved -- it stays refused. A series that has NOT closed
+    out is in flight: its branches are the line it is landing on, so a branch ahead of its source
+    is the series' own committed work. There is then nothing to re-cut and nothing to move, and
+    refusing would strand the very line the series is standing on. Ancestry is what separates the
+    two facts, so a diverged or lagging branch is refused in both cases.
     """
 
     if not source_branch or not branch_exists(repo, source_branch):
@@ -790,9 +810,73 @@ def _series_ref_recut(
     observed = branch_commit(repo, work_branch)
     if observed == tip:
         return _SeriesRefRecut(side, repo, work_branch, source_branch, tip, "present")
+    if in_flight and is_ancestor(repo, tip, observed):
+        return _SeriesRefRecut(side, repo, work_branch, source_branch, observed, "advance")
     return (
         f"the {side} integration branch {work_branch!r} stands at {observed}, not the recorded "
         f"source tip {tip} of {source_branch!r}; the reopen never moves an existing ref."
+    )
+
+
+def _series_in_flight(contract: WorktreeContract) -> bool:
+    """Whether the series still owns its integration line rather than having completed it.
+
+    Read from the two progress cells a completion itself writes. ``cleanup`` deliberately cannot
+    decide this: the reopen rewrites that marker as its own first durable step, so keying the ref
+    rule on it would make the rule's answer depend on whether the reset had already been written --
+    which is exactly the difference between the first attempt and its resume.
+    """
+
+    return contract.closeout_status != "completed" and contract.integration_status != "completed"
+
+
+def _series_is_live_unaddressed(contract: WorktreeContract) -> bool:
+    """Whether this series is live but the enclosure generation at its address was collected.
+
+    ``cleanup: pending`` is not a terminal series state, so the ordinary gate refuses it -- and
+    that is right for a reset, which may only cut a retired line. But there is a second way to
+    arrive here: the series *was* reopened (by hand, before this route existed, or by a reopen
+    whose successor publication was interrupted) and then kept landing work. Its contract is live,
+    its integration branches carry that work, and the only thing missing is the successor
+    generation the reopen's last step publishes.
+
+    The locator is what tells the two apart. A series is only in this state when the generation at
+    its exact address is terminal-archived -- collected after terminal archive proof -- and its
+    closeout and integration are both untouched, so nothing is mid-transition underneath the
+    publication. Every other live contract is somebody else's business and stays refused.
+    """
+
+    if contract.kind != "series" or contract.cleanup != "pending":
+        return False
+    if contract.closeout_status != "not-started" or contract.integration_status != "not-started":
+        return False
+    observation = inspect_lifecycle_operation_locator(
+        contract.coordination_root,
+        contract.contract_path,
+    )
+    return observation.state == "terminal-archived"
+
+
+def _review_state_carries_history(state: ReviewState | None) -> bool:
+    """Whether a series reopen has a review counter to clear.
+
+    The rule is that a reopened master's counter is 0: the rounds that ran belong to the
+    completion being reopened, and carrying them forward would bill the next review against a
+    budget it never spent -- and at the cap would make the ordinary three rounds read as an
+    exhausted one, which is the difference between an ordinary first round and a round the
+    developer had to authorize. A document that carries no review state, or an all-zero one, has
+    nothing to clear and is left exactly as it is.
+    """
+
+    if state is None:
+        return False
+    return bool(
+        state.round
+        or state.pending
+        or state.baselineFindings
+        or state.remainingFindingIds
+        or state.developerApproval is not None
+        or state.additionalRounds
     )
 
 
@@ -810,21 +894,26 @@ def _plan_series_document_reset(
         return (None, f"cannot read series task document {master_path}: {exc}")
     if master.kind != "master":
         return (None, f"series task document is not a master: {master_path}")
-    if master.status != "Completed":
+    reopen_document = master.status == "Completed"
+    clear_review = _review_state_carries_history(master.reviewState)
+    if not reopen_document and not clear_review:
         return (None, None)
     data = master.model_dump(by_alias=True)
     data["status"] = "inProgress"
+    if clear_review:
+        data["reviewState"] = ReviewState().model_dump(by_alias=True)
     stamp = datetime.now(UTC).astimezone().strftime("%Y-%m-%dT%H:%M")
     data.setdefault("decisions", []).append(
         {
             "at": stamp,
             "decision": f"Series {contract.task_name} reopened under its original id.",
             "rationale": (
-                "task_reopen reset the terminal atomic series contract (review/closeout/"
-                "integration cleared, cleanup=reopened) so it owns the lane again, re-cut its "
-                "integration branches at the recorded source tips, and re-published its "
-                "enclosure generation with the archived one as its predecessor. Child leaves "
-                "start under this master exactly as they did before it completed."
+                "task_reopen reset the series contract (review/closeout/integration cleared, "
+                "cleanup=reopened) so it owns the lane again, advanced or re-cut its integration "
+                "branches without moving an existing ref, cleared the review counter the "
+                "completion had spent, and re-published its enclosure generation with the "
+                "archived one as its predecessor. Child leaves start under this master exactly "
+                "as they did before it completed."
             ),
         }
     )
@@ -839,14 +928,22 @@ def _series_reopen_plan(
     blockers: list[str] = []
     if contract.leaf_id:
         blockers.append(f"series contract carries a leaf id {contract.leaf_id!r}.")
-    if not _series_is_reset_tombstone(contract) and contract.cleanup not in TERMINAL_SERIES_CLEANUP:
+    live = _series_is_live_unaddressed(contract)
+    if (
+        not live
+        and not _series_is_reset_tombstone(contract)
+        and contract.cleanup not in TERMINAL_SERIES_CLEANUP
+    ):
         blockers.append(
             f"series cleanup is {contract.cleanup!r}, not a terminal series state "
             f"({', '.join(sorted(TERMINAL_SERIES_CLEANUP))})."
         )
+    in_flight = _series_in_flight(contract)
     recuts: list[_SeriesRefRecut] = []
     for side, repo, source_branch, work_branch in _series_reopen_sides(contract):
-        planned = _series_ref_recut(side, repo, source_branch, work_branch)
+        planned = _series_ref_recut(
+            side, repo, source_branch, work_branch, in_flight=in_flight
+        )
         if isinstance(planned, str):
             blockers.append(planned)
         else:
@@ -862,8 +959,10 @@ def _series_reopen_plan(
                 **_contract_reopen_facts(contract),
                 "blockers": blockers,
                 "summary": (
-                    "Reopen refused: only a terminal atomic series whose enclosure root was "
-                    "collected after terminal archive proof can be reopened. " + " ".join(blockers)
+                    "Reopen refused: a series is reopened when it is terminal and its enclosure "
+                    "root was collected after terminal archive proof, or when it is live at an "
+                    "address whose generation was collected and never re-published. "
+                    + " ".join(blockers)
                 ),
             },
         )
@@ -874,7 +973,7 @@ def _series_reopen_plan(
         contract=contract,
         tombstone=tombstone,
         live=amend_contract(tombstone, ContractCells(cleanup="pending")),
-        mode="publish" if tombstone == contract else "reset",
+        mode="publish" if (live or tombstone == contract) else "reset",
         recuts=tuple(recuts),
         document=document,
     )
@@ -1040,9 +1139,9 @@ def reopen_series(contract: WorktreeContract, *, dry_run: bool = False) -> Workt
         return plan
     if dry_run:
         summary = (
-            "Reopen preview: this terminal atomic series would be reset, its integration refs "
-            "re-cut at the recorded source tips, and its enclosure generation re-published as the "
-            "successor of the archived one."
+            "Reopen preview: this series would be reset where a reset is due, its integration "
+            "branches advanced or re-cut without moving an existing ref, and its enclosure "
+            "generation re-published as the successor of the archived one."
         )
         return WorktreeCommandResult(
             0,
@@ -1079,17 +1178,27 @@ def reopen_series(contract: WorktreeContract, *, dry_run: bool = False) -> Workt
     interrupted = _publish_series_successor(plan)
     if interrupted is not None:
         return interrupted
-    summary = (
-        "Atomic series reopened under its original id: contract review/closeout/integration "
-        "reset, lifecycle binding cleared, integration branches re-cut at the recorded source "
-        "tips, and the enclosure generation re-published with the archived one as its "
-        "predecessor. Start a child leaf with worktree_start under this master."
-    )
+    if plan.mode == "publish":
+        summary = (
+            "Atomic series re-addressed under its original id: its enclosure generation was "
+            "re-published with the archived one as its predecessor, and its integration branches "
+            "were left exactly where the series' own landed work put them. Start a child leaf "
+            "with worktree_start under this master."
+        )
+    else:
+        summary = (
+            "Atomic series reopened under its original id: contract review/closeout/integration "
+            "reset, lifecycle binding cleared, review counter cleared, integration branches re-cut "
+            "at the recorded source tips, and the enclosure generation re-published with the "
+            "archived one as its predecessor. Start a child leaf with worktree_start under this "
+            "master."
+        )
     return WorktreeCommandResult(
         0,
         {
             **_contract_reopen_facts(plan.live),
             "state": "reopened",
+            "mode": plan.mode,
             "seriesRefs": [recut.payload() for recut in recuts],
             "doc": plan.payload()["documentReset"],
             "enclosureGeneration": plan.payload()["enclosureGeneration"],
