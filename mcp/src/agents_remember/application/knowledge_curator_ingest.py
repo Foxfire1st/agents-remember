@@ -20,12 +20,16 @@ empty citation list here arrives only from an entry with no targets, which is th
 is not committed at all.
 
 **Identity is derived, not random.** Every identity this module mints is a ``uuid5`` under one fixed
-namespace over the enclosure's identity (its recorded code base commit, which is what distinguishes
-one leaf's enclosure from another) joined with the entry's own ``id`` from the hand-off list -- and,
-for a target, the path it names, because a target carries no identity of its own in revision 1. Two
-runs of the same list therefore mint the same ids, and the ids are real UUIDs because the write path
-stores UUID-shaped identities. Note that the *resolution* tree and the *identity* anchor are two
-different commits on purpose: see the next paragraph.
+namespace over the **repository's own namespace** joined with the entry's own ``id`` from the
+hand-off list -- and, for a target, what inside the named path the citation is about: a symbol's
+qualified name, or the locator kind when there is nothing finer. Two runs of the same list therefore
+mint the same ids, and the ids are real UUIDs because the write path stores UUID-shaped identities.
+The stable half is the repository and never the code base commit, because a baseline is exactly the
+kind of value ``models/knowledge/repository.py`` says a namespace must not move with: keyed on the
+base commit, one repository's obligation became a different record at each baseline while two
+different repositories that shared a base commit were handed the same record identity. Note that the
+*resolution* tree and the *identity* anchor are two different commits on purpose: see the next
+paragraph.
 
 **A producer may cite the code its own leaf is producing.** The objective commits into the leaf's
 draft-candidate, and a draft is unlanded work by definition, so the tree a target is resolved against
@@ -472,6 +476,41 @@ class _TargetPlan:
 
 
 @dataclass(frozen=True)
+class _TargetIdentities:
+    """The three identities one target's own place mints, derived together rather than apart.
+
+    They are one value because they are one decision: which construct inside the file this citation
+    is about, applied to each identity the write path needs for it. Splitting them across the dataclass
+    that carries them and the caller that derives them is how the anchor and the claim came to key on
+    the path alone, so a file with two constructs handed the batch the same ``source_anchor`` twice.
+    """
+
+    route_id: str
+    anchor_id: str
+    claim_id: str
+
+
+def _target_identities(
+    repository: RepositoryIdentity, entry_id: str, written: str, locator: SourceLocator
+) -> _TargetIdentities:
+    """The route, anchor and claim identities for one target, disambiguated by what it names.
+
+    The route is a **scope**, not a place inside one: it stays keyed on the path it governs, so N
+    anchors in one file are N associations with the one route row rather than N rows. The anchor and
+    the claim are the two records the citation itself creates, so both carry the symbol's own
+    qualified name -- the same discriminator the observation identity uses, and the one that survives
+    the file being edited above the definition.
+    """
+
+    within = locator.qualified_name if isinstance(locator, SymbolLocator) else ""
+    return _TargetIdentities(
+        route_id=_identity(repository, f"route:{written}", entry_id),
+        anchor_id=_identity(repository, f"anchor:{written}", entry_id, within),
+        claim_id=_identity(repository, f"claim:{written}", entry_id, within),
+    )
+
+
+@dataclass(frozen=True)
 class _TreeIds:
     """The tree object ids this run resolves against, and the base its identities are anchored to.
 
@@ -759,12 +798,12 @@ class _Source:
     memory_root: Path
     tree_ids: _TreeIds
     coordination_top_level: frozenset[str]
+    repository: RepositoryIdentity
 
 
 # --------------------------------------------------------------------------------------------
 # The operation
 # --------------------------------------------------------------------------------------------
-
 
 
 @dataclass(frozen=True)
@@ -836,14 +875,15 @@ def ingest_curator_list(
     paths = _Paths(contract_path=Path(contract_path), candidate=Path(candidate_directory))
     contract = load_contract(paths.contract_path)
     code_root, memory_root = _roots(contract)
+    repository = _repository_identity(contract, baseline)
     source = _Source(
         contract=contract,
         code_root=code_root,
         memory_root=memory_root,
         tree_ids=_tree_ids(contract, code_root, memory_root),
         coordination_top_level=_coordination_top_level(contract),
+        repository=repository,
     )
-    repository = _repository_identity(contract, baseline)
     resolution = _resolution(contract, source.tree_ids)
     raw = _read_entries(entries)
     plans, refused, resolved_before_refusal = _plan_entries(raw, source)
@@ -873,9 +913,7 @@ def ingest_curator_list(
         authorization_ref=authorization_ref,
         origin_refs=("curator-handoff:revision-1",),
     )
-    admission = _admitted_candidate(
-        paths.candidate, repository, resolution, baseline=baseline
-    )
+    admission = _admitted_candidate(paths.candidate, repository, resolution, baseline=baseline)
     if admission.state == "refused" or admission.result.identity is None:
         # The destination itself refused, so nothing was planned and nothing was written -- and the
         # planned entries are folded into ``refused`` rather than silently dropped. The report says
@@ -1066,9 +1104,7 @@ def _admitted_candidate(
         selected = Path(baseline)
         forked = clone_knowledge_candidate(
             destination,
-            CandidateBaseline(
-                database_path=selected, expected_identity=dataset_identity(selected)
-            ),
+            CandidateBaseline(database_path=selected, expected_identity=dataset_identity(selected)),
         )
         if forked.state == "created":
             return _Admission("created", forked)
@@ -1352,8 +1388,8 @@ def _plan_entry(
             statement=fields.statement,
             evidence=fields.evidence,
             invariant_id=fields.named_invariant_id
-            or _identity(source.contract, "invariant", fields.entry_id),
-            revision_id=_identity(source.contract, "revision", fields.entry_id),
+            or _identity(source.repository, "invariant", fields.entry_id),
+            revision_id=_identity(source.repository, "revision", fields.entry_id),
             targets=tuple(planned),
             ruling=False,
             declares_invariant=fields.declares_invariant,
@@ -1524,6 +1560,7 @@ def _plan_target_inner(
     if isinstance(observation, _Refusal):
         return None, observation.at(written)
     route_path = target.get("governing_route")
+    identities = _target_identities(source.repository, entry_id, written, locator)
     return (
         _TargetPlan(
             entry_id=entry_id,
@@ -1536,9 +1573,9 @@ def _plan_target_inner(
             role=_authored_role(None if authored is None else authored.role),
             rationale="" if authored is None else authored.rationale,
             route_path=None if route_path is None else str(route_path),
-            route_id=_identity(source.contract, f"route:{written}", entry_id),
-            anchor_id=UUID(_identity(source.contract, f"anchor:{written}", entry_id)),
-            claim_id=_identity(source.contract, f"claim:{written}", entry_id),
+            route_id=identities.route_id,
+            anchor_id=UUID(identities.anchor_id),
+            claim_id=identities.claim_id,
         ),
         None,
     )
@@ -2396,10 +2433,29 @@ def _batch_refused(
 # --------------------------------------------------------------------------------------------
 
 
-def _identity(contract: WorktreeContract, kind: str, entry_id: str) -> str:
-    """One derived identity: the namespace, the enclosure, which identity it is, and the entry."""
+def _identity(repository: RepositoryIdentity, kind: str, entry_id: str, within: str = "") -> str:
+    """One derived identity: the repository it belongs to, which identity it is, and the entry.
 
-    return str(uuid5(_INGEST_NAMESPACE, f"{_enclosure(contract)}|{kind}|{entry_id}"))
+    The stable half is the **repository's own namespace**, never the code base commit. Deriving from
+    the base commit made one repository's knowledge a function of the baseline it happened to be read
+    at: the same obligation under the same local label was a different record at each baseline, while
+    two different repositories that shared a base commit were handed the SAME record identity. The
+    contract carries no stable repository key to derive from
+    (``models/knowledge/repository.py``), so the namespace is the one the selected baseline stores --
+    the dataset is the durable home of that value, and a repository that has published one keeps it
+    whatever baseline the next task runs at. Only a run that selects no baseline derives, through
+    :func:`_repository_identity`'s cold-start fallback, which is keyed on the authority home rather
+    than on any commit.
+
+    ``within`` is the disambiguator *inside* one entry's place, and it is what makes two constructs in
+    one file two records. A path and a locator kind are not enough: ``pkg/module.py`` holding
+    ``resolve_budget`` and ``other`` produced one anchor identity for both, and the batch refused the
+    second with ``duplicate_identity`` on ``source_anchor``. A symbol therefore contributes its
+    qualified name, exactly as the observation identity already does; a range or whole-file citation
+    contributes only the kind it already carried, which is its existing behaviour.
+    """
+
+    return str(uuid5(_INGEST_NAMESPACE, f"{repository.repository_id}|{kind}|{entry_id}|{within}"))
 
 
 def _authored_role(authored: RealizationRole | None) -> RealizationRole:

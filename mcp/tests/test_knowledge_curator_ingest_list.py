@@ -32,24 +32,29 @@ import json
 import shutil
 import sqlite3
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
-from uuid import uuid4
+from typing import Any, cast
+from uuid import uuid4, uuid5
 
 import pytest
 from agents_remember.application.knowledge_curator_ingest import (
+    _INGEST_NAMESPACE,
     COMMITTED,
     SKIPPED,
+    IngestPublication,
     IngestReport,
     IngestSelection,
     _admitted_candidate,
     _EntryFields,
+    _identity,
     _observation_id,
     _repository_identity,
     _Resolved,
     _RouteLedger,
     _Run,
+    _target_identities,
     ingest_curator_list,
 )
 from agents_remember.application.knowledge_ingest import CuratorEntry, curator_entry_commands
@@ -63,6 +68,7 @@ from agents_remember.mcp.tools.knowledge import (
     knowledge_change_payload,
 )
 from agents_remember.memory.knowledge.connection import open_read_only_database
+from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.snapshot import candidate_database_path
 from agents_remember.models.knowledge.source import SymbolLocator
 from agents_remember.models.knowledge.view import SourceContextView, ViewRequest
@@ -74,6 +80,9 @@ pytestmark = pytest.mark.evidence_unit
 AUTHORIZATION = "authorization:ks-l25-ingest-case"
 CODE_FILE = "pkg/module.py"
 CODE_SYMBOL = "resolve_budget"
+# The SECOND construct in the same controlled file. Two symbols of one file are two realizations, so
+# one run must be able to store both -- which is the identity the write path is handed.
+CODE_OTHER_SYMBOL = "other"
 MEMORY_CARD = "pkg/module.md"
 GONE_PATH = "pkg/retired_module.py"
 OUTSIDE_PATH = "notes/reports/terminal-report.md"
@@ -1536,8 +1545,6 @@ def test_the_cli_subcommand_is_a_production_caller_that_writes_the_rows(
         assert WRITE_ENTRY_POINT in body["refusalDetail"], body
 
 
-
-
 # --------------------------------------------------------------------------------------------
 # CYCLE-01 — the repository namespace is a STORED identity, not a function of the code baseline.
 #
@@ -1646,7 +1653,9 @@ class RepositoryIdentityStabilityTests:
     ``CYCLE-01``-marked steps on ``260915-KS-L30`` record which assertion came from which finding.
     """
 
-    def test_repository_knowledge_continues_across_baselines_and_tasks(self, tmp_path: Path) -> None:
+    def test_repository_knowledge_continues_across_baselines_and_tasks(
+        self, tmp_path: Path
+    ) -> None:
         """Identity, its storage, the fork, the successor path, and multiple anchors per file.
 
         (a) The namespace belongs to the repository, not the baseline it is read at. The old
@@ -1761,3 +1770,288 @@ class RepositoryIdentityStabilityTests:
         assert alpha == _observation_id(
             resolved, SymbolLocator(language="python", qualified_name="alpha")
         )
+
+        # (f) to (h) the identities the write path stores, and the ones the PUBLIC operation
+        # committed: two constructs of one file, the baseline the next task selected, and the
+        # sibling identity a reused local label resolves to.
+        _cycle01_public_identities(cast("Any", pair).__wrapped__, tmp_path)
+
+
+def _cycle01_public_identities(build_pair: Callable[..., SourcePair], tmp_path: Path) -> None:
+    """Two symbols in one file, the selected baseline, and the reused-label sibling identity.
+
+    (f) the identities the WRITE PATH stores distinguish the two symbols, which the observation
+        identity alone does not decide: the anchor and the claim are minted from the locator's own
+        qualified name, while the route stays one scope per path.
+    (g) the identities the CLI actually COMMITTED, with a real SQLite store, for the three remaining
+        CYCLE-01 points.
+    (h) a reused local label resolves to the REPOSITORY's record, so one repository answers the same
+        identity at two baselines rather than minting a new one when the baseline moves.
+    """
+
+    repository = RepositoryIdentity(
+        repository_id=str(uuid5(_INGEST_NAMESPACE, "cycle01-identities")),
+        authority_home="agents-remember",
+    )
+    alpha_ids = _target_identities(
+        repository, "E1", CODE_FILE, SymbolLocator(language="python", qualified_name="alpha")
+    )
+    beta_ids = _target_identities(
+        repository, "E1", CODE_FILE, SymbolLocator(language="python", qualified_name="beta")
+    )
+    assert alpha_ids.anchor_id != beta_ids.anchor_id, (
+        "two constructs in one file are still handed ONE stored anchor identity, so the batch "
+        "refuses the second with duplicate_identity on source_anchor"
+    )
+    assert alpha_ids.claim_id != beta_ids.claim_id, (
+        "two constructs in one file are still handed one stored claim identity"
+    )
+    assert alpha_ids.route_id == beta_ids.route_id, (
+        "a route governs a path: two constructs in one file are two associations with ONE route "
+        "row, not two routes"
+    )
+
+    _cycle01_cli_baseline_journey(build_pair, tmp_path)
+    _cycle01_reused_label_identity(tmp_path)
+
+
+def _cycle01_hand_off(
+    entry_id: str, statement: str, targets: list[dict[str, Any]], **extra
+) -> dict:
+    """One curator hand-off entry in revision 1's shape, plus whatever the producer authored."""
+
+    return {**entry(entry_id, targets=targets), "statement": statement, **extra}
+
+
+class _JourneyFactory:
+    """A private ``tmp_path_factory`` for the journey: one directory per builder call."""
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self._root.mkdir(parents=True, exist_ok=True)
+        self._count = 0
+
+    def mktemp(self, name: str) -> Path:
+        self._count += 1
+        created = self._root / f"{self._count}-{name}"
+        created.mkdir()
+        return created
+
+
+def _cycle01_task_a(case, root: Path, published: Path) -> IngestReport:
+    """Task A: two constructs of ONE file realize one obligation, published into the memory line."""
+
+    report: IngestReport = cast("Any", ingest_curator_list)(
+        case.contract_path,
+        [
+            _cycle01_hand_off(
+                "R-A",
+                "The obligation is realized by two constructs of one file.",
+                [
+                    target(CODE_FILE, locator=symbol(CODE_SYMBOL), route="pkg"),
+                    target(CODE_FILE, locator=symbol(CODE_OTHER_SYMBOL), route="pkg"),
+                ],
+                realization_role="presentation",
+                realization_rationale="Both constructs present this obligation.",
+            )
+        ],
+        IngestSelection(
+            candidate_directory=root / "candidate-a",
+            authorization_ref=AUTHORIZATION,
+            dry_run=False,
+            publication=IngestPublication(destination_path=published),
+        ),
+    )
+    assert report.batch_state == "changed", (
+        f"task A could not commit two constructs of one file: {report.batch_refusal!r}"
+    )
+    assert [one.entry_id for one in report.committed] == ["R-A"]
+    assert report.publication is not None, "the publication leg was not attempted"
+    assert report.publication.state == "published", report.publication.refusal
+    assert report.counts.targets_completed == 2
+    return report
+
+
+def _cycle01_task_b(case, root: Path, published: Path, report_a: IngestReport) -> IngestReport:
+    """Task B: begin from A's published dataset, keep the unrelated record, evolve the obligation."""
+
+    expected = report_a.publication
+    assert expected is not None and expected.identity is not None
+    database = candidate_database_path(root / "candidate-a")
+    prior_invariant, prior_revision = next(iter(_cycle01_candidate_revisions(database, "R-A")))
+    report: IngestReport = cast("Any", ingest_curator_list)(
+        case.contract_path,
+        [
+            _cycle01_hand_off(
+                "R-A-successor",
+                "The obligation now also covers the leaf's own construct.",
+                [target(LEAF_EDITED_FILE, locator=symbol(LEAF_EDITED_SYMBOL), route="pkg")],
+                invariant_id=prior_invariant,
+                predecessor_revision_ids=[prior_revision],
+                realization_role="enforcement",
+                realization_rationale="The leaf's construct enforces the evolved obligation.",
+            ),
+            _cycle01_hand_off(
+                "R-B",
+                "An unrelated obligation the next task records.",
+                [target(CODE_FILE, locator=symbol(CODE_OTHER_SYMBOL), route="pkg")],
+            ),
+        ],
+        IngestSelection(
+            candidate_directory=root / "candidate-b",
+            authorization_ref=AUTHORIZATION,
+            dry_run=False,
+            baseline=published,
+            publication=IngestPublication(
+                destination_path=published,
+                expected_destination=expected.identity,
+            ),
+        ),
+    )
+    assert report.batch_state == "changed", (
+        f"task B could not begin from task A's published dataset: {report.batch_refusal!r}"
+    )
+    assert {one.entry_id for one in report.committed} == {"R-A-successor", "R-B"}
+    assert report.publication is not None and report.publication.state == "published", (
+        report.publication
+    )
+    assert report.publication.previous_identity == expected.identity, (
+        "the second publication did not replace the exact dataset the run forked from"
+    )
+    return report
+
+
+def _cycle01_baseline_consequences(pair: SourcePair, root: Path, report_a: IngestReport) -> None:
+    """The dataset the next task actually holds, and the successor it actually recorded."""
+
+    database = candidate_database_path(root / "candidate-b")
+    invariants, revisions = _cycle01_candidate_rows(database)
+    baseline_invariants, baseline_revisions = _cycle01_candidate_rows(
+        candidate_database_path(root / "candidate-a")
+    )
+    assert baseline_invariants <= invariants, (
+        "the candidate for the next task does not carry the baseline's invariants, so the prior "
+        "task's knowledge is absent from it -- which is the continuity defect itself"
+    )
+    assert baseline_revisions <= revisions, "the next candidate dropped the baseline's revisions"
+    assert len(invariants) == 2, (
+        f"the next candidate should hold the forked invariant plus its own, and holds {invariants}"
+    )
+    prior_invariant = next(iter(baseline_invariants))
+    assert prior_invariant in invariants
+    assert any(revision not in baseline_revisions for revision in revisions), (
+        "the successor revision was not stored under the invariant the next task named"
+    )
+
+    published = pair.memory_root / "knowledge.sqlite"
+    published_invariants, published_revisions = _cycle01_candidate_rows(published)
+    assert published_invariants == invariants, (
+        "the published dataset is not the dataset the run committed"
+    )
+    assert published_revisions == revisions
+    anchors = _cycle01_candidate_anchors(database)
+    # Four anchors: task A's two constructs of one file, task B's own construct, and task B's
+    # resumption of the symbol A already cited -- one symbol cited by two entries is two claims.
+    assert len(anchors) == 4, f"the journey's anchors are not the four it made: {anchors}"
+    assert len({one[0] for one in anchors}) == 4, "two anchors share one stored identity"
+    assert len({one[0] for one in anchors if one[1] == CODE_FILE}) == 3, (
+        "the two constructs of one file did not get one stored identity each"
+    )
+    assert _cycle01_predecessor_edges(published), (
+        "the successor revision records no predecessor edge, so the evolution is not readable"
+    )
+    assert report_a.counts.anchors_observed_exact == 2
+
+
+def _cycle01_candidate_revisions(database: Path, label: str) -> tuple[tuple[str, str], ...]:
+    """The (invariant, revision) pair one label's revision rows carry, read from the database."""
+
+    connection = open_read_only_database(database)
+    try:
+        return tuple(
+            (str(row[0]), str(row[1]))
+            for row in connection.execute(
+                "SELECT i.invariant_id, r.revision_id FROM invariant i "
+                "JOIN invariant_revision r ON r.invariant_id = i.invariant_id "
+                "WHERE i.display_label = ?",
+                (label,),
+            )
+        )
+    finally:
+        connection.close()
+
+
+def _cycle01_candidate_anchors(database: Path) -> tuple[tuple[str, str, str], ...]:
+    """Every stored anchor as (identity, path, locator), read from the candidate itself."""
+
+    connection = open_read_only_database(database)
+    try:
+        return tuple(
+            (str(row[0]), str(row[1]), str(row[2]))
+            for row in connection.execute("SELECT anchor_id, path, locator FROM source_anchor")
+        )
+    finally:
+        connection.close()
+
+
+def _cycle01_predecessor_edges(database: Path) -> tuple[tuple[str, str], ...]:
+    """The recorded (child revision, parent revision) edges, which are what makes evolution legible."""
+
+    connection = open_read_only_database(database)
+    try:
+        return tuple(
+            (str(row[0]), str(row[1]))
+            for row in connection.execute(
+                "SELECT child_revision_id, parent_revision_id FROM invariant_predecessor"
+            )
+        )
+    finally:
+        connection.close()
+
+
+def _cycle01_cli_baseline_journey(build_pair: Callable[..., SourcePair], tmp_path: Path) -> None:
+    """The three remaining CYCLE-01 points, through the PUBLIC operation on a real SQLite store.
+
+    The leaf's evidence standard: a test of ``_observation_id`` or ``_admitted_candidate`` alone does
+    not close this finding, because both already passed while the user operation still failed. So this
+    drives the operation the curator actually runs -- a selected baseline, a real published dataset,
+    two constructs of one file, and a successor under the existing invariant -- and then reads the
+    rows that ended up in the candidate and in the published dataset.
+
+    "The operation" and not "the command line": the shipped argparse surface is driven end to end by
+    ``test_the_cli_subcommand_is_a_production_caller_that_writes_the_rows`` above, and the
+    ``--baseline`` flag is the one added line that reaches the selection asserted here. What this
+    journey adds is the part a flag cannot show: which rows the next task's candidate and the
+    published dataset actually hold afterwards.
+
+    ``build_pair`` is the fixture's own builder (``pair.__wrapped__``) rather than the fixture result:
+    this journey publishes into the memory root, where a dataset is the thing being created, so it
+    takes a private pair of real repositories instead of the session's shared read-only one.
+    """
+
+    pair = build_pair(cast("Any", _JourneyFactory)(tmp_path / "cycle01-private"))
+    root = tmp_path / "cycle01-journey"
+    published = pair.memory_root / "knowledge.sqlite"
+    assert not published.exists(), "a private pair's memory root starts with no dataset"
+    report_a = _cycle01_task_a(pair, root, published)
+    report_b = _cycle01_task_b(pair, root, published, report_a)
+    _cycle01_baseline_consequences(pair, root, report_a)
+    assert report_b.counts.entries_read == 2
+
+
+def _cycle01_reused_label_identity(tmp_path: Path) -> None:
+    """Two baselines, one repository, one reused local label: one record, not two.
+
+    Identity is anchored to the repository, so the same label at a later baseline names the SAME
+    record -- which is what lets the next task find what the previous one recorded. Keying it on the
+    code base commit made the label's meaning a function of the baseline, and this is the assertion
+    that fails when it is.
+    """
+
+    first = _repository_identity(_cycle01_contract(tmp_path, code="a" * 40, memory="c" * 40))
+    later = _repository_identity(_cycle01_contract(tmp_path, code="b" * 40, memory="d" * 40))
+    assert _identity(first, "invariant", "R-SIB") == _identity(later, "invariant", "R-SIB"), (
+        "one repository read at two code baselines minted two identities for one local label, so "
+        "the obligation recorded at the first baseline is a different record at the second"
+    )
+    assert _identity(first, "revision", "R-SIB") == _identity(later, "revision", "R-SIB")

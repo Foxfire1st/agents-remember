@@ -2,7 +2,7 @@
 
     agents-remember knowledge-ingest --contract <leaf enclosure contract>
         --list <hand-off list> --candidate-directory <dir>
-        --authorization-ref <ref> [--commit]
+        --authorization-ref <ref> [--commit] [--baseline <published dataset>]
         [--publish-to <memory dataset path> [--expected-destination <identity JSON>]]
 
 ``--contract`` is REQUIRED and is the write guard, exactly as ``memory-citations`` and
@@ -29,6 +29,13 @@ run that reports no publication. ``--expected-destination`` is the exact identit
 observed at that path, as a JSON object of the identity's own fields
 (``repository_id``/``schema_version``/``logical_digest``); omitting it means the destination is
 expected to be ABSENT, which is the first publication into a worktree.
+
+CONTINUITY IS THE SAME DECISION'S OTHER HALF, AND IT ALSO HAS ONE ARGUMENT. ``--baseline`` names the
+published dataset this task forks FROM. It is the pairing :class:`IngestSelection` documents: a
+candidate the caller names without the baseline it starts from is an empty candidate holding only
+this task's new entry, so the repository's existing invariants are absent from it and the next task
+starts blind to knowledge the repository already recorded. Without the argument nothing changed --
+the first task of a repository has no prior dataset to select and still creates an empty candidate.
 
 Exit status: 0 when every entry reached a terminal outcome the report names -- committed, a
 ruling, or a typed refusal -- and 2 when the invocation itself is refused (a missing or
@@ -85,6 +92,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         required=True,
         help="The authorization this run is admitted under. It is also the actor the authorship "
         "envelope names, so one required reference rather than two optional ones.",
+    )
+    parser.add_argument(
+        "--baseline",
+        dest="baseline",
+        default=None,
+        help="Path to the published dataset this task forks FROM. Omit for a repository's first "
+        "task: with no baseline and no existing candidate the run creates an empty candidate, "
+        "which is the cold start rather than the continuity path.",
     )
     parser.add_argument(
         "--commit",
@@ -165,6 +180,7 @@ def run(args: argparse.Namespace) -> int:
                 candidate_directory=args.candidate_directory,
                 authorization_ref=args.authorization_ref,
                 dry_run=not args.commit,
+                baseline=None if args.baseline is None else Path(args.baseline),
                 publication=_publication(args),
             ),
         )
