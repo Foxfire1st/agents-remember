@@ -110,6 +110,16 @@ class ReadToolRequest:
     The tool signature stays flat because FastMCP derives the published input schema from it; this
     value is what the builder consumes, so the builder itself is one argument wide and the flat wire
     shape is preserved without a widened exemption.
+
+    ``database_path`` and ``repository_id`` are the *selection*, and the caller owns both. Nothing
+    this server holds can answer either one: the runtime config carries no knowledge database or
+    namespace field, a repository's coordination declaration (settings, ``context_packet``) names the
+    code root, the memory root and the coordination paths, and no released helper resolves a
+    repository or a task to a knowledge SQLite path. The published schema makes them required rather
+    than optional-with-a-default precisely because a default would be this surface inventing a
+    selection. So a cold planner that has not been told the pair cannot discover it here; it is
+    supplied by the party that created or holds the dataset, exactly as ``databasePath`` is supplied
+    to every other ``knowledge_*`` operation.
     """
 
     database_path: str

@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -93,6 +93,7 @@ from agents_remember.models.knowledge.result import (
 from agents_remember.models.knowledge.source import (
     FileLocator,
     GitBlobIdentity,
+    LineRangeLocator,
     SourceAnchorDraft,
 )
 from agents_remember.models.knowledge.view import (
@@ -787,6 +788,15 @@ INTEGRATION_PATH = "src/integration.py"
 SYNCHRONIZATION_PATH = "src/synchronization.py"
 ABSENT_PATH = "src/retired_adapter.py"
 UNRECORDED_PATH = "src/not-recorded-anywhere.py"
+# The fourth location, and the one that separates a recorded location from prose that merely looks
+# like one. Its rationale names no file, so nothing in its row spells a path: a family read that
+# dropped the recorded path and locator could not be rescued by reading the statement, which is
+# exactly how a filename-bearing rationale hid this until the recheck varied it. Its locator is a
+# line range, so the row also proves the recorded locator union travels as recorded rather than as
+# the bare ``{"kind": "file"}`` an implementation would reach for.
+BATCH_PATH = "src/batch.py"
+BATCH_LOCATOR = LineRangeLocator(start_line=12, end_line=18)
+LIMIT_RATIONALE = "This implementation enforces the shared attempt limit."
 BASE_STATEMENT = "Preserve approved state across an admitted candidate write."
 FAMILY_GUARANTEE = (
     "Approved state survives every admitted candidate write, and the deciding attribution is "
@@ -800,7 +810,12 @@ OVERLAPPING_FAMILY_GUARANTEE = (
 
 @dataclass(frozen=True)
 class MountedFamilyFixture:
-    """One store holding the family, its two members and the realizations the case reads."""
+    """One store holding the family, its two members and the realizations the case reads.
+
+    ``expected_locations`` is the *stored* answer the reads are checked against -- the path, role and
+    locator each realization claim was recorded with -- so the two views are compared with the
+    record rather than with each other.
+    """
 
     database_path: Path
     repository_id: str
@@ -811,6 +826,8 @@ class MountedFamilyFixture:
     integration_claim_id: str
     synchronization_claim_id: str
     absent_claim_id: str
+    limit_claim_id: str
+    expected_locations: dict[str, tuple[str, str, object]]
 
 
 def _fixture_authorship() -> Authorship:
@@ -836,6 +853,7 @@ class _RealizationSpec:
     path: str
     role: str
     rationale: str
+    locator: object = field(default_factory=FileLocator)
 
 
 def _record_realization(
@@ -856,7 +874,7 @@ def _record_realization(
                     anchor_id=UUID(str(uuid4())),
                     path=spec.path,
                     source_identity=GitBlobIdentity(object_id="0" * 40),
-                    locator=FileLocator(),
+                    locator=cast(Any, spec.locator),
                 )
             ),
             provenance=authorship,
@@ -878,7 +896,8 @@ def _build_mounted_family_fixture(directory: Path, *, repository_id: str) -> Mou
     authorship = _fixture_authorship()
     base_revision_id, sibling_revision_id = str(uuid4()), str(uuid4())
     family_revision_id, sibling_family_revision_id = str(uuid4()), str(uuid4())
-    integration_claim_id, synchronization_claim_id, absent_claim_id = (
+    integration_claim_id, synchronization_claim_id, absent_claim_id, limit_claim_id = (
+        str(uuid4()),
         str(uuid4()),
         str(uuid4()),
         str(uuid4()),
@@ -1003,6 +1022,19 @@ def _build_mounted_family_fixture(directory: Path, *, repository_id: str) -> Mou
                 role="support",
                 rationale="The retired adapter applied the same obligation before the source moved.",
             ),
+            # The filename-free rationale, at a fourth path and with a line-range locator: this is
+            # the row that says whether the location a family read reports came from the record or
+            # from the prose. The claim realizes the SAME base revision as the three above, so it is
+            # the same family's member and the same read's frontier, and it adds a location without
+            # adding a member.
+            _RealizationSpec(
+                claim_id=limit_claim_id,
+                revision_id=base_revision_id,
+                path=BATCH_PATH,
+                role="enforcement",
+                rationale=LIMIT_RATIONALE,
+                locator=BATCH_LOCATOR,
+            ),
         ):
             _record_realization(store, repository_id, authorship, spec)
     finally:
@@ -1017,6 +1049,21 @@ def _build_mounted_family_fixture(directory: Path, *, repository_id: str) -> Mou
         integration_claim_id=integration_claim_id,
         synchronization_claim_id=synchronization_claim_id,
         absent_claim_id=absent_claim_id,
+        limit_claim_id=limit_claim_id,
+        expected_locations={
+            integration_claim_id: (INTEGRATION_PATH, "enforcement", {"kind": "file"}),
+            synchronization_claim_id: (
+                SYNCHRONIZATION_PATH,
+                "propagation-persistence",
+                {"kind": "file"},
+            ),
+            absent_claim_id: (ABSENT_PATH, "support", {"kind": "file"}),
+            limit_claim_id: (
+                BATCH_PATH,
+                "enforcement",
+                {"kind": "line_range", "start_line": 12, "end_line": 18},
+            ),
+        },
     )
 
 
@@ -1446,6 +1493,7 @@ async def _assert_family_traversal_from_one_path(
         fixture.integration_claim_id: INTEGRATION_PATH,
         fixture.synchronization_claim_id: SYNCHRONIZATION_PATH,
         fixture.absent_claim_id: ABSENT_PATH,
+        fixture.limit_claim_id: BATCH_PATH,
     }
     seeded = await _call(
         server,
@@ -1456,16 +1504,12 @@ async def _assert_family_traversal_from_one_path(
     assert seeded["state"] == "view", seeded
     rows = seeded["payload"]["rows"]
     subjects = [(row["subject"]["record_kind"], row["subject"]["record_id"]) for row in rows]
-    # The path's own realization and the two claims of the SAME recorded statement, and nothing
+    # The path's own realization and the other claims of the SAME recorded statement, and nothing
     # else: every row is one the seed selected, which is what the read that returned the whole
     # namespace's registered realizations could not say.
-    assert set(subjects) == {
-        ("realization_claim", fixture.integration_claim_id),
-        ("realization_claim", fixture.synchronization_claim_id),
-        ("realization_claim", fixture.absent_claim_id),
-    }, seeded
-    assert seeded["payload"]["counts"]["registered_realizations"]["value"] == 3, seeded
-    assert seeded["payload"]["counts"]["rows_returned"]["value"] == 3, seeded
+    assert set(subjects) == {("realization_claim", claim_id) for claim_id in by_id}, seeded
+    assert seeded["payload"]["counts"]["registered_realizations"]["value"] == 4, seeded
+    assert seeded["payload"]["counts"]["rows_returned"]["value"] == 4, seeded
 
     realized = next(
         row["subject"]["revision_id"]
@@ -1483,12 +1527,18 @@ async def _assert_family_traversal_from_one_path(
     ordered = {row["subject"]["record_kind"] for row in invariant_rows}
     assert ordered == {"invariant_revision", "realization_claim"}, invariants
     assert (
-        sum(row["subject"]["record_kind"] == "realization_claim" for row in invariant_rows) == 3
+        sum(row["subject"]["record_kind"] == "realization_claim" for row in invariant_rows) == 4
     ), invariants
     statement = next(
         row for row in invariant_rows if row["subject"]["record_kind"] == "invariant_revision"
     )
     assert statement["statement"] == BASE_STATEMENT, invariants
+    # The invariant view's realization rows carry their place too, by the same rule and against the
+    # same stored expectation: this is the sibling instance of the family defect, where the candidate
+    # already held the recorded role, path and locator and the projection copied none of them, so the
+    # view that answers "where is this invariant realized" showed the rationale and no place. The
+    # statement row is checked beside it, because only a realization row has a location to report.
+    _assert_the_invariant_realizations_carry_their_recorded_location(invariant_rows, fixture)
 
     # The governing family, read by the id the statement's own revision belongs to: BOTH members,
     # and the locations of both. This is the step the stub-supplied member rows hid -- on the real
@@ -1520,6 +1570,99 @@ async def _assert_family_traversal_from_one_path(
     assert {row["change_locus"] for row in locations} == {"attributed_source"}, family
     assert OVERLAPPING_FAMILY_GUARANTEE not in json.dumps(family), family
     assert family["completeWithinDeclaredScope"] is True, family
+    _assert_the_locations_are_recorded_not_read_out_of_the_prose(locations, fixture)
+
+    # And the same claim in the source-context view, so the two views are compared with the record
+    # and with each other rather than either one being trusted alone. The seeded read above already
+    # returned this claim; this one asks for it by the revision it realizes and no path, which is the
+    # spelling a caller uses when it learned the revision from a family read.
+    context = await _call(
+        server,
+        "knowledge_read",
+        {**anchor, "view": "source_context", "invariantRevisionId": realized},
+    )
+
+    assert context["state"] == "view", context
+    context_locations = {
+        row["subject"]["record_id"]: row
+        for row in context["payload"]["rows"]
+        if row["subject"]["record_kind"] == "realization_claim"
+    }
+    assert set(context_locations) == set(by_id), context
+    for claim_id, expected in fixture.expected_locations.items():
+        path, role, locator = expected
+        assert context_locations[claim_id]["path"] == path, context
+        assert context_locations[claim_id]["role"] == role, context
+        assert context_locations[claim_id]["locator"] == locator, context
+
+
+def _assert_the_invariant_realizations_carry_their_recorded_location(
+    invariant_rows: list[dict[str, Any]], fixture: Any
+) -> None:
+    """Every invariant realization row carries the location its claim was recorded with.
+
+    The sibling of the family defect, in the same file pair: ``_invariant_candidates`` built the
+    realization candidate with its recorded role, path and locator and ``render_invariant`` copied
+    none of them, so the invariant view answered "where is this invariant realized" with the claim
+    id, the invariant revision id and the authored rationale. The same filename-free claim is
+    asserted here, so neither view can be rescued by reading a filename out of the statement.
+
+    Only a realization row has a location to report, and the statement row is asserted beside it so
+    a renderer that started handing the invariant's own row a location from somewhere would be
+    caught rather than silently accepted.
+    """
+
+    realizations = [row for row in invariant_rows if row["fact_kind"] == "realization"]
+    assert len(realizations) == len(fixture.expected_locations), invariant_rows
+    for row in realizations:
+        claim_id = row["subject"]["record_id"]
+        path, role, locator = fixture.expected_locations[claim_id]
+        assert row["path"] == path, (claim_id, row)
+        assert row["role"] == role, (claim_id, row)
+        assert row["locator"] == locator, (claim_id, row)
+
+    filename_free = next(
+        row for row in realizations if row["subject"]["record_id"] == fixture.limit_claim_id
+    )
+    assert filename_free["statement"] == LIMIT_RATIONALE, filename_free
+    assert filename_free["path"] not in filename_free["statement"], filename_free
+
+    for row in invariant_rows:
+        if row["fact_kind"] == "statement":
+            assert row["role"] is None, row
+            assert row["path"] is None, row
+            assert row["locator"] is None, row
+
+
+def _assert_the_locations_are_recorded_not_read_out_of_the_prose(
+    locations: list[dict[str, Any]], fixture: Any
+) -> None:
+    """Each family location row carries the location the claim was recorded with, for every claim.
+
+    The row used to carry the claim id, the invariant revision id and the authored rationale, and
+    nothing else -- so a family read answered "where is this realized" with prose. That is invisible
+    on a fixture whose rationale happens to contain a filename, which is why one claim here is
+    recorded with a rationale that names no file and a line-range locator: neither the path nor the
+    extent can come from the statement, so a row that reports them read them from the record.
+
+    The check is made against the *stored* expectation the fixture built the rows from, not against
+    the other view's answer, so it does not become a test that two renderers agree with each other.
+    """
+
+    assert len(locations) == len(fixture.expected_locations), locations
+    for row in locations:
+        claim_id = row["subject"]["record_id"]
+        path, role, locator = fixture.expected_locations[claim_id]
+        assert row["path"] == path, (claim_id, row)
+        assert row["role"] == role, (claim_id, row)
+        assert row["locator"] == locator, (claim_id, row)
+
+    filename_free = next(
+        row for row in locations if row["subject"]["record_id"] == fixture.limit_claim_id
+    )
+    assert filename_free["statement"] == LIMIT_RATIONALE, filename_free
+    # The rationale names no file, so the path in the row above is the record's and not the prose's.
+    assert filename_free["path"] not in filename_free["statement"], filename_free
 
 
 async def _assert_the_path_seed_selects_in_every_view(
@@ -1557,7 +1700,18 @@ async def _assert_the_path_seed_selects_in_every_view(
         fixture.integration_claim_id,
         fixture.synchronization_claim_id,
         fixture.absent_claim_id,
+        fixture.limit_claim_id,
     }, seeded_family
+    # A path-seeded family read carries the locations too: the seed narrows WHICH rows are on the
+    # frontier, and the narrowing is not a licence to report the survivors without their places.
+    _assert_the_locations_are_recorded_not_read_out_of_the_prose(
+        [
+            row
+            for row in seeded_family["payload"]["rows"]
+            if row["subject"]["record_kind"] == "realization_claim"
+        ],
+        fixture,
+    )
     # ... and within a seeded family read the members are filtered to the seed's own frontier: the
     # other member's revision is realized nowhere, so it is not on this read's frontier.
     assert [

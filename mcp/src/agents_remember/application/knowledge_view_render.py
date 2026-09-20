@@ -994,7 +994,15 @@ def render_invariant(
     int,
 ]:
     """The invariant view's rows, its limitations, its rule ids, its selection's size and the
-    position the next page starts at."""
+    position the next page starts at.
+
+    A realization row carries its own recorded location, exactly as the source-context and family
+    views report it. ``_invariant_candidates`` set the role, path and locator on that candidate from
+    the start -- this projection copied none of them, so the view that answers "where is this
+    invariant realized" reported the claim, its revision and its authored rationale and no place.
+    Nothing is derived here: the fields the candidate already holds are the ones that travel, so the
+    three views cannot disagree about one claim's location.
+    """
 
     page = _render(_invariant_candidates(reader, request), request, offset)
     rows: list[InvariantRow] = []
@@ -1006,6 +1014,9 @@ def render_invariant(
                 subject=candidate.subject,
                 fact_kind=candidate.fact_kind,  # type: ignore[arg-type]
                 statement=candidate.statement,
+                role=candidate.role,  # type: ignore[arg-type]
+                path=candidate.path,
+                locator=candidate.locator,
                 essential_conditions=candidate.essential_conditions,
                 conditions_omitted=candidate.conditions_omitted,
                 lifecycle=candidate.lifecycle,
@@ -1034,7 +1045,15 @@ def render_family(
     int,
     int,
 ]:
-    """The family view's rows, with each row's change locus left as the field it was recorded as."""
+    """The family view's rows, with each row's change locus left as the field it was recorded as.
+
+    A member's location travels with the row, exactly as the source-context view reports it. The
+    candidate carried the recorded path and locator from the start; the projection copied neither,
+    so a family read answered "where is this realized" with a claim id, an invariant revision id
+    and an authored rationale -- and the rationale is authored prose, which is not a location even
+    when a filename happens to appear in it. Both views decode the one recorded locator through the
+    same adapter, so the two cannot disagree about one claim's place.
+    """
 
     page = _render(_family_candidates(reader, request), request, offset)
     rows: list[FamilyRow] = []
@@ -1046,6 +1065,9 @@ def render_family(
                 subject=candidate.subject,
                 fact_kind=candidate.fact_kind,  # type: ignore[arg-type]
                 statement=candidate.statement,
+                role=candidate.role,  # type: ignore[arg-type]
+                path=candidate.path,
+                locator=candidate.locator,
                 change_locus=candidate.change_locus,  # type: ignore[arg-type]
                 lifecycle=candidate.lifecycle,
                 order=_position(page.start + index, provenance, request.ordering_input),

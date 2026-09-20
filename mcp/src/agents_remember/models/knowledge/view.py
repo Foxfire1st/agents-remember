@@ -780,7 +780,15 @@ class SourceContextRow(KnowledgeModel):
 
 
 class InvariantRow(KnowledgeModel):
-    """One recorded fact about an invariant: its statement, its conditions, or a related record."""
+    """One recorded fact about an invariant: its statement, its conditions, or a related record.
+
+    ``role``, ``path`` and ``locator`` are a realization row's own recorded location. The row's
+    ``fact_kind="realization"`` answer to "where is this invariant realized" carried the claim id,
+    the invariant revision id and the authored rationale and no place at all, which is the same loss
+    the family projection had: the caller could see a realization existed but not where it is. They
+    are reported exactly as recorded, through the same locator decoder every other view uses, so no
+    view derives a location from a statement and two views cannot disagree about one claim's place.
+    """
 
     subject: SubjectRef
     fact_kind: Literal[
@@ -795,6 +803,11 @@ class InvariantRow(KnowledgeModel):
         "lineage",
     ]
     statement: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    # The recorded relationship and place a realization row reports, and the same fields the
+    # source-context view publishes for the same claim.
+    role: RealizationRole | None = None
+    path: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+    locator: SourceLocator | None = None
     essential_conditions: tuple[str, ...] = ()
     # Requirement 4.8: a compact view may shorten prose it is licensed to shorten, but it may not
     # drop the conditions under which the invariant applies. When a view was too narrow to carry
@@ -812,6 +825,14 @@ class FamilyRow(KnowledgeModel):
     ``change_locus`` is requirement 1.2's distinction made into a field: a member's *record*
     changing and its *attributed source* changing are different facts about a family, and a view
     that merged them would report a source edit as a knowledge change or the reverse.
+
+    ``role``, ``path`` and ``locator`` are the member location's own recorded fields, carried only
+    by the rows that are a realization claim. A family read answers "which obligations does this
+    family admit, and where are they realized", and a member's location reported as a claim id, an
+    invariant revision id and an authored rationale names no place: the caller could see that a
+    realization row exists but not where it is. The three fields are reported exactly as recorded --
+    the same decoder the source-context view uses, with nothing derived from the row's prose and
+    nothing re-anchored -- so the two views cannot disagree about one claim's location.
     """
 
     subject: SubjectRef
@@ -825,6 +846,13 @@ class FamilyRow(KnowledgeModel):
         "curator_assessment",
     ]
     statement: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    # The recorded role the realization claims, on the rows that are a realization claim. It is the
+    # same authored relationship the source-context view reports, and the family view orders
+    # ``member`` rows by it (``ordering.registered-role``), so a row read here without it could not
+    # be re-derived from what the response carried.
+    role: RealizationRole | None = None
+    path: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+    locator: SourceLocator | None = None
     change_locus: Literal["member_record", "attributed_source", "both", "neither"] = "neither"
     lifecycle: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
     order: OrderedPosition
