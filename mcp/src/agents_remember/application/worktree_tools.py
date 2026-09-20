@@ -26,7 +26,7 @@ from agents_remember.models.lifecycles.operation import (
     LifecycleOperationProjection,
 )
 from agents_remember.models.lifecycles.responses import TerminalState
-from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
+from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionInput
 from agents_remember.observer.ambient import AmbientLifecycle, ambient
 from agents_remember.observer.save_gate import coerce_save_decision
 from agents_remember.observer.ulid import new_ulid
@@ -349,7 +349,7 @@ def worktree_sync_tool(
     *,
     contract_path: str,
     memory_sync_choice: MemorySyncChoice | None = None,
-    resolution_action: SyncResolutionAction | None = None,
+    resolution: SyncResolutionInput | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     configured = admit_configured_contract(config, contract_path)
@@ -358,7 +358,8 @@ def worktree_sync_tool(
     args = git_worktree_manager.WorktreeArgs(
         contract_path=configured.contract_path,
         memory_sync_choice=memory_sync_choice,
-        resolution_action=resolution_action,
+        resolution_action=resolution.action if resolution is not None else None,
+        knowledge_resolution=resolution.knowledge if resolution is not None else None,
         dry_run=dry_run,
     )
     return _worktree_result("worktree_sync", git_worktree_manager.sync_result(args))

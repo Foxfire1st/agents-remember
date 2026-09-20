@@ -43,7 +43,11 @@ from agents_remember.memory.knowledge.merge_refusals import (
 )
 from agents_remember.memory.knowledge.schema_generations import SchemaGeneration
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
-from agents_remember.models.knowledge.merge import ChangeOperationKind
+from agents_remember.models.knowledge.merge import (
+    AuthoredDecision,
+    AuthoredReconciliation,
+    ChangeOperationKind,
+)
 from agents_remember.models.knowledge.result import KnowledgeOperation, KnowledgeRefusal
 
 # The schema name the validated base is attached under. One constant, because the session's
@@ -64,11 +68,15 @@ NOT_SUPPLIED = "<not-supplied>"
 # a foreign key. It is the one conflict that arrives without a row-level change in hand.
 _FOREIGN_KEY_CONFLICT = int(apsw.SQLITE_CHANGESET_FOREIGN_KEY)
 
-# The one conflict action this package ever returns. ``OMIT`` and ``REPLACE`` are intentionally not
-# named anywhere in the merge path: dropping a conflicting operation would publish a candidate that
-# silently lost a side's change, and replacing one side's row with the other's is the automatic
-# resolution this operation does not implement.
+# The conflict action returned for a conflict the *caller* already decided, and the one returned
+# for every conflict it did not. ``OMIT`` and ``REPLACE`` are unreachable without an authored
+# decision naming exactly that row: this package still never drops a conflicting operation on its
+# own judgement, and never replaces one side's value with the other's as an automatic resolution.
+# The distinction is the whole point -- "the caller reconciled this row explicitly" and "the merge
+# picked a winner" are different facts, and only the first is expressible here.
 _ABORT = int(apsw.SQLITE_CHANGESET_ABORT)
+_OMIT = int(apsw.SQLITE_CHANGESET_OMIT)
+_REPLACE = int(apsw.SQLITE_CHANGESET_REPLACE)
 
 
 @dataclass(frozen=True)
@@ -166,6 +174,11 @@ class AppliedChangeset:
     back, so the target holds exactly what it held before. It is a third outcome rather than a
     conflict because no change conflicted -- the engine applied everything it was given, and what
     the caller proved afterwards is that the whole application must not stand.
+
+    ``resolved`` names every conflict an authored decision settled instead of aborting, so the
+    caller's own postcondition check can tell "the engine dropped this operation" from "the caller
+    decided this row". Without it the postcondition would refuse a candidate the caller explicitly
+    asked for.
     """
 
     conflict_code: int | None = None
@@ -174,12 +187,33 @@ class AppliedChangeset:
     conflict_key: tuple[str, ...] | None = None
     detail: str = ""
     refusal: KnowledgeRefusal | None = None
+    resolved: tuple[ResolvedConflict, ...] = ()
 
     @property
     def conflicted(self) -> bool:
         """Whether the application hit a conflict callback at all."""
 
         return self.conflict_code is not None
+
+
+@dataclass(frozen=True)
+class ResolvedConflict:
+    """One conflict an authored decision settled, with the row identity the engine supplied.
+
+    ``record_id`` is rendered the way the refusal renders it -- the primary key values joined with
+    ``/`` -- so the record the caller decided and the record the postcondition check would have
+    looked for are the same string rather than two spellings of one row.
+
+    ``reason`` is empty for a conflict the callback attributed to a row, and names what was removed
+    for a row the caller's referential decision retracted: SQLite reports that conflict without a
+    row, so the row is only identified afterwards, by the violation it left behind.
+    """
+
+    table: str
+    record_id: str
+    decision: AuthoredDecision
+    conflict_code: int
+    reason: str = ""
 
 
 def require_session_capability(operation: KnowledgeOperation) -> KnowledgeRefusal | None:
@@ -259,13 +293,21 @@ def apply_changeset(
     target_path: Path,
     *,
     within_transaction: Callable[[apsw.Connection], KnowledgeRefusal | None] | None = None,
+    reconciliation: AuthoredReconciliation | None = None,
 ) -> AppliedChangeset:
-    """Apply one delta to one private target with a conflict callback that always aborts.
+    """Apply one delta to one private target with a conflict callback that aborts.
 
     The callback copies the available facts -- the conflict code, the table, the operation and the
-    **exact key of the row it could not apply** -- and returns ``SQLITE_CHANGESET_ABORT``
-    unconditionally. The first blocking conflict is captured and the whole application is rolled
-    back, rather than continuing with ``OMIT`` to collect a cosmetically complete list.
+    **exact key of the row it could not apply** -- and returns ``SQLITE_CHANGESET_ABORT``. The first
+    blocking conflict is captured and the whole application is rolled back, rather than continuing
+    with ``OMIT`` to collect a cosmetically complete list.
+
+    ``reconciliation`` is the single exception, and it is the caller's decision rather than this
+    operation's: when it names exactly the row the engine just refused, the callback applies that
+    row's authored decision -- ``keep-left`` retracts the arriving change, ``keep-right`` applies it
+    over the stored value -- records the decision in ``resolved``, and lets the application continue
+    to the *next* conflict, which is refused exactly as before. A row the caller did not name is
+    never touched, so nothing here becomes an automatic resolution policy.
 
     The key is copied here rather than looked up afterwards for two reasons: an APSW ``TableChange``
     expires when the iterator advances, and this is the only place the engine names the row it
@@ -282,9 +324,24 @@ def apply_changeset(
     """
 
     captured: dict[str, Any] = {}
+    settled: list[ResolvedConflict] = []
+    rowless: list[int] = []
     target = Path(target_path)
 
     def conflict(code: int, change: object) -> int:
+        decision = _authored_decision(reconciliation, int(code), change)
+        if decision is not None:
+            if reconciliation is not None and reconciliation.record_id is None:
+                rowless.append(int(code))
+            settled.append(
+                ResolvedConflict(
+                    table=str(getattr(change, "name", "") or ""),
+                    record_id=_rendered_key(change),
+                    decision=decision,
+                    conflict_code=int(code),
+                )
+            )
+            return _OMIT if decision == "keep-left" else _REPLACE
         if not captured:
             captured["code"] = int(code)
             captured["table"] = getattr(change, "name", None)
@@ -301,13 +358,28 @@ def apply_changeset(
         except apsw.Error as error:
             _roll_back_if_open(connection)
             if not captured:
-                return AppliedChangeset(detail=f"{type(error).__name__}: {error}")
+                return AppliedChangeset(
+                    detail=f"{type(error).__name__}: {error}", resolved=tuple(settled)
+                )
             return AppliedChangeset(
                 conflict_code=int(captured["code"]),
                 conflict_table=captured.get("table"),
                 conflict_operation=captured.get("operation"),
                 conflict_key=captured.get("key"),
+                resolved=tuple(settled),
             )
+        retracted = _retract_referential_rows(connection, delta) if rowless else ()
+        if retracted is None:
+            _roll_back_if_open(connection)
+            return AppliedChangeset(
+                conflict_code=_FOREIGN_KEY_CONFLICT,
+                detail=(
+                    "a declared reference is still broken by a row no arriving change wrote, so "
+                    "the caller's retraction cannot settle this conflict"
+                ),
+                resolved=tuple(settled),
+            )
+        settled.extend(retracted)
         if within_transaction is not None:
             refusal = within_transaction(connection)
             if refusal is not None:
@@ -316,7 +388,145 @@ def apply_changeset(
         connection.execute("COMMIT")
     finally:
         connection.close()
-    return AppliedChangeset()
+    return AppliedChangeset(resolved=tuple(settled))
+
+
+# How many retraction passes one application may take. Removing a child row cannot create another
+# reference to it, so one pass is what a schema with no reference cycles needs; the bound exists so
+# a cycle refuses instead of looping.
+_MAX_RETRACTION_PASSES = 8
+
+
+def _retract_referential_rows(
+    connection: apsw.Connection, delta: Delta
+) -> tuple[ResolvedConflict, ...] | None:
+    """Remove the arriving rows that break a declared reference, and nothing else.
+
+    SQLite reports a foreign-key conflict without handing the callback a change, so the row cannot be
+    identified from the conflict itself -- and returning ``OMIT`` for that conflict does not remove
+    it: measured on this schema, the application committed and the violating row was still there. The
+    row is therefore identified by the violation it left behind, and retracted by the caller's
+    decision rather than by the engine's.
+
+    The bound is what keeps that from becoming a general licence to delete: only a row the *arriving*
+    delta **inserted** can be retracted, and only while SQLite itself reports it as breaking a
+    reference. An insertion is the one operation whose retraction removes exactly what arrived and
+    nothing else. A violation no arriving insertion accounts for -- a row the left side authored,
+    which is also the case where the reconciled answer is to restore the removed parent instead --
+    returns ``None``, and the caller refuses the whole application with the conflict it started from.
+    """
+
+    inserted = _delta_inserted_keys(delta)
+    retracted: list[ResolvedConflict] = []
+    for _ in range(_MAX_RETRACTION_PASSES):
+        violations = list(connection.execute("PRAGMA foreign_key_check"))
+        if not violations:
+            return tuple(retracted)
+        row = _retractable_row(connection, violations[0], inserted)
+        if row is None:
+            return None
+        table, record_id, rowid = row
+        connection.execute(f'DELETE FROM "{table}" WHERE rowid = ?', (rowid,))
+        retracted.append(
+            ResolvedConflict(
+                table=table,
+                record_id=record_id,
+                decision="keep-left",
+                conflict_code=_FOREIGN_KEY_CONFLICT,
+                reason="the arriving row broke a declared reference the left side no longer satisfies",
+            )
+        )
+    return None
+
+
+def _delta_inserted_keys(delta: Delta) -> dict[str, set[str]]:
+    """Return the rendered keys of every row the delta *inserted*, by table.
+
+    Only an insertion is a retraction candidate, and the narrowness is what keeps this from becoming
+    destructive. Retracting an arriving ``UPDATE`` means restoring the value it overwrote -- which
+    this layer cannot do, because the stored value it would restore is the left side's -- and
+    deleting the row instead would remove content the left side authored. A ``DELETE`` is not a
+    candidate either: the arriving side removed that row, so there is nothing left to retract.
+    """
+
+    inserted: dict[str, set[str]] = {}
+    for change in delta.operations:
+        if change.operation != "INSERT":
+            continue
+        key = change.primary_key()
+        if not key or any(value is None for value in key):
+            continue
+        inserted.setdefault(change.table, set()).add("/".join(str(value) for value in key))
+    return inserted
+
+
+def _retractable_row(
+    connection: apsw.Connection, violation: tuple[Any, ...], inserted: dict[str, set[str]]
+) -> tuple[str, str, int] | None:
+    """Return ``(table, record_id, rowid)`` for one violating row the delta inserted, or ``None``."""
+
+    table = str(violation[0])
+    rowid = int(violation[1])
+    if not inserted.get(table):
+        return None
+    record_id = _row_record_id(connection, table, rowid)
+    if record_id is None or record_id not in inserted[table]:
+        return None
+    return table, record_id, rowid
+
+
+def _row_record_id(connection: apsw.Connection, table: str, rowid: int) -> str | None:
+    """Render one row's primary key the way the delta renders it, read by rowid."""
+
+    columns = [
+        str(row[1])
+        for row in connection.execute(f'PRAGMA table_info("{table}")')
+        if int(row[5] or 0) > 0
+    ]
+    if not columns:
+        return None
+    selected = ", ".join(f'"{column}"' for column in columns)
+    row = next(
+        iter(connection.execute(f'SELECT {selected} FROM "{table}" WHERE rowid = ?', (rowid,))),
+        None,
+    )
+    if row is None:
+        return None
+    return "/".join(str(value) for value in row)
+
+
+def _authored_decision(
+    reconciliation: AuthoredReconciliation | None, code: int, change: object
+) -> AuthoredDecision | None:
+    """Return the caller's decision for exactly this conflict, or ``None``.
+
+    Which shape of decision can match is a property of the conflict, not of the caller's intent. A
+    conflict the engine attributed to a row is answered only by a decision naming that exact row --
+    table and rendered key both -- and a conflict the engine reported without a change is answered
+    only by the row-less decision. Nothing else matches, so a decision always applies to the conflict
+    the caller read and never to a neighbouring one.
+    """
+
+    if reconciliation is None:
+        return None
+    table = getattr(change, "name", None)
+    if reconciliation.record_id is None:
+        if table is not None or code != _FOREIGN_KEY_CONFLICT:
+            return None
+        return reconciliation.decision
+    key = _conflicting_key(change)
+    if table is None or key is None or str(table) != reconciliation.table:
+        return None
+    if "/".join(key) != reconciliation.record_id:
+        return None
+    return reconciliation.decision
+
+
+def _rendered_key(change: object) -> str:
+    """Render one change's exact key the way the refusals render it: values joined with ``/``."""
+
+    key = _conflicting_key(change)
+    return "" if key is None else "/".join(key)
 
 
 def _roll_back_if_open(connection: apsw.Connection) -> None:

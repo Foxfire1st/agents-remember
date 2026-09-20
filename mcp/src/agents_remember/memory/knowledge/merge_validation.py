@@ -215,6 +215,39 @@ def require_applied_changes(
         side_reader.close()
 
 
+def unapplied_changes(
+    operation: KnowledgeOperation,
+    *,
+    merged: Path,
+    side: Path,
+    operations: tuple[MaterializedChange, ...],
+) -> tuple[KnowledgeRefusal, ...]:
+    """Return one refusal per operation the result does not carry, in delta order.
+
+    This is the same measurement :func:`require_applied_changes` makes, exposed as the whole list
+    rather than only its first member, because the caller's own authored decision changes what
+    "every operation must be present" can mean for the rows it settled. A caller that settled some
+    operations has to know *how many* the result is missing before it can tell the omissions it
+    authorised from the ones it did not; a caller that settled nothing reads the first refusal and
+    the two functions answer identically.
+    """
+
+    merged_reader = open_read_only_database(merged)
+    side_reader = open_read_only_database(side)
+    try:
+        return tuple(
+            difference
+            for change in operations
+            if (
+                difference := _first_unapplied_change(operation, change, merged_reader, side_reader)
+            )
+            is not None
+        )
+    finally:
+        merged_reader.close()
+        side_reader.close()
+
+
 def _first_unapplied_change(
     operation: KnowledgeOperation,
     change: MaterializedChange,

@@ -6,11 +6,17 @@ identity. Code-side files keep ordinary Git semantics, including a file named me
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
-from agents_remember.worktrees.knowledge_conflict import settle_knowledge_conflicts
+from agents_remember.models.knowledge.merge import AuthoredReconciliation
+from agents_remember.worktrees.knowledge_conflict import (
+    RefusedKnowledgeStage,
+    settle_knowledge_conflict,
+    settle_knowledge_conflicts,
+)
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     current_branch,
@@ -23,6 +29,23 @@ from agents_remember.worktrees.sync_transaction_state import SyncSideRecord
 
 class SyncGitProofError(RuntimeError):
     """Live Git state cannot be attributed exactly to the journaled sync."""
+
+
+@dataclass(frozen=True)
+class SideMergeOutcome:
+    """What one side's merge attempt reached, with the adapter's reason when it stopped.
+
+    ``state`` is ``completed`` or ``resolution-required``; ``conflicts`` names the paths still
+    unmerged; ``message`` is Git's own text for a conflict outside the knowledge adapter. ``refused``
+    carries the adapter's explanation for a conflicted knowledge dataset -- the row it refused and
+    the action it advertised -- so the caller can journal it and publish it rather than only knowing
+    that one path is unresolved.
+    """
+
+    state: str
+    conflicts: tuple[str, ...] = ()
+    message: str = ""
+    refused: RefusedKnowledgeStage | None = None
 
 
 def read_ref(repository: Path, ref: str) -> str | None:
@@ -338,7 +361,7 @@ def _require_active_merge(side: SyncSideRecord) -> None:
         raise SyncGitProofError(f"{side.side} active merge is not the pinned sync merge")
 
 
-def _continue_memory_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str]:
+def _continue_memory_merge(side: SyncSideRecord) -> SideMergeOutcome:
     """Settle the memory merge: knowledge datasets route, everything else stays the agent's.
 
     A knowledge database is binary to Git, so an ordinary merge can only declare the whole file
@@ -356,29 +379,64 @@ def _continue_memory_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], 
     if conflicts:
         # ``ours`` is the work branch tip the merge started from and ``theirs`` is the source commit
         # being merged in, which is exactly the left/right pair the adapter's request names.
-        remaining = settle_knowledge_conflicts(
+        settlement = settle_knowledge_conflicts(
             Path(side.worktree), conflicts, side.preSyncHead, side.sourceCommit
         )
-        if remaining:
-            return "resolution-required", remaining, ""
+        if settlement.remaining:
+            return SideMergeOutcome(
+                state="resolution-required",
+                conflicts=settlement.remaining,
+                refused=settlement.guidance,
+            )
     validate_staged_resolution(side)
-    return _finish_staged_memory_merge(side)
+    return SideMergeOutcome(
+        state="completed", conflicts=(), message=_finish_staged_memory_merge(side)
+    )
 
 
-def _existing_side_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str] | None:
+def reconcile_side_merge(
+    side: SyncSideRecord, path: str, reconciliation: AuthoredReconciliation
+) -> RefusedKnowledgeStage | None:
+    """Author the caller's decision for one retained knowledge conflict, and stage the result.
+
+    This is the supported operation's Git half, and it is deliberately the *same* route the automatic
+    pass takes: the three index stages are materialised again, the adapter is asked for the merge with
+    the caller's decision for that one conflict, and the settled dataset is republished into the
+    worktree and staged. Nothing about the conflict is interpreted here -- which row, which decision
+    and whether the decision is expressible at all are the adapter's answers, and the caller has
+    already checked the decision against the diagnosis it journaled.
+
+    Returns ``None`` when the path settled and is staged, and the adapter's fresh explanation when it
+    did not: a decision that settles the first conflict may reveal a second one, and that second one
+    is reported exactly as the first was. The caller finishes the merge afterwards through the
+    ordinary continuation, so a reconciled sync is a normal sync with one authored input.
+    """
+
+    worktree = Path(side.worktree)
+    _require_active_merge(side)
+    return settle_knowledge_conflict(
+        worktree,
+        path,
+        side.preSyncHead,
+        side.sourceCommit,
+        reconciliation=reconciliation,
+    )
+
+
+def _existing_side_merge(side: SyncSideRecord) -> SideMergeOutcome | None:
     """Resume only the admitted merge or its exact completed output."""
     worktree = Path(side.worktree)
     if merge_head(worktree) is not None:
         _require_active_merge(side)
         if side.side == "memory" and side.plan == "merge":
             return _continue_memory_merge(side)
-        return "resolution-required", unmerged_paths(worktree), ""
+        return SideMergeOutcome(state="resolution-required", conflicts=unmerged_paths(worktree))
     if side_merge_completed(side):
-        return "completed", (), head_commit(worktree)
+        return SideMergeOutcome(state="completed", message=head_commit(worktree))
     return None
 
 
-def start_side_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str]:
+def start_side_merge(side: SyncSideRecord) -> SideMergeOutcome:
     """Attempt the pinned merge; only genuine content conflicts require resolution."""
 
     worktree = Path(side.worktree)
@@ -403,18 +461,22 @@ def start_side_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str]:
         if not exact_created_head(side, result_head):
             raise SyncGitProofError(f"{side.side} merge did not create the exact admitted head")
         _refresh_memory_cache(side)
-        return "completed", (), result_head
+        return SideMergeOutcome(state="completed", message=result_head)
     conflicts = unmerged_paths(worktree)
     if result.returncode == 1 and merge_head(worktree) == side.sourceCommit and conflicts:
         if memory_merge:
             return _continue_memory_merge(side)
-        return "resolution-required", conflicts, (result.stderr or result.stdout).strip()
+        return SideMergeOutcome(
+            state="resolution-required",
+            conflicts=conflicts,
+            message=(result.stderr or result.stdout).strip(),
+        )
     raise SyncGitProofError(
         (result.stderr or result.stdout).strip() or f"{side.side} source merge failed"
     )
 
 
-def _finish_staged_memory_merge(side: SyncSideRecord) -> tuple[str, tuple[str, ...], str]:
+def _finish_staged_memory_merge(side: SyncSideRecord) -> str:
     """Publish one ordinary memory merge with exact parents and no cache in its tree."""
 
     worktree = Path(side.worktree)
@@ -426,7 +488,7 @@ def _finish_staged_memory_merge(side: SyncSideRecord) -> tuple[str, tuple[str, .
     if not exact_created_head(side, result_head):
         raise SyncGitProofError("memory merge commit does not have the pinned parents")
     _refresh_memory_cache(side)
-    return "completed", (), result_head
+    return result_head
 
 
 def continue_side_merge(side: SyncSideRecord) -> str:
@@ -445,7 +507,7 @@ def continue_side_merge(side: SyncSideRecord) -> str:
     validate_staged_resolution(side)
     if side.side == "memory":
         _remove_memory_cache_from_index(side)
-        return _finish_staged_memory_merge(side)[2]
+        return _finish_staged_memory_merge(side)
     _require_sync_git(worktree, ["commit", "--no-edit"])
     result_head = head_commit(worktree)
     if not exact_created_head(side, result_head):

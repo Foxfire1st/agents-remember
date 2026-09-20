@@ -13,6 +13,12 @@ from agents_remember.models.closeout.input import (
     CloseoutInvalidField,
     ResolvedCloseoutPlan,
 )
+from agents_remember.models.knowledge.merge import (
+    AuthoredDecision,
+    AuthoredReconciliation,
+    MergeConflict,
+)
+from agents_remember.models.knowledge.result import KnowledgeRefusal
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.lifecycles.operation import LifecycleOperationProjection
 from agents_remember.models.lifecycles.operation_kinds import LifecycleOperationKind
@@ -83,7 +89,10 @@ SourceLineageState = Literal["current", "blocked", "unavailable"]
 SourceLineageEdgeState = Literal["current", "behind", "diverged", "unavailable"]
 SourceLineageRelation = Literal["super-to-master", "master-to-leaf", "super-to-leaf"]
 SourceLineageSide = Literal["code", "memory"]
-SyncResolutionAction = Literal["continue", "cancel"]
+# ``reconcile`` authors a resolution for one exact conflict the merge engine refused; it is the
+# one action that carries a decided input and the only one that can settle a knowledge
+# dataset's conflict without an outside repair tool.
+SyncResolutionAction = Literal["continue", "cancel", "reconcile"]
 MemorySyncChoice = Literal["merge-memory", "skip-memory"]
 SyncSide = Literal["code", "memory"]
 SyncPhase = Literal[
@@ -150,10 +159,48 @@ class SyncOperationProjection(StrictResponseModel):
     identityMismatch: bool = False
     side: SyncSide | None = None
     conflictFiles: tuple[str, ...] = ()
+    # The same explanation the sync response carries, so a status read names what the agent would
+    # have to reconcile instead of only which file is unresolved.
+    knowledgeConflict: SyncKnowledgeConflict | None = None
     summary: str
     nextArgs: dict[str, object] | None = None
     cancelArgs: dict[str, object] | None = None
     evidencePath: str | None = None
+
+
+class SyncResolutionInput(StrictResponseModel):
+    """One resolution call's inputs, paired so an action and its decided input travel together.
+
+    ``reconcile`` is the only action that carries an authored decision, and the two are refused as a
+    pair when they disagree -- a decision without ``reconcile`` and ``reconcile`` without a decision
+    are both input errors -- so they are one value here rather than two parameters every layer has
+    to pass side by side and keep consistent.
+    """
+
+    action: SyncResolutionAction | None = None
+    knowledge: AuthoredReconciliation | None = None
+
+
+class SyncKnowledgeConflict(StrictResponseModel):
+    """The engine's own explanation of why one conflicted knowledge dataset would not settle.
+
+    This model exists because the explanation used to stop one layer below the agent. The merge
+    engine already reported the exact conflict -- the table, the operation and the row identity it
+    refused -- and the adapter already carried a typed refusal with the action it advertised; the
+    sync asked only *whether* the dataset settled, so all of it was reduced to a boolean and the
+    agent received ``files: ["knowledge.sqlite"]`` and nothing to reconcile.
+
+    Every field is the engine's own value, carried verbatim: ``conflict`` is the attribution,
+    ``refusal`` is the typed explanation, and ``decisions`` names the authored decisions that
+    conflict admits. An empty ``decisions`` means there is nothing an authored decision can settle
+    -- a schema disagreement above all -- and the refusal's own ``next_action`` says so.
+    """
+
+    path: str
+    conflict: MergeConflict | None = None
+    refusal: KnowledgeRefusal | None = None
+    detail: str = ""
+    decisions: list[AuthoredDecision] = Field(default_factory=list)
 
 
 class SyncResolutionProjection(StrictResponseModel):
@@ -172,6 +219,7 @@ class SyncResolutionProjection(StrictResponseModel):
     worktree: str | None = None
     files: list[str] = Field(default_factory=list)
     wipRestore: bool = False
+    knowledge: SyncKnowledgeConflict | None = None
 
 
 class AtomicSeriesActivationFact(StrictResponseModel):
@@ -451,7 +499,9 @@ class WorktreeSyncResponse(WorktreeCommandResponse):
     nextArgs: dict[str, object] | None = None
     cancelArgs: dict[str, object] | None = None
     evidencePath: str | None = None
-    invalidField: Literal["memory_sync_choice", "resolution_action"] | None = None
+    invalidField: (
+        Literal["memory_sync_choice", "resolution_action", "knowledge_resolution"] | None
+    ) = None
     manualRepair: dict[str, object] | None = None
 
 

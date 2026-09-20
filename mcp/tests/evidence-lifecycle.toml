@@ -1322,6 +1322,8 @@ consumers = [
   "mcp/tests/test_knowledge_store.py",
   "mcp/tests/test_knowledge_citation_boundaries.py",
   "mcp/tests/test_knowledge_effect_claims.py",
+  "mcp/tests/test_sync_parked_candidate.py",
+  "mcp/tests/test_worktree_sync.py",
 ]
 
 [[artifact]]

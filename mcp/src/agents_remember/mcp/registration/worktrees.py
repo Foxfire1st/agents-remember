@@ -12,7 +12,12 @@ from agents_remember.application.worktree_tools import (
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.declared_caller import DeclaredCaller
-from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
+from agents_remember.models.knowledge.merge import AuthoredReconciliation
+from agents_remember.models.worktree import (
+    MemorySyncChoice,
+    SyncResolutionAction,
+    SyncResolutionInput,
+)
 
 from ..tools import (
     worktree_attach_payload,
@@ -173,6 +178,7 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         contract_path: str,
         memory_sync_choice: MemorySyncChoice | None = None,
         resolution_action: SyncResolutionAction | None = None,
+        knowledge_resolution: AuthoredReconciliation | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """Pull the moved official line into a live worktree (issue #54). Mutating: fetches
@@ -186,13 +192,22 @@ def _register_worktree_observation_tools(server: FastMCP, config: McpRuntimeConf
         memory_sync_choice='merge-memory' or preflight-only 'skip-memory'. A code or chosen
         memory merge conflict is retained for agent resolution; stage the resolution and call
         again with resolution_action='continue', or explicitly restore the pinned pre-sync heads
-        with resolution_action='cancel'. Sync early — before memories are written — for the
-        friction-free fast-forward path."""
+        with resolution_action='cancel'. A retained *knowledge dataset* conflict is reported with
+        the engine's own diagnosis — the table, the operation and the exact row it refused, plus
+        the action it advertises — and is settled by authoring one decision for that row:
+        resolution_action='reconcile' with knowledge_resolution={table, record_id, decision},
+        where decision is one of the conflict's advertised decisions ('keep-left' retracts the
+        arriving change so the stored value stands, 'keep-right' applies it over the stored
+        value). The merge then continues in the same call. Sync early — before memories are
+        written — for the friction-free fast-forward path."""
         return worktree_sync_payload(
             config,
             contract_path,
             memory_sync_choice=memory_sync_choice,
-            resolution_action=resolution_action,
+            resolution=SyncResolutionInput(
+                action=resolution_action,
+                knowledge=knowledge_resolution,
+            ),
             dry_run=dry_run,
         )
 

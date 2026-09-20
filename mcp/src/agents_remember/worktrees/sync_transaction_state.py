@@ -19,6 +19,7 @@ from agents_remember.kernel.atomic_write import (
 )
 from agents_remember.models.worktree import (
     MemorySyncChoice,
+    SyncKnowledgeConflict,
     SyncOperationProjection,
     SyncOperationState,
     SyncPhase,
@@ -59,6 +60,11 @@ class SyncSideRecord(BaseModel):
     temporary: bool = False
     resultHead: str = Field(default="", pattern=r"^$|^[0-9a-f]{40,64}$")
     conflictFiles: tuple[str, ...] = ()
+    # The engine's own explanation for a conflicted knowledge dataset this side retained. It is
+    # journaled rather than only returned, because the agent reads it again on every later call:
+    # a resumed sync re-projects this side's state from the journal, and the diagnosis has to be
+    # there for that projection to say what to reconcile instead of only which file is unresolved.
+    knowledgeConflict: SyncKnowledgeConflict | None = None
     # The exact parked candidate: its stash identity is journaled with the transaction, so
     # a crash mid-carry can always return the WIP it parked.
     wipState: SyncWipState = ""
@@ -481,6 +487,7 @@ def _active_sync_projection(
         identityMismatch=identity_mismatch,
         side=side,
         conflictFiles=side_record.conflictFiles if side_record is not None else (),
+        knowledgeConflict=side_record.knowledgeConflict if side_record is not None else None,
         summary=summary,
         nextArgs=(
             {

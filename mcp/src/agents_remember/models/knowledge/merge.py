@@ -47,6 +47,8 @@ from agents_remember.models.knowledge.snapshot import SnapshotDestinationRequest
 
 __all__ = [
     "MERGE_STATES",
+    "AuthoredDecision",
+    "AuthoredReconciliation",
     "ChangeOperationKind",
     "MergeBaseClaim",
     "MergeBaseRequest",
@@ -60,6 +62,7 @@ __all__ = [
     "ResolvedGitBase",
     "SuppliedGitBase",
     "TableCoverage",
+    "expressible_decisions",
 ]
 
 # What one materialised changeset operation did to its row. These are SQLite's own three
@@ -119,6 +122,91 @@ class MergeInput(KnowledgeModel):
     reference: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     database_path: Path
     expected_identity: SnapshotIdentity
+
+
+# The two authored decisions one refused conflict admits. They are named after the sides the
+# refusal itself prints -- ``expected`` is "the left side's stored value" and ``observed`` is "the
+# right side's supplied value" -- so an agent that reads the refusal already knows what each one
+# means. ``keep-left`` retracts the arriving (right) change for that conflict, so the left's state
+# stands; ``keep-right`` applies the arriving change over the left's stored value. Neither is a
+# policy: each names one conflict, and the merge still refuses every conflict the caller did not
+# name.
+AuthoredDecision = Literal["keep-left", "keep-right"]
+
+# The one conflict code whose overwrite direction this package has proven. ``keep-left`` is offered
+# for every conflict that names a row, because retracting the arriving change is always a legal
+# application; ``keep-right`` is offered only here, so no caller is invited into an overwrite the
+# engine has not shown it can perform.
+_OVERWRITE_CONFLICT_CODES = frozenset({"conflicting_values"})
+
+# The one conflict code SQLite reports *without* a row, and therefore the one code a decision that
+# names no row can answer. See :class:`AuthoredReconciliation`.
+_ROWLESS_CONFLICT_CODE = "delete_reference_conflict"
+
+
+def expressible_decisions(conflict: MergeConflict | None) -> tuple[AuthoredDecision, ...]:
+    """Return the authored decisions one refused conflict admits, in the order to read them.
+
+    Three answers, and the shape of the conflict decides which:
+
+    * a conflict that named no row at all -- a schema disagreement above all -- admits nothing: there
+      is no row to reconcile, and the refusal's own next action says the difference is reported
+      rather than reconciled;
+    * the referential conflict SQLite reports without a row admits ``keep-left`` only, which is the
+      retraction the refusal advertises;
+    * every conflict that named a row admits ``keep-left``, and ``keep-right`` where the overwrite
+      direction is proven.
+
+    This is the one place that judgement lives, so the refusal, the public response and the merge's
+    conflict policy cannot answer it differently.
+    """
+
+    if conflict is None:
+        return ()
+    if conflict.code == _ROWLESS_CONFLICT_CODE:
+        return ("keep-left",)
+    if conflict.table is None or conflict.record_id is None:
+        return ()
+    if conflict.code in _OVERWRITE_CONFLICT_CODES:
+        return ("keep-left", "keep-right")
+    return ("keep-left",)
+
+
+class AuthoredReconciliation(KnowledgeModel):
+    """One explicit authored decision about one conflict a merge refused.
+
+    This is the *authored* half of the explicit-reconciliation requirement, and its shape is what
+    keeps it from becoming an automatic resolution policy: a caller cannot say "prefer my side",
+    cannot name a table without a row, and cannot leave the decision out.
+
+    It has exactly two shapes, and which one a caller means is structural rather than a mode flag:
+
+    * ``table`` and ``record_id`` name the exact row the refusal printed -- the identity rendered
+      exactly as the refusal rendered it -- and the decision applies to that row and to nothing else;
+    * both are absent, and then the decision applies only to a conflict the engine reported *without
+      a row*: the referential shape, where SQLite hands the conflict callback no change at all. Only
+      ``keep-left`` is expressible there, and it is not a weaker answer -- retracting the arriving
+      change is what either restores the removed row or drops the new reference, depending on which
+      side did the removing.
+    """
+
+    table: str | None = Field(default=None, min_length=1, max_length=LABEL_MAX_LENGTH)
+    record_id: str | None = Field(default=None, min_length=1, max_length=REFERENCE_MAX_LENGTH)
+    decision: AuthoredDecision
+
+    @model_validator(mode="after")
+    def _require_one_decidable_shape(self) -> AuthoredReconciliation:
+        if (self.table is None) != (self.record_id is None):
+            raise ValueError(
+                "an authored reconciliation names the table and the record identity together, or "
+                "neither of them: half a row identity names no row"
+            )
+        if self.table is None and self.decision != "keep-left":
+            raise ValueError(
+                "a decision that names no row can only retract the arriving change; an overwrite "
+                "needs the exact row the engine refused"
+            )
+        return self
 
 
 class MergeBaseRequest(KnowledgeModel):
@@ -197,6 +285,12 @@ class MergeRequest(KnowledgeModel):
     ``destination`` is optional on purpose. A caller may run the merge and inspect the structural
     outcome without publishing anything; when it does publish, the install goes through the same
     destination-admitted contract every other closed snapshot uses.
+
+    ``reconciliation`` is the one place an *authored* decision enters the merge, and it is optional
+    because a merge that resolves nothing by itself is the whole point of this operation. When it is
+    present the caller has named the exact record it refuses to let the engine refuse, and has said
+    which side's authored value is the reconciled one. It cannot express a policy: it names one
+    row, and every conflict it does not name is still refused exactly as it is today.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
@@ -204,6 +298,7 @@ class MergeRequest(KnowledgeModel):
     resolution: MergeBaseResolution
     databases: Mapping[MergeInputRole, Path]
     destination: SnapshotDestinationRequest | None = None
+    reconciliation: AuthoredReconciliation | None = None
 
     @model_validator(mode="after")
     def _require_every_role(self) -> MergeRequest:

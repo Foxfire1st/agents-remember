@@ -13,13 +13,22 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest import mock
+from uuid import uuid4
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(MCP_SRC))
 
+import pytest
+
+# The two identities the delete/reference scenario authors: an anchor the left side removes and the
+# claim the right side's own row cites. Fixed rather than random so a failure names the same rows.
+CONFLICT_ANCHOR_ID = "33333333-3333-4333-8333-333333333333"
+CONFLICT_CLAIM_ID = "44444444-4444-4444-8444-444444444444"
+
 from agents_remember.kernel.memory_attribution import render_memory_content_message
 from agents_remember.kernel.memory_ledger import create_initial_ledger, write_ledger
 from agents_remember.memory.knowledge.logical import dataset_identity
+from agents_remember.models.knowledge.merge import AuthoredReconciliation
 from agents_remember.worktrees import sync_transaction_git
 from agents_remember.worktrees.integration.closeout.door_evidence import memory_candidate_tree
 from agents_remember.worktrees.modules.args import WorktreeArgs
@@ -41,8 +50,20 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
     write_contract,
 )
+from generation_test_support import create_generation_2_store
+from merge_case_test_support import (
+    BASE_INVARIANT_ID,
+    BASE_REVISION_ID,
+    add_anchor,
+    add_realization_claim,
+    delete_anchor,
+    file_digest,
+    labels_of,
+    row_counts,
+    set_label,
+    statements_of,
+)
 from merge_case_test_support import build_case as merge_case_build
-from merge_case_test_support import file_digest
 
 
 class SyncFixture:
@@ -150,25 +171,7 @@ def _assert_knowledge_database_conflict_settles(case, fixture, member: str) -> N
 
     worktree = fixture.contract.memory_worktree
     assert worktree is not None
-
-    def commit_dataset(checkout: Path, role: str) -> str:
-        shutil.copyfile(case.state_path(role), checkout / member)
-        git(checkout, "add", member)
-        git(
-            checkout,
-            "commit",
-            "-m",
-            render_memory_content_message(f"{role} knowledge snapshot", fixture.code_base),
-        )
-        return git(checkout, "rev-parse", "HEAD")
-
-    commit_dataset(fixture.memory_repo, "base")
-    bootstrap = fixture.sync()
-    assert bootstrap.payload["state"] == "synced", bootstrap.payload
-    assert dataset_identity(worktree / member) == case.identity("base")
-
-    left = commit_dataset(worktree, "left")
-    right = commit_dataset(fixture.memory_repo, "right")
+    left, right = _stage_knowledge_divergence(case, fixture, member)
     inputs = {role: file_digest(case.state_path(role)) for role in ("base", "left", "right")}
 
     result = fixture.sync(memory_sync_choice="merge-memory")
@@ -181,6 +184,236 @@ def _assert_knowledge_database_conflict_settles(case, fixture, member: str) -> N
     assert sorted(git(worktree, "rev-list", "--parents", "-n", "1", "HEAD").split()[1:]) == sorted(
         [left, right]
     )
+
+
+def _stage_knowledge_divergence(case, fixture, member: str) -> tuple[str, str]:
+    """Commit the base, take the bootstrap sync, then commit each side's own dataset.
+
+    Returns the two side heads. Both sides are real commits on the memory repository and its work
+    branch, so the conflict the transaction meets is a property of the commit graph rather than of
+    the fixture's bookkeeping.
+    """
+
+    def commit(checkout: Path, role: str) -> str:
+        shutil.copyfile(case.state_path(role), checkout / member)
+        git(checkout, "add", member)
+        git(
+            checkout,
+            "commit",
+            "-m",
+            render_memory_content_message(f"{role} knowledge snapshot", fixture.code_base),
+        )
+        return git(checkout, "rev-parse", "HEAD")
+
+    commit(fixture.memory_repo, "base")
+    bootstrap = fixture.sync()
+    assert bootstrap.payload["state"] == "synced", bootstrap.payload
+    worktree = fixture.contract.memory_worktree
+    assert worktree is not None
+    assert dataset_identity(worktree / member) == case.identity("base")
+    return commit(worktree, "left"), commit(fixture.memory_repo, "right")
+
+
+def _shape_label_conflict(case, states: dict[str, Path]) -> None:
+    set_label(states["left"], "left conflicting label")
+    set_label(states["right"], "right conflicting label")
+
+
+def _shape_delete_reference(case, states: dict[str, Path]) -> None:
+    delete_anchor(states["left"], CONFLICT_ANCHOR_ID)
+    add_realization_claim(
+        states["right"],
+        f"{case.repository.repository_id}/{CONFLICT_CLAIM_ID}",
+        BASE_REVISION_ID,
+        CONFLICT_ANCHOR_ID,
+    )
+
+
+def _base_shape_anchor(case, states: dict[str, Path]) -> None:
+    add_anchor(states["base"], CONFLICT_ANCHOR_ID, "src/anchors.py")
+
+
+def _shape_schema_disagreement(case, states: dict[str, Path]) -> None:
+    """Make each side differ from the base, one of them at another recorded schema generation.
+
+    Both sides must differ or the merge is a fast-forward and the transaction never reaches the
+    adapter; the right side is replaced by a genuine older-generation dataset so the disagreement the
+    preflight reports is a real structural pair rather than a doctored version number.
+    """
+
+    set_label(states["left"], "the left side's own reconciled label")
+    states["right"].unlink()
+    with create_generation_2_store(states["right"], case.repository.repository_id):
+        pass
+
+
+def _assert_knowledge_conflict_is_diagnosed_and_reconciled(case, fixture, member: str) -> None:
+    """CYCLE-02 remainder: the engine's diagnosis reaches the agent, and one decision settles it.
+
+    The measured defect this protects: the engine already refused the merge with the table, the
+    operation, the exact row and the reconcile-and-retry action, and the sync response reported only
+    ``sync-resolution-required`` and ``files: ["knowledge.sqlite"]``. An agent could not tell what to
+    reconcile without implementation knowledge or an outside database tool.
+
+    What is asserted is the whole supported operation: the diagnosis is in the response, the row it
+    names is the row the engine refused, a decision for another row is refused with that record
+    named, the preview mutates nothing, and the authored decision settles the merge in one call with
+    the decision's own effect visible in the committed dataset.
+    """
+
+    worktree = fixture.contract.memory_worktree
+    assert worktree is not None
+    left, right = _stage_knowledge_divergence(case, fixture, member)
+
+    result = fixture.sync(memory_sync_choice="merge-memory")
+
+    assert result.payload["state"] == "sync-resolution-required", result.payload
+    knowledge = section(section(result.payload, "resolution"), "knowledge")
+    conflict = section(knowledge, "conflict")
+    assert conflict["code"] == "conflicting_values"
+    assert conflict["attribution"] == "engine_attributed"
+    assert (conflict["table"], conflict["operation"]) == ("invariant", "UPDATE")
+    assert str(conflict["record_id"]).endswith(BASE_INVARIANT_ID), conflict
+    assert knowledge["decisions"] == ["keep-left", "keep-right"]
+    assert (
+        "Reconcile the two authored values explicitly"
+        in section(knowledge, "refusal")["next_action"]
+    )
+    # The advertised next move is the supported operation, and it names the row the engine refused
+    # rather than the file that holds it.
+    assert result.payload["nextOperation"] == "reconcile_knowledge_resolution"
+    advertised = section(section(result.payload, "nextArgs"), "knowledge_resolution")
+    assert advertised["table"] == conflict["table"]
+    assert advertised["record_id"] == conflict["record_id"]
+    # A decision for any other row is refused, and the refusal names the record that was refused.
+    wrong_record = fixture.sync(
+        resolution_action="reconcile",
+        knowledge_resolution=AuthoredReconciliation(
+            table="invariant",
+            record_id=f"{case.repository.repository_id}/{uuid4()}",
+            decision="keep-left",
+        ),
+    )
+    assert wrong_record.payload["state"] == "sync-input-invalid", wrong_record.payload
+    assert str(conflict["record_id"]) in str(wrong_record.payload["summary"])
+    assert git(worktree, "diff", "--name-only", "--diff-filter=U") == member
+    assert git(worktree, "rev-parse", "HEAD") == left
+    # The preview is a read: nothing is applied and nothing moves.
+    preview = fixture.sync(
+        resolution_action="reconcile",
+        knowledge_resolution=AuthoredReconciliation(
+            table="invariant",
+            record_id=str(conflict["record_id"]),
+            decision="keep-left",
+        ),
+        dry_run=True,
+    )
+    assert preview.payload["state"] == "would-reconcile-knowledge-conflict", preview.payload
+    assert git(worktree, "rev-parse", "HEAD") == left
+    assert git(worktree, "diff", "--name-only", "--diff-filter=U") == member
+
+    reconciled = fixture.sync(
+        resolution_action="reconcile",
+        knowledge_resolution=AuthoredReconciliation(
+            table="invariant",
+            record_id=str(conflict["record_id"]),
+            decision="keep-left",
+        ),
+    )
+
+    assert reconciled.payload["state"] == "synced", reconciled.payload
+    # The decision's own effect: the left value stands, and both sides' other rows landed.
+    assert labels_of(worktree / member) == [
+        "left conflicting label",
+        "the left side's own obligation",
+        "the right side's own obligation",
+    ]
+    assert set(statements_of(worktree / member)) == set(
+        statements_of(case.state_path("left"))
+    ) | set(statements_of(case.state_path("right")))
+    assert sorted(git(worktree, "rev-list", "--parents", "-n", "1", "HEAD").split()[1:]) == sorted(
+        [left, right]
+    )
+
+
+def _assert_delete_reference_conflict_is_retracted(case, fixture, member: str) -> None:
+    """The one conflict SQLite reports without a row is still recoverable through one decision.
+
+    The engine refuses a merge in which one side removed a row the other side's new row still
+    references, and it cannot name that row: the conflict callback receives no change at all. The
+    recovery is the refusal's own second option -- retract the arriving reference -- expressed as the
+    row-less decision the response advertises, and it is bounded to the arriving rows SQLite itself
+    reports as breaking a reference.
+    """
+
+    worktree = fixture.contract.memory_worktree
+    assert worktree is not None
+    left, right = _stage_knowledge_divergence(case, fixture, member)
+
+    result = fixture.sync(memory_sync_choice="merge-memory")
+
+    assert result.payload["state"] == "sync-resolution-required", result.payload
+    knowledge = section(section(result.payload, "resolution"), "knowledge")
+    assert section(knowledge, "conflict")["code"] == "delete_reference_conflict"
+    assert section(knowledge, "conflict")["attribution"] == "engine_reported_without_row"
+    assert knowledge["decisions"] == ["keep-left"]
+    advertised = section(section(result.payload, "nextArgs"), "knowledge_resolution")
+    assert advertised == {"decision": "<keep-left>"}
+    # The overwrite direction is not offered, and the model refuses it rather than the engine
+    # discovering it inside the merge.
+    with pytest.raises(ValueError, match="can only retract"):
+        AuthoredReconciliation(decision="keep-right")
+
+    reconciled = fixture.sync(
+        resolution_action="reconcile",
+        knowledge_resolution=AuthoredReconciliation(decision="keep-left"),
+    )
+
+    assert reconciled.payload["state"] == "synced", reconciled.payload
+    rows = row_counts(worktree / member)
+    assert rows["source_anchor"] == 0, rows
+    assert rows["realization_claim"] == 0, rows
+    assert set(statements_of(worktree / member)) == set(
+        statements_of(case.state_path("left"))
+    ) | set(statements_of(case.state_path("right")))
+    assert sorted(git(worktree, "rev-list", "--parents", "-n", "1", "HEAD").split()[1:]) == sorted(
+        [left, right]
+    )
+
+
+def _assert_schema_disagreement_is_reported_not_reconciled(case, fixture, member: str) -> None:
+    """A schema disagreement is refused explicitly, and no authored decision can settle it.
+
+    The invariant this protects: a structural difference is *reported*, never reconciled, so the
+    response must carry the refusal and must not offer a decision for it. Without this case a later
+    change could quietly make a schema mismatch "reconcilable" and nothing would notice.
+    """
+
+    worktree = fixture.contract.memory_worktree
+    assert worktree is not None
+    left, _right = _stage_knowledge_divergence(case, fixture, member)
+
+    result = fixture.sync(memory_sync_choice="merge-memory")
+
+    assert result.payload["state"] == "sync-resolution-required", result.payload
+    knowledge = section(section(result.payload, "resolution"), "knowledge")
+    assert section(knowledge, "refusal")["code"] == "schema_mismatch"
+    assert "next_action" in section(knowledge, "refusal")
+    assert knowledge["decisions"] == []
+    assert result.payload["nextOperation"] == "continue_sync_resolution"
+    refused = fixture.sync(
+        resolution_action="reconcile",
+        knowledge_resolution=AuthoredReconciliation(
+            table="invariant",
+            record_id=f"{case.repository.repository_id}/{BASE_INVARIANT_ID}",
+            decision="keep-left",
+        ),
+    )
+    assert refused.payload["state"] == "sync-input-invalid", refused.payload
+    assert "admits no authored decision" in str(refused.payload["summary"])
+    # Nothing was settled and nothing moved: the conflict is still the agent's.
+    assert git(worktree, "diff", "--name-only", "--diff-filter=U") == member
+    assert git(worktree, "rev-parse", "HEAD") == left
 
 
 class WorktreeSyncTests(unittest.TestCase):
@@ -391,10 +624,13 @@ class WorktreeSyncTests(unittest.TestCase):
     def test_memory_merge_settles_content_and_knowledge_conflicts_in_the_transaction(
         self,
     ) -> None:
-        """Both conflict shapes one memory merge can meet, settled inside the transaction.
+        """Every conflict shape one memory merge can meet, settled inside the transaction.
 
-        The content shape is the shipped one and its body is unchanged; the knowledge shape is
-        CYCLE-02's. They share one case rather than taking one each because the integration lane sits
+        The content shape is the shipped one and its body is unchanged; the knowledge shapes are
+        CYCLE-02's: the disjoint divergence that settles itself, the same-row conflict whose
+        diagnosis has to reach the agent and be settled by one authored decision, the referential
+        conflict SQLite reports without a row, and the schema disagreement that is reported and never
+        reconciled. They share one case rather than taking one each because the integration lane sits
         at its declared ceiling of 400 -- a further collected case would breach it, and above the
         ceiling conftest raises and the lane then runs ZERO tests (D-46's mechanism), which is worse
         than either outcome it would report.
@@ -405,7 +641,41 @@ class WorktreeSyncTests(unittest.TestCase):
             db_fixture = SyncFixture(Path(tmp) / "lifecycle")
             _assert_knowledge_database_conflict_settles(db_case, db_fixture, "knowledge.sqlite")
 
+        self._assert_knowledge_conflict_scenarios()
         self._assert_memory_content_conflict_scenarios()
+
+    def _assert_knowledge_conflict_scenarios(self) -> None:
+        """The three retained-conflict shapes, each through the public sync and its own workspace.
+
+        Each scenario builds its own repositories and its own lifecycle so no state can reach the
+        next one; the helper functions above hold the assertions and say which operation each
+        protects.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            same_record = merge_case_build(Path(tmp) / "same-record", shape=_shape_label_conflict)
+            _assert_knowledge_conflict_is_diagnosed_and_reconciled(
+                same_record, SyncFixture(Path(tmp) / "lifecycle"), "knowledge.sqlite"
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            referential = merge_case_build(
+                Path(tmp) / "referential",
+                shape=_shape_delete_reference,
+                base_shape=_base_shape_anchor,
+            )
+            _assert_delete_reference_conflict_is_retracted(
+                referential, SyncFixture(Path(tmp) / "lifecycle"), "knowledge.sqlite"
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            schema = merge_case_build(
+                Path(tmp) / "schema",
+                shape=_shape_schema_disagreement,
+                diverging_revisions=False,
+                diverging_identities=False,
+            )
+            _assert_schema_disagreement_is_reported_not_reconciled(
+                schema, SyncFixture(Path(tmp) / "lifecycle"), "knowledge.sqlite"
+            )
 
     def _assert_memory_content_conflict_scenarios(self) -> None:
         """The shipped memory-merge conflict scenarios, moved intact out of the case above."""

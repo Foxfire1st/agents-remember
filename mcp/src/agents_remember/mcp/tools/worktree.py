@@ -35,7 +35,10 @@ from agents_remember.models.declared_caller import DeclaredCaller
 from agents_remember.models.lifecycles.operation import (
     IntegrateStrategy,
 )
-from agents_remember.models.worktree import MemorySyncChoice, SyncResolutionAction
+from agents_remember.models.worktree import (
+    MemorySyncChoice,
+    SyncResolutionInput,
+)
 
 from .base import _tool_payload
 
@@ -58,7 +61,7 @@ def worktree_sync_payload(
     contract_path: str,
     *,
     memory_sync_choice: MemorySyncChoice | None = None,
-    resolution_action: SyncResolutionAction | None = None,
+    resolution: SyncResolutionInput | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     return _tool_payload(
@@ -67,7 +70,7 @@ def worktree_sync_payload(
             config,
             contract_path=contract_path,
             memory_sync_choice=memory_sync_choice,
-            resolution_action=resolution_action,
+            resolution=resolution,
             dry_run=dry_run,
         ),
     )

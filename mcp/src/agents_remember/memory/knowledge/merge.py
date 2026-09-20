@@ -57,6 +57,7 @@ from agents_remember.memory.knowledge.merge_base import MERGE_OPERATION
 from agents_remember.memory.knowledge.merge_changeset import (
     AppliedChangeset,
     Delta,
+    MaterializedChange,
     apply_changeset,
     build_delta,
     replay_delta,
@@ -76,10 +77,10 @@ from agents_remember.memory.knowledge.merge_schema import (
 )
 from agents_remember.memory.knowledge.merge_validation import (
     MergeInputs,
-    require_applied_changes,
     require_immutable_revisions_preserved,
     require_side_inputs_preserved,
     require_structural_validity,
+    unapplied_changes,
 )
 from agents_remember.memory.knowledge.publication import publish_prepared_snapshot
 from agents_remember.memory.knowledge.refusals import (
@@ -297,7 +298,12 @@ def _apply_and_validate(run: MergeRun) -> MergeOutcome:
     merged_path = run.workspace / STAGED_LEFT_NAME
     shutil.copyfile(databases["left"], merged_path)
     right = run.deltas["right"]
-    applied = apply_changeset(right, merged_path, within_transaction=run.acyclic_routes)
+    applied = apply_changeset(
+        right,
+        merged_path,
+        within_transaction=run.acyclic_routes,
+        reconciliation=run.request.reconciliation,
+    )
     if applied.refusal is not None:
         return run.refused(applied.refusal)
     if applied.conflicted or applied.detail:
@@ -323,15 +329,56 @@ def _apply_and_validate(run: MergeRun) -> MergeOutcome:
     )
     if preserved is not None:
         return run.refused(preserved)
-    postcondition = require_applied_changes(
-        MERGE_OPERATION,
-        merged=inputs.merged,
-        side=inputs.right,
-        operations=right.operations,
-    )
+    postcondition = _authored_postcondition(right, applied, inputs.merged)
     if postcondition is not None:
         return run.refused(postcondition)
     return _publish(run, inputs.merged)
+
+
+def _authored_postcondition(
+    right: Delta, applied: AppliedChangeset, merged: Path
+) -> KnowledgeRefusal | None:
+    """Refuse a result that lost a change no authored decision settled.
+
+    Without an authored decision this is exactly :func:`require_applied_changes`: every operation
+    the right delta materialised must be in the candidate, and the first one that is not is refused.
+    With one, two things change and nothing else does.
+
+    An operation on a row the caller decided is not required any more -- the caller said the left's
+    state stands, or that the right's value is the reconciled one, so "the candidate carries the
+    delta's operation" is no longer the intended outcome for that row. Everything else is still
+    required, which is what keeps a decision from becoming a way to lose changes silently.
+
+    The referential decision names no row, so it cannot exclude anything by identity. What it does
+    give is a count: every retraction it authorised was reported by the engine, and the result may
+    be missing exactly that many operations and no more. A candidate missing a different number has
+    lost something the caller never authorised, and is refused here as it always was.
+    """
+
+    decided = {(item.table, item.record_id) for item in applied.resolved if item.table}
+    required = tuple(
+        change
+        for change in right.operations
+        if (change.table, _rendered_operation_key(change)) not in decided
+    )
+    unapplied = unapplied_changes(
+        MERGE_OPERATION, merged=merged, side=right.side_path, operations=required
+    )
+    if not unapplied:
+        return None
+    authorised = sum(1 for item in applied.resolved if not item.table)
+    if authorised and len(unapplied) == authorised:
+        return None
+    return unapplied[0]
+
+
+def _rendered_operation_key(change: MaterializedChange) -> str:
+    """Render one materialised operation's key the way the conflict callback renders it."""
+
+    key = change.primary_key()
+    if not key or any(value is None for value in key):
+        return ""
+    return "/".join(str(value) for value in key)
 
 
 def _resolve_databases(request: MergeRequest) -> dict[str, Path] | KnowledgeRefusal:

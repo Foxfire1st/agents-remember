@@ -43,7 +43,7 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 15
 LIFECYCLE_ARTIFACT_COUNT = 65
-LIFECYCLE_CATALOG_SHA256 = "825abfd65a17899cf1334d6191bd944d1f618347db7e599a44629f2bec910ef2"
+LIFECYCLE_CATALOG_SHA256 = "c499cbcc266088f35bd6fdde655f00579431591f02bba5c4859b72f767f65f06"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
 The value this line carries is the catalog after ``260915-KS``'s L28 leaf repaired the missing-consumer
@@ -280,6 +280,21 @@ the catalog after L16's consumer registration **on that merged base**, re-measur
 inherited from the leaf's own base. The proof's own artifact delta remains
 exactly empty -- none of these rows is the proof's -- so the freeze still forbids the proof adding or
 widening anything, and any further catalog change must re-pin this digest deliberately.
+**Eleventh deliberate re-pin (260915-KS-L40, 2026-09-21) -- consumer rows only.** ``260915-KS-L40``
+closes CYCLE-02's remainder at the public boundary: the sync response carries the merge engine's own
+conflict diagnosis, and one authored decision settles it. Its acceptance case is added to the
+existing integration module ``mcp/tests/test_worktree_sync.py`` rather than to a new one -- the
+integration lane sits at its exact ceiling of 400 collected cases -- and that module now builds one
+scenario at an older recorded schema generation, so it consumes the registered ``shared-support``
+fixture ``mcp/tests/generation_test_support.py`` whose ``consumer_scope = "exact"`` requires its
+``consumers`` list to equal the source-derived consumer set. Two paths were appended there: the
+module itself and ``mcp/tests/test_sync_parked_candidate.py``, which imports it and is therefore a
+consumer by the census's own propagation rule. **Nothing was registered, no row was removed and no
+artifact's identity moved**, so the population stays at **fifteen contracts / sixty-five artifacts**
+and the catalog is re-pinned to
+``c499cbcc266088f35bd6fdde655f00579431591f02bba5c4859b72f767f65f06``, measured with
+``sha256sum mcp/tests/evidence-lifecycle.toml`` on the delivered candidate. The proof's own artifact
+delta remains exactly empty.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"

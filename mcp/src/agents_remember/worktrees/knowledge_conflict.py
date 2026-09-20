@@ -16,7 +16,7 @@ the merge are application facts. The split is forced by the layer contract -- a 
 (``test_knowledge_store.py::test_lower_ranked_owners_do_not_import_the_memory_domain``), and the
 adapter's own docstring says a lower owner "receives models values and never an import of this module
 or of the store" -- so the dataset work lives behind ``merge_conflicted_stages`` and this module hands
-it three paths and receives one boolean.
+it three paths and receives one typed settlement.
 
 Three properties are load-bearing.
 
@@ -28,10 +28,15 @@ a row-count mismatch rather than as corruption. The stages are therefore materia
 
 **Refusal is preserved, not swallowed.** Only a genuine knowledge dataset settles. A path the adapter
 will not decide -- a schema disagreement above all -- stays conflicted and remains the agent's to
-resolve, so this narrows the agent's work rather than hiding any of it.
+resolve, so this narrows the agent's work rather than hiding any of it. What changed with CYCLE-02's
+remainder is *what the caller receives*: the adapter's own explanation (the refusal, and the conflict
+naming the table, the operation and the exact row) travels out of here with the path instead of being
+reduced to a boolean, because the agent that has to reconcile the row is the one that needs it.
 
 **No compatibility verdict.** A structurally merged dataset says nothing about whether the combined
-knowledge is correct, and nothing here may treat it as approval.
+knowledge is correct, and nothing here may treat it as approval. An *authored* reconciliation is the
+caller's own decision about one conflict and stays exactly that: this module passes it through, names
+it nowhere, and never invents one.
 """
 
 from __future__ import annotations
@@ -42,14 +47,82 @@ from pathlib import Path
 
 from agents_remember.application.knowledge_merge import ConflictCommits, merge_conflicted_stages
 from agents_remember.kernel.git_command import run_git
-from agents_remember.models.knowledge.merge import MergeInputRole
+from agents_remember.models.knowledge.merge import (
+    AuthoredDecision,
+    AuthoredReconciliation,
+    MergeConflict,
+    MergeInputRole,
+    expressible_decisions,
+)
+from agents_remember.models.knowledge.result import KnowledgeRefusal
 
-__all__ = ["settle_knowledge_conflicts"]
+__all__ = [
+    "KnowledgeConflictSettlement",
+    "RefusedKnowledgeStage",
+    "settle_knowledge_conflict",
+    "settle_knowledge_conflicts",
+]
 
 # The three positions a conflicted path occupies in the index, and the stage number Git gives each.
 # ``base`` is the merge base, ``left`` is the side being merged into (ours), ``right`` is the side
 # arriving (theirs) -- the same roles the adapter's request names, so nothing is translated twice.
 _STAGE_ROLES: tuple[tuple[MergeInputRole, int], ...] = (("base", 1), ("left", 2), ("right", 3))
+
+
+@dataclass(frozen=True)
+class RefusedKnowledgeStage:
+    """One conflicted path the adapter would not settle, with the engine's own reason.
+
+    ``conflict`` is the engine's attribution -- table, operation and the exact row identity it
+    refused -- and ``refusal`` is the typed explanation with the action it advertises. Both are
+    carried verbatim: a caller that re-rendered them would be reimplementing the diagnosis this
+    exists to preserve. ``detail`` is this layer's own reason for a path that never reached the
+    adapter (no common base, a stage that would not materialise), and it is empty whenever the
+    engine answered.
+    """
+
+    path: str
+    conflict: MergeConflict | None = None
+    refusal: KnowledgeRefusal | None = None
+    detail: str = ""
+
+    @property
+    def decisions(self) -> tuple[AuthoredDecision, ...]:
+        """The authored decisions this refusal admits; empty when nothing can be reconciled.
+
+        Read from the conflict the engine attributed, so the agent is offered exactly the decisions
+        that conflict admits and never one the engine would refuse to apply.
+        """
+
+        return expressible_decisions(self.conflict)
+
+
+@dataclass(frozen=True)
+class KnowledgeConflictSettlement:
+    """What one automatic pass over the conflicted paths settled, and what it could not.
+
+    The return value is the contract with the caller: whatever this cannot settle is exactly what
+    the agent is still asked to resolve, so a refusal here narrows the agent's work rather than
+    hiding it -- and ``guidance`` is the explanation to hand that agent.
+    """
+
+    remaining: tuple[str, ...]
+    refused: tuple[RefusedKnowledgeStage, ...] = ()
+
+    @property
+    def guidance(self) -> RefusedKnowledgeStage | None:
+        """The refusal whose explanation belongs in the public response, when there is one.
+
+        A refusal that carries the engine's attribution or its typed explanation is preferred over
+        one that carries only this layer's own reason: the first names a row an agent can reconcile,
+        the second says the path never became a dataset. When several paths refused, the first of the
+        preferred kind is the one reported; the remaining paths are still named in ``remaining``.
+        """
+
+        structured = next((item for item in self.refused if item.conflict or item.refusal), None)
+        if structured is not None:
+            return structured
+        return self.refused[0] if self.refused else None
 
 
 @dataclass(frozen=True)
@@ -98,57 +171,86 @@ def _common_base(worktree: Path, left: str, right: str) -> str | None:
     return commit
 
 
-def _stage(worktree: Path, path: str, left: str, right: str) -> _Settlement | None:
-    """Everything the application layer needs for one conflicted path, or ``None``.
+def _stage(worktree: Path, path: str, left: str, right: str) -> _Settlement | RefusedKnowledgeStage:
+    """Everything the application layer needs for one conflicted path, or why there is none.
 
-    Every ``None`` here is a different reason the agent keeps the conflict: the file is gone, Git
-    cannot name one common base, or a stage will not materialise.
+    Every return here is a different reason the agent keeps the conflict: the file is gone, Git
+    cannot name one common base, or a stage will not materialise. The reason is reported rather than
+    collapsed, because "nothing settled" is not something an agent can act on.
     """
 
     target = worktree / path
     if not target.is_file():
-        return None
+        return RefusedKnowledgeStage(
+            path=path, detail="the conflicted path is not a file in the merge worktree"
+        )
     base_commit = _common_base(worktree, left, right)
     if base_commit is None:
-        return None
+        return RefusedKnowledgeStage(
+            path=path, detail="Git cannot name one common base commit for the retained merge"
+        )
     stages = _materialise_stages(path, Path(tempfile.mkdtemp(prefix="ar-merge-stages-")), worktree)
     if stages is None:
-        return None
+        return RefusedKnowledgeStage(
+            path=path, detail="the three index stages could not be materialised byte-for-byte"
+        )
     return _Settlement(target=target, stages=stages, base_commit=base_commit)
 
 
-def _settle_one(worktree: Path, path: str, left: str, right: str) -> bool:
+def settle_knowledge_conflict(
+    worktree: Path,
+    path: str,
+    left: str,
+    right: str,
+    reconciliation: AuthoredReconciliation | None = None,
+) -> RefusedKnowledgeStage | None:
     """Route one conflicted knowledge dataset through the adapter, publishing into the worktree.
 
-    Returns whether the path was settled. Anything the adapter will not decide returns ``False``, so
-    the caller leaves the path conflicted and the agent keeps ownership of it.
+    Returns ``None`` when the path settled *and* was staged; anything else returns the reason, with
+    the engine's own explanation whenever the engine was the one that answered. ``reconciliation``
+    is the caller's authored decision for exactly one conflict, and it is the only way an authored
+    resolution reaches the merge: without it this is the automatic pass, with it this is the retry
+    the refusal advertised.
     """
 
     settlement = _stage(worktree, path, left, right)
-    if settlement is None:
-        return False
-    settled = merge_conflicted_stages(
+    if isinstance(settlement, RefusedKnowledgeStage):
+        return settlement
+    outcome = merge_conflicted_stages(
         destination=settlement.target,
         stages=settlement.stages,
         repository_root=worktree,
         commits=ConflictCommits(base=settlement.base_commit, left=left, right=right),
+        reconciliation=reconciliation,
     )
-    if not settled:
-        return False
-    return run_git(worktree, ["add", "--", path]).returncode == 0
+    if not outcome.settled:
+        return RefusedKnowledgeStage(
+            path=path,
+            conflict=outcome.conflict,
+            refusal=outcome.refusal,
+            detail=outcome.detail,
+        )
+    if run_git(worktree, ["add", "--", path]).returncode != 0:
+        return RefusedKnowledgeStage(
+            path=path, detail="the settled dataset could not be staged for the merge commit"
+        )
+    return None
 
 
 def settle_knowledge_conflicts(
     worktree: Path, conflicts: tuple[str, ...], left: str, right: str
-) -> tuple[str, ...]:
-    """Settle every conflicted path that is a knowledge dataset; return the ones still unresolved.
+) -> KnowledgeConflictSettlement:
+    """Settle every conflicted path that is a knowledge dataset; report the ones still unresolved.
 
     The return value is the contract with the caller: whatever this cannot settle is exactly what the
-    agent is still asked to resolve, so a refusal here narrows the agent's work rather than hiding it.
+    agent is still asked to resolve, together with the reason it could not be settled.
     """
 
-    remaining: list[str] = []
-    for path in conflicts:
-        if not _settle_one(worktree, path, left, right):
-            remaining.append(path)
-    return tuple(remaining)
+    refused = tuple(
+        item
+        for path in conflicts
+        if (item := settle_knowledge_conflict(worktree, path, left, right)) is not None
+    )
+    return KnowledgeConflictSettlement(
+        remaining=tuple(item.path for item in refused), refused=refused
+    )
