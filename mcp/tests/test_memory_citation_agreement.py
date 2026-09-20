@@ -16,9 +16,13 @@ Both are T45/T52 on the 260918 TSIP campaign, and both were measured rather than
   rather than from any checker's output, and :class:`WrappedCitationPopulationTests` does the same
   for the one citation shape the fixer cannot rewrite (T58).
 
-Every population here is derived at run time. The two pinned constants are tolerated defects with
-their register row and owner named, asserted in BOTH directions: *repaired => remove that entry in
-the same change; never delete the constant, never widen it.*
+Every population here is derived at run time, and each LIVE one is asserted against that
+derivation rather than against a remembered figure: the pair every live number is measured
+against -- a commit pair, not a branch, and the reason for that -- is named in the block
+below. Each pinned constant is a tolerated defect with its register row and owner named, asserted
+in BOTH directions: *repaired => remove that entry in the same change; never delete the constant,
+never widen it.* A case that cannot fail is not a check -- the acceptance test for every pin here
+is the mutation that reds it (`T112`, `T123`, law 4).
 """
 
 from __future__ import annotations
@@ -54,67 +58,219 @@ from agents_remember.memory_quality.style.document_shape import inline_scan
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 # ---------------------------------------------------------------------------------------------
-# Tolerated defects. Each is a NAMED, COUNTED population asserted in both directions, so this
-# module is red when the defect grows AND when it is repaired without the entry being removed.
+# Tolerated defects. Each is a NAMED, COUNTED population asserted against a DERIVATION rather
+# than against its own literal, so this module is red when the defect grows, when it is repaired
+# without the entry being removed, and when the derivation itself stops seeing (`T112`, `law 4`).
 #
-# THE TREE EVERY LIVE NUMBER HERE IS MEASURED AGAINST, named because getting it wrong is this
+# THE PAIR EVERY LIVE NUMBER HERE IS MEASURED AGAINST, named because getting it wrong is this
 # campaign's most-repeated defect (L5's T65, and F1 of this leaf's own review):
 #
-#   memory  the MASTER memory work branch `ar/260918_tool-surface-and-process-integrity`, at the
-#           tip `260918-TSIP-L11` lands, checked out into a DISPOSABLE worktree, with
-#           `AR_ONBOARDING_ROOT` naming that checkout's `onboarding/`.
+#   memory  the pair `260918-TSIP-L12` LANDS: memory `ec1cebe5` -- the
+#           `260918_tool-surface-and-process-integrity` memory tip after its THIRD SYNC, which
+#           merged the concurrent `260915_knowledge-substrate` line into this master -- plus this
+#           leaf's memory change set; paired with code `15e10084` (the same master's code tip)
+#           plus this leaf's code change set. Every number below was RE-DERIVED on that pair, not
+#           carried forward from the pair this leaf was cut from, and the closeout commits it.
+#           Check it out into a DISPOSABLE worktree and point `AR_ONBOARDING_ROOT` at that
+#           checkout's `onboarding/`.
 #   code    the checkout this suite runs in -- the repository root `REPOSITORY_ROOT` resolves to
 #           -- whose bytes at the pinned tip are the bytes the memory tree documents.
 #
-# The memory tree is named as a BRANCH and not as a path on purpose. Leaf worktrees are reclaimed
-# at finalize, which is exactly why the header this replaces -- the L7 leaf memory worktree at
-# `fd1a024e` -- could no longer be reached by any runner: the tree it named had been deleted, so
-# the pin described a measurement nobody could reproduce.
+# THE BRANCH IS ONLY WHERE THE COMMIT MAY BE FOUND, NOT THE PIN'S ADDRESS, and that is the
+# correction `F3` needed twice. The header this replaces named a leaf worktree (`fd1a024e`) that a
+# leaf finalize reclaims; the header this repairs named the MASTER work branch
+# `ar/260918_tool-surface-and-process-integrity`, which the master's own cleanup reclaims in turn
+# (the register's `T89`: *cleanup retired the master's work branch*). And the branch itself is
+# written by another line besides this master -- it moved three times while this leaf lived:
+# `7dcec036`/`66b2ae8a`, then `756c47b3`/`da33325c`, then this master's own sync onto it. Each
+# move changed the tree under these pins: on the pre-sync sprint branch the superseded-pair
+# population was 66 and two qualified `## Update History...` headings returned, so those pins are
+# red THERE and correct HERE. `git -C memory-repos/ar-agents-remember rev-parse
+# ar/260713_improved-agentic-system` therefore tells you where to find the commit once this
+# master's integration has landed it there; it is NOT the pin's address, and a red pin on a moved
+# or merged tree is not a regression until it is re-derived on that tree. That is `T122`/law 7 --
+# a pin is a claim about a moment.
 #
-# The pair below was re-derived on the landed line on 2026-09-20 at memory `ee1a16cc` / code
-# `a3050958`, the pair `260918-TSIP-L11` closes out.
+# `260918-TSIP-L11` re-derived these constants at memory `ee1a16cc` / code `a3050958`; this leaf
+# re-derived them three times -- once on the pair it was cut from (`4d0fc20a`/`47570cd8`), once
+# after repairing the corpus, and finally ON THE SYNCED TREE, which is the pair that ships. The
+# superseded-pair constant moved from an asserted `20` to 47 and then to the 55 the merged tree
+# derives; the two citation constants moved with the merge, and both of those moves are stated
+# beneath the constants with what they MEAN rather than only with their value.
 #
 # The OFFICIAL memory checkout (`memory-repos/ar-agents-remember`) is a DIFFERENT tree on a
 # different commit and is refused for exactly this reason by
-# `application/memory_tools.py:100 _refuse_official_memory`. The two are a pair: naming one
-# without the other measures a memory tree against code it was never documented for. Round 1 of
-# this leaf made that mistake; every number below was re-derived on the pair.
+# `application/memory_tools.py:105 _refuse_official_memory` (called at `:140`). The two are a
+# pair: naming one without the other measures a memory tree against code it was never documented
+# for. Round 1 of this leaf made that mistake; every number below was re-derived on the pair.
 #
 # THE LIVE ARM SKIPS WITHOUT ``AR_ONBOARDING_ROOT``, so a green lane run is NEVER evidence that
 # these pins hold: the variable is not set by the default selection, and only a run that sets it
 # exercises the numbers below.
 #
-# T52 / T60 -- the REPORT-ONLY population. 123 rows carry a SYMBOL anchor with exactly one
+# T52 / T60 -- the REPORT-ONLY population. 130 rows carry a SYMBOL anchor with exactly one
 # definition across the claim's cited files, inside no cited range, while the name still occurs
 # inside one. This figure is a REPORT and not a gate: `definitionsOutsideCitedRanges` is the
 # product's own counter and every row rides `reportOnlyFindings`, so it is counted, rendered and
-# reviewed without entering `findingCount`. The rows that entered it under `260918-TSIP-L10` --
-# which is what moved the number from 120 -- are
-# `mcp/src/agents_remember/mcp/tools/knowledge.py.md:71`, `mcp/tests/overview.md:2788` and
-# `mcp/tests/test_tool_refusal_conformance.py.md:114-115`. A future move of this constant should
-# be traced the same way, row by row, and never adjusted to fit. Owner: the checker's own report
-# (``citation_anchor_definition_outside_range``, emitted by the product) plus each route's
-# curator for the re-read.
+# reviewed without entering `findingCount`. It read 120 when this module was written, 123 on the
+# pair this leaf was cut from, and 130 ON THE MERGED TREE -- the +7 arrived with the third sync,
+# whose TWO legs both moved (the sibling `260915_knowledge-substrate` line's documents arrived and
+# the code they document arrived with them), so this module does not split the increase between
+# the legs; what it asserts is the count and that the population stays a REPORT.
 #
-# T52 -- THE ENFORCED PIN IS ZERO, and zero is the assertion: every cited anchor in the memory
-# tree resolves to a line inside a cited range, so the check reports ``ok: true``. A FUTURE
-# NONZERO READING MEANS THE ENFORCED POPULATION REGREW -- a range was moved, a construct was
-# added below an existing citation, or a landing inserted a registry row -- and that is curator
-# work, not a number to update: read the finding, re-derive the range from the construct's real
-# extent, and only then revisit this constant. It read 283 when this module was written, 292
-# after L8 landed, 53 after L10 landed, and 0 once the last twelve rows had been re-read against
-# the constructs they cite.
+# The rows are traced, never adjusted to fit. Those that entered it under `260918-TSIP-L10` --
+# which is what moved the number from 120 -- are `mcp/src/agents_remember/mcp/tools/knowledge.py.md:71`,
+# `mcp/tests/overview.md:2788` and `mcp/tests/test_tool_refusal_conformance.py.md:114-115`. The
+# merged population's own shape, measured with the product's counter on the pinned pair: 130 rows
+# over 95 documents, densest in `mcp/src/agents_remember/application/overview.md` (4),
+# `mcp/tests/overview.md` (4), `mcp/overview.md` (3), and 3 each in
+# `application/knowledge_view_render.py.md`, `memory_quality/style/citations/migration.py.md`,
+# `memory_quality/style/citations/source_index_cache.py.md`,
+# `worktrees/integration/organizational_completion_repair.py.md` and `worktrees/modules/integrate.py.md`.
+# Owner: the checker's own report (``citation_anchor_definition_outside_range``, emitted by the
+# product) plus each route's curator for the re-read.
 #
-# T58 -- 3 wrapped ``cit:`` constructs at 2 documents on the same pair
-# (``models/worktree.py.md`` line 99, ``serving/conversation/active/service.py.md`` lines 30 and
-# 43). The checker parses them (it joins the paragraph), the fixer counts them in
-# ``claimsNotOnOneLine`` and can rewrite none of them, so the finding is reported by a route that
-# never closes it. Owner: the product's citation fixer, this register row. Re-measured unchanged
-# on the landed pair, so the pin holds rather than being carried.
-T52_DEFINITION_OUTSIDE_RANGE = 123
-T52_ENFORCED_POPULATION = 0
+# T52 -- THE ENFORCED PIN IS 97, AND 97 IS INHERITED DEBT, NOT THIS MASTER'S. Every one of these
+# rows is an ENFORCED finding -- 96 `citation_anchor_absent_from_range` and 1
+# `citation_range_out_of_bounds` -- so the check reports ``ok: false`` on the merged tree, and the
+# module says so rather than pinning a zero it cannot see. The 97 arrived with the THIRD SYNC: it
+# is the sibling `260915_knowledge-substrate` line's citation debt, merged into this master's
+# memory tree on 2026-09-20, and it is the same 97 that register row `T141` measured independently
+# (392 failing / 337 repairable / 55 declined tree-wide, 97 enforced remaining). The densest
+# documents are `mcp/src/agents_remember/application/knowledge_curator_ingest.py.md` (19),
+# `mcp/tests/overview.md` (14), `mcp/tests/test_knowledge_curator_ingest_list.py.md` (12),
+# `mcp/tests/diff_scope_test_support.py.md` (10) and `mcp/src/agents_remember/mcp/tools/knowledge.py.md` (9).
+#
+# A PIN THAT ASSERTS A DEBT MUST SAY SO, which is why this paragraph exists: the number is not a
+# budget to grow into and not a target to keep. A CHANGE IN EITHER DIRECTION IS A FINDING --
+# DOWN means somebody cleared rows (name them, and remove this entry only when the count reaches
+# the value the cleared tree derives), UP means somebody added them (find which landing, and
+# re-read the construct rather than the number). It read 283 when this module was written, 292
+# after L8 landed, 53 after L10 landed, 0 once the last twelve rows had been re-read against the
+# constructs they cite on the pair this leaf was cut from -- and 97 here, which is the merge's,
+# measured on the tree this leaf ships.
+#
+# T58 -- 3 wrapped ``cit:`` constructs at 2 documents, RE-MEASURED on the merged tree rather than
+# carried: ``models/worktree.py.md`` (1) and ``serving/conversation/active/service.py.md`` (2),
+# the same two documents and the same three constructs as on the pre-merge pair, so this pin
+# holds across the sync. The checker parses them (it joins the paragraph), the fixer counts them
+# in ``claimsNotOnOneLine`` and can rewrite none of them, so the finding is reported by a route
+# that never closes it. Owner: the product's citation fixer, this register row.
+T52_DEFINITION_OUTSIDE_RANGE = 130
+T52_ENFORCED_POPULATION = 97
 T58_WRAPPED_CITATIONS = 3
 T58_WRAPPED_DOCUMENTS = 2
+
+# ---------------------------------------------------------------------------------------------
+# T112 / F2 -- the superseded-pair worklist, DERIVED from the tree rather than remembered.
+#
+# The constant this replaces (`SUPERSEDED_DECLARED_SITES = 20`) was compared with its own literal,
+# so no change to any tree could move it: a hard-coded fact wearing the clothes of a measurement,
+# in the module written to enforce agreement (`law 4` -- the acceptance test for a pin is the
+# mutation that reds it, never the case that passes). Its named producer,
+# `notes/reports/tsip-instruments/l7-curator-stale-pair-enum.py`, read 64 outside
+# `## Update History` on the very tree the module pins, and `F1` of this master's end review is
+# the class it was blind to. The rule below is that producer's, carried in-tree so the case can
+# fail, and the producer is named so a second seat can re-derive the count independently:
+#
+#   a LINE outside a `## Update History` section whose figures include the SUPERSEDED unit
+#   ceiling (2300 -- the comma-grouped `2,300` included, which a plain `grep 2300` under-counts),
+#   or which states 400 as the integration ceiling.
+#
+# The section rule is the producer's `startswith("update history")` narrowed to the exact title
+# `update_history_sections` itself accepts (`history_order.py`: ``title.strip() == "Update
+# History"``). The two agree on the tree named above because `QualifiedHistoryHeadingTests` pins
+# that tree's qualified `## Update History...` headings as the NAMED population
+# `mcp/tests/overview.md:4833` and asserts it in BOTH directions -- a NEW qualified heading is a
+# finding there, and so is the disappearance of the one the third sync's merge brought in, which is
+# an entry to remove in the same change rather than a silence. Where the two rules would differ,
+# this rule is the one that cannot be blinded by a mangled heading.
+SUPERSEDED_PAIR = (2300, 400)
+HISTORY_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
+FIGURES_IN_LINE = re.compile(r"[\d,]{3,}")
+
+
+def history_section_flags(text: str) -> list[bool]:
+    """Per line: does it sit inside a level-2 `Update History` section?
+
+    The exact-title rule, not a prefix: `history_order.update_history_sections` recognises only
+    the bare form, so a line under a qualified heading is NOT a dated record and stays in the
+    worklist.
+
+    THE BOUNDS, stated because both are real, one of them is deliberate, and the earlier
+    sentence about them was wrong in the direction it named -- measured, not reasoned
+    (`notes/reports/tsip-instruments/l12-sv3-bound.py`):
+
+    * vs THE PRODUCT (`history_order`, pattern ``^(#{1,6})``, a section ending at any heading of
+      level <= 2): a level-1 `# ...` heading INSIDE an `## Update History` section ends the
+      product's section and does NOT end this flag (nor the producer's, whose pattern is
+      ``^(#{2,6})``). A line beneath such a heading is OUTSIDE the product's section and INSIDE
+      mine, so this worklist can UNDER-count against what the product treats as outside history.
+    * vs THE PRODUCER (prefix match on the title): a QUALIFIED `## Update History...` heading is
+      history to the producer and not to this rule, so this worklist can OVER-count against the
+      producer. That direction is deliberate: it is the one that cannot be blinded by a mangled
+      heading.
+
+    Neither bound is reached on the pinned pair -- `QualifiedHistoryHeadingTests` asserts zero
+    qualified headings, and the successor verification measured 0 of 2,345 documents differing --
+    which is why the derivation and the producer agreed there. They are written down so a tree
+    that does reach one is recognised instead of absorbed, and they are NOT fixed here: widening
+    either would change the derivation, and therefore the pin, for a case the pinned pair does
+    not have.
+    """
+    flags: list[bool] = []
+    inside = False
+    for line in text.splitlines():
+        match = HISTORY_HEADING.match(line)
+        if match is not None and len(match.group(1)) == 2:
+            inside = match.group(2).strip() == "Update History"
+        flags.append(inside)
+    return flags
+
+
+def superseded_pair_sites(onboarding_root: Path) -> list[str]:
+    """Every ``path:line`` stating the superseded pair outside `## Update History`.
+
+    The producer's rule, in-tree. Ordered by path then line, so two runs on one tree return the
+    same list in the same order and a diff between two trees is a real diff.
+    """
+    sites: list[str] = []
+    for path in sorted(onboarding_root.glob("**/*.md")):
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        in_history = history_section_flags(text)
+        for number, line in enumerate(text.splitlines(), 1):
+            if in_history[number - 1]:
+                continue
+            figures = {int(one.replace(",", "")) for one in FIGURES_IN_LINE.findall(line)}
+            states_unit = SUPERSEDED_PAIR[0] in figures
+            states_integration = SUPERSEDED_PAIR[1] in figures and "integration" in line.lower()
+            if states_unit or states_integration:
+                sites.append(f"{path.relative_to(onboarding_root)}:{number}")
+    return sites
+
+
+def qualified_history_headings(onboarding_root: Path) -> list[str]:
+    """Every level-2 heading whose title BEGINS with `Update History` and is not exactly it.
+
+    `T125`/`F8`: the corpus writes `## Update History` and the checker accepts only that spelling,
+    so a qualified title renders as a section boundary while every entry beneath it is invisible
+    to the order check -- and the corpus carried two of them with no diagnostic at all.
+    """
+    found: list[str] = []
+    for path in sorted(onboarding_root.glob("**/*.md")):
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for number, line in enumerate(text.splitlines(), 1):
+            match = HISTORY_HEADING.match(line)
+            if match is None or len(match.group(1)) != 2:
+                continue
+            title = match.group(2).strip()
+            if title.startswith("Update History") and title != "Update History":
+                found.append(f"{path.relative_to(onboarding_root)}:{number}")
+    return found
 
 
 def live_onboarding_root() -> Path | None:
@@ -583,12 +739,26 @@ class BudgetAgreementTests(unittest.TestCase):
     #: The subset of ``NON_HISTORY_SITES`` that asserts the stale pair as CURRENT -- the sites a
     #: curator must repair. Derived, not remembered: the other entry names the figure as wrong.
     LIVE_SITE_COUNT = 2
-    #: Sites stating the pair THIS CHANGE SUPERSEDES (2300 / 400) as the pair the file declares.
-    #: Correct against the leaf memory worktree's own base, stale the moment this leaf's raise
-    #: lands -- the worklist the next curation inherits. Enumerated as a POPULATION rather than as
-    #: twenty line numbers, because their lines move with every curation pass and a line-numbered
-    #: pin would rot faster than it informed.
-    SUPERSEDED_DECLARED_SITES = 20
+    #: The superseded-pair worklist -- every line outside `## Update History` on the pair named at
+    #: the head of this module that still states the pair THIS MASTER'S RAISE SUPERSEDES
+    #: (``SUPERSEDED_PAIR``), DERIVED by ``superseded_pair_sites`` and pinned as the count that
+    #: function returns. The producer is `notes/reports/tsip-instruments/l7-curator-stale-pair-
+    #: enum.py`, whose rule the function carries (`T112`). The constant this replaces was compared
+    #: with its own literal `20`, so no tree could move it, while the producer read 64 outside
+    #: `## Update History` on the very tree it pinned.
+    #:
+    #: IT NOW READS 55, AND THE MOVES ARE THE POINT: 64 at base, 47 once this leaf had repaired the
+    #: seventeen lines that stated the superseded pair as current (`F1`), 55 on the MERGED tree.
+    #: The +8 arrived with the third sync and every one of them is the sibling
+    #: `260915_knowledge-substrate` line's own budget prose -- its documents arrived carrying the
+    #: pair as it stood when they were written. This is a WORKLIST, not a verdict: each line is a
+    #: dated or as-of reading reviewed row by row (`F1`'s classification, §4.5 of this leaf's
+    #: report) and none of them is asserted to be wrong by being counted. A change in either
+    #: direction is a finding: UP means a landing added a line that states the superseded pair,
+    #: DOWN means somebody repaired one -- and in both cases the entry moves in the SAME change,
+    #: with the line read against the declaration it names rather than shifted.
+    #: Owner: each route's curator, for the re-read; the register row is `T112`.
+    NON_HISTORY_SUPERSEDED_SITES = 55
 
     @staticmethod
     def declared() -> dict[str, int]:
@@ -695,18 +865,32 @@ class BudgetAgreementTests(unittest.TestCase):
             )
             self.assertTrue(int(line) > 0, f"{site} must name a line")
 
-    def test_the_superseded_declared_pair_is_enumerated_as_a_population(self) -> None:
-        """2300 / 400 sites are held as a count, and the pair they state is pinned.
+    def test_the_superseded_pair_population_is_derived_from_the_tree(self) -> None:
+        """`T112`/`F2`: the worklist is COUNTED ON THE TREE, so a landing that moves it reds here.
 
-        Their lines move with every curation pass, so pinning twenty line numbers would produce a
-        worklist that rots faster than it informs. The instrument derives them from the tree; this
-        case holds the number it measured, so the count is still asserted.
+        The constant this replaces read ``20`` and was compared with ``20``: it passed whatever
+        the corpus said, and the master's own producer for the population read 64 outside
+        `## Update History` on the same tree. The pair is still pinned as the superseded one, and
+        the count is asserted against the derivation rather than against itself, so both failure
+        directions are live -- a repair that removes a site (55 down) and a landing that adds one
+        (55 up) red this case with the sites named in the message.
+
+        The case SKIPS when no tree is named, like every other live case here; the derivation's
+        own ability to fire is proved hermetically by ``SupersededPairDerivationTests``.
         """
-        self.assertEqual(self.SUPERSEDED_DECLARED_SITES, 20, "the superseded-pair population moved")
         self.assertNotEqual(
-            (2300, 400),
+            SUPERSEDED_PAIR,
             (self.declared()["unit"], self.declared()["integration"]),
             "the superseded pair must not be the declared one",
+        )
+        root = live_onboarding_root()
+        if root is None:
+            self.skipTest("AR_ONBOARDING_ROOT names no memory tree on this machine")
+        sites = superseded_pair_sites(root)
+        self.assertEqual(
+            len(sites),
+            self.NON_HISTORY_SUPERSEDED_SITES,
+            f"T112: the superseded-pair population moved; first sites {sites[:8]}",
         )
 
     def test_the_live_sites_still_state_the_figures_they_are_pinned_to(self) -> None:
@@ -746,13 +930,138 @@ class BudgetAgreementTests(unittest.TestCase):
     def test_the_two_figure_classes_are_counted_separately(self) -> None:
         """The live sites must be able to fail on their own, and the population must be larger.
 
-        ``LIVE_SITE_COUNT`` is the set a repair moves; ``SUPERSEDED_DECLARED_SITES`` is the worklist
-        the next curation inherits. A single number could not tell a repaired site from a newly
-        stale one.
+        ``LIVE_SITE_COUNT`` is the set a repair moves; ``NON_HISTORY_SUPERSEDED_SITES`` is the
+        worklist the next curation inherits. A single number could not tell a repaired site from a
+        newly stale one.
         """
         self.assertGreater(self.LIVE_SITE_COUNT, 0)
         self.assertLessEqual(self.LIVE_SITE_COUNT, len(self.NON_HISTORY_SITES))
-        self.assertGreater(self.SUPERSEDED_DECLARED_SITES, 0)
+        self.assertGreater(self.NON_HISTORY_SUPERSEDED_SITES, 0)
+
+
+class SupersededPairDerivationTests(unittest.TestCase):
+    """`T112`: the worklist rule itself, proven to fire on planted shapes.
+
+    The live case above skips without a named tree, so without these arms a lane run would say
+    nothing at all about the derivation -- which is exactly the shape `F2` found: the old
+    constant was asserted, and nothing could move it. Each arm is a document built for the
+    purpose, and the rule is the named producer's (`l7-curator-stale-pair-enum.py`).
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="tsip-l12-pair-")
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+
+    def document(self, name: str, body: str) -> None:
+        path = self.root / "mcp" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+    def test_a_live_site_outside_history_is_counted(self) -> None:
+        """The rule fires, and it names the site rather than only counting it."""
+        self.document("live.md", "# card\n\nThe pair declared now is `unit_case_budget = 2300`.\n")
+        self.assertEqual(superseded_pair_sites(self.root), ["mcp/live.md:3"])
+
+    def test_the_same_line_inside_update_history_is_a_dated_record(self) -> None:
+        """A history entry states what was true then, so it is not part of the worklist."""
+        self.document(
+            "dated.md",
+            "# card\n\n## Update History\n\n- 2026-01-01T00:00+00:00: raised to 2300 unit.\n",
+        )
+        self.assertEqual(superseded_pair_sites(self.root), [])
+
+    def test_a_qualified_heading_cannot_hide_a_live_line(self) -> None:
+        """`T125`/`F8`'s class, at the rule that consumes it.
+
+        The producer's own section test is a prefix match, so a mangled `## Update History...`
+        heading would hide the lines beneath it from the worklist. This rule uses the exact title
+        the product itself accepts, so it cannot; the two agree on the pinned pair because
+        ``QualifiedHistoryHeadingTests`` asserts that tree carries no qualified heading.
+        """
+        self.document(
+            "qualified.md",
+            "# card\n\n## Update History` bullets\n\n- 2026-01-01T00:00+00:00: it was 2300 unit.\n",
+        )
+        self.assertEqual(superseded_pair_sites(self.root), ["mcp/qualified.md:5"])
+
+    def test_the_comma_grouped_spelling_is_counted(self) -> None:
+        """`T112`'s own under-count: a plain ``grep 2300`` misses ``2,300``."""
+        self.document("grouped.md", "# card\n\nThe pair was 2,300 unit and 400 integration.\n")
+        self.assertEqual(superseded_pair_sites(self.root), ["mcp/grouped.md:3"])
+
+    def test_the_declared_pair_is_not_a_site(self) -> None:
+        """The other direction: the pair the repository declares now must not be counted."""
+        self.document("declared.md", "# card\n\nThe pair is `unit_case_budget = 3000` / 600.\n")
+        self.assertEqual(superseded_pair_sites(self.root), [])
+
+
+class QualifiedHistoryHeadingTests(unittest.TestCase):
+    """`T125`/`F8`: a level-2 heading that only BEGINS with `Update History` is not a section.
+
+    ``history_order.update_history_sections`` accepts one spelling -- a level-2 heading whose
+    title is exactly ``Update History`` -- so a qualified title still renders as a section
+    boundary while every entry under it is invisible to the order check, and the corpus carried
+    two of them with no diagnostic anywhere. The detector is proven by planting the shape, then
+    asserted against the tree the pinned pair names as a NAMED, COUNTED population -- so a landing
+    that adds one reds here, AND a repair that removes one reds until its entry is removed in the
+    same change, which is the discipline every other pin in this module follows.
+    """
+
+    #: The qualified headings the merged tree carries, NAMED rather than counted away. It read
+    #: ZERO on the pair this leaf was cut from -- this leaf normalised the two the master-end
+    #: review found -- and ONE here, because the third sync merged the sibling
+    #: `260915_knowledge-substrate` line's document in with it. `mcp/tests/overview.md:4833` is
+    #: `## Update History — 260915-KS-L31`, a DATED heading on a memory document that is NOT this
+    #: leaf's and is NOT repaired here. THE CURATOR READ IT AND DECIDED, and the decision is on
+    #: the record rather than left as a question: at its originating commit `beaee93bb` the
+    #: heading stood WITH its own `260915-KS-L31` bullet beneath it, in the corpus's uniform dated
+    #: form shared with four sibling dated headings in the same file; the third sync's
+    #: bullet-granular union relocated that bullet (now at `:4766`) and orphaned the heading. It is
+    #: therefore NOT the wrap damage this leaf repaired for `F8` -- it is a structurally complete
+    #: standalone line, and the `F8` reasoning does not transfer to it -- and removing it and
+    #: promoting it are BOTH output-neutral (`history_section_line` stays 1705; 849 entries, 0
+    #: malformed either way). So it was KEPT deliberately, and this module pins it as a named,
+    #: counted population instead of asserting it away.
+    QUALIFIED_HEADINGS: ClassVar[tuple[str, ...]] = ("mcp/tests/overview.md:4833",)
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(prefix="tsip-l12-heading-")
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+
+    def document(self, name: str, body: str) -> None:
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+    def test_the_detector_fires_on_the_planted_shape(self) -> None:
+        self.document("card.md", "# card\n\n## Update History` bullets\n\n- something\n")
+        self.assertEqual(qualified_history_headings(self.root), ["card.md:3"])
+
+    def test_the_detector_fires_on_a_dated_title(self) -> None:
+        """The spelling `T125` named, on the same detector: a dated heading is invisible too."""
+        self.document("dated.md", "# card\n\n## Update History — 260918-TSIP-L7\n\n- entry\n")
+        self.assertEqual(qualified_history_headings(self.root), ["dated.md:3"])
+
+    def test_an_exact_heading_is_not_reported(self) -> None:
+        """The negative arm, and the one that keeps \"exactly\" exact: a deeper heading is fine."""
+        self.document("good.md", "# card\n\n## Update History\n\n- entry\n\n### Update History\n")
+        self.assertEqual(qualified_history_headings(self.root), [])
+
+    def test_the_named_tree_carries_exactly_the_pinned_ones(self) -> None:
+        """The pin, in both directions. Skips without a named tree, like every other live case."""
+        root = live_onboarding_root()
+        if root is None:
+            self.skipTest("AR_ONBOARDING_ROOT names no memory tree on this machine")
+        found = qualified_history_headings(root)
+        self.assertEqual(
+            found,
+            list(self.QUALIFIED_HEADINGS),
+            "T125: the qualified Update History population moved. UP means a landing introduced "
+            "one -- normalise it, or add its entry with the reading that says why it stays. DOWN "
+            f"means one was repaired -- remove its entry in the same change. Found: {found}",
+        )
 
 
 class RepoStateTests(unittest.TestCase):
