@@ -13,8 +13,8 @@ import pytest
 # The declared pair this module's stub mirrors. `test_the_stub_matches_the_declared_pair` below
 # keeps it honest, so a raise cannot leave the screen proving the boundaries of a ceiling that no
 # longer exists.
-STUB_UNIT = 3000
-STUB_INTEGRATION = 600
+STUB_UNIT = 4000
+STUB_INTEGRATION = 1000
 
 
 class _Item:
@@ -109,7 +109,7 @@ def test_the_option_declarations_state_no_budget_of_their_own() -> None:
 
     A ``default=`` here is never in effect -- the root ini value always wins -- so it can only
     mislead: a terminal reader who finds ``default=1100`` concludes the unit rail is 1100 while the
-    tree is judged against 3000. Red the moment a dead number returns to either declaration.
+    tree is judged against 4000. Red the moment a dead number returns to either declaration.
     """
 
     tree = ast.parse((conftest.REPOSITORY_ROOT / "mcp/tests/conftest.py").read_text("utf-8"))

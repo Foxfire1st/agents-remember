@@ -65,14 +65,14 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 # THE PAIR EVERY LIVE NUMBER HERE IS MEASURED AGAINST, named because getting it wrong is this
 # campaign's most-repeated defect (L5's T65, and F1 of this leaf's own review):
 #
-#   memory  the pair `260918-TSIP-L12` LANDS: memory `ec1cebe5` -- the
-#           `260918_tool-surface-and-process-integrity` memory tip after its THIRD SYNC, which
-#           merged the concurrent `260915_knowledge-substrate` line into this master -- plus this
-#           leaf's memory change set; paired with code `15e10084` (the same master's code tip)
+#   memory  the pair `260918-TSIP-L13` LANDS: memory `682bbdfd` -- the
+#           `260918_tool-surface-and-process-integrity` memory tip this leaf was cut from, after
+#           its THIRD SYNC merged the concurrent `260915_knowledge-substrate` line in -- plus this
+#           leaf's memory change set; paired with code `1bcf73e7` (the same master's code tip)
 #           plus this leaf's code change set. Every number below was RE-DERIVED on that pair, not
-#           carried forward from the pair this leaf was cut from, and the closeout commits it.
-#           Check it out into a DISPOSABLE worktree and point `AR_ONBOARDING_ROOT` at that
-#           checkout's `onboarding/`.
+#           carried forward from the pair the leaf that wrote this header was cut from, and the
+#           closeout commits it. Check it out into a DISPOSABLE worktree and point
+#           `AR_ONBOARDING_ROOT` at that checkout's `onboarding/`.
 #   code    the checkout this suite runs in -- the repository root `REPOSITORY_ROOT` resolves to
 #           -- whose bytes at the pinned tip are the bytes the memory tree documents.
 #
@@ -91,12 +91,12 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 # or merged tree is not a regression until it is re-derived on that tree. That is `T122`/law 7 --
 # a pin is a claim about a moment.
 #
-# `260918-TSIP-L11` re-derived these constants at memory `ee1a16cc` / code `a3050958`; this leaf
-# re-derived them three times -- once on the pair it was cut from (`4d0fc20a`/`47570cd8`), once
-# after repairing the corpus, and finally ON THE SYNCED TREE, which is the pair that ships. The
-# superseded-pair constant moved from an asserted `20` to 47 and then to the 55 the merged tree
-# derives; the two citation constants moved with the merge, and both of those moves are stated
-# beneath the constants with what they MEAN rather than only with their value.
+# `260918-TSIP-L11` re-derived these constants at memory `ee1a16cc` / code `a3050958`; the leaf
+# that wrote this header re-derived them three times -- once on the pair it was cut from, once
+# after repairing the corpus, and finally ON THE SYNCED TREE. `260918-TSIP-L13` re-derived every
+# one of them on ITS pair (`682bbdfd` / `1bcf73e7` plus its change set) and moved the worklist
+# 55 -> 53, the one pin its raise moved; both citation constants and the enforced population are
+# unchanged, and the move is stated beneath the constant with what it MEANS.
 #
 # The OFFICIAL memory checkout (`memory-repos/ar-agents-remember`) is a DIFFERENT tree on a
 # different commit and is refused for exactly this reason by
@@ -704,8 +704,9 @@ class BudgetAgreementTests(unittest.TestCase):
     A budget written in prose is invisible to every checker, so the population is derived by GREP
     over the declared files -- not from a checker's output, and not from the numbers this module
     happens to know. ``T79`` is the reason each figure must name its ceiling: the pair below moved
-    from ``2000/300`` to ``2300/400`` when a concurrent line landed, and to ``3000/600`` by a
-    developer decision on 2026-09-19, so a figure quoted without its ceiling cannot be judged.
+    from ``2000/300`` to ``2300/400`` when a concurrent line landed, to ``3000/600`` by a developer
+    decision on 2026-09-19, and to ``4000/1000`` by ``260918-TSIP-L13``'s developer decision on
+    2026-09-20, so a figure quoted without its ceiling cannot be judged.
     """
 
     #: Every site the sweep found, keyed by ``onboarding-root-relative path:line``, valued with
@@ -747,18 +748,18 @@ class BudgetAgreementTests(unittest.TestCase):
     #: with its own literal `20`, so no tree could move it, while the producer read 64 outside
     #: `## Update History` on the very tree it pinned.
     #:
-    #: IT NOW READS 55, AND THE MOVES ARE THE POINT: 64 at base, 47 once this leaf had repaired the
+    #: IT NOW READS 53, AND THE MOVES ARE THE POINT: 64 at base, 47 once this leaf had repaired the
     #: seventeen lines that stated the superseded pair as current (`F1`), 55 on the MERGED tree.
-    #: The +8 arrived with the third sync and every one of them is the sibling
-    #: `260915_knowledge-substrate` line's own budget prose -- its documents arrived carrying the
-    #: pair as it stood when they were written. This is a WORKLIST, not a verdict: each line is a
-    #: dated or as-of reading reviewed row by row (`F1`'s classification, §4.5 of this leaf's
-    #: report) and none of them is asserted to be wrong by being counted. A change in either
-    #: direction is a finding: UP means a landing added a line that states the superseded pair,
-    #: DOWN means somebody repaired one -- and in both cases the entry moves in the SAME change,
-    #: with the line read against the declaration it names rather than shifted.
-    #: Owner: each route's curator, for the re-read; the register row is `T112`.
-    NON_HISTORY_SUPERSEDED_SITES = 55
+    #: The +8 arrived with the third sync and is the sibling `260915_knowledge-substrate` line's own
+    #: budget prose. The -2 is `260918-TSIP-L13`'s raise to 4000 / 1000, and a derived count that
+    #: moves must say why: three `integration_case_budget` citation rows in
+    #: `test-evidence-lanes.toml.md` were re-pointed at the key's new line and their replaced
+    #: wording no longer names 2300, while `mcp/tests/overview.md:975` joined the worklist by naming
+    #: 2300 among the DATED ceilings. A WORKLIST, not a verdict: each line is a dated or as-of
+    #: reading reviewed row by row and none is asserted wrong by being counted. A change in either
+    #: direction is a finding: UP means a landing added such a line, DOWN a repair, and the entry
+    #: moves in the SAME change with the line read against the declaration it names (`T112`).
+    NON_HISTORY_SUPERSEDED_SITES = 53
 
     @staticmethod
     def declared() -> dict[str, int]:
@@ -769,6 +770,31 @@ class BudgetAgreementTests(unittest.TestCase):
             "unit": int(options["unit_case_budget"]),
             "integration": int(options["integration_case_budget"]),
         }
+
+    @staticmethod
+    def declared_lines() -> dict[str, int]:
+        """The LINE each key is declared on, derived from the file rather than remembered.
+
+        ``test_the_repaired_site_states_the_declared_pair`` asserts that the live memory sentence
+        cites the declaration **by line**, and until ``260918-TSIP-L13`` that expectation was the
+        literal ``"pyproject.toml:263-264"``. A raise inserts its dated tradeoff block above the two
+        keys -- which is exactly what the doctrine asks of it -- so every raise moves them: this
+        leaf moved them to ``:278-279``, and the citation corpus records the earlier addresses
+        (``:185``, ``:244``, ``:263``). A literal here is a pin on a mutable file (`T119`, `T122`),
+        so the expectation is read from the file instead. The case still fails when the sentence
+        cites a line that does not declare the pair; it stops failing merely because a raise pushed
+        the key down the file.
+        """
+
+        lines: dict[str, int] = {}
+        for number, text in enumerate(
+            (REPOSITORY_ROOT / "pyproject.toml").read_text("utf-8").splitlines(), 1
+        ):
+            stripped = text.strip()
+            for name in ("unit_case_budget", "integration_case_budget"):
+                if stripped.startswith(f"{name} ="):
+                    lines[name] = number
+        return lines
 
     def test_the_repaired_site_states_the_declared_pair(self) -> None:
         """``T56``'s repaired half, held by a case now that its stale entry is gone.
@@ -800,12 +826,17 @@ class BudgetAgreementTests(unittest.TestCase):
             sentence,
             "T56: integration missing",
         )
-        self.assertIn("pyproject.toml:263-264", sentence, "T56: the ceiling is not cited")
+        lines = self.declared_lines()
+        self.assertIn(
+            f"pyproject.toml:{lines['unit_case_budget']}-{lines['integration_case_budget']}",
+            sentence,
+            "T56: the ceiling is not cited",
+        )
         self.assertNotIn("1,000 unit", sentence, "T56: the stale pair is back in the sentence")
 
     def test_the_declaration_is_the_ceiling_this_module_screens(self) -> None:
         """The authority is one file, and the screen reads it rather than a copy."""
-        self.assertEqual(self.declared(), {"unit": 3000, "integration": 600})
+        self.assertEqual(self.declared(), {"unit": 4000, "integration": 1000})
         budget_test = (MCP_TESTS / "test_suite_budget.py").read_text("utf-8")
         self.assertIn(f"STUB_UNIT = {self.declared()['unit']}", budget_test)
         self.assertIn(f"STUB_INTEGRATION = {self.declared()['integration']}", budget_test)

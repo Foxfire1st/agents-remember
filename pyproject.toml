@@ -260,8 +260,23 @@ minversion = "9.0"
 #     over-integration -- at whatever pair is declared.  Only the numbers moved.
 #   * no case, module, registration or lane member was deleted, deselected, consolidated away or
 #     weakened by this change, and it adds no case of its own.
-unit_case_budget = 3000
-integration_case_budget = 600
+# 2026-09-20 -- both ceilings raised again, **3000 -> 4000** unit and **600 -> 1000** integration,
+# by the 260918-TSIP-L13 leaf under a second direct developer decision.  Like the paragraph above
+# it, this raise is a POLICY and is recorded as one: no increment below is earned from a
+# projection, and this change set adds no case of its own.
+#   * the pair it replaces is `3000 / 600` -- `260918-TSIP-L7`'s policy raise of 2026-09-19 (**T79**).
+#     The measured populations at this leaf's base, code `1bcf73e7` / memory `682bbdfd`, are
+#     **2457 unit / 429 integration** (`pytest mcp/tests -m "not integration" --collect-only` and
+#     `-m "integration" --collect-only`), so the ceilings carry 1543 and 571 cases of headroom where
+#     the pair they replace carried 543 and 171.  Headroom, never a target: a successor measures both
+#     populations rather than filling them.
+#   * what is NOT relaxed: `pytest_collection_finish` still refuses a population over the ceiling
+#     by name, an absent declaration still resolves to `0` and still refuses rather than running
+#     unbounded, and `test_suite_budget.py` still proves both failure directions -- over-unit and
+#     over-integration -- at whatever pair is declared.  Only the numbers moved, and no case,
+#     module, registration or lane member was deleted, deselected, consolidated away or weakened.
+unit_case_budget = 4000
+integration_case_budget = 1000
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this
 # key to build its pytest step, so the wrapper no longer carries a second copy that can
