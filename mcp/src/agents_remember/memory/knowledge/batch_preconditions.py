@@ -1331,6 +1331,10 @@ def _census_check(
     storage error. Reference resolution is deliberately **not** here: it belongs to the record
     group's own write step, which runs in command order, so a disposition that links to a claim the
     same batch creates resolves once that claim's command has run.
+
+    ``pending`` is accepted and discarded: the census group cites no other command's target, so
+    this check declares the read-only set it needs rather than the mutable ``set`` the dispatcher
+    passes. Nothing in the target-check family mutates that argument.
     """
 
     del index, pending

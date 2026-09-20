@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel.authority import require_repo
 from agents_remember.kernel.primitives.identity import (
     stable_provider_id,
@@ -92,6 +93,202 @@ def provider_watchers_tool(
 def summarize_provider_watchers_result(result: dict[str, Any]) -> dict[str, Any]:
     """Apply provider command-log reporting policy inside the application layer."""
     return summarize_command_logs(result)
+
+
+@dataclass(frozen=True)
+class ProviderRefusalSite:
+    """One provider tool's own declaration of how it refuses when it cannot run.
+
+    ``tool`` is the operation name the response carries, ``why`` is the capability that was
+    absent when the tool was actually called (used when the refusal is raised rather than
+    returned), and ``next_tool``/``next_action`` name the machine-readable way out.
+
+    A provider tool has two ordinary reasons to answer without running: the capability is not
+    configured on this host, or the on-disk authority does not arm it. Both are *conditions*,
+    not crashes, and `provider_status`/`provider_diagnostics` already answer the identical
+    absence with a typed payload (``providers.state: "noProviders"``) -- so a seat reading a
+    refusal here keeps ``ok``, ``status`` and the way out instead of hunting a traceback.
+    `260918-TSIP` `T34`, owner `L6`.
+    """
+
+    tool: str
+    why: str
+    next_tool: str
+    next_action: str
+
+
+_PROVIDER_REFUSAL_SITES: dict[str, ProviderRefusalSite] = {
+    "grepai_search": ProviderRefusalSite(
+        tool="grepai_search",
+        why="the grepai-memory provider is not configured or not armed on this host",
+        next_tool="provider_watchers",
+        next_action=(
+            "configure the grepai-memory provider in the MCP authority settings, then arm it "
+            "with provider_watchers(action='start'); provider_status reports the live set"
+        ),
+    ),
+    "grepai_trace": ProviderRefusalSite(
+        tool="grepai_trace",
+        why="the grepai-memory provider is not configured or not armed on this host",
+        next_tool="provider_watchers",
+        next_action=(
+            "configure the grepai-memory provider in the MCP authority settings, then arm it "
+            "with provider_watchers(action='start'); provider_status reports the live set"
+        ),
+    ),
+    "cgc_symbol_search": ProviderRefusalSite(
+        tool="cgc_symbol_search",
+        why="the codegraphcontext-code provider is not configured or not armed on this host",
+        next_tool="provider_watchers",
+        next_action=(
+            "configure the codegraphcontext-code provider in the MCP authority settings, then "
+            "arm it with provider_watchers(action='start'); provider_status reports the live set"
+        ),
+    ),
+    "cgc_callers": ProviderRefusalSite(
+        tool="cgc_callers",
+        why="the codegraphcontext-code provider is not configured or not armed on this host",
+        next_tool="provider_watchers",
+        next_action=(
+            "configure the codegraphcontext-code provider in the MCP authority settings, then "
+            "arm it with provider_watchers(action='start'); provider_status reports the live set"
+        ),
+    ),
+    "cgc_callees": ProviderRefusalSite(
+        tool="cgc_callees",
+        why="the codegraphcontext-code provider is not configured or not armed on this host",
+        next_tool="provider_watchers",
+        next_action=(
+            "configure the codegraphcontext-code provider in the MCP authority settings, then "
+            "arm it with provider_watchers(action='start'); provider_status reports the live set"
+        ),
+    ),
+    "cgc_dependencies": ProviderRefusalSite(
+        tool="cgc_dependencies",
+        why="the codegraphcontext-code provider is not configured or not armed on this host",
+        next_tool="provider_watchers",
+        next_action=(
+            "configure the codegraphcontext-code provider in the MCP authority settings, then "
+            "arm it with provider_watchers(action='start'); provider_status reports the live set"
+        ),
+    ),
+    "cgc_complexity": ProviderRefusalSite(
+        tool="cgc_complexity",
+        why="the codegraphcontext-code provider is not configured or not armed on this host",
+        next_tool="provider_watchers",
+        next_action=(
+            "configure the codegraphcontext-code provider in the MCP authority settings, then "
+            "arm it with provider_watchers(action='start'); provider_status reports the live set"
+        ),
+    ),
+    "cgc_visualize": ProviderRefusalSite(
+        tool="cgc_visualize",
+        why="the codegraphcontext-code provider is not configured or not armed on this host",
+        next_tool="provider_watchers",
+        next_action=(
+            "configure the codegraphcontext-code provider in the MCP authority settings, then "
+            "arm it with provider_watchers(action='start'); provider_status reports the live set"
+        ),
+    ),
+}
+
+
+def provider_refusal_payload(site: ProviderRefusalSite, detail: str) -> dict[str, Any]:
+    """One provider tool's typed refusal: what refused, why, and the machine-readable way out.
+
+    The shape is the product's standard refusal envelope -- ``ok: false`` plus a refusal
+    identity key (``state``/``status``) and recovery guidance -- and it is deliberately the
+    same one the worktree and memory families answer with, so a caller reads one vocabulary
+    across the surface. ``nextStep`` is a declared field of the response envelope
+    (``models.base.ResponseModel.nextStep``) and the choke point preserves a producer's own
+    hint rather than overwriting it, so the way out survives to the wire.
+    """
+
+    return {
+        "ok": False,
+        "operation": site.tool,
+        "state": "refused",
+        "status": "provider-capability-unavailable",
+        "detail": detail,
+        "nextAction": site.next_action,
+        "nextStep": {
+            "summary": f"{site.tool} did not run: {site.why}",
+            "nextTool": site.next_tool,
+        },
+    }
+
+
+def provider_refusal_result(site: ProviderRefusalSite, error: Exception) -> dict[str, Any] | None:
+    """Project one capability exception into a refusal, or ``None`` to keep it an error.
+
+    Only the family's *condition* errors are answered: an absent or unarmed capability, which
+    the product already models as a typed state elsewhere. The family's own typed errors
+    (``AgentsRememberError``: the on-disk authority gate) and the grepai settings absences are
+    conditions; a malformed argument -- a blank ``query`` or ``symbol``, an unknown
+    ``output_format`` -- is the caller's error and is still raised, because turning a fixable
+    call into a "refusal" would hide it behind prose.
+    """
+
+    detail = str(error).strip()
+    if isinstance(error, AgentsRememberError):
+        return provider_refusal_payload(site, detail)
+    if "is not configured" in detail or "not indexed by" in detail:
+        return provider_refusal_payload(site, detail)
+    return None
+
+
+def resolve_grepai_query(
+    config: McpRuntimeConfig,
+    *,
+    tool: str,
+    repos: GrepaiRepoScope,
+    scope: ProviderQueryScope,
+    allow_multiple: bool,
+) -> dict[str, Any]:
+    """A grepai tool's answer when the provider cannot serve it, or ``{}`` to run the query.
+
+    The two absences a grepai query meets on an ordinary host -- the provider is not in the
+    MCP authority settings, or its settings hold no project for a selected repo -- are
+    answered here rather than escaping as a raise (`T34`). ``{}`` (falsy) is the "go ahead"
+    answer, so the caller reads one condition instead of unwrapping a tuple.
+    """
+
+    site = _PROVIDER_REFUSAL_SITES[tool]
+    try:
+        target = _grepai_target(config, repos, scope)
+        _grepai_project_selection(
+            config,
+            repos=repos,
+            allow_multiple=allow_multiple,
+            provider_settings=(
+                _load_worktree_grepai_provider(target.settings_path) if target else None
+            ),
+        )
+    except Exception as error:
+        refusal = provider_refusal_result(site, error)
+        if refusal is None:
+            raise
+        return refusal
+    return {}
+
+
+def resolve_cgc_capability(config: McpRuntimeConfig, *, tool: str) -> dict[str, Any]:
+    """A cgc tool's answer when the provider is not armed, or ``{}`` to run the query.
+
+    The containment-R1 authority gate is the only precondition a read-only CGC query meets
+    before it dispatches, and it is a *condition*: with no provider configured the tool
+    answers in the envelope naming the way out instead of losing it to a traceback (`T34`).
+    """
+
+    site = _PROVIDER_REFUSAL_SITES[tool]
+    try:
+        require_provider_launch_authority(config, operation=tool)
+    except Exception as error:
+        refusal = provider_refusal_result(site, error)
+        if refusal is None:
+            raise
+        return refusal
+    return {}
 
 
 @dataclass(frozen=True)
@@ -279,6 +476,11 @@ def grepai_search_tool(
     repos: GrepaiRepoScope = ALL_INDEXED_REPOS,
     scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
+    refusal = resolve_grepai_query(
+        config, tool="grepai_search", repos=repos, scope=scope, allow_multiple=True
+    )
+    if refusal:
+        return refusal
     target = _grepai_target(config, repos, scope)
     selection = _grepai_project_selection(
         config,
@@ -315,6 +517,11 @@ def grepai_trace_tool(
     action = _grepai_trace_action(trace.trace_action)
     if trace.depth is not None and action != "graph":
         raise ValueError("grepai_trace depth is only supported for trace_action='graph'")
+    refusal = resolve_grepai_query(
+        config, tool="grepai_trace", repos=repos, scope=scope, allow_multiple=False
+    )
+    if refusal:
+        return refusal
     target = _grepai_target(config, repos, scope)
     selection = _grepai_project_selection(
         config,
@@ -349,6 +556,9 @@ def cgc_symbol_search_tool(
     name: str,
     scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
+    refusal = resolve_cgc_capability(config, tool="cgc_symbol_search")
+    if refusal:
+        return refusal
     return _cgc_run_tool(
         config,
         operation="cgc_symbol_search",
@@ -366,6 +576,9 @@ def cgc_callers_tool(
     file: str | None = None,
     scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
+    refusal = resolve_cgc_capability(config, tool="cgc_callers")
+    if refusal:
+        return refusal
     native_args = ["analyze", "callers", _required_text(function, "function")]
     if file:
         native_args.extend(["--file", _required_text(file, "file")])
@@ -385,6 +598,9 @@ def cgc_callees_tool(
     function: str,
     scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
+    refusal = resolve_cgc_capability(config, tool="cgc_callees")
+    if refusal:
+        return refusal
     return _cgc_run_tool(
         config,
         operation="cgc_callees",
@@ -401,6 +617,9 @@ def cgc_dependencies_tool(
     module: str,
     scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
+    refusal = resolve_cgc_capability(config, tool="cgc_dependencies")
+    if refusal:
+        return refusal
     return _cgc_run_tool(
         config,
         operation="cgc_dependencies",
@@ -417,6 +636,9 @@ def cgc_complexity_tool(
     function: str | None = None,
     scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
+    refusal = resolve_cgc_capability(config, tool="cgc_complexity")
+    if refusal:
+        return refusal
     native_args = ["analyze", "complexity"]
     if function:
         native_args.append(_required_text(function, "function"))
@@ -437,6 +659,9 @@ def cgc_visualize_tool(
     context: str | None = None,
     scope: ProviderQueryScope = WORKSPACE_QUERY_SCOPE,
 ) -> dict[str, Any]:
+    refusal = resolve_cgc_capability(config, tool="cgc_visualize")
+    if refusal:
+        return refusal
     require_repo(config, repo_id)
     target = _resolve_worktree_target(config, repo_id=repo_id, worktree=scope.worktree)
     return _provider_operation_result(

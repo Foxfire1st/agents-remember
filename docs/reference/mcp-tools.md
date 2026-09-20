@@ -1,14 +1,14 @@
 # MCP Tool Reference
 
-The Agents Remember MCP server exposes 63 public tools. Tools **apply by default** — pass
+The Agents Remember MCP server exposes 72 public tools (`PUBLIC_TOOLS`, which `server_info` reports for the running process). Tools **apply by default** — pass
 `dry_run=true` to preview first (for the read-only `cgc_*`/`grepai_*` query tools,
 `dry_run=true` returns the planned provider command without running it). The two
 `codex_benchmark_*` tools are the exception: they default to `dry_run=true`
 because a real run clones repos and executes Codex agents. Repository-scoped tools
 take a `repo_id` that must be an allowed repo in the MCP settings.
 
-This page is a map of the surface; behavior detail lives in the linked skill and
-reference pages.
+This page is a map of the surface, not a complete index of it: the tables below name a subset
+of the roster above. Behavior detail lives in the linked skill and reference pages.
 
 **Skills vs tools.** Many skills wrap one or more of these tools and add the
 procedure, gates, and ordering around them: the `c-00-initialize-memory-repo` skill drives the `memory_init` MCP tool, the `c-02-memory-quality-control` skill

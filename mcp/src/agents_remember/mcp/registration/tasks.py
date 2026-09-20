@@ -45,13 +45,18 @@ def _register_curator_coherence_tools(server: FastMCP, config: McpRuntimeConfig)
         `prepare` returns the exact code, memory, task-topology, attestation, predecessor, and
         source-candidate identities. `publish` requires those unchanged identities plus one
         curator/architect-authored disposition, rationale, and evidenceRef for every candidate.
-        It rejects missing, extra, duplicate, malformed, or stale judgments, publishes atomically,
-        and may freeze an immutable delivery-attempt snapshot. Evidence references use one explicit
-        authority namespace—`code:`, `memory:`, or `task:`—and the lifecycle records and later
-        revalidates the referenced bytes' digest. A semantic requirement revision, delivery
-        attempt, and content digest are separate fields. `validate` is the same validator
-        used by memory preflight and closeout admission. Historical files are never searched as
-        fallbacks."""
+        `publish` also requires every one of `semantic_requirement_revision`, `delivery_attempt`,
+        `expected_predecessor_digest`, `expected_code_candidate_tree`,
+        `expected_memory_candidate_tree`, `expected_task_topology_fingerprint`,
+        `expected_task_intent`, `expected_attestation_sha256` and `caller` to be supplied and
+        non-null: the request carries one action's input shape at a time, so `status`, `prepare`
+        and `validate` forbid all nine. It rejects missing, extra, duplicate, malformed, or stale
+        judgments, publishes atomically, and may freeze an immutable delivery-attempt snapshot.
+        Evidence references use one explicit authority namespace—`code:`, `memory:`, or `task:`—and
+        the lifecycle records and later revalidates the referenced bytes' digest. A semantic
+        requirement revision, delivery attempt, and content digest are separate fields. `validate`
+        is the same validator used by memory preflight and closeout admission. Historical files
+        are never searched as fallbacks."""
         return curator_coherence_payload(config, request)
 
 
@@ -118,7 +123,8 @@ _TASK_DOC_TOOL_DESCRIPTION = """Author the JSON-primary task document (ar-task-d
         'set_field' | 'get'. Locate the doc by task_name (also resolves the
         contract for the lifecycle key) or contract_path; pass slug for a series sub-task
         ('<slug>.json'), omit for a standalone task ('task.json'). 'create' takes fields (id, slug,
-        title, kind ['light'|'subTask'|'master'], repo, type, createdAt, objective, requirements,
+        title, kind ['subTask'|'master'] (the former 'light' kind is refused), repo, type,
+        createdAt, objective, requirements,
         steps, ... — a master takes subTasks + ordered sections instead of steps, and an
         orchestration sprint is scaffolded with empty canonical Judgment and Priority Register
         sections); 'replace' takes a

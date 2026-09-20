@@ -75,6 +75,11 @@ evidence_node = "mcp/tests/test_knowledge_evidence_claims.py::test_a_claim_reads
 id = "migration-census-cases"
 owner = "mcp/tests/migration_census_test_support.py"
 evidence_node = "mcp/tests/test_migration_census.py::test_the_seed_writes_every_census_record_kind_through_the_shipped_batch_operation"
+
+[[contract]]
+id = "tool-refusal-census-cases"
+owner = "mcp/tests/tool_refusal_census_support.py"
+evidence_node = "mcp/tests/test_tool_refusal_conformance.py::FailurePathCensusTests::test_every_failure_path_answers_in_one_of_the_four_named_shapes"
 [[artifact]]
 path = "mcp/tests/_control_plane.py"
 kind = "shared-support"
@@ -431,6 +436,7 @@ consumers = [
   "mcp/tests/test_spawn_agent_session.py",
   "mcp/tests/test_task_doc_structural_publication_l2.py",
   "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_task_reopen_series_extension.py",
   "mcp/tests/test_task_sprint_linkage.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
@@ -518,6 +524,7 @@ replacement_contract = "node:mcp/tests/test_task_reopen.py::ReopenResetTests::te
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_task_reopen_series_extension.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
   "mcp/tests/test_memory_mode_removal.py",
 ]
@@ -556,6 +563,7 @@ replacement_contract = "node:mcp/tests/test_task_reopen.py::ReopenResetTests::te
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_task_reopen.py",
+  "mcp/tests/test_task_reopen_series_extension.py",
 ]
 
 [[artifact]]
@@ -739,6 +747,7 @@ consumers = [
   "mcp/tests/test_quality_report_publication_security.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_repository_certification_profiles.py",
+  "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_serving.py",
   "mcp/tests/test_serving_files.py",
@@ -760,6 +769,7 @@ consumers = [
   "mcp/tests/test_task_document.py",
   "mcp/tests/test_task_document_application_1.py",
   "mcp/tests/test_task_document_master.py",
+  "mcp/tests/test_task_reopen_series_extension.py",
   "mcp/tests/test_task_sprint_linkage.py",
   "mcp/tests/test_terminal_blocker_reasons.py",
   "mcp/tests/test_terminal_enclosure_archive_sync_journal.py",
@@ -770,9 +780,13 @@ consumers = [
   "mcp/tests/test_terminal_liveness_pane_authority.py",
   "mcp/tests/test_terminal_liveness_registration_order.py",
   "mcp/tests/test_terminal_observer_health.py",
+  "mcp/tests/test_tool_entry_point_sweep.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
+  "mcp/tests/test_tool_response_conformance.py",
   "mcp/tests/test_tools.py",
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_wire_vocabulary_exhaustiveness_boundary.py",
+  "mcp/tests/test_workflow_chain_guidance.py",
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
@@ -791,23 +805,7 @@ introduced_by = "260827-PDLS-remediation"
 lifetime = "permanent"
 permanence_rationale = "The manifest removes the unmarked-unit fallback and binds selection, cadence, retry, and reporting to one explicit population."
 replacement_contract = "node:mcp/tests/test_evidence_lanes.py::EvidenceLaneRegistryTests::test_incomplete_or_ambiguous_registry_is_refused"
-consumer_scope = "exact"
-consumers = [
-  "mcp/tests/test_catalog_selection.py",
-  "mcp/tests/test_causal_quality_preflight.py",
-  "mcp/tests/test_code_quality_check_scope.py",
-  "mcp/tests/test_code_quality_targeted.py",
-  "mcp/tests/test_dependency_ownership_ast_helpers.py",
-  "mcp/tests/test_evidence_lanes.py",
-  "mcp/tests/test_file_size_detector.py",
-  "mcp/tests/test_pytest_bootstrap_boundaries.py",
-  "mcp/tests/test_quality_diagnostics.py",
-  "mcp/tests/test_quality_retry_proof.py",
-  "mcp/tests/test_repository_certification_profiles.py",
-  "mcp/tests/test_suite_budget.py",
-  "mcp/tests/test_evidence_catalog_gate_boundaries.py",
-  "mcp/tests/test_memory_citation_resolution.py",
-]
+consumer_scope = "all-tests"
 
 [[artifact]]
 path = "scripts/e2e_harness/codex_driver.py"
@@ -1420,16 +1418,17 @@ permanence_rationale = "The selective read is decided by one exact topology -- I
 replacement_contract = "contract:knowledge-read-scope-cases"
 consumer_scope = "exact"
 consumers = [
-  "mcp/tests/test_knowledge_diff_boundaries.py",
-  "mcp/tests/test_knowledge_family_composition_boundaries.py",
-  "mcp/tests/test_knowledge_projection_vault_safety.py",
-  "mcp/tests/test_knowledge_diff_scope.py",
+  "mcp/tests/test_knowledge_curator_ingest.py",
   "mcp/tests/test_knowledge_detection_runs.py",
+  "mcp/tests/test_knowledge_diff_boundaries.py",
+  "mcp/tests/test_knowledge_diff_scope.py",
+  "mcp/tests/test_knowledge_family_composition_boundaries.py",
+  "mcp/tests/test_knowledge_family_integrity_pipeline.py",
+  "mcp/tests/test_knowledge_projection_vault_safety.py",
   "mcp/tests/test_knowledge_curator_ingest.py",
   "mcp/tests/test_knowledge_read_boundaries.py",
   "mcp/tests/test_knowledge_read_paths.py",
   "mcp/tests/test_knowledge_read_scope.py",
-  "mcp/tests/test_knowledge_family_integrity_pipeline.py",
   "mcp/tests/test_knowledge_registered_scope.py",
   "mcp/tests/test_knowledge_review_surface.py",
 ]
@@ -1642,4 +1641,23 @@ replacement_contract = "contract:migration-census-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_migration_census.py",
+]
+
+[[artifact]]
+path = "mcp/tests/tool_refusal_census_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "tool-refusal-census-cases"
+category = "unit-regression"
+fidelity = "local-composition"
+cadence = "affected"
+source_version_or_generator = "the production entry points of every advertised tool, invoked over one disposable coordination root through a real MCP client session: `failure_invocations` is the table of calls that cannot succeed and `drive_census` is the driver that classifies what each one answered"
+introduced_by = "260918-TSIP-L6"
+lifetime = "permanent"
+permanence_rationale = "A tool's failure path is only observable where the envelope meets the transport, and the answer it earns -- a typed refusal, a refusal carried as a state, an always-answer, or a lost envelope -- is decided by the tool's own response model, so the table and the driver must be the production call rather than a private-function probe. It is shared rather than local because the module's population is derived from the advertised roster at run time and is asserted from the conformance module beside it; a second copy of the table would let the two readings of the same surface disagree."
+replacement_contract = "contract:tool-refusal-census-cases"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_response_address_binding.py",
+  "mcp/tests/test_tool_refusal_conformance.py",
 ]

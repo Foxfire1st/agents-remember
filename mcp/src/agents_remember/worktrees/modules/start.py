@@ -1091,7 +1091,10 @@ def _retry_provider_setup_result(
                 **next_guidance(
                     "continue_work",
                     tool="worktree_status",
-                    args=contract_next_args(contract),
+                    # Same requirement, same reason as the start response's own triple: this is the
+                    # "poll worktree_status instead of retrying" remedy, and a remedy that cannot be
+                    # invoked is not one. `repo_id` is on the contract (260918-TSIP-L8).
+                    args=contract_next_args(contract, repo_id=contract.repo_name),
                 ),
             },
         )

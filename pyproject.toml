@@ -241,8 +241,42 @@ minversion = "9.0"
 #     raised afterwards, from the measurement rather than from the plan.
 #   * integration is **not** raised: measured **394 collected** against 400, unchanged by this leaf,
 #     which adds no integration case.  The six cases of headroom are reported rather than consumed.
-unit_case_budget = 2300
-integration_case_budget = 400
+#
+# 2026-09-19 -- both ceilings raised, **2300 -> 3000** unit and **400 -> 600** integration, by the
+# 260918-TSIP-L7 agreement leaf under a direct developer decision: *"increase budgets ... the
+# ratchets are a cancer."*  This is the first raise on this line that is a POLICY rather than a
+# measurement, and it is recorded as such: the two paragraphs above earn their increments from a
+# collected population, and this one does not.
+#   * the pair it replaces was the merged line's, not this master's (**T79**): `2300 / 400`, with
+#     usage measured on L6's frozen bytes at **1650 unit / 284 integration**.  So the ceilings
+#     carried 650 and 116 cases of headroom before this change and 1350 and 316 after it.
+#   * the numbers are deliberately round and deliberately not derived from a projection.  The
+#     developer's stated reason is that a ceiling which must be re-earned by measurement before
+#     every leaf taxes exactly the work it is meant to protect; a ceiling far above usage still
+#     fires on the thing it exists for -- a runaway collection -- and stops pretending to be a plan.
+#   * what is NOT relaxed: `pytest_collection_finish` still refuses a population over the ceiling by
+#     name, an absent declaration still resolves to `0` and still refuses rather than running
+#     unbounded, and `test_suite_budget.py` still proves both failure directions -- over-unit and
+#     over-integration -- at whatever pair is declared.  Only the numbers moved.
+#   * no case, module, registration or lane member was deleted, deselected, consolidated away or
+#     weakened by this change, and it adds no case of its own.
+# 2026-09-20 -- both ceilings raised again, **3000 -> 4000** unit and **600 -> 1000** integration,
+# by the 260918-TSIP-L13 leaf under a second direct developer decision.  Like the paragraph above
+# it, this raise is a POLICY and is recorded as one: no increment below is earned from a
+# projection, and this change set adds no case of its own.
+#   * the pair it replaces is `3000 / 600` -- `260918-TSIP-L7`'s policy raise of 2026-09-19 (**T79**).
+#     The measured populations at this leaf's base, code `1bcf73e7` / memory `682bbdfd`, are
+#     **2457 unit / 429 integration** (`pytest mcp/tests -m "not integration" --collect-only` and
+#     `-m "integration" --collect-only`), so the ceilings carry 1543 and 571 cases of headroom where
+#     the pair they replace carried 543 and 171.  Headroom, never a target: a successor measures both
+#     populations rather than filling them.
+#   * what is NOT relaxed: `pytest_collection_finish` still refuses a population over the ceiling
+#     by name, an absent declaration still resolves to `0` and still refuses rather than running
+#     unbounded, and `test_suite_budget.py` still proves both failure directions -- over-unit and
+#     over-integration -- at whatever pair is declared.  Only the numbers moved, and no case,
+#     module, registration or lane member was deleted, deselected, consolidated away or weakened.
+unit_case_budget = 4000
+integration_case_budget = 1000
 
 # The single declaration of where the suite lives. `code_quality/check.py` reads this
 # key to build its pytest step, so the wrapper no longer carries a second copy that can
@@ -253,6 +287,12 @@ addopts = [
   # Ordinary edits exercise deterministic tests without delivery-only boundaries.
   "-m", "not integration",
   "-n=4",
+  # One file's cases stay in one worker, because file-scoped state is how several modules state a
+  # population claim (`test_task_reopen_series_extension.py`'s completion count is the measured
+  # one: its population case passes at `-n0` and red 4 runs of 4 at `-n4 --dist load`, which hands
+  # individual cases to whichever worker is free). `loadfile` changes how the suite parallelizes,
+  # never what a case checks.
+  "--dist", "loadfile",
   # An unregistered marker is a typo that quietly selects nothing. Fail on it.
   "--strict-markers",
   # An unknown or misspelled ini key is a setting that quietly does nothing. Fail on it.

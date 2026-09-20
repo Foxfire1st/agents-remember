@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Literal, get_args
 
+from pydantic import Field
+
 from agents_remember.models.base import ToolResponse
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.worktree import SourceLineageProjection
@@ -200,6 +202,15 @@ class SessionRetireResponse(ToolResponse):
     retiredBySession: str | None = None
     retiredReason: str | None = None
     retiredEdge: str | None = None
+    # The stranded-row report (T16). ``_retire_payload``
+    # (application/terminal_tools.py:1038-1042) adds these three keys on the success path
+    # whenever ``_surface_stranded_rows`` surfaced a pending operator-inbox row addressed to
+    # the retiring seat or its lifecycle. They are set after the seat is already terminated
+    # and the row is already posted, so without the declaration the caller lost the only
+    # report of that row: a retry answers ``already-retired`` and carries none of them.
+    strandedRowIds: list[str] = Field(default_factory=list)
+    strandedRowCount: int = 0
+    surfacedRowId: str | None = None
     detail: str | None = None
 
 

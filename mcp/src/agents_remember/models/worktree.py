@@ -568,7 +568,13 @@ class WorktreeOperationControlResponse(WorktreeCommandResponse):
     observed: dict[str, object] = Field(default_factory=dict)
     nextAction: str = ""
     nextTool: (
-        Literal["worktree_operation_control", "worktree_integrate", "direct_landing"] | None
+        Literal[
+            "worktree_operation_control",
+            "worktree_integrate",
+            "direct_landing",
+            "worktree_closeout_preview",
+        ]
+        | None
     ) = None
     nextArgs: dict[str, object] | None = None
     developerDecisionRequired: bool = False

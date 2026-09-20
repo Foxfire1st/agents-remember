@@ -301,10 +301,18 @@ def post_operator_inbox_entry(
         message_kind=message.message_kind,
     )
     if message.message_kind == "decision-item" and catalog is not None and owner.agent_id is None:
+        # A refusal that returns before the first write, so it carries no entry identity:
+        # ``messageKind`` is the one queued-projection field that is already known here, and
+        # ``OperatorInboxPostResponse`` requires the rest only when ``ok`` is true.
         return {
             "ok": False,
             "operation": "operator_inbox_post",
             "status": "sprint-owner-required",
+            "messageKind": message.message_kind,
+            "detail": (
+                "a decision-item needs a routed sprint owner; none was resolved for this "
+                "message, so nothing was queued"
+            ),
         }
     task_document_ref, seat_role, subject_agent_id = _dispatch_entry_fields(
         dispatch_target,
@@ -347,6 +355,7 @@ def post_operator_inbox_entry(
     return {
         "ok": True,
         "operation": "operator_inbox_post",
+        "status": "queued",
         "entryId": entry.id,
         "state": entry.state,
         "lifecycleId": entry.lifecycleId,

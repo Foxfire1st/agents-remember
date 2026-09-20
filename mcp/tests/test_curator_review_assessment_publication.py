@@ -944,4 +944,5 @@ class TestAttestationDurability:
         second = require_current_curator_coherence(contract).record
         assert second.attestationCopyPath is not None
         assert second.attestationCopyPath == first.attestationCopyPath
+        assert second.attestationCopyPath is not None
         assert (contract.task_root / second.attestationCopyPath).read_bytes() == before

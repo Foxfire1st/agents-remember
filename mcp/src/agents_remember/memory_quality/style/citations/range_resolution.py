@@ -43,6 +43,13 @@ from agents_remember.memory_quality.style.finding import QualityFinding, check_r
 
 CHECK_NAME = "style.citations.range_resolution"
 NEAR_MISS_LIMIT = 3
+# The membership check's blind spot, reported rather than gated. ``unsatisfied`` asks whether an
+# anchor OCCURS inside a cited range, so a range the construct has moved out of stays green for as
+# long as the construct's name still occurs inside it -- the measured shape is a construct cited at
+# its old lines whose own name survives there as a CALL while its definition now sits far below.
+# T52 on the 260918 TSIP campaign measured the class three times (L3: 18 findings against 45 moved
+# ranges; L4: 96 of 165 movers seen, 69 green; L6: this row).
+DEFINITION_OUTSIDE_RANGE = "citation_anchor_definition_outside_range"
 
 CURATOR_REMEDIATION = (
     "This is a memory document, not code: nothing is broken in the build, the CARD is now "
@@ -105,6 +112,7 @@ class Tally:
     rows_without_citation: int = 0
     unchecked_spans: int = 0
     unchecked_prose_ranges: int = 0
+    definitions_outside_ranges: int = 0
 
 
 @dataclass
@@ -428,6 +436,97 @@ def vanished_finding(document: str, claim: model.Claim, citation: model.Citation
     )
 
 
+def defined_extents(
+    scope: ClaimScope, anchor: model.Anchor
+) -> list[tuple[Resolved, extents.Extent]]:
+    """Every DEFINITION of ``anchor`` the claim's own cited files carry, with the file it is in.
+
+    A citation into a language with no grammar binds no name, so it contributes nothing and the
+    caller's uniqueness test sees only what a parser could prove -- the ceiling, not a silent
+    "none".
+    """
+    found: list[tuple[Resolved, extents.Extent]] = []
+    for one in scope.resolved:
+        if not extents.parsed(one.citation.path):
+            continue
+        for extent in scope.sources.view(one.file, one.citation.path).extents(anchor):
+            if extent.kind == extents.DEFINITION:
+                found.append((one, extent))
+    return found
+
+
+def holds_extent(scope: ClaimScope, extent: extents.Extent) -> bool:
+    """Whether any of the claim's cited ranges overlaps the construct's own lines."""
+    return any(
+        one.citation.start <= extent.end and extent.start <= one.citation.end
+        for one in scope.resolved
+    )
+
+
+def definition_outside_range_findings(
+    document: str, claim: model.Claim, scope: ClaimScope
+) -> list[QualityFinding]:
+    """A range that satisfies the membership test while its construct lives somewhere else.
+
+    The one hole membership cannot close: ``unsatisfied`` accepts an anchor that OCCURS in a cited
+    range, and a construct's own name occurs at every call site. So a range whose construct was
+    pushed out of it by an insertion stays green for as long as anything inside it still spells the
+    name -- measured on this campaign, a row citing ``controller.py:295-441`` for
+    ``_attach_curator_checklist`` while the definition sits at ``:465-638`` and the name survives
+    inside the range as one call.
+
+    Three conditions make the finding sharp rather than noisy, and all three are needed:
+
+    1. the anchor is a SYMBOL -- a heading or a quoted literal has no definition to be outside of;
+    2. exactly ONE definition of it exists across the cited files -- a name bound twice has no
+       single construct the range could be about, and guessing which one is how a checker invents
+       findings;
+    3. the definition is inside NO cited range, while the anchor still occurs in one of them --
+       without the second half ``unsatisfied`` already reports the row and this would be a second
+       finding for one defect.
+
+    REPORTED, never gated: ``report_only`` keeps it out of ``findingCount`` and out of ``ok``, so it
+    is counted, rendered and reviewed without turning a membership-clean tree red. Reporting it is
+    the whole repair. The old behaviour made this class invisible -- every check green, no counter
+    naming it -- and an invisible defect is the one a landing gets to repeat.
+    """
+    if not scope.resolved:
+        return []
+    found: list[QualityFinding] = []
+    for anchor in claim.anchors:
+        if anchor.kind != model.SYMBOL:
+            continue
+        definitions = defined_extents(scope, anchor)
+        if len(definitions) != 1:
+            continue
+        one, extent = definitions[0]
+        if holds_extent(scope, extent):
+            continue
+        if not any(model.occurs_in(anchor, body) for _file, body in scope.bodies()):
+            continue
+        found.append(
+            QualityFinding(
+                check=CHECK_NAME,
+                path=document,
+                line=claim.line,
+                severity="warning",
+                code=DEFINITION_OUTSIDE_RANGE,
+                message=(
+                    f"This claim names {anchor.written}, whose one definition in "
+                    f"{one.citation.path} is at lines {extent.start}-{extent.end} -- OUTSIDE every "
+                    f"range the claim cites ({', '.join(item.citation.text for item in scope.resolved)}). "
+                    f"The range still passes the membership test because the name occurs inside it, "
+                    f"so nothing else reports this: a construct that moved out of its cited range "
+                    f"while its name stayed behind reads exactly like a current citation. Re-read "
+                    f"the construct and write the range it occupies now, or name the anchor the "
+                    f"cited range actually holds. {CURATOR_REMEDIATION}"
+                ),
+                report_only=True,
+            )
+        )
+    return found
+
+
 def claim_findings(document: str, claim: model.Claim, run: Run) -> list[QualityFinding]:
     found = (
         malformed_findings(document, claim)
@@ -451,7 +550,9 @@ def claim_findings(document: str, claim: model.Claim, run: Run) -> list[QualityF
         document=document, claim=claim, resolved=tuple(resolved), sources=run.sources
     )
     run.absent.extend((scope, anchor) for anchor in unsatisfied(scope))
-    return found + bounds_findings(scope)
+    outside = definition_outside_range_findings(document, claim, scope)
+    run.tally.definitions_outside_ranges += len(outside)
+    return found + bounds_findings(scope) + outside
 
 
 def prose_findings(document: str, scan: prose.ProseScan, run: Run) -> list[QualityFinding]:
@@ -614,5 +715,6 @@ def _check_documents(
         "rowsWithNoResolvedCitation": run.tally.rows_without_citation,
         "uncheckedSpans": run.tally.unchecked_spans,
         "uncheckedProseRanges": run.tally.unchecked_prose_ranges,
+        "definitionsOutsideCitedRanges": run.tally.definitions_outside_ranges,
         "sourceIndex": index.telemetry(),
     }

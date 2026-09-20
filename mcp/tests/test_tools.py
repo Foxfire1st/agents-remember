@@ -8,10 +8,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import patch
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import ValidationError
 
 MCP_SRC = Path(__file__).resolve().parents[1] / "src"
 MCP_TESTS = Path(__file__).resolve().parent
@@ -41,6 +42,7 @@ from agents_remember.mcp.tools import (
     ping_payload,
     server_info_payload,
 )
+from agents_remember.models.lifecycles.curator_coherence import CuratorCoherenceRequest
 from agents_remember.models.tools.tool_registry import PUBLIC_TOOL_RESPONSE_MODELS
 from agents_remember.models.tools.tool_response import finalize_tool_response
 from agents_remember.serving.build_info import ServingBuild
@@ -344,6 +346,125 @@ class PublicSurfaceInventoryTests(unittest.TestCase):
         self.assertNotIn("atomic-series-activation-selection-missing", pause)
         self.assertNotIn("selection-missing", pause)
         self.assertIn("releases the master's atomic-series activation selection", pause)
+
+
+PUBLISH_REQUIRED_FIELDS = (
+    "semantic_requirement_revision",
+    "delivery_attempt",
+    "expected_predecessor_digest",
+    "expected_code_candidate_tree",
+    "expected_memory_candidate_tree",
+    "expected_task_topology_fingerprint",
+    "expected_task_intent",
+    "expected_attestation_sha256",
+    "caller",
+)
+"""Every field `curator_coherence` refuses a `publish` without.
+
+`CuratorCoherenceRequest._action_has_one_input_shape` requires all nine to be non-null, and
+`worktrees/integration/closeout/curator_coherence_publication.py:227-229` asserts three of them
+again before it writes the record. The list is spelled here so the advertised text and the
+enforced validator are compared against one source rather than restated twice.
+"""
+
+
+class CuratorCoherencePublishContractTests(unittest.TestCase):
+    """The published description and the enforced validator must demand the same fields.
+
+    `260918-TSIP-L3` row `T50`: `publish` was refused twice on a real curator with *"publish
+    requires every identity, predecessor, and caller field"* while every field the registered
+    description named had been supplied. Two disagreements at once, pinned separately here
+    because either can regress alone:
+
+    * the **description** (`mcp/registration/tasks.py`) did not mark
+      `semantic_requirement_revision` or `delivery_attempt` as required at all, so a caller
+      reading the published contract had no way to learn that `publish` wants them; and
+    * the **refusal** named a class of fields and none of them, and pydantic reports a
+      model-level validator with `loc: ()` (measured), so the message was the caller's only
+      route to the missing field.
+
+    Both are the same class as `T43` (a description that advertises what the tool refuses) and
+    `D13` (a capability advertised through a surface that cannot serve it): a declared contract
+    that is not the enforced one.
+    """
+
+    def test_the_description_names_every_field_publish_requires(self) -> None:
+        server = FastMCP("curator-coherence-description-probe")
+        for register_tools in TOOL_REGISTRARS:
+            register_tools(server, _permissive_registration_config())
+        advertised = {
+            tool.name: " ".join((tool.description or "").split())
+            for tool in asyncio.run(server.list_tools())
+        }
+
+        description = advertised["curator_coherence"]
+        for field in PUBLISH_REQUIRED_FIELDS:
+            with self.subTest(field=field):
+                self.assertIn(field, description)
+
+        # The published JSON schema cannot carry this constraint, which is why the description is
+        # the load-bearing surface: the requirement is conditional on `action == "publish"`, and
+        # pydantic marks only `action` and `contract_path` required. Pinned so the repair cannot
+        # be "moved into the schema" by someone who assumes the schema can express it.
+        schema = CuratorCoherenceRequest.model_json_schema()
+        self.assertEqual(sorted(schema["required"]), ["action", "contract_path"])
+
+    def test_publish_refuses_by_naming_every_missing_field(self) -> None:
+        complete: dict[str, Any] = {
+            "semantic_requirement_revision": "tsip-l3@v1",
+            "delivery_attempt": "l3-attempt-1",
+            "expected_predecessor_digest": "0" * 64,
+            "expected_code_candidate_tree": "a" * 40,
+            "expected_memory_candidate_tree": "b" * 40,
+            "expected_task_topology_fingerprint": "c" * 64,
+            "expected_attestation_sha256": "d" * 64,
+            "expected_task_intent": {"schema": "task-intent/v1", "digest": "e" * 64},
+            "caller": {
+                "role": "curator",
+                "task_document_ref": {
+                    "repository": "agents-remember",
+                    "path": "tasks/agents-remember/master/leaf.json",
+                },
+            },
+        }
+
+        # Positive control: the field list above is the complete one, so an omission below is the
+        # only reason for a refusal. Without this arm a mistyped field name would make every
+        # assertion pass for a reason that has nothing to do with the repair.
+        accepted = CuratorCoherenceRequest(
+            action="publish", contract_path="/tmp/leaf.md", **complete
+        )
+        self.assertEqual(accepted.semantic_requirement_revision, "tsip-l3@v1")
+
+        for omitted in PUBLISH_REQUIRED_FIELDS:
+            with self.subTest(omitted=omitted):
+                supplied = {key: value for key, value in complete.items() if key != omitted}
+                with self.assertRaises(ValidationError) as raised:
+                    CuratorCoherenceRequest(
+                        action="publish", contract_path="/tmp/leaf.md", **supplied
+                    )
+                # `errors()[0]["msg"]`, never `str(error)`: the rendered error echoes
+                # `input_value`, and a substring check against the echo reports "named" for a
+                # message that names nothing -- the instrument fault this case exists to catch.
+                message = raised.exception.errors()[0]["msg"]
+                # The declared text, not a punctuation of it. This case asserted
+                # `f"missing: {omitted}"` from `0dd04d6a` (this master's L3, which wrote it against
+                # a product text that never carried that colon) until `260918-TSIP-L10` measured
+                # it: `publication_refusal` has emitted
+                # `"... field; missing " + ", ".join(missing)` since the commit that introduced it
+                # (`4264dcc9`, `260915-KS-R24`), and the sibling case in
+                # `test_curator_coherence_publication_discoverability.py` pins the same prefix with
+                # no colon. The old form was therefore red from the day it was written -- and
+                # invisible, because `mcp/tests/test_tools.py` is in the INTEGRATION lane and every
+                # leaf gate on this master runs `-m "not integration"`. The assertion is now the
+                # whole opening sentence plus the exact field, so it still cannot be satisfied by
+                # naming a different member, and it reads the contract the product actually
+                # declares.
+                self.assertIn(
+                    "publish requires every identity, predecessor, and caller field; "
+                    f"missing {omitted}",
+                    message,
+                )
 
 
 def _permissive_registration_config() -> McpRuntimeConfig:

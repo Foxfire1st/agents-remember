@@ -786,12 +786,23 @@ def payload(
     half converted, which is the exact state this format change has already produced once.
     A DRY RUN changed nothing, so it re-measures nothing and reports ``null`` rather than a
     number a reader could mistake for the post-migration tree; ``findingsRemeasured`` says
-    which of the two happened. ``ok`` is false on a dry run for the same reason -- nothing
-    was done, so nothing is done.
+    which of the two happened.
+
+    ``ok`` ANSWERS "did this call do what it set out to do", NOT "did anything change"
+    (`260918-TSIP` `T64`). Its sibling ``citation_fix`` answers ``ok: true`` on the equivalent
+    preview of the same family, so reading ``ok`` as a completion signal made the two previews
+    of one family contradict each other and left a caller unable to tell "nothing to migrate"
+    from "the operation did not happen". A dry run that produced its complete plan with nothing
+    declined did do what it set out to do; the two facts that used to be folded into ``ok`` are
+    now declared separately, in ``outcome`` ("planned" on a dry run, "converted" on a write) and
+    in ``findingsRemaining`` (``null`` when nothing was re-measured).
     """
+    blocked = bool(result.declined) or (not dry_run and bool(result.remaining))
     return {
-        "ok": not result.declined and not result.remaining and not dry_run,
+        "ok": not blocked,
         "operation": OPERATION,
+        "state": "refused" if result.declined else ("planned" if dry_run else "converted"),
+        "outcome": "planned" if dry_run else "converted",
         "onboardingRoot": onboarding_root.as_posix(),
         "codeRoot": code_repository_root.as_posix(),
         "dryRun": dry_run,

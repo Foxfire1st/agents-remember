@@ -591,7 +591,8 @@ def _build_doc(
         raise TaskDocError(
             "light task documents are no longer supported — author a master, or a "
             "subTask (leaf) under a master. Every task is wrapped master/leaf, even a "
-            "single-file change."
+            "single-file change. kind must be one of ['subTask', 'master'], or omitted "
+            "to take the contract-derived default."
         )
     if "kind" not in data:
         # Master/leaf only — there is no "light" default. A create against a leaf

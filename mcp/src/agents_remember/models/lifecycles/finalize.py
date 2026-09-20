@@ -42,7 +42,10 @@ class LifecycleFinalizeTaskResponse(ToolResponse):
     # branch retirement, task updates and enclosure cleanup had committed -- a successful master
     # promotion reported to its caller as a failed call (D-47). Declared rather than relaxed: the
     # two facts are part of this response's contract, and a flexible envelope would have hidden the
-    # next drift instead of this one.
+    # next drift instead of this one. The projection is already declared on ``WorktreeSummary``
+    # and ``WorktreeCommandResponse`` (``models/worktree.py``, D53), which every worktree tool
+    # response inherits; this model was the only strict consumer that did not declare it, which is
+    # why the transaction completed and the caller got a validation error instead of the payload.
     atomicSeriesActivation: AtomicSeriesActivationFact | None = None
     atomicSeriesActivationRelease: AtomicSeriesActivationRelease | None = None
     # Completion-seat cleanup is additive to finalization truth. Default-on auto-close reports the

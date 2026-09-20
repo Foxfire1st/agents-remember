@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from agents_remember.application.memory_scope import (
@@ -37,6 +38,9 @@ from agents_remember.memory_quality.style.citations.exclusion_register import (
 from agents_remember.memory_quality.style.citations.resolution import Trees
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
+)
+from agents_remember.worktrees.integration.integration_branch_repository import (
+    BranchAuthorityUnavailable,
 )
 from agents_remember.worktrees.worktree_contract import load_contract
 
@@ -402,15 +406,63 @@ def memory_baseline_adopt_tool(
     branches: MemoryBranches = DEFAULT_MEMORY_BRANCHES,
     dry_run: bool = False,
 ) -> dict[str, Any]:
+    """Adopt the first memory baseline, or refuse in the envelope like its status sibling.
+
+    The sibling ``memory_baseline_status`` answers the same repository with
+    ``state: "ready"``-and-``ok``; a memory repository that has never recorded its
+    default-branch authority is an ordinary *precondition*, not a crash, so it is answered
+    with ``state``/``status``/``nextAction`` here rather than escaping as a traceback in which
+    the caller loses the whole envelope (`260918-TSIP` `T34`, owner `L6`).
+
+    The caught type is deliberately narrow. ``BranchAuthorityUnavailable`` means "the authority
+    this operation needs was never recorded", and its own message names the remedy. The other
+    ``RuntimeError``s on this path -- *memory baseline adoption is a bootstrap-only exception on
+    the checked-out repository-default branch*, *memory root does not exist* -- are refusals of
+    a state the caller must understand and change, and they keep raising: turning them into
+    refusals would hide a misuse behind an envelope. That boundary is what
+    ``test_memory_branch_authority.py::test_baseline_adoption_refuses_a_branch_the_memory_repository_does_not_record``
+    holds, and this is the narrow form that keeps it true.
+    """
+
     repo = require_repo(config, repo_id)
-    returncode, payload = baseline.baseline_adopt(
-        _baseline_request(config, repo),
-        accept_drift=accept_drift,
-        source_branch=branches.source_branch,
-        work_branch=branches.work_branch,
-        dry_run=dry_run,
-    )
+    try:
+        returncode, payload = baseline.baseline_adopt(
+            _baseline_request(config, repo),
+            accept_drift=accept_drift,
+            source_branch=branches.source_branch,
+            work_branch=branches.work_branch,
+            dry_run=dry_run,
+        )
+    except BranchAuthorityUnavailable as error:
+        return _baseline_adopt_refusal(repo, error)
     return {"ok": returncode == 0, "operation": "memory_baseline_adopt", **payload}
+
+
+def _baseline_adopt_refusal(repo, error: BranchAuthorityUnavailable) -> dict[str, Any]:
+    """The typed refusal for an adoption precondition the memory layer reports by raising."""
+
+    memory_root = Path(repo.memory_root).as_posix() if repo.memory_root is not None else ""
+    return {
+        "ok": False,
+        "operation": "memory_baseline_adopt",
+        "state": "refused",
+        "status": "memory-baseline-precondition-unavailable",
+        "detail": str(error).strip(),
+        "repoId": repo.repo_id,
+        "memoryRoot": memory_root,
+        "nextAction": (
+            "initialize the memory repository through memory_init (which records the "
+            "default-branch authority adoption requires), then rerun memory_baseline_adopt; "
+            "memory_baseline_status reports the same repository's state"
+        ),
+        "nextStep": {
+            "summary": (
+                "memory_baseline_adopt did not run: the memory repository is not ready for "
+                "adoption."
+            ),
+            "nextTool": "memory_init",
+        },
+    }
 
 
 def memory_carryover_plan_tool(

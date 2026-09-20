@@ -19,6 +19,9 @@ elapsed runtime. A changed configuration limit alone is not that justification.
 - Integration: `mcp/.venv/bin/python -m pytest -m integration`.
 - Combined: `mcp/.venv/bin/python -m pytest -m ""`.
 - Focused debugging: supply a test file/node, optionally with `-n=0`.
+- Every command needs a Git checkout: the evidence-lane hook enumerates the test population
+  through `git ls-files`, so an exported (`git archive`/tarball) tree must run `git init` and
+  `git add -A` first or collection fails instead of running.
 
 Four workers run by default. The existing file membership list skips integration-only modules
 before import during ordinary unit runs. Keep small parser, selection, reporting and retry

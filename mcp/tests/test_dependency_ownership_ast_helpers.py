@@ -41,12 +41,47 @@ LIFECYCLE_CATALOG = Path("mcp/tests/evidence-lifecycle.toml")
 LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
-LIFECYCLE_CONTRACT_COUNT = 15
-LIFECYCLE_ARTIFACT_COUNT = 65
-LIFECYCLE_CATALOG_SHA256 = "c499cbcc266088f35bd6fdde655f00579431591f02bba5c4859b72f767f65f06"
+LIFECYCLE_CONTRACT_COUNT = 16
+LIFECYCLE_ARTIFACT_COUNT = 66
+LIFECYCLE_CATALOG_SHA256 = "f0cb5fec700019923c5028d4e2547e70cecab97582870f128e70e4f8f960a1e4"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
-The value this line carries is the catalog after ``260915-KS``'s L28 leaf repaired the missing-consumer
+``260918-TSIP-L10`` registered the module this leaf's own red base exposed as ungoverned:
+``mcp/tests/tool_refusal_census_support.py``, introduced by ``260918-TSIP-L6`` (the refusal-census leaf
+of this master) and carrying no catalog row, so ``load_evidence_inventory``'s coverage finding read
+*"governed evidence has no lifecycle metadata: ['mcp/tests/tool_refusal_census_support.py']"* and the
+two integration cases below -- ``test_repository_inputs_reach_their_supported_consumers`` and
+``test_production_proof_adds_no_governed_evidence_artifact`` -- were red from L6's landing onward.
+Neither the unit lane nor any leaf's measurement could see it: ``addopts`` deselects integration, and
+the master's frozen-tip check is the combined lane. **A lane nobody runs cannot be reviewed**, which
+is why this registration is a leaf's work rather than a note. The registration follows the sibling
+support-module pattern exactly (``migration_census_test_support.py``): a new ``[[contract]]`` row
+(``tool-refusal-census-cases``) whose ``evidence_node`` is the census's own partition case, and one
+``[[artifact]]`` row of ``kind = "shared-support"``, ``category = "unit-regression"`` (both consumers
+are in that lane), ``fidelity = "local-composition"`` (the census drives production entry points over
+a disposable coordination root through a real MCP client session) and
+``replacement_contract = "contract:tool-refusal-census-cases"``. The consumer list is not invented:
+it is ``RepositoryDependencyFacts.observed_test_consumers`` for that path --
+``mcp/tests/test_tool_response_conformance.py`` and ``mcp/tests/test_response_address_binding.py``,
+the second through its ``from test_tool_refusal_conformance import refusal_axes`` import.
+**Registering the module moved one more list**: the census's import walk from that path reaches
+``agents_remember.models.tools.public_roster`` and, through it, the portable profile runtime whose
+input is the node lockfile, so ``mcp/tests/fixtures/repository_profiles/node/package-lock.json``
+gained those same two consumers -- a consumer change, not a new artifact, exactly as the sibling
+leaves' registrations each moved theirs. Contract count **15 -> 16**, artifact count **65 -> 66**;
+the digest this value replaces was ``6ec7eb0d…``.
+
+**Re-derived at the sync.** This master then merged onto the advanced sprint line (``756c47b3``),
+whose own catalog value read fifteen contracts and sixty-five artifacts at ``825abfd6…``. Both
+lines changed this file and git merged it cleanly, so **neither side's pin described the merged
+bytes**: the merged catalog carries this master's ``tool-refusal-census-cases`` contract and its
+shared-support artifact *and* the sibling line's consumer re-registrations, and its digest is
+neither side's. The three values were re-derived from the merged file itself
+(``sha256sum mcp/tests/evidence-lifecycle.toml``) rather than chosen from a side. The counts happen
+to equal this line's because the sibling line's changes were all consumer lists; the digest does
+not.
+
+The value this line carried before is the catalog after ``260915-KS``'s L28 leaf repaired the missing-consumer
 registration that made the repository's own gate fail. L25 registered no artifact and no contract of its
 own -- its ingest drives the shipped batch operation through ``candidate_batch_test_support`` and builds
 its record trees through ``read_scope_test_support`` rather than introducing a third fixture -- so its
@@ -295,6 +330,16 @@ and the catalog is re-pinned to
 ``c499cbcc266088f35bd6fdde655f00579431591f02bba5c4859b72f767f65f06``, measured with
 ``sha256sum mcp/tests/evidence-lifecycle.toml`` on the delivered candidate. The proof's own artifact
 delta remains exactly empty.
+**Twelfth deliberate re-pin (series sync of 260915-KS onto 260713, 2026-09-21) -- the merged union.**
+The master was synced onto its super line and both sides had moved this catalog: this master's own
+L40 consumer rows and the super line's ``260918-TSIP-L10`` registration
+(``tool-refusal-census-cases`` with its ``shared-support`` artifact) both belong on the merged file.
+The populations are therefore the super line's **sixteen contracts / sixty-six artifacts**, and the
+bytes are neither side's own: re-pinned to
+``f0cb5fec700019923c5028d4e2547e70cecab97582870f128e70e4f8f960a1e4``, measured with
+``sha256sum mcp/tests/evidence-lifecycle.toml`` on the merged candidate. Neither side's pin was
+correct for the union, which is why this value had to be measured rather than inherited. The proof's
+own artifact delta remains exactly empty.
 """
 
 REJECTED_STANDALONE_IDENTITY = "lifecycle-owned-completion-relay-production-chain"

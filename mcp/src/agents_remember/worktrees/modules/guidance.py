@@ -364,7 +364,9 @@ def _post_integration_phase(contract: WorktreeContract) -> LifecycleGuidance | N
             **next_guidance(
                 "continue_work",
                 tool="worktree_status",
-                args=contract_next_args(contract),
+                # Same requirement, same reason as the pre-integration phase's step: a
+                # `worktree_status` recommendation has to carry `repo_id` or it cannot be followed.
+                args=contract_next_args(contract, repo_id=contract.repo_name),
             ),
         }
     return None
@@ -440,7 +442,13 @@ def _pre_integration_phase(contract: WorktreeContract) -> LifecycleGuidance:
         **next_guidance(
             "continue_work",
             tool="worktree_status",
-            args=contract_next_args(contract),
+            # `repo_id` travels with the recommendation because `worktree_status` cannot be called
+            # without it: its registered argument model names it as required
+            # (`1 validation error for worktree_statusArguments: repo_id Field required`), so a
+            # seat that followed this hint verbatim could not reach the operation the hint names.
+            # The contract already knows the repository, so the guidance supplies it rather than
+            # leaving the second step of the workflow unreachable (260918-TSIP-L8).
+            args=contract_next_args(contract, repo_id=contract.repo_name),
         ),
     }
 

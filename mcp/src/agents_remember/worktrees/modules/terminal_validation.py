@@ -284,8 +284,14 @@ def terminal_result_blockers(result: TerminalResult) -> list[dict[str, object]]:
                 result.drift_snapshots,
                 # Every sibling collection above propagates ``preview``; this one did not, so a
                 # preview's ``would_remove`` entry was read with the real call's ``would_delete``
-                # key, looked like a blockage, and ``_blocker`` raised on the missing reason. A
-                # preview then failed on exactly the contracts a real finalize completed.
+                # key, looked like a blockage, and ``_blocker`` raised on the missing reason. The
+                # producer answers a dry run with ``would_remove``
+                # (``kernel/primitives/drift_snapshot.py::_remove_snapshot_file``) exactly as the
+                # worktree, directory and provider collections beside it do, so without it the
+                # entry was neither reclaimed, nor pending, nor reasoned and every preview of a
+                # task that HAS a drift snapshot crashed on its own producer's output
+                # (260918-TSIP ``T62``/``D49``; the same keyword was fixed independently on the
+                # incoming line, which is why this merge met a comment-only conflict).
                 expect=TerminalExpectation(done_key="removed", preview=result.preview),
             )
         )
