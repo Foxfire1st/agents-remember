@@ -60,6 +60,10 @@ from agents_remember.application.knowledge_curator_ingest import (
 )
 from agents_remember.application.knowledge_ingest import CuratorEntry, curator_entry_commands
 from agents_remember.application.knowledge_read import open_read_context
+from agents_remember.application.knowledge_review import (
+    REVIEW_BASELINE_DIRECTORY,
+    REVIEW_CANDIDATE_RELATIVE_ROOT,
+)
 from agents_remember.application.knowledge_views import read_knowledge_view
 from agents_remember.cli.__main__ import main
 from agents_remember.mcp.tools.knowledge import (
@@ -70,7 +74,10 @@ from agents_remember.mcp.tools.knowledge import (
 )
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.models.knowledge.repository import RepositoryIdentity
-from agents_remember.models.knowledge.snapshot import candidate_database_path
+from agents_remember.models.knowledge.snapshot import (
+    CANDIDATE_DATABASE_NAME,
+    candidate_database_path,
+)
 from agents_remember.models.knowledge.source import SymbolLocator
 from agents_remember.models.knowledge.view import SourceContextView, ViewRequest
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
@@ -1575,6 +1582,155 @@ def test_the_cli_subcommand_is_a_production_caller_that_writes_the_rows(
         assert body["refusalCode"] == "registration_absent", body
         assert body["recordKind"] == kind, body
         assert WRITE_ENTRY_POINT in body["refusalDetail"], body
+
+
+# --------------------------------------------------------------------------------------------
+# The review's before half survives the run that REFUSES.
+#
+# The defect this case seals: ``_place_review_baseline`` gated placement on the batch state alone,
+# and a batch whose every entry refused reports ``no_change`` -- the batch-level state falls back to
+# it when the batch never ran, so state cannot separate an all-refused run from an idempotent one.
+# Once the leaf had published over its own fork point, the refused run's captured baseline bytes were
+# the PUBLISHED dataset, so the run re-placed the before half with the after half and the review then
+# showed the addition present on both sides with an empty delta -- the exact failure the capture
+# exists to prevent, reached through the refusal path instead of the publication path.
+# --------------------------------------------------------------------------------------------
+def _cli_json(argv: list[str], capsys: pytest.CaptureFixture[str]) -> dict[str, Any]:
+    """Run one captured CLI invocation that must succeed, and return the report it printed."""
+
+    capsys.readouterr()
+    assert main(argv) == 0
+    return cast("dict[str, Any]", json.loads(capsys.readouterr().out))
+
+
+def _fork_ingest_argv(
+    contract: Path, listed: Path, candidate: Path, fork: Path, expected: dict[str, Any]
+) -> list[str]:
+    """The shipped invocation one curator run issues against the dataset its leaf forked from.
+
+    ``--baseline`` and ``--publish-to`` name ONE path on purpose: that is the shape in which the run
+    that authors the candidate also replaces the dataset it started from, which is what makes the
+    captured baseline bytes and the before half two different datasets.
+    """
+
+    return [
+        "knowledge-ingest",
+        "--contract",
+        str(contract),
+        "--list",
+        str(listed),
+        "--candidate-directory",
+        str(candidate),
+        "--authorization-ref",
+        AUTHORIZATION,
+        "--commit",
+        "--json",
+        "--baseline",
+        str(fork),
+        "--publish-to",
+        str(fork),
+        "--expected-destination",
+        json.dumps(expected),
+    ]
+
+
+def test_a_refused_rerun_leaves_the_reviews_before_half_at_the_fork_point(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A refused re-run must not touch the review's before half.
+
+    The user operation is the one a curator performs when a review asks for a correction: author the
+    entry, publish over the dataset the leaf forked from, then re-run the SAME hand-off entry with a
+    changed statement. The write plane correctly refuses that second run -- one idempotency key names
+    one creation operation -- and the question this case answers is what the refusal did to the
+    reviewer's before-snapshot on its way out.
+
+    Three facts are measured, and the second and third are what the defect moved:
+
+    * the run that PUBLISHES still places the fork point, so the fix narrows nothing on that path;
+    * the refused run reports ``not-placed`` and leaves the half byte-identical to the fork point;
+    * the review's own comparison therefore still reads the addition ``absent`` before and
+      ``present`` after, over two different digests, instead of present on both sides.
+
+    A private pair is built rather than the session's shared one because this case publishes into a
+    dataset and derives a review root from the contract's worktree group: both are case state, and the
+    shared fixture's own contract says no case mutates the sources it hands out.
+    """
+
+    private = cast("Any", pair).__wrapped__(
+        cast("Any", _JourneyFactory)(tmp_path / "refused-rerun")
+    )
+    published = private.memory_root / "knowledge.sqlite"
+    fork_identity = _cycle01_publish_baseline(private, tmp_path, published)
+
+    # The leaf's own dataset is a fork of the published line, exactly as a worktree cut from it is.
+    fork = tmp_path / "leaf.sqlite"
+    shutil.copyfile(published, fork)
+    fork_bytes = published.read_bytes()
+
+    contract = _cycle01_sibling_contract(private, tmp_path, "fork")
+    before_half = (
+        load_contract(contract).worktree_group
+        / REVIEW_CANDIDATE_RELATIVE_ROOT
+        / REVIEW_BASELINE_DIRECTORY
+        / CANDIDATE_DATABASE_NAME
+    )
+
+    authored = entry(
+        "E-fork", targets=[target(CODE_FILE, locator=symbol(CODE_SYMBOL), route="pkg")]
+    )
+    corrected = {**authored, "statement": "The obligation E-fork records, corrected after review."}
+    first_list = tmp_path / "first.json"
+    first_list.write_text(json.dumps([authored]), encoding="utf-8")
+    corrected_list = tmp_path / "corrected.json"
+    corrected_list.write_text(json.dumps([corrected]), encoding="utf-8")
+
+    # The placing path, which the fix must not narrow: this run publishes over the dataset it forked
+    # from, and its captured baseline is the fork point, so the before half becomes the fork point.
+    placing = _cli_json(
+        _fork_ingest_argv(
+            contract,
+            first_list,
+            tmp_path / "fork-candidate",
+            fork,
+            fork_identity.model_dump(mode="json"),
+        ),
+        capsys,
+    )
+    assert placing["batchState"] == "changed", placing
+    assert placing["publication"]["state"] == "published", placing["publication"]
+    assert before_half.read_bytes() == fork_bytes, (
+        "the run that published over its own fork point no longer places that fork point in the "
+        "review's before half"
+    )
+
+    # The refused re-run: same entry id, changed statement, same retry key.
+    refused = _cli_json(
+        _fork_ingest_argv(
+            contract,
+            corrected_list,
+            tmp_path / "fork-candidate",
+            fork,
+            placing["publication"]["identity"],
+        ),
+        capsys,
+    )
+    assert refused["batchState"] == "no_change", refused
+    assert refused["committed"] == [], refused
+    assert [one["refusal"].split(":")[0] for one in refused["refused"]] == [
+        "allocation_content_conflict"
+    ], refused["refused"]
+    assert refused["publication"] is None, refused["publication"]
+    assert refused["reviewBaseline"].startswith("not-placed"), refused["reviewBaseline"]
+
+    # THE REGRESSION: the refused run left the before half exactly where the placing run put it.
+    # Without the committed-entry half of the gate this run re-placed the half from the bytes it
+    # captured at the top of the run -- which, the leaf having published, are the AFTER half -- and
+    # this assertion is what fails.
+    assert before_half.read_bytes() == fork_bytes, (
+        "a refused re-run replaced the review's before half with the dataset this leaf published, so "
+        "the review now shows the addition present on both sides with an empty delta"
+    )
 
 
 # --------------------------------------------------------------------------------------------

@@ -85,10 +85,13 @@ class KnowledgeDiffResponse(ToolResponse):
 class KnowledgeIntegrityCheckResponse(ToolResponse):
     """``knowledge_integrity_check``: conditions, their limits -- and no verdict.
 
-    ``compatible`` is ``None`` by design and not by omission. ``Doc13:186`` says the operation
+    ``compatible`` is declared here and is always ``None``: ``Doc13:186`` says the operation
     "produces no compatibility verdict or causal explanation", so a caller reads the conditions and
     the limitations and decides; computing ``true`` from the absence of a matched condition would be
-    inferring a semantic conclusion from a detection's silence.
+    inferring a semantic conclusion from a detection's silence. The field is declared so the
+    response vocabulary carries the no-verdict position, and the response choke point omits ``None``
+    values from the wire, so a caller sees it absent rather than present-and-null -- absence means
+    this build reached no verdict, never that a verdict was suppressed.
 
     The five run fields bind those conditions to the inputs they were measured over: the digest of
     the scope's exact inputs the caller named, the selected run's own identity, the digest over its

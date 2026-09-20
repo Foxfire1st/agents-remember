@@ -513,17 +513,28 @@ def test_both_conflicting_edits_refuse_whole_and_preserve_every_input(tmp_path: 
         shape=_shared_revision_shape,
     )
 
-    duplicate_outcome = run(duplicate)
+    assert_insertion_collision_refused(duplicate)
 
-    duplicate_refusal = assert_refused_without_moving_any_input(duplicate, duplicate_outcome)
-    assert duplicate_refusal.code == "duplicate_identity"
-    assert duplicate_refusal.table == "invariant_revision"
-    assert duplicate_outcome.conflict is not None
-    assert duplicate_outcome.conflict.code == "duplicate_identity"
-    # An INSERT is the one operation with no old side, so its key is read from the new side.
-    assert duplicate_outcome.conflict.record_id == (
-        f"{duplicate.repository.repository_id}/{SHARED_REVISION_ID}"
+    # The same collision with EQUAL payloads. The case above builds different ones, so it refuses a
+    # diverging payload and says nothing about two independent insertions that happen to agree -- the
+    # property the independent-insert guard exists for and which no case measured before L47. It is
+    # asserted inside this collected node rather than as a node of its own because the two are one
+    # guarantee: exactly one insertion identity is refused, whatever the two sides wrote in it.
+    equal = build_case(
+        tmp_path / "duplicate-equal-payload",
+        diverging_revisions=False,
+        diverging_identities=False,
+        shape=_equal_payload_revision_shape,
     )
+    # The variant is the equal-payload input only if the payloads really are equal: both sides'
+    # stored rows for the shared identity are compared column by column, so an edit that made the two
+    # sides diverge again would fail here instead of quietly re-testing the case above.
+    assert (
+        _revision_rows(equal, SHARED_REVISION_ID)["left"]
+        == _revision_rows(equal, SHARED_REVISION_ID)["right"]
+    )
+
+    assert_insertion_collision_refused(equal)
 
     for removing in ("left", "right"):
         reference = _reference_case(tmp_path / f"reference-{removing}", removing=removing)
@@ -824,6 +835,25 @@ def assert_refused_without_moving_any_input(case: MergeCase, outcome) -> Knowled
     return outcome.refusal
 
 
+def assert_insertion_collision_refused(case: MergeCase) -> None:
+    """Require two independent insertions of one revision identity to be refused whole.
+
+    One helper for both payload shapes because the guarantee is one guarantee: the collision is
+    refused on the identity, no side's row is written, and the record names the row the engine
+    refused. An INSERT is the one operation with no old side, so its key is read from the new side --
+    asserted here rather than left to the boundary module.
+    """
+
+    outcome = run(case)
+
+    refusal = assert_refused_without_moving_any_input(case, outcome)
+    assert refusal.code == "duplicate_identity"
+    assert refusal.table == "invariant_revision"
+    assert outcome.conflict is not None
+    assert outcome.conflict.code == "duplicate_identity"
+    assert outcome.conflict.record_id == (f"{case.repository.repository_id}/{SHARED_REVISION_ID}")
+
+
 def assert_removal_orientation(case: MergeCase, removing: str) -> None:
     """Require the named side to be the one that ends without the anchor, and the other to cite it.
 
@@ -986,6 +1016,30 @@ def _shared_revision_shape(case: MergeCase, states: dict[str, Path]) -> None:
         )
 
 
+def _equal_payload_revision_shape(case: MergeCase, states: dict[str, Path]) -> None:
+    """Two sides independently author ONE revision identity with byte-identical payloads.
+
+    This is the preserved guard's own property, and it is a different input from
+    :func:`_shared_revision_shape` rather than a second spelling of it: that shape gives the two
+    sides different ``display_version`` and ``statement`` values, so it measures the refusal of a
+    *diverging* payload and cannot measure this one at all. Every value below is written identically
+    on both sides, so the only thing distinguishing the two insertions is that each side made its
+    own -- and the refusal therefore rests on the identity collision alone, with no payload
+    comparison anywhere to fall back on. A guard that gained an equal-payload exception would let
+    this merge succeed while the diverging case kept refusing.
+    """
+
+    add_invariant(states["left"], case, "a diverging obligation on the left")
+    for path in (states["left"], states["right"]):
+        _insert_revision(
+            path,
+            repository_id=case.repository.repository_id,
+            revision_id=SHARED_REVISION_ID,
+            display_version="v2",
+            statement="Both sides independently authored a revision under this identity.",
+        )
+
+
 def _tamper(case: MergeCase, states: dict[str, Path]) -> None:
     """Rewrite a sealed revision in place, then restore the trigger that refused the write."""
 
@@ -1066,6 +1120,53 @@ def _insert_revision(
         )
     finally:
         connection.close()
+
+
+_REVISION_COLUMNS = (
+    "repository_id",
+    "invariant_id",
+    "revision_id",
+    "display_version",
+    "statement",
+    "applicability",
+    "conditions",
+    "exclusions",
+    "state_at_origin",
+    "acceptance_ref",
+    "provenance",
+    "payload_digest",
+)
+
+
+def _revision_rows(case: MergeCase, revision_id: str) -> dict[str, tuple[str, ...]]:
+    """Every declared column of one revision row on each side, keyed by side.
+
+    Read back from the datasets the merge will actually receive rather than from the arguments the
+    shaper was called with, so "the two payloads are equal" is a measurement about the inputs and not
+    a restatement of how they were built. The declared columns are named rather than selected with
+    ``*`` so the comparison covers the row the guard sees and not an implicit row number that differs
+    between two databases holding the same row.
+    """
+
+    rows: dict[str, tuple[str, ...]] = {}
+    for role in ("left", "right"):
+        connection = open_read_only_database(case.state_path(role))
+        try:
+            row = next(
+                iter(
+                    connection.execute(
+                        f"SELECT {', '.join(_REVISION_COLUMNS)} FROM invariant_revision "
+                        "WHERE revision_id = ?",
+                        (revision_id,),
+                    )
+                ),
+                None,
+            )
+        finally:
+            connection.close()
+        assert row is not None, (role, revision_id)
+        rows[role] = tuple("<NULL>" if value is None else str(value) for value in row)
+    return rows
 
 
 def _mutate(path: Path, *statements: tuple[str, apsw.Bindings]) -> None:

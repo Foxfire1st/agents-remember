@@ -35,6 +35,8 @@ from agents_remember.models.knowledge.result import (
 from agents_remember.models.knowledge.source import SourceAnchor, SourceAnchorDraft
 
 if TYPE_CHECKING:
+    import apsw
+
     from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
 
 
@@ -142,10 +144,25 @@ def get_anchor(store: OpenedKnowledgeStore, anchor_id: str) -> SourceAnchor | No
     snapshot here, so an anchor whose target no longer exists still reads back in full.
     """
 
+    return read_anchor(store.connection, store.repository_id, anchor_id)
+
+
+def read_anchor(
+    connection: apsw.Connection, repository_id: str, anchor_id: str
+) -> SourceAnchor | None:
+    """Return one stored anchor read straight from a connection, or ``None`` when it is not stored.
+
+    This is the same read as :func:`get_anchor` against the same columns and the same decoder, and
+    it exists because a caller can hold a connection without holding an
+    :class:`~agents_remember.memory.knowledge.store.OpenedKnowledgeStore`: the curation intake reads
+    the anchor an entry reuses from a candidate it has merely opened read-only, and it needs the
+    stored row rather than a second decoder that could drift from this one.
+    """
+
     row = fetch_one(
-        store.connection,
+        connection,
         f"SELECT {_ANCHOR_COLUMNS} FROM source_anchor WHERE repository_id = ? AND anchor_id = ?",
-        (store.repository_id, anchor_id),
+        (repository_id, anchor_id),
     )
     return None if row is None else records.decode_anchor_row(row)
 

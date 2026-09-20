@@ -123,6 +123,7 @@ from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.kernel.canonical_json import canonical_json_bytes, decoded_json, sha256_digest
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge import routes
+from agents_remember.memory.knowledge.anchors import read_anchor
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.read_anchors import observe_anchor
@@ -154,6 +155,7 @@ from agents_remember.models.knowledge.source import (
     FileLocator,
     GitBlobIdentity,
     LineRangeLocator,
+    SourceAnchor,
     SourceAnchorDraft,
     SourceLocator,
     SymbolLocator,
@@ -250,6 +252,13 @@ _CODE_NO_DEFINITIONS_IN_PROSE = "symbol_target_is_prose"
 _CODE_SYMBOL_LANGUAGE = "symbol_language_underdetermined"
 _CODE_SYMBOL_NAME_MISSING = "symbol_name_missing"
 _CODE_ANCHOR_ID_SHAPE = "anchor_id_not_a_uuid"
+# The two ways an explicitly reused anchor identity fails to bind. They are separate codes because
+# they need separate remedies: ``anchor_id_not_stored`` means the caller must cite a place the
+# dataset holds or omit the identity to author a new one, while ``anchor_reuse_mismatch`` means the
+# identity is real and the facts supplied beside it describe a different place -- so the caller
+# either corrects those facts or drops them and lets the stored row speak.
+_CODE_ANCHOR_ID_NOT_STORED = "anchor_id_not_stored"
+_CODE_ANCHOR_REUSE_MISMATCH = "anchor_reuse_mismatch"
 
 # The one refusal code for a target whose identity the tree and the working bytes disagree about, and
 # the two observation answers that mean the recorded identity could not be confirmed. The first is
@@ -944,7 +953,21 @@ class _ReportTarget:
 
 @dataclass(frozen=True)
 class _Source:
-    """The enclosure's two roots and its recorded trees, bound once so planning names one value."""
+    """The enclosure's two roots and its recorded trees, bound once so planning names one value.
+
+    ``anchors`` names the datasets a reused-anchor identity may resolve against, in the order they
+    are consulted. Planning needs it because an entry may cite a place the dataset **already
+    records** by naming that anchor's stored identity, and the stored row is the only authority on
+    what that identity means: the supplied path, blob and locator are redundant restatements of facts
+    the dataset already holds, and this is where they are checked against it rather than trusted
+    beside it.
+
+    The order is the candidate first, then the baseline. A candidate already on disk is what the next
+    run writes into, so it is the dataset whose rows the reuse has to agree with; a run that will
+    **create** the candidate clones the baseline, so until that moment the baseline is the dataset
+    those rows will come from. Neither is a fallback for the other -- both are consulted, in that
+    order, and an identity in neither is refused.
+    """
 
     contract: WorktreeContract
     code_root: Path
@@ -952,6 +975,7 @@ class _Source:
     tree_ids: _TreeIds
     coordination_top_level: frozenset[str]
     repository: RepositoryIdentity
+    anchors: tuple[Path, ...] = ()
 
 
 # --------------------------------------------------------------------------------------------
@@ -1036,6 +1060,9 @@ def ingest_curator_list(
         tree_ids=_tree_ids(contract, code_root, memory_root),
         coordination_top_level=_coordination_top_level(contract),
         repository=repository,
+        anchors=tuple(
+            one for one in (paths.candidate, baseline) if one is not None and Path(one).is_file()
+        ),
     )
     resolution = _resolution(contract, source.tree_ids)
     raw = _read_entries(entries)
@@ -1494,13 +1521,23 @@ def _retry_key(contract: WorktreeContract, entry_id: str) -> str:
 
 
 def _content_digest(fields: _EntryFields, targets: Sequence[_TargetPlan]) -> str:
-    """A digest over the content one creation operation is minting an identity for.
+    """A digest over the semantic write intent one creation operation is minting an identity for.
 
-    It covers every fact the stored truth is made of and every fact a replay would silently drop if
-    the key's content were allowed to change: the kind, the statement, the evidence, the producer's
-    disposition and each resolved place with the locator that names the construct inside it. It is
-    deliberately *not* an identity: two entries with different content are two operations even under
-    one key, and the digest is what lets that be refused instead of absorbed.
+    It covers every input of this operation whose change alters the stored truth, its lineage, or its
+    realization and attribution: the kind, the statement, the evidence, the producer's disposition
+    **and the source it rules from**, which invariant an entry revises when it names one, the
+    predecessor edges it declares, the authored realization role and its rationale, and each resolved
+    place with the locator that names the construct inside it.
+
+    Two things are deliberately out. ``entry_id`` is the key's own scoping half rather than content:
+    it is what :func:`_retry_key` normalizes into the question a retry asks, so digesting it would
+    fold the key into the value the key is supposed to guard. ``declares_invariant`` is derived, not
+    authored -- it is ``not predecessors`` by construction -- so it carries no fact its own source
+    field does not already carry, and digesting a derivation beside its source is how one intent
+    comes to have two spellings that can disagree.
+
+    It is deliberately *not* an identity: two entries with different content are two operations even
+    under one key, and the digest is what lets that be refused instead of absorbed.
     """
 
     return sha256_digest(
@@ -1509,6 +1546,11 @@ def _content_digest(fields: _EntryFields, targets: Sequence[_TargetPlan]) -> str
             "statement": fields.statement,
             "evidence": fields.evidence,
             "disposition": fields.disposition,
+            "dispositionSource": fields.disposition_source,
+            "namedInvariantId": fields.named_invariant_id,
+            "predecessors": list(fields.predecessors),
+            "role": fields.role,
+            "roleRationale": fields.role_rationale,
             "targets": [
                 {"path": one.completed_path, "locator": _locator_text(one.locator)}
                 for one in targets
@@ -1967,6 +2009,87 @@ def _confined(written: str) -> str:
     return relative or written
 
 
+def _require_stored_anchor(
+    named: UUID,
+    resolved: _Resolved,
+    locator: SourceLocator,
+    source: _Source,
+) -> _Refusal | None:
+    """Bind an explicitly reused anchor to the stored row it names, or refuse the disagreement.
+
+    Naming a stored anchor identity is the half of the citation contract where the caller supplies
+    **redundant** facts: the path, the blob it resolved to and the locator are all already recorded
+    on the row being reused. Redundancy that is never checked is how a receipt comes to describe a
+    place the dataset does not link -- the named identity can be read for its shape and then used as
+    the claim's endpoint while the supplied path and locator are resolved, observed and reported
+    beside it, so the success line and the stored claim name two different constructs. That is a
+    false statement about the delivered result rather than a formatting slip, which is why the check
+    is here, before the plan exists and therefore before anything can be written.
+
+    The stored row is the authority on all three facts, and the supplied ones must agree with it:
+    the same resolved path, the same recorded blob, and the same locator. A blob comparison is what
+    makes "the same place" a measurement rather than a restatement -- two spellings of one path can
+    resolve to one file, and only the object id says whether the bytes the reuse cites are the bytes
+    the anchor was recorded against.
+
+    An identity the dataset does not hold is refused too, and separately: a caller that meant to
+    author a new place omits ``anchor_id`` entirely, so arriving with one that resolves to nothing is
+    a caller asking to cite a row that is not there, and inventing one instead would answer a
+    different question than the one asked.
+    """
+
+    if not source.anchors:  # pragma: no cover - a run always names a candidate or a baseline
+        return _Refusal(
+            _CODE_ANCHOR_ID_NOT_STORED,
+            f"the target names the stored anchor {named}, and this run has no candidate or baseline "
+            "dataset to resolve that identity against, so the place it names cannot be read",
+        )
+    stored = _stored_anchor(source, named)
+    if stored is None:
+        return _Refusal(
+            _CODE_ANCHOR_ID_NOT_STORED,
+            f"the target names the stored anchor {named} and neither the candidate nor the baseline "
+            "dataset holds it; cite a place the dataset records, or omit anchor_id to author a new "
+            "one",
+        )
+    disagreements: list[str] = []
+    if stored.path != resolved.path:
+        disagreements.append(f"path: stored {stored.path!r}, supplied {resolved.path!r}")
+    if str(stored.source_identity.object_id) != resolved.blob:
+        disagreements.append(
+            f"source identity: stored blob {stored.source_identity.object_id}, supplied blob "
+            f"{resolved.blob}"
+        )
+    if stored.locator != locator:
+        disagreements.append(
+            f"locator: stored {stored.locator.model_dump(mode='json')}, supplied "
+            f"{locator.model_dump(mode='json')}"
+        )
+    if not disagreements:
+        return None
+    return _Refusal(
+        _CODE_ANCHOR_REUSE_MISMATCH,
+        f"the target reuses the stored anchor {named}, and the facts supplied beside that identity "
+        f"describe a different place ({'; '.join(disagreements)}); a reused anchor is the stored "
+        "row's own location, so either correct the supplied facts to agree with it or omit "
+        "anchor_id to author a new anchor",
+    )
+
+
+def _stored_anchor(source: _Source, named: UUID) -> SourceAnchor | None:
+    """One stored anchor with the named identity, or ``None`` when no named dataset holds it."""
+
+    for database in source.anchors:
+        connection = open_read_only_database(database)
+        try:
+            found = read_anchor(connection, source.repository.repository_id, str(named))
+        finally:
+            connection.close()
+        if found is not None:
+            return found
+    return None
+
+
 def _named_anchor_id(target: Mapping[str, Any]) -> str | UUID | _Refusal:
     """The stored anchor identity one target names, or the refusal its own spelling earns.
 
@@ -2013,6 +2136,12 @@ def _plan_target_inner(
     named = _named_anchor_id(target)
     if isinstance(named, _Refusal):
         return None, named.at(written)
+    if isinstance(named, UUID):
+        # A reused anchor is the stored row's own place, so the facts supplied beside its identity
+        # have to agree with that row before the plan that would cite it exists.
+        mismatch = _require_stored_anchor(named, resolved, locator, source)
+        if mismatch is not None:
+            return None, mismatch.at(written)
     route_path = target.get("governing_route")
     identities = _target_identities(
         source.repository,

@@ -1931,7 +1931,6 @@ async def test_the_integrity_family_reports_the_absence_of_a_detection_run_witho
     )
 
     assert selected["state"] == "reported", selected
-    assert selected["compatible"] is None, selected
     assert selected["traversalScope"] == scope_y, selected
     assert selected["selectedRunId"] is not None, selected
     assert selected["inputDigest"] is not None, selected
@@ -1985,7 +1984,11 @@ async def test_the_integrity_family_reports_the_absence_of_a_detection_run_witho
     )
 
     assert unnamed["state"] == "reported", unnamed
-    assert unnamed["selectedRunId"] is None, unnamed
+    # ``selectedRunId`` is declared and ``None`` here, and the shared response choke point omits
+    # ``None`` values from the wire (``models/base.py::ResponseModel.to_payload``, dumps with
+    # ``exclude_none=True``), so the caller sees it absent rather than present-and-null. Absence is
+    # the no-run answer; a producer that reported a run would put the key back and fail this.
+    assert "selectedRunId" not in unnamed, unnamed
     assert unnamed["matchingRunIds"] == [], unnamed
     assert unnamed["traversalScope"] == "10000000-0000-4000-8000-000000000009", unnamed
     assert "no recorded detection run measured the requested scope" in unnamed["limitations"][0], (

@@ -45,6 +45,13 @@ this task's new entry, so the repository's existing invariants are absent from i
 starts blind to knowledge the repository already recorded. Without the argument nothing changed --
 the first task of a repository has no prior dataset to select and still creates an empty candidate.
 
+The baseline is **read at the top of the run**, before the ingest publishes, and the review's
+baseline half is made from those bytes rather than from a later read of the same path. That ordering
+is deliberate and load-bearing: ``--baseline`` and ``--publish-to`` may name one path, and
+publication replaces that file in place, so a copy taken afterwards would place the published
+candidate in the before half and the review would compare a dataset against itself. A retry keeps the
+half it was first handed instead of restating it.
+
 Exit status: 0 when every entry reached a terminal outcome the report names -- committed, a
 ruling, or a typed refusal -- and 2 when the invocation itself is refused (a missing or
 unreadable list, a blank authorization reference, a contract this command cannot load, a malformed
@@ -60,7 +67,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +94,16 @@ EXIT_REFUSED = 2
 # wrote rows; ``no_change`` is a batch whose rows were already stored, which committed and changed
 # nothing -- both have a candidate on disk, and a batch that refused, was never attempted or ran in
 # planning mode has none.
+#
+# ``no_change`` is not sufficient on its own, because a batch whose every entry REFUSED also reports
+# it: the batch-level state falls back to ``no_change`` when the batch never ran, so an all-refused
+# run is indistinguishable from an idempotent one by state alone. The committed-entry list is what
+# separates them, and it is the honest test for this caller: a run that committed no entry has no
+# candidate of its own, so it must not touch the review's before half. Without that check, a refused
+# re-run re-placed the baseline from the bytes it captured at the top of the run -- which, once the
+# leaf had published over its own fork point, are the PUBLISHED dataset -- and the review then showed
+# the addition present on both sides with an empty delta. That is the failure the capture exists to
+# prevent, reaching it through the refusal path instead of the publication path.
 COMMITTED_BATCH_STATES = frozenset({"changed", "no_change"})
 
 
@@ -210,39 +227,109 @@ def _candidate_directory(args: argparse.Namespace, review_root: Path) -> Path:
     return review_root / REVIEW_CANDIDATE_DIRECTORY
 
 
+@dataclass(frozen=True)
+class _CapturedBaseline:
+    """The admitted before snapshot, read into memory before the run can move the file it came from.
+
+    This value is the whole of the repair it exists for. ``--baseline`` names the dataset the task
+    forks from, and when it also names the publication destination the run **overwrites that file in
+    place** before the review's baseline half is placed. Copying it afterwards therefore copies the
+    published result, and the review is handed the after half twice: the addition it exists to show
+    is reported present on both sides with an empty delta.
+    """
+
+    origin: Path
+    payload: bytes
+
+
+def _capture_baseline(args: argparse.Namespace) -> _CapturedBaseline | str | None:
+    """Read the admitted baseline before anything can publish over it, or say why it was not read.
+
+    The read happens here, at the top of :func:`run`, and the bytes are carried rather than the path:
+    publication replaces the dataset this path names, so a later read of the same path is a read of
+    the after state. Absence and unreadability are returned as reasons rather than raised, because
+    both are facts about the invocation that belong in the report beside the outcome that used the
+    baseline, exactly as the rest of this command reports them.
+    """
+
+    if args.baseline is None:
+        return None
+    source = Path(args.baseline)
+    if not source.is_file():
+        return f"not-captured: the named baseline dataset {source} is not a file"
+    try:
+        return _CapturedBaseline(origin=source, payload=source.read_bytes())
+    except OSError as error:
+        return f"not-captured: the named baseline dataset {source} could not be read ({error})"
+
+
+def _placement_refusal(
+    report: IngestReport, captured: _CapturedBaseline | str | None
+) -> str | None:
+    """Why this run must not place a baseline, or ``None`` when it may place one.
+
+    Each condition states only what it established, and the two that concern the batch are separate
+    on purpose. The state alone cannot carry the second: a batch whose every entry REFUSED also
+    reports ``no_change``, because the batch-level state falls back to it when the batch never ran,
+    so the committed-entry list is what separates an all-refused run from an idempotent one. One
+    sentence serving both conditions read "committed no entry (replayed, committed 1)", contradicting
+    itself in a single line about the one thing this function exists to make trustworthy.
+    """
+
+    if report.dry_run:
+        return "not-placed: planning run (the baseline is placed by the run that commits)"
+    if report.batch_state not in COMMITTED_BATCH_STATES:
+        return f"not-placed: the batch did not commit ({report.batch_state})"
+    if not report.committed:
+        return (
+            "not-placed: the batch committed no entry "
+            f"({report.batch_state}, refused {len(report.refused)})"
+        )
+    if not isinstance(captured, _CapturedBaseline):
+        return captured or "not-placed: the baseline was not captured"
+    return None
+
+
 def _place_review_baseline(
-    args: argparse.Namespace, review_root: Path, report: IngestReport
+    args: argparse.Namespace,
+    review_root: Path,
+    report: IngestReport,
+    captured: _CapturedBaseline | str | None,
 ) -> str | None:
     """Put the dataset this task forks from into the review's baseline half, or say why not.
 
     ``--baseline`` is the one production input that names the fork-point dataset, and the ruling this
     function implements is that the run which authors the candidate is the run that places the
     baseline: same run, same explicit caller input, no new owner and no recorded contract. The bytes
-    are **copied**, not moved or linked, because the review's own recorded decision is that both
-    halves sit inside the leaf's disposable local root "so a review reads no candidate out of the
-    live coordination tree" -- the published dataset keeps serving its own lane.
+    are **copied** into the half, not moved or linked, because the review's own recorded decision is
+    that both halves sit inside the leaf's disposable local root "so a review reads no candidate out
+    of the live coordination tree" -- the published dataset keeps serving its own lane.
+
+    The bytes copied are the ones :func:`_capture_baseline` read **before** the run started, not a
+    fresh read of ``args.baseline``. That distinction is the repair: a run that publishes to the same
+    path it forks from has already replaced that file by the time this runs, so a fresh read would
+    place the published candidate in the before half and the comparison would be a dataset against
+    itself. A destination already holding the captured dataset is left alone rather than rewritten,
+    which is what makes a retry keep the fork point it was first handed instead of restating it.
 
     Nothing is invented on the ways out: a planning run and a batch that did not commit place
     nothing, a caller that named no baseline leaves the half absent (where ``candidate_dataset_absent``
-    is then the truthful answer), and a destination already holding an identical dataset is left
-    alone rather than rewritten.
+    is then the truthful answer), and a baseline that could not be read is reported as such rather
+    than as placed.
     """
 
     if args.baseline is None:
         return None
-    if report.dry_run:
-        return "not-placed: planning run (the baseline is placed by the run that commits)"
-    if report.batch_state not in COMMITTED_BATCH_STATES:
-        return f"not-placed: the batch did not commit ({report.batch_state})"
-    source = Path(args.baseline)
-    if not source.is_file():
-        return f"not-placed: the named baseline dataset {source} is not a file"
+    refused = _placement_refusal(report, captured)
+    if refused is not None:
+        return refused
     destination = review_root / REVIEW_BASELINE_DIRECTORY / CANDIDATE_DATABASE_NAME
-    if destination.is_file() and destination.read_bytes() == source.read_bytes():
+    already = destination.is_file() and destination.read_bytes() == captured.payload
+    if already:
         return f"present: {destination}"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, destination)
-    return f"placed: {destination}"
+    destination.write_bytes(captured.payload)
+    return f"placed: {destination} (captured from {captured.origin} before this run)"
 
 
 def run(args: argparse.Namespace) -> int:
@@ -261,6 +348,9 @@ def run(args: argparse.Namespace) -> int:
     except (ValueError, OSError) as error:
         print(f"the ingest was refused before it read the list: {error}")
         return EXIT_REFUSED
+    # The baseline is read BEFORE the ingest runs, because the ingest publishes, and a run whose
+    # publication destination is also its baseline path replaces the very bytes this half is made of.
+    captured_baseline = _capture_baseline(args)
     try:
         report = ingest_curator_list(
             args.contract,
@@ -276,7 +366,7 @@ def run(args: argparse.Namespace) -> int:
     except (ValueError, OSError) as error:
         print(f"the ingest was refused before it read the list: {error}")
         return EXIT_REFUSED
-    review_baseline = _place_review_baseline(args, review_root, report)
+    review_baseline = _place_review_baseline(args, review_root, report, captured_baseline)
     if args.as_json:
         print(json.dumps(_payload(report, review_baseline), indent=2, sort_keys=True))
     else:
