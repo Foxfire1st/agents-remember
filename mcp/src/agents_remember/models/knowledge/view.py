@@ -1070,6 +1070,17 @@ class KnowledgeViewReader(Protocol):
         """Every recorded realization claim with the source location it attributes."""
         ...
 
+    def family_member_rows(self) -> tuple[ViewSourceRow, ...]:
+        """Every recorded family membership, one row per member id.
+
+        Membership is a recorded generation-1 entity with its own table rather than an envelope
+        record kind, so it is read through its own port method. ``rows("family_member")`` asks the
+        ``knowledge_record`` envelope for a kind that envelope has never carried, and answers "no
+        rows" on a dataset that holds them -- the empty answer a family view then reported as a
+        complete view of a family it had not read.
+        """
+        ...
+
     def anchor_state(self, locator: Mapping[str, object]) -> AnchorResolutionState:
         """How one recorded source locator resolves against the recorded tree."""
         ...

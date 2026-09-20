@@ -89,6 +89,12 @@ class KnowledgeIntegrityCheckResponse(ToolResponse):
     "produces no compatibility verdict or causal explanation", so a caller reads the conditions and
     the limitations and decides; computing ``true`` from the absence of a matched condition would be
     inferring a semantic conclusion from a detection's silence.
+
+    The five run fields bind those conditions to the inputs they were measured over: the digest of
+    the scope's exact inputs the caller named, the selected run's own identity, the digest over its
+    exact inputs, the input identity itself, and the runs this scope holds. A response carrying
+    conditions alone left a caller unable to tell a report about its own candidate from a report
+    about another run recorded in the same scope.
     """
 
     operation: Literal["knowledge_integrity_check"] = "knowledge_integrity_check"
@@ -96,6 +102,11 @@ class KnowledgeIntegrityCheckResponse(ToolResponse):
     repositoryId: str
     conditions: list[dict[str, Any]] = Field(default_factory=list)
     traversalScope: str | None = None
+    selectedRunId: str | None = None
+    inputDigest: str | None = None
+    inputIdentities: list[dict[str, Any]] = Field(default_factory=list)
+    matchingRunIds: list[dict[str, Any]] = Field(default_factory=list)
+    exactInputSelector: dict[str, Any] | None = None
     limitations: list[str] = Field(default_factory=list)
     compatible: None = None
     assessment: dict[str, Any] | None = None

@@ -46,6 +46,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import cast
 
 from pydantic import TypeAdapter
 
@@ -104,6 +105,12 @@ PRIORITY_OUTCOME_PREFIX = "declared_priority: "
 DETECTION_RULE = ("ordering.trigger-rule", 1)
 CONSEQUENCE_RULE = ("consequence.record-payload-byte-equal", 1)
 REGISTERED_ROLE_RULE = ("ordering.registered-role", 1)
+
+# The per-reader cache key for the path seed and the two questions a path read asks of it. They are
+# module constants rather than literals because two functions must agree on them exactly.
+_SEED_MEMO_ATTRIBUTE = "_view_path_seed_cache"
+_SEED_KEY = "realized_revisions"
+_SEED_FAMILY_KEY = "realized_families"
 
 
 @dataclass(frozen=True)
@@ -462,6 +469,81 @@ def _seed_revisions(reader: KnowledgeViewReader, request: ViewRequest) -> set[st
     }
 
 
+def _seed_memo(reader: KnowledgeViewReader) -> dict[str, set[str] | None]:
+    """The seed cache belonging to this one reader.
+
+    A path read asks the seed three different questions -- which revisions were realized here, which
+    families admit one of them, and which statement was realized here -- and every one of them is
+    answered from the same recorded rows. The cache is attached to the reader *object*, so it lives
+    exactly as long as the reader the seam already opened and closed, and a reader that forbids
+    attributes falls back to computing the seed rather than failing the read.
+    """
+
+    try:
+        memo = reader.__dict__.setdefault(_SEED_MEMO_ATTRIBUTE, {})
+    except AttributeError:  # pragma: no cover - every shipped reader is an ordinary object
+        return {}
+    return cast("dict[str, set[str] | None]", memo)
+
+
+def _seeded_realizations(reader: KnowledgeViewReader, request: ViewRequest) -> set[str] | None:
+    """The revisions realized at the request's path seed, computed once per reader."""
+
+    memo = _seed_memo(reader)
+    if _SEED_KEY not in memo:
+        memo[_SEED_KEY] = _seed_revisions(reader, request)
+    return memo[_SEED_KEY]
+
+
+def _seed_selects(seeded: set[str] | None, revision_id: str | None) -> bool:
+    """Whether one revision is on the seeded frontier, or the read named no seed at all."""
+
+    return seeded is None or (revision_id or "") in seeded
+
+
+def _seeded_family_revisions(reader: KnowledgeViewReader, request: ViewRequest) -> set[str] | None:
+    """The family revisions admitting a member realized at the request's path seed.
+
+    A family is not a file, so the seed selects one through the membership that names the revision
+    the path realizes. A family whose members are realized nowhere near the path is another
+    subject's answer to "what governs this file", exactly as a realization belonging to an
+    unselected revision is on the invariant view.
+    """
+
+    seeded = _seeded_realizations(reader, request)
+    if seeded is None:
+        return None
+    memo = _seed_memo(reader)
+    if _SEED_FAMILY_KEY not in memo:
+        memo[_SEED_FAMILY_KEY] = {
+            family_revision
+            for row in reader.family_member_rows()
+            if _string(row.payload.get("invariant_revision_id")) in seeded
+            for family_revision in (_string(row.payload.get("family_revision_id")),)
+            if family_revision
+        }
+    return memo[_SEED_FAMILY_KEY]
+
+
+def _selected_invariant_revisions(reader: KnowledgeViewReader, request: ViewRequest) -> set[str]:
+    """The invariant revisions one source_context read covers, as a frontier.
+
+    Two things narrow it and both are the caller's own: the exact revision a caller named, and the
+    path seed. The set is returned rather than a boolean per row so the same set can filter the
+    registered realizations and the authored decisions attached to those revisions.
+    """
+
+    seeded = _seeded_realizations(reader, request)
+    selected: set[str] = set()
+    for row in reader.invariant_rows():
+        if request.invariant_revision_id and row.revision_id != request.invariant_revision_id:
+            continue
+        if not _seed_selects(seeded, row.revision_id):
+            continue
+        selected.add(row.revision_id or "")
+    return selected
+
+
 def _invariant_candidates(
     reader: KnowledgeViewReader, request: ViewRequest
 ) -> tuple[Candidate, ...]:
@@ -481,11 +563,11 @@ def _invariant_candidates(
 
     candidates: list[Candidate] = []
     selected: set[str] = set()
-    seeded = _seed_revisions(reader, request)
+    seeded = _seeded_realizations(reader, request)
     for row in reader.invariant_rows():
         if request.invariant_revision_id and row.revision_id != request.invariant_revision_id:
             continue
-        if seeded is not None and (row.revision_id or "") not in seeded:
+        if not _seed_selects(seeded, row.revision_id):
             continue
         selected.add(row.revision_id or "")
         decisions = _decisions_for(reader, "invariant_revision", row.revision_id or "")
@@ -534,28 +616,23 @@ def _invariant_candidates(
 def _source_context_candidates(
     reader: KnowledgeViewReader, request: ViewRequest
 ) -> tuple[Candidate, ...]:
-    """The compact registered neighborhood: roles, locations and selected diagnostics."""
+    """The compact registered neighborhood: roles, locations and selected diagnostics.
+
+    The path seed selects here too. A caller that names the file it is standing in asks what is
+    recorded about *that* file, and every registered realization of every other invariant in the
+    namespace is a different subject's answer -- so a read that ignored the seed returned the whole
+    namespace under a request that had narrowed it, which is how the same eight realizations came
+    back for a real path and for a path that was never recorded.
+    """
 
     candidates: list[Candidate] = []
+    seeded = _seeded_realizations(reader, request)
+    selected = _selected_invariant_revisions(reader, request)
     for row in reader.realization_rows():
-        candidates.append(
-            Candidate(
-                subject=SubjectRef(
-                    record_kind="realization_claim",
-                    record_id=row.record_id,
-                    revision_id=row.revision_id,
-                ),
-                label=str(row.payload.get("path") or row.record_id),
-                authored=None,
-                mechanical_rule_id=("ordering.registered-role", 1),
-                role=_string(row.payload.get("role")),
-                fact_kind="registered_realization",
-                statement=_string(row.payload.get("rationale")),
-                path=_string(row.payload.get("path")),
-                locator=_locator(row.payload.get("locator")),
-            )
-        )
-    if request.invariant_revision_id:
+        if not _seed_selects(seeded, row.revision_id):
+            continue
+        candidates.append(_realization_candidate(row))
+    if request.invariant_revision_id and request.invariant_revision_id in selected:
         for decision in _decisions_for(reader, "invariant_revision", request.invariant_revision_id):
             candidates.append(
                 Candidate(
@@ -577,6 +654,27 @@ def _source_context_candidates(
     return tuple(candidates)
 
 
+def _realization_candidate(row: object) -> Candidate:
+    """One recorded realization claim as a source-context row, with its recorded role and location."""
+
+    payload = row.payload  # type: ignore[attr-defined]
+    return Candidate(
+        subject=SubjectRef(
+            record_kind="realization_claim",
+            record_id=str(row.record_id),  # type: ignore[attr-defined]
+            revision_id=row.revision_id,  # type: ignore[attr-defined]
+        ),
+        label=str(payload.get("path") or row.record_id),  # type: ignore[attr-defined]
+        authored=None,
+        mechanical_rule_id=("ordering.registered-role", 1),
+        role=_string(payload.get("role")),
+        fact_kind="registered_realization",
+        statement=_string(payload.get("rationale")),
+        path=_string(payload.get("path")),
+        locator=_locator(payload.get("locator")),
+    )
+
+
 def _family_candidates(reader: KnowledgeViewReader, request: ViewRequest) -> tuple[Candidate, ...]:
     """The family view's rows: the joint guarantee, its members, and where those members live.
 
@@ -593,8 +691,14 @@ def _family_candidates(reader: KnowledgeViewReader, request: ViewRequest) -> tup
     """
 
     candidates: list[Candidate] = []
+    seeded_families = _seeded_family_revisions(reader, request)
     for row in reader.family_rows():
         if request.family_revision_id and row.revision_id != request.family_revision_id:
+            continue
+        if not _seed_selects(seeded_families, row.revision_id):
+            # The path seed selects a family through the membership that names a revision the path
+            # realizes. A family none of whose members is realized at the named file is another
+            # subject's answer to "what governs this file", so it is not on this read's frontier.
             continue
         decisions = _decisions_for(reader, "family_revision", row.revision_id or "")
         candidates.append(
@@ -624,18 +728,23 @@ def _family_candidates(reader: KnowledgeViewReader, request: ViewRequest) -> tup
 def _family_members(
     reader: KnowledgeViewReader, request: ViewRequest, candidates: list[Candidate]
 ) -> set[str]:
-    """Append this family's members and return the invariant revisions they name."""
+    """Append this family's members and return the invariant revisions they name.
+
+    Membership is read through the port's own membership statement. It is not an envelope record
+    kind, so asking the envelope reader for it returned nothing on a dataset that holds members --
+    and a family read that found no members reported no locations with them, while still calling
+    its answer complete for the scope it declared.
+    """
 
     members: set[str] = set()
-    seeded = _seed_revisions(reader, request)
-    for row in reader.rows("family_member"):
+    seeded = _seeded_realizations(reader, request)
+    for row in reader.family_member_rows():
         member_family = _string(row.payload.get("family_revision_id"))
         if request.family_revision_id and member_family != request.family_revision_id:
             continue
-        member_seed = _string(row.payload.get("invariant_revision_id"))
-        if seeded is not None and member_seed not in seeded:
-            continue
         member_revision = _string(row.payload.get("invariant_revision_id"))
+        if not _seed_selects(seeded, member_revision):
+            continue
         if member_revision:
             members.add(member_revision)
         candidates.append(
@@ -648,7 +757,7 @@ def _family_members(
                 label=member_revision or row.record_id,
                 authored=None,
                 mechanical_rule_id=REGISTERED_ROLE_RULE,
-                fact_kind="family_member",
+                fact_kind="member",
                 statement=member_revision,
                 lifecycle=row.lifecycle,
                 change_locus="member_record",
@@ -660,7 +769,12 @@ def _family_members(
 def _member_locations(
     reader: KnowledgeViewReader, members: set[str], candidates: list[Candidate]
 ) -> None:
-    """Append where the selected members are realized, and nowhere else."""
+    """Append where the selected members are realized, and nowhere else.
+
+    The row's ``fact_kind`` is ``member`` rather than the source-context view's
+    ``registered_realization``: ``FamilyRow`` declares the family view's own vocabulary, and a
+    location reported as one of a family's members is a member fact about that family.
+    """
 
     for row in reader.realization_rows():
         if row.revision_id not in members:
@@ -676,7 +790,7 @@ def _member_locations(
                 authored=None,
                 mechanical_rule_id=REGISTERED_ROLE_RULE,
                 role=_string(row.payload.get("role")),
-                fact_kind="registered_realization",
+                fact_kind="member",
                 statement=_string(row.payload.get("rationale")),
                 path=_string(row.payload.get("path")),
                 locator=_locator(row.payload.get("locator")),

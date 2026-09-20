@@ -851,3 +851,55 @@ def detection_payload_digest(payload: Mapping[str, Any]) -> str:
     """Return the digest of one detection payload, for a caller comparing two recorded payloads."""
 
     return sha256_digest(dict(payload))
+
+
+def detection_input_identity(run: DetectionRunPayload) -> dict[str, Any]:
+    """Return the canonical input identity one recorded run was measured over.
+
+    Requirement 3.2 makes a run's inputs identities rather than paths, and this is that identity as
+    one JSON value: the namespace and scope the run was bound to, the policy, extractor and condition
+    vocabulary it ran under, and -- per side -- the exact logical snapshot, the optional exact code
+    tree and the selector digest and policy that read it. The run's own identity and the declared
+    input sets are facts about the same execution, so they travel with it.
+
+    Nothing here is inferred from the dataset the run happens to sit in, and nothing is read from the
+    clock, the filesystem or the caller: two runs with different inputs get different identities, and
+    the same run always gets the same one.
+    """
+
+    return {
+        "run_id": run.run_id,
+        "repository_id": run.repository_id,
+        "assessed_repository_id": run.assessed_repository_id,
+        "governing_route_id": run.governing_route_id,
+        "policy_version": run.policy_version,
+        "extractor_version": run.extractor_version,
+        "condition_vocabulary_version": run.condition_vocabulary_version,
+        "declared_input_sets": list(run.declared_input_sets),
+        "input_sides": [
+            {
+                "side": side.side,
+                "knowledge_repository_id": side.context.knowledge.repository_id,
+                "schema_version": side.context.knowledge.schema_version,
+                "logical_digest": side.context.knowledge.logical_digest,
+                "repository_root": side.context.repository_root,
+                "code_tree_id": side.context.code_tree_id,
+                "task_ref": side.context.task_ref,
+                "selector_digest": side.selector_digest,
+                "selector_policy_version": side.selector_policy_version,
+            }
+            for side in run.input_sides
+        ],
+    }
+
+
+def detection_input_digest(run: DetectionRunPayload) -> str:
+    """Return the digest that stands for one run's exact inputs, and nothing else.
+
+    It is a digest over :func:`detection_input_identity`, so two runs recorded in one scope with
+    different snapshots, trees or selectors carry two different digests and a caller can name the
+    exact one it wants reported. A run's own ``run_id`` travels inside the identity as well, so the
+    digest also distinguishes two executions over identical inputs.
+    """
+
+    return sha256_digest(detection_input_identity(run))

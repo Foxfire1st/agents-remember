@@ -18,18 +18,30 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
+from uuid import UUID, uuid4
 
 import pytest
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.mcp.registration.knowledge import register_knowledge_tools
+from agents_remember.memory.knowledge import families, memberships, realizations
 from agents_remember.memory.knowledge.connection import create_or_validate_schema, open_database
+from agents_remember.memory.knowledge.detection import (
+    REQUIRED_DETECTION_GENERATION,
+    record_detection_run,
+)
 from agents_remember.memory.knowledge.managed_projection import (
     ManagedProjectionWriter,
     ProjectionHooks,
 )
 from agents_remember.memory.knowledge.schema_generations import GENERATIONS, generation_for_key
+from agents_remember.memory.knowledge.store import open_knowledge_store
+from agents_remember.models.knowledge.authorship import Authorship
+from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.classification import (
     AUTHORED_CLASS,
     CLASSIFICATION_CLASSES,
@@ -44,6 +56,17 @@ from agents_remember.models.knowledge.classification import (
     mechanical_rule,
     mechanical_rules_for,
 )
+from agents_remember.models.knowledge.detection import (
+    DETECTION_EXTRACTOR_VERSION,
+    DETECTION_POLICY_VERSION,
+    NO_SEMANTIC_ASSESSMENT_LIMITATION,
+    DetectionInputSide,
+    DetectionRunPayload,
+    DetectionRunRequest,
+    DetectionSide,
+)
+from agents_remember.models.knowledge.family import FamilyRevisionDraft
+from agents_remember.models.knowledge.graph import FamilyMemberDraft, RealizationClaimDraft
 from agents_remember.models.knowledge.projection_manifest import (
     PROJECTION_MANIFEST_NAME,
     STAGING_DIRECTORY_NAME,
@@ -55,7 +78,23 @@ from agents_remember.models.knowledge.projection_manifest import (
     detect_destination_collisions,
     require_confined_relative_path,
 )
-from agents_remember.models.knowledge.read import KnowledgeReadSnapshot
+from agents_remember.models.knowledge.read import KnowledgeReadContext, KnowledgeReadSnapshot
+from agents_remember.models.knowledge.repository import RepositoryIdentity
+from agents_remember.models.knowledge.result import (
+    FamilyMemberRequest,
+    FamilyRequest,
+    FamilyRevisionRequest,
+    InvariantRequest,
+    NewAnchor,
+    RealizationClaimRequest,
+    RevisionDraft,
+    RevisionRequest,
+)
+from agents_remember.models.knowledge.source import (
+    FileLocator,
+    GitBlobIdentity,
+    SourceAnchorDraft,
+)
 from agents_remember.models.knowledge.view import (
     VIEW_NAMES,
     VIEW_PAYLOADS,
@@ -736,6 +775,252 @@ def test_the_five_view_names_are_the_closed_ordered_set() -> None:
 
 
 # ---------------------------------------------------------------------------
+# The mounted family read's own fixture: one path, one governing family, two members.
+# ---------------------------------------------------------------------------
+
+# The recorded source locations, the authored statement and the two guarantees this case reads.
+# The paths are spelled here rather than shared, because the file that builds the larger branching
+# corpus is a governed evidence artifact and this case needs only the three rows below: a family
+# whose members are realized at one path, a sibling family that is not, and one path recorded
+# nowhere. The names match that corpus so a reader moving between the two is not confused.
+INTEGRATION_PATH = "src/integration.py"
+SYNCHRONIZATION_PATH = "src/synchronization.py"
+ABSENT_PATH = "src/retired_adapter.py"
+UNRECORDED_PATH = "src/not-recorded-anywhere.py"
+BASE_STATEMENT = "Preserve approved state across an admitted candidate write."
+FAMILY_GUARANTEE = (
+    "Approved state survives every admitted candidate write, and the deciding attribution is "
+    "recorded beside it."
+)
+OVERLAPPING_FAMILY_GUARANTEE = (
+    "A candidate write is atomic, and its recorded source location stays visible whether or not "
+    "that location resolves in the selected snapshot."
+)
+
+
+@dataclass(frozen=True)
+class MountedFamilyFixture:
+    """One store holding the family, its two members and the realizations the case reads."""
+
+    database_path: Path
+    repository_id: str
+    base_revision_id: str
+    sibling_revision_id: str
+    family_revision_id: str
+    sibling_family_revision_id: str
+    integration_claim_id: str
+    synchronization_claim_id: str
+    absent_claim_id: str
+
+
+def _fixture_authorship() -> Authorship:
+    return Authorship(
+        actor_ref="agent:fixture",
+        authorization_ref="260915-KS-L41 mounted family case",
+        operation_id=uuid4(),
+        recorded_at=datetime.now(UTC).isoformat(),
+        origin_refs=("requirement:KS-R20@v1",),
+    )
+
+
+def _record_or_fail(outcome: Any, operation: str) -> None:
+    assert outcome.state in ("created", "no_change"), (operation, outcome.refusal)
+
+
+@dataclass(frozen=True)
+class _RealizationSpec:
+    """One realization to record: its own identity, the revision it realizes and where it lives."""
+
+    claim_id: str
+    revision_id: str
+    path: str
+    role: str
+    rationale: str
+
+
+def _record_realization(
+    store: Any, repository_id: str, authorship: Authorship, spec: _RealizationSpec
+) -> None:
+    outcome = realizations.create_realization_claim(
+        store,
+        RealizationClaimRequest(
+            repository_id=repository_id,
+            claim=RealizationClaimDraft(
+                claim_id=spec.claim_id,
+                invariant_revision_id=spec.revision_id,
+                role=cast(Any, spec.role),
+                rationale=spec.rationale,
+            ),
+            anchor=NewAnchor(
+                anchor=SourceAnchorDraft(
+                    anchor_id=UUID(str(uuid4())),
+                    path=spec.path,
+                    source_identity=GitBlobIdentity(object_id="0" * 40),
+                    locator=FileLocator(),
+                )
+            ),
+            provenance=authorship,
+        ),
+    )
+    _record_or_fail(outcome, "create_realization_claim")
+
+
+def _build_mounted_family_fixture(directory: Path, *, repository_id: str) -> MountedFamilyFixture:
+    """Build the case's store through the shipped typed operations.
+
+    This module builds its own rows rather than importing the larger branching corpus: that file is
+    a governed shared-support artifact whose consumer list is a pinned catalog, and this case needs
+    three recorded rows rather than a corpus. Every row below goes through the same public operation
+    a real caller uses, so the store is one the production reader must read rather than one a stub
+    supplied.
+    """
+
+    authorship = _fixture_authorship()
+    base_revision_id, sibling_revision_id = str(uuid4()), str(uuid4())
+    family_revision_id, sibling_family_revision_id = str(uuid4()), str(uuid4())
+    integration_claim_id, synchronization_claim_id, absent_claim_id = (
+        str(uuid4()),
+        str(uuid4()),
+        str(uuid4()),
+    )
+    database_path = directory / "mounted-family.db"
+    store = open_knowledge_store(database_path, repository_id)
+    try:
+        _record_or_fail(
+            store.create_repository(
+                RepositoryIdentity(repository_id=repository_id, authority_home="agents-remember")
+            ),
+            "create_repository",
+        )
+        for label, statement in (
+            ("approved-state-preservation", BASE_STATEMENT),
+            ("source-resolution-visibility", "Report an unresolved source location as a fact."),
+        ):
+            invariant_id = str(uuid4())
+            _record_or_fail(
+                store.create_invariant(
+                    InvariantRequest(
+                        repository_id=repository_id,
+                        invariant_id=invariant_id,
+                        display_label=label,
+                        provenance=authorship,
+                    )
+                ),
+                "create_invariant",
+            )
+            revision_id = (
+                base_revision_id
+                if label == "approved-state-preservation"
+                else (sibling_revision_id)
+            )
+            _record_or_fail(
+                store.create_revision(
+                    RevisionRequest(
+                        repository_id=repository_id,
+                        revision=RevisionDraft(
+                            revision_id=revision_id,
+                            invariant_id=invariant_id,
+                            display_version="v1",
+                            statement=statement,
+                            applicability="Every admitted candidate write in this namespace.",
+                            provenance=authorship,
+                        ),
+                    )
+                ),
+                "create_revision",
+            )
+        for family_id, revision_id, guarantee in (
+            (str(uuid4()), family_revision_id, FAMILY_GUARANTEE),
+            (str(uuid4()), sibling_family_revision_id, OVERLAPPING_FAMILY_GUARANTEE),
+        ):
+            _record_or_fail(
+                families.create_family(
+                    store,
+                    FamilyRequest(
+                        repository_id=repository_id,
+                        family_id=family_id,
+                        display_label=f"family-{revision_id[:8]}",
+                        provenance=authorship,
+                    ),
+                ),
+                "create_family",
+            )
+            _record_or_fail(
+                families.create_family_revision(
+                    store,
+                    FamilyRevisionRequest(
+                        repository_id=repository_id,
+                        revision=FamilyRevisionDraft(
+                            family_id=family_id,
+                            revision_id=revision_id,
+                            display_version="v1",
+                            joint_guarantee=guarantee,
+                            provenance=authorship,
+                        ),
+                    ),
+                ),
+                "create_family_revision",
+            )
+        for revision_id, member_family in (
+            (base_revision_id, family_revision_id),
+            (sibling_revision_id, family_revision_id),
+            (sibling_revision_id, sibling_family_revision_id),
+        ):
+            _record_or_fail(
+                memberships.create_family_member(
+                    store,
+                    FamilyMemberRequest(
+                        repository_id=repository_id,
+                        member=FamilyMemberDraft(
+                            member_id=str(uuid4()),
+                            family_revision_id=member_family,
+                            invariant_revision_id=revision_id,
+                            provenance=authorship,
+                        ),
+                    ),
+                ),
+                "create_family_member",
+            )
+        for spec in (
+            _RealizationSpec(
+                claim_id=integration_claim_id,
+                revision_id=base_revision_id,
+                path=INTEGRATION_PATH,
+                role="enforcement",
+                rationale="The integration entry point applies the admitted write as one batch.",
+            ),
+            _RealizationSpec(
+                claim_id=synchronization_claim_id,
+                revision_id=base_revision_id,
+                path=SYNCHRONIZATION_PATH,
+                role="propagation-persistence",
+                rationale="The synchronization path propagates the approved state afterwards.",
+            ),
+            _RealizationSpec(
+                claim_id=absent_claim_id,
+                revision_id=base_revision_id,
+                path=ABSENT_PATH,
+                role="support",
+                rationale="The retired adapter applied the same obligation before the source moved.",
+            ),
+        ):
+            _record_realization(store, repository_id, authorship, spec)
+    finally:
+        store.close()
+    return MountedFamilyFixture(
+        database_path=database_path,
+        repository_id=repository_id,
+        base_revision_id=base_revision_id,
+        sibling_revision_id=sibling_revision_id,
+        family_revision_id=family_revision_id,
+        sibling_family_revision_id=sibling_family_revision_id,
+        integration_claim_id=integration_claim_id,
+        synchronization_claim_id=synchronization_claim_id,
+        absent_claim_id=absent_claim_id,
+    )
+
+
+# ---------------------------------------------------------------------------
 # §6: the mounted surface's own refusals, one case per operation family.
 # ---------------------------------------------------------------------------
 
@@ -808,11 +1093,134 @@ def _unregistered_generation_name() -> str:
     return f"ar-knowledge-sqlite/v{candidate}"
 
 
+def _detection_input_side(
+    repository_id: str, logical_digest: str, *, side: str
+) -> DetectionInputSide:
+    """One recorded input side: an exact snapshot identity and the selector digest that read it."""
+
+    return DetectionInputSide(
+        side=cast("DetectionSide", side),
+        context=KnowledgeReadContext(
+            repository_id=repository_id,
+            knowledge=SnapshotIdentity(
+                repository_id=repository_id,
+                schema_version=REQUIRED_DETECTION_GENERATION.schema_name,
+                logical_digest=logical_digest,
+            ),
+        ),
+        selector_digest=logical_digest,
+        selector_policy_version="recorded-family-frontier/v1",
+    )
+
+
+def _detection_run(
+    repository_id: str, run_id: str, scope_id: str, digest: str
+) -> DetectionRunPayload:
+    """One minimal recorded detection run over two exact input sides.
+
+    The payload is built to the shipped model's own rules -- the semantic-assessment limitation is
+    stated and the bounded ``detail`` is the observed basis -- so the only fact this fixture adds is
+    which inputs the run measured.
+    """
+
+    return DetectionRunPayload(
+        run_id=run_id,
+        repository_id=repository_id,
+        assessed_repository_id=repository_id,
+        governing_route_id=scope_id,
+        policy_version=DETECTION_POLICY_VERSION,
+        extractor_version=DETECTION_EXTRACTOR_VERSION,
+        input_sides=(
+            _detection_input_side(repository_id, digest, side="before"),
+            _detection_input_side(repository_id, digest, side="after"),
+        ),
+        limitations=(NO_SEMANTIC_ASSESSMENT_LIMITATION,),
+        detail=(
+            f"policy={DETECTION_POLICY_VERSION}; extractor={DETECTION_EXTRACTOR_VERSION}; "
+            "conditions=detection-conditions/v1; declared_input_sets=<none>; ordered_signals=0; "
+            f"limitations={NO_SEMANTIC_ASSESSMENT_LIMITATION}"
+        ),
+    )
+
+
+def _dataset_with_two_runs_in_one_scope(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """One real dataset holding two detection runs in ONE scope over two different input digests.
+
+    Recorded through the shipped write operation rather than inserted, because the defect this case
+    pins lives below the boundary: two runs sharing a scope meant "the first identity-sorted match",
+    with nothing in the response saying which run it was or what inputs it read.
+    """
+
+    path = tmp_path / "two-runs.db"
+    store = open_knowledge_store(path, REPOSITORY_ID)
+    try:
+        store.create_repository(
+            RepositoryIdentity(repository_id=REPOSITORY_ID, authority_home="agents-remember")
+        )
+        scope_y = "10000000-0000-4000-8000-000000000002"
+        first, second = (
+            "20000000-0000-4000-8000-000000000002",
+            "20000000-0000-4000-8000-000000000003",
+        )
+        for run_id, digest in ((first, "b" * 64), (second, "c" * 64)):
+            recorded = record_detection_run(
+                store,
+                DetectionRunRequest(
+                    repository_id=REPOSITORY_ID,
+                    provenance=Authorship(
+                        actor_ref="agent:fixture",
+                        authorization_ref="260915-KS-L41 mounted-boundary case",
+                        operation_id=uuid4(),
+                        recorded_at=datetime.now(UTC).isoformat(),
+                        origin_refs=("requirement:KS-R14@v1",),
+                    ),
+                    run=_detection_run(REPOSITORY_ID, run_id, scope_y, digest),
+                    signals=(),
+                ),
+            )
+            assert recorded.state == "created", recorded.refusal
+    finally:
+        store.close()
+    return path, scope_y, first, second
+
+
 async def _call(server: FastMCP, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    """The JSON body the named registered tool returned for one call."""
+    """The JSON body the named registered tool returned for one call.
+
+    A registered handler that lets a model's own ``ValidationError`` escape reaches the transport as
+    ``ToolError`` instead of returning, so a case that read only the returned dictionary would be
+    checking nothing about such an input. Every call in this module goes through here for that
+    reason: "a schema-conformant input is answered" is asserted at the mounted boundary.
+    """
 
     _content, structured = await server.call_tool(tool, arguments)
     return cast(dict[str, Any], structured)
+
+
+def _git_repository(tmp_path: Path, name: str) -> Path:
+    """One real Git repository, so a named source root can be completed with its own tree."""
+
+    root = tmp_path / name
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "README.md").write_text("a resolved source root\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=case@example.invalid",
+            "-c",
+            "user.name=knowledge-case",
+            "commit",
+            "-q",
+            "-m",
+            "one resolved root",
+        ],
+        cwd=root,
+        check=True,
+    )
+    return root
 
 
 def _diff_body(schema_name: str, digest: str) -> dict[str, Any]:
@@ -889,6 +1297,12 @@ async def test_the_read_family_refuses_a_sixth_view_before_it_touches_a_dataset(
     path, ``file is not a database`` for a file that is not one, and a raw ``ValidationError`` for a
     diff body that does not validate. A handler that lets any of them escape reddens here, and so
     does one that answers "no rows" for a dataset nobody opened.
+
+    The case carries the family's successful path as well, because the mounted read surface is what
+    both halves are decided at: its last three paragraphs drive ``knowledge_read`` against a real
+    SQLite store built through the shipped typed operations, to read the stored family membership,
+    the path seed those views used to ignore, and the context the registration resolves for an
+    ordinary minimal call.
     """
 
     body = await _call(
@@ -963,6 +1377,12 @@ async def test_the_read_family_refuses_a_sixth_view_before_it_touches_a_dataset(
     assert invalid["refusalCode"] == "invalid_payload", invalid
     assert "KnowledgeDiffRequest" in invalid["refusalDetail"], invalid
 
+    # The read family's *successful* path, against the real SQLite reader. The refusals above are
+    # decided from the caller's own input, which is why they need no stored rows; the mounted family
+    # read and the path seed do, and the rows that matter here are the ones the production reader
+    # must supply from the dedicated membership table rather than from the record envelope.
+    await _assert_the_family_read_returns_stored_membership_and_the_path_seed(tmp_path)
+
 
 @pytest.mark.anyio
 async def test_the_read_family_refuses_a_continuation_minted_for_another_walk(
@@ -1005,6 +1425,228 @@ async def test_the_read_family_refuses_a_continuation_minted_for_another_walk(
     assert body["refusalCode"] == "continuation_unreadable", body
     assert body["view"] == "invariant", body
     assert "minted for another view's walk" in body["refusalDetail"], body
+
+    # The same mounted surface, called with a schema-conformant minimal read: the context the
+    # registration resolves for it must be a context the caller's own request can construct.
+    constructible = _build_mounted_family_fixture(tmp_path, repository_id=REPOSITORY_ID)
+    await _assert_the_context_is_constructible(_knowledge_tool_server(), constructible, tmp_path)
+
+
+async def _assert_family_traversal_from_one_path(
+    server: FastMCP, anchor: dict[str, str], fixture: Any
+) -> None:
+    """One path -> the realized statement -> the governing family -> its other member and location.
+
+    Every call here goes through the mounted handler against the real store, so the step the stub
+    reader hid -- reading the membership rows the production reader must supply -- is inside the
+    assertion rather than beside it.
+    """
+
+    by_id = {
+        fixture.integration_claim_id: INTEGRATION_PATH,
+        fixture.synchronization_claim_id: SYNCHRONIZATION_PATH,
+        fixture.absent_claim_id: ABSENT_PATH,
+    }
+    seeded = await _call(
+        server,
+        "knowledge_read",
+        {**anchor, "view": "source_context", "sourcePath": INTEGRATION_PATH},
+    )
+
+    assert seeded["state"] == "view", seeded
+    rows = seeded["payload"]["rows"]
+    subjects = [(row["subject"]["record_kind"], row["subject"]["record_id"]) for row in rows]
+    # The path's own realization and the two claims of the SAME recorded statement, and nothing
+    # else: every row is one the seed selected, which is what the read that returned the whole
+    # namespace's registered realizations could not say.
+    assert set(subjects) == {
+        ("realization_claim", fixture.integration_claim_id),
+        ("realization_claim", fixture.synchronization_claim_id),
+        ("realization_claim", fixture.absent_claim_id),
+    }, seeded
+    assert seeded["payload"]["counts"]["registered_realizations"]["value"] == 3, seeded
+    assert seeded["payload"]["counts"]["rows_returned"]["value"] == 3, seeded
+
+    realized = next(
+        row["subject"]["revision_id"]
+        for row in rows
+        if row["subject"]["record_id"] == fixture.integration_claim_id
+    )
+    assert realized == fixture.base_revision_id, seeded
+
+    invariants = await _call(
+        server, "knowledge_read", {**anchor, "view": "invariant", "invariantRevisionId": realized}
+    )
+
+    assert invariants["state"] == "view", invariants
+    invariant_rows = invariants["payload"]["rows"]
+    ordered = {row["subject"]["record_kind"] for row in invariant_rows}
+    assert ordered == {"invariant_revision", "realization_claim"}, invariants
+    assert (
+        sum(row["subject"]["record_kind"] == "realization_claim" for row in invariant_rows) == 3
+    ), invariants
+    statement = next(
+        row for row in invariant_rows if row["subject"]["record_kind"] == "invariant_revision"
+    )
+    assert statement["statement"] == BASE_STATEMENT, invariants
+
+    # The governing family, read by the id the statement's own revision belongs to: BOTH members,
+    # and the locations of both. This is the step the stub-supplied member rows hid -- on the real
+    # store the member rows are only reachable through the dedicated table.
+    family = await _call(
+        server,
+        "knowledge_read",
+        {**anchor, "view": "family", "familyRevisionId": fixture.family_revision_id},
+    )
+
+    assert family["state"] == "view", family
+    family_rows = family["payload"]["rows"]
+    guarantee = [row for row in family_rows if row["fact_kind"] == "joint_guarantee"]
+    members = [
+        row
+        for row in family_rows
+        if row["subject"]["record_kind"] == "family_member"
+        and row["subject"]["revision_id"] == fixture.family_revision_id
+    ]
+    locations = [row for row in family_rows if row["subject"]["record_kind"] == "realization_claim"]
+    assert [row["statement"] for row in guarantee] == [FAMILY_GUARANTEE], family
+    assert sorted(row["statement"] for row in members) == sorted(
+        (fixture.base_revision_id, fixture.sibling_revision_id)
+    ), family
+    # The other member is named by the membership, and every location carried belongs to one of the
+    # two member revisions -- a renderer that reported a member's locations without filtering them to
+    # this family's members would carry the third family's location here instead.
+    assert {row["subject"]["record_id"] for row in locations} == set(by_id), family
+    assert {row["change_locus"] for row in locations} == {"attributed_source"}, family
+    assert OVERLAPPING_FAMILY_GUARANTEE not in json.dumps(family), family
+    assert family["completeWithinDeclaredScope"] is True, family
+
+
+async def _assert_the_path_seed_selects_in_every_view(
+    server: FastMCP, anchor: dict[str, str], fixture: Any
+) -> None:
+    """A recorded path narrows each view to its own frontier; an unrecorded one answers nothing."""
+
+    empty_path = UNRECORDED_PATH
+    for view in ("source_context", "family"):
+        unrecorded = await _call(
+            server, "knowledge_read", {**anchor, "view": view, "sourcePath": empty_path}
+        )
+        assert unrecorded["state"] == "view", unrecorded
+        assert unrecorded["payload"]["rows"] == [], unrecorded
+        assert unrecorded["completeWithinDeclaredScope"] is True, unrecorded
+
+    # The seed selects a family through its membership: a path whose realization belongs to the base
+    # revision selects the family that admits it, and the sibling family -- which admits the base
+    # revision's successor and nothing realized at this path -- is not selected.
+    seeded_family = await _call(
+        server, "knowledge_read", {**anchor, "view": "family", "sourcePath": INTEGRATION_PATH}
+    )
+
+    assert seeded_family["state"] == "view", seeded_family
+    assert [
+        row["statement"]
+        for row in seeded_family["payload"]["rows"]
+        if row["fact_kind"] == "joint_guarantee"
+    ] == [FAMILY_GUARANTEE], seeded_family
+    assert {
+        row["subject"]["record_id"]
+        for row in seeded_family["payload"]["rows"]
+        if row["subject"]["record_kind"] == "realization_claim"
+    } == {
+        fixture.integration_claim_id,
+        fixture.synchronization_claim_id,
+        fixture.absent_claim_id,
+    }, seeded_family
+    # ... and within a seeded family read the members are filtered to the seed's own frontier: the
+    # other member's revision is realized nowhere, so it is not on this read's frontier.
+    assert [
+        row["statement"]
+        for row in seeded_family["payload"]["rows"]
+        if row["subject"]["record_kind"] == "family_member"
+        and row["subject"]["revision_id"] == fixture.family_revision_id
+    ] == [fixture.base_revision_id], seeded_family
+
+    # A recorded path that exists in no snapshot is still a recorded realization: the seed selects
+    # the revision it is attributed to, so the same governing family is reported for it, and the
+    # path never becomes silently unanswerable.
+    recorded_but_absent = await _call(
+        server, "knowledge_read", {**anchor, "view": "family", "sourcePath": ABSENT_PATH}
+    )
+
+    assert recorded_but_absent["state"] == "view", recorded_but_absent
+    assert [
+        row["statement"]
+        for row in recorded_but_absent["payload"]["rows"]
+        if row["fact_kind"] == "joint_guarantee"
+    ] == [FAMILY_GUARANTEE], recorded_but_absent
+
+
+async def _assert_the_context_is_constructible(
+    server: FastMCP, fixture: Any, tmp_path: Path
+) -> None:
+    """A schema-conformant mounted read answers, in every spelling of the resolution pair.
+
+    A minimal read -- a dataset and a namespace, nothing else -- used to reach the context
+    constructor with the mount's workspace default as ``repository_root`` and no ``code_tree_id``,
+    which that model refuses as a half-specified source resolution. The caller received a raw
+    pydantic ``ValidationError`` from a mounted tool instead of a view or a typed refusal, so the
+    same call is made through a real handler here and its body is read. A root the caller names is
+    likewise completed with that root's own current tree rather than being passed alone.
+    """
+
+    spellings: tuple[dict[str, Any], ...] = (
+        {},
+        {"repositoryRoot": str(_git_repository(tmp_path, "resolved-root"))},
+    )
+    for extra in spellings:
+        body = await _call(
+            server,
+            "knowledge_read",
+            {
+                "databasePath": str(fixture.database_path),
+                "repositoryId": fixture.repository_id,
+                "view": "family",
+                **extra,
+            },
+        )
+        assert body["state"] == "view", (extra, body)
+        assert body["payload"]["rows"], (extra, body)
+
+
+async def _assert_the_family_read_returns_stored_membership_and_the_path_seed(
+    tmp_path: Path,
+) -> None:
+    """The real SQLite reader, through the mounted tool: members, locations and the seeded frontier.
+
+    This is the case the suite could not see. Family membership is stored in the dedicated
+    ``family_member`` table and is not duplicated into the ``knowledge_record`` envelope, so a
+    renderer that asked the *envelope* reader for the kind ``family_member`` received no rows on a
+    dataset that holds them -- and reported a joint guarantee with no members, no implementation
+    locations and ``completeWithinDeclaredScope`` true. The predecessor's own verification supplied
+    member rows through a stub reader, which is exactly why the production table/reader mismatch
+    survived it; every assertion the three helpers make is therefore made against a real store,
+    built through the shipped typed operations and read through a real mounted ``FastMCP`` handler.
+
+    The same store carries the path seed's other obligations. The seed must select in every view,
+    where ``source_context`` and the family guarantees used to ignore it: a real path narrows the
+    read to the family whose member is realized at it, and a path recorded nowhere answers honestly
+    with nothing rather than with every guarantee in the namespace. And the traversal the CYCLE-03
+    acceptance asks for has to work from one path to the governing family and that family's OTHER
+    code location, which is only possible when membership is actually read.
+    """
+
+    fixture = _build_mounted_family_fixture(tmp_path, repository_id=REPOSITORY_ID)
+    server = _knowledge_tool_server()
+    anchor = {
+        "databasePath": str(fixture.database_path),
+        "repositoryId": fixture.repository_id,
+        "repositoryRoot": str(tmp_path),
+        "codeTreeId": CODE_TREE_ID,
+    }
+
+    await _assert_family_traversal_from_one_path(server, anchor, fixture)
+    await _assert_the_path_seed_selects_in_every_view(server, anchor, fixture)
 
 
 @pytest.mark.anyio
@@ -1099,6 +1741,84 @@ async def test_the_integrity_family_reports_the_absence_of_a_detection_run_witho
         "no detection run is recorded for this namespace at this snapshot"
     ], body
     assert body["traversalScope"] == "registered-scope-from-the-case", body
+
+    # The second half: a dataset that DOES hold two runs in one scope. The run's own identity, the
+    # digest over its exact inputs and the input identity itself must all reach the caller, because
+    # conditions reported without them cannot be tied to the inputs they were measured over -- and
+    # the runs the scope does hold must be carried too, which is what makes an exact request
+    # constructible from the response a caller already has.
+    database_path, scope_y, first_run, second_run = _dataset_with_two_runs_in_one_scope(tmp_path)
+    selected = await _call(
+        _knowledge_tool_server(),
+        "knowledge_integrity_check",
+        {
+            "databasePath": str(database_path),
+            "repositoryId": REPOSITORY_ID,
+            "scopeId": scope_y,
+        },
+    )
+
+    assert selected["state"] == "reported", selected
+    assert selected["compatible"] is None, selected
+    assert selected["traversalScope"] == scope_y, selected
+    assert selected["selectedRunId"] is not None, selected
+    assert selected["inputDigest"] is not None, selected
+    assert selected["unresolved"] == ["no condition matched the recorded scope"], selected
+    carried = {entry["runId"]: entry["inputDigest"] for entry in selected["matchingRunIds"]}
+    assert set(carried) == {first_run, second_run}, selected
+    # The selected run's digest is the digest of the input identity carried with it, and the two
+    # runs' digests differ: a caller can therefore name the exact run it wants instead of receiving
+    # whichever one sorted first.
+    assert len(set(carried.values())) == 2, selected
+    assert selected["inputDigest"] == carried[selected["selectedRunId"]], selected
+    only_identity = selected["inputIdentities"]
+    assert len(only_identity) == 1, selected
+    assert only_identity[0]["run_id"] == selected["selectedRunId"], selected
+    assert {(side["side"], side["logical_digest"]) for side in only_identity[0]["input_sides"]} == {
+        ("before", "b" * 64),
+        ("after", "b" * 64),
+    }, selected
+
+    # The exact selector is reachable and it binds: the run the caller names is the run reported,
+    # even when it is NOT the identity-sorted first match, and the scope keeps filtering -- a run
+    # measured over another scope is still never borrowed, whatever selector is supplied.
+    wanted = carried[second_run]
+    exact = await _call(
+        _knowledge_tool_server(),
+        "knowledge_integrity_check",
+        {
+            "databasePath": str(database_path),
+            "repositoryId": REPOSITORY_ID,
+            "scopeId": scope_y,
+            "inputDigest": wanted,
+        },
+    )
+
+    assert exact["state"] == "reported", exact
+    assert exact["selectedRunId"] == second_run, exact
+    assert exact["inputDigest"] == wanted, exact
+    assert exact["exactInputSelector"] == {"runId": None, "inputDigest": wanted}, exact
+    assert {side["logical_digest"] for side in exact["inputIdentities"][0]["input_sides"]} == {
+        "c" * 64
+    }, exact
+
+    unnamed = await _call(
+        _knowledge_tool_server(),
+        "knowledge_integrity_check",
+        {
+            "databasePath": str(database_path),
+            "repositoryId": REPOSITORY_ID,
+            "scopeId": "10000000-0000-4000-8000-000000000009",
+        },
+    )
+
+    assert unnamed["state"] == "reported", unnamed
+    assert unnamed["selectedRunId"] is None, unnamed
+    assert unnamed["matchingRunIds"] == [], unnamed
+    assert unnamed["traversalScope"] == "10000000-0000-4000-8000-000000000009", unnamed
+    assert "no recorded detection run measured the requested scope" in unnamed["limitations"][0], (
+        unnamed
+    )
 
 
 @pytest.mark.anyio

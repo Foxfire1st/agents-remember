@@ -45,9 +45,13 @@ def register_knowledge_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     """Register the knowledge read, change, diff, integrity and projection operations.
 
     The runtime configuration supplies exactly one thing to this family: the workspace root a read
-    resolves recorded source anchors against when the caller names none. Everything else a handler
-    needs -- the dataset path, the namespace and the destination -- is caller-supplied, because the
-    substrate decides nothing about which dataset or which vault is meant.
+    falls back to when the caller names no repository of its own. It is handed over as the *default
+    repository*, not as half of a source-resolution pair: the read builder completes the pair or
+    names neither half, because a context carrying ``repository_root`` without ``code_tree_id`` is
+    refused by its own model and a minimal schema-conformant call would then raise instead of
+    returning a view. Everything else a handler needs -- the dataset path, the namespace and the
+    destination -- is caller-supplied, because the substrate decides nothing about which dataset or
+    which vault is meant.
     """
 
     _register_knowledge_read(server, config)
@@ -92,11 +96,10 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
                 invariant_revision_id=invariantRevisionId,
                 family_revision_id=familyRevisionId,
                 source_path=sourcePath,
-                repository_root=(
-                    repositoryRoot if repositoryRoot is not None else str(config.workspace_root)
-                ),
+                repository_root=repositoryRoot,
                 code_tree_id=codeTreeId,
-            )
+            ),
+            workspace_root=str(config.workspace_root),
         )
 
 
@@ -164,15 +167,23 @@ def _register_knowledge_integrity_check(server: FastMCP) -> None:
         databasePath: str,
         repositoryId: str,
         scopeId: str | None = None,
+        *,
+        runId: str | None = None,
+        inputDigest: str | None = None,
     ) -> dict[str, Any]:
         """Report declared structural-rule violations, mechanically matched review conditions, their
         registered traversal scope and the observable mapping and scan limitations. It produces no
         compatibility verdict and no causal explanation: `compatible` is absent by design, not
-        omitted by accident, and an unresolved assessment stays unresolved."""
+        omitted by accident, and an unresolved assessment stays unresolved. The scope selects the
+        recorded run; `runId` or `inputDigest` selects one exact run among several in that scope, and
+        the response names the selected run and its input identities so the conditions cannot be
+        read as belonging to a run they were not measured over."""
         return knowledge_integrity_check_payload(
             databasePath=databasePath,
             repositoryId=repositoryId,
             scopeId=scopeId,
+            runId=runId,
+            inputDigest=inputDigest,
         )
 
 

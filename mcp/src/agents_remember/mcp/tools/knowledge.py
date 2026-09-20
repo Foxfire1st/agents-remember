@@ -19,7 +19,9 @@ short:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import re
+import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -41,7 +43,11 @@ from agents_remember.memory.knowledge.connection import (
     inspect_schema,
     open_read_only_database,
 )
-from agents_remember.memory.knowledge.detection import read_detection_run
+from agents_remember.memory.knowledge.detection import (
+    detection_input_digest,
+    detection_input_identity,
+    read_detection_run,
+)
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
 from agents_remember.models.knowledge.diff import KnowledgeDiffRequest
@@ -90,6 +96,11 @@ DECLARED_CHANGE_KINDS: tuple[str, ...] = (
 # The one file this surface can resolve a whole write from, named so a refusal is actionable rather
 # than a dead end. Kept as a constant because two detail strings and a test quote it.
 WRITE_ENTRY_POINT = "agents-remember knowledge-ingest"
+
+# The two shapes a source-resolution half can take, and the bound on how long resolving one may
+# take: a Git call that hangs must not hold a mounted read open.
+_TREE_ID_PATTERN = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
+_GIT_TIMEOUT_SECONDS = 20
 
 
 @dataclass(frozen=True)
@@ -191,7 +202,66 @@ def _unusable_dataset(database_path: str, error: BaseException) -> tuple[str, st
     )
 
 
-def knowledge_read_payload(request: ReadToolRequest) -> dict[str, Any]:
+def _source_resolution(
+    request: ReadToolRequest, workspace_root: str | None
+) -> tuple[str | None, str | None]:
+    """The source-resolution pair one read context may carry, completed rather than half-supplied.
+
+    A read resolves recorded anchors against a tree, and the shipped context model refuses a pair
+    that names only one of the two: ``repository_root`` without ``code_tree_id`` is an incomplete
+    request, not a narrower one. An ordinary caller supplies neither and still needs an answer, and
+    the mount's own default supplied the root alone -- so a schema-conformant call raised a raw
+    ``ValidationError`` out of the context constructor instead of returning a view or a typed
+    refusal.
+
+    The pair is completed here for the same reason the context refuses it: if a tree is to be named,
+    both halves of it are named. The workspace default is used only when the caller names no
+    repository at all, which is the behaviour the mount already documented; a caller that names a
+    root without a tree gets that root's own current tree, resolved from it.
+    """
+
+    if request.code_tree_id is not None and request.repository_root is not None:
+        return request.repository_root, request.code_tree_id
+    root = request.repository_root
+    if root is None:
+        if request.code_tree_id is not None or workspace_root is None:
+            return None, None
+        # The mount's own default supplies a *repository*, never half a resolution request: a
+        # workspace that is not the repository a tree could be read from is not named at all,
+        # because the context model refuses a root without a tree and answering with one would
+        # replace a caller's minimal read with a refusal about the mount's configuration.
+        tree_id = _current_code_tree(workspace_root)
+        return (workspace_root, tree_id) if tree_id is not None else (None, None)
+    return root, _current_code_tree(root)
+
+
+def _current_code_tree(repository_root: str) -> str | None:
+    """The tree id of one repository root's current commit, or ``None`` when it has no tree.
+
+    Nothing is invented when the root is not a repository, Git is absent or Git does not answer in
+    time: the context is then built with neither half, which the shipped resolver reports as "no
+    source resolution was requested" rather than as a resolution that silently failed.
+    """
+
+    try:
+        completed = subprocess.run(
+            ["git", "-C", repository_root, "rev-parse", "HEAD^{tree}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_GIT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    tree_id = completed.stdout.strip()
+    return tree_id if _TREE_ID_PATTERN.match(tree_id) else None
+
+
+def knowledge_read_payload(
+    request: ReadToolRequest, *, workspace_root: str | None = None
+) -> dict[str, Any]:
     """Retrieve one named view at one snapshot, returning its payload or its typed refusal."""
 
     databasePath, repositoryId, view = (
@@ -228,13 +298,12 @@ def knowledge_read_payload(request: ReadToolRequest) -> dict[str, Any]:
     # to already turns all three into typed refusals, and a transport that let them escape as
     # ``ToolError`` would refuse the same input on one surface and raise on another.
     try:
+        repository_root, code_tree_id = _source_resolution(request, workspace_root)
         context = open_read_context(
             path,
             repositoryId,
-            repository_root=(
-                None if request.repository_root is None else Path(request.repository_root)
-            ),
-            code_tree_id=request.code_tree_id,
+            repository_root=None if repository_root is None else Path(repository_root),
+            code_tree_id=code_tree_id,
         )
         built = _view_request(request)
         if isinstance(built, ViewRefusal):
@@ -410,19 +479,32 @@ def knowledge_integrity_check_payload(
     databasePath: str,
     repositoryId: str,
     scopeId: str | None = None,
+    runId: str | None = None,
+    inputDigest: str | None = None,
 ) -> dict[str, Any]:
     """Report declared structural-rule violations and their limits, and produce no verdict.
 
     ``compatible`` is ``None`` and is present. A caller that wants a compatibility decision makes it;
     this operation reports conditions, a traversal scope and the observable limitations of the read,
     which is what ``Doc13:186`` writes for it.
+
+    The scope selects a run and never borrows another scope's run. Within one scope a namespace may
+    hold several runs -- the same policy re-executed over a moved snapshot is exactly that case --
+    so the exact ``runId`` or the exact ``inputDigest`` a caller names selects among them, and the
+    response always carries the selected run's identity, its input identity and the digest over it.
+    A caller is never left holding conditions it cannot tie to the inputs they were measured over.
     """
 
     # The report is a read of a dataset the caller selected, so a selection that cannot be read is
     # reported as a refusal with the same shipped code the application seam uses, rather than
     # escaping as ``ToolError`` -- a report about a file nobody could open is not a report.
     try:
-        conditions = _recorded_conditions(Path(databasePath), repositoryId, scopeId)
+        conditions = _recorded_conditions(
+            Path(databasePath),
+            repositoryId,
+            scopeId,
+            selector=_ExactInputSelector(run_id=runId, input_digest=inputDigest),
+        )
     except (KnowledgeStorageError, apsw.Error, OSError) as error:
         code, detail = _unusable_dataset(databasePath, error)
         return {
@@ -439,6 +521,11 @@ def knowledge_integrity_check_payload(
         "repositoryId": repositoryId,
         "conditions": conditions["conditions"],
         "traversalScope": conditions["scope"],
+        "selectedRunId": conditions["selectedRunId"],
+        "inputDigest": conditions["inputDigest"],
+        "inputIdentities": conditions["inputIdentities"],
+        "matchingRunIds": conditions["matchingRunIds"],
+        "exactInputSelector": conditions["exactInputSelector"],
         "limitations": conditions["limitations"],
         "compatible": None,
         "assessment": None,
@@ -446,10 +533,36 @@ def knowledge_integrity_check_payload(
     }
 
 
+@dataclass(frozen=True)
+class _ExactInputSelector:
+    """The exact run selector a caller named, as one value.
+
+    ``runId`` and ``inputDigest`` are two spellings of one request -- "report the run with this
+    identity", "report the run measured over these inputs" -- so they travel together and are echoed
+    together. A pair of ``None``s is a fact worth reporting rather than an absence: it says the run
+    below was selected by scope alone, and that ``matchingRunIds`` is where a narrower request would
+    come from.
+    """
+
+    run_id: str | None = None
+    input_digest: str | None = None
+
+    def as_wire(self) -> dict[str, Any] | None:
+        """The selector as the response spells it, or ``None`` when the caller named none."""
+
+        if self.run_id is None and self.input_digest is None:
+            return None
+        return {"runId": self.run_id, "inputDigest": self.input_digest}
+
+
 def _recorded_conditions(
-    database_path: Path, repository_id: str, scope_id: str | None
+    database_path: Path,
+    repository_id: str,
+    scope_id: str | None,
+    *,
+    selector: _ExactInputSelector | None = None,
 ) -> dict[str, Any]:
-    """The recorded detection conditions for the requested scope, with their recorded limitations.
+    """The recorded detection conditions for the requested scope and exact inputs, with their limits.
 
     The scope SELECTS the run; it is not echoed beside one. Before this, every ``detection_run``
     record was read in ``record_id`` order and the first was reported, whatever scope the caller
@@ -458,11 +571,14 @@ def _recorded_conditions(
     conditions measured over scope Y was told something false about a real dataset.
 
     The run's own ``governing_route_id`` is the registered traversal scope the tool documents, so the
-    match is against that. A caller that names no scope keeps the previous behaviour -- the first
-    recorded run -- and a caller whose scope matches no run is told so rather than handed a different
-    run's conditions.
+    match is against that. Within the selected scope, an exact ``run_id`` or ``input_digest`` picks
+    one run out of several instead of the report silently choosing the first identity-sorted match
+    and omitting which one it read. A caller that names no scope keeps the previous behaviour -- the
+    first recorded run -- and a caller whose selection matches no run is told so, with the runs that
+    did match carried back, rather than handed a different run's conditions.
     """
 
+    resolved = selector or _ExactInputSelector()
     connection = open_read_only_database(database_path)
     try:
         rows = tuple(
@@ -473,7 +589,7 @@ def _recorded_conditions(
             )
         )
         if not rows:
-            return _no_detection_run(scope_id)
+            return _no_detection_run(scope_id, resolved)
         store = OpenedKnowledgeStore(
             database_path=database_path,
             repository_id=repository_id,
@@ -481,74 +597,176 @@ def _recorded_conditions(
             connection=connection,
             resource_lock_path=database_path.with_name(f"{database_path.name}.lock"),
         )
-        result = _run_for_scope(store, (str(row[0]) for row in rows), scope_id)
+        run_ids = tuple(str(row[0]) for row in rows)
+        result = _run_for_scope(store, run_ids, scope_id, selector=resolved)
+        matching = _runs_in_scope(store, run_ids, scope_id)
         if result is None:
-            return _no_run_for_scope(scope_id)
+            return _no_run_for_scope(scope_id, resolved, matching)
     finally:
         connection.close()
-    return _condition_report(result, scope_id)
+    return _condition_report(result, scope_id, resolved, matching)
 
 
-def _no_detection_run(scope_id: str | None) -> dict[str, Any]:
+def _no_detection_run(scope_id: str | None, selector: _ExactInputSelector) -> dict[str, Any]:
     """The honest report when no detection run is recorded: no conditions and a stated limit."""
 
-    return {
-        "conditions": [],
-        "scope": scope_id or "registered",
-        "limitations": ["no detection run is recorded for this namespace at this snapshot"],
-        "unresolved": ["no recorded detection run to report conditions from"],
-    }
+    return _report_facts(
+        scope=scope_id or "registered",
+        selector=selector,
+        matching_runs=[],
+        limitations=["no detection run is recorded for this namespace at this snapshot"],
+        unresolved=["no recorded detection run to report conditions from"],
+    )
 
 
-def _run_for_scope(store: OpenedKnowledgeStore, run_ids: Iterator[str], scope_id: str | None) -> Any:
-    """The first recorded run whose registered traversal scope is the one asked for, or ``None``.
+def _run_for_scope(
+    store: OpenedKnowledgeStore,
+    run_ids: Iterable[str],
+    scope_id: str | None,
+    *,
+    selector: _ExactInputSelector | None = None,
+) -> Any:
+    """The first recorded run this request selects, or ``None`` when nothing matches.
 
     With no scope named, the first recorded run is the answer -- the behaviour this operation always
     had, kept so a caller that does not scope its request is not newly refused. With one named, a run
-    measured over a different scope is not a weaker answer but the wrong one, so the search continues
-    and a namespace with no matching run reports that instead.
+    measured over a different scope is not a weaker answer but the wrong one, so the search
+    continues and a namespace with no matching run reports that instead.
+
+    An exact ``run_id`` or ``input_digest`` is applied as well, and unlike the scope it *is* a
+    binding: a run whose recorded identity or input digest does not match the caller's is a
+    different execution, so the search continues past it and a request that names inputs nothing was
+    measured over reports no run rather than the first one that shares a scope.
     """
 
-    for run_id in run_ids:
-        result = read_detection_run(store, run_id)
-        if scope_id is None:
-            return result
+    resolved = selector or _ExactInputSelector()
+    for candidate_id in run_ids:
+        result = read_detection_run(store, candidate_id)
         run = result.run
-        if run is not None and run.governing_route_id == scope_id:
-            return result
+        if scope_id is not None and (run is None or run.governing_route_id != scope_id):
+            continue
+        if resolved.run_id is not None and candidate_id != resolved.run_id:
+            continue
+        if resolved.input_digest is not None and (
+            run is None or detection_input_digest(run) != resolved.input_digest
+        ):
+            continue
+        return result
     return None
 
 
-def _no_run_for_scope(scope_id: str | None) -> dict[str, Any]:
-    """The honest report when no recorded run measured the requested scope."""
+def _runs_in_scope(
+    store: OpenedKnowledgeStore, run_ids: Iterable[str], scope_id: str | None
+) -> list[dict[str, Any]]:
+    """Every recorded run the requested scope selects, as identity facts for the caller."""
+
+    matching: list[dict[str, Any]] = []
+    for candidate_id in run_ids:
+        result = read_detection_run(store, candidate_id)
+        run = result.run
+        if run is None:
+            continue
+        if scope_id is not None and run.governing_route_id != scope_id:
+            continue
+        matching.append(_run_identity(run))
+    return matching
+
+
+def _run_identity(run: Any) -> dict[str, Any]:
+    """One run's identity facts: its own id, its registered scope and the digest of its inputs."""
 
     return {
-        "conditions": [],
-        "scope": scope_id or "registered",
-        "limitations": [
-            f"no recorded detection run measured the requested scope {scope_id!r}; the conditions "
-            "of another scope's run are not reported in its place"
-        ],
-        "unresolved": [f"no recorded detection run for scope {scope_id!r}"],
+        "runId": run.run_id,
+        "governingRouteId": run.governing_route_id,
+        "inputDigest": detection_input_digest(run),
     }
 
 
-def _condition_report(result: Any, scope_id: str | None) -> dict[str, Any]:
-    """The recorded conditions and limitations of one detection run, and no verdict."""
+def _no_run_for_scope(
+    scope_id: str | None,
+    selector: _ExactInputSelector,
+    matching_runs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The honest report when no recorded run matches the requested scope and exact inputs."""
+
+    detail = (
+        f"no recorded detection run measured the requested scope {scope_id!r}; the conditions "
+        "of another scope's run are not reported in its place"
+        if scope_id is not None
+        else "no recorded detection run is recorded for this namespace"
+    )
+    return _report_facts(
+        scope=scope_id or "registered",
+        selector=selector,
+        matching_runs=matching_runs,
+        limitations=[detail],
+        unresolved=[
+            "no recorded detection run matches the requested scope and exact inputs; the carried "
+            "matchingRunIds list names the runs this scope does hold"
+        ],
+    )
+
+
+def _report_facts(
+    *,
+    scope: str,
+    selector: _ExactInputSelector,
+    matching_runs: list[dict[str, Any]],
+    limitations: list[str],
+    unresolved: list[str | None],
+) -> dict[str, Any]:
+    """One report's common facts: the scope, the exact selector echoed, and what matched."""
+
+    return {
+        "conditions": [],
+        "scope": scope,
+        "selectedRunId": None,
+        "inputDigest": None,
+        "inputIdentities": [],
+        "matchingRunIds": matching_runs,
+        "exactInputSelector": selector.as_wire(),
+        "limitations": limitations,
+        "unresolved": unresolved,
+    }
+
+
+def _condition_report(
+    result: Any,
+    scope_id: str | None,
+    selector: _ExactInputSelector,
+    matching_runs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """The recorded conditions and limitations of one detection run, and no verdict.
+
+    The run the conditions came from is named here, beside the input identity and the digest over
+    it, so "these conditions" and "the inputs they were measured over" are one answer. Before this
+    the response omitted all three, which left a caller unable to tell a report about its own
+    candidate from a report about another run in the same scope.
+
+    ``matchingRunIds`` carries every run this scope holds, the selected one included, so a caller
+    that received the first identity-sorted match can see that it was one of several and issue an
+    exact request from the response it already has.
+    """
 
     if result.state == "refused" or result.run is None:
-        return {
-            "conditions": [],
-            "scope": scope_id or "registered",
-            "limitations": ["the recorded detection run could not be read"],
-            "unresolved": [None if result.refusal is None else result.refusal.detail],
-        }
+        return _report_facts(
+            scope=scope_id or "registered",
+            selector=selector,
+            matching_runs=matching_runs,
+            limitations=["the recorded detection run could not be read"],
+            unresolved=[None if result.refusal is None else result.refusal.detail],
+        )
     conditions = [
         {"code": signal.condition, "matched_facts": [signal.detail]} for signal in result.signals
     ]
     return {
         "conditions": conditions,
-        "scope": scope_id or "registered",
+        "scope": result.run.governing_route_id,
+        "selectedRunId": result.run.run_id,
+        "inputDigest": detection_input_digest(result.run),
+        "inputIdentities": [detection_input_identity(result.run)],
+        "matchingRunIds": matching_runs,
+        "exactInputSelector": selector.as_wire(),
         "limitations": list(result.run.limitations),
         "unresolved": [] if conditions else ["no condition matched the recorded scope"],
     }

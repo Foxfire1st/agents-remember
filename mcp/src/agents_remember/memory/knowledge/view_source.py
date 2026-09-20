@@ -88,6 +88,11 @@ FAMILY_REVISIONS = (
     "WHERE family.repository_id = ? ORDER BY family.family_id, revision.revision_id"
 )
 
+# Membership is its own recorded entity, so it is read by its own statement here. The generic
+# ``RECORDS_OF_KIND`` statement above reads the ``knowledge_record``/``record_revision`` envelope,
+# and a ``family_member`` row is not duplicated into that envelope: a reader that asked for the kind
+# by name received no membership at all, which is how a family view could report a joint guarantee,
+# no members and no implementation locations while calling its own answer complete.
 FAMILY_MEMBERS = (
     "SELECT member_id, family_revision_id, invariant_revision_id, provenance "
     "FROM family_member WHERE repository_id = ? ORDER BY family_revision_id, member_id"
@@ -227,6 +232,21 @@ class StoreViewReader:
             )
         return self._cache[REALIZATION_CLAIMS]
 
+    def family_member_rows(self) -> tuple[ViewSourceRow, ...]:
+        """Every recorded family membership, as one row per member id.
+
+        ``family_member`` is a generation-1 entity with its own table, like ``family`` and
+        ``invariant``, so a view asking which revisions one family admits reads THIS statement. The
+        envelope reader answers only for envelope kinds, and membership has never been one.
+        """
+
+        if FAMILY_MEMBERS not in self._cache:
+            self._cache[FAMILY_MEMBERS] = tuple(
+                self._member_row(row)
+                for row in self._connection.execute(FAMILY_MEMBERS, (self._repository_id,))
+            )
+        return self._cache[FAMILY_MEMBERS]
+
     def attachment_rows(self, endpoint_kind: str, endpoint_id: str) -> tuple[ViewSourceRow, ...]:
         """Every authored facet attached to one exact endpoint revision, in attachment order."""
 
@@ -307,6 +327,26 @@ class StoreViewReader:
                 "display_version": _text(row[3]),
                 "joint_guarantee": _text(row[4]),
                 "acceptance_ref": _text(row[6]),
+            },
+        )
+
+    def _member_row(self, row: tuple[object, ...]) -> ViewSourceRow:
+        """One membership row: the family revision it belongs to and the revision it names.
+
+        The two ids travel in the payload under the names the view layer reads, and the ``change
+        locus`` such a row carries is the view's own decision rather than this reader's: this module
+        performs no selection and no classification, so the row keeps only what was recorded.
+        """
+
+        return ViewSourceRow(
+            record_kind="family_member",
+            record_schema="family-member/v1",
+            record_id=str(row[0]),
+            revision_id=None if row[1] is None else str(row[1]),
+            author_ref=_provenance_author(row[3]),
+            payload={
+                "family_revision_id": _text(row[1]),
+                "invariant_revision_id": _text(row[2]),
             },
         )
 
