@@ -60,6 +60,7 @@ __all__ = [
     "MergeOutcome",
     "MergeRequest",
     "ResolvedGitBase",
+    "RetractionPrecondition",
     "SuppliedGitBase",
     "TableCoverage",
     "expressible_decisions",
@@ -152,18 +153,24 @@ def expressible_decisions(conflict: MergeConflict | None) -> tuple[AuthoredDecis
     * a conflict that named no row at all -- a schema disagreement above all -- admits nothing: there
       is no row to reconcile, and the refusal's own next action says the difference is reported
       rather than reconciled;
-    * the referential conflict SQLite reports without a row admits ``keep-left`` only, which is the
-      retraction the refusal advertises;
+    * the referential conflict SQLite reports without a row admits ``keep-left`` only when an
+      arriving insertion can be retracted -- see :data:`RetractionPrecondition`, which the caller
+      supplies because only the application that ran the delta can observe it;
     * every conflict that named a row admits ``keep-left``, and ``keep-right`` where the overwrite
       direction is proven.
 
     This is the one place that judgement lives, so the refusal, the public response and the merge's
-    conflict policy cannot answer it differently.
+    conflict policy cannot answer it differently. The order of the first two answers is what makes
+    the referential test reachable at all: a row-less conflict has no table and no record id, so
+    asking the row-level question first would answer "no row, admit nothing" for the one code a
+    row-less decision exists for.
     """
 
     if conflict is None:
         return ()
     if conflict.code == _ROWLESS_CONFLICT_CODE:
+        if conflict.precondition == "no_arriving_insertion":
+            return ()
         return ("keep-left",)
     if conflict.table is None or conflict.record_id is None:
         return ()
@@ -186,8 +193,10 @@ class AuthoredReconciliation(KnowledgeModel):
     * both are absent, and then the decision applies only to a conflict the engine reported *without
       a row*: the referential shape, where SQLite hands the conflict callback no change at all. Only
       ``keep-left`` is expressible there, and it is not a weaker answer -- retracting the arriving
-      change is what either restores the removed row or drops the new reference, depending on which
-      side did the removing.
+      change is what restores the removed row, or drops the new reference, depending on which side
+      did the removing. It is not offered in every orientation of that code, because the retraction
+      needs a row the arriving delta *inserted* and one orientation has none: see
+      :data:`RetractionPrecondition` and :func:`expressible_decisions`.
     """
 
     table: str | None = Field(default=None, min_length=1, max_length=LABEL_MAX_LENGTH)
@@ -384,6 +393,17 @@ class MergeCoverage(KnowledgeModel):
 # operation can only make when SQLite handed the callback the change itself.
 ConflictAttribution = Literal["engine_attributed", "engine_reported_without_row"]
 
+# Whether the one retraction a row-less decision performs is available. The referential conflict is
+# the only conflict whose authored recovery is a retraction, and a retraction can only remove a row
+# the *arriving* delta inserted -- so the two values are the whole answer, and the caller supplies
+# the one it measured because only the application that ran the delta can.
+#
+# ``arriving_insertion`` is the default because it is true of every conflict that named a row, where
+# this question does not arise: ``keep-left`` retracts the arriving change by declining to apply it,
+# and no delta inspection is involved. The value is only ever consulted for the row-less referential
+# code, which is the one conflict whose recovery the engine has to have proven it can perform.
+RetractionPrecondition = Literal["arriving_insertion", "no_arriving_insertion"]
+
 
 class MergeConflict(KnowledgeModel):
     """The first blocking conflict of an application, with exactly the facts SQLite supplied.
@@ -400,6 +420,13 @@ class MergeConflict(KnowledgeModel):
       only that the application could not be completed. ``attribution`` is
       ``engine_reported_without_row``, the row fields are absent, and ``detail`` says so.
 
+    ``precondition`` is what keeps the row-less shape's *recovery* as factual as its diagnosis. The
+    code alone cannot say whether the retraction a row-less decision performs is available, and
+    answering from the code alone advertised a decision that provably could not apply in the
+    orientation where the arriving side removed a row the retained side still references. The field
+    therefore records the answer the application measured, and
+    :func:`expressible_decisions` reads it rather than the code.
+
     Nothing is fabricated to fill either gap. A row-level conflict whose change carried no readable
     key columns reports no ``record_id`` and must say so in ``detail`` rather than substitute a row
     identity, and no violation count is reported for the foreign-key shape: the pinned binding raises
@@ -413,6 +440,7 @@ class MergeConflict(KnowledgeModel):
     operation: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
     record_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     detail: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    precondition: RetractionPrecondition = "arriving_insertion"
 
     @model_validator(mode="after")
     def _require_consistent_conflict_facts(self) -> MergeConflict:

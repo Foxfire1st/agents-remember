@@ -229,6 +229,24 @@ def _shape_delete_reference(case, states: dict[str, Path]) -> None:
     )
 
 
+def _shape_delete_reference_reversed(case, states: dict[str, Path]) -> None:
+    """The OTHER orientation: the arriving (right) side removes the row the left still cites.
+
+    Same conflict code, same absence of a row in the diagnosis, and no recovery through a decision:
+    the only retraction a row-less decision performs removes a row the arriving delta *inserted*, and
+    this arriving delta inserted nothing. This is the orientation whose response used to advertise
+    that impossible call and repeat it byte-for-byte forever.
+    """
+
+    add_realization_claim(
+        states["left"],
+        f"{case.repository.repository_id}/{CONFLICT_CLAIM_ID}",
+        BASE_REVISION_ID,
+        CONFLICT_ANCHOR_ID,
+    )
+    delete_anchor(states["right"], CONFLICT_ANCHOR_ID)
+
+
 def _base_shape_anchor(case, states: dict[str, Path]) -> None:
     add_anchor(states["base"], CONFLICT_ANCHOR_ID, "src/anchors.py")
 
@@ -379,6 +397,62 @@ def _assert_delete_reference_conflict_is_retracted(case, fixture, member: str) -
     assert sorted(git(worktree, "rev-list", "--parents", "-n", "1", "HEAD").split()[1:]) == sorted(
         [left, right]
     )
+
+
+def _assert_unretractable_delete_reference_advertises_its_real_route(
+    case, fixture, member: str
+) -> None:
+    """The other orientation of the same row-less conflict stops advertising a call that cannot work.
+
+    The defect this protects: the arriving (right) side removed a row the retained side still cites,
+    and the response reported the identical diagnosis as the recoverable orientation -- ``["keep-left"]``
+    and ``nextOperation=reconcile_knowledge_resolution`` with a summary promising the merge continues.
+    Driving exactly that advertised call returned a byte-identical response forever: the retraction
+    ``keep-left`` performs removes rows the arriving delta *inserted*, and this arriving delta
+    inserted nothing.
+
+    What is asserted is the whole corrected surface and the acceptance the verifier applies to it: the
+    diagnosis is still the engine's (same code, same attribution, still no row), no decision and no
+    reconcile operation are advertised, the summary says what the caller must do instead, the call the
+    response DOES advertise is the manual continuation, driving it moves the state rather than
+    repeating the response, and no input or ref moved.
+    """
+
+    worktree = fixture.contract.memory_worktree
+    assert worktree is not None
+    left, _right = _stage_knowledge_divergence(case, fixture, member)
+    inputs = {role: file_digest(case.state_path(role)) for role in ("base", "left", "right")}
+
+    result = fixture.sync(memory_sync_choice="merge-memory")
+
+    assert result.payload["state"] == "sync-resolution-required", result.payload
+    knowledge = section(section(result.payload, "resolution"), "knowledge")
+    # The diagnosis is the engine's and is unchanged: the same code, the same attribution, and the
+    # same absence of a row -- the fact that narrowed is the *precondition*, not the diagnosis.
+    assert section(knowledge, "conflict")["code"] == "delete_reference_conflict"
+    assert section(knowledge, "conflict")["attribution"] == "engine_reported_without_row"
+    assert section(knowledge, "conflict")["precondition"] == "no_arriving_insertion"
+    assert "delete_reference_conflict" in str(result.payload["summary"])
+    assert knowledge["decisions"] == []
+    assert result.payload["nextOperation"] == "continue_sync_resolution"
+    advertised = dict(section(result.payload, "nextArgs"))
+    assert "knowledge_resolution" not in advertised
+    assert advertised["resolution_action"] == "continue"
+    # The response says what the caller must do instead of promising a continuation that cannot
+    # happen, and it still names the conflicted path and the cancel route beside it.
+    assert "restore the removed row" in str(result.payload["summary"])
+    assert section(result.payload, "resolution")["files"] == [member]
+    assert section(result.payload, "cancelArgs")["resolution_action"] == "cancel"
+
+    # Driving exactly what the response advertised moves the state. A byte-identical repeat is the
+    # failure this leaf exists for, so "the advertised call changed something" is asserted rather
+    # than "the second response is one of these states".
+    second = fixture.sync(resolution_action=advertised["resolution_action"])
+    assert second.payload["state"] != result.payload["state"], second.payload
+    assert second.payload["state"] == "sync-resolution-incomplete", second.payload
+    assert git(worktree, "diff", "--name-only", "--diff-filter=U") == member
+    assert git(worktree, "rev-parse", "HEAD") == left
+    assert {role: file_digest(case.state_path(role)) for role in inputs} == inputs
 
 
 def _assert_schema_disagreement_is_reported_not_reconciled(case, fixture, member: str) -> None:
@@ -665,6 +739,15 @@ class WorktreeSyncTests(unittest.TestCase):
             )
             _assert_delete_reference_conflict_is_retracted(
                 referential, SyncFixture(Path(tmp) / "lifecycle"), "knowledge.sqlite"
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            unrecoverable = merge_case_build(
+                Path(tmp) / "unrecoverable",
+                shape=_shape_delete_reference_reversed,
+                base_shape=_base_shape_anchor,
+            )
+            _assert_unretractable_delete_reference_advertises_its_real_route(
+                unrecoverable, SyncFixture(Path(tmp) / "lifecycle"), "knowledge.sqlite"
             )
         with tempfile.TemporaryDirectory() as tmp:
             schema = merge_case_build(

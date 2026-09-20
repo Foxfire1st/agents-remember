@@ -93,11 +93,13 @@ from agents_remember.memory.knowledge.schema_generations import SchemaGeneration
 from agents_remember.memory.knowledge.store import open_existing_knowledge_store
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.merge import (
+    AuthoredReconciliation,
     MergeBaseResolution,
     MergeConflict,
     MergeCoverage,
     MergeOutcome,
     MergeRequest,
+    RetractionPrecondition,
     TableCoverage,
 )
 from agents_remember.models.knowledge.result import KnowledgeRefusal
@@ -109,6 +111,11 @@ STAGED_LEFT_NAME = "target.sqlite"
 REPLAY_LEFT_NAME = "replay-left.sqlite"
 REPLAY_RIGHT_NAME = "replay-right.sqlite"
 _FROZEN_STAGE_NAME = "snapshot.sqlite"
+
+# The copy a referential refusal's retraction probe is applied to. It is a fourth private name for
+# the same reason as the others: the probe is a database of its own, and a probe that overwrote the
+# real target would make its answer describe a state nobody ran.
+PROBE_LEFT_NAME = "probe-left.sqlite"
 
 # SQLite's conflict codes, as the merge's conflict taxonomy names them. The mapping is by code and
 # the table decides between the two constraint meanings, because SQLite reports a duplicate row
@@ -308,7 +315,10 @@ def _apply_and_validate(run: MergeRun) -> MergeOutcome:
         return run.refused(applied.refusal)
     if applied.conflicted or applied.detail:
         return run.refused(
-            _conflict_refusal(applied, right), conflict=_conflict_facts(applied, right)
+            _conflict_refusal(applied, right),
+            conflict=_conflict_facts(
+                applied, right, precondition=_retraction_precondition(run, applied)
+            ),
         )
     inputs = MergeInputs(
         base=databases["base"],
@@ -333,6 +343,62 @@ def _apply_and_validate(run: MergeRun) -> MergeOutcome:
     if postcondition is not None:
         return run.refused(postcondition)
     return _publish(run, inputs.merged)
+
+
+def _retraction_precondition(run: MergeRun, applied: AppliedChangeset) -> RetractionPrecondition:
+    """Whether this refusal leaves the row-less retraction available, measured rather than inferred.
+
+    ``keep-left`` on a referential conflict is a *retraction*: it removes the arriving rows that
+    break a declared reference, and the retraction is bounded to rows the arriving delta INSERTED.
+    The conflict code cannot say whether such a row exists -- the same code arrives in both
+    orientations, one where the arriving side added the broken reference and one where it removed a
+    row the retained side still cites -- so answering from the code alone advertised a decision that
+    could not apply in the second orientation. This measures the answer instead, by running exactly
+    the retraction the caller's decision would author.
+
+    The measurement is the shipped application primitive, on the retained side's *own* bytes so
+    nothing the real application has applied can leak into it, and it is read for one bit: whether
+    that retraction reaches a reference-clean state. A clean state *is* the retraction the offer
+    advertises, so the offer is only made where it has already been performed once. Anything else
+    withholds the offer, and the referential case that reaches here carries a delta whose INSERTs
+    cannot account for the violation -- the arriving side removed a row the retained side still
+    references.
+
+    The probe is discarded either way. It cannot publish: a settled probe mutates only the discarded
+    copy, and an unsettled one is rolled back inside the application. It is also unreachable for a
+    conflict that named a row, because the question only arises for the one row-less code, which is
+    why the cheap code test comes first.
+    """
+
+    if applied.conflict_code != _CONFLICT_FOREIGN_KEY or applied.conflict_table is not None:
+        return "arriving_insertion"
+    probe = run.workspace / PROBE_LEFT_NAME
+    shutil.copyfile(run.paths()["left"], probe)
+    return (
+        "arriving_insertion"
+        if _retracts_arriving_rows(run.deltas["right"], probe)
+        else "no_arriving_insertion"
+    )
+
+
+def _retracts_arriving_rows(delta: Delta, probe: Path) -> bool:
+    """Apply the arriving delta's row-less decision to ``probe`` and report whether it settles.
+
+    Only a settled application is reported as a retraction, because it is the only outcome that
+    establishes one: the caller's decision was applied and the result holds no broken reference. An
+    application that hit a conflict has not shown the retraction to be unavailable, and one that
+    could not be applied at all has shown nothing, so the offer is withheld for both -- what this
+    answers is whether the offer has been *proven*, not what the conflict is. The application's own
+    outcome is deliberately not returned: the outcome of this refusal is the real application's to
+    report, and this one is a throwaway.
+    """
+
+    probe_result = apply_changeset(
+        delta,
+        probe,
+        reconciliation=AuthoredReconciliation(decision="keep-left"),
+    )
+    return not probe_result.conflicted and not probe_result.detail
 
 
 def _authored_postcondition(
@@ -747,12 +813,18 @@ def _conflict_record(applied: AppliedChangeset) -> str:
     return "/".join(applied.conflict_key)
 
 
-def _conflict_facts(applied: AppliedChangeset, delta: Delta) -> MergeConflict:
+def _conflict_facts(
+    applied: AppliedChangeset,
+    delta: Delta,
+    *,
+    precondition: RetractionPrecondition = "arriving_insertion",
+) -> MergeConflict:
     """Build the conflict record a caller can read, from the facts that actually exist.
 
-    ``delta`` is not consulted for the row: the operation the engine refused is the one the callback
-    held, and a changeset search would name a different operation whenever a table carries more than
-    one.
+    ``delta`` is not consulted: the operation the engine refused is the one the callback held, and a
+    changeset search would name a different operation whenever a table carries more than one. The
+    one fact a delta cannot answer is the retraction precondition, which is why the caller that ran
+    the retraction supplies it.
     """
 
     del delta
@@ -767,6 +839,7 @@ def _conflict_facts(applied: AppliedChangeset, delta: Delta) -> MergeConflict:
                 "the engine reported this conflict without a row: the conflict callback receives a "
                 "change only for a row-level conflict, so no table, operation or key was supplied"
             ),
+            precondition=precondition,
         )
     return MergeConflict(
         code=_CONFLICT_NAMES.get((code, is_relationship), f"unmapped_conflict_{code}"),

@@ -39,8 +39,9 @@ branch base made the leaf's own deliverable a non-member of the tree it was reso
 the leaf added was refused as *gone*, and a file the leaf modified made the resolver raise before any
 report existed. The two trees are kept apart where they must be: the resolution tree is the leaf's
 line (so the leaf's new and changed files resolve, and the recorded ``source_identity`` is the blob id
-in **that** tree), while the derived identities stay anchored to the recorded base commit, because
-identity must not move when the line advances by one commit. Every report names both trees it used.
+in **that** tree), while a derived identity is anchored to neither tree -- it is keyed on the
+repository's own namespace, so identity does not move when the line advances by one commit *or* when
+the next task runs at a different baseline. Every report names both trees it used.
 
 **No failure is an exception.** Every unreadable identity, unresolvable path or unverifiable locator
 arrives in :class:`IngestReport` as a typed refusal whose reason names the actual failure. The
@@ -2744,10 +2745,12 @@ def _report(
         code_tree_source=target.trees.code_source,
         repository_id=repository.repository_id,
         derived_identities=(
-            "uuid5 over one fixed curator-ingest namespace, the enclosure's recorded code base "
-            "commit, which identity it is (invariant, revision, anchor, claim, route), and the "
-            "entry's own id -- plus the written path for a target, because a target carries no "
-            "identity of its own in revision 1"
+            "uuid5 over one fixed curator-ingest namespace, the repository's own namespace "
+            "identity, which identity it is (invariant, revision, anchor, claim, route), and the "
+            "entry's own id -- plus, for a target, what inside the written path the citation is "
+            "about: a symbol's qualified name, or the locator kind when there is nothing finer. The "
+            "stable half is the repository namespace and never the enclosure's recorded code base "
+            "commit, because identity must not move when the baseline or the line advances"
         ),
         dry_run=dry_run,
         entries_read=read.ids,

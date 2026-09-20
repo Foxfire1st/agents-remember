@@ -72,7 +72,7 @@ from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.snapshot import candidate_database_path
 from agents_remember.models.knowledge.source import SymbolLocator
 from agents_remember.models.knowledge.view import SourceContextView, ViewRequest
-from agents_remember.worktrees.worktree_contract import WorktreeContract
+from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 from snapshot_lifecycle_test_support import build_case, create, write_record
 
 pytestmark = pytest.mark.evidence_unit
@@ -1395,7 +1395,18 @@ def test_the_report_names_the_candidate_its_receipt_the_lane_and_the_exact_input
     assert report.code_tree_source.startswith("work-line:")
     assert receipt["memory"]["tree_id"] == report.memory_tree_id == pair.memory_tree_id
     assert receipt["repository_id"] == report.repository_id
-    assert report.derived_identities
+    # The report's description of its own identity rule has to be the rule the code follows. It
+    # described uuid5 over the enclosure's recorded code base commit long after `_identity` stopped
+    # deriving from any commit, and a public field that names the wrong input is what misled a
+    # verification round into reading the identity as baseline-scoped. The rule is therefore checked
+    # against the derivation rather than against a phrase: the identity this run mints joins the
+    # repository's own namespace with the kind and the entry's own id, and the description must not
+    # name the base commit as an input.
+    assert report.code_base_commit not in report.derived_identities
+    assert "repository's own namespace" in report.derived_identities
+    assert _identity(
+        _repository_identity(load_contract(pair.contract_path), None), "invariant", "E-named"
+    ) == str(uuid5(_INGEST_NAMESPACE, f"{report.repository_id}|invariant|E-named|"))
     assert report.entries_read == ("E-named",)
 
 

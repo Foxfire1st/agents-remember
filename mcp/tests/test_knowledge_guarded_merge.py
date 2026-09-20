@@ -22,8 +22,11 @@ What the cases are, and what each fails on:
   publication that changed nothing is reported as a change.
 * :func:`test_both_conflicting_edits_refuse_whole_and_preserve_every_input` -- the refusal taxonomy:
   a same-field conflict, two independent insertions of one identity, and a removed row the other
-  side's new reference depended on in *both* orientations. Fails if a conflict is applied, resolved,
-  or mapped to the wrong code, or if a refusal modifies an input.
+  side's new reference depended on in *both* orientations -- including that the two orientations
+  differ in whether the retraction a row-less decision performs is available, so only the one that
+  has an arriving insertion to retract admits a decision. Fails if a conflict is applied, resolved, or
+  mapped to the wrong code, if an unavailable retraction is offered as expressible, or if a refusal
+  modifies an input.
 * :func:`test_every_base_and_every_input_defect_refuses_without_moving_a_dataset` -- base
   resolution and input integrity: the
   ancestry-proven and supplied claims, a history with no common base, a criss-cross history with two,
@@ -71,12 +74,14 @@ from agents_remember.memory.knowledge.schema_generations import (
 )
 from agents_remember.memory.knowledge.schema_v2 import APPENDED_TABLES
 from agents_remember.models.knowledge.merge import (
+    AuthoredReconciliation,
     MergeBaseRequest,
     MergeBaseResolution,
     MergeInput,
     MergeRequest,
     ResolvedGitBase,
     SuppliedGitBase,
+    expressible_decisions,
 )
 from agents_remember.models.knowledge.result import KnowledgeRefusal
 from agents_remember.models.knowledge.snapshot import SnapshotDestinationRequest
@@ -534,6 +539,33 @@ def test_both_conflicting_edits_refuse_whole_and_preserve_every_input(tmp_path: 
         # orientations are genuinely different inputs, which the counts below establish rather than
         # assert by naming them.
         assert_removal_orientation(reference, removing)
+
+        # ...but they are NOT the same conflict to recover from, and the difference is measured
+        # rather than inferred from the code. ``keep-left`` on this code is a *retraction* of the
+        # arriving rows that break a reference, so it is expressible exactly when the arriving (right)
+        # side inserted the offending row -- the case the removal happened on the retained side. When
+        # the arriving side performed the removal, nothing it inserted can account for the violation
+        # and the one offered decision would be performed and could not apply, which is what the
+        # public response used to advertise forever. One collected case guards both orientations
+        # because the unit ceiling is exact (D-46's mechanism turns an over-budget lane into zero
+        # tests).
+        precondition = outcome.conflict.precondition
+        if removing == "left":
+            assert precondition == "arriving_insertion", removing
+            assert expressible_decisions(outcome.conflict) == ("keep-left",), removing
+        else:
+            assert precondition == "no_arriving_insertion", removing
+            assert expressible_decisions(outcome.conflict) == (), removing
+
+        # Withdrawing the offer changed nothing about the diagnosis, the refusal, or what the caller
+        # may *say*: the code, the attribution and the action the caller is told to take are the ones
+        # this case already asserted, and the row-less decision is still a nameable input. Only the
+        # decision the conflict admits narrowed; the sync refuses that input by name against exactly
+        # this list, which is asserted through the public response in test_worktree_sync.py.
+        assert AuthoredReconciliation(decision="keep-left").record_id is None, removing
+        assert reference_refusal.next_action.endswith(
+            "A row the result still points at is never deleted to finish a merge."
+        ), removing
 
 
 # -- 4. base adjudication and input integrity ---------------------------------------------------

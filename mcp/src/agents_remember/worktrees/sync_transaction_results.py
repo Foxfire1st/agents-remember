@@ -147,13 +147,34 @@ def _resolution_guidance(
             "continue_sync_resolution",
             continuation,
             f"The retained {side.side} merge holds a conflict no authored decision settles "
-            f"({_conflict_subject(knowledge)}); resolve it in the worktree, stage it, then continue.",
+            f"({_conflict_subject(knowledge)}): {_unsettled_instruction(knowledge)}",
         )
     return (
         "continue_sync_resolution",
         continuation,
         f"Resolve and stage the retained {side.side} merge, then continue.",
     )
+
+
+def _unsettled_instruction(knowledge: SyncKnowledgeConflict) -> str:
+    """What the caller has to do about a conflict no authored decision settles.
+
+    Two conflicts reach here and they need different work, so the sentence names which one this is.
+    A referential refusal whose retraction is unavailable is the orientation where the *arriving*
+    side removed a row the retained side still cites: the missing row is not something any arriving
+    insertion can account for, so the caller restores or removes the reference by hand in the
+    worktree dataset, stages it, and continues -- or cancels, which is the continuation the response
+    carries beside this one.
+    """
+
+    conflict = knowledge.conflict
+    if conflict is not None and conflict.precondition == "no_arriving_insertion":
+        return (
+            "the arriving side removed a row the retained side still references, and no arriving "
+            "insertion can be retracted to settle it, so restore the removed row or retract the "
+            "reference in the worktree, stage it, then continue"
+        )
+    return "resolve it in the worktree, stage it, then continue"
 
 
 def _reconcile_args(
