@@ -105,6 +105,7 @@ from agents_remember.application.knowledge import (
     open_admitted_knowledge_store,
     write_authorship,
 )
+from agents_remember.application.knowledge_before_half import read_dataset_identity
 from agents_remember.application.knowledge_ingest import (
     CuratorCitation,
     CuratorEntry,
@@ -125,9 +126,9 @@ from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge import routes
 from agents_remember.memory.knowledge.anchors import read_anchor
 from agents_remember.memory.knowledge.connection import open_read_only_database
-from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.memory.knowledge.read_anchors import observe_anchor
 from agents_remember.memory.knowledge.records import decode_repository_row
+from agents_remember.memory.knowledge.refusals import selected_input_unavailable_refusal
 from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
 from agents_remember.memory_quality.style.citations import grammars
 from agents_remember.memory_quality.style.citations.extents import bound_definitions
@@ -1325,25 +1326,57 @@ def _admitted_candidate(
     ``CandidateBaseline.expected_identity`` is the baseline's own identity re-read and compared
     before a byte is copied, so a baseline that moved since it was selected is caught rather than
     silently cloned from.
+
+    A baseline the caller selected is read **on every run, resume included**, and before anything
+    else is decided: an existing candidate is a resume attempt, and a resume that names a dataset it
+    cannot read is still an unavailable selected input rather than a run that proceeds without it.
+    Reading it only on the clone path made a corrupt fork point invisible exactly where a later run
+    would go on to act on it.
     """
 
     destination = admitted_candidate_destination(candidate, repository, resolution)
+    selected: CandidateBaseline | None = None
+    if baseline is not None:
+        read = _selected_baseline(Path(baseline))
+        if isinstance(read, KnowledgeRefusal):
+            return _Admission("refused", CandidateResult(state="refused", refusal=read))
+        selected = read
     if candidate.exists():
         opened = open_knowledge_candidate(destination)
         return _Admission(opened.state, opened)
-    if baseline is not None:
-        selected = Path(baseline)
-        forked = clone_knowledge_candidate(
-            destination,
-            CandidateBaseline(database_path=selected, expected_identity=dataset_identity(selected)),
+    if selected is None:
+        created = create_knowledge_candidate(destination)
+        if created.state == "created":
+            return _Admission("created", created)
+        return _Admission("refused", created)
+    forked = clone_knowledge_candidate(destination, selected)
+    if forked.state == "created":
+        return _Admission("created", forked)
+    return _Admission("refused", forked)
+
+
+def _selected_baseline(selected: Path) -> CandidateBaseline | KnowledgeRefusal:
+    """The selected fork point as the baseline it names, or the refusal naming why it is unavailable.
+
+    The read itself -- and every reason a file is not a dataset of this code -- lives with the before
+    half's other dataset reads (:func:`~agents_remember.application.knowledge_before_half.
+    read_dataset_identity`); what stays here is the refusal *this* operation answers a selected input
+    with, because that is the admission's voice and not the reader's.
+
+    What the guard is for: a lost or corrupt expected dataset must stay a refusal that names its path
+    and its reason. An escaping storage error ends the run in a traceback instead of a report, and the
+    other reading of an unreadable fork point -- taking it as "no baseline selected" -- is how a
+    missing historical dataset comes to be silently replaced by a newly empty one. The clone's own
+    precondition still runs: this refuses the *input* the identity is read from, and the storage owner
+    independently refuses a clone whose named file is not there.
+    """
+
+    reading = read_dataset_identity(selected)
+    if isinstance(reading, str):
+        return selected_input_unavailable_refusal(
+            "clone_candidate", reading, record_id=str(selected)
         )
-        if forked.state == "created":
-            return _Admission("created", forked)
-        return _Admission("refused", forked)
-    created = create_knowledge_candidate(destination)
-    if created.state == "created":
-        return _Admission("created", created)
-    return _Admission("refused", created)
+    return CandidateBaseline(database_path=selected, expected_identity=reading)
 
 
 def _repository_namespace(database_path: Path | None) -> RepositoryIdentity | None:

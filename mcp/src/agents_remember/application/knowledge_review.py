@@ -39,6 +39,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from agents_remember.application.knowledge_before_half import unreadable_half_refusal
 from agents_remember.application.knowledge_diff import diff_knowledge_scope, open_diff_side
 from agents_remember.application.knowledge_views import read_knowledge_view
 from agents_remember.application.review_candidate_resolution import (
@@ -226,6 +227,11 @@ def list_knowledge_review_entries(
     operation answers with a page are listed. Nothing is recorded to make that true and no ranking
     is applied here -- a candidate that records no identity the pair can compare yields an empty
     list, which the caller renders as no entry rather than as an invitation to name one.
+
+    Both refusals that answer for the *pair* are stated before any subject is compared, so an
+    unreadable side is a refusal on this route exactly as it is on the composition's: a half that is
+    present but cannot be read as a dataset would otherwise raise out of the per-subject comparison,
+    which is a traceback where this surface promises a state naming the side.
     """
 
     resolved = resolve_review_candidate(config, repository_id, master, leaf_id)
@@ -253,6 +259,9 @@ def list_knowledge_review_entries(
                 offending_input=database.name,
             ),
         )
+    unreadable = unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database)
+    if unreadable is not None:
+        return _entry_refused(repository_id, master, leaf_id, unreadable)
     try:
         entries = _reviewable_entries(resolved, probe=probe)
     except KnowledgeStorageError as error:
@@ -383,6 +392,10 @@ def compose_review(
     probe: TreeDifferenceProbe | None = None,
 ) -> KnowledgeReviewResult:
     """Render one review over two already-resolved datasets. Selects nothing; calls the operations."""
+
+    unreadable = unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database)
+    if unreadable is not None:
+        return _refused(request.repository_id, unreadable)
 
     absent = missing_dataset_half(resolved)
     if absent is not None:

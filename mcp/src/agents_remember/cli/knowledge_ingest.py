@@ -42,8 +42,19 @@ CONTINUITY IS THE SAME DECISION'S OTHER HALF, AND IT ALSO HAS ONE ARGUMENT. ``--
 published dataset this task forks FROM. It is the pairing :class:`IngestSelection` documents: a
 candidate the caller names without the baseline it starts from is an empty candidate holding only
 this task's new entry, so the repository's existing invariants are absent from it and the next task
-starts blind to knowledge the repository already recorded. Without the argument nothing changed --
-the first task of a repository has no prior dataset to select and still creates an empty candidate.
+starts blind to knowledge the repository already recorded.
+
+Without the argument nothing about the candidate changed -- the first task of a repository has no
+prior dataset to select and still creates an empty candidate -- but the review's before half is now
+established rather than left absent. A repository whose *first* knowledge is what this run writes
+has a truthful before side, and it is an empty **first generation** that says so: the shipped
+initialization owner creates a schema-valid empty dataset in the candidate's own namespace, and a
+record beside it names the generation, the code base the run observed, and that pre-feature history
+is not recorded. That is what makes the first invariant an addition instead of a comparison that
+cannot open. A *selected* baseline that is missing or corrupt is a different fact and is never
+answered this way: the run refuses it by name and establishes nothing, and the bytes it captured are
+read as a dataset before they are written, so an unreadable fork point is never placed over the half
+either.
 
 The baseline is **read at the top of the run**, before the ingest publishes, and the review's
 baseline half is made from those bytes rather than from a later read of the same path. That ordering
@@ -71,6 +82,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.knowledge_before_half import (
+    baseline_origin_path,
+    read_before_half,
+    read_captured_dataset_identity,
+)
 from agents_remember.application.knowledge_curator_ingest import (
     EntryOutcome,
     IngestPublication,
@@ -78,14 +94,17 @@ from agents_remember.application.knowledge_curator_ingest import (
     IngestSelection,
     ingest_curator_list,
 )
+from agents_remember.application.knowledge_first_generation import (
+    FirstGenerationRun,
+    establish_first_generation,
+)
 from agents_remember.application.knowledge_review import (
     REVIEW_BASELINE_DIRECTORY,
     REVIEW_CANDIDATE_DIRECTORY,
     REVIEW_CANDIDATE_RELATIVE_ROOT,
 )
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
-from agents_remember.models.knowledge.snapshot import CANDIDATE_DATABASE_NAME
-from agents_remember.worktrees.worktree_contract import load_contract
+from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 EXIT_REPORTED = 0
 EXIT_REFUSED = 2
@@ -139,8 +158,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         dest="baseline",
         default=None,
         help="Path to the published dataset this task forks FROM. Omit for a repository's first "
-        "task: with no baseline and no existing candidate the run creates an empty candidate, "
-        "which is the cold start rather than the continuity path.",
+        "task: with no baseline and no existing candidate the run creates an empty candidate and "
+        "establishes the review's before half as an explicitly identified empty first generation, "
+        "which is the cold start rather than the continuity path. A named baseline that is missing "
+        "or unreadable is refused by name, and one that is unreadable is never placed in the before "
+        "half: a half that already records its first generation keeps it.",
     )
     parser.add_argument(
         "--commit",
@@ -203,7 +225,7 @@ def _publication(args: argparse.Namespace) -> IngestPublication | None:
     )
 
 
-def _review_root(args: argparse.Namespace) -> Path:
+def _review_root(contract: WorktreeContract) -> Path:
     """The leaf's canonical review knowledge root, derived from the contract.
 
     Derived from the contract's own recorded worktree group rather than from the caller and rather
@@ -212,7 +234,7 @@ def _review_root(args: argparse.Namespace) -> Path:
     agreeing.
     """
 
-    return load_contract(Path(args.contract)).worktree_group / REVIEW_CANDIDATE_RELATIVE_ROOT
+    return contract.worktree_group / REVIEW_CANDIDATE_RELATIVE_ROOT
 
 
 def _candidate_directory(args: argparse.Namespace, review_root: Path) -> Path:
@@ -263,6 +285,33 @@ def _capture_baseline(args: argparse.Namespace) -> _CapturedBaseline | str | Non
         return f"not-captured: the named baseline dataset {source} could not be read ({error})"
 
 
+def _placement_refusal(report: IngestReport) -> str | None:
+    """Why this run may put nothing in the review's before half, or ``None`` when it may.
+
+    Each condition states only what it established, and the two that concern the batch are separate
+    on purpose. The state alone cannot carry the second: a batch whose every entry REFUSED also
+    reports ``no_change``, because the batch-level state falls back to it when the batch never ran,
+    so the committed-entry list is what separates an all-refused run from an idempotent one. One
+    sentence serving both conditions read "committed no entry (replayed, committed 1)", contradicting
+    itself in a single line about the one thing this gate exists to make trustworthy.
+
+    Both ways of filling the before half are gated here rather than in each of them, because the
+    question is the same one: the half belongs to the run that committed, and a planning run, a
+    refused batch and a batch that committed nothing all leave it exactly as they found it.
+    """
+
+    if report.dry_run:
+        return "not-placed: planning run (the before half is filled by the run that commits)"
+    if report.batch_state not in COMMITTED_BATCH_STATES:
+        return f"not-placed: the batch did not commit ({report.batch_state})"
+    if not report.committed:
+        return (
+            "not-placed: the batch committed no entry "
+            f"({report.batch_state}, refused {len(report.refused)})"
+        )
+    return None
+
+
 def _placeable_baseline(
     report: IngestReport, captured: _CapturedBaseline | str | None
 ) -> _CapturedBaseline | str:
@@ -274,24 +323,11 @@ def _placeable_baseline(
     standing at those reads -- the split this function was extracted by introduced exactly that, and
     a static checker rightly refuses to assume the string branch cannot reach them. Returning the
     narrowed value makes the guard a real ``isinstance`` branch that reader and checker both follow.
-
-    Each condition states only what it established, and the two that concern the batch are separate
-    on purpose. The state alone cannot carry the second: a batch whose every entry REFUSED also
-    reports ``no_change``, because the batch-level state falls back to it when the batch never ran,
-    so the committed-entry list is what separates an all-refused run from an idempotent one. One
-    sentence serving both conditions read "committed no entry (replayed, committed 1)", contradicting
-    itself in a single line about the one thing this function exists to make trustworthy.
     """
 
-    if report.dry_run:
-        return "not-placed: planning run (the baseline is placed by the run that commits)"
-    if report.batch_state not in COMMITTED_BATCH_STATES:
-        return f"not-placed: the batch did not commit ({report.batch_state})"
-    if not report.committed:
-        return (
-            "not-placed: the batch committed no entry "
-            f"({report.batch_state}, refused {len(report.refused)})"
-        )
+    refusal = _placement_refusal(report)
+    if refusal is not None:
+        return refusal
     if not isinstance(captured, _CapturedBaseline):
         return captured or "not-placed: the baseline was not captured"
     return captured
@@ -299,11 +335,11 @@ def _placeable_baseline(
 
 def _place_review_baseline(
     args: argparse.Namespace,
-    review_root: Path,
+    contract: WorktreeContract,
     report: IngestReport,
     captured: _CapturedBaseline | str | None,
 ) -> str | None:
-    """Put the dataset this task forks from into the review's baseline half, or say why not.
+    """Fill the review's before half, or say why this run filled nothing.
 
     ``--baseline`` is the one production input that names the fork-point dataset, and the ruling this
     function implements is that the run which authors the candidate is the run that places the
@@ -319,24 +355,94 @@ def _place_review_baseline(
     itself. A destination already holding the captured dataset is left alone rather than rewritten,
     which is what makes a retry keep the fork point it was first handed instead of restating it.
 
+    A caller that named no baseline is the repository's first generation, and the half is then
+    established instead of left absent (:func:`_establish_first_generation`). Both branches fill one
+    half and one only, so a leaf reaches the review with a before side that is either the dataset it
+    forked from or an explicit record of the generation it began.
+
     Nothing is invented on the ways out: a planning run and a batch that did not commit place
-    nothing, a caller that named no baseline leaves the half absent (where ``candidate_dataset_absent``
-    is then the truthful answer), and a baseline that could not be read is reported as such rather
-    than as placed.
+    nothing, a baseline that could not be read is reported as such rather than as placed, a first
+    generation that could not be completed leaves the half absent rather than claimed, and a fork
+    point is never written over a half that already holds an identified generation or bytes that are
+    not the side they claim to be (:func:`_place_fork_point`).
     """
 
+    review_root = _review_root(contract)
     if args.baseline is None:
-        return None
+        return _establish_first_generation(args, contract, report, review_root)
     placeable = _placeable_baseline(report, captured)
     if not isinstance(placeable, _CapturedBaseline):
         return placeable
-    destination = review_root / REVIEW_BASELINE_DIRECTORY / CANDIDATE_DATABASE_NAME
+    return _place_fork_point(review_root, placeable)
+
+
+def _place_fork_point(review_root: Path, placeable: _CapturedBaseline) -> str:
+    """Copy one captured fork point into the before half, or say exactly which rule kept it out.
+
+    Three rules guard this write, each naming a state the half can already be in: it already records
+    an identified first generation, so nothing replaces the before side this leaf began from; it is
+    damaged, so it is named and left exactly as it is; or the captured bytes are not a dataset, which
+    is read *before* they are written because placing them would hand the review a before side no
+    comparison can open -- a corrupt expected dataset reported as *placed*.
+
+    A destination already holding the captured bytes is left alone rather than rewritten, which is
+    what makes a retry keep the fork point it was first handed instead of restating it.
+    """
+
+    half = read_before_half(review_root / REVIEW_BASELINE_DIRECTORY)
+    if half.state == "identified":
+        return (
+            f"not-placed: the before half at {half.database} already records its first generation "
+            f"at {baseline_origin_path(half.database.parent)}; a selected baseline does not replace "
+            "the before side this leaf began from"
+        )
+    if half.state == "damaged":
+        return f"not-placed: {half.detail}, and this run left the half exactly as it is"
+    reading = read_captured_dataset_identity(placeable.payload, placeable.origin)
+    if isinstance(reading, str):
+        return f"not-placed: {reading}, so nothing was placed in the before half"
+    destination = half.database
     already = destination.is_file() and destination.read_bytes() == placeable.payload
     if already:
         return f"present: {destination}"
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(placeable.payload)
     return f"placed: {destination} (captured from {placeable.origin} before this run)"
+
+
+def _establish_first_generation(
+    args: argparse.Namespace,
+    contract: WorktreeContract,
+    report: IngestReport,
+    review_root: Path,
+) -> str:
+    """Establish the before half as an explicitly identified empty first generation, or say why not.
+
+    The repository's first knowledge has no dataset to fork from, and the truthful before side is an
+    empty one that is *identified* as such. Leaving the half absent instead is what the review then
+    refuses -- a pair with one side missing has nothing to compare -- and the first invariant this
+    very run commits would never be displayed as an addition.
+
+    The run's own observed facts are what the record carries: the leaf the enclosure names, the
+    authorization this write is admitted under, and the code base the ingest read its citations from.
+    The last of those is the *observation* the report already prints, not a second source-endpoint
+    resolution: how a comparison binds a source side stays the review's own resolution.
+    """
+
+    refusal = _placement_refusal(report)
+    if refusal is not None:
+        return refusal
+    outcome = establish_first_generation(
+        baseline_directory=review_root / REVIEW_BASELINE_DIRECTORY,
+        candidate_directory=Path(report.candidate_directory),
+        run=FirstGenerationRun(
+            leaf_id=contract.leaf_id,
+            contract_path=str(args.contract),
+            authorization_ref=args.authorization_ref,
+            code_base_commit=report.code_base_commit or None,
+        ),
+    )
+    return outcome.detail
 
 
 def run(args: argparse.Namespace) -> int:
@@ -350,7 +456,8 @@ def run(args: argparse.Namespace) -> int:
         print("--authorization-ref must not be blank: an admitted write needs an authorization")
         return EXIT_REFUSED
     try:
-        review_root = _review_root(args)
+        contract = load_contract(Path(args.contract))
+        review_root = _review_root(contract)
         candidate_directory = _candidate_directory(args, review_root)
     except (ValueError, OSError) as error:
         print(f"the ingest was refused before it read the list: {error}")
@@ -373,7 +480,7 @@ def run(args: argparse.Namespace) -> int:
     except (ValueError, OSError) as error:
         print(f"the ingest was refused before it read the list: {error}")
         return EXIT_REFUSED
-    review_baseline = _place_review_baseline(args, review_root, report, captured_baseline)
+    review_baseline = _place_review_baseline(args, contract, report, captured_baseline)
     if args.as_json:
         print(json.dumps(_payload(report, review_baseline), indent=2, sort_keys=True))
     else:

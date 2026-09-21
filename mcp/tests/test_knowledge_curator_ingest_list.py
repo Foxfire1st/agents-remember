@@ -39,6 +39,10 @@ from typing import Any, cast
 from uuid import uuid4, uuid5
 
 import pytest
+from agents_remember.application.knowledge_before_half import (
+    BASELINE_ORIGIN_NAME,
+    baseline_origin_path,
+)
 from agents_remember.application.knowledge_curator_ingest import (
     _INGEST_NAMESPACE,
     COMMITTED,
@@ -63,9 +67,13 @@ from agents_remember.application.knowledge_read import open_read_context
 from agents_remember.application.knowledge_review import (
     REVIEW_BASELINE_DIRECTORY,
     REVIEW_CANDIDATE_RELATIVE_ROOT,
+    ReviewCandidateResolution,
+    ReviewSurfaceRequest,
+    compose_review,
 )
 from agents_remember.application.knowledge_views import read_knowledge_view
 from agents_remember.cli.__main__ import main
+from agents_remember.cli.knowledge_ingest import _CapturedBaseline, _place_fork_point
 from agents_remember.mcp.tools.knowledge import (
     DECLARED_CHANGE_KINDS,
     WRITE_ENTRY_POINT,
@@ -73,6 +81,8 @@ from agents_remember.mcp.tools.knowledge import (
     knowledge_change_payload,
 )
 from agents_remember.memory.knowledge.connection import open_read_only_database
+from agents_remember.memory.knowledge.logical import dataset_identity
+from agents_remember.models.knowledge.read import InvariantIdentitySeed
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.snapshot import (
     CANDIDATE_DATABASE_NAME,
@@ -1650,6 +1660,100 @@ def _cli_json(argv: list[str], capsys: pytest.CaptureFixture[str]) -> dict[str, 
     return cast("dict[str, Any]", json.loads(capsys.readouterr().out))
 
 
+def _review_before_half(contract: Path) -> Path:
+    """The dataset the review reads as a comparison's before side, derived as the review derives it.
+
+    One derivation, spelled once: the review resolves its before half from the contract's own
+    recorded worktree group, so a case that read the half from anywhere else could pass while the
+    review still refused the pair.
+    """
+
+    return (
+        load_contract(contract).worktree_group
+        / REVIEW_CANDIDATE_RELATIVE_ROOT
+        / REVIEW_BASELINE_DIRECTORY
+        / CANDIDATE_DATABASE_NAME
+    )
+
+
+def _cold_start_argv(contract: Path, listed: Path, candidate: Path) -> list[str]:
+    """The shipped invocation a repository's first task issues: no ``--baseline`` to name."""
+
+    return [
+        "knowledge-ingest",
+        "--contract",
+        str(contract),
+        "--list",
+        str(listed),
+        "--candidate-directory",
+        str(candidate),
+        "--authorization-ref",
+        AUTHORIZATION,
+        "--json",
+    ]
+
+
+def _one_entry_list(directory: Path, name: str, entry_id: str, symbol_name: str) -> Path:
+    """A hand-off list holding one entry, so each run in a case is a new creation operation.
+
+    The ingest's idempotency key is the entry's own id, so a case that needs a run to COMMIT writes
+    the next id rather than repeating one: a repeated id replays, and a replayed batch places nothing
+    in the before half -- which would make a case about the half pass without reaching it.
+    """
+
+    path = directory / f"{name}.json"
+    path.write_text(
+        json.dumps(
+            [
+                entry(
+                    entry_id,
+                    targets=[target(CODE_FILE, locator=symbol(symbol_name), route="pkg")],
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _private_pair(root: Path) -> SourcePair:
+    """A pair of real repositories whose own contract names a worktree group this case owns.
+
+    The session fixture's contract is shared by every case in this file, and the review's two halves
+    are derived from the contract's own recorded worktree group -- so a case that establishes or
+    reads a half through the shared contract would be measuring another case's state instead of its
+    own. ``pair`` here is the fixture *function*, whose ``__wrapped__`` builder the refused-rerun
+    case above calls for the same reason.
+    """
+
+    return cast("Any", pair).__wrapped__(cast("Any", _JourneyFactory)(root))
+
+
+def _relocated_contract(pair: SourcePair, root: Path) -> Path:
+    """One more enclosure whose recorded worktree group -- and nothing else -- is this case's root.
+
+    The review's two halves are derived from the contract's own recorded worktree group, so a case
+    that has to reach a *different* half than the session fixture's writes a contract naming one.
+    Only the four coordination cells move: the code and memory lines keep naming the fixture's real
+    repositories, because this case is about where the before half lives and not about new sources.
+    """
+
+    relocated = {
+        "root": root,
+        "task_root": root / "tasks" / "sprint",
+        "task_artifact": root / "tasks" / "sprint" / "task.md",
+        "worktree_group": root,
+    }
+    (root / "tasks" / "sprint").mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    for line in pair.contract_path.read_text(encoding="utf-8").splitlines():
+        cell = line.strip().split(":", 1)[0] if line.startswith("  ") else ""
+        lines.append(f"  {cell}: {relocated[cell]}" if cell in relocated else line)
+    contract = root / "series-contract.md"
+    contract.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return contract
+
+
 def _fork_ingest_argv(
     contract: Path, listed: Path, candidate: Path, fork: Path, expected: dict[str, Any]
 ) -> list[str]:
@@ -1716,12 +1820,7 @@ def test_a_refused_rerun_leaves_the_reviews_before_half_at_the_fork_point(
     fork_bytes = published.read_bytes()
 
     contract = _cycle01_sibling_contract(private, tmp_path, "fork")
-    before_half = (
-        load_contract(contract).worktree_group
-        / REVIEW_CANDIDATE_RELATIVE_ROOT
-        / REVIEW_BASELINE_DIRECTORY
-        / CANDIDATE_DATABASE_NAME
-    )
+    before_half = _review_before_half(contract)
 
     authored = entry(
         "E-fork", targets=[target(CODE_FILE, locator=symbol(CODE_SYMBOL), route="pkg")]
@@ -1777,6 +1876,566 @@ def test_a_refused_rerun_leaves_the_reviews_before_half_at_the_fork_point(
     assert before_half.read_bytes() == fork_bytes, (
         "a refused re-run replaced the review's before half with the dataset this leaf published, so "
         "the review now shows the addition present on both sides with an empty delta"
+    )
+
+
+# --------------------------------------------------------------------------------------------
+# THE FIRST GENERATION — a repository's first knowledge write has a before side, and it says so.
+#
+# The defect these cases seal (F03): a fresh CLI ingest with no ``--baseline`` committed its
+# candidate and left the review's before half ABSENT, and the review then refused the missing half
+# -- so the first invariant a repository ever recorded could not be displayed as an addition at
+# all. The tempting repair is the wrong one: answering the absent half with a newly empty dataset
+# and no record is how a missing historical database is silently replaced by an empty one. So the
+# half is *established* and *identified*, and a fork point the caller named that is missing or
+# corrupt is refused by name instead.
+# --------------------------------------------------------------------------------------------
+def test_a_cold_start_cli_run_establishes_an_identified_first_generation_before_half(
+    pair: SourcePair, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A repository's first knowledge write reviews against an explicit empty first generation.
+
+    The user operation is the one a curator performs on a repository that holds no knowledge yet:
+    author the first obligation through the shipped command, naming no ``--baseline`` because there
+    is no dataset to name. What the review then has to compare against is not "nothing" -- a pair
+    with one side missing is refused -- and it is not a copy of what the run just wrote either. It is
+    an empty dataset in the candidate's own namespace, and a record beside it that says which
+    generation it is and that pre-feature history was never recorded.
+
+    Five facts are measured, and the last two are what make the empty side legitimate rather than a
+    convenient invention: the dry run claims nothing; the committed run establishes the half; the
+    half is schema-valid, empty, and bound to the candidate's own namespace; its record names the
+    dataset identity that is actually on disk; and a later run committing a second obligation leaves
+    the half byte for byte as it was.
+    """
+
+    own = _private_pair(tmp_path / "cold-start")
+    listed = tmp_path / "first-generation.json"
+    listed.write_text(
+        json.dumps(
+            [
+                entry(
+                    "E-first",
+                    targets=[target(CODE_FILE, locator=symbol(CODE_SYMBOL), route="pkg")],
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+    candidate = tmp_path / "first-generation-candidate"
+    argv = _cold_start_argv(own.contract_path, listed, candidate)
+    before_half = _review_before_half(own.contract_path)
+
+    # PLANNING IS THE DEFAULT AND IT CLAIMS NOTHING: no candidate, no before half, and the report
+    # says the half is placed by the run that commits rather than reporting a state nothing reached.
+    planning = _cli_json(argv, capsys)
+    assert planning["batchState"] != "changed", planning
+    assert planning["reviewBaseline"].startswith("not-placed"), planning["reviewBaseline"]
+    assert not before_half.exists()
+    assert not candidate.exists()
+
+    established = _cli_json([*argv, "--commit"], capsys)
+    assert established["batchState"] == "changed", established
+    assert [one["entryId"] for one in established["committed"]] == ["E-first"], established
+    assert established["reviewBaseline"].startswith("established:"), established["reviewBaseline"]
+    assert before_half.is_file(), (
+        "the cold-start run committed its candidate and left the review's before half absent, so the "
+        "pair has one side and the first addition cannot be displayed"
+    )
+    assert str(before_half) in established["reviewBaseline"]
+
+    # THE HALF IS EMPTY, and that is the point: the populated candidate is never copied backward as
+    # its own origin -- doing so would display the first addition as present on both sides.
+    assert _cycle01_candidate_rows(before_half) == (set(), set()), (
+        "the before half carries the candidate's own rows, so the first addition is present on both "
+        "sides of the comparison"
+    )
+    candidate_database = candidate_database_path(candidate)
+    invariants, revisions = _cycle01_candidate_rows(candidate_database)
+    assert len(invariants) == 1 and len(revisions) == 1, (invariants, revisions)
+
+    # ... AND IT IS IN THE CANDIDATE'S OWN NAMESPACE, which is what makes the two halves one pair.
+    baseline_identity = dataset_identity(before_half)
+    candidate_identity = dataset_identity(candidate_database)
+    assert baseline_identity.repository_id == candidate_identity.repository_id
+    assert baseline_identity.repository_id == established["repositoryId"]
+    assert candidate_identity.logical_digest != baseline_identity.logical_digest
+
+    # THE ORIGIN RECORD IS WHAT MAKES IT A FIRST GENERATION AND NOT AN UNKNOWN: the exact dataset
+    # identity that is on disk, the namespace, the run's own admitted facts, and the one state that
+    # distinguishes this from a history that was measured and found empty.
+    origin_path = baseline_origin_path(before_half.parent)
+    assert origin_path.name == BASELINE_ORIGIN_NAME
+    origin = json.loads(origin_path.read_text(encoding="utf-8"))
+    assert origin["state"] == "first-generation", origin
+    assert origin["pre_feature_history"] == "not-recorded", origin
+    # What this run observed is that it was handed no fork point -- not a claim about what other
+    # tasks of the same repository may have published elsewhere, which no input here establishes.
+    assert origin["selected_baseline"] == "none", origin
+    assert origin["repository_id"] == baseline_identity.repository_id, origin
+    assert origin["schema_version"] == baseline_identity.schema_version, origin
+    assert origin["logical_digest"] == baseline_identity.logical_digest, origin
+    assert origin["authority_home"] == "agents-remember", origin
+    assert origin["leaf_id"] == CONTRACT_LEAF_ID, origin
+    assert origin["contract_path"] == str(own.contract_path), origin
+    assert origin["authorization_ref"] == AUTHORIZATION, origin
+    assert origin["code_base_commit"] == established["codeBaseCommit"], origin
+
+    # A LATER RUN DOES NOT RESTATE THE BEFORE SIDE. The second obligation is a new creation
+    # operation, so the batch commits -- and the half, having been established, is reported present
+    # and left exactly as it was rather than rewritten from whatever this run happens to hold.
+    second = tmp_path / "second-generation.json"
+    second.write_text(
+        json.dumps(
+            [
+                entry(
+                    "E-second",
+                    targets=[target(CODE_FILE, locator=symbol(CODE_OTHER_SYMBOL), route="pkg")],
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+    half_bytes, origin_bytes = before_half.read_bytes(), origin_path.read_bytes()
+    later = _cli_json([*_cold_start_argv(own.contract_path, second, candidate), "--commit"], capsys)
+    assert later["batchState"] == "changed", later
+    assert later["reviewBaseline"].startswith("present:"), later["reviewBaseline"]
+    assert before_half.read_bytes() == half_bytes, (
+        "a later run restated the review's before side instead of keeping the first generation it was "
+        "first handed"
+    )
+    assert origin_path.read_bytes() == origin_bytes, "a later run rewrote the recorded origin"
+
+
+def test_the_first_generation_pair_reviews_the_first_invariant_as_an_addition(
+    pair: SourcePair, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The pair the cold-start run authored is the pair the shipped comparison opens.
+
+    This is the other half of the same user operation: establishing a before side is worth nothing
+    unless the review then reads the two datasets as one comparison. The resolution is built from the
+    two paths the ingest actually wrote and the namespace the datasets actually record -- not from a
+    fixture payload -- and the shipped composition is asked for the subject the run committed.
+
+    What proves the requirement is which side the subject is on: the first invariant a repository
+    ever recorded is ``present`` after and ``absent`` before, and the before side says the snapshot
+    selected no record for it rather than rendering an empty statement. An empty before *side* is not
+    an empty history, and the surface has no state that could call it one.
+    """
+
+    own = _private_pair(tmp_path / "addition")
+    listed = tmp_path / "addition.json"
+    listed.write_text(
+        json.dumps(
+            [
+                entry(
+                    "E-addition",
+                    targets=[target(CODE_FILE, locator=symbol(CODE_SYMBOL), route="pkg")],
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+    candidate = tmp_path / "addition-candidate"
+    report = _cli_json(
+        [*_cold_start_argv(own.contract_path, listed, candidate), "--commit"], capsys
+    )
+    assert report["reviewBaseline"].startswith("established:"), report["reviewBaseline"]
+
+    before_half = _review_before_half(own.contract_path)
+    candidate_database = candidate_database_path(candidate)
+    namespace = dataset_identity(candidate_database).repository_id
+    invariant_id = next(iter(_cycle01_candidate_rows(candidate_database)[0]))
+    resolution = ReviewCandidateResolution(
+        repository_id=namespace,
+        leaf_id=CONTRACT_LEAF_ID,
+        baseline_database=before_half,
+        candidate_database=candidate_database,
+        baseline_code_root=own.code_root,
+        candidate_code_root=None,
+        baseline_code_tree_id=own.code_tree_id,
+        candidate_code_tree_id=None,
+    )
+
+    result = compose_review(
+        resolution,
+        ReviewSurfaceRequest(
+            repository_id=namespace,
+            master="ingest_case",
+            leaf_id=CONTRACT_LEAF_ID,
+            selector=InvariantIdentitySeed(invariant_id=invariant_id),
+        ),
+    )
+    assert result.state == "review", result.refusal
+    assert result.payload is not None
+    pane = result.payload.knowledge
+    assert pane.after_statement.state == "present", pane.after_statement
+    assert pane.after_statement.text == "The obligation E-addition records.", pane.after_statement
+    assert pane.before_statement.state == "absent", (
+        "the first invariant of a repository is not displayed as an addition: the before side did "
+        f"not report an absent record ({pane.before_statement})"
+    )
+
+
+def test_a_lost_or_corrupt_selected_baseline_is_refused_by_name_and_establishes_nothing(
+    pair: SourcePair, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A named fork point that is not a readable dataset is unavailable, and stays that way.
+
+    This is the non-conforming case the requirement names: a *missing historical database* must not
+    be silently replaced with a newly empty one. The caller selected a fork point, so the empty first
+    generation is not this run's answer -- the run refuses the input by name, writes no candidate,
+    establishes no before half, and records no origin. Both ways an expected dataset can be
+    unavailable are exercised, because they fail differently: the path is gone, and the path holds
+    something that is not a dataset of this code.
+
+    It is also the regression for a defect the intake did not reach: both of these used to end in an
+    escaping storage error rather than a report, so an operator saw a traceback instead of the
+    refusal that names the path and the reason.
+    """
+
+    own = _private_pair(tmp_path / "selected-baseline")
+    listed = tmp_path / "selected-baseline.json"
+    listed.write_text(
+        json.dumps(
+            [
+                entry(
+                    "E-selected",
+                    targets=[target(CODE_FILE, locator=symbol(CODE_SYMBOL), route="pkg")],
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+    corrupt = tmp_path / "corrupt.sqlite"
+    corrupt.write_bytes(b"this is not a database\n")
+    before_half = _review_before_half(own.contract_path)
+
+    for state, selected in (("lost", tmp_path / "absent.sqlite"), ("corrupt", corrupt)):
+        candidate = tmp_path / f"{state}-candidate"
+        report = _cli_json(
+            [
+                *_cold_start_argv(own.contract_path, listed, candidate),
+                "--commit",
+                "--baseline",
+                str(selected),
+            ],
+            capsys,
+        )
+        assert report["batchState"] == "not_attempted", (state, report)
+        assert report["committed"] == [], (state, report)
+        refusal = report["batchRefusal"]
+        assert refusal is not None and refusal["code"] == "selected_input_unavailable", (
+            state,
+            report,
+        )
+        assert str(selected) in refusal["detail"], (state, refusal)
+        # "Stays unavailable" is the whole point: the run reports the failure and invents nothing --
+        # no candidate, no before half, and no origin claiming a first generation for this repository.
+        assert not candidate.exists(), (state, report)
+        assert report["reviewBaseline"].startswith("not-placed"), (state, report["reviewBaseline"])
+        assert not before_half.exists(), (
+            f"the {state} selected baseline was answered with a before half: a missing historical "
+            "dataset has been replaced with a newly empty one"
+        )
+        assert not baseline_origin_path(before_half.parent).exists(), (state, report)
+        # Every handed-over entry names the same refusal, so the operator learns which input failed
+        # rather than which entry did.
+        assert [one["entryId"] for one in report["refused"]] == ["E-selected"], (state, report)
+        assert "selected_input_unavailable" in report["refused"][0]["refusal"], (state, report)
+
+
+def test_a_first_generation_that_cannot_be_exposed_leaves_no_claimed_baseline(
+    pair: SourcePair, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Initialization failure cannot leave a baseline this repository would read as valid.
+
+    The before half is built privately and promoted as one directory, so the failure this case forces
+    is the one that happens at the last step: the half's own directory is already occupied by content
+    this run did not write, and the promote cannot replace it. The run must then claim nothing.
+
+    Four facts are measured. The failure is named with the path it could not reach and the reason.
+    No dataset and no origin record exist at the half, so a later review cannot open a comparison
+    against a half that was never established. The foreign content is exactly as it was -- a failed
+    establishment does not delete what it found. And the half's directory holds nothing but that
+    foreign content, so the private stage the attempt built did not survive it either.
+    """
+
+    root = tmp_path / "occupied-root"
+    contract = _relocated_contract(pair, root)
+    half_directory = root / REVIEW_CANDIDATE_RELATIVE_ROOT / REVIEW_BASELINE_DIRECTORY
+    half_directory.mkdir(parents=True)
+    foreign = half_directory / "unrelated.txt"
+    foreign.write_text("content this run did not write\n", encoding="utf-8")
+    listed = tmp_path / "occupied.json"
+    listed.write_text(
+        json.dumps(
+            [
+                entry(
+                    "E-occupied",
+                    targets=[target(CODE_FILE, locator=symbol(CODE_SYMBOL), route="pkg")],
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = _cli_json(
+        [*_cold_start_argv(contract, listed, tmp_path / "occupied-candidate"), "--commit"], capsys
+    )
+    assert report["batchState"] == "changed", report
+    assert [one["entryId"] for one in report["committed"]] == ["E-occupied"], report
+    assert report["reviewBaseline"].startswith("not-established:"), report["reviewBaseline"]
+    assert str(half_directory) in report["reviewBaseline"], report["reviewBaseline"]
+    assert not (half_directory / CANDIDATE_DATABASE_NAME).exists(), (
+        "a first generation that could not be exposed left a dataset behind, so the review would open "
+        "a before side this run never established"
+    )
+    assert not baseline_origin_path(half_directory).exists(), report["reviewBaseline"]
+    assert foreign.read_text(encoding="utf-8") == "content this run did not write\n", (
+        "the failed establishment removed or rewrote content it did not write"
+    )
+    assert sorted(one.name for one in half_directory.iterdir()) == ["unrelated.txt"], (
+        "the attempt left its private stage behind in the half"
+    )
+
+
+def test_a_resume_run_that_names_an_unreadable_baseline_replaces_nothing(
+    pair: SourcePair, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A selected fork point is read on every run, so a resume cannot act on an unreadable one.
+
+    The user operation is the one a curator performs on a leaf they have already ingested into: a
+    second obligation is handed over with ``--baseline`` still naming the dataset the repository
+    forks from -- and that path is gone, or holds something that is not a dataset. The candidate
+    already exists, so nothing needs to be cloned from the baseline, and that is exactly how the
+    unavailable input used to disappear: the run committed, and the review's before half was then
+    filled from the bytes it had captured, replacing an identified first generation with a corrupt
+    file and reporting it *placed*.
+
+    Four facts are measured for both reasons the input can be unavailable: the run refuses the
+    selected input by name and commits nothing; the candidate gains no row; every handed-over entry
+    names the same refusal; and the established half and its origin record are byte-for-byte what
+    they were.
+    """
+
+    own = _private_pair(tmp_path / "resume-unreadable")
+    first = _one_entry_list(tmp_path, "resume-first", "E-established", CODE_SYMBOL)
+    candidate = tmp_path / "resume-candidate"
+    established = _cli_json(
+        [*_cold_start_argv(own.contract_path, first, candidate), "--commit"], capsys
+    )
+    assert established["reviewBaseline"].startswith("established:"), established["reviewBaseline"]
+    half = _review_before_half(own.contract_path)
+    origin_path = baseline_origin_path(half.parent)
+    half_bytes, origin_bytes = half.read_bytes(), origin_path.read_bytes()
+    candidate_database = candidate_database_path(candidate)
+    before_rows = _cycle01_candidate_rows(candidate_database)
+
+    corrupt = tmp_path / "corrupt.sqlite"
+    corrupt.write_bytes(b"this is not a database\n")
+    second = _one_entry_list(tmp_path, "resume-second", "E-resumed", CODE_OTHER_SYMBOL)
+
+    for state, selected in (("lost", tmp_path / "absent.sqlite"), ("corrupt", corrupt)):
+        report = _cli_json(
+            [
+                *_cold_start_argv(own.contract_path, second, candidate),
+                "--commit",
+                "--baseline",
+                str(selected),
+            ],
+            capsys,
+        )
+        assert report["batchState"] == "not_attempted", (state, report)
+        assert report["committed"] == [], (state, report)
+        refusal = report["batchRefusal"]
+        assert refusal is not None and refusal["code"] == "selected_input_unavailable", (
+            state,
+            report,
+        )
+        assert str(selected) in refusal["detail"], (state, refusal)
+        assert [one["entryId"] for one in report["refused"]] == ["E-resumed"], (state, report)
+        assert report["reviewBaseline"].startswith("not-placed"), (state, report["reviewBaseline"])
+        # THE REGRESSION: the established before half and its record are untouched. Before the
+        # selected baseline was read on the resume path this run committed and then reported
+        # "placed: ... (captured from .../corrupt.sqlite before this run)", leaving a damaged dataset
+        # beside an origin record that no longer matched it.
+        assert half.read_bytes() == half_bytes, (
+            f"the {state} selected baseline was placed over the review's before half, so an "
+            "identified first generation was replaced by a dataset that is not one"
+        )
+        assert origin_path.read_bytes() == origin_bytes, (state, report)
+        assert _cycle01_candidate_rows(candidate_database) == before_rows, (
+            f"the {state} selected baseline was refused but the candidate still gained a row"
+        )
+    # The origin record still identifies the bytes that are actually there.
+    assert json.loads(origin_path.read_text(encoding="utf-8"))["logical_digest"] == (
+        dataset_identity(half).logical_digest
+    ), "the refused runs left a recorded origin that disagrees with the dataset beside it"
+
+
+def test_a_damaged_before_half_is_named_and_left_exactly_as_it_is(
+    pair: SourcePair, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A half whose bytes are not the generation its record names is damage, not an identification.
+
+    Two ways a half can stop being the first generation it recorded are exercised on one leaf, in
+    order: the dataset is replaced by bytes that are not a dataset at all, and then by a *readable*
+    dataset that is simply not the one the record was written for. The second is the harder case and
+    the one a "is there a file?" check cannot see: the file opens, so only the recorded identity can
+    tell that this is no longer the generation that was established.
+
+    Every fact worth measuring follows from the state being named: the run says ``not-established``
+    with the path and the reason instead of reporting an identified generation; the half's own bytes
+    and the record are left exactly as they are, because neither a damaged side nor the record of
+    what it should have been is this run's to rewrite; and the candidate write the run *was* asked
+    for still lands, because the damage is in the review's before side and not in the candidate.
+    """
+
+    own = _private_pair(tmp_path / "damaged-half")
+    listed = _one_entry_list(tmp_path, "damaged-first", "E-established", CODE_SYMBOL)
+    candidate = tmp_path / "damaged-candidate"
+    established = _cli_json(
+        [*_cold_start_argv(own.contract_path, listed, candidate), "--commit"], capsys
+    )
+    assert established["reviewBaseline"].startswith("established:"), established["reviewBaseline"]
+    half = _review_before_half(own.contract_path)
+    origin_path = baseline_origin_path(half.parent)
+    origin_bytes = origin_path.read_bytes()
+    candidate_database = candidate_database_path(candidate)
+
+    garbage = b"not a database at all\n"
+    for index, (damage, payload, expected) in enumerate(
+        (
+            ("unreadable bytes", garbage, "could not be read as a dataset"),
+            (
+                "a dataset the record does not name",
+                candidate_database.read_bytes(),
+                "logical_digest",
+            ),
+        )
+    ):
+        half.write_bytes(payload)
+        # A distinct entry id per run, so each run really commits and the before half is reached
+        # rather than skipped by the gate that keeps a replayed batch from placing anything.
+        committing = _one_entry_list(
+            tmp_path, f"damaged-{index}", f"E-damaged-{index}", CODE_OTHER_SYMBOL
+        )
+        report = _cli_json(
+            [*_cold_start_argv(own.contract_path, committing, candidate), "--commit"], capsys
+        )
+        assert report["batchState"] == "changed", (damage, report)
+        assert [one["entryId"] for one in report["committed"]] == [f"E-damaged-{index}"], (
+            damage,
+            report,
+        )
+        assert report["reviewBaseline"].startswith("not-established:"), (
+            damage,
+            report["reviewBaseline"],
+        )
+        assert str(half) in report["reviewBaseline"], (damage, report["reviewBaseline"])
+        assert expected in report["reviewBaseline"], (damage, report["reviewBaseline"])
+        assert half.read_bytes() == payload, (
+            f"the run rewrote a before half damaged by {damage} instead of leaving it as it was"
+        )
+        assert origin_path.read_bytes() == origin_bytes, (damage, report)
+    assert json.loads(origin_path.read_text(encoding="utf-8"))["logical_digest"] != (
+        dataset_identity(half).logical_digest
+    ), "the case no longer exercises a recorded origin that disagrees with the bytes beside it"
+
+
+def test_an_established_first_generation_is_not_replaced_by_a_later_selected_baseline(
+    pair: SourcePair, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A leaf that began from nothing keeps that before side, even when a later run names a baseline.
+
+    The user operation is a curator's second run of an enclosure whose first knowledge was already
+    written: the hand-off list names the next obligation, and ``--baseline`` names a dataset the
+    repository published since. The candidate legitimately gains that entry -- the run committed it --
+    but the review's before half is the identified first generation this leaf began from, and
+    replacing it with a later dataset would silently rewrite what the comparison is *of*.
+
+    The rest of the case is what a reader needs to trust that answer: the published dataset is a real
+    one this code reads, the half's bytes and origin record are exactly what they were, and the
+    report says the half already records its first generation rather than reporting a placement.
+    """
+
+    own = _private_pair(tmp_path / "identified-half")
+    published = tmp_path / "published.sqlite"
+    first = _one_entry_list(tmp_path, "identified-first", "E-identified", CODE_SYMBOL)
+    candidate = tmp_path / "identified-candidate"
+    established = _cli_json(
+        [
+            *_cold_start_argv(own.contract_path, first, candidate),
+            "--commit",
+            "--publish-to",
+            str(published),
+        ],
+        capsys,
+    )
+    assert established["reviewBaseline"].startswith("established:"), established["reviewBaseline"]
+    assert published.is_file() and dataset_identity(published).logical_digest, established
+    half = _review_before_half(own.contract_path)
+    origin_path = baseline_origin_path(half.parent)
+    half_bytes, origin_bytes = half.read_bytes(), origin_path.read_bytes()
+
+    second = _one_entry_list(tmp_path, "identified-second", "E-later", CODE_OTHER_SYMBOL)
+    later = _cli_json(
+        [
+            *_cold_start_argv(own.contract_path, second, candidate),
+            "--commit",
+            "--baseline",
+            str(published),
+        ],
+        capsys,
+    )
+    assert later["batchState"] == "changed", later
+    assert [one["entryId"] for one in later["committed"]] == ["E-later"], later
+    assert later["reviewBaseline"].startswith("not-placed:"), later["reviewBaseline"]
+    assert str(half) in later["reviewBaseline"], later["reviewBaseline"]
+    assert "already records its first generation" in later["reviewBaseline"], later[
+        "reviewBaseline"
+    ]
+    assert half.read_bytes() == half_bytes, (
+        "a selected baseline replaced the identified first generation this leaf began from"
+    )
+    assert origin_path.read_bytes() == origin_bytes, later["reviewBaseline"]
+
+
+def test_the_write_site_places_only_bytes_that_read_as_a_dataset(tmp_path: Path) -> None:
+    """The before half is filled with bytes that read as a dataset of this code, or not at all.
+
+    This is the write site's own precondition rather than a repeat of the admission's: the admission
+    answers for the *input path* it was handed, while this answers for the bytes that would actually
+    land in the half -- the last thing standing between a corrupt fork point and a before side no
+    comparison can open. It is driven here because the operation refuses an unreadable selected
+    baseline earlier, which is the right order and also why a CLI-level case cannot reach this rule.
+
+    Both directions are measured: bytes that are not a dataset are refused by name and leave nothing
+    behind, and a real dataset is written, then kept as it is by the retry that follows.
+    """
+
+    review_root = tmp_path / "write-site"
+    origin = tmp_path / "corrupt.sqlite"
+    origin.write_bytes(b"this is not a database\n")
+    refused = _place_fork_point(
+        review_root, _CapturedBaseline(origin=origin, payload=origin.read_bytes())
+    )
+    assert refused.startswith("not-placed:"), refused
+    assert str(origin) in refused and "could not be read as a dataset" in refused, refused
+    assert not (review_root / REVIEW_BASELINE_DIRECTORY).exists(), refused
+
+    case = build_case(tmp_path / "write-site-valid")
+    assert create(case).state == "created", "the fixture did not produce a real dataset"
+    placeable = _CapturedBaseline(
+        origin=case.database_path, payload=case.database_path.read_bytes()
+    )
+    placed = _place_fork_point(review_root, placeable)
+    assert placed.startswith("placed:"), placed
+    destination = review_root / REVIEW_BASELINE_DIRECTORY / CANDIDATE_DATABASE_NAME
+    assert destination.read_bytes() == placeable.payload, placed
+    assert _place_fork_point(review_root, placeable).startswith("present:"), (
+        "a retry restated the before side it was first handed"
     )
 
 
