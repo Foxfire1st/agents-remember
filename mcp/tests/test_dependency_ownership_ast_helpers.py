@@ -43,8 +43,40 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "24e760a124d5f0d3a608295533720168b47e8a2ee28f6ee85c493e3778cdbed4"
+LIFECYCLE_CATALOG_SHA256 = "3f91773d5533139aa24df0e75ddafcecbc68cd9797b7663084f8aca567176c57"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Consequence repair (260921-ICR-L18, 2026-09-21) -- attributed to the `260921-ICR-L19` landing, and NOT
+ICR-R17/R18 work.** The sync that landed ``260921-ICR-L19`` rewrote ``mcp/tests/test_read_ar_files.py``
+and added ``from read_scope_test_support import (build_read_scope_fixture, ...)`` to it, which makes that
+module a source-derived consumer of the pre-existing ``consumer_scope = "exact"`` row
+``mcp/tests/read_scope_test_support.py`` -- a row L19's landing did not update, so
+``test_repository_inputs_reach_their_supported_consumers`` reported
+``missing=['mcp/tests/test_read_ar_files.py']`` on the merged tip. The entry was derived from the census
+itself (``RepositoryDependencyFacts.observed_test_consumers``: 14 derived paths against 13 declared, with
+``unsupported=[]``) and appended, which closes the proof with **no artifact registered, no row added, no
+identity moved** and the population unchanged at **sixteen contracts / sixty-six artifacts**. Two
+pre-existing facts of that row are deliberately untouched: it lists ``mcp/tests/test_knowledge_curator_ingest.py``
+twice (tolerated because the proof compares sets), and its list is otherwise sorted, so the new entry sits
+last. The catalog is re-pinned to
+``3f91773d5533139aa24df0e75ddafcecbc68cd9797b7663084f8aca567176c57``, measured with
+``sha256sum mcp/tests/evidence-lifecycle.toml`` on the delivered candidate.
+
+``260921-ICR-L18`` (requirement ``ICR-R18@v1``) registered no artifact and no contract of its own: its
+cases live in two ordinary unit modules -- ``mcp/tests/test_knowledge_ingest_comparison_generation.py``
+(the successful journey) and ``mcp/tests/test_knowledge_ingest_failure_windows.py`` (every way a
+placement refuses or loses a leg, extracted there so neither module approaches the file-size rail) --
+which import the existing ingest-list fixture module and ``snapshot_lifecycle_test_support`` rather than
+introducing a third support module. Its catalog change is therefore a *consumer* change only, and
+exactly two ``consumer_scope = "exact"`` rows gained both paths: ``mcp/tests/snapshot_lifecycle_test_support.py``
+(it builds the real datasets the cases publish and rebase) and the Node ``package-lock.json`` fixture,
+which the census's own propagation rule reaches through the support module those rows already name.
+**Nothing was registered, no row was removed and no artifact's identity moved**, so the population stays
+at **sixteen contracts / sixty-six artifacts** and the catalog was re-pinned to
+``4fb2bc3f2da65134e428631f0e964f4f712e6655f4816934e2a93a4cb8e32046``, measured with
+``sha256sum mcp/tests/evidence-lifecycle.toml`` on this leaf's own candidate **before** the consequence
+repair recorded above (that value is historical; the pin in force is ``3f91773d...``). The proof's own
+artifact delta remains exactly empty.
 
 ``260921-ICR-L1`` (requirement ``ICR-R01@v1``) registered no artifact and no contract of its own -- its
 source-endpoint cases build on the existing ``diff_scope_test_support`` and ``read_scope_test_support``

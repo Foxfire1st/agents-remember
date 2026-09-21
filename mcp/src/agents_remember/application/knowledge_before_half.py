@@ -1,10 +1,13 @@
 """The review's before half: the dataset it holds, the generation it records, and how to read both.
 
 A comparison is *between* two datasets, so whatever a review is opened on must have a before side.
-That side is one directory in the leaf's disposable knowledge root holding exactly two files: the
-dataset the comparison opens, and the origin record that says which generation the dataset is. This
-module owns that layout, the reads that decide what the half currently *is*, and the record of its
-provenance. Establishing a first generation is the separate act in
+That side is one directory in the leaf's disposable knowledge root holding the dataset the comparison
+opens and **one** provenance record beside it: the origin record below for the identified first
+generation this leaf began from, or the selected baseline's generation record
+(:mod:`agents_remember.application.knowledge_baseline_generation`) for a fork point a run was handed
+-- never both, because a half began from exactly one of them. This module owns that layout, the reads
+that decide what the half currently *is*, and the record of a first generation's provenance.
+Establishing a first generation is the separate act in
 :mod:`agents_remember.application.knowledge_first_generation`, which is the caller of the readers
 here.
 

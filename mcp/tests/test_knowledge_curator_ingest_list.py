@@ -73,7 +73,6 @@ from agents_remember.application.knowledge_review import (
 )
 from agents_remember.application.knowledge_views import read_knowledge_view
 from agents_remember.cli.__main__ import main
-from agents_remember.cli.knowledge_ingest import _CapturedBaseline, _place_fork_point
 from agents_remember.mcp.tools.knowledge import (
     DECLARED_CHANGE_KINDS,
     WRITE_ENTRY_POINT,
@@ -2402,41 +2401,12 @@ def test_an_established_first_generation_is_not_replaced_by_a_later_selected_bas
     assert origin_path.read_bytes() == origin_bytes, later["reviewBaseline"]
 
 
-def test_the_write_site_places_only_bytes_that_read_as_a_dataset(tmp_path: Path) -> None:
-    """The before half is filled with bytes that read as a dataset of this code, or not at all.
-
-    This is the write site's own precondition rather than a repeat of the admission's: the admission
-    answers for the *input path* it was handed, while this answers for the bytes that would actually
-    land in the half -- the last thing standing between a corrupt fork point and a before side no
-    comparison can open. It is driven here because the operation refuses an unreadable selected
-    baseline earlier, which is the right order and also why a CLI-level case cannot reach this rule.
-
-    Both directions are measured: bytes that are not a dataset are refused by name and leave nothing
-    behind, and a real dataset is written, then kept as it is by the retry that follows.
-    """
-
-    review_root = tmp_path / "write-site"
-    origin = tmp_path / "corrupt.sqlite"
-    origin.write_bytes(b"this is not a database\n")
-    refused = _place_fork_point(
-        review_root, _CapturedBaseline(origin=origin, payload=origin.read_bytes())
-    )
-    assert refused.startswith("not-placed:"), refused
-    assert str(origin) in refused and "could not be read as a dataset" in refused, refused
-    assert not (review_root / REVIEW_BASELINE_DIRECTORY).exists(), refused
-
-    case = build_case(tmp_path / "write-site-valid")
-    assert create(case).state == "created", "the fixture did not produce a real dataset"
-    placeable = _CapturedBaseline(
-        origin=case.database_path, payload=case.database_path.read_bytes()
-    )
-    placed = _place_fork_point(review_root, placeable)
-    assert placed.startswith("placed:"), placed
-    destination = review_root / REVIEW_BASELINE_DIRECTORY / CANDIDATE_DATABASE_NAME
-    assert destination.read_bytes() == placeable.payload, placed
-    assert _place_fork_point(review_root, placeable).startswith("present:"), (
-        "a retry restated the before side it was first handed"
-    )
+# The write site's own precondition -- that the before half is filled with bytes that read as a
+# dataset of this code, or not at all -- moved to test_knowledge_ingest_failure_windows.py
+# with the placement owner it belongs to (ICR-R18), together with the generation record the write
+# site now publishes beside the dataset. It left this module because a case about the half's
+# generation belongs beside the module that owns generations, and because this file is already
+# over the repository's 1,200-line rail: above the rail the default action is extraction.
 
 
 # --------------------------------------------------------------------------------------------

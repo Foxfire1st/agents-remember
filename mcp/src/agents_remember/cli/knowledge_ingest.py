@@ -60,8 +60,17 @@ The baseline is **read at the top of the run**, before the ingest publishes, and
 baseline half is made from those bytes rather than from a later read of the same path. That ordering
 is deliberate and load-bearing: ``--baseline`` and ``--publish-to`` may name one path, and
 publication replaces that file in place, so a copy taken afterwards would place the published
-candidate in the before half and the review would compare a dataset against itself. A retry keeps the
-half it was first handed instead of restating it.
+candidate in the before half and the review would compare a dataset against itself.
+
+The half is then filled **once**. The first admitted baseline is the comparison's original one, so a
+later successful run over the same shared path keeps the before side it was first handed instead of
+restating it: the second run's captured bytes are the first run's *publication*, and placing them is
+exactly how the addition the review exists to show comes to be present on both sides with an empty
+delta. A run whose admitted baseline differs from the standing one therefore places nothing and says
+so, naming the generation the half holds and the action that begins a new one. That action is
+``--rebase-baseline``, and it is explicit because a deliberately new baseline is a **new comparison
+generation with recorded lineage**, never an overwrite behind the identity the comparison already
+had. An exact retry, a refused retry and a planning run all leave the half exactly as they found it.
 
 Exit status: 0 when every entry reached a terminal outcome the report names -- committed, a
 ruling, or a typed refusal -- and 2 when the invocation itself is refused (a missing or
@@ -78,14 +87,13 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agents_remember.application.knowledge_before_half import (
-    baseline_origin_path,
-    read_before_half,
-    read_captured_dataset_identity,
+from agents_remember.application.knowledge_baseline_generation import (
+    BaselineRun,
+    CapturedBaseline,
+    fill_admitted_before_half,
 )
 from agents_remember.application.knowledge_curator_ingest import (
     EntryOutcome,
@@ -93,10 +101,6 @@ from agents_remember.application.knowledge_curator_ingest import (
     IngestReport,
     IngestSelection,
     ingest_curator_list,
-)
-from agents_remember.application.knowledge_first_generation import (
-    FirstGenerationRun,
-    establish_first_generation,
 )
 from agents_remember.application.knowledge_review import (
     REVIEW_BASELINE_DIRECTORY,
@@ -162,7 +166,20 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "establishes the review's before half as an explicitly identified empty first generation, "
         "which is the cold start rather than the continuity path. A named baseline that is missing "
         "or unreadable is refused by name, and one that is unreadable is never placed in the before "
-        "half: a half that already records its first generation keeps it.",
+        "half: a half that already records its first generation keeps it. The half is filled ONCE: "
+        "the dataset this comparison was opened on stays its before side across later successful "
+        "runs, exact retries and refused retries, so a run whose baseline differs from the one "
+        "standing there places nothing and names --rebase-baseline.",
+    )
+    parser.add_argument(
+        "--rebase-baseline",
+        dest="rebase_baseline",
+        action="store_true",
+        help="Begin an explicitly NEW comparison generation from --baseline, recording the "
+        "generation it replaces and that generation's dataset identity as its lineage. Without it a "
+        "baseline that differs from the one this comparison opened on is never placed: the original "
+        "is kept and the report names the rebase action. It does not replace an identified first "
+        "generation and does not repair a damaged half.",
     )
     parser.add_argument(
         "--commit",
@@ -249,29 +266,16 @@ def _candidate_directory(args: argparse.Namespace, review_root: Path) -> Path:
     return review_root / REVIEW_CANDIDATE_DIRECTORY
 
 
-@dataclass(frozen=True)
-class _CapturedBaseline:
-    """The admitted before snapshot, read into memory before the run can move the file it came from.
-
-    This value is the whole of the repair it exists for. ``--baseline`` names the dataset the task
-    forks from, and when it also names the publication destination the run **overwrites that file in
-    place** before the review's baseline half is placed. Copying it afterwards therefore copies the
-    published result, and the review is handed the after half twice: the addition it exists to show
-    is reported present on both sides with an empty delta.
-    """
-
-    origin: Path
-    payload: bytes
-
-
-def _capture_baseline(args: argparse.Namespace) -> _CapturedBaseline | str | None:
+def _capture_baseline(args: argparse.Namespace) -> CapturedBaseline | str | None:
     """Read the admitted baseline before anything can publish over it, or say why it was not read.
 
     The read happens here, at the top of :func:`run`, and the bytes are carried rather than the path:
     publication replaces the dataset this path names, so a later read of the same path is a read of
     the after state. Absence and unreadability are returned as reasons rather than raised, because
     both are facts about the invocation that belong in the report beside the outcome that used the
-    baseline, exactly as the rest of this command reports them.
+    baseline, exactly as the rest of this command reports them. The value itself is the application
+    owner's, because "the bytes the run was handed, read before it could move them" is a fact about
+    the comparison and not about this argument list.
     """
 
     if args.baseline is None:
@@ -280,7 +284,7 @@ def _capture_baseline(args: argparse.Namespace) -> _CapturedBaseline | str | Non
     if not source.is_file():
         return f"not-captured: the named baseline dataset {source} is not a file"
     try:
-        return _CapturedBaseline(origin=source, payload=source.read_bytes())
+        return CapturedBaseline(origin=source, payload=source.read_bytes())
     except OSError as error:
         return f"not-captured: the named baseline dataset {source} could not be read ({error})"
 
@@ -312,137 +316,45 @@ def _placement_refusal(report: IngestReport) -> str | None:
     return None
 
 
-def _placeable_baseline(
-    report: IngestReport, captured: _CapturedBaseline | str | None
-) -> _CapturedBaseline | str:
-    """The captured baseline this run may place, or the reason it must not place one.
-
-    The answer and the value are one object rather than a refusal beside an unnarrowed union. That is
-    the whole point of this signature: the caller has to read ``payload`` and ``origin`` off the
-    captured baseline, and a helper that answers only "may I?" in a separate string leaves the union
-    standing at those reads -- the split this function was extracted by introduced exactly that, and
-    a static checker rightly refuses to assume the string branch cannot reach them. Returning the
-    narrowed value makes the guard a real ``isinstance`` branch that reader and checker both follow.
-    """
-
-    refusal = _placement_refusal(report)
-    if refusal is not None:
-        return refusal
-    if not isinstance(captured, _CapturedBaseline):
-        return captured or "not-placed: the baseline was not captured"
-    return captured
-
-
 def _place_review_baseline(
     args: argparse.Namespace,
     contract: WorktreeContract,
     report: IngestReport,
-    captured: _CapturedBaseline | str | None,
+    captured: CapturedBaseline | str | None,
 ) -> str | None:
-    """Fill the review's before half, or say why this run filled nothing.
+    """Fill the review's before half through its owner, or say why this run filled nothing.
 
-    ``--baseline`` is the one production input that names the fork-point dataset, and the ruling this
-    function implements is that the run which authors the candidate is the run that places the
-    baseline: same run, same explicit caller input, no new owner and no recorded contract. The bytes
-    are **copied** into the half, not moved or linked, because the review's own recorded decision is
-    that both halves sit inside the leaf's disposable local root "so a review reads no candidate out
-    of the live coordination tree" -- the published dataset keeps serving its own lane.
+    Two questions are answered in two places on purpose, and the split is the same one the rest of
+    this command follows. *Whether* this run may fill anything at all is read from the run's own
+    report, because a planning run and a batch that committed nothing are facts only the report
+    holds. *What the half then is* -- its generation, its lineage, and whether a baseline the run was
+    handed may replace the one standing there -- belongs to
+    :mod:`agents_remember.application.knowledge_baseline_generation`, which composes the before-half
+    layout owner and the first-generation owner. This function carries the run's facts across that
+    seam and nothing else, so the CLI stays a surface rather than a second placement authority.
 
-    The bytes copied are the ones :func:`_capture_baseline` read **before** the run started, not a
-    fresh read of ``args.baseline``. That distinction is the repair: a run that publishes to the same
-    path it forks from has already replaced that file by the time this runs, so a fresh read would
-    place the published candidate in the before half and the comparison would be a dataset against
-    itself. A destination already holding the captured dataset is left alone rather than rewritten,
-    which is what makes a retry keep the fork point it was first handed instead of restating it.
-
-    A caller that named no baseline is the repository's first generation, and the half is then
-    established instead of left absent (:func:`_establish_first_generation`). Both branches fill one
-    half and one only, so a leaf reaches the review with a before side that is either the dataset it
-    forked from or an explicit record of the generation it began.
-
-    Nothing is invented on the ways out: a planning run and a batch that did not commit place
-    nothing, a baseline that could not be read is reported as such rather than as placed, a first
-    generation that could not be completed leaves the half absent rather than claimed, and a fork
-    point is never written over a half that already holds an identified generation or bytes that are
-    not the side they claim to be (:func:`_place_fork_point`).
-    """
-
-    review_root = _review_root(contract)
-    if args.baseline is None:
-        return _establish_first_generation(args, contract, report, review_root)
-    placeable = _placeable_baseline(report, captured)
-    if not isinstance(placeable, _CapturedBaseline):
-        return placeable
-    return _place_fork_point(review_root, placeable)
-
-
-def _place_fork_point(review_root: Path, placeable: _CapturedBaseline) -> str:
-    """Copy one captured fork point into the before half, or say exactly which rule kept it out.
-
-    Three rules guard this write, each naming a state the half can already be in: it already records
-    an identified first generation, so nothing replaces the before side this leaf began from; it is
-    damaged, so it is named and left exactly as it is; or the captured bytes are not a dataset, which
-    is read *before* they are written because placing them would hand the review a before side no
-    comparison can open -- a corrupt expected dataset reported as *placed*.
-
-    A destination already holding the captured bytes is left alone rather than rewritten, which is
-    what makes a retry keep the fork point it was first handed instead of restating it.
-    """
-
-    half = read_before_half(review_root / REVIEW_BASELINE_DIRECTORY)
-    if half.state == "identified":
-        return (
-            f"not-placed: the before half at {half.database} already records its first generation "
-            f"at {baseline_origin_path(half.database.parent)}; a selected baseline does not replace "
-            "the before side this leaf began from"
-        )
-    if half.state == "damaged":
-        return f"not-placed: {half.detail}, and this run left the half exactly as it is"
-    reading = read_captured_dataset_identity(placeable.payload, placeable.origin)
-    if isinstance(reading, str):
-        return f"not-placed: {reading}, so nothing was placed in the before half"
-    destination = half.database
-    already = destination.is_file() and destination.read_bytes() == placeable.payload
-    if already:
-        return f"present: {destination}"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(placeable.payload)
-    return f"placed: {destination} (captured from {placeable.origin} before this run)"
-
-
-def _establish_first_generation(
-    args: argparse.Namespace,
-    contract: WorktreeContract,
-    report: IngestReport,
-    review_root: Path,
-) -> str:
-    """Establish the before half as an explicitly identified empty first generation, or say why not.
-
-    The repository's first knowledge has no dataset to fork from, and the truthful before side is an
-    empty one that is *identified* as such. Leaving the half absent instead is what the review then
-    refuses -- a pair with one side missing has nothing to compare -- and the first invariant this
-    very run commits would never be displayed as an addition.
-
-    The run's own observed facts are what the record carries: the leaf the enclosure names, the
-    authorization this write is admitted under, and the code base the ingest read its citations from.
-    The last of those is the *observation* the report already prints, not a second source-endpoint
-    resolution: how a comparison binds a source side stays the review's own resolution.
+    The half is derived from the contract's own recorded worktree group, exactly as the review
+    resolves it, so the directory this run fills and the directory the comparison opens are one path
+    by construction rather than by two spellings agreeing.
     """
 
     refusal = _placement_refusal(report)
     if refusal is not None:
         return refusal
-    outcome = establish_first_generation(
-        baseline_directory=review_root / REVIEW_BASELINE_DIRECTORY,
+    if isinstance(captured, str):
+        return captured
+    return fill_admitted_before_half(
+        half=_review_root(contract) / REVIEW_BASELINE_DIRECTORY,
         candidate_directory=Path(report.candidate_directory),
-        run=FirstGenerationRun(
+        captured=captured,
+        run=BaselineRun(
             leaf_id=contract.leaf_id,
             contract_path=str(args.contract),
             authorization_ref=args.authorization_ref,
             code_base_commit=report.code_base_commit or None,
         ),
+        rebase=args.rebase_baseline,
     )
-    return outcome.detail
 
 
 def run(args: argparse.Namespace) -> int:
@@ -454,6 +366,15 @@ def run(args: argparse.Namespace) -> int:
         return EXIT_REFUSED
     if not str(args.authorization_ref).strip():
         print("--authorization-ref must not be blank: an admitted write needs an authorization")
+        return EXIT_REFUSED
+    if args.rebase_baseline and args.baseline is None:
+        # A rebase is a transition *from* one admitted baseline to another, so a run that names the
+        # action without the dataset has stated no generation to begin from. Reading it as the cold
+        # start would silently do something other than what the caller asked for.
+        print(
+            "--rebase-baseline begins a new comparison generation from --baseline, so it needs the "
+            "dataset it rebases onto"
+        )
         return EXIT_REFUSED
     try:
         contract = load_contract(Path(args.contract))
