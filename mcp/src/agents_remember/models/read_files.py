@@ -54,6 +54,16 @@ class ReadArFilesResponse(ToolResponse):
     front-door: each is served once per lifecycle, or again when its content
     changed; both are omitted when already served unchanged (or when
     ``onboarding`` was suppressed for every file).
+
+    ``published_intent`` is the repository's published intent, read through the
+    existing selective read at one exact snapshot and seeded with the requested
+    paths (ICR-R19@v1). It is always present, because its own ``state`` is the
+    answer: ``recorded`` carries the dataset identity, the snapshot and one
+    bounded page per seed; ``not-recorded`` and ``unusable`` name why no
+    publication could be read. Its shape is owned by
+    ``application.published_intent`` -- the route that selects, seeds and
+    names the absences -- so this model carries it rather than re-declaring a
+    second contract for the same read.
     """
 
     operation: Literal["read_ar_files"] = "read_ar_files"
@@ -61,3 +71,4 @@ class ReadArFilesResponse(ToolResponse):
     files: list[FileRead]
     repository_overview: dict[str, Any] | None = None
     route_overviews: dict[str, Any] | None = None
+    published_intent: dict[str, Any] | None = None

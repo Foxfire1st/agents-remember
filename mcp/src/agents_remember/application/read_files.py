@@ -9,6 +9,15 @@ precomputed route index. On top of the per-file onboarding bodies it auto-attach
 the repo overview and the governing route-overview chain, deduplicated per
 lifecycle, and emits a facts-only ``read.packet`` (paths/ranges/statuses/bytes --
 never content).
+
+It is also the ordinary route to the repository's **published intent** (ICR-R19@v1): the same call
+resolves the repository's published knowledge dataset from the coordination context -- no task, no
+leaf and no enclosure -- and reads the recorded invariants about each requested path at that
+dataset's exact snapshot through the shipped selective read. The block is attached on every read,
+including when the repository publishes nothing yet, because "nothing is recorded" is an answer a
+fresh planner needs and an omitted block is indistinguishable from a route that never ran. The
+selection, the seeds and the named absences are owned by
+:mod:`agents_remember.application.published_intent`; this module only carries the block.
 """
 
 from __future__ import annotations
@@ -19,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.published_intent import published_intent_block
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.authority import require_repo
@@ -129,6 +139,13 @@ def read_ar_files_tool(
         "operation": "read_ar_files",
         "repoId": repo.repo_id,
         "files": file_results,
+        # The published intent of the repository this read is addressed at, read at one exact
+        # snapshot through the existing selective read and seeded with the paths just requested
+        # (ICR-R19@v1). It is attached even when the repository publishes nothing yet: that named
+        # absence is the answer, and an omitted block could not be told apart from a route that
+        # never ran. Every one of its failures is carried inside the block, so it can never cost
+        # the caller the source and onboarding bytes this call exists to return.
+        "published_intent": published_intent_block(context, [request.path for request in requests]),
     }
     if attach_any_onboarding:
         served = _attach_front_door(context, repo.path, requests, amb, lifecycle_id)

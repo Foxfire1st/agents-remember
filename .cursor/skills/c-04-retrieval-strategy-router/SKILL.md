@@ -22,7 +22,9 @@ Choose the next substrate by the missing context bundle:
   branch-valid truths, behavioral expectations, or code intent are unknown. Use
   onboarding plus bounded source confirmation. Prefer the `read_ar_files` MCP tool for the
   paired onboarding + source read (mirrors how Semantics prefers GrepAI and Relationship
-  prefers CodeGraphContext).
+  prefers CodeGraphContext). The same call also carries the repository's **published intent**:
+  the invariants a previous task already recorded about the paths you asked for, at their exact
+  snapshot and without needing a task (see _Published Intent Before Planning_ below).
 
 Substrates can be chained. A triage prompt may start with Relationship to find
 the neighborhood around a ticket anchor, then switch to Intent to prove the
@@ -167,6 +169,64 @@ names an unresolved source question.
 - Native read is reserved as the edit precondition once building begins.
 - Keep a running count of your `read_ar_files` calls and list them as research evidence,
   alongside Semantics (GrepAI) and Relationship (CGC) queries.
+
+## Published Intent Before Planning
+
+The first question about a route is often "what did this repository already intend here?". The
+paired read answers it in the same call: `read_ar_files` resolves the repository's published
+knowledge dataset from that repository's own coordination context -- no leaf, no enclosure and no
+task is needed -- and reads the recorded intent about each requested path at that dataset's exact
+snapshot. The result carries it as `published_intent`.
+
+**Where the route reads, and what has to publish there.** This route *declares* the publication
+location it reads: `<memory_root>/knowledge.sqlite`, one file in the memory layer the repository's
+coordination declaration resolves. No published owner defaults that destination today -- the ingest
+command publishes only where its caller's `--publish-to` points, and an ingest that names none
+commits without publishing -- so the ordinary write side has to be wired to this one location
+(ICR-R20@v1), and the two-consecutive-task journey has to prove that task A's publication lands where
+task B's planner looks (ICR-R25@v1). Do not read a `not-recorded` answer as "this repository never
+recorded intent": it means nothing is published at the location this read was addressed to.
+
+Which memory root that is depends on scope, and there is no fallback between the two. With no
+enclosure in scope -- the taskless planner this route exists for -- it is the canonical external
+memory root. Inside a leaf enclosure the coordination context's memory root is the contract's memory
+**worktree**, that task's own memory line, so the read sees the publication on the line it is standing
+on and reports `not-recorded` when that line carries none. Neither root stands in for the other.
+
+`state: "recorded"` means a publication was read, and the block names it exactly: `datasetPath`,
+`repositoryId`, `schemaVersion`, `snapshot` (the logical digest every page was verified against)
+and `sourceResolution` (`repositoryRoot` plus `codeTreeId`, the tree recorded anchors were observed
+against). `seeds` holds one bounded entry per requested path; each entry carries the exact record
+identities it selected in the payload's own spellings (`kind`, `item_id`, `invariant_id`,
+`record_id`, `revision_id`), the authored statements with their essential conditions, and `counts`,
+`hasMore` and `continuation` whenever the page was bounded. A bounded page is not a smaller scope:
+`counts.primary_items_total` is the whole selection and `counts.primary_items_remaining` is what is
+still ahead.
+
+`state: "not-recorded"` means nothing is published at the location this read selected. That is an
+answer, not a failure: source and onboarding research continue unchanged, and nothing is claimed to
+have been measured. `state: "unusable"` means something is there and is not a publication this route
+can answer from -- a non-file entry where the dataset belongs (`selected_input_unavailable`), bytes
+that cannot be read as a dataset of this code, or a dataset bound to another repository's authority
+home (`snapshot_unavailable`). The failed binding is named, and no other repository's publication is
+read in its place.
+
+Inside a `recorded` block, a seed that selects nothing is named rather than returned empty:
+`refusalCode: "registration_absent"` means the snapshot records nothing about that path, and
+`refusalCode: "selector_absent"` means the identity you named is not in this snapshot -- an earlier
+generation this publication does not carry. Neither is filled from today's data, and a path no
+recorded anchor could carry is refused as a seed rather than answered with an absence the read
+never observed.
+
+Read deeper by identity instead of re-reading everything, and do not try to continue a bounded page
+through the mounted read tool: the `continuation` a page mints continues the selective scope read
+(the block names it as `continuationOperation: "read_knowledge_scope"`), while `knowledge_read`
+continues *views* and refuses a scope cursor. Take the identities a page returned instead: pass the
+**value of** `datasetPath` as the mounted tool's `databasePath`, plus `repositoryId` from the block,
+`view: "invariant"` and `invariantRevisionId` for one exact retained revision (or `sourcePath` for
+the registered neighborhood of one file). The snapshot is retained evidence of an owner-produced
+input and never a new source of authored truth: no route here substitutes another repository, the
+current working tree, or a scratch dataset for the publication the repository actually records.
 
 ## Route Index Semantics
 
