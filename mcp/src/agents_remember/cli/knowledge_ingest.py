@@ -3,7 +3,7 @@
     agents-remember knowledge-ingest --contract <leaf enclosure contract>
         --list <hand-off list> [--candidate-directory <dir>]
         --authorization-ref <ref> [--commit] [--baseline <published dataset>]
-        [--publish-to <memory dataset path> [--expected-destination <identity JSON>]]
+        [--publish | --publish-to <memory dataset path> [--expected-destination <identity JSON>]]
 
 ``--contract`` is REQUIRED and is the write guard, exactly as ``memory-citations`` and
 ``memory-backfill`` use it: the operation reads the code and memory repositories the contract
@@ -37,6 +37,29 @@ run that reports no publication. ``--expected-destination`` is the exact identit
 observed at that path, as a JSON object of the identity's own fields
 (``repository_id``/``schema_version``/``logical_digest``); omitting it means the destination is
 expected to be ABSENT, which is the first publication into a worktree.
+
+THE ORDINARY ROUTE HAS ONE DESTINATION, AND IT IS THE ONE THE READ SIDE DECLARES. ``--publish``
+selects that destination instead of a path: the repository's published knowledge dataset at
+``<this enclosure's resolved memory root>/knowledge.sqlite``, resolved through
+:func:`~agents_remember.application.published_intent.published_dataset_path` for the coordination
+context the ordinary read route resolves, so the location a curator writes and the location a later
+task's planner selects are one spelling owned once rather than two conventions that agree today.
+What the run admits is at that destination is *derived* rather than typed, because the ordinary route
+has no caller-typed identity to offer and needs none: when ``--baseline`` names that same location,
+the bytes this run captured from it at the top of the run are the dataset standing there, and their
+identity is what the publication may replace -- that is the explicit update. Every other case is
+admitted as nothing being there, and the publication owner refuses by name if the location turns out
+to hold something. ``--publish`` and ``--publish-to`` are mutually exclusive, ``--expected-destination``
+belongs to the caller-named path alone, and NEITHER IS IMPLIED BY ``--commit``: the commit word stays
+the knowledge-batch write and acquires no publication meaning.
+
+THE RUN READS ITS PUBLICATION BACK. When the ordinary route published, the location is read again
+through :func:`~agents_remember.application.published_intent.resolve_published_intent` -- the owner
+the ordinary read route itself uses, in the same scope the write was made in -- and the report carries
+the dataset a reader will select: ``confirmed`` with the exact identity, ``mismatch`` naming both, or
+``unavailable`` with the shipped refusal code for what was found instead. A publication the owner
+refused is read back not at all: nothing was established about the destination, and the report says
+that rather than inventing an identity for it.
 
 CONTINUITY IS THE SAME DECISION'S OTHER HALF, AND IT ALSO HAS ONE ARGUMENT. ``--baseline`` names the
 published dataset this task forks FROM. It is the pairing :class:`IngestSelection` documents: a
@@ -75,8 +98,16 @@ had. An exact retry, a refused retry and a planning run all leave the half exact
 Exit status: 0 when every entry reached a terminal outcome the report names -- committed, a
 ruling, or a typed refusal -- and 2 when the invocation itself is refused (a missing or
 unreadable list, a blank authorization reference, a contract this command cannot load, a malformed
-expected-destination identity). A refusal per entry is a *result*, not a tool failure: the report
+expected-destination identity, two contradictory destination selections, a declared location that
+cannot be resolved). A refusal per entry is a *result*, not a tool failure: the report
 is the product, and a caller branching on the exit code would otherwise lose it.
+
+EXIT ZERO IS NOT A PUBLICATION CLAIM, and the report is where that claim lives. A run whose entries
+all committed can still have published nothing -- because it named no destination, because a
+publication was refused, or because the read-back found something other than what was written -- and
+each of those is stated as its own fact (``publicationRoute``, the ``publication`` result, and
+``publishedIdentity``). Reading the status as proof that every entry committed, or that the
+repository now holds them, is exactly the mistake these three fields exist to make impossible.
 
 This is the production caller for :func:`agents_remember.application.knowledge_curator_ingest.
 ingest_curator_list`. The mounted ``knowledge_change`` tool does NOT write and says so; the write
@@ -87,8 +118,8 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from agents_remember.application.knowledge_baseline_generation import (
     BaselineRun,
@@ -96,17 +127,24 @@ from agents_remember.application.knowledge_baseline_generation import (
     fill_admitted_before_half,
 )
 from agents_remember.application.knowledge_curator_ingest import (
-    EntryOutcome,
     IngestPublication,
     IngestReport,
     IngestSelection,
     ingest_curator_list,
+)
+from agents_remember.application.knowledge_publication_route import (
+    DeclaredPublicationLocation,
+    PublishedIdentityReadBack,
+    admitted_destination,
+    declared_publication_location,
+    published_identity_read_back,
 )
 from agents_remember.application.knowledge_review import (
     REVIEW_BASELINE_DIRECTORY,
     REVIEW_CANDIDATE_DIRECTORY,
     REVIEW_CANDIDATE_RELATIVE_ROOT,
 )
+from agents_remember.cli.knowledge_ingest_report import payload, summary
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
@@ -191,7 +229,22 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         dest="publish_to",
         default=None,
         help="Dataset path the committed candidate is published to. Omit to commit without "
-        "publishing; a run that did not commit publishes nothing.",
+        "publishing; a run that did not commit publishes nothing. Naming a path and --publish "
+        "together is refused: the ordinary route has one destination and a caller-named path is a "
+        "different selection.",
+    )
+    parser.add_argument(
+        "--publish",
+        dest="publish_declared",
+        action="store_true",
+        help="Publish the committed candidate to the repository's ONE declared published dataset "
+        "location -- <this enclosure's resolved memory root>/knowledge.sqlite, the same location "
+        "the ordinary read route declares -- and read the published identity back through that "
+        "route's owner. What is admitted at the destination is derived from --baseline: when the "
+        "baseline IS that location, the identity this run captured from it is the dataset being "
+        "replaced (the explicit update); otherwise the destination is expected to hold nothing. "
+        "Mutually exclusive with --publish-to and with --expected-destination, and never implied "
+        "by --commit.",
     )
     parser.add_argument(
         "--expected-destination",
@@ -231,15 +284,147 @@ def _expected_destination(text: str | None) -> SnapshotIdentity | None:
     return SnapshotIdentity.model_validate(parsed)
 
 
-def _publication(args: argparse.Namespace) -> IngestPublication | None:
-    """The publication this invocation selects, or ``None`` when it selected no destination."""
+@dataclass(frozen=True)
+class _Destination:
+    """The destination this invocation selected, and the report's own line about that selection.
 
-    if args.publish_to is None:
-        return None
-    return IngestPublication(
-        destination_path=Path(args.publish_to),
-        expected_destination=_expected_destination(args.expected_destination),
+    ``location`` is present only for the ordinary route, because the read-back is a read of *that*
+    declared location through the read route's own owner: a caller-named path is not the repository's
+    publication, so there is no declared location to read and no reader route to bind it to.
+    """
+
+    publication: IngestPublication | None
+    route: str
+    location: DeclaredPublicationLocation | None = None
+
+
+def _destination_conflict(args: argparse.Namespace) -> str | None:
+    """Why this invocation's destination argument set is not one coherent selection, or ``None``.
+
+    Stated before anything is read, because two destinations are not a narrower request: the
+    ordinary route's declared location and a caller-named path are different selections, and a run
+    that named both has not said which one it means. The same rule covers an argument that names
+    something about a destination the run never selected:
+
+    * ``--expected-destination`` belongs to the caller-named path alone -- the ordinary route derives
+      the identity it may replace from its own admitted baseline -- so a caller-typed identity beside
+      ``--publish`` would be a second, unchecked claim about the one fact the derivation establishes;
+    * ``--expected-destination`` with NO destination selector at all admits what is at a place the run
+      is not publishing to. It is refused by name rather than silently absorbed, exactly as
+      ``--rebase-baseline`` without ``--baseline`` is: an ignored argument is one the caller believes
+      was honoured, and the malformed value beside it is already refused by name.
+    """
+
+    if args.publish_declared and args.publish_to is not None:
+        return (
+            "--publish and --publish-to name two different destinations, so one run cannot mean "
+            "both"
+        )
+    if args.publish_declared and args.expected_destination is not None:
+        return (
+            "--publish derives the destination's admitted identity from --baseline, so "
+            "--expected-destination (which belongs to --publish-to) is refused beside it"
+        )
+    if (
+        args.expected_destination is not None
+        and args.publish_to is None
+        and not args.publish_declared
+    ):
+        return (
+            "--expected-destination admits what is at a destination, so it needs --publish-to or "
+            "--publish: a run that names neither commits and publishes nothing"
+        )
+    return None
+
+
+def _caller_named_destination(args: argparse.Namespace) -> _Destination:
+    """The destination the caller typed, admitted exactly as it was before the ordinary route.
+
+    Nothing about this selection narrows: the path is the caller's, the expectation is the caller's
+    ``--expected-destination`` and its absence still means "the destination is expected to be
+    absent". It is reported as caller-named so that a reader can tell this run from one that used
+    the repository's own declared location.
+    """
+
+    destination = Path(args.publish_to)
+    return _Destination(
+        publication=IngestPublication(
+            destination_path=destination,
+            expected_destination=_expected_destination(args.expected_destination),
+        ),
+        route=f"caller-named: {destination}",
     )
+
+
+def _declared_destination(
+    contract: WorktreeContract, captured: CapturedBaseline | str | None
+) -> _Destination:
+    """The repository's declared published dataset location, and what this run admits is there.
+
+    The location comes from the read side's owner and the admission from the run's own captured
+    baseline; nothing here decides a path or an identity of its own. A location that cannot be
+    resolved raises, which :func:`run` turns into the invocation refusal it is: an unowned
+    destination is the one thing this route must never acquire by falling back to a guess.
+    """
+
+    location = declared_publication_location(contract)
+    admission = admitted_destination(location.path, captured)
+    return _Destination(
+        publication=IngestPublication(
+            destination_path=location.path,
+            expected_destination=admission.identity,
+        ),
+        route=f"declared-location: {location.path} ({admission.detail})",
+        location=location,
+    )
+
+
+def _selected_destination(
+    args: argparse.Namespace, contract: WorktreeContract, captured: CapturedBaseline | str | None
+) -> _Destination:
+    """This invocation's one destination selection: named by the caller, declared, or none."""
+
+    if args.publish_to is not None:
+        return _caller_named_destination(args)
+    if args.publish_declared:
+        return _declared_destination(contract, captured)
+    return _Destination(
+        publication=None,
+        route=_nothing_selected(args),
+    )
+
+
+def _nothing_selected(args: argparse.Namespace) -> str:
+    """What a run that named no destination reports, in the mode it actually ran in.
+
+    The mode is read from the invocation rather than assumed, because "so the batch was committed
+    without publishing" is false in a planning run: the line exists to stop a zero exit being read
+    as a publication, and a line that claimed a commit this run did not make would be its own small
+    fabrication.
+    """
+
+    if args.commit:
+        return (
+            "not-selected: this run named no destination, so the batch was committed without "
+            "publishing and the repository's published dataset was not touched"
+        )
+    return "not-selected: this run named no destination and committed nothing, so nothing was published"
+
+
+def _read_back(destination: _Destination, report: IngestReport) -> PublishedIdentityReadBack | None:
+    """Read the published location back, or report that this run published nothing to read back.
+
+    *Whether* the read-back may run is read from the run's own report, exactly as the before-half
+    placement is: a publication the owner refused established nothing about the destination, and a
+    run that published nothing has no location of its own to read. *What* the read-back is belongs to
+    :mod:`agents_remember.application.knowledge_publication_route`, which reads the declared location
+    through the owner the ordinary read route itself uses.
+    """
+
+    publication = report.publication
+    if destination.location is None or publication is None or publication.identity is None:
+        return None
+    return published_identity_read_back(destination.location, publication.identity)
 
 
 def _review_root(contract: WorktreeContract) -> Path:
@@ -357,185 +542,151 @@ def _place_review_baseline(
     )
 
 
-def run(args: argparse.Namespace) -> int:
-    """Run one ingest and print its report; the report IS the result."""
+@dataclass(frozen=True)
+class _Invocation:
+    """Everything one run resolves before it hands the list to the operation.
+
+    The four values are one fact each and are resolved here in the order the run needs them: the
+    contract names the enclosure, the review root comes from that contract, and the baseline is read
+    BEFORE the destination is selected, because the ordinary route's admission IS the identity of
+    those captured bytes.
+    """
+
+    contract: WorktreeContract
+    candidate_directory: Path
+    captured_baseline: CapturedBaseline | str | None
+    destination: _Destination
+
+
+def _invocation_refusal(args: argparse.Namespace) -> str | None:
+    """Why this invocation is refused before anything is read, or ``None`` when it may proceed.
+
+    Every one of these is a fact about the argument list, so they are answered before a contract, a
+    list or a byte is touched. They are grouped here rather than spread through :func:`run` for the
+    reason the rest of this command separates its steps: a reader asking "what does this refuse
+    outright" reads one function, and ``run`` stays the sequence of what a run does.
+    """
 
     list_path = Path(args.hand_off_list)
     if not list_path.is_file():
-        print(f"the hand-off list {list_path} is not a file this command can read")
-        return EXIT_REFUSED
+        return f"the hand-off list {list_path} is not a file this command can read"
     if not str(args.authorization_ref).strip():
-        print("--authorization-ref must not be blank: an admitted write needs an authorization")
-        return EXIT_REFUSED
+        return "--authorization-ref must not be blank: an admitted write needs an authorization"
+    conflict = _destination_conflict(args)
+    if conflict is not None:
+        return conflict
     if args.rebase_baseline and args.baseline is None:
         # A rebase is a transition *from* one admitted baseline to another, so a run that names the
         # action without the dataset has stated no generation to begin from. Reading it as the cold
         # start would silently do something other than what the caller asked for.
-        print(
+        return (
             "--rebase-baseline begins a new comparison generation from --baseline, so it needs the "
             "dataset it rebases onto"
         )
+    return None
+
+
+def _invocation(args: argparse.Namespace) -> _Invocation:
+    """Resolve the enclosure, the candidate and the destination this run is admitted under."""
+
+    contract = load_contract(Path(args.contract))
+    captured_baseline = _capture_baseline(args)
+    return _Invocation(
+        contract=contract,
+        candidate_directory=_candidate_directory(args, _review_root(contract)),
+        captured_baseline=captured_baseline,
+        destination=_selected_destination(args, contract, captured_baseline),
+    )
+
+
+def _publication_route(destination: _Destination, report: IngestReport) -> str:
+    """The run's own line about its publication: the destination selected, and what became of it.
+
+    The selection happens before the list is read -- the destination is part of what the operation is
+    handed -- but whether anything was published is a fact only the report holds. A planning run and a
+    batch that committed no entry both leave ``report.publication`` absent while a destination WAS
+    selected, so a line that stopped at the selection would read as a publication claim for both. The
+    line is completed here, where the report exists, by the same discipline the review-baseline line
+    follows: the run's own report says what the run did, and no field overstates it.
+    """
+
+    if destination.publication is None or report.publication is not None:
+        return destination.route
+    return f"{destination.route}; nothing was published by this run: {_nothing_published(report)}"
+
+
+def _nothing_published(report: IngestReport) -> str:
+    """Why a run that selected a destination published nothing, read from its own report."""
+
+    if report.dry_run:
+        return "it was a planning run, and publication is the committed batch's second half"
+    return f"the batch committed no entry ({report.batch_state}, refused {len(report.refused)})"
+
+
+def _print_report(
+    args: argparse.Namespace,
+    report: IngestReport,
+    review_baseline: str | None,
+    destination: _Destination,
+    published_identity: PublishedIdentityReadBack | None,
+) -> None:
+    """Print the report in the form the caller asked for; the report IS the result."""
+
+    publication_route = _publication_route(destination, report)
+    if args.as_json:
+        print(
+            json.dumps(
+                payload(
+                    report,
+                    review_baseline,
+                    publication_route=publication_route,
+                    published_identity=published_identity,
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+    print(
+        summary(
+            report,
+            review_baseline,
+            publication_route=publication_route,
+            published_identity=published_identity,
+        )
+    )
+
+
+def run(args: argparse.Namespace) -> int:
+    """Run one ingest and print its report; the report IS the result."""
+
+    refusal = _invocation_refusal(args)
+    if refusal is not None:
+        print(refusal)
         return EXIT_REFUSED
     try:
-        contract = load_contract(Path(args.contract))
-        review_root = _review_root(contract)
-        candidate_directory = _candidate_directory(args, review_root)
+        invocation = _invocation(args)
     except (ValueError, OSError) as error:
         print(f"the ingest was refused before it read the list: {error}")
         return EXIT_REFUSED
-    # The baseline is read BEFORE the ingest runs, because the ingest publishes, and a run whose
-    # publication destination is also its baseline path replaces the very bytes this half is made of.
-    captured_baseline = _capture_baseline(args)
     try:
         report = ingest_curator_list(
             args.contract,
-            list_path,
+            Path(args.hand_off_list),
             IngestSelection(
-                candidate_directory=candidate_directory,
+                candidate_directory=invocation.candidate_directory,
                 authorization_ref=args.authorization_ref,
                 dry_run=not args.commit,
                 baseline=None if args.baseline is None else Path(args.baseline),
-                publication=_publication(args),
+                publication=invocation.destination.publication,
             ),
         )
     except (ValueError, OSError) as error:
         print(f"the ingest was refused before it read the list: {error}")
         return EXIT_REFUSED
-    review_baseline = _place_review_baseline(args, contract, report, captured_baseline)
-    if args.as_json:
-        print(json.dumps(_payload(report, review_baseline), indent=2, sort_keys=True))
-    else:
-        print(_summary(report, review_baseline))
-    return EXIT_REPORTED
-
-
-def _summary(report: IngestReport, review_baseline: str | None) -> str:
-    """The report as a reader scans it: the mode, the counts, and one line per outcome."""
-
-    lines = [
-        f"knowledge-ingest {'dry run' if report.dry_run else 'commit'} on {report.contract_path}",
-        f"  candidate: {report.candidate_directory}",
-        f"  lane: {report.lane}  repository: {report.repository_id}",
-        f"  code tree: {report.code_tree_id} ({report.code_tree_source} at "
-        f"{report.code_base_commit})",
-        f"  memory tree: {report.memory_tree_id}",
-        f"  batch: {report.batch_state}"
-        + (f"  refusal: {report.batch_refusal.code}" if report.batch_refusal else ""),
-        "  counts: " + ", ".join(f"{name}={value}" for name, value in _counts(report).items()),
-    ]
-    if report.publication is not None:
-        publication = report.publication
-        published_to = f" -> {publication.destination_ref}" if publication.destination_ref else ""
-        refusal = (
-            f"  refusal: {publication.refusal.code}" if publication.refusal is not None else ""
-        )
-        lines.append(f"  publication: {publication.state}{published_to}{refusal}")
-    if review_baseline is not None:
-        lines.append(f"  review baseline: {review_baseline}")
-    for outcome in report.committed:
-        lines.append(f"  committed {outcome.entry_id}: {_targets(outcome)}")
-    for outcome in report.rulings:
-        lines.append(f"  ruling {outcome.entry_id}: {outcome.kind}/{outcome.disposition}")
-    for outcome in report.refused:
-        lines.append(f"  refused {outcome.entry_id}: {outcome.refusal}")
-    return "\n".join(lines)
-
-
-def _targets(outcome: EntryOutcome) -> str:
-    return "; ".join(
-        f"{target.completed_path} [{target.locator_kind}] {target.observation}"
-        for target in outcome.targets
+    review_baseline = _place_review_baseline(
+        args, invocation.contract, report, invocation.captured_baseline
     )
-
-
-def _payload(report: IngestReport, review_baseline: str | None) -> dict[str, Any]:
-    """The whole report as one JSON object, so a caller branches on facts and not on prose.
-
-    Every tuple becomes a list and every dataclass a mapping; nothing is summarised away, because
-    the report is the operation's product and a caller that has to re-read the database to learn
-    what happened has been given a message rather than a result. ``reviewBaseline`` is the report's
-    own line about the review handoff: what this run placed in the baseline half, or why it placed
-    nothing. It is a string and not a boolean because "not placed" has several reasons and a caller
-    that has to guess which one is being given a message rather than a result.
-    """
-
-    return {
-        "contractPath": report.contract_path,
-        "candidateDirectory": report.candidate_directory,
-        "reviewBaseline": review_baseline,
-        "candidateReceipt": report.candidate_receipt,
-        "lane": report.lane,
-        "repositoryId": report.repository_id,
-        "codeTreeId": report.code_tree_id,
-        "memoryTreeId": report.memory_tree_id,
-        "codeBaseCommit": report.code_base_commit,
-        "codeTreeSource": report.code_tree_source,
-        "derivedIdentities": report.derived_identities,
-        "dryRun": report.dry_run,
-        "entriesRead": list(report.entries_read),
-        "batchState": report.batch_state,
-        "batchDigestBefore": report.batch_digest_before,
-        "batchDigestAfter": report.batch_digest_after,
-        "batchRefusal": (
-            None if report.batch_refusal is None else report.batch_refusal.model_dump(mode="json")
-        ),
-        "publication": (
-            None if report.publication is None else report.publication.model_dump(mode="json")
-        ),
-        "counts": _counts(report),
-        "committed": [_outcome(one) for one in report.committed],
-        "rulings": [_outcome(one) for one in report.rulings],
-        "refused": [_outcome(one) for one in report.refused],
-    }
-
-
-def _counts(report: IngestReport) -> dict[str, int]:
-    return {
-        "entriesRead": report.counts.entries_read,
-        "rulings": report.counts.rulings,
-        "targetsCompleted": report.counts.targets_completed,
-        "locatorsResolved": report.counts.locators_resolved,
-        "anchorsObservedExact": report.counts.anchors_observed_exact,
-        "routePaths": report.counts.route_paths,
-        "routesAuthored": report.counts.routes_authored,
-        "routesReused": report.counts.routes_reused,
-        "commandsSent": report.counts.commands_sent,
-        "recordsWritten": report.counts.records_written,
-    }
-
-
-def _outcome(outcome: EntryOutcome) -> dict[str, Any]:
-    """One entry's whole outcome, including the state the operation itself assigned it."""
-
-    return {
-        "entryId": outcome.entry_id,
-        "kind": outcome.kind,
-        "disposition": outcome.disposition,
-        "dispositionSource": outcome.disposition_source,
-        "state": outcome.state,
-        "refusal": outcome.refusal,
-        "routes": [
-            {
-                "routePath": route.route_path,
-                "routeId": route.route_id,
-                "state": route.state,
-                "refusal": route.refusal,
-            }
-            for route in outcome.routes
-        ],
-        "targets": [
-            {
-                "path": target.path,
-                "step": target.step,
-                "completedPath": target.completed_path,
-                "locatorKind": target.locator_kind,
-                "locator": target.locator,
-                "observation": target.observation,
-                "sourceIdentity": target.source_identity,
-                "routePath": target.route_path,
-                "routeState": target.route_state,
-                "refusal": target.refusal,
-            }
-            for target in outcome.targets
-        ],
-    }
+    published_identity = _read_back(invocation.destination, report)
+    _print_report(args, report, review_baseline, invocation.destination, published_identity)
+    return EXIT_REPORTED

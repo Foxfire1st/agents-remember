@@ -730,6 +730,7 @@ consumers = [
   "mcp/tests/test_knowledge_curator_ingest_list.py",
   "mcp/tests/test_knowledge_ingest_comparison_generation.py",
   "mcp/tests/test_knowledge_ingest_failure_windows.py",
+  "mcp/tests/test_knowledge_ingest_publication_route.py",
   "mcp/tests/test_knowledge_views_and_projection.py",
   "mcp/tests/test_layering.py",
   "mcp/tests/test_leaf_doc_master_link_binding.py",
@@ -1267,6 +1268,7 @@ consumers = [
   "mcp/tests/test_knowledge_curator_ingest_list.py",
   "mcp/tests/test_knowledge_ingest_comparison_generation.py",
   "mcp/tests/test_knowledge_ingest_failure_windows.py",
+  "mcp/tests/test_knowledge_ingest_publication_route.py",
   "mcp/tests/test_knowledge_portable_boundaries.py",
   "mcp/tests/test_knowledge_snapshot_publication.py",
 ]

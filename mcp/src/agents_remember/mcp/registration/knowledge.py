@@ -122,8 +122,9 @@ def _register_knowledge_change(server: FastMCP) -> None:
         this tool to record: it has no admitted write operation for any kind, so every kind is
         refused with `registration_absent` and nothing is written. The knowledge write plane's
         reachable entry point is the `agents-remember knowledge-ingest` subcommand, which commits a
-        whole curator hand-off list through the admitted batch; read the committed result back with
-        `knowledge_read`."""
+        whole curator hand-off list through the admitted batch and, on the curator's ordinary route,
+        publishes that candidate to the repository's one declared published dataset location and
+        reads the published identity back; read the committed result back with `knowledge_read`."""
         return knowledge_change_payload(
             ChangeToolRequest(
                 database_path=databasePath,

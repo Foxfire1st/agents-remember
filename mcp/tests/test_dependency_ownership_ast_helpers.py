@@ -43,7 +43,7 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "7920a0f9f6134d3849e60685ad8a9424cdc95e8209631a03b889cf7d79e05281"
+LIFECYCLE_CATALOG_SHA256 = "51a218a09ea5721197cb15b445f98fb8f1dd734c2d083124c913226e599a8745"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
 **Thirteenth deliberate re-pin (260921-ICR-L6, at the sync onto ``71a4433e``, 2026-09-21) -- the union
@@ -101,6 +101,22 @@ fixtures rather than introducing a third one -- so its catalog change is a *cons
 of those support modules' consumer lists gained
 ``mcp/tests/test_knowledge_review_source_endpoints.py``. The counts stay sixteen and sixty-six, and the
 digest this value replaces was ``f0cb5fec...``.
+
+``260921-ICR-L20`` (requirement ``ICR-R20@v1``) registered no artifact and no contract of its own: its
+ordinary-publication cases live in one new ordinary unit module,
+``mcp/tests/test_knowledge_ingest_publication_route.py``, which drives the shipped
+``agents-remember knowledge-ingest`` entry point over a production-shaped enclosure (a real external
+memory repository with a real memory worktree) and imports the existing ingest-list fixture module
+rather than introducing a second support module. Its catalog change is therefore a *consumer* change
+only, and exactly two ``consumer_scope = "exact"`` rows gained the path:
+``mcp/tests/snapshot_lifecycle_test_support.py``, which the new module reaches through the fixture
+module it imports, and the Node ``package-lock.json`` fixture, which the census's own propagation rule
+reaches through the CLI import chain those rows already name -- the same two rows L18's own module
+moved. **Nothing was registered, no row was removed and no artifact's identity moved**, so the
+population stays at **sixteen contracts / sixty-six artifacts** and the catalog is re-pinned to
+``51a218a09ea5721197cb15b445f98fb8f1dd734c2d083124c913226e599a8745``, measured with
+``sha256sum mcp/tests/evidence-lifecycle.toml`` on the delivered candidate. The digest this value
+replaces was ``3f91773d…``. The proof's own artifact delta remains exactly empty.
 
 ``260918-TSIP-L10`` registered the module this leaf's own red base exposed as ungoverned:
 ``mcp/tests/tool_refusal_census_support.py``, introduced by ``260918-TSIP-L6`` (the refusal-census leaf

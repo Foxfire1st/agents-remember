@@ -30,8 +30,10 @@ The brief **feeds** all three inputs; none is inferred from transcript memory:
    was requested.
 
 Also required: the existing onboarding contracts and entity records for the affected routes (read
-before replacing their account of current intent); the code and memory worktree paths; and the
-enclosure contract path that scopes the curator's MCP tools to this leaf.
+before replacing their account of current intent); the code and memory worktree paths; the
+repository's published dataset — the one declared location the ordinary read route selects, which the
+knowledge hand-off is published to and the next task's planner reads; and the enclosure contract path
+that scopes the curator's MCP tools to this leaf.
 
 Intake is **rejected** when an applicable packet is missing, unapproved, or version-mismatched. A
 rejected or worker-blocked requirement is a contradiction/blocker to report, never ruled current
@@ -55,7 +57,19 @@ their accumulated change is reviewed on the canonical master at master-to-parent
      coverage, generated indexes;
    - **semantic history** — append-only changes in accepted understanding: what changed, why, and
      what it superseded. Not a replay of task rounds.
-3. **Route every change-set item and every notes item to the right home** through the
+3. **Route the durable knowledge through the real writer, and publish it.** The reconciliation's
+   requirement-shaped items are authored knowledge, not onboarding prose: hand the same JSON hand-off list to
+   `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the list>
+   --authorization-ref <the authorization this run is admitted under> --baseline <the published dataset this task
+   forked from> --publish --commit --json`. `--publish` selects the repository's **one declared published dataset
+   location** — the location the ordinary read route declares — and the run reads that location back;
+   `--publish-to <path>` is the caller-named alternative and the two are mutually exclusive. **Consume the report,
+   not the exit status:** every entry appears in exactly one of `committed` / `rulings` / `refused` with its own
+   reason, `publicationRoute` names the destination selected or that none was, `publishedIdentity` reports what an
+   independent read found (`confirmed` / `mismatch` / `unavailable`), and a refused publication established nothing.
+   A partial hand-off therefore stays partial and visible; it is never rounded up to "the batch went through". Carry
+   the confirmed published identity into the handoff, because it is what the next task's planner reads.
+4. **Route every change-set item and every notes item to the right home** through the
    `c-05-create-or-update-onboarding-files` skill workflow:
    - changed source files → their file-level sidecars with compact current contracts and a newest
      semantic-history entry; a mechanical consumer change with no contract impact gets a precise
@@ -66,11 +80,11 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    - a notes item with no file, route, or entity home → the L3 Operational-Notes target, **last
      resort only**, never the default drop point for an inconvenient finding;
    - generated route indexes → regenerate with `route_index_refresh` scoped to this leaf.
-4. **Reject overview-dumping and task-log-dumping.** Preserve a truth when it is important to future
+5. **Reject overview-dumping and task-log-dumping.** Preserve a truth when it is important to future
    correctness, non-obvious, and expensive to rediscover. Omit code narration, temporary branch
    facts, raw test totals, generic implementation-round chronology, and facts obvious from code and
    tests.
-5. **Run the complete curation check set** and report each as passed, failed, blocked, or not-run with
+6. **Run the complete curation check set** and report each as passed, failed, blocked, or not-run with
    its exact command and scope. At minimum inspect the changed sidecars and the affected
    overviews/indexes/entities, run `git diff --check` in the memory worktree, and run the full
    `memory_quality_check` operation. Curation is always complete: a named scoped check never stands in
@@ -81,13 +95,21 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    missing or stale: that is the coherence gate, not another repair — clear it by publishing the
    `curator_coherence` authority with `prepare` → `publish` → `validate`, because `closeoutReady` becomes
    true only once that validation passes.
-6. **Repair, then republish.** After each repair, re-run the full operation before handoff.
+7. **Repair, then republish.** After each repair, re-run the full operation before handoff.
 
 ## Authority gates
 
 - **Onboarding writes only.** The curator never writes code, never edits task docs, gates, lifecycle
   state, worktree contracts, or closeout state, never mutates task-doc status, and never performs
   closeout/integration/finalization.
+- **The knowledge batch and its publication keep their existing owners.** The curator *invokes*
+  `agents-remember knowledge-ingest`; it never writes the dataset itself, never edits SQLite, never
+  selects a destination of its own, and never treats the mounted `knowledge_change` tool as a write
+  route — it refuses every record kind and only names the real entry point. `--commit` stays the
+  knowledge-batch write word: it is not a Git action and not an acceptance, and a zero exit is not
+  proof that every entry committed or that anything was published. The report's per-entry outcomes,
+  its `publicationRoute` and its `publishedIdentity` are the evidence, and a refused entry or a refused
+  publication is reported exactly as it came back.
 - **Scope the MCP tools with the enclosure contract path.** Without it they resolve the **official**
   memory repo — read-only for the diagnostics, but `route_index_refresh` writes, so an unscoped call
   dirties a repository the curator does not own and blocks the next `worktree_start` until a human
@@ -116,6 +138,11 @@ their accumulated change is reviewed on the canonical master at master-to-parent
   and control-plane state stayed coherent.
 - **Do not promote a historical oddity** into a permanent invariant without checking its causal
   applicability and reconsideration condition.
+- **A partial or refused knowledge hand-off stays partial.** A run whose entries split across
+  `committed` and `refused`, or whose publication the owner refused, names each outcome and
+  manufactures no full completion; an exact retry is the recovery (the batch replays and the
+  publication reports `no_change`), while changed content under one entry id is refused by design and
+  is corrected with a successor entry.
 - **If any side of the three-way comparison is missing or ambiguous enough that curation would become
   guesswork**, ask the owning seat for one clarification row.
 - Report **dirty-source drift**, missing onboarding, or other findings exactly as returned; never
@@ -125,6 +152,9 @@ their accumulated change is reviewed on the canonical master at master-to-parent
 
 The curator's exit returns to the owning manager: the changed onboarding paths, the intent
 reconciliation, the exact scoped commands and results, and any failed, blocked, or not-run checks.
+It also carries the knowledge hand-off result: every entry's outcome from the ingest report
+(`committed` / `rulings` / `refused`, each refusal named) and the **published dataset identity** the
+run read back, which is the snapshot the next task's planner reads.
 The structured coherence record and its generated projection are the durable output — not the
 transcript and not a parallel hand-authored report. Write the record before ending the turn;
 terminal/finalizer evidence then attests only that this turn ended and wakes the manager, who

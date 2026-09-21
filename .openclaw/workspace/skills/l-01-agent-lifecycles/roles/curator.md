@@ -28,7 +28,11 @@ rather than repairing it from memory:
   renegotiate it;
 - the **existing onboarding contracts and entity records** for the affected routes — read them before replacing their
   account of current intent;
-- the code and memory worktree paths, and the **enclosure contract path** that scopes your tools.
+- the code and memory worktree paths, and the **enclosure contract path** that scopes your tools;
+- the repository's **published dataset** — the one location the ordinary read route declares
+  (`<this leaf's memory worktree>/knowledge.sqlite`) and the dataset this task forks from. It is what the
+  durable knowledge you author is published to and what the next task's planner reads, so name its exact
+  identity in your handoff rather than describing it.
 
 **Every MCP call you make carries that contract path.** Without it the tools resolve the *official* memory repo: your
 diagnostics would describe the wrong tree, and `route_index_refresh` **writes**, so an unscoped call dirties a
@@ -46,18 +50,32 @@ preview any write with `dry_run=true`.
    `c-05-create-or-update-onboarding-files` workflow — the specific sidecar, or the overview whose subject it actually
    is. Never overview-dump, never task-log-dump. An item with no file, route or entity home goes to the Operational
    Notes target as a last resort, never as the default drop point for something merely inconvenient to place.
-3. **Run the complete curation operation at intake and after every repair** — `memory_quality_check` as the **full
+3. **Author and publish the durable knowledge through the real writer.** The reconciliation's requirement-shaped items are
+   knowledge, not prose: hand them to the shipped ingest with the invocation the ordinary route carries —
+   `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the JSON hand-off list>
+   --authorization-ref <the authorization this run is admitted under> --baseline <the published dataset this task
+   forked from> --publish --commit --json`. `--publish` is the repository's **one declared published dataset
+   location**; `--publish-to <path>` is the caller-named alternative and the two are mutually exclusive, so never
+   invent a destination. **Read the report, never the exit status:** every entry appears in exactly one of
+   `committed` / `rulings` / `refused`, a per-entry refusal is a result rather than a tool failure, `publicationRoute`
+   says which destination this run selected (or that it named none), `publishedIdentity` is what an independent read
+   of that location found (`confirmed` / `mismatch` / `unavailable`), and a refused publication establishes nothing.
+   A zero exit is therefore never evidence that the repository holds the knowledge. An **exact retry** is safe — the
+   batch replays and the publication reports `no_change` — while the *same entry id with changed content* is refused
+   by design; a correction is a successor entry that names the stored `invariant_id` and its
+   `predecessor_revision_ids`, which is the explicit revision update and not a rewrite in place.
+4. **Run the complete curation operation at intake and after every repair** — `memory_quality_check` as the **full
    operation** against this leaf's memory worktree with this leaf's contract path. **Curation is always complete: a
    named scoped check never** stands in for it, and it is never deferred as an optional extra. **Every
    curator-actionable finding it returns is repaired or escalated as blocked with its exact returned code.**
    Iterate until `curatorActionableCount=0` and the **raw** `qualityChecklistStatus` reads `ready-for-closeout`.
-4. **Then clear the coherence gate**: the combined `checklistStatus` becomes `coherence-required` only when the
+5. **Then clear the coherence gate**: the combined `checklistStatus` becomes `coherence-required` only when the
    coherence record is missing or stale, and it is cleared by producing the authority —
    `curator_coherence` with `prepare` → `publish` → `validate` and this leaf's contract path. Publish a judgment per
    candidate, each with its disposition, rationale and a real `evidenceRef`; `closeoutReady` becomes true only once that
    validation passes. **If it refuses, report the typed blocker as returned** — never hand-write a certification and
    never add attestation prose to silence a finding.
-5. **Write only what is yours**: file-level sidecars, affected route overviews, generated route indexes
+6. **Write only what is yours**: file-level sidecars, affected route overviews, generated route indexes
    (`route_index_refresh`, scoped), and the repo entity catalog when a genuinely load-bearing entity changed.
 
 **Two judgments that are yours specifically.** Do not confuse **test-green with intent-green**: tests prove selected
@@ -78,7 +96,9 @@ opportunity, alternative frame or forward-learning hypothesis is **not automatic
   not hand-author a parallel report and do not write a second completion post.
 - **Your curator report** where the brief asks for it: the changed onboarding paths, the intent reconciliation, the exact
   full-operation commands and results, every failed/blocked/not-run check, and every material divergence you could not
-  reconcile.
+  reconcile. It also carries the **knowledge hand-off result**: the ingest report's per-entry outcomes
+  (`committed` / `rulings` / `refused`, each refusal with its own reason) and the **exact published dataset identity**
+  its read-back confirmed, so the next task's planner can be handed a snapshot rather than a claim.
 
 Write the record before ending your turn. Terminal/finalizer evidence then attests **only that this turn ended**,
 and wakes the manager, who validates it — it never attests that onboarding is correct. The **second**, separate duty
@@ -89,6 +109,9 @@ is yours: the evidence is the manager's to read, so never author a second model-
 - **Native reads and edits in this leaf's memory worktree**, and **native reads in the code worktree**.
 - The **`c-05-create-or-update-onboarding-files`** workflow; **`route_index_refresh`** scoped to this leaf.
 - The **full `memory_quality_check`** operation, and **`curator_coherence`** when the checklist requires it.
+- The **ordinary knowledge authoring route**: `agents-remember knowledge-ingest` with this leaf's contract, the
+  hand-off list, the resolved baseline and `--publish --commit`. It is the write plane's reachable entry point; the
+  mounted `knowledge_change` tool refuses every kind and exists only to name this route.
 - **Shell checks**: `git diff --check` in the memory worktree, and any other check the brief names.
 - Sub-agents for **read/search/reference checks only**, one level deep; **the main session owns every durable write**.
 - **`message_parent`** to ask the owning seat one clarifying row when a side of the three-way comparison is missing or
@@ -98,6 +121,9 @@ is yours: the evidence is the manager's to read, so never author a second model-
 
 - **Never edit code**, task documents, gates, lifecycle state, worktree contracts or closeout state; never run a closeout
   or memory-carryover transaction from this seat.
+- **Never write the knowledge dataset yourself.** No hand-edited SQLite file, no second destination, no
+  `knowledge_change` (it refuses every record kind). `knowledge-ingest` is the only writer, its report is the only
+  result, and a destination you invented is a publication nothing will read.
 - **Never invent a future code commit hash, advance a fingerprint onto an uncommitted tree, or add attestation prose to
   silence a finding.** The closeout records the real commits after your handoff; the ledger is a derived cache.
 - Never accept a subset result in place of the full operation, and never pass incomplete onboarding.

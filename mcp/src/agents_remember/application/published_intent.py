@@ -11,13 +11,17 @@ Three decisions, and this module owns exactly these:
 * **Which dataset.** One repository-scoped location, resolved from the coordination context the
   ordinary read already carries: the memory layer's knowledge dataset at
   ``<memory_root>/knowledge.sqlite`` (:data:`PUBLISHED_DATASET_NAME`). **This route declares the
-  location it reads; the ordinary write side has to publish there.** No shipped owner computes or
-  defaults a publication destination today -- ``IngestPublication.destination_path`` is whatever the
-  caller's ``--publish-to`` names, and a run that names none commits without publishing -- so wiring
-  the ordinary publisher to this one location is ICR-R20@v1's obligation, and the
-  two-consecutive-task journey that proves task A's publication lands where task B's planner looks is
-  ICR-R25@v1's. Declaring it here is what makes it one shared spelling instead of two conventions
-  that happen to agree. It is a *selection*, not a search: no other repository's dataset is read, no
+  location it reads, and the ordinary write side publishes there.** That wiring was the obligation
+  this declaration recorded until ICR-R20@v1 landed it: no shipped owner computed or defaulted a
+  publication destination before then -- ``IngestPublication.destination_path`` was whatever the
+  caller's ``--publish-to`` named, and a run that named none committed without publishing -- so the
+  ingest command now selects this one location with ``--publish``, resolving it through this module's
+  :func:`published_dataset_path` and reading the published identity back through
+  :func:`resolve_published_intent`. A run that names no destination and passes no ``--publish`` still
+  commits without publishing, which is why the destination stays a selection rather than a default.
+  The two-consecutive-task journey that proves task A's publication lands where task B's planner looks
+  is still ICR-R25@v1's. Declaring it here is what makes it one shared spelling instead of two
+  conventions that happen to agree. It is a *selection*, not a search: no other repository's dataset is read, no
   working directory is guessed, and naming it needs no leaf, no enclosure and no task. *Which* memory
   root that is follows the resolved context: the canonical external memory root when no enclosure is
   in scope -- the taskless planner this route exists for -- and the memory **worktree** (that task's
@@ -100,12 +104,16 @@ __all__ = [
 ]
 
 # The one file name a repository's published knowledge dataset occupies inside its memory layer.
-# THIS ROUTE DECLARES THE LOCATION IT READS. No shipped owner computes or defaults a publication
-# destination today: ``IngestPublication.destination_path`` is whatever the caller's ``--publish-to``
-# names, and an ingest run that names none commits without publishing. The ordinary publisher has to
-# be wired to this one location (ICR-R20@v1), and the two-consecutive-task journey has to prove task
-# A's publication lands where task B's planner looks (ICR-R25@v1). Declaring it here is what gives
-# the read side and the write side one shared spelling instead of two conventions that agree today.
+# THIS ROUTE DECLARES THE LOCATION IT READS, AND THE ORDINARY WRITE SIDE PUBLISHES THERE: the ingest
+# command selects it with ``--publish``, which resolves this same path through
+# ``published_dataset_path`` and reads the published identity back through
+# ``resolve_published_intent``. A run that names no destination and passes no ``--publish`` still
+# commits without publishing, which is why the destination is a selection rather than a default.
+# Before ICR-R20@v1 no shipped owner computed or defaulted a destination at all --
+# ``IngestPublication.destination_path`` was whatever the caller's ``--publish-to`` named -- and the
+# two-consecutive-task journey that has to prove task A's publication lands where task B's planner
+# looks is still ICR-R25@v1's. Declaring it here is what gives the read side and the write side one
+# shared spelling instead of two conventions that agree today.
 PUBLISHED_DATASET_NAME = "knowledge.sqlite"
 
 # One bounded page per seed. A path seed selects the revisions realized at that path plus the

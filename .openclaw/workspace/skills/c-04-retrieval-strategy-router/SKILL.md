@@ -178,14 +178,16 @@ knowledge dataset from that repository's own coordination context -- no leaf, no
 task is needed -- and reads the recorded intent about each requested path at that dataset's exact
 snapshot. The result carries it as `published_intent`.
 
-**Where the route reads, and what has to publish there.** This route *declares* the publication
+**Where the route reads, and what publishes there.** This route *declares* the publication
 location it reads: `<memory_root>/knowledge.sqlite`, one file in the memory layer the repository's
-coordination declaration resolves. No published owner defaults that destination today -- the ingest
-command publishes only where its caller's `--publish-to` points, and an ingest that names none
-commits without publishing -- so the ordinary write side has to be wired to this one location
-(ICR-R20@v1), and the two-consecutive-task journey has to prove that task A's publication lands where
-task B's planner looks (ICR-R25@v1). Do not read a `not-recorded` answer as "this repository never
-recorded intent": it means nothing is published at the location this read was addressed to.
+coordination declaration resolves. The ordinary write side publishes to that same location: the
+ingest command selects it with `--publish` — resolving it through this read side's own declaration
+and reading the published identity back through the reader's owner — while an ingest that names no
+destination and passes no `--publish` still commits without publishing, so the flag stays a selection
+rather than a default. That wiring was ICR-R20@v1's obligation; the two-consecutive-task journey that
+has to prove task A's publication lands where task B's planner looks is ICR-R25@v1's. Do not read a
+`not-recorded` answer as "this repository never recorded intent": it means nothing is published at
+the location this read was addressed to.
 
 Which memory root that is depends on scope, and there is no fallback between the two. With no
 enclosure in scope -- the taskless planner this route exists for -- it is the canonical external
