@@ -177,6 +177,32 @@ class FutureCodeCandidateError(AgentsRememberError):
         super().__init__(detail)
 
 
+class CodeObjectRetentionError(AgentsRememberError):
+    """A comparison's explicit code-object retention could not be created, or was not released.
+
+    Raised rather than returned because every caller is *inside* a publication that has not happened
+    yet: the freeze converts it into a typed refusal, and the retention owner itself has no result
+    value that could carry both facts a caller needs -- which ref, and which of the two objects.
+    """
+
+    def __init__(self, status: str, detail: str) -> None:
+        self.status = status
+        super().__init__(detail)
+
+
+class ComparisonReclamationError(AgentsRememberError):
+    """A durable comparison artifact could not be reclaimed as its own record describes it.
+
+    Raised rather than returned because the caller is a deletion: the caller must not proceed to
+    record a deletion, and a returned value would make "nothing was removed" easy to overlook at the
+    one place where removing the wrong bytes is irreversible.
+    """
+
+    def __init__(self, status: str, detail: str) -> None:
+        self.status = status
+        super().__init__(detail)
+
+
 class CuratorCoherenceError(AgentsRememberError):
     """The leaf's structured curator-coherence authority is absent, stale, or invalid."""
 

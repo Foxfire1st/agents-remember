@@ -104,6 +104,7 @@ unit-regression = [
   "mcp/tests/test_knowledge_merge_generations_and_envelope.py",
   "mcp/tests/test_knowledge_routes.py",
   "mcp/tests/test_knowledge_read_scope.py",
+  "mcp/tests/test_knowledge_review_comparison_generation.py",
   "mcp/tests/test_knowledge_review_surface.py",
   "mcp/tests/test_knowledge_review_one_sided_statements.py",
   "mcp/tests/test_knowledge_review_source_endpoints.py",

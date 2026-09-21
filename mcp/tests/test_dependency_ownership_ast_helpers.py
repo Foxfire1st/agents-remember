@@ -43,8 +43,27 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "51a218a09ea5721197cb15b445f98fb8f1dd734c2d083124c913226e599a8745"
+LIFECYCLE_CATALOG_SHA256 = "aedb2636844faf41ca63b7099e6c62bcaf888720e7e7dd78e203e3a1c9e061ff"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Fourteenth deliberate re-pin (260921-ICR-L11, at base ``9043a82e``, 2026-09-21) -- one new case
+module's two consumer rows.** ``260921-ICR-L11`` (requirement ``ICR-R11@v1``) registers no artifact and
+no contract of its own: its nine durable-comparison-generation cases live in the ordinary unit module
+``mcp/tests/test_knowledge_review_comparison_generation.py``, which builds on the existing
+``mcp/tests/test_knowledge_review_source_endpoints.py`` enclosure fixture rather than introducing a
+second one -- so it is a source-derived consumer of both ``mcp/tests/diff_scope_test_support.py`` (the
+candidate content its cases read back out of the retained tree and the two real trees the enclosure is
+built over) and ``mcp/tests/read_scope_test_support.py`` (the repository, the recorded anchors and the
+datasets the comparison is between). Both ``consumer_scope = "exact"`` rows gained that one path each,
+derived from the census's own finding -- ``missing=['mcp/tests/test_knowledge_review_comparison_generation.py']``
+with ``unsupported=[]`` on both rows. The module's own lane row was added to
+``mcp/tests/test-evidence-lanes.toml``, which pins no digest and refuses an unregistered module at
+collection. **Nothing was registered, no row was removed and no artifact's identity moved**, so the
+population stays at **sixteen contracts / sixty-six artifacts**, and the catalog is re-pinned from
+``7920a0f9f6134d3849e60685ad8a9424cdc95e8209631a03b889cf7d79e05281`` (L6's measurement above) to
+``aedb2636844faf41ca63b7099e6c62bcaf888720e7e7dd78e203e3a1c9e061ff``, measured with
+``sha256sum mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact delta
+remains exactly empty.
 
 **Thirteenth deliberate re-pin (260921-ICR-L6, at the sync onto ``71a4433e``, 2026-09-21) -- the union
 of two consumer repairs, re-measured on the merged file.** ``260921-ICR-L6`` drives the real review
@@ -114,7 +133,7 @@ module it imports, and the Node ``package-lock.json`` fixture, which the census'
 reaches through the CLI import chain those rows already name -- the same two rows L18's own module
 moved. **Nothing was registered, no row was removed and no artifact's identity moved**, so the
 population stays at **sixteen contracts / sixty-six artifacts** and the catalog is re-pinned to
-``51a218a09ea5721197cb15b445f98fb8f1dd734c2d083124c913226e599a8745``, measured with
+``aedb2636844faf41ca63b7099e6c62bcaf888720e7e7dd78e203e3a1c9e061ff``, measured with
 ``sha256sum mcp/tests/evidence-lifecycle.toml`` on the delivered candidate. The digest this value
 replaces was ``3f91773d…``. The proof's own artifact delta remains exactly empty.
 

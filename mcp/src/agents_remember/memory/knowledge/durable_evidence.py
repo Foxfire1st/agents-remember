@@ -38,6 +38,7 @@ __all__ = [
     "DURABLE_EVIDENCE_REFUSED_DESTINATIONS",
     "DurableEvidencePublication",
     "EvidenceReadBack",
+    "durable_reports_root",
     "enclosure_reports_removed",
     "publish_durable_evidence",
     "read_back_evidence",
@@ -52,6 +53,20 @@ DURABLE_EVIDENCE_REFUSED_DESTINATIONS: tuple[str, ...] = ("enclosure_reports", "
 # Where a durable artifact may live, relative to the task root. This is the shipped curator-coherence
 # route's own subdirectory, so one place owns "leaf evidence parked where it survives".
 _TASK_RELATIVE_REPORTS = ("notes", "reports")
+
+
+def durable_reports_root(task_root: Path) -> Path:
+    """Return ``<task_root>/notes/reports`` -- the one durable directory a task artifact may survive in.
+
+    Exported because the destination is a *decision* and not a convenience: the enclosure root and
+    ``<worktree_group>/`` are both removed by cleanup, so a second module that spelled this path for
+    itself would be a second place where "durable" could drift away from the one that is. The single
+    file-name publication above stays the route for one artifact; a producer whose evidence is a
+    directory of related files -- a comparison generation and the snapshots it retains -- roots that
+    directory here rather than restating the path.
+    """
+
+    return Path(task_root).joinpath(*_TASK_RELATIVE_REPORTS)
 
 
 @dataclass(frozen=True)

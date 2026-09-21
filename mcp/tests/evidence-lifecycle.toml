@@ -1402,6 +1402,7 @@ permanence_rationale = "The comparison is decided by what changed between two sn
 replacement_contract = "contract:knowledge-diff-cases"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_knowledge_review_comparison_generation.py",
   "mcp/tests/test_knowledge_diff_scope.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_detection_runs.py",
@@ -1425,6 +1426,7 @@ permanence_rationale = "The selective read is decided by one exact topology -- I
 replacement_contract = "contract:knowledge-read-scope-cases"
 consumer_scope = "exact"
 consumers = [
+  "mcp/tests/test_knowledge_review_comparison_generation.py",
   "mcp/tests/test_knowledge_curator_ingest.py",
   "mcp/tests/test_knowledge_detection_runs.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
