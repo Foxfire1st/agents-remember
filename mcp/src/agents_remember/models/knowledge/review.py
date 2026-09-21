@@ -101,6 +101,7 @@ ReviewRefusalCode = Literal[
     "candidate_dataset_absent",
     "subject_unresolved",
     "comparison_refused",
+    "source_content_unresolved",
     "review_adapter_unavailable",
 ]
 

@@ -2,9 +2,11 @@
 //
 // The surface is display-only. It renders records other owners store, carries every attribution it
 // was given, and produces no conclusion of its own: there is no summary, no severity, no score and
-// no control that writes anything. The one renderer it reuses is `DiffPane`, fed the statements the
-// comparison published: both operands when both sides recorded one, and the available operand beside
-// the named absence when one side did not (R06 -- `KnowledgeStatements` owns that rule).
+// no control that writes anything. The two renderers it reuses are fed by other owners: `DiffPane`
+// for the statements the comparison published -- both operands when both sides recorded one, and the
+// available operand beside the named absence when one side did not (R06 -- `KnowledgeStatements` owns
+// that rule) -- and the Source pane's own entry expansion (R03 -- `SourceContent` owns reading one
+// listed entry's content at the two bound code trees the inventory published).
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -23,6 +25,7 @@ import type {
 } from "../../data/review";
 import { intentReview } from "../../data/review";
 import { KnowledgeStatements } from "./KnowledgeStatements";
+import { SourceContent } from "./SourceContent";
 
 export interface ReviewTarget {
   repo: string;
@@ -204,16 +207,54 @@ function KnowledgePane({ payload }: { payload: ReviewPayload }) {
 // One inventory entry. The path is printed exactly as the server published it -- a tab or a newline
 // inside a name is part of the address -- and the status and renderability are printed beside it,
 // because a path whose content cannot be rendered is still a change that must be listed.
-function inventoryEntry(entry: ReviewChangedFile) {
+//
+// The entry is also the way into its own content (ICR-R03): opening it reads the file at the two
+// code trees the inventory published, and the generation ids travel with the request, so a row
+// opened after the branch moved still shows the generation the reader was looking at.
+function inventoryEntry(
+  entry: ReviewChangedFile,
+  repo: string,
+  master: string,
+  leaf: string,
+  generation: { before?: string; after?: string },
+  open: string | null,
+  onOpen: (path: string | null) => void,
+) {
   const notes = [
     entry.mode_change ? "mode changed" : null,
     entry.content === "unknown" ? null : `content: ${entry.content}`,
     entry.detail ?? null,
   ].filter((note): note is string => note !== null);
+  const expandable = generation.before !== undefined && generation.after !== undefined;
+  const isOpen = open === entry.path;
   return (
     <li key={entry.path} data-testid="review-inventory-entry" data-status={entry.status}>
-      <code>{entry.path}</code> · {entry.status}
+      {expandable ? (
+        <button
+          type="button"
+          data-testid="review-inventory-open"
+          data-path={entry.path}
+          aria-expanded={isOpen}
+          onClick={() => onOpen(isOpen ? null : entry.path)}
+        >
+          {isOpen ? "▾ " : "▸ "}
+          {entry.path}
+        </button>
+      ) : (
+        <code>{entry.path}</code>
+      )}{" "}
+      · {entry.status}
       {notes.length ? <span style={{ color: "muted" }}> · {notes.join(" · ")}</span> : null}
+      {isOpen && expandable ? (
+        <SourceContent
+          repo={repo}
+          master={master}
+          leaf={leaf}
+          entry={entry}
+          beforeCodeTreeId={generation.before as string}
+          afterCodeTreeId={generation.after as string}
+        />
+      ) : null}
     </li>
   );
 }
@@ -221,12 +262,21 @@ function inventoryEntry(entry: ReviewChangedFile) {
 // One changed path this surface cannot name as text, printed by its exact byte form. It is a change
 // like any other: it is listed, its status is shown, and the reason it has no name is stated rather
 // than left as a gap in a list that would otherwise look complete.
+//
+// It carries no expansion control, and says so: this vocabulary carries text, so the only spelling
+// that could address the row's content cannot be expressed in a request (ICR-R03's boundary). The row
+// is for identification -- a reader can act on the bytes beside it with Git directly -- and the pane
+// must not imply that clicking it would open anything.
 function byteNamedEntry(entry: ReviewUnrepresentablePath) {
   return (
     <li key={entry.path_bytes} data-testid="review-inventory-byte-path" data-status={entry.status}>
       <code>{entry.path_bytes}</code> · {entry.status}
       {entry.mode_change ? " · mode changed" : ""}
       <div style={{ color: "muted" }}>{entry.detail}</div>
+      <div style={{ color: "muted" }} data-testid="review-byte-path-not-addressable">
+        this row's content is not openable through this surface: its name is carried as bytes for
+        identification, and no expansion request can name it.
+      </div>
     </li>
   );
 }
@@ -235,8 +285,26 @@ function byteNamedEntry(entry: ReviewUnrepresentablePath) {
 // of its states and never as an empty list: a measured empty set says the two trees agree, an
 // unavailable measurement says nothing was observed and why, and a partial one says which entries
 // could not be classified or carried as names.
-function Inventory({ inventory }: { inventory: ReviewSourceInventory }) {
+//
+// Every entry is openable while the inventory named both of its code trees: those two ids are the
+// generation the content is read at, and an inventory that named no pair has nothing to open.
+function Inventory({
+  inventory,
+  repo,
+  master,
+  leaf,
+}: {
+  inventory: ReviewSourceInventory;
+  repo: string;
+  master: string;
+  leaf: string;
+}) {
   const byByteForm = inventory.unrepresentable_paths ?? [];
+  const [open, setOpen] = useState<string | null>(null);
+  const generation = {
+    before: inventory.before_code_tree_id,
+    after: inventory.after_code_tree_id,
+  };
   return (
     <div data-testid="review-inventory" data-inventory-state={inventory.state}>
       <p style={{ margin: "0.4rem 0" }}>
@@ -245,7 +313,11 @@ function Inventory({ inventory }: { inventory: ReviewSourceInventory }) {
         {byByteForm.length ? ` + ${byByteForm.length} by byte form` : ""} — {inventory.detail}
       </p>
       {inventory.entries.length ? (
-        <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }}>{inventory.entries.map(inventoryEntry)}</ul>
+        <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }}>
+          {inventory.entries.map((entry) =>
+            inventoryEntry(entry, repo, master, leaf, generation, open, setOpen),
+          )}
+        </ul>
       ) : null}
       {byByteForm.length ? (
         <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }}>
@@ -262,12 +334,27 @@ function Inventory({ inventory }: { inventory: ReviewSourceInventory }) {
   );
 }
 
-function SourcePane({ payload }: { payload: ReviewPayload }) {
+function SourcePane({
+  payload,
+  repo,
+  master,
+  leaf,
+}: {
+  payload: ReviewPayload;
+  repo: string;
+  master: string;
+  leaf: string;
+}) {
   const { source } = payload;
   return pane(
     "Source",
     <>
-      <Inventory inventory={source.inventory} />
+      <Inventory
+        inventory={source.inventory}
+        repo={repo}
+        master={master}
+        leaf={leaf}
+      />
       <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-locations">
         {source.locations.map((location) => (
           <li key={`${location.claim_id}:${location.path}`} data-change-state={location.change_state}>
@@ -452,7 +539,7 @@ export function ReviewSurface({
           <SubmissionBlock payload={payload} />
           <div className={TAKEOVER} style={{ display: "grid", gap: "1rem" }}>
             <KnowledgePane payload={payload} />
-            <SourcePane payload={payload} />
+            <SourcePane payload={payload} repo={repo} master={master} leaf={leaf} />
             <EvidencePane payload={payload} />
           </div>
         </>

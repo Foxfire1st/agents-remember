@@ -33,7 +33,11 @@ from agents_remember.serving.launch_capsule import (
 )
 from agents_remember.serving.ports import TerminalCatalogPort
 from agents_remember.serving.projector import ProjectionReplay, Projector
-from agents_remember.serving.review import KnowledgeReviewEntriesPort, KnowledgeReviewPort
+from agents_remember.serving.review import (
+    KnowledgeReviewEntriesPort,
+    KnowledgeReviewPort,
+    ReviewSourceContentPort,
+)
 from agents_remember.serving.served_state import served_state_tail
 from agents_remember.serving.terminal import TerminalHost, TerminalSessionSpec
 from agents_remember.serving.terminal_liveness import (
@@ -472,6 +476,16 @@ class ServingCollaborators:
     it knows a subject. Omitting it refuses that route by name for the same reason the review route
     is refused: an empty entry list would say "nothing is reviewable here", which is a different
     fact from "this process cannot answer".
+    """
+
+    review_source_content: ReviewSourceContentPort | None = None
+    """The application-tier owner of one inventory entry's content at its two bound code trees.
+
+    A third port rather than a field on the review payload: the inventory is the whole task's change
+    set, and the route that opens one entry reads two Git objects the payload never carried. Omitting
+    it refuses that route by name -- "this process cannot read the entry" and "this entry has no
+    content" are different facts, and a browser served an empty file for the second would be reading
+    a document this repository does not hold.
     """
 
     capsule_launch: LaunchCapsuleResolverPort | None = None

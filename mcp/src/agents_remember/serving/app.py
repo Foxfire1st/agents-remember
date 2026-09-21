@@ -293,7 +293,11 @@ def create_app(
     register_notes_routes(app, config)
     register_requirements_routes(app, config)
     register_review_routes(
-        app, config, collaborators.knowledge_review, collaborators.knowledge_review_entries
+        app,
+        config,
+        collaborators.knowledge_review,
+        collaborators.knowledge_review_entries,
+        collaborators.review_source_content,
     )
     register_harness_control_routes(
         app,

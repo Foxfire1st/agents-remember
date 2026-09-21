@@ -78,6 +78,9 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         read_knowledge_review,
         review_records_for,
     )
+    from agents_remember.application.review_source_content import (  # noqa: PLC0415 - composition
+        read_review_source_content,
+    )
     from agents_remember.application.role_capsules.launch import (  # noqa: PLC0415 - composition
         compile_launch_capsule,
     )
@@ -103,11 +106,24 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
 
         return list_knowledge_review_entries(config, repository_id, master, leaf_id)
 
+    def review_source_content_port(request):
+        """Open one listed entry's content at the two code trees the listing published.
+
+        The request carries the generation the browser is looking at rather than the server choosing
+        one, and the application owner re-resolves the leaf to *measure* whether that generation is
+        still the candidate's. It then reads those two objects and nothing else -- no working tree,
+        no ``HEAD`` -- so an entry opened after the branch moved still shows the listed generation's
+        bytes and says that the leaf has moved past them.
+        """
+
+        return read_review_source_content(config, request)
+
     return replace(
         EXECUTION_REGISTRATION_COLLABORATORS,
         capsule_launch=partial(compile_launch_capsule, config),
         knowledge_review=review_port,
         knowledge_review_entries=review_entries_port,
+        review_source_content=review_source_content_port,
     )
 
 

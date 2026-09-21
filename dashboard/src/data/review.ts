@@ -6,8 +6,9 @@
 //
 // Every type below mirrors one model in models/knowledge/review.py. A field the server omits is
 // absent here rather than defaulted, so an unresolved reference stays unresolved on the client too.
+// The expansion types mirror models/knowledge/review_source_content.py the same way (ICR-R03).
 
-import { getJson, qs } from "./files";
+import { FilesApiError, getJson, qs } from "./files";
 
 export type ReviewSideState = "present" | "absent" | "binary" | "unresolved";
 export type ReviewSelectorKind = "invariant" | "family";
@@ -188,6 +189,62 @@ export interface ReviewSourcePane {
   unresolved: ReviewUnresolvedReference[];
 }
 
+// One bound endpoint's content for one listed entry. `state` is the whole truth about what can be
+// rendered: `present` (a regular file's text, carried in `text`), `symlink` (the link target),
+// `absent` (this endpoint holds no entry at the path), `binary`, `submodule` (a recorded pointer
+// with no file bytes) and `unavailable` (the entry could not be read). `text` is present only for
+// the two textual states, so a missing or unrenderable side can never arrive as an empty document.
+export type ReviewSourceSideState =
+  | "present"
+  | "absent"
+  | "binary"
+  | "symlink"
+  | "submodule"
+  | "unavailable";
+
+export interface ReviewSourceSide {
+  state: ReviewSourceSideState;
+  text?: string;
+  detail: string;
+  object_id?: string;
+  byte_length?: number;
+  truncated: boolean;
+}
+
+// One inventory entry opened: both endpoints' content at the exact generation the listing named.
+// `currentness` says whether that generation is still the pair the leaf's review binds -- the
+// content is the requested generation's either way, and a superseded read never silently becomes a
+// read of the newer one.
+//
+// `path_bound` says which *measured* change set admitted the path: the requested generation's own
+// (`requested_generation`), or -- when that measurement could not be made -- the one this leaf's
+// review publishes (`leaf_change_set`). A path in no measured change set is refused outright, so
+// this field states which measurement was the bound rather than widening the read.
+export interface ReviewSourceExpansion {
+  path: string;
+  status: ReviewFileStatus;
+  mode_change: boolean;
+  language: string;
+  before: ReviewSourceSide;
+  after: ReviewSourceSide;
+  before_code_tree_id: string;
+  after_code_tree_id: string;
+  currentness: "current" | "superseded" | "unmeasured";
+  currentness_detail: string;
+  path_bound: "requested_generation" | "leaf_change_set";
+  path_bound_detail: string;
+  reference: string;
+  command: string;
+}
+
+export interface ReviewSourceContentResult {
+  state: "content" | "refused";
+  operation: string;
+  repository_id: string;
+  expansion?: ReviewSourceExpansion;
+  refusal?: ReviewRefusal;
+}
+
 export interface ReviewEvidenceLink {
   claim_id: string;
   revision_id?: string;
@@ -318,3 +375,40 @@ export const intentReviewEntries = (
   getJson<ReviewEntryListResult>(
     `${base}/api/review/intent/entries?${qs({ repo, master, leaf })}`,
   );
+
+// One listed entry's actual content at the two bound code trees (ICR-R03). The generation is an
+// *input*: `before`/`after` are the ids the inventory published to this client, echoed back, so the
+// content a reader opens is the content of the generation they were looking at -- never re-resolved
+// from whatever the leaf holds by the time the request lands.
+//
+// The transport maps a refused read onto its 400/404 status idiom WITH the typed refusal in the
+// body, and for this route a refusal is a normal answer (a path outside the measured change set, a
+// baseline that is not this leaf's recorded one). So this function reads the body whatever the
+// status and returns a typed result when the body is one; only a body that is not this route's
+// answer (an unwired process, a proxy error) becomes a FilesApiError.
+export const reviewSourceContent = async (
+  repo: string,
+  master: string,
+  leaf: string,
+  path: string,
+  beforeCodeTreeId: string,
+  afterCodeTreeId: string,
+  base = "",
+): Promise<ReviewSourceContentResult> => {
+  const url = `${base}/api/review/intent/source-content?${qs({
+    repo,
+    master,
+    leaf,
+    path,
+    beforeCodeTreeId,
+    afterCodeTreeId,
+  })}`;
+  const response = await fetch(url);
+  const body = (await response.json().catch(() => ({}))) as Partial<ReviewSourceContentResult> & {
+    status?: string;
+  };
+  if (body.state === "content" || body.state === "refused") {
+    return body as ReviewSourceContentResult;
+  }
+  throw new FilesApiError(response.status, body.status ?? response.statusText);
+};

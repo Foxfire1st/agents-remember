@@ -43,8 +43,27 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "aedb2636844faf41ca63b7099e6c62bcaf888720e7e7dd78e203e3a1c9e061ff"
+LIFECYCLE_CATALOG_SHA256 = "dc6e380867302d7e2fff89f8c36549c85528ed4dafa28b4510981b573f09739b"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Fifteenth deliberate re-pin (260921-ICR-L3, at base ``d80a0513``, 2026-09-21) -- one new case
+module's two consumer rows.** ``260921-ICR-L3`` (requirement ``ICR-R03@v1``) registers no artifact and
+no contract of its own: its twenty source-content cases live in the ordinary unit module
+``mcp/tests/test_knowledge_review_source_content.py``, which extends the existing
+``mcp/tests/test_knowledge_review_source_endpoints.py`` enclosure fixture (adding the content classes
+the packet names to its worktree) rather than introducing a second enclosure. It is therefore a
+source-derived consumer of both ``mcp/tests/diff_scope_test_support.py`` (the fixture's two real trees
+and its ``_git`` observation helper) and ``mcp/tests/read_scope_test_support.py`` (the repository, the
+tracked paths whose bytes the cases read back), and both ``consumer_scope = "exact"`` rows gained that
+one path each -- derived from the census's own finding,
+``missing=['mcp/tests/test_knowledge_review_source_content.py']`` with ``unsupported=[]`` on both rows.
+The module's own lane row was added to ``mcp/tests/test-evidence-lanes.toml``, which pins no digest and
+refuses an unregistered module at collection. **Nothing was registered, no row was removed and no
+artifact's identity moved**, so the population stays at **sixteen contracts / sixty-six artifacts**,
+and the catalog is re-pinned from ``aedb2636844faf41ca63b7099e6c62bcaf888720e7e7dd78e203e3a1c9e061ff``
+(L11's measurement above) to ``dc6e380867302d7e2fff89f8c36549c85528ed4dafa28b4510981b573f09739b``,
+measured with ``sha256sum mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own
+artifact delta remains exactly empty.
 
 **Fourteenth deliberate re-pin (260921-ICR-L11, at base ``9043a82e``, 2026-09-21) -- one new case
 module's two consumer rows.** ``260921-ICR-L11`` (requirement ``ICR-R11@v1``) registers no artifact and
