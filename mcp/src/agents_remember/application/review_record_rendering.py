@@ -31,6 +31,7 @@ from agents_remember.models.knowledge.review import (
     ReviewEvidenceLink,
     ReviewEvidencePane,
     ReviewObservation,
+    ReviewRecordChannel,
     ReviewRefusal,
     ReviewSignal,
     ReviewSubmission,
@@ -45,6 +46,7 @@ from agents_remember.models.lifecycles.review_assessment import (
 
 __all__ = [
     "EMPTY_REVIEW_RECORDS",
+    "ReviewClaimRecord",
     "ReviewRecordInputs",
     "assessment_displays",
     "evidence_pane",
@@ -57,6 +59,29 @@ __all__ = [
 
 
 @dataclass(frozen=True)
+class ReviewClaimRecord:
+    """One evidence claim's own recorded fields, as the evidence owner serves them.
+
+    The claim's *identity* already reaches the surface through the review matrix's row, which names
+    which claims a selection reaches. What the row deliberately does not do is restate the claim's
+    content -- the view refuses to become a second renderer of a record group it does not own -- so
+    the authored fields travel here instead, read from the claim's own owner: the author the
+    admission recorded, the lifecycle the record was written under, the limitations the author
+    declared (``""`` is that declaration, verbatim, and never "unknown") and the coverage endpoints
+    the author asserted.
+
+    It is a *renderer input* and not a record: nothing here is derived, ranked or filtered.
+    """
+
+    claim_id: str
+    author_ref: str | None = None
+    lifecycle: str | None = None
+    limitations: str = ""
+    claimed_coverage: tuple[str, ...] = ()
+    assessment_refs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ReviewRecordInputs:
     """The records the renderer is *given*, rather than records it goes and selects for itself.
 
@@ -64,12 +89,21 @@ class ReviewRecordInputs:
     An empty collection is a stated absence and never a fabricated positive: no assessments means
     every subject is displayed ``unassessed``, and no observations means the evidence pane carries
     none -- neither is defaulted to a clearance.
+
+    ``channels`` is the availability fact that goes with the collections: one entry per record class
+    the composition read, saying whether its owner answered (and with what count), whether expected
+    content could not be read, or whether the collection was not read at all. It is what keeps an
+    empty tuple from standing for three different facts, and it is deliberately *not* derived from
+    the collection lengths here -- an empty collection is exactly what this module must be able to
+    render without claiming which of the three it is.
     """
 
     assessments: tuple[ReviewAssessment, ...] = ()
     current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]] | None = None
     signals: tuple[DetectionSignalPayload, ...] = ()
     observations: tuple[VerificationObservationPayload, ...] = ()
+    claims: tuple[ReviewClaimRecord, ...] = ()
+    channels: tuple[ReviewRecordChannel, ...] = ()
 
 
 # The empty record set, as one module-level value: a call in an argument default would rebuild it on
@@ -122,23 +156,9 @@ def evidence_pane(
 ) -> ReviewEvidencePane:
     """Pane 3: evidence references, execution observations and the authored assessments."""
 
+    claims = {claim.claim_id: claim for claim in records.claims}
     links = tuple(
-        ReviewEvidenceLink(
-            claim_id=row.subject.record_id,
-            revision_id=row.subject.revision_id,
-            assessment_refs=row.assessment_ids,
-            unresolved=(
-                ReviewUnresolvedReference(
-                    field="coverage",
-                    recorded_reference=row.subject.record_id,
-                    detail=(
-                        "the review matrix publishes this claim's identity, lifecycle and "
-                        "assessment references; it publishes no coverage or limitations for it, so "
-                        "they are displayed as unresolved rather than reported as absent"
-                    ),
-                ),
-            ),
-        )
+        _evidence_link(row, claims.get(row.subject.record_id))
         for row in rows
         if row.subject.record_kind == "evidence_claim"
     )
@@ -151,6 +171,7 @@ def evidence_pane(
         observations=observations,
         assessments=assessments,
         source_inspection_available=True,
+        channels=records.channels,
     )
 
 
@@ -209,6 +230,46 @@ def _assessment_display(record: ReviewAssessment, currentness: str) -> ReviewAss
         or (record.comparisonRef,),
         binding_state=currentness,
         evidence_refs=tuple(reference.spelling for reference in record.evidenceRefs),
+    )
+
+
+def _evidence_link(row: ReviewMatrixRow, claim: ReviewClaimRecord | None) -> ReviewEvidenceLink:
+    """One matrix row's claim, with the claim's own recorded fields where its owner supplied them.
+
+    A claim this composition supplied carries its author, lifecycle, declared limitations and asserted
+    coverage verbatim. A claim whose record could not be read keeps its identity and its assessment
+    references and names the missing half as unresolved -- with the owner that would supply it -- so
+    an unread claim is never rendered as a claim with no limitations.
+    """
+
+    if claim is not None:
+        return ReviewEvidenceLink(
+            claim_id=row.subject.record_id,
+            revision_id=row.subject.revision_id,
+            claimed_coverage=claim.claimed_coverage,
+            # The authored field verbatim: an empty member is the author's own "no limitations
+            # declared", which is a recorded fact and not an unknown.
+            limitations=(claim.limitations,),
+            author_ref=claim.author_ref,
+            assessment_refs=row.assessment_ids,
+            lifecycle=claim.lifecycle,
+        )
+    return ReviewEvidenceLink(
+        claim_id=row.subject.record_id,
+        revision_id=row.subject.revision_id,
+        assessment_refs=row.assessment_ids,
+        unresolved=(
+            ReviewUnresolvedReference(
+                field="claim_content",
+                recorded_reference=row.subject.record_id,
+                detail=(
+                    "the review matrix publishes this claim's identity, lifecycle and assessment "
+                    "references, and the evidence owner's own read of this claim supplied no "
+                    "content for it, so its coverage, limitations and author are displayed as "
+                    "unresolved rather than reported as absent"
+                ),
+            ),
+        ),
     )
 
 

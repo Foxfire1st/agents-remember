@@ -16,7 +16,9 @@ composition, not a degraded one:
   three states the model keeps apart.
 * **Nothing here selects, ranks or concludes.** The records the caller supplied are rendered by
   :mod:`agents_remember.application.review_record_rendering`, the same renderer the subject review
-  uses, so an unassessed assessment collection reads identically in both.
+  uses, so an unassessed assessment collection reads identically in both. The two collections the
+  *review matrix* owns are reported ``not_selected`` rather than omitted: this composition read no
+  matrix, and a review that did not ask may not report an owner's absence (``ICR-R14@v1``).
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ from agents_remember.application.review_candidate_resolution import (
     missing_dataset_half,
     require_current_candidate_identity,
 )
+from agents_remember.application.review_evidence_records import with_selection_channels
 from agents_remember.application.review_record_rendering import (
     ReviewRecordInputs,
     assessment_displays,
@@ -81,6 +84,7 @@ def task_context_review(
     if moved is not None:
         return refused(request.repository_id, moved)
     unreadable = unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database)
+    records = with_selection_channels(records, (), selected=False)
     subjects = subject_states(records)
     return KnowledgeReviewResult(
         state="review",

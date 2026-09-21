@@ -43,8 +43,30 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "dc6e380867302d7e2fff89f8c36549c85528ed4dafa28b4510981b573f09739b"
+LIFECYCLE_CATALOG_SHA256 = "3e9105c2116422debaa01c295294fc0c714288f701ee5902e6552884b64a52d8"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Sixteenth deliberate re-pin (260921-ICR-L14, synced onto the landed ICR-L3 re-pin, 2026-09-21) -- one
+new case module's four consumer rows, merged with the Fifteenth's two.** ``260921-ICR-L14`` (requirement
+``ICR-R14@v1``) registers no artifact and no contract of its own: its eight record-collection cases live in
+the ordinary unit module ``mcp/tests/test_knowledge_review_evidence_channels.py``, which builds on the
+existing ``mcp/tests/test_knowledge_review_source_endpoints.py`` enclosure fixture and the existing
+``mcp/tests/curator_coherence_test_support.py`` publication helper rather than introducing a second
+fixture of either. It is therefore a source-derived consumer of **four** rows, each derived from the
+census's own finding -- ``missing=['mcp/tests/test_knowledge_review_evidence_channels.py']`` with
+``unsupported=[]`` on every one: ``mcp/tests/curator_coherence_test_support.py`` (the topology and
+publication helpers the assessment channel is produced through), ``mcp/tests/diff_scope_test_support.py``
+(the two real trees and the candidate bytes the enclosure is built over),
+``mcp/tests/read_scope_test_support.py`` (the repository, the anchors and the datasets the comparison is
+between) and the Node ``package-lock.json`` fixture, which the census's own propagation rule reaches
+through the support modules those rows already name. The module's own lane row was added to
+``mcp/tests/test-evidence-lanes.toml``, which pins no digest and refuses an unregistered module at
+collection. **Nothing was registered, no row was removed and no artifact's identity moved**, so the
+population stays at **sixteen contracts / sixty-six artifacts**. Because this branch was synced onto the
+landed Fifteenth re-pin (``dc6e3808…``), the merged catalog carries both leaves' consumer rows, so the pin
+is re-measured on the merged candidate rather than copied from either side: ``sha256sum
+mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact delta remains
+exactly empty.
 
 **Fifteenth deliberate re-pin (260921-ICR-L3, at base ``d80a0513``, 2026-09-21) -- one new case
 module's two consumer rows.** ``260921-ICR-L3`` (requirement ``ICR-R03@v1``) registers no artifact and

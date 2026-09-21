@@ -65,6 +65,11 @@ from agents_remember.application.review_candidate_resolution import (
     resolve_review_candidate,
     review_namespace,
 )
+from agents_remember.application.review_evidence_records import (
+    AUTHORED_EFFECT_KINDS,
+    review_records_for,
+    with_selection_channels,
+)
 from agents_remember.application.review_record_rendering import (
     EMPTY_REVIEW_RECORDS,
     ReviewRecordInputs,
@@ -121,12 +126,8 @@ from agents_remember.models.knowledge.review import (
     ReviewSurfaceRequest,
     ReviewUnresolvedReference,
 )
-from agents_remember.models.knowledge.view import ReviewMatrixRow, ViewRequest
+from agents_remember.models.knowledge.view import ReviewMatrixRow, ViewRequest, ViewResult
 from agents_remember.models.lifecycles.review_assessment import SubjectAssessmentState
-from agents_remember.worktrees.integration.closeout.curator_coherence import (
-    CuratorCoherenceError,
-    load_curator_coherence_authority,
-)
 
 __all__ = [
     "EMPTY_REVIEW_RECORDS",
@@ -152,13 +153,6 @@ REVIEW_MATRIX_KINDS: tuple[str, ...] = (
     "preservation_claim",
     "unresolved_question",
     "evidence_claim",
-)
-
-# The record kinds the knowledge pane renders as mechanically-sourced *authored* records. They are
-# the author's own rows; none of them is a detection fact, and the pane keeps the two collections
-# apart by type rather than by a rendering convention.
-AUTHORED_EFFECT_KINDS: frozenset[str] = frozenset(
-    {"invariant_effect_claim", "preservation_claim", "unresolved_question"}
 )
 
 _IDENTITY_ITEM_KINDS: frozenset[str] = frozenset({"invariant", "family"})
@@ -420,6 +414,13 @@ def compose_review(
         return matrix
     rows: tuple[ReviewMatrixRow, ...] = tuple(getattr(matrix.payload, "rows", ()))
 
+    # The two collections that live in the review matrix are added here, where the view's own answer
+    # is: a review that read the matrix reports what it returned, and a review that read none says so
+    # rather than reporting an absence it never asked about (ICR-R14).
+    records = with_selection_channels(
+        records, rows, selected=True, rows_remaining=_rows_remaining(matrix)
+    )
+
     # The endpoints are re-derived here, after every read and immediately before the payload is
     # built: a capture input that moved while the comparison ran would otherwise be published as the
     # candidate's own comparison. A moved input is a named refusal, never a substitution.
@@ -500,7 +501,9 @@ def _open_dataset_pair(
         )
 
 
-def _review_matrix(resolved: ReviewCandidateResolution, namespace: str, repository_id: str):
+def _review_matrix(
+    resolved: ReviewCandidateResolution, namespace: str, repository_id: str
+) -> ViewResult | KnowledgeReviewResult:
     """Read L20's review matrix for the candidate, or the refusal the view earns."""
 
     matrix = read_knowledge_view(
@@ -528,6 +531,19 @@ def _review_matrix(resolved: ReviewCandidateResolution, namespace: str, reposito
             next_action="repair the candidate dataset, then reopen the review",
         ),
     )
+
+
+def _rows_remaining(result: ViewResult) -> int:
+    """How many rows the matrix view declared beyond the page it returned, or none.
+
+    The view's own count is the authority, so a review that rendered a bounded page reports the bound
+    instead of presenting the page it read as the whole selection (ICR-R14).
+    """
+
+    payload = result.payload
+    if payload is None:  # pragma: no cover - a served view always carries its payload
+        return 0
+    return int(payload.counts.rows_remaining.value or 0)
 
 
 def _compare(
@@ -801,31 +817,3 @@ def _unresolved_author(row: ReviewMatrixRow) -> ReviewUnresolvedReference:
             "anonymously or filled with the current actor"
         ),
     )
-
-
-def review_records_for(
-    config: McpRuntimeConfig, request: ReviewSurfaceRequest
-) -> ReviewRecordInputs:
-    """The published assessments for this candidate, as the renderer's own input.
-
-    The collection is read from the **curator authority's own publication**, through the shipped
-    loader rather than a second reader of the same bytes, and an absent or unreadable authority is
-    an empty collection and not an error: a candidate with no published assessment is a candidate
-    whose subjects are displayed ``unassessed``, which is a state the surface must be able to show
-    truthfully rather than a failure it should hide behind a refusal.
-
-    No ``current`` measurement is supplied. The shipped projection reports an unmeasured assessment
-    ``stale`` rather than promoting it to current, and this surface does not improve on that by
-    guessing which dependencies still match.
-    """
-
-    resolved = resolve_review_candidate(
-        config, request.repository_id, request.master, request.leaf_id
-    )
-    if isinstance(resolved, ReviewRefusal) or resolved.contract is None:
-        return EMPTY_REVIEW_RECORDS
-    try:
-        validated = load_curator_coherence_authority(resolved.contract)
-    except (CuratorCoherenceError, OSError, ValueError):
-        return EMPTY_REVIEW_RECORDS
-    return ReviewRecordInputs(assessments=tuple(validated.record.assessments))

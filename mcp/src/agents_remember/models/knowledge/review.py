@@ -36,6 +36,11 @@ from agents_remember.models.knowledge.base import (
     KnowledgeModel,
 )
 from agents_remember.models.knowledge.read import KnowledgeReadSeed
+from agents_remember.models.knowledge.review_records import (
+    ReviewRecordChannel,
+    ReviewRecordChannelState,
+    ReviewRecordClassName,
+)
 
 __all__ = [
     "KNOWLEDGE_REVIEW_SURFACE_VERSION",
@@ -55,6 +60,9 @@ __all__ = [
     "ReviewFieldChange",
     "ReviewKnowledgePane",
     "ReviewObservation",
+    "ReviewRecordChannel",
+    "ReviewRecordChannelState",
+    "ReviewRecordClassName",
     "ReviewRefusal",
     "ReviewRefusalCode",
     "ReviewRemainingCount",
@@ -639,6 +647,12 @@ class ReviewEvidencePane(KnowledgeModel):
     ``evidence_state`` and ``assessment_state`` are separate because they are separate facts: a
     corpus can hold evidence and no assessment, an assessment and no evidence, or neither. Neither
     state has a favourable member, so no rendering can turn an absence into a clearance.
+
+    ``channels`` is the composition's own supply of every record class this review read, one entry per
+    class, with the availability fact each owner's answer earned. It is carried here because this is
+    the pane that displays records rather than recorded knowledge, and it is carried *whole*: a class
+    that was not read, or that could not be read, appears with that state instead of being absent from
+    the list.
     """
 
     evidence_state: Literal["recorded", "none_recorded"]
@@ -647,6 +661,7 @@ class ReviewEvidencePane(KnowledgeModel):
     observations: tuple[ReviewObservation, ...] = ()
     assessments: tuple[ReviewAssessmentDisplay, ...] = ()
     source_inspection_available: bool
+    channels: tuple[ReviewRecordChannel, ...] = ()
     unresolved: tuple[ReviewUnresolvedReference, ...] = ()
 
     @model_validator(mode="after")

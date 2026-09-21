@@ -195,17 +195,25 @@ def endpoint_fixture(tmp_path: Path) -> EndpointFixture:
     return build_endpoint_fixture(tmp_path / "endpoints")
 
 
-def build_endpoint_fixture(directory: Path, *, datasets: bool = True) -> EndpointFixture:
+def build_endpoint_fixture(
+    directory: Path, *, datasets: bool = True, memory_mode: str = "disabled"
+) -> EndpointFixture:
     """Build the diff fixture's two datasets inside a real leaf enclosure with a real worktree.
 
     ``datasets=False`` is the never-initialized task: the leaf has a real recorded base, a real
     worktree and a real captured candidate, and the two knowledge halves simply do not exist. That is
     the state the packet's "no knowledge at all" exercise is about, and it is a state of the *task*
     rather than a broken fixture.
+
+    ``memory_mode="external"`` adds the other half of the enclosure a later leaf's cases need: a real
+    external-memory repository and its linked worktree, on the same contract. It is a parameter rather
+    than a second builder because every other fact about the enclosure -- the recorded base, the
+    captured candidate, the two datasets -- is the same one, and two builders would be two fixtures
+    free to drift apart.
     """
 
     diff = build_diff_fixture(directory / "diff")
-    contract = _enclosure(directory, diff)
+    contract = _enclosure(directory, diff, memory_mode=memory_mode)
     _materialize_candidate(diff, contract)
     if datasets:
         _place_datasets(diff, contract)
@@ -222,18 +230,21 @@ def build_endpoint_fixture(directory: Path, *, datasets: bool = True) -> Endpoin
     )
 
 
-def _enclosure(directory: Path, diff: DiffFixture) -> WorktreeContract:
+def _enclosure(
+    directory: Path, diff: DiffFixture, *, memory_mode: str = "disabled"
+) -> WorktreeContract:
     """The leaf contract, its source branch and its linked worktree, all really on disk."""
 
     code_repo = diff.before.git_root
     base_commit = _git(code_repo, ["rev-parse", "HEAD"])
+    memory = None if memory_mode == "disabled" else _memory_plan(directory, diff)
     contract = default_contract(
         ContractTask(
             name=TASK_NAME,
             repo_name=diff.repository_id,
             coordination_root=directory / "ar-coordination",
             workflow_kind="light-task",
-            memory_mode="disabled",
+            memory_mode=memory_mode,
         ),
         leaf=LeafIdentity(worktree_name=WORKTREE_NAME, leaf_id=LEAF_ID),
         code=RepoBranchPlan(
@@ -242,6 +253,7 @@ def _enclosure(directory: Path, diff: DiffFixture) -> WorktreeContract:
             work_branch=f"ar/{WORKTREE_NAME}",
             base_commit=base_commit,
         ),
+        memory=memory,
     )
     _git(code_repo, ["branch", "super", base_commit])
     assert contract.code_worktree is not None
@@ -257,8 +269,55 @@ def _enclosure(directory: Path, diff: DiffFixture) -> WorktreeContract:
             "super",
         ],
     )
+    _link_memory_worktree(contract)
     write_contract(contract.contract_path, contract)
     return contract
+
+
+def _memory_plan(directory: Path, diff: DiffFixture) -> RepoBranchPlan:
+    """One real external-memory repository at the conventional coordination path.
+
+    The ledger the contract names is the repository's own ``memory.md``, written and committed by this
+    helper, and ``super`` is created at that commit -- the same shape the managed worktree owner
+    produces, so the enclosure the curator authority validates is a real one rather than a directory
+    that merely exists.
+    """
+
+    repository = directory / "ar-coordination" / "memory-repos" / f"ar-{diff.repository_id}"
+    repository.mkdir(parents=True, exist_ok=True)
+    _git(repository, ["init", "-q"])
+    _git(repository, ["config", "user.email", "fixture@example.invalid"])
+    _git(repository, ["config", "user.name", "endpoint fixture"])
+    (repository / "memory.md").write_text("# fixture memory ledger\n", encoding="utf-8")
+    _git(repository, ["add", "-A"])
+    _git(repository, ["commit", "-q", "-m", "Add memory ledger"])
+    base_commit = _git(repository, ["rev-parse", "HEAD"])
+    _git(repository, ["branch", "super", base_commit])
+    return RepoBranchPlan(
+        repo_path=repository,
+        source_branch="super",
+        work_branch=f"ar/{WORKTREE_NAME}",
+        base_commit=base_commit,
+    )
+
+
+def _link_memory_worktree(contract: WorktreeContract) -> None:
+    """Link the memory worktree when this contract names one, and nothing when it does not."""
+
+    if contract.memory_worktree is None or contract.memory_repo_path is None:
+        return
+    contract.memory_worktree.parent.mkdir(parents=True, exist_ok=True)
+    _git(
+        contract.memory_repo_path,
+        [
+            "worktree",
+            "add",
+            "-b",
+            contract.memory_work_branch,
+            str(contract.memory_worktree),
+            contract.memory_source_branch,
+        ],
+    )
 
 
 def _materialize_candidate(diff: DiffFixture, contract: WorktreeContract) -> None:

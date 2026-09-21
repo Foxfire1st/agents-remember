@@ -115,6 +115,9 @@ _SIGNAL_REVISION = (
     "SELECT revision_id, record_schema, payload FROM record_revision "
     "WHERE repository_id = ? AND record_id = ? ORDER BY revision_id"
 )
+_RECORDED_RUN_IDS = (
+    "SELECT record_id FROM knowledge_record WHERE repository_id = ? AND kind = ? ORDER BY record_id"
+)
 
 # The lifecycle every detection record is written under. A detection signal is a *recorded
 # measurement*, not a proposal awaiting acceptance: it is not accepted origin data and it carries no
@@ -556,6 +559,23 @@ def _refused(
 ) -> DetectionRunResult:
     return DetectionRunResult(
         state="refused", operation=operation, repository_id=repository_id, refusal=refusal_value
+    )
+
+
+def recorded_run_ids(store: OpenedKnowledgeStore) -> tuple[str, ...]:
+    """Every detection run identity this namespace records, in identity order.
+
+    A caller that wants the signals a review should carry has to name the runs to read, and this is
+    the list of them: the runs are the records, and each one's signals are read through
+    :func:`read_detection_run` rather than through a second reader of the same tables. The order is
+    the recorded identities' own, so two reads of one namespace answer the same sequence.
+    """
+
+    return tuple(
+        str(row[0])
+        for row in store.connection.execute(
+            _RECORDED_RUN_IDS, (store.repository_id, DETECTION_RUN_KIND)
+        )
     )
 
 

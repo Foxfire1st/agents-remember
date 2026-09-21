@@ -86,12 +86,17 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     )
 
     def review_port(request):
-        """Render one review through the application adapter, with its published records.
+        """Render one review through the application adapter, with its complete record collection.
 
-        The assessment collection is read from the curator authority's own publication for the
-        candidate the request resolves to. A candidate with no published assessment supplies an
-        empty collection, which the surface displays as ``unassessed`` -- the honest state, and the
-        one a reviewer needs to see.
+        Every collection the candidate's owners can answer for is read from the owner's own operation
+        for the candidate this request resolves to -- the detection runs and their signals, the
+        verification observations, the review matrix's authored effects and evidence claims, and the
+        curator authority's published assessments -- and each arrives with the availability fact its
+        owner's answer earned. A collection an owner answers for and holds none is a measured zero; a
+        collection whose expected content could not be read is ``unavailable`` with that owner's own
+        provenance; and a dependency-currentness measurement is reported ``not_measured`` rather than
+        omitted. The bundle therefore never presents an empty tuple where three different facts are
+        possible, and one unreadable authority does not withdraw the collections that were readable.
         """
 
         return read_knowledge_review(config, request, review_records_for(config, request))

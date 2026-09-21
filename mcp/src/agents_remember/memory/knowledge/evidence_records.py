@@ -1039,6 +1039,21 @@ def _observation_revision(row: Sequence[Any]) -> VerificationObservationRevision
     return decode_observation_revision(row, payload)
 
 
+def claim_ids(store: OpenedKnowledgeStore) -> tuple[str, ...]:
+    """Every stored claim identity in this namespace, in declared order, and none of their content.
+
+    The identities are separate from the records because the two answer different questions, and a
+    caller that reads one record at a time -- so that a damaged record can be named while its
+    siblings are still served -- needs the listing without the decode. :func:`all_claims` is that
+    listing read whole; it stays the convenient form for a caller that wants every record or nothing.
+    """
+
+    return tuple(
+        str(row[0])
+        for row in store.connection.execute(CLAIM_IDS_OF_REPOSITORY, (store.repository_id,))
+    )
+
+
 def all_claims(store: OpenedKnowledgeStore) -> tuple[EvidenceClaimRecord, ...]:
     """Return every stored claim identity in this namespace, in declared order."""
 
@@ -1150,6 +1165,7 @@ __all__ = [
     "all_claims",
     "all_observations",
     "claim_digest",
+    "claim_ids",
     "claim_record",
     "claim_record_at",
     "claim_revisions",

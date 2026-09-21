@@ -450,6 +450,7 @@ consumers = [
   "mcp/tests/test_capsule_launch_wiring.py",
   "mcp/tests/test_memory_branch_authority.py",
   "mcp/tests/test_memory_mode_removal.py",
+  "mcp/tests/test_knowledge_review_evidence_channels.py",
 ]
 
 [[artifact]]
@@ -793,6 +794,7 @@ consumers = [
   "mcp/tests/test_worktree_closeout_quality_gate.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
+  "mcp/tests/test_knowledge_review_evidence_channels.py",
 ]
 
 [[artifact]]
@@ -1410,6 +1412,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_surface.py",
   "mcp/tests/test_knowledge_review_source_endpoints.py",
   "mcp/tests/test_knowledge_review_source_content.py",
+  "mcp/tests/test_knowledge_review_evidence_channels.py",
 ]
 
 [[artifact]]
@@ -1445,6 +1448,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_source_content.py",
   "mcp/tests/test_knowledge_review_one_sided_statements.py",
   "mcp/tests/test_read_ar_files.py",
+  "mcp/tests/test_knowledge_review_evidence_channels.py",
 ]
 
 [[artifact]]
