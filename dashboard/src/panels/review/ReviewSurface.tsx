@@ -9,6 +9,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import type {
   ReviewAssessmentDisplay,
+  ReviewChangedFile,
+  ReviewUnrepresentablePath,
   ReviewKnowledgePane,
   ReviewAuthoredEffect,
   ReviewPayload,
@@ -16,6 +18,7 @@ import type {
   ReviewSelectorKind,
   ReviewSideContent,
   ReviewSignal,
+  ReviewSourceInventory,
   ReviewUnresolvedReference,
 } from "../../data/review";
 import { intentReview } from "../../data/review";
@@ -25,8 +28,11 @@ export interface ReviewTarget {
   repo: string;
   master: string;
   leaf: string;
-  selectorKind: ReviewSelectorKind;
-  selectorId: string;
+  // The reviewed subject, when the entry carried one. Absent, this is the TASK-CONTEXT review: the
+  // surface asks the server for the task's own comparison and renders the complete source change
+  // inventory, which is what a task with no recorded invariant -- or no datasets yet -- still has.
+  selectorKind?: ReviewSelectorKind;
+  selectorId?: string;
 }
 
 const TAKEOVER = "changeset-viewer";
@@ -176,8 +182,10 @@ function KnowledgePane({ payload }: { payload: ReviewPayload }) {
   return pane(
     "Knowledge",
     <>
-      <div style={{ color: "muted" }}>
-        comparison: {payload.comparison.reference} · policy {payload.comparison.policy_version}
+      <div style={{ color: "muted" }} data-testid="review-selection">
+        {payload.comparison
+          ? `comparison: ${payload.comparison.reference} · policy ${payload.comparison.policy_version}`
+          : `no knowledge comparison was made · ${knowledge.selection_detail ?? "no subject selected"}`}
       </div>
       {bothPresent ? (
         <DiffPane
@@ -207,11 +215,73 @@ function KnowledgePane({ payload }: { payload: ReviewPayload }) {
   );
 }
 
+// One inventory entry. The path is printed exactly as the server published it -- a tab or a newline
+// inside a name is part of the address -- and the status and renderability are printed beside it,
+// because a path whose content cannot be rendered is still a change that must be listed.
+function inventoryEntry(entry: ReviewChangedFile) {
+  const notes = [
+    entry.mode_change ? "mode changed" : null,
+    entry.content === "unknown" ? null : `content: ${entry.content}`,
+    entry.detail ?? null,
+  ].filter((note): note is string => note !== null);
+  return (
+    <li key={entry.path} data-testid="review-inventory-entry" data-status={entry.status}>
+      <code>{entry.path}</code> · {entry.status}
+      {notes.length ? <span style={{ color: "muted" }}> · {notes.join(" · ")}</span> : null}
+    </li>
+  );
+}
+
+// One changed path this surface cannot name as text, printed by its exact byte form. It is a change
+// like any other: it is listed, its status is shown, and the reason it has no name is stated rather
+// than left as a gap in a list that would otherwise look complete.
+function byteNamedEntry(entry: ReviewUnrepresentablePath) {
+  return (
+    <li key={entry.path_bytes} data-testid="review-inventory-byte-path" data-status={entry.status}>
+      <code>{entry.path_bytes}</code> · {entry.status}
+      {entry.mode_change ? " · mode changed" : ""}
+      <div style={{ color: "muted" }}>{entry.detail}</div>
+    </li>
+  );
+}
+
+// The complete source change inventory of the comparison's bound pair. It is rendered in all three
+// of its states and never as an empty list: a measured empty set says the two trees agree, an
+// unavailable measurement says nothing was observed and why, and a partial one says which entries
+// could not be classified or carried as names.
+function Inventory({ inventory }: { inventory: ReviewSourceInventory }) {
+  const byByteForm = inventory.unrepresentable_paths ?? [];
+  return (
+    <div data-testid="review-inventory" data-inventory-state={inventory.state}>
+      <p style={{ margin: "0.4rem 0" }}>
+        source change inventory ({inventory.state}
+        {inventory.partial ? ", partial" : ""}): {inventory.listed_total} listed path(s)
+        {byByteForm.length ? ` + ${byByteForm.length} by byte form` : ""} — {inventory.detail}
+      </p>
+      {inventory.entries.length ? (
+        <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }}>{inventory.entries.map(inventoryEntry)}</ul>
+      ) : null}
+      {byByteForm.length ? (
+        <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }}>
+          {byByteForm.map(byteNamedEntry)}
+        </ul>
+      ) : null}
+      <p style={{ color: "muted", margin: "0.2rem 0", fontSize: "0.8rem" }}>
+        reproduce: {inventory.command}
+        {inventory.before_code_tree_id && inventory.after_code_tree_id
+          ? ` · ${inventory.before_code_tree_id} → ${inventory.after_code_tree_id}`
+          : ""}
+      </p>
+    </div>
+  );
+}
+
 function SourcePane({ payload }: { payload: ReviewPayload }) {
   const { source } = payload;
   return pane(
     "Source",
     <>
+      <Inventory inventory={source.inventory} />
       <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-locations">
         {source.locations.map((location) => (
           <li key={`${location.claim_id}:${location.path}`} data-change-state={location.change_state}>
@@ -374,7 +444,7 @@ export function ReviewSurface({
     <div
       className="screen"
       data-testid="review-surface"
-      data-comparison={payload?.comparison.reference}
+      data-comparison={payload?.comparison?.reference}
       data-review-target={`${repo}/${master}/${leaf}`}
     >
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.75rem" }}>
@@ -383,7 +453,10 @@ export function ReviewSurface({
         </button>
         <strong>Intent review</strong>
         <span style={{ color: "muted" }} data-testid="review-subject">
-          {repo} · {master} · {leaf} · {selectorKind} {selectorId}
+          {repo} · {master} · {leaf} ·{" "}
+          {selectorKind && selectorId
+            ? `${selectorKind} ${selectorId}`
+            : "whole task (no subject selected)"}
         </span>
       </div>
       {error ? <p data-testid="review-error">the review read failed: {error}</p> : null}

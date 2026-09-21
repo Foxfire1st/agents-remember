@@ -28,6 +28,15 @@ because resolution is a responsibility of its own and because this adapter is at
 file-size rail; ``review_candidate_resolution`` is the one implementation, and the names re-exported
 below are that module's -- there is no second resolution path here.
 
+**Three more responsibilities this adapter hands to their own modules, for the same reason.**
+:mod:`agents_remember.application.review_source_inventory` measures the exact source-change inventory
+of the bound pair and renders the source pane; :mod:`agents_remember.application.review_record_rendering`
+renders the record collections the caller supplied into the evidence and submission values; and
+:mod:`agents_remember.application.review_task_context` composes the entry that needs no selected
+subject. Each is one responsibility with one implementation, and every name that moved is re-exported
+below so no importer had to learn a new home: this adapter resolves, calls and assembles, and it grows
+no feature logic of its own while its file is over the soft rail.
+
 **Every absence is a state.** An unresolvable author, a missing operand, an absent assessment
 collection and a comparison the shipped operation refused each produce a named field or a typed
 refusal -- never a blank a reader could take for a measured zero, and never a favourable default.
@@ -36,8 +45,6 @@ refusal -- never a blank a reader could take for a measured zero, and never a fa
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from typing import Literal
 
 from agents_remember.application.knowledge_before_half import unreadable_half_refusal
 from agents_remember.application.knowledge_diff import diff_knowledge_scope, open_diff_side
@@ -47,12 +54,30 @@ from agents_remember.application.review_candidate_resolution import (
     REVIEW_CANDIDATE_DIRECTORY,
     REVIEW_CANDIDATE_RELATIVE_ROOT,
     ReviewCandidateResolution,
+    candidate_ref,
     missing_dataset_half,
     refusal,
     require_current_candidate_identity,
     resolve_review_candidate,
     review_namespace,
 )
+from agents_remember.application.review_record_rendering import (
+    EMPTY_REVIEW_RECORDS,
+    ReviewRecordInputs,
+    assessment_displays,
+    evidence_pane,
+    refused,
+    signal,
+    subject_states,
+    submission,
+)
+from agents_remember.application.review_source_inventory import (
+    inventory_limitations,
+    review_inventory,
+    source_pane,
+    source_tree_side,
+)
+from agents_remember.application.review_task_context import task_context_review
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.diff_display import TreeDifferenceProbe
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
@@ -60,55 +85,38 @@ from agents_remember.memory.knowledge.store import (
     OpenedKnowledgeStore,
     open_existing_knowledge_store,
 )
-from agents_remember.models.knowledge.detection import DetectionSignalPayload
 from agents_remember.models.knowledge.diff import (
     KnowledgeDiffItem,
     KnowledgeDiffRequest,
     KnowledgeDiffResult,
     KnowledgeDiffSide,
 )
-from agents_remember.models.knowledge.evidence import VerificationObservationPayload
 from agents_remember.models.knowledge.read import (
     FamilyIdentitySeed,
     InvariantIdentitySeed,
-    ItemKind,
     KnowledgeReadSeed,
     ReadItem,
 )
 from agents_remember.models.knowledge.review import (
-    PROPOSED_ASSESSMENT_DISPOSITIONS,
     ComparisonIdentity,
     KnowledgeReviewPayload,
     KnowledgeReviewResult,
-    ReviewAssessmentDisplay,
     ReviewAuthoredEffect,
-    ReviewCandidateRef,
     ReviewEntry,
     ReviewEntryListResult,
-    ReviewEvidenceLink,
-    ReviewEvidencePane,
     ReviewFieldChange,
     ReviewKnowledgePane,
-    ReviewObservation,
     ReviewRefusal,
-    ReviewRemainingCount,
     ReviewRevisionGroup,
     ReviewSideContent,
-    ReviewSignal,
-    ReviewSourceLocation,
-    ReviewSourcePane,
+    ReviewSourceInventory,
     ReviewStaleness,
     ReviewSubjectKind,
-    ReviewSubmission,
     ReviewSurfaceRequest,
     ReviewUnresolvedReference,
 )
 from agents_remember.models.knowledge.view import ReviewMatrixRow, ViewRequest
-from agents_remember.models.lifecycles.review_assessment import (
-    ReviewAssessment,
-    SubjectAssessmentState,
-    assessment_state_for,
-)
+from agents_remember.models.lifecycles.review_assessment import SubjectAssessmentState
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
     CuratorCoherenceError,
     load_curator_coherence_authority,
@@ -148,29 +156,6 @@ AUTHORED_EFFECT_KINDS: frozenset[str] = frozenset(
 )
 
 _IDENTITY_ITEM_KINDS: frozenset[str] = frozenset({"invariant", "family"})
-_REALIZATION_ITEM_KIND = "realization"
-_REALIZATION_READ_KIND: ItemKind = "realization_claim"
-
-
-@dataclass(frozen=True)
-class ReviewRecordInputs:
-    """The records the renderer is *given*, rather than records it goes and selects for itself.
-
-    Each collection belongs to another owner's read path, and the surface renders what it is handed.
-    An empty collection is a stated absence and never a fabricated positive: no assessments means
-    every subject is displayed ``unassessed``, and no observations means the evidence pane carries
-    none -- neither is defaulted to a clearance.
-    """
-
-    assessments: tuple[ReviewAssessment, ...] = ()
-    current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]] | None = None
-    signals: tuple[DetectionSignalPayload, ...] = ()
-    observations: tuple[VerificationObservationPayload, ...] = ()
-
-
-# The empty record set, as one module-level value: a call in an argument default would rebuild it on
-# every call, and the collections it holds are immutable tuples.
-EMPTY_REVIEW_RECORDS = ReviewRecordInputs()
 
 
 def read_knowledge_review(
@@ -194,7 +179,7 @@ def read_knowledge_review(
         config, request.repository_id, request.master, request.leaf_id
     )
     if isinstance(resolved, ReviewRefusal):
-        return _refused(request.repository_id, resolved)
+        return refused(request.repository_id, resolved)
     return compose_review(
         resolved,
         request,
@@ -391,16 +376,95 @@ def compose_review(
     previous_binding_digest: str | None = None,
     probe: TreeDifferenceProbe | None = None,
 ) -> KnowledgeReviewResult:
-    """Render one review over two already-resolved datasets. Selects nothing; calls the operations."""
+    """Render one review over two already-resolved datasets. Selects nothing; calls the operations.
+
+    The **source inventory is measured first and unconditionally**, from the two code trees the
+    resolution bound: it is the one half of a review that cannot depend on a knowledge selection, and
+    measuring it only after a comparison succeeded is how a task with no invariant -- or with no
+    datasets at all -- came to lose its source review entirely.
+
+    A request that names no selector is the **task context** and is answered without a comparison:
+    the source pane still carries the complete inventory, and the knowledge pane states that no
+    operand was compared instead of rendering an empty one. A request that does name a selector keeps
+    the shipped behaviour exactly, including its refusals, because a selected subject that cannot be
+    compared is a different fact from a review that selected no subject.
+    """
+
+    inventory = review_inventory(
+        source_tree_side(resolved.baseline_code_tree_id, resolved.baseline_code_root),
+        source_tree_side(resolved.candidate_code_tree_id, resolved.candidate_code_root),
+        probe=probe,
+    )
+    if request.selector is None:
+        return task_context_review(resolved, request, records, inventory)
+    opened = _open_dataset_pair(resolved, request)
+    if isinstance(opened, KnowledgeReviewResult):
+        return opened
+
+    comparison = _compare(resolved, request.selector, probe=probe, namespace=opened)
+    page = comparison.page
+    if comparison.state != "page" or page is None or comparison.binding is None:
+        return refused(
+            request.repository_id,
+            _comparison_refusal(comparison, request),
+        )
+
+    matrix = _review_matrix(resolved, opened, request.repository_id)
+    if isinstance(matrix, KnowledgeReviewResult):
+        return matrix
+    rows: tuple[ReviewMatrixRow, ...] = tuple(getattr(matrix.payload, "rows", ()))
+
+    # The endpoints are re-derived here, after every read and immediately before the payload is
+    # built: a capture input that moved while the comparison ran would otherwise be published as the
+    # candidate's own comparison. A moved input is a named refusal, never a substitution.
+    moved = require_current_candidate_identity(resolved)
+    if moved is not None:
+        return refused(request.repository_id, moved)
+
+    identity = _comparison_identity(comparison)
+    subjects = subject_states(records)
+    stale = (
+        previous_binding_digest is not None and previous_binding_digest != identity.binding_digest
+    )
+    return KnowledgeReviewResult(
+        state="review",
+        repository_id=request.repository_id,
+        payload=KnowledgeReviewPayload(
+            candidate=candidate_ref(
+                resolved,
+                repository_id=request.repository_id,
+                master=request.master,
+            ),
+            comparison=identity,
+            knowledge=_knowledge_pane(comparison, rows, records, subjects, request.selector),
+            source=source_pane(comparison, inventory),
+            evidence=evidence_pane(rows, records, subjects),
+            staleness=_staleness(identity, previous_binding_digest),
+            submission=submission(stale),
+            limitations=_limitations(comparison, inventory),
+        ),
+    )
+
+
+def _open_dataset_pair(
+    resolved: ReviewCandidateResolution, request: ReviewSurfaceRequest
+) -> str | KnowledgeReviewResult:
+    """Return the namespace the pair opens under, or the named refusal an absent pair earns.
+
+    A selector was named, so the comparison is *between* two datasets and the pair has to be there:
+    an absent half and a half whose receipt cannot be read are both ``candidate_dataset_absent``, and
+    each names which half and what to do instead. This is deliberately not reached by a task-context
+    review, which compares no dataset and therefore has nothing to open.
+    """
 
     unreadable = unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database)
     if unreadable is not None:
-        return _refused(request.repository_id, unreadable)
+        return refused(request.repository_id, unreadable)
 
     absent = missing_dataset_half(resolved)
     if absent is not None:
         half, database = absent
-        return _refused(
+        return refused(
             request.repository_id,
             refusal(
                 "candidate_dataset_absent",
@@ -414,9 +478,9 @@ def compose_review(
             ),
         )
     try:
-        namespace = review_namespace(resolved.repository_id, resolved.candidate_database)
+        return review_namespace(resolved.repository_id, resolved.candidate_database)
     except KnowledgeStorageError as error:
-        return _refused(
+        return refused(
             request.repository_id,
             refusal(
                 "candidate_dataset_absent",
@@ -429,13 +493,9 @@ def compose_review(
             ),
         )
 
-    comparison = _compare(resolved, request.selector, probe=probe, namespace=namespace)
-    page = comparison.page
-    if comparison.state != "page" or page is None or comparison.binding is None:
-        return _refused(
-            request.repository_id,
-            _comparison_refusal(comparison, request),
-        )
+
+def _review_matrix(resolved: ReviewCandidateResolution, namespace: str, repository_id: str):
+    """Read L20's review matrix for the candidate, or the refusal the view earns."""
 
     matrix = read_knowledge_view(
         resolved.candidate_database,
@@ -451,47 +511,15 @@ def compose_review(
             record_kinds=REVIEW_MATRIX_KINDS,
         ),
     )
-    if matrix.state != "view" or matrix.payload is None:
-        detail = matrix.refusal.detail if matrix.refusal is not None else "no rows were returned"
-        return _refused(
-            request.repository_id,
-            refusal(
-                "comparison_refused",
-                f"the review-matrix view refused the candidate: {detail}",
-                next_action="repair the candidate dataset, then reopen the review",
-            ),
-        )
-    rows: tuple[ReviewMatrixRow, ...] = tuple(getattr(matrix.payload, "rows", ()))
-
-    # The endpoints are re-derived here, after every read and immediately before the payload is
-    # built: a capture input that moved while the comparison ran would otherwise be published as the
-    # candidate's own comparison. A moved input is a named refusal, never a substitution.
-    moved = require_current_candidate_identity(resolved)
-    if moved is not None:
-        return _refused(request.repository_id, moved)
-
-    identity = _comparison_identity(comparison)
-    subjects = _subject_states(records)
-    stale = (
-        previous_binding_digest is not None and previous_binding_digest != identity.binding_digest
-    )
-    return KnowledgeReviewResult(
-        state="review",
-        repository_id=request.repository_id,
-        payload=KnowledgeReviewPayload(
-            candidate=ReviewCandidateRef(
-                repository_id=request.repository_id,
-                master=request.master,
-                leaf_id=resolved.leaf_id,
-                task_ref=request.master,
-            ),
-            comparison=identity,
-            knowledge=_knowledge_pane(comparison, rows, records, subjects, request.selector),
-            source=_source_pane(comparison),
-            evidence=_evidence_pane(rows, records, subjects),
-            staleness=_staleness(identity, previous_binding_digest),
-            submission=_submission(stale),
-            limitations=_limitations(comparison),
+    if matrix.state == "view" and matrix.payload is not None:
+        return matrix
+    detail = matrix.refusal.detail if matrix.refusal is not None else "no rows were returned"
+    return refused(
+        repository_id,
+        refusal(
+            "comparison_refused",
+            f"the review-matrix view refused the candidate: {detail}",
+            next_action="repair the candidate dataset, then reopen the review",
         ),
     )
 
@@ -538,6 +566,18 @@ def _compare(
     )
 
 
+def _selector_kind_or_absence(selector: KnowledgeReadSeed | None) -> str:
+    """Return the selector kind a refusal names, or the absence itself when there is no selector.
+
+    A request that named no subject never reaches a comparison refusal -- the task-context
+    composition answers it first -- so this narrows the optional field at the one place a refusal
+    spells it. Reading ``selector.kind`` through would make the value that *explains* a refusal the
+    thing that raises, and a request without a selector is a fact worth naming rather than a crash.
+    """
+
+    return "no selector" if selector is None else selector.kind
+
+
 def _comparison_refusal(
     comparison: KnowledgeDiffResult, request: ReviewSurfaceRequest
 ) -> ReviewRefusal:
@@ -556,7 +596,7 @@ def _comparison_refusal(
             if shipped is None
             else shipped.next_action
         ),
-        offending_input=request.selector.kind,
+        offending_input=_selector_kind_or_absence(request.selector),
     )
 
 
@@ -579,8 +619,15 @@ def _comparison_identity(comparison: KnowledgeDiffResult) -> ComparisonIdentity:
     )
 
 
-def _limitations(comparison: KnowledgeDiffResult) -> tuple[str, ...]:
-    """The comparison's declared limits and its counted omissions, carried as facts."""
+def _limitations(
+    comparison: KnowledgeDiffResult, inventory: ReviewSourceInventory
+) -> tuple[str, ...]:
+    """The comparison's declared limits and its counted omissions, carried as facts.
+
+    The inventory's own state is declared here as well, because a limit a reader has to open a pane
+    to discover is a limit the response did not state: an unavailable measurement and a partial one
+    are two different facts and both are named at the top level.
+    """
 
     return tuple(
         [
@@ -593,6 +640,7 @@ def _limitations(comparison: KnowledgeDiffResult) -> tuple[str, ...]:
                 f"side_absence:{absence.side}:{absence.code}"
                 for absence in comparison.side_absences
             ),
+            *inventory_limitations(inventory),
         ]
     )
 
@@ -613,39 +661,6 @@ def _staleness(
         previous_comparison_ref=previous_binding_digest,
         moved=("comparison-binding",),
     )
-
-
-def _submission(stale: bool) -> ReviewSubmission:
-    """Whether an assessment may be submitted, and through what.
-
-    This increment ships no serving route that publishes an assessment, so the surface is
-    display-only and says so. It grows no private write path to compensate: the published
-    dispositions are the existing authority's own vocabulary, and the next action names that
-    authority rather than a control this surface invented.
-    """
-
-    if stale:
-        return ReviewSubmission(
-            state="disabled_stale",
-            reason="Candidate changed — open a new comparison",
-            next_action="open a new comparison against the candidate's current inputs",
-            proposed_dispositions=PROPOSED_ASSESSMENT_DISPOSITIONS,
-        )
-    return ReviewSubmission(
-        state="unavailable",
-        reason=(
-            "this increment mounts no serving route that publishes an assessment, so the surface "
-            "displays only and does not grow a private write path to compensate"
-        ),
-        next_action=(
-            "publish an assessment through the existing curator authority's publication action, "
-            "which supplies the author, the role and the authority provenance"
-        ),
-        proposed_dispositions=PROPOSED_ASSESSMENT_DISPOSITIONS,
-    )
-
-
-# -- the three panes --------------------------------------------------------------------------
 
 
 def _knowledge_pane(
@@ -674,198 +689,13 @@ def _knowledge_pane(
             for row in rows
             if row.subject.record_kind in AUTHORED_EFFECT_KINDS
         ),
-        signals=tuple(_signal(signal) for signal in records.signals),
-        assessments=_assessment_displays(records, subjects),
+        signals=tuple(signal(entry) for entry in records.signals),
+        assessments=assessment_displays(records, subjects),
         unresolved=tuple(
             _unresolved_author(row)
             for row in rows
             if row.subject.record_kind in AUTHORED_EFFECT_KINDS
         ),
-    )
-
-
-def _source_pane(comparison: KnowledgeDiffResult) -> ReviewSourcePane:
-    """Pane 2: the selected locations under registered claims, and what the selection did not reach."""
-
-    assert comparison.page is not None
-    items = comparison.page.items
-    counts = comparison.page.counts
-    expansion = comparison.expansion
-    outside = tuple(item for item in items if item.coverage == "present_outside_selection")
-    return ReviewSourcePane(
-        locations=tuple(
-            location for location in (_location(item) for item in items) if location is not None
-        ),
-        remaining=(
-            ReviewRemainingCount(name="locations_remaining", value=counts.items_remaining),
-            ReviewRemainingCount(
-                name="changed_paths_outside_selection",
-                value=(
-                    None
-                    if expansion is None
-                    else len(expansion.attributed_changed_paths)
-                    + len(expansion.unattributed_changed_paths)
-                ),
-                reason=(
-                    None
-                    if expansion is not None
-                    else "the comparison published no source expansion for this selection"
-                ),
-            ),
-            ReviewRemainingCount(
-                name="unattributed_changed_paths",
-                value=None if expansion is None else len(expansion.unattributed_changed_paths),
-                reason=(
-                    None
-                    if expansion is not None
-                    else (
-                        "the comparison made no tree observation, so no path is reported as "
-                        "attributed or unattributed"
-                    )
-                ),
-            ),
-            ReviewRemainingCount(name="records_present_outside_selection", value=len(outside)),
-            ReviewRemainingCount(name="references_unresolved", value=counts.suppressed_total),
-        ),
-        expansion_reference=None if expansion is None else expansion.reference,
-        expansion_command=None if expansion is None else expansion.command,
-        unattributed_changed_paths=()
-        if expansion is None
-        else expansion.unattributed_changed_paths,
-        attributed_changed_paths=() if expansion is None else expansion.attributed_changed_paths,
-        unresolved=tuple(
-            ReviewUnresolvedReference(
-                field="attribution",
-                recorded_reference=item.item_id,
-                detail=(
-                    "this record is held by one snapshot and was not reached by the other side's "
-                    "declared selection; it is displayed as present outside the selection and "
-                    "never as a deletion"
-                ),
-            )
-            for item in outside
-        ),
-    )
-
-
-def _evidence_pane(
-    rows: Sequence[ReviewMatrixRow],
-    records: ReviewRecordInputs,
-    subjects: Mapping[str, SubjectAssessmentState],
-) -> ReviewEvidencePane:
-    """Pane 3: evidence references, execution observations and the authored assessments."""
-
-    links = tuple(
-        ReviewEvidenceLink(
-            claim_id=row.subject.record_id,
-            revision_id=row.subject.revision_id,
-            assessment_refs=row.assessment_ids,
-            unresolved=(
-                ReviewUnresolvedReference(
-                    field="coverage",
-                    recorded_reference=row.subject.record_id,
-                    detail=(
-                        "the review matrix publishes this claim's identity, lifecycle and "
-                        "assessment references; it publishes no coverage or limitations for it, so "
-                        "they are displayed as unresolved rather than reported as absent"
-                    ),
-                ),
-            ),
-        )
-        for row in rows
-        if row.subject.record_kind == "evidence_claim"
-    )
-    observations = tuple(_observation(entry) for entry in records.observations)
-    assessments = _assessment_displays(records, subjects)
-    return ReviewEvidencePane(
-        evidence_state="recorded" if links or observations else "none_recorded",
-        assessment_state="assessed" if assessments else "unassessed",
-        evidence_links=links,
-        observations=observations,
-        assessments=assessments,
-        source_inspection_available=True,
-    )
-
-
-# -- record rendering -------------------------------------------------------------------------
-
-
-def _subject_states(records: ReviewRecordInputs) -> Mapping[str, SubjectAssessmentState]:
-    """Every stored assessment projected per subject, with currentness left as measured.
-
-    A caller that supplied no ``current`` measurement gets every assessment reported ``stale``:
-    the shipped projection refuses to promote an unmeasured assessment to current, and this surface
-    does not improve on that by guessing.
-    """
-
-    grouped: dict[str, list[ReviewAssessment]] = {}
-    for assessment in records.assessments:
-        grouped.setdefault(assessment.subject.recordId, []).append(assessment)
-    states: dict[str, SubjectAssessmentState] = {}
-    for subject_id, stored in grouped.items():
-        stale_ids = (
-            ()
-            if records.current is not None
-            else tuple(assessment.assessmentId for assessment in stored)
-        )
-        states[subject_id] = assessment_state_for(stored, stale_ids=stale_ids)
-    return states
-
-
-def _assessment_displays(
-    records: ReviewRecordInputs,
-    subjects: Mapping[str, SubjectAssessmentState],
-) -> tuple[ReviewAssessmentDisplay, ...]:
-    """The authored assessments as displayed, each with its own binding status."""
-
-    by_id = {assessment.assessmentId: assessment for assessment in records.assessments}
-    displayed: list[ReviewAssessmentDisplay] = []
-    seen: set[str] = set()
-    for state in subjects.values():
-        for entry in state.assessments:
-            record = by_id.get(entry.assessmentId)
-            if record is None or entry.assessmentId in seen:
-                continue
-            seen.add(entry.assessmentId)
-            displayed.append(_assessment_display(record, entry.currentness))
-    return tuple(displayed)
-
-
-def _assessment_display(record: ReviewAssessment, currentness: str) -> ReviewAssessmentDisplay:
-    """One stored assessment as the pane's own display value."""
-
-    return ReviewAssessmentDisplay(
-        assessment_id=record.assessmentId,
-        disposition=record.disposition,
-        finding=record.finding or record.rationale,
-        rationale=record.rationale,
-        author_ref=record.provenance.authorRef,
-        role_ref=record.provenance.authorRole,
-        examined_inputs=tuple(f"{kind}:{name}" for kind, name in record.examinedInputs.identities)
-        or (record.comparisonRef,),
-        binding_state=currentness,
-        evidence_refs=tuple(reference.spelling for reference in record.evidenceRefs),
-    )
-
-
-def _observation(entry: VerificationObservationPayload) -> ReviewObservation:
-    """One verification observation displayed exactly, with its authored limitations."""
-
-    artifact = entry.result_artifact
-    return ReviewObservation(
-        observation_id=entry.command_name,
-        tested_candidate=(
-            None if entry.knowledge_candidate is None else entry.knowledge_candidate.logical_digest
-        ),
-        command_identity=entry.command_identity,
-        result_artifact_ref=None if artifact is None else artifact.path,
-        result_artifact_digest=None if artifact is None else artifact.sha256,
-        execution_result=entry.execution_result,
-        environment_identity=f"{entry.environment.host}/{entry.environment.interpreter}",
-        # A verification observation carries no authored limitation field of its own; the pane
-        # therefore adds none rather than inventing one, and the surface's own limitation list
-        # states that no sufficiency claim is made from a result.
-        limitations=(),
     )
 
 
@@ -1027,74 +857,6 @@ def _unresolved_author(row: ReviewMatrixRow) -> ReviewUnresolvedReference:
             "for it, so the attribution is displayed as unresolved rather than rendered "
             "anonymously or filled with the current actor"
         ),
-    )
-
-
-def _signal(signal: DetectionSignalPayload) -> ReviewSignal:
-    """One detection fact, carried with its inputs, versions and scope limitations only."""
-
-    return ReviewSignal(
-        signal_id=signal.signal_id,
-        condition=signal.condition,
-        input_set=signal.input_set.declared,
-        detected_at=signal.governing_route_id,
-        relationship_paths=tuple(
-            f"{path.path_id}:{path.reached_item_id}" for path in signal.relationship_paths
-        ),
-        extractor_version=signal.extractor_version,
-        policy_version=signal.policy_version,
-        scope_limitations=tuple(signal.limitations),
-    )
-
-
-def _location(item: KnowledgeDiffItem) -> ReviewSourceLocation | None:
-    """One selected source location with its recorded role and its own change state."""
-
-    if item.kind != _REALIZATION_ITEM_KIND:
-        return None
-    claim = _realization_read_item(item)
-    if claim is None:
-        return None
-    anchor = claim.anchor
-    return ReviewSourceLocation(
-        claim_id=claim.claim_id or item.item_id,
-        invariant_revision_id=claim.invariant_revision_id,
-        path="" if anchor is None else anchor.path,
-        role=claim.role,
-        rationale=claim.rationale,
-        recorded_source_identity=(
-            item.item_id if anchor is None else anchor.recorded_source_identity
-        ),
-        observed_source_identity=None if anchor is None else anchor.observed_source_identity,
-        resolution="unsupported_locator" if anchor is None else anchor.resolution,
-        change_state=_change_state(item),
-        before_only=item.before is not None and item.after is None,
-        reached_via=tuple(item.reached_via),
-    )
-
-
-def _realization_read_item(item: KnowledgeDiffItem) -> ReadItem | None:
-    for candidate in (item.after, item.before):
-        if candidate is not None and candidate.kind == _REALIZATION_READ_KIND:
-            return candidate
-    return None
-
-
-def _change_state(item: KnowledgeDiffItem) -> Literal["changed", "unchanged", "not_selected"]:
-    change = item.source_change
-    if change is None:
-        return "not_selected"
-    if change.source_observation_changed or change.source_change_only:
-        return "changed"
-    return "unchanged"
-
-
-# -- refusals ---------------------------------------------------------------------------------
-
-
-def _refused(repository_id: str, refusal_value: ReviewRefusal) -> KnowledgeReviewResult:
-    return KnowledgeReviewResult(
-        state="refused", repository_id=repository_id, refusal=refusal_value
     )
 
 

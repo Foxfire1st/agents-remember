@@ -26,6 +26,7 @@ The load-bearing properties, one case each:
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -65,6 +66,7 @@ from diff_scope_test_support import (
     DiffFixture,
     _git,
     build_diff_fixture,
+    independent_changed_records,
 )
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -127,6 +129,21 @@ class EndpointFixture:
             ),
         )
 
+    def task_request(self) -> ReviewSurfaceRequest:
+        """The task-context request (ICR-R02): the same task, with no reviewed subject.
+
+        This is not a degraded subject request. It names exactly the task context the entry names and
+        no selector at all, which is the entry a task with no recorded invariant -- or with no
+        datasets yet -- has to be reviewable through.
+        """
+
+        return ReviewSurfaceRequest(
+            repository_id=self.repository_id,
+            master=self.master,
+            leaf_id=LEAF_ID,
+            selector=None,
+        )
+
     def resolve(self) -> ReviewCandidateResolution:
         resolved = resolve_review_candidate(self.config, self.repository_id, self.master, LEAF_ID)
         assert isinstance(resolved, ReviewCandidateResolution), resolved
@@ -178,13 +195,20 @@ def endpoint_fixture(tmp_path: Path) -> EndpointFixture:
     return build_endpoint_fixture(tmp_path / "endpoints")
 
 
-def build_endpoint_fixture(directory: Path) -> EndpointFixture:
-    """Build the diff fixture's two datasets inside a real leaf enclosure with a real worktree."""
+def build_endpoint_fixture(directory: Path, *, datasets: bool = True) -> EndpointFixture:
+    """Build the diff fixture's two datasets inside a real leaf enclosure with a real worktree.
+
+    ``datasets=False`` is the never-initialized task: the leaf has a real recorded base, a real
+    worktree and a real captured candidate, and the two knowledge halves simply do not exist. That is
+    the state the packet's "no knowledge at all" exercise is about, and it is a state of the *task*
+    rather than a broken fixture.
+    """
 
     diff = build_diff_fixture(directory / "diff")
     contract = _enclosure(directory, diff)
     _materialize_candidate(diff, contract)
-    _place_datasets(diff, contract)
+    if datasets:
+        _place_datasets(diff, contract)
     return EndpointFixture(
         config=McpRuntimeConfig(
             workspace_root=directory,
@@ -386,6 +410,7 @@ def test_the_rendered_review_publishes_the_endpoints_and_reaches_the_whole_candi
     assert result.state == "review", result.refusal
     payload = result.payload
     assert payload is not None
+    assert payload.comparison is not None
     assert payload.comparison.before_code_tree_id == fixture.contract.code_base_commit
     assert payload.comparison.after_code_tree_id == resolved.candidate_code_tree_id
     changed = _changed_paths_of(payload)
@@ -633,3 +658,281 @@ def test_an_unrecorded_memory_half_empties_only_itself_and_keeps_the_code_half(
     assert view["counters"]["code"]["files"] == len(view["code"])
     assert view["memory"] == []
     assert view["counters"]["memory"] == {"files": 0, "insertions": 0, "deletions": 0}
+
+
+# --- the task-context entry and the complete source inventory (ICR-R02) --------------------------
+#
+# The entry is the task context. Every case below opens the review the way the dashboard does -- the
+# task's own context, no reviewed subject -- through the real resolution, the real capture and the
+# real route, and compares the inventory it returns against an independent Git observation of the
+# same bound pair rather than against a list written here.
+
+UNUSUAL_PATH = "src/tab\tnewline\nname.py"
+BINARY_ADDITION_PATH = "assets/blob.dat"
+
+
+def test_a_task_context_review_lists_the_complete_source_inventory_with_no_knowledge_at_all(
+    tmp_path: Path,
+) -> None:
+    """The packet's entry case: a never-initialized task still opens its complete source review.
+
+    The leaf has a recorded base, a live worktree and a captured candidate, and neither knowledge half
+    exists. The inventory must be the *whole* change set of the bound pair -- compared here against an
+    independent Git observation of those two exact objects -- and the knowledge pane must state that
+    no operand was compared rather than rendering an empty one. The subject route keeps its own
+    missing-dataset refusal, so nothing here softens an existing named state.
+    """
+
+    fixture = build_endpoint_fixture(tmp_path / "task-context", datasets=False)
+    resolved = fixture.resolve()
+    candidate_tree = _captured_tree(resolved)
+
+    result = read_knowledge_review(fixture.config, fixture.task_request())
+
+    assert result.state == "review", result.refusal
+    payload = result.payload
+    assert payload is not None
+    # No comparison identity is published, because none was made, and the staleness state says so in
+    # its own word rather than borrowing "current".
+    assert payload.comparison is None
+    assert payload.staleness.state == "not_compared"
+    assert payload.knowledge.selection_state == "task_context"
+    assert "absent" in (payload.knowledge.selection_detail or "")
+    assert payload.knowledge.before_statement.state == "unresolved"
+    assert payload.source.inventory.state == "measured"
+    assert payload.source.inventory.partial is False
+
+    expected = independent_changed_records(
+        fixture.contract.code_repo_path, fixture.contract.code_base_commit, candidate_tree
+    )
+    listed = [entry.path for entry in payload.source.inventory.entries]
+    assert sorted(listed) == sorted(expected)
+    assert payload.source.inventory.listed_total == len(listed) == len(expected)
+    assert {
+        MODIFIED_PATH,
+        SYNCHRONIZATION_PATH,
+        STAGED_ADDITION_PATH,
+        ELIGIBLE_UNTRACKED_PATH,
+        UNMAPPED_PATH,
+    } <= set(listed)
+    assert IGNORED_PATH not in listed
+    assert payload.source.inventory.before_code_tree_id == fixture.contract.code_base_commit
+    assert payload.source.inventory.after_code_tree_id == candidate_tree
+    assert "limitation:no_knowledge_subject_selected" in payload.limitations
+    assert "limitation:source_inventory_unavailable" not in payload.limitations
+
+    # The entry is reachable through the real transport with NO selector parameters, which is what
+    # makes "the task context is the entry" a served behaviour rather than an internal one.
+    served = FastAPI()
+    register_review_routes(
+        served, fixture.config, lambda request: read_knowledge_review(fixture.config, request)
+    )
+    with TestClient(served) as client:
+        body = client.get(
+            "/api/review/intent",
+            params={
+                "repo": fixture.repository_id,
+                "master": fixture.master,
+                "leaf": LEAF_ID,
+            },
+        )
+    assert body.status_code == 200, body.text
+    served_payload = body.json()["payload"]
+    assert served_payload["staleness"]["state"] == "not_compared"
+    assert "comparison" not in served_payload
+    assert sorted(
+        entry["path"] for entry in served_payload["source"]["inventory"]["entries"]
+    ) == sorted(expected)
+
+    # The subject route is untouched: a named subject with no datasets is still refused by name.
+    named = read_knowledge_review(fixture.config, fixture.request())
+    assert named.state == "refused"
+    assert named.refusal is not None and named.refusal.code == "candidate_dataset_absent"
+
+
+def test_the_production_inventory_keeps_an_unusual_filename_as_the_address_it_expands_by(
+    tmp_path: Path,
+) -> None:
+    """A tab and a newline inside a name survive the capture, the resolution and the payload.
+
+    The file is written into the leaf's real worktree and reaches the candidate through the shipped
+    capture owner, so the path the payload publishes is the address of a file the leaf really holds
+    -- and the line-oriented Git question about the same pair is shown losing it.
+    """
+
+    fixture = build_endpoint_fixture(tmp_path / "unusual-name")
+    (fixture.worktree / UNUSUAL_PATH).write_text(
+        "a name that is not a separator\n", encoding="utf-8"
+    )
+    resolved = fixture.resolve()
+    candidate_tree = _captured_tree(resolved)
+
+    result = read_knowledge_review(fixture.config, fixture.task_request())
+
+    assert result.state == "review", result.refusal
+    payload = result.payload
+    assert payload is not None
+    listed = [entry.path for entry in payload.source.inventory.entries]
+    assert UNUSUAL_PATH in listed
+    assert "\\t" not in listed
+    assert sorted(listed) == sorted(
+        independent_changed_records(
+            fixture.contract.code_repo_path, fixture.contract.code_base_commit, candidate_tree
+        )
+    )
+    unusual = next(
+        entry for entry in payload.source.inventory.entries if entry.path == UNUSUAL_PATH
+    )
+    assert unusual.status == "added"
+    assert unusual.content == "text"
+    # The same address reaches the file the leaf holds, which is what "used for file expansion" means.
+    assert (fixture.worktree / unusual.path).is_file()
+    line_oriented = _git(
+        fixture.contract.code_repo_path,
+        ["diff", "--name-only", "--no-renames", fixture.contract.code_base_commit, candidate_tree],
+    )
+    assert UNUSUAL_PATH not in line_oriented.splitlines()
+
+
+def test_the_production_inventory_lists_non_text_and_mode_changed_paths_it_cannot_render(
+    tmp_path: Path,
+) -> None:
+    """A binary addition and a mode-only change stay listed, each with the fact that says so."""
+
+    fixture = build_endpoint_fixture(tmp_path / "non-text")
+    (fixture.worktree / BINARY_ADDITION_PATH).parent.mkdir(parents=True, exist_ok=True)
+    (fixture.worktree / BINARY_ADDITION_PATH).write_bytes(b"binary\x00content\n")
+    (fixture.worktree / MODIFIED_PATH).chmod(0o755)
+    resolved = fixture.resolve()
+    candidate_tree = _captured_tree(resolved)
+
+    result = read_knowledge_review(fixture.config, fixture.task_request())
+
+    assert result.state == "review", result.refusal
+    payload = result.payload
+    assert payload is not None
+    entries = {entry.path: entry for entry in payload.source.inventory.entries}
+    assert sorted(entries) == sorted(
+        independent_changed_records(
+            fixture.contract.code_repo_path, fixture.contract.code_base_commit, candidate_tree
+        )
+    )
+    assert entries[BINARY_ADDITION_PATH].content == "binary"
+    assert entries[BINARY_ADDITION_PATH].status == "added"
+    assert entries[MODIFIED_PATH].mode_change is True
+    assert entries[MODIFIED_PATH].status == "modified"
+    assert "limitation:source_inventory_partial" not in payload.limitations
+
+
+NON_UTF8_ADDITION = b"src/caf\xe9-latin1.py"
+NON_UTF8_BYTE_FORM = "b'src/caf\\xe9-latin1.py'"
+
+
+def _write_non_utf8_addition(worktree: Path) -> None:
+    """Create the leaf's one changed file whose name is not valid UTF-8.
+
+    A Python ``str`` path cannot express this name -- the filesystem encoding would turn it into valid
+    UTF-8 bytes -- so the file is created through the exact bytes, which is what makes the case real
+    rather than simulated.
+    """
+
+    with open(os.fsencode(worktree) + b"/" + NON_UTF8_ADDITION, "wb") as handle:
+        handle.write(b"# a name that is not text\n")
+
+
+def test_a_non_utf8_pathname_leaves_the_review_openable_and_states_why_it_is_partial(
+    tmp_path: Path,
+) -> None:
+    """A name that is not text is carried by its bytes; the route answers 200, never a crash.
+
+    The runner preserves the change (``surrogateescape``), and this surface's text fields refuse the
+    value that decoding produces. The packet's failure behaviour is a *stated* unknown: the review
+    stays openable, the changed path is listed by its exact byte form, the renderable remainder is
+    listed in full, and the response declares itself partial at the top level. The real route is
+    exercised because "the review is openable" is a claim about the served behaviour: the same request
+    raised a validation error and answered 500 before this boundary stated the fact.
+    """
+
+    fixture = build_endpoint_fixture(tmp_path / "non-utf8")
+    _write_non_utf8_addition(fixture.worktree)
+    resolved = fixture.resolve()
+    candidate_tree = _captured_tree(resolved)
+
+    result = read_knowledge_review(fixture.config, fixture.task_request())
+
+    assert result.state == "review", result.refusal
+    payload = result.payload
+    assert payload is not None
+    inventory = payload.source.inventory
+    assert inventory.state == "measured"
+    assert inventory.partial is True
+    assert [entry.path_bytes for entry in inventory.unrepresentable_paths] == [NON_UTF8_BYTE_FORM]
+    assert inventory.unrepresentable_paths[0].status == "added"
+    assert NON_UTF8_BYTE_FORM in inventory.detail
+    assert "limitation:source_inventory_partial" in payload.limitations
+    # The renderable remainder is the whole independent observation minus the one uncarried path, so
+    # the odd name costs exactly one entry and never the review.
+    observed = independent_changed_records(
+        fixture.contract.code_repo_path, fixture.contract.code_base_commit, candidate_tree
+    )
+    listed = [entry.path for entry in inventory.entries]
+    assert inventory.listed_total == len(listed) == len(observed) - 1
+    assert {
+        MODIFIED_PATH,
+        SYNCHRONIZATION_PATH,
+        STAGED_ADDITION_PATH,
+        ELIGIBLE_UNTRACKED_PATH,
+        UNMAPPED_PATH,
+    } <= set(listed)
+
+    served = FastAPI()
+    register_review_routes(
+        served, fixture.config, lambda request: read_knowledge_review(fixture.config, request)
+    )
+    with TestClient(served, raise_server_exceptions=False) as client:
+        body = client.get(
+            "/api/review/intent",
+            params={"repo": fixture.repository_id, "master": fixture.master, "leaf": LEAF_ID},
+        )
+    assert body.status_code == 200, body.text
+    shown = body.json()["payload"]["source"]["inventory"]
+    assert shown["partial"] is True
+    assert [entry["path_bytes"] for entry in shown["unrepresentable_paths"]] == [NON_UTF8_BYTE_FORM]
+
+
+def test_a_task_context_review_states_a_damaged_half_and_still_lists_the_source_inventory(
+    tmp_path: Path,
+) -> None:
+    """The pair's preflight runs on the task-context route too, and is stated there rather than raised.
+
+    This is the cross-leaf seam between two obligations that are both true at once: a half that is
+    present and cannot be read as a dataset is a **named refusal** where a comparison would be made
+    (asserted here on the subject route), and a **stated reason** where none is (this review reads no
+    dataset at all, so refusing would take the whole source review with it -- the failure the
+    task-context entry exists to remove). Both facts come from the same preflight, so neither route
+    can answer for the pair while the other skips it.
+    """
+
+    fixture = build_endpoint_fixture(tmp_path / "damaged-half")
+    resolved = fixture.resolve()
+    resolved.baseline_database.write_bytes(b"this is not a database\n")
+
+    result = read_knowledge_review(fixture.config, fixture.task_request())
+
+    assert result.state == "review", result.refusal
+    payload = result.payload
+    assert payload is not None
+    assert payload.source.inventory.state == "measured"
+    assert payload.source.inventory.listed_total > 0
+    assert "limitation:knowledge_half_unreadable" in payload.limitations
+    detail = payload.knowledge.selection_detail or ""
+    assert "present but cannot be read" in detail
+    assert str(resolved.baseline_database) in detail
+
+    refused = read_knowledge_review(fixture.config, fixture.request())
+
+    assert refused.state == "refused"
+    assert refused.refusal is not None
+    assert refused.refusal.code == "candidate_dataset_absent"
+    assert "baseline" in refused.refusal.detail
+    assert "present but cannot be read" in refused.refusal.detail

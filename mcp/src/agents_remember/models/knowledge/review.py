@@ -47,6 +47,7 @@ __all__ = [
     "ReviewAssessmentDisplay",
     "ReviewAuthoredEffect",
     "ReviewCandidateRef",
+    "ReviewChangedFile",
     "ReviewEntry",
     "ReviewEntryListResult",
     "ReviewEvidenceLink",
@@ -60,17 +61,27 @@ __all__ = [
     "ReviewRevisionGroup",
     "ReviewSideContent",
     "ReviewSignal",
+    "ReviewSourceInventory",
     "ReviewSourceLocation",
     "ReviewSourcePane",
     "ReviewStaleness",
     "ReviewSubjectKind",
     "ReviewSubmission",
     "ReviewSurfaceRequest",
+    "ReviewUnrepresentablePath",
     "ReviewUnresolvedReference",
 ]
 
 # The surface's own version. It is a recorded value rather than a package version read at display
 # time, so two payloads produced by different renderings are distinguishable from the payloads.
+#
+# ``/1`` admits BOTH payload shapes and is deliberately not bumped by ICR-R02: the subject payload,
+# where ``comparison`` is present and names the knowledge comparison that was made, and the
+# task-context payload, where ``comparison`` is **absent** and the staleness state is
+# ``not_compared`` because no comparison was made at all. The addition is additive for every client
+# that can already request the subject payload (it ignores what it does not read), and a bump would
+# oblige a client migration that nothing validates -- there is no version validator anywhere in this
+# package, so ``/2`` would be a claim with no enforcement behind it.
 KNOWLEDGE_REVIEW_SURFACE_VERSION = "knowledge-review-surface/1"
 
 REVIEW_PANE_NAMES: tuple[str, ...] = ("knowledge", "source", "evidence")
@@ -150,12 +161,18 @@ class ReviewSurfaceRequest(KnowledgeModel):
     that have to be kept in agreement. ``selector`` is one of the read operation's own declared
     seeds and nothing else: no display version, no insertion instant and no "latest" flag is
     representable, so none of them can select.
+
+    ``selector`` is **optional**, and its absence is the task context rather than an empty subject:
+    a task that records no invariant and a task whose datasets do not exist yet both still have a
+    declared source comparison, and this request is how a caller asks for it. A request with no
+    selector compares no knowledge operand at all -- it does not select "everything", and the
+    payload states which of the two it did.
     """
 
     repository_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     master: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     leaf_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    selector: KnowledgeReadSeed
+    selector: KnowledgeReadSeed | None = None
 
 
 class ReviewCandidateRef(KnowledgeModel):
@@ -198,16 +215,38 @@ class ComparisonIdentity(KnowledgeModel):
     binding digest, its policy and version, both declared snapshot digests and both code tree ids --
     so "the same comparison" is a value a reviewer can compare between two responses rather than a
     claim the surface makes about itself.
+
+    ``knowledge_compared`` is what keeps a **task-context** review from wearing a comparison it never
+    made: a review opened with no recorded subject compares no knowledge operand, so it carries no
+    selector digest and no snapshot digests, and the three absent fields are exactly the statement
+    that nothing was selected. The two snapshot digests travel together or not at all -- one of them
+    alone would describe a comparison between a measured dataset and nothing.
     """
 
     reference: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     policy_version: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     binding_digest: str = Field(pattern=SHA256_PATTERN)
-    selector_digest: str = Field(pattern=SHA256_PATTERN)
-    before_snapshot_digest: str = Field(pattern=SHA256_PATTERN)
-    after_snapshot_digest: str = Field(pattern=SHA256_PATTERN)
+    selector_digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    before_snapshot_digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    after_snapshot_digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
     before_code_tree_id: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
     after_code_tree_id: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
+    knowledge_compared: bool = True
+
+    @model_validator(mode="after")
+    def _require_the_knowledge_half_to_be_all_or_nothing(self) -> ComparisonIdentity:
+        digests = (self.selector_digest, self.before_snapshot_digest, self.after_snapshot_digest)
+        if self.knowledge_compared and any(digest is None for digest in digests):
+            raise ValueError(
+                "a comparison that compared knowledge names its selector and both snapshot "
+                "digests; a measured comparison missing one of them cannot be reproduced"
+            )
+        if not self.knowledge_compared and any(digest is not None for digest in digests):
+            raise ValueError(
+                "a comparison that compared no knowledge carries no selector or snapshot digest; "
+                "one beside the statement is how an invented selection becomes readable"
+            )
+        return self
 
 
 class ReviewRevisionGroup(KnowledgeModel):
@@ -403,6 +442,13 @@ class ReviewKnowledgePane(KnowledgeModel):
     The authored records and the mechanical signal facts are separate collections with separate
     element types, so a rendering cannot place a signal where a finding goes without the type
     system objecting first.
+
+    ``selection_state`` says which question this pane answered. ``subject_selected`` means the
+    reviewed subject was compared and the two statements below are that comparison's operands;
+    ``task_context`` means the review was opened from the task alone, so **no operand was compared**
+    and the pane carries unresolved sides rather than empty ones. The detail is required in exactly
+    that second state, because "nothing was compared" without a reason reads like a subject whose
+    snapshots hold no statement.
     """
 
     invariant_ids: tuple[str, ...] = ()
@@ -418,6 +464,8 @@ class ReviewKnowledgePane(KnowledgeModel):
     assessment: ReviewAssessmentDisplay | None = None
     assessments: tuple[ReviewAssessmentDisplay, ...] = ()
     unresolved: tuple[ReviewUnresolvedReference, ...] = ()
+    selection_state: Literal["subject_selected", "task_context"] = "subject_selected"
+    selection_detail: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
 
     @model_validator(mode="after")
     def _require_the_assessment_state_to_be_one_fact(self) -> ReviewKnowledgePane:
@@ -430,10 +478,151 @@ class ReviewKnowledgePane(KnowledgeModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _require_the_selection_state_to_state_itself(self) -> ReviewKnowledgePane:
+        if (self.selection_state == "task_context") != (self.selection_detail is not None):
+            raise ValueError(
+                "a task-context pane states why no subject was compared, and a pane that compared a "
+                "subject carries no task-context reason"
+            )
+        return self
+
+
+ReviewFileStatus = Literal["added", "deleted", "modified", "type_changed", "unknown"]
+
+ReviewFileContent = Literal["text", "binary", "symlink", "submodule", "unknown"]
+
+
+class ReviewChangedFile(KnowledgeModel):
+    """One path the bound source pair differs at, as an address, a status and a renderability.
+
+    This is the surface's own inventory entry, and it is deliberately three separate facts.
+    ``path`` is the **raw filename** exactly as Git recorded it -- a tab or a newline inside it is
+    part of the address the same file is expanded with and never a separator -- so the string here
+    is the string a later read of that file must use. ``status`` is what happened to the path and
+    carries no assessment of it. ``content`` states whether the path's content can be rendered at
+    all, which is a property of the content and not of the change: a binary path, a symlink and a
+    submodule pointer are listed exactly like a text file and are simply not text.
+
+    ``mode_change`` separates "the bytes moved" from "only the permission word moved" without
+    turning either into a different status, and ``detail`` is present exactly when ``content`` is
+    ``unknown``, where it says whether the classification was not measured or was not reported for
+    this path.
+    """
+
+    path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
+    status: ReviewFileStatus
+    content: ReviewFileContent
+    mode_change: bool = False
+    detail: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+
+    @model_validator(mode="after")
+    def _require_an_unknown_content_to_state_its_reason(self) -> ReviewChangedFile:
+        if (self.content == "unknown") != (self.detail is not None):
+            raise ValueError(
+                "an entry whose content cannot be classified states why, and a classified entry "
+                "states no reason; an unexplained unknown reads like a measured absence"
+            )
+        return self
+
+
+class ReviewUnrepresentablePath(KnowledgeModel):
+    """One changed path whose **name** cannot be carried as text by this vocabulary.
+
+    A Git pathname is bytes and this surface carries text. The runner preserves the bytes exactly, so
+    a name that is not valid UTF-8 arrives as lone surrogates -- a value a ``str`` field refuses --
+    and such a path would otherwise vanish from a response that claimed to be complete, or crash the
+    response that was supposed to state the fact. It is carried here instead.
+
+    ``path_bytes`` is the path's exact bytes rendered ASCII-safely (``b'src/caf\xe9-latin1.py'``), so
+    the value is valid text and still says precisely which file changed; ``status`` and
+    ``mode_change`` are what Git reported for it. Nothing is re-encoded: a re-encoded name would
+    address a file this repository does not hold, which is worse than an unusual spelling.
+    """
+
+    # The byte form of a pathname is longer than the pathname (up to four characters per byte), so it
+    # is bounded by the prose limit rather than by the path limit.
+    path_bytes: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    status: ReviewFileStatus
+    mode_change: bool = False
+    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+
+
+class ReviewSourceInventory(KnowledgeModel):
+    """The complete source change set of one bound pair: measured, partial, or unavailable.
+
+    This is the value R02 exists for. It is measured from the two code trees the resolution bound
+    and from nothing else, so it is present and complete for a candidate that records no invariant,
+    for a candidate whose datasets do not exist, and for a comparison whose knowledge half is a
+    different question entirely. The knowledge selection may filter *attribution*; it can never
+    remove an entry from here.
+
+    ``state`` is the honesty boundary. ``measured`` means this list is the whole change set of the
+    pair, including the measured empty set two identical trees produce. ``unavailable`` means the
+    measurement was not made at all, and then ``entries`` is empty **because nothing was observed**:
+    the ``detail`` carries the reason, and the count is zero rather than reported as "no changes".
+    ``partial`` is the third state and it is not a weaker measurement of the path set -- every
+    changed path is listed and one field of some entries could not be classified, which each entry
+    states for itself.
+
+    ``listed_total`` is the length of the list above and is checked against it, so a count can never
+    describe a population the response does not carry. Both code tree ids travel with the list, so a
+    caller can reproduce the exact measurement the entries came from.
+
+    ``unrepresentable_paths`` is the rest of the measured population, and it exists so the two lists
+    together are the whole change set: a changed path whose *name* is not valid text cannot be
+    ``entries`` without the value itself being unrepresentable, and dropping it would make a partial
+    change set read as a complete one. An inventory that carries any of them is ``partial`` by
+    construction, because it is exactly that.
+    """
+
+    state: Literal["measured", "unavailable"]
+    entries: tuple[ReviewChangedFile, ...] = ()
+    listed_total: int = Field(ge=0)
+    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    partial: bool = False
+    command: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    before_code_tree_id: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
+    after_code_tree_id: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
+    unrepresentable_paths: tuple[ReviewUnrepresentablePath, ...] = ()
+
+    @model_validator(mode="after")
+    def _require_the_count_to_describe_the_list(self) -> ReviewSourceInventory:
+        if self.listed_total != len(self.entries):
+            raise ValueError(
+                "an inventory's count is the length of the list beside it; a count of a population "
+                "the response does not carry is how a partial list is read as a whole one"
+            )
+        if self.state == "unavailable" and self.entries:
+            raise ValueError(
+                "an unavailable measurement lists nothing: entries beside it would be read as an "
+                "observed change set"
+            )
+        if self.state == "unavailable" and self.partial:
+            raise ValueError(
+                "an unavailable measurement is not a partial one; there is no measured remainder "
+                "to label"
+            )
+        if self.unrepresentable_paths and (self.state != "measured" or not self.partial):
+            raise ValueError(
+                "an inventory that could not carry some changed paths as text is a measured, "
+                "partial one; an unrepresentable path beside a complete or unavailable inventory "
+                "describes no measurement"
+            )
+        return self
+
 
 class ReviewSourcePane(KnowledgeModel):
-    """Pane 2 -- Source: selected locations, expansion, and what the selection did not reach."""
+    """Pane 2 -- Source: the whole-task inventory, selected locations, and what the selection missed.
 
+    ``inventory`` is required and comes first, because it is the pane's one fact that does not depend
+    on a knowledge selection: the complete source change set of the comparison's bound pair. Every
+    field below it is the *attribution* half -- which of those changes a recorded realization claim
+    reaches -- and that half may legitimately be empty, filtered or unmeasured without shortening the
+    inventory above it.
+    """
+
+    inventory: ReviewSourceInventory
     locations: tuple[ReviewSourceLocation, ...] = ()
     remaining: tuple[ReviewRemainingCount, ...] = ()
     expansion_reference: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
@@ -480,9 +669,13 @@ class ReviewStaleness(KnowledgeModel):
     A stale payload keeps the last displayed comparison as a *labelled previous input*: the identity
     is retained and named as previous, so a reviewer can see what was reviewed while being unable to
     mistake it for a review of what is there now.
+
+    ``not_compared`` is the task-context state and not a third flavour of current: a review opened
+    from the task alone compared no knowledge operand, so there is no comparison binding that could
+    be current or stale, and the response says that instead of borrowing the word for either.
     """
 
-    state: Literal["current", "stale"]
+    state: Literal["current", "stale", "not_compared"]
     statement: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
     previous_comparison_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     moved: tuple[str, ...] = ()
@@ -493,8 +686,8 @@ class ReviewStaleness(KnowledgeModel):
             raise ValueError(
                 "a stale comparison retains the comparison it is labelling as previous input"
             )
-        if self.state == "current" and self.previous_comparison_ref is not None:
-            raise ValueError("a current comparison has no previous input to label")
+        if self.state != "stale" and self.previous_comparison_ref is not None:
+            raise ValueError("only a stale comparison has a previous input to label")
         return self
 
 
@@ -523,13 +716,18 @@ class KnowledgeReviewPayload(KnowledgeModel):
     whose submission claims to be disabled for staleness -- so "an assessment is never submitted
     against a comparison that has moved" is a property of the value rather than a rule a client is
     asked to honour.
+
+    ``comparison`` is absent exactly when no knowledge comparison was made -- the task-context review
+    R02 requires, in which the source pane still carries the complete inventory of the bound pair.
+    The absence is not a blank: it is held in agreement with the staleness state below, so a payload
+    cannot omit the comparison and still claim to be current.
     """
 
     surface_version: str = Field(
         default=KNOWLEDGE_REVIEW_SURFACE_VERSION, min_length=1, max_length=LABEL_MAX_LENGTH
     )
     candidate: ReviewCandidateRef
-    comparison: ComparisonIdentity
+    comparison: ComparisonIdentity | None = None
     knowledge: ReviewKnowledgePane
     source: ReviewSourcePane
     evidence: ReviewEvidencePane
@@ -552,6 +750,24 @@ class KnowledgeReviewPayload(KnowledgeModel):
         ) - set(PROPOSED_ASSESSMENT_DISPOSITIONS):
             raise ValueError(
                 "the surface publishes the authority's declared dispositions and invents none"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_the_identity_and_staleness_to_agree(self) -> KnowledgeReviewPayload:
+        absent = self.comparison is None
+        if absent != (self.staleness.state == "not_compared"):
+            raise ValueError(
+                "a payload states that no knowledge comparison was made exactly when it carries no "
+                "comparison identity; a missing identity beside a current or stale state claims a "
+                "measurement nobody made"
+            )
+        compared = self.comparison is not None and self.comparison.knowledge_compared
+        if compared != (self.knowledge.selection_state == "subject_selected"):
+            raise ValueError(
+                "the comparison identity and the knowledge pane answer the same question about "
+                "which subject was compared, and two spellings of one state is how a payload comes "
+                "to disagree with itself"
             )
         return self
 

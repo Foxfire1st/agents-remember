@@ -81,15 +81,38 @@ _UNWIRED_ENTRIES: dict[str, Any] = {
 
 
 def review_request_from_query(
-    repository_id: str, master: str, leaf_id: str, selector_kind: str, selector_id: str
+    repository_id: str,
+    master: str,
+    leaf_id: str,
+    selector_kind: str | None,
+    selector_id: str | None,
 ) -> ReviewSurfaceRequest | None:
-    """Parse one query string into the typed request, or ``None`` when a selector is not admitted."""
+    """Parse one query string into the typed request, or ``None`` when a selector is not admitted.
 
+    Two shapes are admitted and they are different questions. **No selector at all** is the task
+    context: the review is opened from the task and lists the complete source change inventory of the
+    pair it resolves, which is what a task with no recorded invariant -- or with no datasets yet --
+    still has. **One named kind with an id** is a reviewed subject. A half-named selector, and a kind
+    this surface does not review, are both refused with ``None`` rather than guessed at, because a
+    caller that asked for a specific subject and received a whole-task review would be reading an
+    answer to a question it did not ask.
+    """
+
+    if selector_kind is None and selector_id is None:
+        return ReviewSurfaceRequest(
+            repository_id=repository_id,
+            master=master,
+            leaf_id=leaf_id,
+            selector=None,
+        )
+    if not selector_kind or not selector_id:
+        return None
+    seed: KnowledgeReadSeed | None = None
     if selector_kind == "invariant":
-        seed: KnowledgeReadSeed = InvariantIdentitySeed(invariant_id=selector_id)
+        seed = InvariantIdentitySeed(invariant_id=selector_id)
     elif selector_kind == "family":
         seed = FamilyIdentitySeed(family_id=selector_id)
-    else:
+    if seed is None:
         return None
     return ReviewSurfaceRequest(
         repository_id=repository_id,
@@ -147,8 +170,8 @@ def register_review_routes(
         repo: str,
         master: str,
         leaf: str,
-        selectorKind: Annotated[str, Query(alias="selectorKind")],
-        selectorId: Annotated[str, Query(alias="selectorId")],
+        selectorKind: Annotated[str | None, Query(alias="selectorKind")] = None,
+        selectorId: Annotated[str | None, Query(alias="selectorId")] = None,
     ) -> Response:
         if port is None:
             return JSONResponse(
@@ -173,11 +196,15 @@ def register_review_routes(
                     "status": "bad-request",
                     "detail": (
                         "the review selector names no admitted subject kind; the surface reviews "
-                        "one recorded invariant or family identity"
+                        "one recorded invariant or family identity, or no subject at all when both "
+                        "selector parameters are omitted"
                     ),
-                    "offendingInput": selectorKind,
-                    "expected": ", ".join(SELECTOR_KINDS),
-                    "nextAction": "name selectorKind=invariant|family with the subject's record id",
+                    "offendingInput": selectorKind or selectorId,
+                    "expected": f"{', '.join(SELECTOR_KINDS)}, or no selector at all",
+                    "nextAction": (
+                        "name selectorKind=invariant|family together with the subject's record id, "
+                        "or omit both to review the task's complete source change inventory"
+                    ),
                 },
                 status_code=400,
             )

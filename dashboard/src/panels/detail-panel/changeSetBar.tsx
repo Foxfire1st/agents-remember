@@ -65,9 +65,9 @@ export function ChangeSetButton({
 // The reviewed subject of one live leaf, read from the server that owns the resolution. The id
 // returned is a recorded identity inside the candidate the server resolved from canonical task
 // context, so this hook chooses no candidate and invents no id: it asks, and a refusal or an empty
-// list is a normal answer that leaves the entry hidden. Nothing is fetched for a leaf that is not
-// live, because there is no candidate to resolve and the working change-set is hidden for the same
-// reason.
+// list is a normal answer that simply leaves the entry on the task context. Nothing is fetched for
+// a leaf that is not live, because there is no candidate to resolve and the working change-set is
+// hidden for the same reason.
 function useReviewSubject(
   live: boolean,
   repo: string,
@@ -135,20 +135,27 @@ export function DocChangeSetBar({
           onOpen={onOpen}
         />
       ) : null}
-      {live && subject ? (
+      {live ? (
         // The reviewer entry, added BESIDE the working/committed actions and never in their place.
-        // It is offered only for an admitted live curator candidate -- the same liveness the
-        // working change-set is gated on -- and it carries the reviewed subject's recorded identity
-        // rather than a filesystem path, because the browser never chooses the candidate. The
-        // identity itself comes from the server's own resolution over the candidate pair; when no
-        // candidate is admitted, or the pair selects no subject, `subject` stays undefined and no
-        // entry is offered rather than a broken one.
+        // It is offered for an admitted live curator candidate -- the same liveness the working
+        // change-set is gated on -- and **the task context is the entry**: the target names the
+        // repo/master/leaf the server resolves the candidate from and carries no filesystem path,
+        // because the browser never chooses the candidate.
+        //
+        // The server's subject list is a REFINEMENT and never a gate. When it offers a recorded
+        // subject, that identity travels with the target so the review is opened on it; when it
+        // offers none -- no invariants recorded, no datasets yet, or a refusal this client cannot
+        // read -- the target still carries `review: {}` and the review opens on the task's complete
+        // source change inventory. Offering the entry only for a subject is exactly how a task with
+        // no knowledge lost its source review.
         <ChangeSetButton
           target={{
             repo,
             master,
             leaf,
-            review: { selectorKind: subject.selector_kind, selectorId: subject.selector_id },
+            review: subject
+              ? { selectorKind: subject.selector_kind, selectorId: subject.selector_id }
+              : {},
           }}
           label="Intent review"
           onOpen={onOpen}

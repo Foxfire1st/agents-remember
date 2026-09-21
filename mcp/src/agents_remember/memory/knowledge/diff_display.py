@@ -16,6 +16,10 @@ Three jobs, and they are one job: a response must never be readable as more than
   paths carry no recorded attribution. A caller that was shown a partial view can therefore reach the
   whole comparison without asking this operation for anything else -- and the operation never dumps
   source text, because reporting *attribution* is this increment's contract.
+* **A changed path is an address and a status.** :class:`TreeChange` carries the raw filename exactly
+  as Git recorded it plus what happened to it, so a tab or a newline inside a name stays part of the
+  address a caller expands the same file with, and an addition, a deletion, a mode or type change and
+  a path whose content cannot be rendered are all still *listed* rather than dropped from the set.
 
 The unattributed-path computation is delegated through :data:`TreeDifferenceProbe` rather than
 performed here: Git is the application layer's seam (:mod:`agents_remember.memory.knowledge.read_anchors`
@@ -43,6 +47,7 @@ __all__ = [
     "DIFF_EXPANSION_REFERENCE",
     "DIFF_LIMITATION_ORDER",
     "DiffDisplay",
+    "TreeChange",
     "TreeDifferenceProbe",
     "TreePaths",
     "attributed_paths",
@@ -59,7 +64,15 @@ DIFF_EXPANSION_REFERENCE = "diff_knowledge_scope:full-selected-candidate-source-
 # is reproducible without reading this module: the two tree objects are substituted, never a branch,
 # a working tree or ``HEAD``, because those name whatever is checked out now rather than the two
 # snapshots the comparison was between.
-TREE_DIFF_COMMAND = "git diff --name-only --no-renames {before_tree} {after_tree}"
+#
+# It is the **same delimiter-safe interface the measurement itself reads** (``--raw -z``), and that is
+# not a detail: the line-oriented ``--name-only`` form quotes and escapes a pathname containing a tab
+# or a newline, so a caller who ran the advertised command would hold a different string from the
+# address this response lists and from the address the same file is expanded by. Advertising an
+# interface that loses the identity the response just preserved would make the boundary example --
+# "a tab/newline filename remains the same address used for file expansion" -- false in the one place
+# a reader acts on it.
+TREE_DIFF_COMMAND = "git diff --raw -z --no-renames {before_tree} {after_tree}"
 
 # The declared order limitations are reported in. It is fixed so two responses that established the
 # same limits present them identically, whatever order their items happened to be built in.
@@ -86,6 +99,28 @@ class TreeSide:
 
 
 @dataclass(frozen=True)
+class TreeChange:
+    """One path two code trees differ at, with Git's own status and what can be rendered.
+
+    ``path`` is the raw filename exactly as Git recorded it -- a tab or a newline inside a name is
+    part of the address and not a separator, which is why the observation that produces these values
+    reads a NUL-delimited Git interface rather than lines. ``status`` and ``content`` are the two
+    separate facts a listing needs: what happened to the path, and whether its content could be
+    rendered at all. A mode change is a ``modified`` entry that also says so, because "the bytes are
+    the same and the mode moved" is a different change from "the bytes moved".
+
+    ``detail`` states why ``content`` is ``unknown``; it is empty for a measured classification, so a
+    reader never has to guess whether an unknown was measured and failed or simply not reported.
+    """
+
+    path: str
+    status: str
+    content: str
+    mode_change: bool = False
+    detail: str = ""
+
+
+@dataclass(frozen=True)
 class TreePaths:
     """The paths two code trees differ at, as the probe observed them.
 
@@ -93,11 +128,40 @@ class TreePaths:
     a tree this repository does not hold) has not observed *no changes*, and reporting its silence
     as "nothing changed between the trees" would be a fabricated fact. An unavailable probe
     therefore contributes no expansion at all and says so through its ``detail``.
+
+    ``entries`` is the same measurement at full resolution -- one :class:`TreeChange` per *carriable*
+    path, in the same order ``paths`` reports them -- and the two are held in agreement by
+    construction: a value that named paths its entries do not carry would make one measurement into
+    two. ``partial`` says the path set was measured while part of it could not be reported whole:
+    either one field of the entries could not be classified, or some changed paths had to travel in
+    ``unrepresentable`` instead. ``detail`` states whichever of those happened, so a partial
+    observation is never a quiet one.
+
+    ``unrepresentable`` is the second half of that honesty rule, and it is not an empty list a caller
+    may ignore. A Git pathname is *bytes* and this surface carries *text*; a name that is not valid
+    UTF-8 decodes to lone surrogates, which is a value the surface's own text fields refuse. Dropping
+    such a path would make a partial change set read as a whole one, so it is measured, kept here in
+    full, and rendered by its byte form by whoever can state that fact to a reader.
     """
 
     available: bool
     paths: tuple[str, ...] = ()
     detail: str = ""
+    entries: tuple[TreeChange, ...] = ()
+    partial: bool = False
+    unrepresentable: tuple[TreeChange, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.entries and self.paths != tuple(entry.path for entry in self.entries):
+            raise ValueError(
+                "a tree observation's paths and its entries are two renderings of one measurement, "
+                "so a value whose paths are not exactly the entry paths describes no observation"
+            )
+        if self.unrepresentable and not self.partial:
+            raise ValueError(
+                "an observation that could not carry some of its changed paths as text is a partial "
+                "one; a complete observation beside an unrepresentable path describes no measurement"
+            )
 
 
 # The Git seam, narrowed to one question. It is a callable rather than a class so the application
@@ -408,17 +472,32 @@ def _expansion(
         after_code_tree_id=after.tree_id,
         attributed_changed_paths=attributed,
         unattributed_changed_paths=unattributed,
-        detail=(
-            observed.detail
-            if not observed.available
-            else (
-                f"the two code trees differ at {len(observed.paths)} path(s); "
-                f"{len(attributed)} are attributed by a realization claim both sides selected and "
-                f"{len(unattributed)} are not. This reference names the whole comparison so a "
-                "filtered or partial response can be expanded rather than trusted"
-            )
-        ),
+        detail=_expansion_detail(observed, attributed, unattributed),
     )
+
+
+def _expansion_detail(
+    observed: TreePaths, attributed: Sequence[str], unattributed: Sequence[str]
+) -> str:
+    """Return what the expansion states about itself: the measurement, its limits, and nothing more.
+
+    A partial observation states its limit *here* as well as counting less, because the two counts
+    beside this sentence describe only the paths that could be carried: a reader who is not told that
+    two changed paths could not be named would read a smaller change set as the whole one. The
+    unavailable case reports the observation's own reason verbatim, as it always has.
+    """
+
+    if not observed.available:
+        return observed.detail
+    stated = (
+        f"the two code trees differ at {len(observed.paths)} path(s); "
+        f"{len(attributed)} are attributed by a realization claim both sides selected and "
+        f"{len(unattributed)} are not. This reference names the whole comparison so a filtered or "
+        "partial response can be expanded rather than trusted"
+    )
+    if not observed.partial:
+        return stated
+    return f"{stated} This observation is partial: {observed.detail}"
 
 
 # --- one union item, typed ------------------------------------------------------------------

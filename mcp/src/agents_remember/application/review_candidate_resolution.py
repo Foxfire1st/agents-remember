@@ -35,7 +35,11 @@ from pathlib import Path
 from agents_remember.errors import FutureCodeCandidateError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.candidate_receipt import read_candidate_receipt
-from agents_remember.models.knowledge.review import ReviewRefusal, ReviewRefusalCode
+from agents_remember.models.knowledge.review import (
+    ReviewCandidateRef,
+    ReviewRefusal,
+    ReviewRefusalCode,
+)
 from agents_remember.models.knowledge.snapshot import (
     CANDIDATE_DATABASE_NAME,
     CANDIDATE_RECEIPT_NAME,
@@ -56,6 +60,7 @@ __all__ = [
     "REVIEW_CANDIDATE_DIRECTORY",
     "REVIEW_CANDIDATE_RELATIVE_ROOT",
     "ReviewCandidateResolution",
+    "candidate_ref",
     "missing_dataset_half",
     "refusal",
     "require_current_candidate_identity",
@@ -191,6 +196,25 @@ def resolve_review_candidate(
         candidate_code_tree_id=captured.codeCandidateTree,
         contract=contract,
         candidate_identity=captured,
+    )
+
+
+def candidate_ref(
+    resolved: ReviewCandidateResolution, *, repository_id: str, master: str
+) -> ReviewCandidateRef:
+    """The reviewed candidate as the surface names it: task context plus the resolved leaf id.
+
+    This is the one construction of that value, shared by the subject review and the task-context
+    review, so the two cannot come to name different leaves for the same resolution. It carries only
+    identities a caller may legitimately name -- no path appears in it -- and the leaf id is the
+    resolution's own, never the requested spelling, because the resolution is what located it.
+    """
+
+    return ReviewCandidateRef(
+        repository_id=repository_id,
+        master=master,
+        leaf_id=resolved.leaf_id,
+        task_ref=master,
     )
 
 

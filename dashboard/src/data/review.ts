@@ -36,11 +36,15 @@ export interface ComparisonIdentity {
   reference: string;
   policy_version: string;
   binding_digest: string;
-  selector_digest: string;
-  before_snapshot_digest: string;
-  after_snapshot_digest: string;
+  // Absent exactly when no knowledge operand was compared (a task-context review): the server
+  // omits the selector and both snapshot digests together, and `knowledge_compared` says which
+  // shape this is rather than leaving a reader to infer it from three missing fields.
+  selector_digest?: string;
+  before_snapshot_digest?: string;
+  after_snapshot_digest?: string;
   before_code_tree_id?: string;
   after_code_tree_id?: string;
+  knowledge_compared: boolean;
 }
 
 export interface ReviewRevisionGroup {
@@ -104,6 +108,9 @@ export interface ReviewKnowledgePane {
   signals: ReviewSignal[];
   assessments: ReviewAssessmentDisplay[];
   unresolved: ReviewUnresolvedReference[];
+  // Which question this pane answered: a compared subject, or the task context with no operand.
+  selection_state: "subject_selected" | "task_context";
+  selection_detail?: string;
 }
 
 export interface ReviewSourceLocation {
@@ -126,7 +133,52 @@ export interface ReviewRemainingCount {
   reason?: string;
 }
 
+export type ReviewFileStatus = "added" | "deleted" | "modified" | "type_changed" | "unknown";
+export type ReviewFileContent = "text" | "binary" | "symlink" | "submodule" | "unknown";
+
+// One changed path of the bound source pair. `path` is the raw filename exactly as Git recorded it
+// -- a tab or a newline inside it is part of the address and not a separator -- so this string is
+// what a later read of the same file must use. `content` says whether the content can be rendered
+// at all; the entry is listed either way.
+export interface ReviewChangedFile {
+  path: string;
+  status: ReviewFileStatus;
+  content: ReviewFileContent;
+  mode_change: boolean;
+  detail?: string;
+}
+
+// One changed path whose NAME cannot be carried as text: a Git pathname is bytes and this surface
+// carries text, so a name that is not valid UTF-8 arrives as `path_bytes`, the exact bytes in an
+// ASCII-safe spelling (`b'src/caf\xe9-latin1.py'`). The change is listed rather than dropped, and
+// nothing is re-encoded: a re-encoded name would address a file the repository does not hold.
+export interface ReviewUnrepresentablePath {
+  path_bytes: string;
+  status: ReviewFileStatus;
+  mode_change: boolean;
+  detail: string;
+}
+
+// The complete source change set of the comparison's bound pair, measured from those two Git
+// objects and from nothing else. `state` is the honesty boundary: "measured" is the whole change set
+// (including a measured empty one), "unavailable" means nothing was observed and `detail` says why,
+// and `partial` means every changed path is listed while part of it could not be reported whole --
+// one field of some entries could not be classified, or some paths are in
+// `unrepresentable_paths`. A missing or unavailable inventory is never rendered as "no changes".
+export interface ReviewSourceInventory {
+  state: "measured" | "unavailable";
+  entries: ReviewChangedFile[];
+  listed_total: number;
+  detail: string;
+  partial: boolean;
+  command: string;
+  before_code_tree_id?: string;
+  after_code_tree_id?: string;
+  unrepresentable_paths: ReviewUnrepresentablePath[];
+}
+
 export interface ReviewSourcePane {
+  inventory: ReviewSourceInventory;
   locations: ReviewSourceLocation[];
   remaining: ReviewRemainingCount[];
   expansion_reference?: string;
@@ -166,7 +218,7 @@ export interface ReviewEvidencePane {
 }
 
 export interface ReviewStaleness {
-  state: "current" | "stale";
+  state: "current" | "stale" | "not_compared";
   statement: string;
   previous_comparison_ref?: string;
   moved: string[];
@@ -183,7 +235,9 @@ export interface ReviewSubmission {
 export interface ReviewPayload {
   surface_version: string;
   candidate: ReviewCandidateRef;
-  comparison: ComparisonIdentity;
+  // Absent exactly when the review compared no knowledge operand; the source pane's inventory is
+  // present either way, which is the point of the task-context entry.
+  comparison?: ComparisonIdentity;
   knowledge: ReviewKnowledgePane;
   source: ReviewSourcePane;
   evidence: ReviewEvidencePane;
@@ -209,20 +263,26 @@ export interface ReviewResult {
   refusal?: ReviewRefusal;
 }
 
-// The one request the surface makes. It names canonical task context and one recorded subject; it
-// never names a filesystem path, because the candidate is resolved on the server from the task
-// context and the browser must not be able to choose which dataset is reviewed.
+// The one request the surface makes. It names canonical task context and, when there is one, the
+// recorded subject being compared; it never names a filesystem path, because the candidate is
+// resolved on the server from the task context and the browser must not be able to choose which
+// dataset is reviewed. Omitting the selector asks for the task's own review -- the complete source
+// change inventory of the resolved pair -- which is the entry a task with no invariant still has.
 export const intentReview = (
   repo: string,
   master: string,
   leaf: string,
-  selectorKind: ReviewSelectorKind,
-  selectorId: string,
+  selectorKind?: ReviewSelectorKind,
+  selectorId?: string,
   base = "",
-): Promise<ReviewResult> =>
-  getJson<ReviewResult>(
-    `${base}/api/review/intent?${qs({ repo, master, leaf, selectorKind, selectorId })}`,
-  );
+): Promise<ReviewResult> => {
+  const params: Record<string, string> = { repo, master, leaf };
+  if (selectorKind !== undefined && selectorId !== undefined) {
+    params.selectorKind = selectorKind;
+    params.selectorId = selectorId;
+  }
+  return getJson<ReviewResult>(`${base}/api/review/intent?${qs(params)}`);
+};
 
 // One subject the resolved candidate pair can be reviewed on, as the server selected it. This is
 // the ONLY legitimate source of the entry's selector: the id is a recorded identity inside the

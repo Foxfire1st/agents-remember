@@ -35,10 +35,13 @@ export interface ChangeSetTarget {
   master?: string; // a series master (net base->tip); also QUALIFIES a `leaf`
   leaf?: string; // a single leaf (committed/working), resolved by leaf-id; needs `master` + `mode`
   mode?: LeafMode; // committed = landed delta (base->code_commit), working = uncommitted delta (live)
-  // The Intent Reviewer's own selector: the reviewed subject's recorded identity. Present only on a
-  // review target, and the cockpit's takeover dispatch is what reads it -- the change-set viewer is
-  // never mounted for one, so no change-set request is made from a review.
-  review?: { selectorKind: ReviewSelectorKind; selectorId: string };
+  // The Intent Reviewer's own selector: the reviewed subject's recorded identity, when the server
+  // offered one. Its PRESENCE is what marks this target as a review and the cockpit's takeover
+  // dispatch is what reads it -- the change-set viewer is never mounted for one, so no change-set
+  // request is made from a review. An EMPTY object is the task-context entry: the review is opened
+  // from the task alone and lists the complete source inventory, which is what a task with no
+  // recorded invariant still has.
+  review?: { selectorKind?: ReviewSelectorKind; selectorId?: string };
 }
 
 const screen = css({

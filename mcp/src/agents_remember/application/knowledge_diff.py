@@ -36,7 +36,9 @@ from typing import Any
 
 import apsw
 
-from agents_remember.kernel.git_command import run_git
+from agents_remember.application.review_source_inventory import (
+    tree_difference_observation,
+)
 from agents_remember.memory.knowledge.connection import inspect_schema, open_read_only_database
 from agents_remember.memory.knowledge.diff import DiffComparison, compare_selected_scopes
 from agents_remember.memory.knowledge.diff_display import (
@@ -45,7 +47,6 @@ from agents_remember.memory.knowledge.diff_display import (
     TreePaths,
     TreeSide,
     build_display,
-    no_tree_difference_probe,
 )
 from agents_remember.memory.knowledge.logical import (
     bound_repository,
@@ -119,11 +120,6 @@ __all__ = [
 # the evidence) can prove a refused comparison persisted nothing.
 ROW_COUNT_TEMPLATE = "SELECT count(*) FROM {table}"
 
-# The Git question the expansion's command answers. ``--no-renames`` is deliberate: a rename is a
-# deletion of one path and an addition of another, and reporting a rename would attribute the
-# candidate's *new* path to a baseline path that no recorded anchor names.
-_TREE_DIFF_ARGS = ("diff", "--name-only", "--no-renames")
-
 
 def open_diff_side(
     database_path: Path,
@@ -162,38 +158,19 @@ def open_diff_side(
 def git_tree_difference_probe(before: TreeSide, after: TreeSide) -> TreePaths:
     """Return the paths two exact code trees differ at, as Git reports them.
 
-    This is the production :data:`~agents_remember.memory.knowledge.diff_display.TreeDifferenceProbe`.
-    Two sides are compared only when each has named an exact tree *and* is resolvable in the root it
-    named; anything else is reported as an observation this run could not make, never as an empty
-    change set. The two trees are addressed by object id and never by a branch, a working tree or
-    ``HEAD``, so a comparison of published snapshots cannot silently become a comparison of whatever
-    is checked out now.
+    This is the production :data:`~agents_remember.memory.knowledge.diff_display.TreeDifferenceProbe`
+    and it is one call: the observation itself belongs to
+    :func:`~agents_remember.application.review_source_inventory.tree_difference_observation`, which
+    the review's own inventory reads too. Two implementations of "what did these two trees change"
+    would be two answers to one question, so this seam delegates and adds nothing -- in particular it
+    does not re-parse paths, which is how a name containing a tab or a newline stops being an address.
+
+    A side that named no tree, an unresolvable root and a comparison this repository cannot make are
+    all reported by that one observation: an unavailable observation naming its reason, never an
+    empty change set.
     """
 
-    if before.tree_id is None or after.tree_id is None:
-        return no_tree_difference_probe(before, after)
-    if before.root is None or after.root is None:
-        return TreePaths(
-            available=False,
-            detail=(
-                "a side named an exact code tree without the repository root it lives in, so the "
-                "two trees could not be compared and no change set was observed"
-            ),
-        )
-    result = run_git(Path(before.root), [*_TREE_DIFF_ARGS, before.tree_id, after.tree_id])
-    if result.returncode != 0:
-        return TreePaths(
-            available=False,
-            detail=(
-                f"the two requested code trees could not be compared ({before.tree_id} in "
-                f"{before.root} against {after.tree_id} in {after.root}), so no change set was "
-                "observed and none is reported; no working tree or HEAD was substituted"
-            ),
-        )
-    return TreePaths(
-        available=True,
-        paths=tuple(sorted(line for line in result.stdout.splitlines() if line.strip())),
-    )
+    return tree_difference_observation(before, after)
 
 
 def diff_knowledge_scope(

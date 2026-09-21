@@ -572,6 +572,8 @@ function ChangeSetTakeover({
         data-view={target.review ? "intent-review" : "changeset"}
       >
         {target.review ? (
+          // A review target may carry a subject's selector or none at all: the task-context entry
+          // opens the review on the task, and the surface asks for exactly what it was handed.
           <ReviewSurface
             repo={target.repo}
             master={target.master ?? ""}

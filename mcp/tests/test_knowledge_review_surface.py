@@ -28,8 +28,9 @@ unreadable or reusable.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
-from typing import get_args
+from typing import Literal, get_args
 
 import pytest
 from agents_remember.application.knowledge_diff import diff_knowledge_scope, open_diff_side
@@ -60,7 +61,7 @@ from agents_remember.models.knowledge.evidence import (
     VerificationObservationPayload,
 )
 from agents_remember.models.knowledge.graph import RealizationRole
-from agents_remember.models.knowledge.read import InvariantIdentitySeed
+from agents_remember.models.knowledge.read import InvariantIdentitySeed, KnowledgeReadSeed
 from agents_remember.models.knowledge.review import (
     PROPOSED_ASSESSMENT_DISPOSITIONS,
     KnowledgeReviewPayload,
@@ -69,9 +70,11 @@ from agents_remember.models.knowledge.review import (
     ReviewKnowledgePane,
     ReviewSideContent,
     ReviewSignal,
+    ReviewSourceInventory,
     ReviewSourceLocation,
     ReviewSourcePane,
     ReviewSurfaceRequest,
+    ReviewUnrepresentablePath,
 )
 from agents_remember.models.lifecycles.review_assessment import (
     AssessmentEvidenceReference,
@@ -162,6 +165,20 @@ def review_request(fixture: DiffFixture) -> ReviewSurfaceRequest:
         leaf_id=REPOSITORY_LEAF,
         selector=InvariantIdentitySeed(invariant_id=fixture.retry_invariant_id),
     )
+
+
+def reviewed_selector(fixture: DiffFixture) -> KnowledgeReadSeed:
+    """The reviewed subject's selector, narrowed once: a comparison requires one.
+
+    ``ReviewSurfaceRequest.selector`` is optional because the *task-context* request names no subject
+    (ICR-R02). Every case here is a subject review, so the narrowing is an assertion about the
+    request this module builds rather than a convenience: a helper that silently stopped naming a
+    subject would fail here.
+    """
+
+    selector = review_request(fixture).selector
+    assert selector is not None
+    return selector
 
 
 NO_RECORDS = ReviewRecordInputs()
@@ -307,10 +324,9 @@ def test_the_knowledge_pane_renders_the_subjects_own_statements_and_the_comparis
 ) -> None:
     """Pane 1 shows the reviewed subject's two recorded statements and its own classification."""
 
-    request = review_request(fixture)
     shipped = diff_knowledge_scope(
         KnowledgeDiffRequest(
-            selector=request.selector,
+            selector=reviewed_selector(fixture),
             before=KnowledgeDiffSide(
                 context=open_diff_side(
                     fixture.before.database_path,
@@ -353,6 +369,7 @@ def test_the_knowledge_pane_renders_the_subjects_own_statements_and_the_comparis
     assert {(change.item_id, change.field) for change in knowledge.field_changes} == {
         (item.item_id, name) for item in shipped.page.items for name in item.changed_fields
     }
+    assert payload.comparison is not None
     assert payload.comparison.policy_version
     assert payload.comparison.binding_digest == payload.comparison.reference
 
@@ -458,10 +475,9 @@ def test_the_adapter_selects_nothing_because_the_shipped_comparison_is_the_compa
 ) -> None:
     """The identity, the ordering and the counts are the shared operation's own, value for value."""
 
-    request = review_request(fixture)
     shipped = diff_knowledge_scope(
         KnowledgeDiffRequest(
-            selector=request.selector,
+            selector=reviewed_selector(fixture),
             before=KnowledgeDiffSide(
                 context=open_diff_side(
                     fixture.before.database_path,
@@ -485,6 +501,7 @@ def test_the_adapter_selects_nothing_because_the_shipped_comparison_is_the_compa
     assert shipped.page is not None
     assert shipped.binding is not None
     payload = render(fixture)
+    assert payload.comparison is not None
     assert payload.comparison.binding_digest == shipped.binding_digest
     assert payload.comparison.selector_digest == shipped.selector_digest
     assert payload.comparison.after_snapshot_digest == shipped.binding.after.logical_digest
@@ -584,6 +601,7 @@ def test_the_stale_rule_holds_in_both_directions(fixture: DiffFixture) -> None:
     assert payload.staleness.previous_comparison_ref == previous
     assert payload.staleness.statement == "Candidate changed — open a new comparison"
     assert payload.submission.state == "disabled_stale"
+    assert payload.comparison is not None
     assert payload.staleness.previous_comparison_ref != payload.comparison.binding_digest
 
     current = render(fixture)
@@ -685,6 +703,7 @@ def test_the_worked_review_journey_renders_every_step_it_walks(fixture: DiffFixt
 
     # 1. Change knowledge and open the review before any commit: the comparison is page-rendered.
     payload = render(fixture)
+    assert payload.comparison is not None
     assert payload.comparison.after_snapshot_digest
     # 2. Expand the unchanged sibling and the removed claim, each on its own side.
     locations = {location.path: location for location in payload.source.locations}
@@ -967,11 +986,13 @@ def test_the_transport_admits_exactly_the_two_reviewable_selector_kinds() -> Non
         "invariant",
         "11111111-1111-1111-1111-111111111111",
     )
-    assert invariant is not None and invariant.selector.kind == "invariant"
+    assert invariant is not None and invariant.selector is not None
+    assert invariant.selector.kind == "invariant"
     family = review_request_from_query(
         "agents-remember", "master", "leaf", "family", "11111111-1111-1111-1111-111111111111"
     )
-    assert family is not None and family.selector.kind == "family"
+    assert family is not None and family.selector is not None
+    assert family.selector.kind == "family"
     for refused in ("path", "invariant_revision", "", "latest"):
         assert review_request_from_query("agents-remember", "master", "leaf", refused, "x") is None
 
@@ -1001,6 +1022,7 @@ def test_the_route_serves_the_typed_result_and_refuses_by_name_with_no_adapter(
         )
         assert body.status_code == 200
         assert body.json()["state"] == "review"
+        assert payload.comparison is not None
         assert (
             body.json()["payload"]["comparison"]["binding_digest"]
             == payload.comparison.binding_digest
@@ -1134,3 +1156,96 @@ def test_the_rendered_pane_types_are_the_three_the_design_names(fixture: DiffFix
     absent = "11111111-1111-1111-1111-111111111111"
     assert absent not in by_id
     assert _selected_item_count(resolved, "invariant", absent, probe=None) is None
+
+
+def test_a_knowledge_only_change_leaves_an_openable_review_with_a_measured_empty_inventory(
+    fixture: DiffFixture,
+) -> None:
+    """A task whose two bound trees agree still opens, with a *measured* empty source inventory.
+
+    This is the packet's second exercise: knowledge changed and no source path did. The two halves
+    must be reported as two different measurements -- an empty change set that was really measured,
+    beside the knowledge comparison that really has a page -- because rendering the first as
+    "not measured" or the second as empty would each be a different false statement. The comparison
+    is the shipped one over the fixture's two real datasets; only the *declared* candidate tree is
+    the base tree, which is exactly what a knowledge-only change is.
+    """
+
+    resolution = replace(
+        resolution_for(fixture),
+        candidate_code_root=fixture.before.git_root,
+        candidate_code_tree_id=fixture.before_tree_id,
+    )
+
+    result = compose_review(resolution, review_request(fixture))
+
+    assert result.state == "review", result.refusal
+    payload = result.payload
+    assert payload is not None
+    inventory = payload.source.inventory
+    assert inventory.state == "measured"
+    assert inventory.partial is False
+    assert inventory.entries == ()
+    assert inventory.listed_total == 0
+    assert "measured empty change set" in inventory.detail
+    assert inventory.before_code_tree_id == inventory.after_code_tree_id == fixture.before_tree_id
+    # The knowledge half is untouched by the empty source half: the same comparison, the same page.
+    assert payload.comparison is not None
+    assert payload.comparison.knowledge_compared is True
+    assert payload.comparison.before_code_tree_id == fixture.before_tree_id
+    assert payload.staleness.state == "current"
+    assert payload.knowledge.selection_state == "subject_selected"
+    assert payload.knowledge.before_statement.state == "present"
+    assert payload.knowledge.after_statement.state == "present"
+    # Attribution is the comparison's own statement about recorded claims and not about the trees:
+    # the fixture's claims still name their paths, and an empty source half does not erase them. What
+    # the empty change set does establish is that no changed path is *unattributed* -- there is no
+    # change to attribute -- which is precisely the opposite of the fabricated-empty reading this
+    # case exists to prevent.
+    assert payload.source.attributed_changed_paths
+    assert payload.source.unattributed_changed_paths == ()
+    assert set(payload.source.attributed_changed_paths) != {
+        entry.path for entry in inventory.entries
+    }
+    assert "limitation:source_inventory_unavailable" not in payload.limitations
+
+
+def test_an_inventory_that_could_not_carry_a_name_is_partial_by_construction() -> None:
+    """An entry that exists because a path could not be named makes the inventory partial.
+
+    The rule is structural rather than editorial: a changed path carried by its byte form is exactly
+    what a partial measurement *is*, so the two cannot be assembled into a response that reads as
+    whole, and an unavailable measurement cannot carry one either. The byte form itself stays valid
+    text -- it is the path's exact bytes -- which is what lets the entry be carried at all.
+    """
+
+    byte_named = ReviewUnrepresentablePath(
+        path_bytes="b'src/caf\\xe9-latin1.py'",
+        status="added",
+        detail="this changed path's name is not valid text under this code",
+    )
+
+    def inventory(
+        state: Literal["measured", "unavailable"], *, partial: bool
+    ) -> ReviewSourceInventory:
+        return ReviewSourceInventory(
+            state=state,
+            listed_total=0,
+            detail="one changed path could not be carried as a name",
+            partial=partial,
+            command="git diff --raw -z --no-renames <before> <after>",
+            unrepresentable_paths=(byte_named,),
+        )
+
+    refused: tuple[tuple[Literal["measured", "unavailable"], bool], ...] = (
+        ("measured", False),
+        ("unavailable", False),
+        ("unavailable", True),
+    )
+    for state, partial in refused:
+        with pytest.raises(ValidationError):
+            inventory(state, partial=partial)
+    carried = inventory("measured", partial=True)
+    assert carried.partial is True
+    assert carried.unrepresentable_paths == (byte_named,)
+    assert carried.listed_total == len(carried.entries) == 0

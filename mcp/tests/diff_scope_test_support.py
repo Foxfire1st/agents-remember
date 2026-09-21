@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge import realizations
 from agents_remember.memory.knowledge.records import (
     claim_row_digest,
@@ -493,6 +494,23 @@ def _borrow_objects(root: Path, baseline_root: Path) -> None:
     alternates = root / ".git" / "objects" / "info" / "alternates"
     alternates.parent.mkdir(parents=True, exist_ok=True)
     alternates.write_text(str(baseline_root / ".git" / "objects") + "\n", encoding="utf-8")
+
+
+def independent_changed_records(root: Path, before: str, after: str) -> dict[str, str]:
+    """The pair's changed paths and Git status letters, read independently and byte-safely.
+
+    ``--name-status -z`` is a *different* Git question from the inventory's own ``--raw -z``, so
+    agreement between the two is an observation about the two trees rather than a restatement of one
+    implementation. It is read through the production runner for the reason this helper exists at
+    all: a pathname is bytes, and a name that is not valid UTF-8 makes strict decoding raise -- the
+    fixture helper below is deliberately strict, and this observation deliberately is not.
+    """
+
+    result = run_git(root, ["diff", "--name-status", "-z", "--no-renames", before, after])
+    if result.returncode != 0:
+        raise AssertionError(f"independent Git observation failed: {result.stderr.strip()}")
+    fields = [field for field in result.stdout.split("\0") if field]
+    return {fields[index + 1]: fields[index][0] for index in range(0, len(fields) - 1, 2)}
 
 
 def _git(root: Path, args: list[str]) -> str:
