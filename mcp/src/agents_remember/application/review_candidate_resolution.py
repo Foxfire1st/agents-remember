@@ -1,0 +1,378 @@
+"""The exact source endpoints and the dataset pair one live curator review binds.
+
+A review reads two things at once: the *records* two knowledge datasets hold, and the *source* the
+candidate's recorded anchors are resolved against. The record half names its own two files; the
+source half is a pair of **immutable Git object identities**, and this module is the one place that
+derives them:
+
+* the **baseline** is the enclosure contract's recorded ``code_base_commit`` -- the commit the leaf
+  forked from, written when the worktree was created and never re-derived from a branch or from
+  ``HEAD``;
+* the **candidate** is the tree
+  :func:`~agents_remember.worktrees.modules.future_code_candidate.capture_future_code_candidate`
+  derives through a private index: the leaf's ``HEAD`` with every staged, unstaged and eligible
+  untracked change applied (ignored paths stay excluded by the existing policy), with the real Git
+  index left byte-identical. The *working tree* is therefore never the endpoint, and a review of
+  "HEAD to unstaged" that called itself the full task diff is exactly what this binding prevents.
+
+Each root travels with its tree id, because a tree id without the repository that holds it is not
+resolvable; the read context refuses a half-resolution rather than falling back to a working tree.
+
+Every way the derivation can fail is a **named state**: a contract that records no base commit, a
+capture the shipped owner refused, and a capture whose inputs moved while the review was being
+composed each produce a typed
+:class:`~agents_remember.models.knowledge.review.ReviewRefusal` that names the offending side and
+the action that yields a reviewable candidate. ``None`` is never returned for an endpoint that could
+not be bound, and no refusal is softened into a favourable default: ``HEAD``, another branch and a
+different working tree are all unavailable as substitutes.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from agents_remember.errors import FutureCodeCandidateError
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.memory.knowledge.candidate_receipt import read_candidate_receipt
+from agents_remember.models.knowledge.review import ReviewRefusal, ReviewRefusalCode
+from agents_remember.models.knowledge.snapshot import (
+    CANDIDATE_DATABASE_NAME,
+    CANDIDATE_RECEIPT_NAME,
+)
+from agents_remember.worktrees.modules.future_code_candidate import (
+    FutureCodeCandidateIdentity,
+    capture_future_code_candidate,
+)
+from agents_remember.worktrees.task_resolver import slugify
+from agents_remember.worktrees.worktree_contract import (
+    ContractError,
+    WorktreeContract,
+    load_contract,
+)
+
+__all__ = [
+    "REVIEW_BASELINE_DIRECTORY",
+    "REVIEW_CANDIDATE_DIRECTORY",
+    "REVIEW_CANDIDATE_RELATIVE_ROOT",
+    "ReviewCandidateResolution",
+    "missing_dataset_half",
+    "refusal",
+    "require_current_candidate_identity",
+    "resolve_review_candidate",
+    "review_namespace",
+]
+
+# Where a leaf's reviewable datasets live. Both are inside the leaf's **disposable** local root --
+# ``<worktree-group>/provider-runtime/dev-ar-coordination/``, the one root the checkout-coordination
+# contract declares a linked task worktree may hold undeclared state under -- so a review reads no
+# candidate out of the live coordination tree and writes beside none. The candidate half holds the
+# database the leaf is authoring; the baseline half holds the dataset that candidate descends from.
+# (This layout is the review surface's own recorded decision for this increment.)
+REVIEW_CANDIDATE_RELATIVE_ROOT = Path("provider-runtime") / "dev-ar-coordination" / "knowledge"
+
+# The two halves are named once, here, because two owners read them: the resolution below derives the
+# pair it reviews from them, and the ingest CLI derives the candidate directory it authors into from
+# the same two names. One spelling is what makes "the candidate the leaf authored" and "the candidate
+# the review resolved" the same directory rather than two conventions that happen to agree today.
+REVIEW_BASELINE_DIRECTORY = "baseline"
+REVIEW_CANDIDATE_DIRECTORY = "candidate"
+
+# The three fields of the capture's own identity, each with the words a refusal needs to name it. The
+# order is the order the capture observes them, so a refusal lists the moved inputs left to right.
+_CAPTURE_INPUTS: tuple[tuple[str, str], ...] = (
+    ("observedCodeHead", "the leaf worktree's code HEAD"),
+    ("codeBaseCommit", "the contract's recorded task base commit"),
+    ("codeCandidateTree", "the captured candidate tree"),
+)
+
+# The one action that produces a reviewable candidate once a capture input has moved. It is stated
+# once because three refusals need it and a caller acts on all three the same way.
+_RECAPTURE_ACTION = (
+    "reopen the review so the candidate is captured again from the leaf's live worktree; the surface "
+    "substitutes neither the moved HEAD, nor another branch, nor a different working tree"
+)
+
+
+@dataclass(frozen=True)
+class ReviewCandidateResolution:
+    """The two datasets and two source trees one admitted live curator candidate resolves to.
+
+    Both source sides are bound here and neither is optional in a resolution this module produced:
+    a side that could not be bound is refused by name before a resolution exists, so a caller never
+    reads an endpoint as an absent ``None``. ``baseline_code_tree_id`` is the contract's recorded
+    base *commit* -- the recorded task endpoint -- and ``candidate_code_tree_id`` is the captured
+    candidate *tree*.
+
+    ``candidate_identity`` is the capture's own complete identity, carried so the composition can
+    re-derive it and require it to still be current before the comparison is published. A resolution
+    that was hand-assembled rather than resolved (a caller comparing two named files) carries none,
+    and names no contract to recheck against.
+    """
+
+    repository_id: str
+    leaf_id: str
+    baseline_database: Path
+    candidate_database: Path
+    baseline_code_root: Path | None
+    candidate_code_root: Path | None
+    baseline_code_tree_id: str | None
+    candidate_code_tree_id: str | None
+    # The enclosure contract the resolution read, when there was one. The composition ignores it;
+    # it is carried so a caller that also needs the recorded task facts (the published assessment
+    # collection, for instance) reads them from the same resolution rather than resolving twice.
+    contract: WorktreeContract | None = None
+    # The captured candidate identity, when this resolution derived one. Never re-derived here: the
+    # recheck belongs to the composition, immediately before the comparison is published.
+    candidate_identity: FutureCodeCandidateIdentity | None = None
+
+
+def resolve_review_candidate(
+    config: McpRuntimeConfig, repository_id: str, master: str, leaf_id: str
+) -> ReviewCandidateResolution | ReviewRefusal:
+    """Resolve one admitted live curator candidate from canonical task context, or refuse by name."""
+
+    for segment, value in (("repository", repository_id), ("master", master), ("leaf", leaf_id)):
+        if not value or "/" in value or "\\" in value or value.startswith("."):
+            return refusal(
+                "candidate_unresolved",
+                f"the {segment} selector is not a single path segment",
+                next_action="name the canonical task context: repository, master and leaf id",
+                offending_input=value,
+            )
+    contract = _leaf_contract(config, repository_id, master, leaf_id)
+    if contract is None:
+        return refusal(
+            "candidate_unresolved",
+            "no readable leaf enclosure contract records this leaf under the named master",
+            next_action=(
+                "open the review for an admitted live curator candidate whose enclosure contract "
+                "exists under tasks/<repository>/<master>/enclosures"
+            ),
+            offending_input=f"{master}/{leaf_id}",
+        )
+    if contract.code_worktree is None or not contract.code_worktree.exists():
+        return refusal(
+            "candidate_not_live",
+            "the leaf's enclosure has no live worktree, so there is no candidate to review",
+            next_action=(
+                "review a leaf whose worktree is live; a landed leaf's committed change-set stays "
+                "inspectable through the existing change-set views and is not this surface"
+            ),
+            offending_input=contract.leaf_id,
+        )
+    if not contract.code_base_commit:
+        return refusal(
+            "candidate_unresolved",
+            "the leaf's enclosure contract records no code base commit, so the review has no "
+            "baseline source endpoint to bind",
+            next_action=(
+                "repair the leaf's recorded base in its enclosure contract, then reopen the review; "
+                "the surface binds no branch, no HEAD and no other working tree in its place"
+            ),
+            offending_input="baseline",
+        )
+    captured = _captured_candidate(contract)
+    if isinstance(captured, ReviewRefusal):
+        return captured
+    root = contract.worktree_group / REVIEW_CANDIDATE_RELATIVE_ROOT
+    return ReviewCandidateResolution(
+        repository_id=repository_id,
+        leaf_id=contract.leaf_id,
+        baseline_database=root / REVIEW_BASELINE_DIRECTORY / CANDIDATE_DATABASE_NAME,
+        candidate_database=root / REVIEW_CANDIDATE_DIRECTORY / CANDIDATE_DATABASE_NAME,
+        baseline_code_root=contract.code_repo_path,
+        # The candidate side resolves to **both** a root and a tree id or to neither: the read
+        # context refuses a root without a tree id, and correctly so -- that is an incomplete source
+        # resolution rather than a licence to read a working tree. Both are supplied from the same
+        # capture: the tree the isolated index produced, and the worktree it was derived in.
+        candidate_code_root=contract.code_worktree,
+        baseline_code_tree_id=contract.code_base_commit,
+        candidate_code_tree_id=captured.codeCandidateTree,
+        contract=contract,
+        candidate_identity=captured,
+    )
+
+
+def require_current_candidate_identity(resolved: ReviewCandidateResolution) -> ReviewRefusal | None:
+    """Re-derive the captured candidate and refuse by name when one of its inputs has moved.
+
+    The comparison is composed *after* the capture and reads several files while it runs, so a
+    capture that was current when it was taken can be stale by the time a payload would be returned.
+    Publishing that payload would bind a generation to a candidate the leaf no longer has, under a
+    label that says it is the candidate's own comparison. This is the recheck: the shipped capture
+    owner recomputes the whole identity, and any field that disagrees names the exact side that moved
+    plus the action that produces a current one.
+
+    A resolution with no capture to recheck -- a hand-assembled pair naming two files -- has nothing
+    to re-derive and is left exactly as it was assembled.
+    """
+
+    accepted = resolved.candidate_identity
+    contract = resolved.contract
+    if accepted is None or contract is None:
+        return None
+    try:
+        current = capture_future_code_candidate(contract)
+    except FutureCodeCandidateError as error:
+        return _capture_refusal(error)
+    moved = tuple(
+        label
+        for field, label in _CAPTURE_INPUTS
+        if getattr(accepted, field) != getattr(current, field)
+    )
+    if not moved:
+        return None
+    return _moved_candidate_refusal(accepted, current, moved)
+
+
+def _moved_candidate_refusal(
+    accepted: FutureCodeCandidateIdentity,
+    current: FutureCodeCandidateIdentity,
+    moved: tuple[str, ...],
+) -> ReviewRefusal:
+    """The refusal for a capture whose inputs moved, carrying both identities it compared.
+
+    ``expected`` and ``observed`` are the two complete captures, rendered by the model that owns
+    them rather than restated here: a reader can compare the side the detail names against the exact
+    object ids it changed from and to.
+    """
+
+    return ReviewRefusal(
+        code="candidate_unresolved",
+        detail=(
+            "the candidate's captured source endpoint moved while the review was being composed: "
+            f"{'; '.join(moved)} changed, so the comparison that was read no longer describes the "
+            "candidate this leaf holds"
+        ),
+        next_action=_RECAPTURE_ACTION,
+        offending_input="; ".join(moved),
+        expected=accepted.model_dump_json(),
+        observed=current.model_dump_json(),
+    )
+
+
+def missing_dataset_half(resolved: ReviewCandidateResolution) -> tuple[str, Path] | None:
+    """The half of the candidate pair that is absent, or ``None`` when both are on disk.
+
+    A comparison is *between* two datasets, so an absent half is not a smaller comparison -- the
+    shipped operation refuses a side whose database is not a file, and it refuses it by returning a
+    typed result. Preflighting here is what keeps that refusal a named state instead of a storage
+    exception raised from inside a read-context construction, and it is also what lets the refusal
+    say *which* half is missing: ``baseline`` and ``candidate`` are different facts about a leaf, and
+    a reader who is told "the datasets are absent" cannot tell whether to author a candidate or to
+    place the dataset it forks from.
+    """
+
+    for half, database in (
+        ("baseline", resolved.baseline_database),
+        ("candidate", resolved.candidate_database),
+    ):
+        if not database.is_file():
+            return half, database
+    return None
+
+
+def review_namespace(requested: str, candidate_database: Path) -> str:
+    """The namespace to read the candidate's datasets under, from its receipt when it has one.
+
+    The namespace and the requested repository are not the same string: a request names a
+    *repository* ("agents-remember"), while a candidate the write plane admitted is bound to a
+    *namespace* id derived from it, and a side opened under the requested spelling refuses against
+    the dataset's own binding. So the candidate's own **receipt** is the authority -- the admission
+    that created it wrote the receipt beside the working database and sealed it -- and a review of an
+    admitted candidate reads the namespace that candidate actually holds.
+
+    A candidate with **no** receipt beside its database is a dataset this surface was handed directly
+    rather than one an admission produced (a fixture, a comparison a caller assembled from two
+    named files). For that shape the requested repository *is* the available identity and is read as
+    it always was, because the alternative -- refusing every caller-assembled pair -- would break the
+    comparison contract for inputs that were never candidates.
+
+    A receipt that **exists but cannot be read** is a different fact and is refused: something wrote
+    a receipt here and it does not say which namespace this dataset belongs to, so standing in the
+    caller's word for the dataset's own record is exactly how a review comes to read a namespace
+    nothing admitted.
+    """
+
+    receipt_path = candidate_database.parent / CANDIDATE_RECEIPT_NAME
+    if not receipt_path.exists():
+        return requested
+    return read_candidate_receipt(receipt_path).repository_id
+
+
+def refusal(
+    code: ReviewRefusalCode,
+    detail: str,
+    *,
+    next_action: str,
+    offending_input: str | None = None,
+) -> ReviewRefusal:
+    """One typed review refusal: what was asked, why it cannot be answered, what to do instead."""
+
+    return ReviewRefusal(
+        code=code,
+        detail=detail,
+        next_action=next_action,
+        offending_input=offending_input,
+    )
+
+
+def _captured_candidate(
+    contract: WorktreeContract,
+) -> FutureCodeCandidateIdentity | ReviewRefusal:
+    """Capture the leaf's candidate identity, or the named refusal the capture owner's failure earns.
+
+    The capture is the existing owner's and stays the owner's: it derives the full add-all tree
+    through a private index and already re-derives the observed ``HEAD`` after the tree is written,
+    so a head that moves *during* the capture is caught there. This function adds no second capture
+    path -- it only turns the owner's typed failure into the surface's named state.
+    """
+
+    try:
+        return capture_future_code_candidate(contract)
+    except FutureCodeCandidateError as error:
+        return _capture_refusal(error)
+
+
+def _capture_refusal(error: FutureCodeCandidateError) -> ReviewRefusal:
+    """The surface's refusal for one capture-owner failure, naming the candidate side and the action."""
+
+    return refusal(
+        "candidate_unresolved",
+        (
+            f"the candidate's source endpoint could not be captured in the leaf's live worktree "
+            f"({_status_text(error)}): {error}"
+        ),
+        next_action=_RECAPTURE_ACTION,
+        offending_input="candidate",
+    )
+
+
+def _status_text(error: FutureCodeCandidateError) -> str:
+    """The capture owner's own status spelling, for a refusal that has to be actionable."""
+
+    return str(getattr(error, "status", "unavailable"))
+
+
+def _leaf_contract(
+    config: McpRuntimeConfig, repository_id: str, master: str, leaf_id: str
+) -> WorktreeContract | None:
+    """The one enclosure contract recorded for this leaf, or ``None`` when none is readable."""
+
+    task_root = config.coordination_root / "tasks" / repository_id / master
+    if not task_root.is_dir():
+        return None
+    want = slugify(leaf_id)
+    for path in sorted((task_root / "enclosures").glob("*/series-contract.md")):
+        try:
+            contract = load_contract(path)
+        except (ContractError, OSError):
+            continue
+        if contract.repo_name != repository_id or contract.cleanup == "abandoned":
+            continue
+        if master not in (contract.parent_task_name, contract.task_name):
+            continue
+        if slugify(contract.leaf_id) == want:
+            return contract
+    return None

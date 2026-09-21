@@ -43,8 +43,15 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "f0cb5fec700019923c5028d4e2547e70cecab97582870f128e70e4f8f960a1e4"
+LIFECYCLE_CATALOG_SHA256 = "24e760a124d5f0d3a608295533720168b47e8a2ee28f6ee85c493e3778cdbed4"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+``260921-ICR-L1`` (requirement ``ICR-R01@v1``) registered no artifact and no contract of its own -- its
+source-endpoint cases build on the existing ``diff_scope_test_support`` and ``read_scope_test_support``
+fixtures rather than introducing a third one -- so its catalog change is a *consumer* change only: both
+of those support modules' consumer lists gained
+``mcp/tests/test_knowledge_review_source_endpoints.py``. The counts stay sixteen and sixty-six, and the
+digest this value replaces was ``f0cb5fec...``.
 
 ``260918-TSIP-L10`` registered the module this leaf's own red base exposed as ungoverned:
 ``mcp/tests/tool_refusal_census_support.py``, introduced by ``260918-TSIP-L6`` (the refusal-census leaf

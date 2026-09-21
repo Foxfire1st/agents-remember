@@ -16,10 +16,14 @@ alongside. Mainline has no base, so a mainline scope is a 404.
 
 L4a adds the doc-reader views: a ``leaf`` change-set resolved by leaf-id from the persisted
 enclosure contract (so it works with no live worktree, for a completed leaf) in one of two
-modes -- ``committed`` (``base -> code_commit``, the leaf's landed delta) or ``working``
-(``worktree-HEAD -> worktree``, the UNCOMMITTED delta only, live worktree required). These ride
+modes -- ``committed`` (the contract's two **recorded** commits: ``base_commit`` -> the
+landed commit its closeout or integration wrote) or ``working`` (``worktree-HEAD ->
+worktree``, the UNCOMMITTED delta only, live worktree required). These ride
 the same ``/api/changeset/{task,file-diff}`` routes via a ``leaf`` + ``mode`` selector, returning
-the ``task_changeset`` shape. Selection precedence is ``leaf > master > scope``.
+the ``task_changeset`` shape. Selection precedence is ``leaf > master > scope``. The two modes are
+never mixed: a committed view whose recorded endpoint is not written yet is refused by name (404)
+rather than answered from the worktree's moveable ``HEAD``, and the working view keeps publishing
+exactly the uncommitted delta its name claims.
 """
 
 from __future__ import annotations
@@ -36,6 +40,11 @@ from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
 )
 from agents_remember.kernel.sidecar_pairing import confine_rel, route_sidecar_status
+from agents_remember.serving.changeset_endpoints import (
+    NOT_RECORDED,
+    RecordedEndpointAbsent,
+    recorded_committed_range,
+)
 from agents_remember.serving.response_contract import (
     SCOPED_READ_RESPONSES,
     FileDiff,
@@ -336,18 +345,28 @@ def _load_leaf_contract(
 def _leaf_range(contract: WorktreeContract, *, memory: bool, mode: str) -> list[dict[str, Any]]:
     """One side's (code or memory) change-set for a leaf view ``mode``.
 
-    ``committed`` = ``base -> code_commit`` (the leaf's LANDED delta); a still-live leaf whose
-    ``code_commit`` is not written yet falls back to the worktree's HEAD (committed-so-far, NOT the
-    dirty tree). ``working`` = ``worktree-HEAD -> worktree`` (the UNCOMMITTED delta only) and requires
-    a live worktree. Two-commit diffs run against the source repo (durable, and it shares the
+    ``committed`` = the contract's **recorded** range (``base_commit`` -> the landed commit), which
+    is the leaf's LANDED delta and is what ``mode=committed`` publishes. A still-live leaf whose
+    landed commit is not recorded yet has no committed delta, and says so by name
+    (:class:`~agents_remember.serving.changeset_endpoints.RecordedEndpointAbsent`) instead of binding
+    the worktree's moveable ``HEAD`` and labelling it the landed delta. ``working`` = ``worktree-HEAD
+    -> worktree`` (the UNCOMMITTED delta only), which is exactly what its own ``mode`` names and
+    requires a live worktree. Two-commit diffs run against the repository (durable, and it shares the
     worktree's object store) so ``committed`` keeps working after the worktree is cleaned up.
+
+    The two sides resolve **independently**, so one side's unrecorded endpoint never discards the
+    other side's answer: a memory half nothing has recorded yet degrades to nothing to show -- the
+    same degradation this side has always published for a leaf that does not run memory at all --
+    while the code half, resolved from its own recorded commit, is still published. The code half
+    keeps the named refusal, because there the endpoint *is* the view: answering it with nothing
+    would claim the leaf landed nothing. Every other absence (a recorded commit this repository does
+    not hold) stays a refusal on both sides, since reporting it as an empty range would publish a
+    measurement the caller never made.
     """
     if memory:
-        worktree, repo = contract.memory_worktree, contract.memory_repo_path
-        base, committed = contract.memory_base_commit, contract.memory_content_commit
+        worktree, repository = contract.memory_worktree, contract.memory_repo_path
     else:
-        worktree, repo = contract.code_worktree, contract.code_repo_path
-        base, committed = contract.code_base_commit, contract.code_commit
+        worktree, repository = contract.code_worktree, contract.code_repo_path
     if mode == "working":
         # No worktree on this side (e.g. memory disabled) -> nothing to show, like task_changeset's
         # memory degradation. The code-side liveness that makes ``working`` meaningful is enforced once
@@ -355,17 +374,17 @@ def _leaf_range(contract: WorktreeContract, *, memory: bool, mode: str) -> list[
         if worktree is None or not worktree.exists():
             return []
         return changed_files_with_counts(worktree, head_commit(worktree, "HEAD"), None)
-    if not base:
+    if repository is None:
         return []
-    head = committed or (
-        head_commit(worktree, "HEAD") if worktree is not None and worktree.exists() else ""
+    try:
+        recorded = recorded_committed_range(contract, memory=memory)
+    except RecordedEndpointAbsent as absent:
+        if not memory or absent.kind != NOT_RECORDED:
+            raise
+        return []
+    return changed_files_with_counts(
+        recorded.repository, recorded.base_commit, recorded.head_commit
     )
-    if not head:
-        return []
-    diff_repo = repo if repo is not None else worktree
-    if diff_repo is None:
-        return []
-    return changed_files_with_counts(diff_repo, base, head)
 
 
 def _leaf_onboarding_root(contract: WorktreeContract, mode: str) -> Path | None:
@@ -387,7 +406,9 @@ def leaf_changeset(
 
     Returns the same shape as :func:`task_changeset` (so the L4 viewer renders it unchanged): the
     code + memory changed-file lists with counts, code files tagged ``hasSidecar``. ``committed``
-    works with no live worktree (a completed leaf); ``working`` requires one (404 otherwise).
+    reads the contract's recorded commits and works with no live worktree (a completed leaf); a leaf
+    whose landed commit is not recorded yet is refused by name instead. ``working`` requires a live
+    worktree (404 otherwise).
     """
     contract = _load_leaf_contract(config, repo_id, master, leaf)
     if contract is None:
@@ -435,20 +456,18 @@ class ChangesetFileRef:
 def leaf_file_diff(config: McpRuntimeConfig, ref: ChangesetFileRef) -> dict[str, Any]:
     """BEFORE + AFTER content for one file in a leaf's ``committed`` or ``working`` change-set.
 
-    ``committed`` = ``base`` vs ``code_commit`` (or the worktree HEAD when live and not yet
-    committed). ``working`` = the worktree HEAD vs the (dirty) worktree file. Mirrors
-    :func:`file_diff`'s response so the L4 MergeView feeds it directly.
+    ``committed`` = the two **recorded** commits (``base`` vs the landed commit), read from the
+    repository that holds them. A recorded endpoint that is absent is refused by name rather than
+    replaced with the worktree's ``HEAD``. ``working`` = the worktree HEAD vs the (dirty) worktree
+    file, which is the one view whose after-side is a filesystem location, and its own ``mode`` says
+    so. Mirrors :func:`file_diff`'s response so the L4 MergeView feeds it directly.
     """
     kind, rel, mode = ref.kind, ref.path, ref.mode
     contract = _load_leaf_contract(config, ref.repo, ref.master, ref.leaf)
     if contract is None:
         raise FileNotFoundError(f"no leaf contract for {ref.leaf!r}")
-    if kind == "memory":
-        worktree, repo = contract.memory_worktree, contract.memory_repo_path
-        base, committed = contract.memory_base_commit, contract.memory_content_commit
-    else:
-        worktree, repo = contract.code_worktree, contract.code_repo_path
-        base, committed = contract.code_base_commit, contract.code_commit
+    memory = kind == "memory"
+    worktree = contract.memory_worktree if memory else contract.code_worktree
     if mode == "working":
         if worktree is None or not worktree.exists():
             raise FileNotFoundError("no live worktree for the working change-set")
@@ -457,18 +476,13 @@ def leaf_file_diff(config: McpRuntimeConfig, ref: ChangesetFileRef) -> dict[str,
         after_path = worktree / relp
         after = after_path.read_text(errors="replace") if after_path.is_file() else None
     else:
-        head = committed or (
-            head_commit(worktree, "HEAD") if worktree is not None and worktree.exists() else ""
-        )
-        diff_repo = repo if repo is not None else worktree
-        if diff_repo is None or not base or not head:
-            raise FileNotFoundError(rel)
-        relp = confine_rel(diff_repo, rel)
-        before = commit_text_or_none(diff_repo, base, relp)
-        after = commit_text_or_none(diff_repo, head, relp)
+        recorded = recorded_committed_range(contract, memory=memory)
+        relp = confine_rel(recorded.repository, rel)
+        before = commit_text_or_none(recorded.repository, recorded.base_commit, relp)
+        after = commit_text_or_none(recorded.repository, recorded.head_commit, relp)
     return {
         "scope": contract.leaf_id,
-        "kind": "memory" if kind == "memory" else "code",
+        "kind": "memory" if memory else "code",
         "path": relp,
         "language": language_for(Path(relp)),
         "before": {"content": before} if before is not None else None,

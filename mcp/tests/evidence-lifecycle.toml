@@ -1401,6 +1401,7 @@ consumers = [
   "mcp/tests/test_knowledge_detection_runs.py",
   "mcp/tests/test_knowledge_family_integrity_pipeline.py",
   "mcp/tests/test_knowledge_review_surface.py",
+  "mcp/tests/test_knowledge_review_source_endpoints.py",
 ]
 
 [[artifact]]
@@ -1431,6 +1432,7 @@ consumers = [
   "mcp/tests/test_knowledge_read_scope.py",
   "mcp/tests/test_knowledge_registered_scope.py",
   "mcp/tests/test_knowledge_review_surface.py",
+  "mcp/tests/test_knowledge_review_source_endpoints.py",
 ]
 
 [[artifact]]
