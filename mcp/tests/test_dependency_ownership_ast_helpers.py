@@ -43,8 +43,25 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "3f91773d5533139aa24df0e75ddafcecbc68cd9797b7663084f8aca567176c57"
+LIFECYCLE_CATALOG_SHA256 = "7920a0f9f6134d3849e60685ad8a9424cdc95e8209631a03b889cf7d79e05281"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Thirteenth deliberate re-pin (260921-ICR-L6, at the sync onto ``71a4433e``, 2026-09-21) -- the union
+of two consumer repairs, re-measured on the merged file.** ``260921-ICR-L6`` drives the real review
+composition over two real read-scope snapshots, so its case module consumes
+``mcp/tests/read_scope_test_support.py``, whose ``consumer_scope = "exact"`` requires its
+``consumers`` list to equal the source-derived consumer set:
+``mcp/tests/test_knowledge_review_one_sided_statements.py`` is the one path this leaf added there,
+beside the ``mcp/tests/test_read_ar_files.py`` entry L18's consequence repair below had already
+landed for the L19 import. The two are kept as a *set* and not concatenated: the census compares
+consumer sets, so a second copy of one path would pass silently, which is why the resolved row names
+each path exactly once. **Nothing was registered, no row was removed and no artifact's identity
+moved**, so the population stays at **sixteen contracts / sixty-six artifacts**, and the catalog --
+L18's landed bytes plus this leaf's one path -- is re-pinned from
+``3f91773d5533139aa24df0e75ddafcecbc68cd9797b7663084f8aca567176c57`` (L18's own measurement on
+``71a4433e``) to ``7920a0f9f6134d3849e60685ad8a9424cdc95e8209631a03b889cf7d79e05281``, measured with
+``sha256sum mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact
+delta remains exactly empty.
 
 **Consequence repair (260921-ICR-L18, 2026-09-21) -- attributed to the `260921-ICR-L19` landing, and NOT
 ICR-R17/R18 work.** The sync that landed ``260921-ICR-L19`` rewrote ``mcp/tests/test_read_ar_files.py``

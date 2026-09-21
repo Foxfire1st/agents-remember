@@ -28,14 +28,18 @@ because resolution is a responsibility of its own and because this adapter is at
 file-size rail; ``review_candidate_resolution`` is the one implementation, and the names re-exported
 below are that module's -- there is no second resolution path here.
 
-**Three more responsibilities this adapter hands to their own modules, for the same reason.**
+**Four more responsibilities this adapter hands to their own modules, for the same reason.**
 :mod:`agents_remember.application.review_source_inventory` measures the exact source-change inventory
 of the bound pair and renders the source pane; :mod:`agents_remember.application.review_record_rendering`
-renders the record collections the caller supplied into the evidence and submission values; and
-:mod:`agents_remember.application.review_task_context` composes the entry that needs no selected
-subject. Each is one responsibility with one implementation, and every name that moved is re-exported
-below so no importer had to learn a new home: this adapter resolves, calls and assembles, and it grows
-no feature logic of its own while its file is over the soft rail.
+renders the record collections the caller supplied into the evidence and submission values;
+:mod:`agents_remember.application.review_statement_sides` projects one comparison item's recorded
+content into the pane's statement sides and mechanical field rows, where ICR-R06's one-sided contract
+lives; and :mod:`agents_remember.application.review_task_context` composes the entry that needs no
+selected subject. Each is one responsibility with one implementation, and every name an importer
+referenced is re-exported below so no importer had to learn a new home -- the statement-side helpers
+are the one move that leaves no alias, because they were private to this adapter and no module under
+``mcp/`` imported them: this adapter resolves, calls and assembles, and it grows no feature logic of
+its own while its file is over the soft rail.
 
 **Every absence is a state.** An unresolvable author, a missing operand, an absent assessment
 collection and a comparison the shipped operation refused each produce a named field or a typed
@@ -77,6 +81,11 @@ from agents_remember.application.review_source_inventory import (
     source_pane,
     source_tree_side,
 )
+from agents_remember.application.review_statement_sides import (
+    field_changes,
+    side_conditions,
+    side_content,
+)
 from agents_remember.application.review_task_context import task_context_review
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.diff_display import TreeDifferenceProbe
@@ -95,7 +104,6 @@ from agents_remember.models.knowledge.read import (
     FamilyIdentitySeed,
     InvariantIdentitySeed,
     KnowledgeReadSeed,
-    ReadItem,
 )
 from agents_remember.models.knowledge.review import (
     ComparisonIdentity,
@@ -104,11 +112,9 @@ from agents_remember.models.knowledge.review import (
     ReviewAuthoredEffect,
     ReviewEntry,
     ReviewEntryListResult,
-    ReviewFieldChange,
     ReviewKnowledgePane,
     ReviewRefusal,
     ReviewRevisionGroup,
-    ReviewSideContent,
     ReviewSourceInventory,
     ReviewStaleness,
     ReviewSubjectKind,
@@ -678,12 +684,12 @@ def _knowledge_pane(
     return ReviewKnowledgePane(
         invariant_ids=_identity_ids(items, "invariant"),
         family_ids=_identity_ids(items, "family"),
-        before_statement=_side_content(identity, "before"),
-        after_statement=_side_content(identity, "after"),
-        before_conditions=_conditions(identity, "before"),
-        after_conditions=_conditions(identity, "after"),
+        before_statement=side_content(identity, "before"),
+        after_statement=side_content(identity, "after"),
+        before_conditions=side_conditions(identity, "before"),
+        after_conditions=side_conditions(identity, "after"),
         revision_groups=_revision_groups(comparison),
-        field_changes=_field_changes(items),
+        field_changes=field_changes(items),
         authored_effects=tuple(
             _authored_effect(row)
             for row in rows
@@ -749,42 +755,6 @@ def _identity_ids(items: Sequence[KnowledgeDiffItem], kind: str) -> tuple[str, .
     )
 
 
-def _side_content(item: KnowledgeDiffItem | None, side: str) -> ReviewSideContent:
-    read_item = _read_side(item, side)
-    if read_item is None:
-        return ReviewSideContent(
-            state="absent",
-            language="text",
-            detail=f"the {side} snapshot selected no record for the reviewed subject",
-        )
-    if read_item.statement is None:
-        return ReviewSideContent(
-            state="unresolved",
-            language="text",
-            detail=(
-                f"the {side} snapshot holds the record but published no statement for it; the "
-                "operand is unresolved rather than an empty statement"
-            ),
-        )
-    return ReviewSideContent(
-        state="present",
-        text=read_item.statement,
-        language="text",
-        detail=f"the {side} snapshot's recorded statement for this revision",
-    )
-
-
-def _conditions(item: KnowledgeDiffItem | None, side: str) -> tuple[str, ...]:
-    read_item = _read_side(item, side)
-    return () if read_item is None else tuple(read_item.essential_conditions)
-
-
-def _read_side(item: KnowledgeDiffItem | None, side: str) -> ReadItem | None:
-    if item is None:
-        return None
-    return item.before if side == "before" else item.after
-
-
 def _revision_groups(comparison: KnowledgeDiffResult) -> tuple[ReviewRevisionGroup, ...]:
     groups = comparison.revision_groups
     return tuple(
@@ -805,33 +775,6 @@ def _revision_groups(comparison: KnowledgeDiffResult) -> tuple[ReviewRevisionGro
             for group in groups.after
         ]
     )
-
-
-def _field_changes(items: Sequence[KnowledgeDiffItem]) -> tuple[ReviewFieldChange, ...]:
-    return tuple(
-        ReviewFieldChange(
-            item_id=item.item_id,
-            item_kind=item.kind,
-            field=name,
-            before_value=_field_text(item.before, name),
-            after_value=_field_text(item.after, name),
-        )
-        for item in items
-        for name in item.changed_fields
-    )
-
-
-def _field_text(item: ReadItem | None, name: str) -> str | None:
-    if item is None:
-        return None
-    value = getattr(item, name, None)
-    if value is None:
-        return None
-    if isinstance(value, tuple):
-        return "; ".join(str(part) for part in value)
-    if isinstance(value, dict):
-        return None
-    return str(value)
 
 
 def _authored_effect(row: ReviewMatrixRow) -> ReviewAuthoredEffect:

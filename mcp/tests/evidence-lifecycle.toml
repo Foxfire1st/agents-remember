@@ -1437,6 +1437,7 @@ consumers = [
   "mcp/tests/test_knowledge_registered_scope.py",
   "mcp/tests/test_knowledge_review_surface.py",
   "mcp/tests/test_knowledge_review_source_endpoints.py",
+  "mcp/tests/test_knowledge_review_one_sided_statements.py",
   "mcp/tests/test_read_ar_files.py",
 ]
 

@@ -2,8 +2,9 @@
 //
 // The surface is display-only. It renders records other owners store, carries every attribution it
 // was given, and produces no conclusion of its own: there is no summary, no severity, no score and
-// no control that writes anything. The one renderer it reuses is `DiffPane`, fed the two recorded
-// statements the comparison published and only when both sides are `present`.
+// no control that writes anything. The one renderer it reuses is `DiffPane`, fed the statements the
+// comparison published: both operands when both sides recorded one, and the available operand beside
+// the named absence when one side did not (R06 -- `KnowledgeStatements` owns that rule).
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -16,13 +17,12 @@ import type {
   ReviewPayload,
   ReviewRefusal,
   ReviewSelectorKind,
-  ReviewSideContent,
   ReviewSignal,
   ReviewSourceInventory,
   ReviewUnresolvedReference,
 } from "../../data/review";
 import { intentReview } from "../../data/review";
-import { DiffPane } from "../changeset/DiffPane";
+import { KnowledgeStatements } from "./KnowledgeStatements";
 
 export interface ReviewTarget {
   repo: string;
@@ -67,12 +67,13 @@ const unresolvedList = (entries: ReviewUnresolvedReference[]) =>
     </ul>
   ) : null;
 
-const sideState = (side: ReviewSideContent, testid: string) =>
-  side.state === "present" ? null : (
-    <p style={{ color: "muted", margin: "0.2rem 0" }} data-testid={testid} data-side-state={side.state}>
-      {side.state}: {side.detail}
-    </p>
-  );
+// One mechanical field transition, and the three different facts its two values can be. A value the
+// server did not send is the recorded fact that the field was absent on that side; a value that IS
+// there and is empty is a recorded empty list, which is not the same fact and is not printed as a
+// blank either. `(absent)` and `(recorded empty)` are the two words, so no row is ever silently
+// blank and no reader has to decide which of the two a gap meant.
+const fieldValue = (value?: string) =>
+  value === undefined ? "(absent)" : value === "" ? "(recorded empty)" : value;
 
 function assessmentBlock(entry: ReviewAssessmentDisplay) {
   return (
@@ -142,7 +143,7 @@ function KnowledgeFacts({ knowledge }: { knowledge: ReviewKnowledgePane }) {
       <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-field-changes">
         {knowledge.field_changes.map((change) => (
           <li key={`${change.item_id}:${change.field}`}>
-            {change.field}: {change.before_value ?? "(absent)"} → {change.after_value ?? "(absent)"}
+            {change.field}: {fieldValue(change.before_value)} → {fieldValue(change.after_value)}
           </li>
         ))}
       </ul>
@@ -177,8 +178,6 @@ function AuthoredRecords({ knowledge }: { knowledge: ReviewKnowledgePane }) {
 
 function KnowledgePane({ payload }: { payload: ReviewPayload }) {
   const { knowledge } = payload;
-  const bothPresent =
-    knowledge.before_statement.state === "present" && knowledge.after_statement.state === "present";
   return pane(
     "Knowledge",
     <>
@@ -187,20 +186,7 @@ function KnowledgePane({ payload }: { payload: ReviewPayload }) {
           ? `comparison: ${payload.comparison.reference} · policy ${payload.comparison.policy_version}`
           : `no knowledge comparison was made · ${knowledge.selection_detail ?? "no subject selected"}`}
       </div>
-      {bothPresent ? (
-        <DiffPane
-          before={knowledge.before_statement.text ?? ""}
-          after={knowledge.after_statement.text ?? ""}
-          language={knowledge.before_statement.language}
-          mode="split"
-          collapse={false}
-        />
-      ) : (
-        <>
-          {sideState(knowledge.before_statement, "review-before-state")}
-          {sideState(knowledge.after_statement, "review-after-state")}
-        </>
-      )}
+      <KnowledgeStatements before={knowledge.before_statement} after={knowledge.after_statement} />
       <KnowledgeFacts knowledge={knowledge} />
       <AuthoredRecords knowledge={knowledge} />
       {knowledge.assessments.length ? (
