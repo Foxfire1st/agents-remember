@@ -1,14 +1,34 @@
 // Same-origin client for the read-only Intent Reviewer API (mcp/.../serving/review.py).
 //
 // Mirrors data/changeset.ts: a `base` arg (same-origin default), typed results taken from the
-// application models, a thrown FilesApiError, and NO store mutation. It is a *read* client: the
-// surface exposes no submission control, so no function here writes anything.
+// application models, a thrown error, and NO store mutation. It is a *read* client: the surface
+// exposes no submission control, so no function here writes anything.
 //
 // Every type below mirrors one model in models/knowledge/review.py. A field the server omits is
 // absent here rather than defaulted, so an unresolved reference stays unresolved on the client too.
 // The expansion types mirror models/knowledge/review_source_content.py the same way (ICR-R03).
+//
+// TRANSPORT (ICR-R16). This route answers with its typed result and maps a refusal onto a 400/404/503
+// status, so the refusal is in the *body* of a non-2xx response. `getJson` -- the shared client for
+// the other serving routes -- reads only `body.status` and throws, which dropped every typed review
+// refusal before a reader could see it. Every read below therefore goes through this route's own
+// decode, `data/reviewTransport.ts` (one implementation, re-exported here so the surface and the task
+// view import one public entry): the body is read whatever the status and a body carrying this
+// route's `state` is the answer, refusal included.
 
-import { FilesApiError, getJson, qs } from "./files";
+import { getReviewJson } from "./reviewTransport";
+import { qs } from "./files";
+
+export {
+  ReviewTransportError,
+  getReviewJson,
+  intentOnlyRefusal,
+  reviewFailureToken,
+  reviewProblemFromCause,
+  reviewProblemFromRefusal,
+  unreadableAnswer,
+} from "./reviewTransport";
+export type { ReviewFailure, ReviewFailureToken, ReviewRefusalFacts } from "./reviewTransport";
 
 export type ReviewSideState = "present" | "absent" | "binary" | "unresolved";
 export type ReviewSelectorKind = "invariant" | "family";
@@ -338,7 +358,7 @@ export const intentReview = (
     params.selectorKind = selectorKind;
     params.selectorId = selectorId;
   }
-  return getJson<ReviewResult>(`${base}/api/review/intent?${qs(params)}`);
+  return getReviewJson<ReviewResult>(`${base}/api/review/intent?${qs(params)}`);
 };
 
 // One subject the resolved candidate pair can be reviewed on, as the server selected it. This is
@@ -364,17 +384,18 @@ export interface ReviewEntryListResult {
 
 // The entry read the task view makes before it can offer the Intent review button. It takes the
 // same task context the review itself takes and nothing else. A refused read is a normal outcome
-// (no live candidate, no dataset yet): it yields no entry and the caller renders no button, which
-// is the existing `live && selectorId` semantics and stays correct.
+// (no live candidate, no datasets yet) and it is *read* rather than thrown: the answer is `entries`
+// with the subjects the pair offers (an empty list is the known-empty answer "no subject is
+// recorded here"), or `refused` with the owner's own code, reason and next action, which the task
+// view shows beside the entry. The entry itself never depends on this read: it is offered for an
+// admitted live candidate, and a refusal here leaves the task-context review reachable.
 export const intentReviewEntries = (
   repo: string,
   master: string,
   leaf: string,
   base = "",
 ): Promise<ReviewEntryListResult> =>
-  getJson<ReviewEntryListResult>(
-    `${base}/api/review/intent/entries?${qs({ repo, master, leaf })}`,
-  );
+  getReviewJson<ReviewEntryListResult>(`${base}/api/review/intent/entries?${qs({ repo, master, leaf })}`);
 
 // One listed entry's actual content at the two bound code trees (ICR-R03). The generation is an
 // *input*: `before`/`after` are the ids the inventory published to this client, echoed back, so the
@@ -383,10 +404,10 @@ export const intentReviewEntries = (
 //
 // The transport maps a refused read onto its 400/404 status idiom WITH the typed refusal in the
 // body, and for this route a refusal is a normal answer (a path outside the measured change set, a
-// baseline that is not this leaf's recorded one). So this function reads the body whatever the
-// status and returns a typed result when the body is one; only a body that is not this route's
-// answer (an unwired process, a proxy error) becomes a FilesApiError.
-export const reviewSourceContent = async (
+// baseline that is not this leaf's recorded one). The shared review decode reads the body whatever
+// the status, so a refusal arrives as the typed result it is and only a body that is not this
+// route's answer becomes a failure.
+export const reviewSourceContent = (
   repo: string,
   master: string,
   leaf: string,
@@ -394,21 +415,14 @@ export const reviewSourceContent = async (
   beforeCodeTreeId: string,
   afterCodeTreeId: string,
   base = "",
-): Promise<ReviewSourceContentResult> => {
-  const url = `${base}/api/review/intent/source-content?${qs({
-    repo,
-    master,
-    leaf,
-    path,
-    beforeCodeTreeId,
-    afterCodeTreeId,
-  })}`;
-  const response = await fetch(url);
-  const body = (await response.json().catch(() => ({}))) as Partial<ReviewSourceContentResult> & {
-    status?: string;
-  };
-  if (body.state === "content" || body.state === "refused") {
-    return body as ReviewSourceContentResult;
-  }
-  throw new FilesApiError(response.status, body.status ?? response.statusText);
-};
+): Promise<ReviewSourceContentResult> =>
+  getReviewJson<ReviewSourceContentResult>(
+    `${base}/api/review/intent/source-content?${qs({
+      repo,
+      master,
+      leaf,
+      path,
+      beforeCodeTreeId,
+      afterCodeTreeId,
+    })}`,
+  );

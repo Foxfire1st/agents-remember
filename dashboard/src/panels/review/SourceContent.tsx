@@ -23,17 +23,26 @@
 // silently showing newer bytes. When the requested generation could not be measured at all, the read
 // is bounded by the change set this leaf's review publishes and `path_bound` says so -- the row is
 // still a changed path of a measured pair, and the pane names which one.
+//
+// Two answer shapes reach this pane and both are rendered with the owner's own fields (ICR-R16). A
+// refusal this route *admits* arrives as its typed result and is rendered below by this module's own
+// `refusalBlock`. Everything else -- an unwired process, a query the route does not admit, a socket
+// that never answered -- reaches the shared review failure and is rendered by `ReviewProblemBlock`,
+// the same renderer the surface uses, so this pane shows the code, reason, offending input and next
+// action instead of only the thrown message.
 
 import { useEffect, useState } from "react";
 
 import type {
   ReviewChangedFile,
+  ReviewFailure,
   ReviewRefusal,
   ReviewSourceContentResult,
   ReviewSourceExpansion,
   ReviewSourceSide,
 } from "../../data/review";
-import { reviewSourceContent } from "../../data/review";
+import { reviewProblemFromCause, reviewSourceContent } from "../../data/review";
+import { ReviewProblemBlock } from "./ReviewOutcome";
 import { DiffPane } from "../changeset/DiffPane";
 import { FilePane } from "../file-viewer/FilePane";
 
@@ -177,12 +186,19 @@ export function SourceContent({
   afterCodeTreeId: string;
 }) {
   const [result, setResult] = useState<ReviewSourceContentResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The transport-level failure (ICR-R16): this route answers a refusal it *admits* as its typed
+  // result -- rendered below, unchanged -- and everything else (an unwired process, an unadmitted
+  // query, a socket that never answered) as the shared review failure, which is rendered by the same
+  // `ReviewProblemBlock` the surface uses so the code, reason, offending input and next action are
+  // all shown here too. The pre-existing rendering printed only the thrown message, which for a 503
+  // read "503 unavailable" and dropped the adapter's own instruction.
+  const [problem, setProblem] = useState<ReviewFailure | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let live = true;
     setResult(null);
-    setError(null);
+    setProblem(null);
     reviewSourceContent(
       repo,
       master,
@@ -195,18 +211,21 @@ export function SourceContent({
         if (live) setResult(opened);
       })
       .catch((cause: unknown) => {
-        if (live) setError(cause instanceof Error ? cause.message : String(cause));
+        if (live) setProblem(reviewProblemFromCause(cause));
       });
     return () => {
       live = false;
     };
-  }, [repo, master, leaf, entry.path, beforeCodeTreeId, afterCodeTreeId]);
+  }, [repo, master, leaf, entry.path, beforeCodeTreeId, afterCodeTreeId, attempt]);
 
-  if (error !== null) {
+  if (problem !== null) {
     return (
-      <p style={{ margin: "0.2rem 0" }} data-testid="review-source-error">
-        the entry's content could not be read: {error}
-      </p>
+      <ReviewProblemBlock
+        origin="failure"
+        subject="this entry's content"
+        problem={problem}
+        onRetry={() => setAttempt((previous) => previous + 1)}
+      />
     );
   }
   if (result === null) {

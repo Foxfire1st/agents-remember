@@ -1,4 +1,4 @@
-// The Intent Reviewer surface: three panes over one comparison, and the refusal states they render.
+// The Intent Reviewer surface: three panes over one comparison, and every state that is not a review.
 //
 // The surface is display-only. It renders records other owners store, carries every attribution it
 // was given, and produces no conclusion of its own: there is no summary, no severity, no score and
@@ -7,25 +7,53 @@
 // available operand beside the named absence when one side did not (R06 -- `KnowledgeStatements` owns
 // that rule) -- and the Source pane's own entry expansion (R03 -- `SourceContent` owns reading one
 // listed entry's content at the two bound code trees the inventory published).
+//
+// THE READ'S OUTCOMES (ICR-R16). This route answers with its typed result and maps a refusal onto a
+// 400/404/503 status with the refusal in the body, so the surface must read the *body* whatever the
+// status (data/reviewTransport.ts owns that decode). Its read therefore has four phases, and each is
+// rendered as itself: `loading` while the request is in flight, `reviewed` (with the known-empty note
+// when the answer measured nothing), `refused` for the owner's typed refusal, and `failed` for a
+// transport-level failure (an unwired adapter, an unadmitted input, no HTTP response at all). Every
+// non-review phase goes through `ReviewOutcome.tsx`, which carries the server's own code, reason,
+// offending input and next action -- so an actionable refusal is visible instead of "404 Not Found".
+//
+// A failed read never erases the last coherent comparison this surface read: the retained payload is
+// still shown, labelled as the last generation read, and no empty review is ever claimed for it. A
+// retained comparison is stored and shown with the question it was read for (`targetKeyOf`), so a
+// payload is never rendered under a header it was not read for. The only control offered beside a
+// refusal is the same task's source change inventory, asked as its own question (the task-context
+// route needs no knowledge dataset); the client names no dataset either way, and the refusal's
+// reason, offending input and next action stay on screen while that inventory is shown.
 
 import { useCallback, useEffect, useState } from "react";
 
 import type {
   ReviewAssessmentDisplay,
-  ReviewChangedFile,
-  ReviewUnrepresentablePath,
-  ReviewKnowledgePane,
   ReviewAuthoredEffect,
+  ReviewChangedFile,
+  ReviewFailure,
+  ReviewKnowledgePane,
   ReviewPayload,
-  ReviewRefusal,
   ReviewSelectorKind,
   ReviewSignal,
   ReviewSourceInventory,
   ReviewUnresolvedReference,
+  ReviewUnrepresentablePath,
 } from "../../data/review";
-import { intentReview } from "../../data/review";
+import {
+  intentOnlyRefusal,
+  intentReview,
+  reviewProblemFromCause,
+} from "../../data/review";
 import { KnowledgeStatements } from "./KnowledgeStatements";
 import { SourceContent } from "./SourceContent";
+import {
+  type ReviewRead,
+  ReviewOutcomeRegion,
+  problemOf,
+  readFrom,
+  shownPayload,
+} from "./ReviewOutcome";
 
 export interface ReviewTarget {
   repo: string;
@@ -465,18 +493,52 @@ function SubmissionBlock({ payload }: { payload: ReviewPayload }) {
   );
 }
 
-function RefusalBlock({ refusal }: { refusal: ReviewRefusal }) {
-  return (
-    <div data-testid="review-refusal">
-      <p style={{ margin: "0.2rem 0" }}>
-        the review could not be opened ({refusal.code}): {refusal.detail}
-      </p>
-      <p style={{ color: "muted", margin: "0.2rem 0" }}>next: {refusal.next_action}</p>
-      {refusal.offending_input ? (
-        <p style={{ color: "muted", margin: "0.2rem 0" }}>offending input: {refusal.offending_input}</p>
-      ) : null}
-    </div>
-  );
+// The surface's read phases and the rendering of every phase that is not panes live in
+// `ReviewOutcome.tsx` (one owner for the outcome states). What stays here is how a target and a read
+// phase become the controls' wiring.
+
+function subjectLabel(
+  selectorKind: ReviewSelectorKind | undefined,
+  selectorId: string | undefined,
+  instead: ReviewFailure | null,
+): string {
+  if (instead !== null) return "whole task (no subject selected)";
+  if (selectorKind && selectorId) return `${selectorKind} ${selectorId}`;
+  return "whole task (no subject selected)";
+}
+
+// The retry control belongs to the state that has no owner-published recovery route: a read that
+// never reached the server. A typed refusal keeps its own next action instead.
+const retryFor = (read: ReviewRead, load: () => Promise<void>) =>
+  read.phase === "failed" ? () => void load() : undefined;
+
+// The source-inventory offer belongs to a refusal that answers for the intent half alone, when the
+// reader has not already taken it.
+function insteadFor(
+  read: ReviewRead,
+  problem: ReviewFailure | null,
+  instead: ReviewFailure | null,
+  offer: (problem: ReviewFailure) => void,
+): (() => void) | undefined {
+  if (read.phase !== "refused" || problem === null || instead !== null) return undefined;
+  if (!intentOnlyRefusal(problem.code)) return undefined;
+  return () => offer(problem);
+}
+
+// The identity one read answers for: the task context AND the question asked of it. A comparison is
+// only ever shown under the header it was read for, so this key is what a retained generation is
+// stored with and checked against -- a payload read for another target is never rendered under this
+// one's header, whatever a caller does to the props.
+function targetKeyOf(
+  repo: string,
+  master: string,
+  leaf: string,
+  instead: ReviewFailure | null,
+  selectorKind?: ReviewSelectorKind,
+  selectorId?: string,
+): string {
+  const question = instead !== null ? "task-context" : `${selectorKind ?? ""}:${selectorId ?? ""}`;
+  return `${repo}/${master}/${leaf}/${question}`;
 }
 
 export function ReviewSurface({
@@ -487,37 +549,55 @@ export function ReviewSurface({
   selectorId,
   onBack,
 }: ReviewTarget & { onBack: () => void }) {
-  const [payload, setPayload] = useState<ReviewPayload | null>(null);
-  const [refusal, setRefusal] = useState<ReviewRefusal | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [read, setRead] = useState<ReviewRead>({ phase: "loading" });
+  // The last comparison this surface really read, with the identity it was read for. A read that
+  // fails without an answer must not erase it: it stays on screen, labelled, and the failure is
+  // stated beside it -- but only while the surface is still asking that same question.
+  const [retained, setRetained] = useState<{ key: string; payload: ReviewPayload } | null>(null);
+  // The refusal the reader answered by asking for the task's own source inventory instead. It is a
+  // second, explicitly asked question -- never an automatic substitution -- so the refusal stays on
+  // screen while its answer is shown.
+  const [instead, setInstead] = useState<ReviewFailure | null>(null);
+  const targetKey = targetKeyOf(repo, master, leaf, instead, selectorKind, selectorId);
 
   const load = useCallback(async () => {
-    setError(null);
+    setRead({ phase: "loading" });
+    // A comparison read for another target is dropped the moment this question is asked: it belongs
+    // to the header it was read for, and one read's answer is never rendered under another's.
+    setRetained((previous) => (previous !== null && previous.key !== targetKey ? null : previous));
     try {
-      const result = await intentReview(repo, master, leaf, selectorKind, selectorId);
+      const result = await intentReview(
+        repo,
+        master,
+        leaf,
+        instead ? undefined : selectorKind,
+        instead ? undefined : selectorId,
+      );
+      setRead(readFrom(result));
       if (result.state === "review" && result.payload) {
-        setPayload(result.payload);
-        setRefusal(null);
-        return;
+        setRetained({ key: targetKey, payload: result.payload });
       }
-      setPayload(null);
-      setRefusal(result.refusal ?? null);
     } catch (cause) {
-      setPayload(null);
-      setRefusal(null);
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setRead({ phase: "failed", problem: reviewProblemFromCause(cause) });
     }
-  }, [repo, master, leaf, selectorKind, selectorId]);
+  }, [repo, master, leaf, selectorKind, selectorId, instead, targetKey]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
+  // The retained generation is used only when it was read for the question on screen now; the check
+  // is belt-and-braces beside the reset in `load`, because a payload under a header it was not read
+  // for is exactly the mismatch this surface must not be able to produce.
+  const coherent = retained !== null && retained.key === targetKey ? retained.payload : null;
+  const shown = shownPayload(read, coherent);
+  const problem = problemOf(read);
+
   return (
     <div
       className="screen"
       data-testid="review-surface"
-      data-comparison={payload?.comparison?.reference}
+      data-comparison={shown?.comparison?.reference}
       data-review-target={`${repo}/${master}/${leaf}`}
     >
       <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.75rem" }}>
@@ -526,21 +606,24 @@ export function ReviewSurface({
         </button>
         <strong>Intent review</strong>
         <span style={{ color: "muted" }} data-testid="review-subject">
-          {repo} · {master} · {leaf} ·{" "}
-          {selectorKind && selectorId
-            ? `${selectorKind} ${selectorId}`
-            : "whole task (no subject selected)"}
+          {repo} · {master} · {leaf} · {subjectLabel(selectorKind, selectorId, instead)}
         </span>
       </div>
-      {error ? <p data-testid="review-error">the review read failed: {error}</p> : null}
-      {refusal ? <RefusalBlock refusal={refusal} /> : null}
-      {payload ? (
+      <ReviewOutcomeRegion
+        read={read}
+        instead={instead}
+        shown={shown}
+        lastCoherent={read.phase === "failed" ? coherent : null}
+        onRetry={retryFor(read, load)}
+        onOpenTaskContext={insteadFor(read, problem, instead, setInstead)}
+      />
+      {shown ? (
         <>
-          <SubmissionBlock payload={payload} />
+          <SubmissionBlock payload={shown} />
           <div className={TAKEOVER} style={{ display: "grid", gap: "1rem" }}>
-            <KnowledgePane payload={payload} />
-            <SourcePane payload={payload} repo={repo} master={master} leaf={leaf} />
-            <EvidencePane payload={payload} />
+            <KnowledgePane payload={shown} />
+            <SourcePane payload={shown} repo={repo} master={master} leaf={leaf} />
+            <EvidencePane payload={shown} />
           </div>
         </>
       ) : null}

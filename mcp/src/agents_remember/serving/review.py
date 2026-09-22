@@ -110,6 +110,64 @@ _UNWIRED_SOURCE_CONTENT: dict[str, Any] = {
     ),
 }
 
+# The two failures the ports themselves can raise, as the same actionable shape every other refusal
+# on these routes already has. A reader has to be able to act on them (ICR-R16), so each carries the
+# next action its own exception implies rather than only the message the exception happened to hold;
+# the tool that answers is the caller's own authority, and neither route substitutes a repository or
+# a path the caller did not name.
+_AUTHORITY_NEXT_ACTION = (
+    "name a repository the configured workspace authority admits, then reopen the review; these "
+    "routes read no other repository in its place"
+)
+_NOT_FOUND_NEXT_ACTION = (
+    "reopen the review from the task context whose recorded datasets and paths exist; a path this "
+    "leaf does not hold is not substituted by another one"
+)
+
+
+def _transport_refusal(
+    status: str,
+    detail: str,
+    *,
+    next_action: str,
+    offending_input: str | None = None,
+) -> dict[str, Any]:
+    """One transport-level refusal body, in the typed refusals' own field vocabulary."""
+
+    body: dict[str, Any] = {"status": status, "detail": detail, "nextAction": next_action}
+    if offending_input:
+        body["offendingInput"] = offending_input
+    return body
+
+
+def _port_outcome(port: Callable[[Any], Any], request: Any) -> Any | Response:
+    """Call one port, or answer the two failures the change-set routes already name.
+
+    The one implementation of this mapping: both adapters below reach their port through it, so the
+    400/404 idiom (and the actionable fields on its bodies) cannot come to differ between them.
+    """
+
+    try:
+        return port(request)
+    except AuthorityError as err:
+        return JSONResponse(
+            _transport_refusal(
+                "bad-path",
+                str(err),
+                next_action=_AUTHORITY_NEXT_ACTION,
+            ),
+            status_code=400,
+        )
+    except FileNotFoundError as err:
+        body = _transport_refusal(
+            "not-found",
+            str(err),
+            next_action=_NOT_FOUND_NEXT_ACTION,
+            offending_input=str(err),
+        )
+        body["path"] = str(err)
+        return JSONResponse(body, status_code=404)
+
 
 @dataclass(frozen=True)
 class SourceContentRef:
@@ -289,12 +347,9 @@ def register_review_routes(
                 },
                 status_code=400,
             )
-        try:
-            result = port(request)
-        except AuthorityError as err:
-            return JSONResponse({"status": "bad-path", "detail": str(err)}, status_code=400)
-        except FileNotFoundError as err:
-            return JSONResponse({"status": "not-found", "path": str(err)}, status_code=404)
+        result = _port_outcome(port, request)
+        if isinstance(result, Response):
+            return result
         return JSONResponse(_json(result), status_code=_status_for(result))
 
 
@@ -312,8 +367,8 @@ def _source_content_response(
     """One expansion read's whole transport: the unwired answer, the selector check, the 400/404 map.
 
     It is a module-level function rather than the route body so the registrar stays a composition of
-    three one-line registrations; nothing about the answer changes, and the status idiom is the same
-    one the two routes above use.
+    three one-line registrations; nothing about the answer changes, and the status idiom (and its
+    actionable fields) is the one implementation both adapters reach through :func:`_port_outcome`.
     """
 
     if port is None:
@@ -321,12 +376,9 @@ def _source_content_response(
     request = source_content_request_from_query(ref)
     if request is None:
         return JSONResponse(_incomplete_generation(ref), status_code=400)
-    try:
-        result = port(request)
-    except AuthorityError as err:
-        return JSONResponse({"status": "bad-path", "detail": str(err)}, status_code=400)
-    except FileNotFoundError as err:
-        return JSONResponse({"status": "not-found", "path": str(err)}, status_code=404)
+    result = _port_outcome(port, request)
+    if isinstance(result, Response):
+        return result
     return JSONResponse(_json(result), status_code=_status_for(result))
 
 

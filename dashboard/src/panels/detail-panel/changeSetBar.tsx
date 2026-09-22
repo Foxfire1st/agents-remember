@@ -9,7 +9,14 @@ import {
   masterChangeset,
   taskChangeset,
 } from "../../data/changeset";
-import { type ReviewEntry, intentReviewEntries } from "../../data/review";
+import {
+  type ReviewEntry,
+  type ReviewFailure,
+  intentReviewEntries,
+  reviewProblemFromCause,
+  reviewProblemFromRefusal,
+  unreadableAnswer,
+} from "../../data/review";
 import { useDashboard } from "../../data/store";
 import type { ChangeSetTarget } from "../changeset/ChangeSetViewer";
 import {
@@ -62,32 +69,112 @@ export function ChangeSetButton({
   );
 }
 
+// What the entry read answered, as the task view needs it: the subject the pair offers (if any), and
+// -- when the read did not answer with a subject list -- the reason, in the owner's own words.
+interface ReviewSubjectRead {
+  loading: boolean;
+  entry?: ReviewEntry;
+  // The read answered `entries` with none: a known-empty answer about the pair's recorded subjects,
+  // which is a fact about the datasets and not a failure.
+  empty?: boolean;
+  // The read refused (a typed refusal, a transport-level failure, or an answer this client does not
+  // admit). It is carried rather than swallowed: the entry must be able to say why it cannot refine.
+  problem?: ReviewFailure;
+}
+
 // The reviewed subject of one live leaf, read from the server that owns the resolution. The id
 // returned is a recorded identity inside the candidate the server resolved from canonical task
-// context, so this hook chooses no candidate and invents no id: it asks, and a refusal or an empty
-// list is a normal answer that simply leaves the entry on the task context. Nothing is fetched for
-// a leaf that is not live, because there is no candidate to resolve and the working change-set is
-// hidden for the same reason.
+// context, so this hook chooses no candidate and invents no id: it asks, and every answer is carried
+// -- a subject, a known-empty list, or a typed refusal whose code, reason and next action are shown
+// beside the entry (ICR-R16). The route answers a refusal with its own status and the refusal in the
+// body, so the shared review decode reads the body whatever the status; `getJson` would have thrown
+// and the detail would have been lost. Nothing is fetched for a leaf that is not live, because there
+// is no candidate to resolve and the working change-set is hidden for the same reason.
 function useReviewSubject(
   live: boolean,
   repo: string,
   master: string,
   leaf?: string,
-): ReviewEntry | undefined {
-  const [entry, setEntry] = useState<ReviewEntry | undefined>(undefined);
+): ReviewSubjectRead {
+  const [read, setRead] = useState<ReviewSubjectRead>({ loading: false });
   useEffect(() => {
     let current = true;
-    setEntry(undefined);
-    if (!live || !leaf) return () => void (current = false);
+    if (!live || !leaf) {
+      setRead({ loading: false });
+      return () => void (current = false);
+    }
+    setRead({ loading: true });
     void intentReviewEntries(repo, master, leaf).then(
-      (result) => current && setEntry(result.state === "entries" ? result.entries?.[0] : undefined),
-      () => current && setEntry(undefined),
+      (result) => {
+        if (!current) return;
+        if (result.state === "entries") {
+          const entries = result.entries ?? [];
+          setRead({ loading: false, entry: entries[0], empty: entries.length === 0 });
+          return;
+        }
+        if (result.state === "refused") {
+          setRead({
+            loading: false,
+            problem: result.refusal
+              ? reviewProblemFromRefusal(result.refusal)
+              : unreadableAnswer("refused"),
+          });
+          return;
+        }
+        setRead({ loading: false, problem: unreadableAnswer(result.state) });
+      },
+      (cause: unknown) => {
+        if (current) setRead({ loading: false, problem: reviewProblemFromCause(cause) });
+      },
     );
     return () => {
       current = false;
     };
   }, [live, repo, master, leaf]);
-  return entry;
+  return read;
+}
+
+// The entry read's own state, printed beside the entry rather than hidden. It never gates the entry:
+// the button beside it is offered for an admitted live candidate whatever this read answered, so a
+// refusal here is a stated reason and not a missing control.
+function ReviewEntryState({ read }: { read: ReviewSubjectRead }) {
+  if (read.loading) {
+    return (
+      <span
+        style={{ color: "muted" }}
+        data-testid="review-entry-state"
+        data-review-state="loading"
+      >
+        reading this candidate&apos;s recorded subjects…
+      </span>
+    );
+  }
+  if (read.empty) {
+    return (
+      <span
+        style={{ color: "muted" }}
+        data-testid="review-entry-state"
+        data-review-state="known-empty"
+      >
+        no subject is recorded for this pair; the review opens on the task&apos;s complete source
+        change inventory.
+      </span>
+    );
+  }
+  if (!read.problem) return null;
+  return (
+    <span
+      style={{ color: "muted" }}
+      data-testid="review-entry-state"
+      data-review-state={read.problem.token}
+      data-review-code={read.problem.code}
+    >
+      this candidate&apos;s recorded subjects could not be read ({read.problem.code}):{" "}
+      {read.problem.detail}
+      {read.problem.offendingInput ? ` — offending input: ${read.problem.offendingInput}` : ""}
+      {read.problem.nextAction ? ` — next: ${read.problem.nextAction}` : ""}
+    </span>
+  );
 }
 
 // The change-set bar shown on a task-document READER (master or leaf), with identity taken from
@@ -129,37 +216,44 @@ export function DocChangeSetBar({
         onOpen={onOpen}
       />
       {live ? (
-        <ChangeSetButton
-          target={{ repo, master, leaf, mode: "working" }}
-          label="working"
-          onOpen={onOpen}
-        />
-      ) : null}
-      {live ? (
-        // The reviewer entry, added BESIDE the working/committed actions and never in their place.
-        // It is offered for an admitted live curator candidate -- the same liveness the working
+        // The working change-set, the reviewer entry and the entry read's own state, all gated on the
+        // same liveness. The entry is added BESIDE the working/committed actions and never in their
+        // place: it is offered for an admitted live curator candidate -- the same liveness the working
         // change-set is gated on -- and **the task context is the entry**: the target names the
         // repo/master/leaf the server resolves the candidate from and carries no filesystem path,
         // because the browser never chooses the candidate.
         //
         // The server's subject list is a REFINEMENT and never a gate. When it offers a recorded
-        // subject, that identity travels with the target so the review is opened on it; when it
-        // offers none -- no invariants recorded, no datasets yet, or a refusal this client cannot
-        // read -- the target still carries `review: {}` and the review opens on the task's complete
-        // source change inventory. Offering the entry only for a subject is exactly how a task with
-        // no knowledge lost its source review.
-        <ChangeSetButton
-          target={{
-            repo,
-            master,
-            leaf,
-            review: subject
-              ? { selectorKind: subject.selector_kind, selectorId: subject.selector_id }
-              : {},
-          }}
-          label="Intent review"
-          onOpen={onOpen}
-        />
+        // subject, that identity travels with the target so the review is opened on it; when the read
+        // answers with no subject, refuses, or fails outright (ICR-R16: the route puts its refusal in
+        // the body of a non-2xx response, and this client reads it whatever the status), the target
+        // still carries `review: {}` and the review opens on the task's complete source change
+        // inventory. The read's own answer is printed beside the entry by `ReviewEntryState`, so a
+        // refusal is a visible reason rather than a silently missing refinement. Offering the entry
+        // only for a subject is exactly how a task with no knowledge lost its source review.
+        <>
+          <ChangeSetButton
+            target={{ repo, master, leaf, mode: "working" }}
+            label="working"
+            onOpen={onOpen}
+          />
+          <ChangeSetButton
+            target={{
+              repo,
+              master,
+              leaf,
+              review: subject.entry
+                ? {
+                    selectorKind: subject.entry.selector_kind,
+                    selectorId: subject.entry.selector_id,
+                  }
+                : {},
+            }}
+            label="Intent review"
+            onOpen={onOpen}
+          />
+          <ReviewEntryState read={subject} />
+        </>
       ) : null}
     </div>
   );
