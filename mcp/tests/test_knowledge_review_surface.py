@@ -38,13 +38,12 @@ from agents_remember.application.knowledge_read import read_row_counts
 from agents_remember.application.knowledge_review import (
     ReviewCandidateResolution,
     ReviewRecordInputs,
-    _reviewable_entries,
-    _selected_item_count,
     compose_review,
     list_knowledge_review_entries,
     resolve_review_candidate,
     review_records_for,
 )
+from agents_remember.application.review_subject_catalogue import read_subject_catalogue
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.knowledge import review as vocabulary
 from agents_remember.models.knowledge.detection import (
@@ -1125,13 +1124,15 @@ def test_the_published_assessment_loader_returns_nothing_for_an_unresolvable_can
 def test_the_rendered_pane_types_are_the_three_the_design_names(fixture: DiffFixture) -> None:
     """The three panes exist as three distinct types, so a rendering cannot merge their contents.
 
-    The entry read (260915-KS-L45 S2) is measured in the same case because it is the same surface's
-    other half and exists for one reason: ``changeSetBar`` offers the Intent review entry only when
-    it holds a reviewed subject, and that subject must be a recorded identity inside the candidate
-    the *server* resolved -- the browser never chooses the candidate. So the entry the resolver
-    offers is measured against the shipped comparison's own answer for the same identity, item for
-    item, and a subject the comparison cannot answer for is absent from the list rather than offered
-    with a count nobody measured.
+    The entry read (260915-KS-L45 S2, re-contracted by ICR-R09) is measured in the same case
+    because it is the same surface's other half and exists for one reason: ``changeSetBar`` offers
+    the Intent review entry only when it holds a recorded subject, and that subject must be a
+    recorded identity inside the pair the *server* resolved -- the browser never chooses the
+    candidate. So the catalogue the resolver offers is measured identity for identity against the
+    two snapshots' own tables: every recorded invariant and family is listed with its label and
+    its before/after presence, and listing one never compares it. A subject the comparison cannot
+    answer for is still listed rather than dropped to imply a smaller complete population; opening
+    it is what carries the comparison's own reason.
     """
 
     panes = KnowledgeReviewPayload.model_fields
@@ -1148,18 +1149,20 @@ def test_the_rendered_pane_types_are_the_three_the_design_names(fixture: DiffFix
     assert fields["authored_effects"].annotation != fields["signals"].annotation
 
     resolved = resolution_for(fixture)
-    offered = _reviewable_entries(resolved, probe=None)
-    # The reviewed subject is one of the candidate's own recorded identities -- the fixture records
-    # several -- and every identity offered is one the comparison answered for.
+    offered = read_subject_catalogue(resolved)
+    # The reviewed subject is one of the pair's own recorded identities -- the fixture records
+    # several in both snapshots -- and every recorded identity is listed with its label and the
+    # presence the two snapshots give it.
     by_id = {entry.selector_id: entry for entry in offered}
     assert fixture.retry_invariant_id in by_id
     assert all(entry.selector_kind in ("invariant", "family") for entry in offered)
     assert all(entry.label for entry in offered)
-    assert all(entry.selected_item_count > 0 for entry in offered)
+    assert all(entry.presence in ("before_only", "after_only", "both") for entry in offered)
+    assert by_id[fixture.retry_invariant_id].presence == "both"
 
-    # The count is the comparison's own total for that identity, re-read here through the shipped
-    # operation rather than trusted: an entry advertising a number the review would not show is how
-    # a caller comes to believe a subject was reviewed when it was not.
+    # The catalogue agrees with the shipped comparison about which subjects open: the reviewed
+    # identity opens through the same operation the review itself uses, and the catalogue row is
+    # what names the selector it opens with.
     comparison = diff_knowledge_scope(
         KnowledgeDiffRequest(
             selector=InvariantIdentitySeed(invariant_id=fixture.retry_invariant_id),
@@ -1184,15 +1187,11 @@ def test_the_rendered_pane_types_are_the_three_the_design_names(fixture: DiffFix
         after_path=resolved.candidate_database,
     )
     assert comparison.page is not None
-    assert (
-        by_id[fixture.retry_invariant_id].selected_item_count == comparison.page.counts.items_total
-    )
 
-    # An identity the candidate does not record is not offered at all, and a subject the comparison
-    # cannot answer for is dropped rather than listed with a zero.
+    # An identity neither snapshot records is not offered at all: it is not part of the
+    # comparison's population, so offering it would invent a subject the pair never held.
     absent = "11111111-1111-1111-1111-111111111111"
     assert absent not in by_id
-    assert _selected_item_count(resolved, "invariant", absent, probe=None) is None
 
 
 def test_a_knowledge_only_change_leaves_an_openable_review_with_a_measured_empty_inventory(

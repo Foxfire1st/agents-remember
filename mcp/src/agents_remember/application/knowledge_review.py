@@ -28,7 +28,7 @@ because resolution is a responsibility of its own and because this adapter is at
 file-size rail; ``review_candidate_resolution`` is the one implementation, and the names re-exported
 below are that module's -- there is no second resolution path here.
 
-**Four more responsibilities this adapter hands to their own modules, for the same reason.**
+**Five more responsibilities this adapter hands to their own modules, for the same reason.**
 :mod:`agents_remember.application.review_source_inventory` measures the exact source-change inventory
 of the bound pair and renders the source pane; :mod:`agents_remember.application.review_record_rendering`
 renders the record collections the caller supplied into the evidence and submission values;
@@ -37,13 +37,17 @@ content into the pane's statement sides and mechanical field rows, where ICR-R06
 lives; :mod:`agents_remember.application.review_revision_comparison` selects which retained
 revisions those sides render -- the before head and the after head from the snapshots' own
 authored successor relationships, with explicit ambiguity when no unique head exists, which is
-ICR-R07's explicit revision comparison; and
+ICR-R07's explicit revision comparison; :mod:`agents_remember.application.review_subject_catalogue`
+enumerates the entry's labelled subject catalogue from both snapshots' own identity tables, with
+totals and per-row presence, comparing no subject to earn its row (ICR-R09); and
 :mod:`agents_remember.application.review_task_context` composes the entry that needs no
 selected subject. Each is one responsibility with one implementation, and every name an importer
 referenced is re-exported below so no importer had to learn a new home -- the statement-side helpers
 are the one move that leaves no alias, because they were private to this adapter and no module under
-``mcp/`` imported them, and the head-selection rule likewise leaves no alias because the
-both-sides preference it replaces was private to this adapter: this adapter resolves, calls and
+``mcp/`` imported them, the head-selection rule likewise leaves no alias because the
+both-sides preference it replaces was private to this adapter, and the entry enumeration leaves
+none either: the per-subject compare-to-earn-a-row helpers were private to this adapter, and the
+catalogue replaces their mechanism rather than moving it -- this adapter resolves, calls and
 assembles, and it grows no feature logic of its own while its file is over the soft rail.
 
 **Every absence is a state.** An unresolvable author, a missing operand, an absent assessment
@@ -103,14 +107,11 @@ from agents_remember.application.review_statement_sides import (
     side_conditions,
     side_content,
 )
+from agents_remember.application.review_subject_catalogue import read_subject_catalogue
 from agents_remember.application.review_task_context import task_context_review
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.diff_display import TreeDifferenceProbe
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
-from agents_remember.memory.knowledge.store import (
-    OpenedKnowledgeStore,
-    open_existing_knowledge_store,
-)
 from agents_remember.models.knowledge.diff import (
     KnowledgeDiffItem,
     KnowledgeDiffRequest,
@@ -118,17 +119,12 @@ from agents_remember.models.knowledge.diff import (
     KnowledgeDiffSide,
     SourceAttribution,
 )
-from agents_remember.models.knowledge.read import (
-    FamilyIdentitySeed,
-    InvariantIdentitySeed,
-    KnowledgeReadSeed,
-)
+from agents_remember.models.knowledge.read import KnowledgeReadSeed
 from agents_remember.models.knowledge.review import (
     ComparisonIdentity,
     KnowledgeReviewPayload,
     KnowledgeReviewResult,
     ReviewAuthoredEffect,
-    ReviewEntry,
     ReviewEntryListResult,
     ReviewKnowledgePane,
     ReviewRefusal,
@@ -136,7 +132,6 @@ from agents_remember.models.knowledge.review import (
     ReviewSideContent,
     ReviewSourceInventory,
     ReviewStaleness,
-    ReviewSubjectKind,
     ReviewSurfaceRequest,
     ReviewUnresolvedReference,
 )
@@ -206,10 +201,8 @@ def list_knowledge_review_entries(
     repository_id: str,
     master: str,
     leaf_id: str,
-    *,
-    probe: TreeDifferenceProbe | None = None,
 ) -> ReviewEntryListResult:
-    """The subjects the resolved pair can be reviewed on, or the one refusal that says why not.
+    """The subjects the resolved pair records, or the one refusal that says why not.
 
     This is the *entry* half of the surface, and it exists because the reviewed subject is the one
     input a reader cannot supply from the task view: the subject is a recorded identity inside the
@@ -218,16 +211,16 @@ def list_knowledge_review_entries(
     root -- so the list a caller is offered and the review it then opens cannot disagree about which
     datasets are being compared.
 
-    A subject is offered exactly when the **shipped comparison** reaches it: the candidate's own
-    recorded invariant and family identities are each compared through
-    :func:`~agents_remember.application.knowledge_diff.diff_knowledge_scope`, and only the ones the
-    operation answers with a page are listed. Nothing is recorded to make that true and no ranking
-    is applied here -- a candidate that records no identity the pair can compare yields an empty
-    list, which the caller renders as no entry rather than as an invitation to name one.
+    The catalogue is enumerated, not compared: every invariant and family identity the pair's
+    before/after snapshots record is listed with its label, its presence on each side and the
+    labelled totals, and no subject is compared to earn its row. A candidate that records no
+    identity yields an empty list, which the caller renders as no entry beside the source
+    inventory rather than as an invitation to name one. What one subject's review renders stays
+    the comparison's own answer when that subject alone is opened.
 
-    Both refusals that answer for the *pair* are stated before any subject is compared, so an
-    unreadable side is a refusal on this route exactly as it is on the composition's: a half that is
-    present but cannot be read as a dataset would otherwise raise out of the per-subject comparison,
+    Both refusals that answer for the *pair* are stated before any subject is listed, so an
+    unreadable side is a refusal on this route exactly as it is on the composition's: a half that
+    is present but cannot be read as a dataset would otherwise raise out of the catalogue read,
     which is a traceback where this surface promises a state naming the side.
     """
 
@@ -263,7 +256,7 @@ def list_knowledge_review_entries(
     if unreadable_receipt is not None:
         return _entry_refused(repository_id, master, leaf_id, unreadable_receipt)
     try:
-        entries = _reviewable_entries(resolved, probe=probe)
+        entries = read_subject_catalogue(resolved)
     except KnowledgeStorageError as error:
         # The preflight above reads the same bytes; this guard exists so that a candidate record which
         # moves between the two reads is still the same typed refusal rather than a traceback.
@@ -273,94 +266,17 @@ def list_knowledge_review_entries(
             leaf_id,
             unreadable_candidate_refusal(resolved, str(error)),
         )
+    invariant_total = sum(1 for entry in entries if entry.selector_kind == "invariant")
     return ReviewEntryListResult(
         state="entries",
         repository_id=repository_id,
         master=master,
         leaf_id=resolved.leaf_id,
         entries=entries,
+        total_subjects=len(entries),
+        invariant_total=invariant_total,
+        family_total=len(entries) - invariant_total,
     )
-
-
-def _reviewable_entries(
-    resolved: ReviewCandidateResolution, *, probe: TreeDifferenceProbe | None
-) -> tuple[ReviewEntry, ...]:
-    """Every identity the shipped comparison reaches on this pair, as the entry list's own values.
-
-    The namespace is read once and threaded into every comparison, so one entry read cannot compare
-    its subjects under two different namespaces: the recorded one is what the list and the review it
-    opens both use.
-    """
-
-    namespace = review_namespace(resolved.repository_id, resolved.candidate_database)
-    store = open_existing_knowledge_store(resolved.candidate_database, namespace)
-    try:
-        recorded = _recorded_identities(store)
-    finally:
-        store.close()
-    entries: list[ReviewEntry] = []
-    for kind, identity_id, label in recorded:
-        selected = _selected_item_count(
-            resolved, kind, identity_id, probe=probe, namespace=namespace
-        )
-        if selected is None:
-            continue
-        entries.append(
-            ReviewEntry(
-                selector_kind=kind,
-                selector_id=identity_id,
-                label=label,
-                selected_item_count=selected,
-            )
-        )
-    return tuple(entries)
-
-
-def _recorded_identities(
-    store: OpenedKnowledgeStore,
-) -> tuple[tuple[ReviewSubjectKind, str, str], ...]:
-    """Every reviewable identity one candidate records, invariants before families.
-
-    Read through the store's own two list operations rather than through a query written here, so
-    the identities this list offers are the ones the namespace records and not the ones a second
-    reader of the same tables believes it finds.
-    """
-
-    invariants: tuple[tuple[ReviewSubjectKind, str, str], ...] = tuple(
-        ("invariant", invariant.invariant_id, invariant.display_label)
-        for invariant in store.list_invariants()
-    )
-    families: tuple[tuple[ReviewSubjectKind, str, str], ...] = tuple(
-        ("family", family.family_id, family.display_label) for family in store.list_families()
-    )
-    return invariants + families
-
-
-def _selected_item_count(
-    resolved: ReviewCandidateResolution,
-    subject_kind: ReviewSubjectKind,
-    selector_id: str,
-    *,
-    probe: TreeDifferenceProbe | None,
-    namespace: str | None = None,
-) -> int | None:
-    """How many items the pair's comparison reached for one subject, or ``None`` when it refused.
-
-    A refusal is not a zero: a subject the comparison could not answer for is absent from the list
-    rather than offered with a count this reader made up, because an entry that opens a refusal is
-    worse than no entry at all.
-    """
-
-    selector: KnowledgeReadSeed = (
-        InvariantIdentitySeed(invariant_id=selector_id)
-        if subject_kind == "invariant"
-        else FamilyIdentitySeed(family_id=selector_id)
-    )
-    comparison = _compare(resolved, selector, probe=probe, namespace=namespace)
-    page = comparison.page
-    if comparison.state != "page" or page is None or comparison.binding is None:
-        return None
-    return page.counts.items_total
 
 
 def _entry_refused(

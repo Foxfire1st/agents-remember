@@ -276,9 +276,12 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
           selector_kind: "invariant",
           selector_id: "inv-1",
           label: "Retries share one budget",
-          selected_item_count: 3,
+          presence: "both",
         },
       ],
+      total_subjects: 1,
+      invariant_total: 1,
+      family_total: 0,
     });
     liveLeaf();
     const onOpenChangeSet = vi.fn();
@@ -299,6 +302,77 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
       master: "260628_operations-integration",
       leaf: "260628-l4a",
       review: { selectorKind: "invariant", selectorId: "inv-1" },
+    });
+  });
+
+  it("offers every catalogue row for review, not just the first", async () => {
+    // ICR-R09's failing case: several invariants and families are all selectable from the task
+    // review. The picker lists the whole catalogue with the server's totals, and the Intent review
+    // button opens whichever row the reader selected -- the second and third rows exactly like the
+    // first. A retired (before-only) row is marked for what it is, never dropped.
+    stubCounters({
+      state: "entries",
+      operation: "list_knowledge_review_entries",
+      repository_id: "agents-remember",
+      master: "260628_operations-integration",
+      leaf_id: "260628-l4a",
+      entries: [
+        {
+          selector_kind: "invariant",
+          selector_id: "inv-1",
+          label: "Retries share one budget",
+          presence: "both",
+        },
+        {
+          selector_kind: "invariant",
+          selector_id: "inv-2",
+          label: "Retired obligation",
+          presence: "before_only",
+        },
+        {
+          selector_kind: "family",
+          selector_id: "fam-9",
+          label: "Retry budget family",
+          presence: "after_only",
+        },
+      ],
+      total_subjects: 3,
+      invariant_total: 2,
+      family_total: 1,
+    });
+    liveLeaf();
+    const onOpenChangeSet = vi.fn();
+    const { findAllByTestId, findByTestId, getAllByTestId } = render(
+      <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
+    );
+    const picker = (await findByTestId("review-subject-picker")) as HTMLSelectElement;
+    const options = getAllByTestId("review-subject-option");
+    expect(options).toHaveLength(3);
+    expect(options[1].textContent).toContain("retired · before-only");
+    expect(options[2].textContent).toContain("new · after-only");
+    const totals = await findByTestId("review-catalogue-totals");
+    expect(totals.textContent).toContain("3 subject(s)");
+    expect(totals.textContent).toContain("2 invariant(s)");
+    expect(totals.textContent).toContain("1 family/families");
+
+    // The button opens the picker's current row: the second row, then the third -- each exactly
+    // like the first was reachable before.
+    fireEvent.change(picker, { target: { value: "inv-2" } });
+    const button = (await reviewButton(findAllByTestId)) as HTMLElement;
+    fireEvent.click(button);
+    expect(onOpenChangeSet).toHaveBeenLastCalledWith({
+      repo: "agents-remember",
+      master: "260628_operations-integration",
+      leaf: "260628-l4a",
+      review: { selectorKind: "invariant", selectorId: "inv-2" },
+    });
+    fireEvent.change(picker, { target: { value: "fam-9" } });
+    fireEvent.click(button);
+    expect(onOpenChangeSet).toHaveBeenLastCalledWith({
+      repo: "agents-remember",
+      master: "260628_operations-integration",
+      leaf: "260628-l4a",
+      review: { selectorKind: "family", selectorId: "fam-9" },
     });
   });
 

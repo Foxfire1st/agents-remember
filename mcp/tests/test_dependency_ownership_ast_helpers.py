@@ -43,8 +43,28 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "3e9105c2116422debaa01c295294fc0c714288f701ee5902e6552884b64a52d8"
+LIFECYCLE_CATALOG_SHA256 = "8d60a34cf56a9740e234823658312c8b6f5ae4e958344fe8ba2ea152b8ff6891"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Seventeenth deliberate re-pin (260921-ICR-L9, at base ``f141d164``, 2026-09-22) -- one new case
+module's two consumer rows.** ``260921-ICR-L9`` (requirement ``ICR-R09@v1``) registers no artifact and
+no contract of its own: its ten catalogue cases live in the ordinary unit module
+``mcp/tests/test_review_subject_catalogue.py``, which builds its retired/added/unselectable
+populations through the public store operations over copies of the shared diff fixture's datasets
+beside its two real Git trees rather than introducing a second topology. It is therefore a
+source-derived consumer of **two** rows, each derived from the census's own finding --
+``missing=['mcp/tests/test_review_subject_catalogue.py']`` with ``unsupported=[]`` on both:
+``mcp/tests/diff_scope_test_support.py`` (the two snapshots and the two real trees the populations
+are copied from) and ``mcp/tests/read_scope_test_support.py`` (the authorship and the
+applicability/conditions/exclusions constants the authored rows are built with). Both
+``consumer_scope = "exact"`` rows gained that one path each. The module's own lane row was added to
+``mcp/tests/test-evidence-lanes.toml``, which pins no digest and refuses an unregistered module at
+collection. **Nothing was registered, no row was removed and no artifact's identity moved**, so the
+population stays at **sixteen contracts / sixty-six artifacts**, and the catalog is re-pinned from
+``3e9105c2116422debaa01c295294fc0c714288f701ee5902e6552884b64a52d8`` (L14's measurement above) to
+``8d60a34cf56a9740e234823658312c8b6f5ae4e958344fe8ba2ea152b8ff6891``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact delta remains
+exactly empty.
 
 **Sixteenth deliberate re-pin (260921-ICR-L14, synced onto the landed ICR-L3 re-pin, 2026-09-21) -- one
 new case module's four consumer rows, merged with the Fifteenth's two.** ``260921-ICR-L14`` (requirement

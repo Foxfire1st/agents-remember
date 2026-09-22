@@ -187,9 +187,12 @@ describe("the review entry's own read state", () => {
           selector_kind: "invariant",
           selector_id: "inv-1",
           label: "Retries share one budget",
-          selected_item_count: 3,
+          presence: "both",
         },
       ],
+      total_subjects: 1,
+      invariant_total: 1,
+      family_total: 0,
     });
 
     const { view, onOpen } = mount();

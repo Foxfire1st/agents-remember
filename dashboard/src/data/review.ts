@@ -365,11 +365,17 @@ export const intentReview = (
 // the ONLY legitimate source of the entry's selector: the id is a recorded identity inside the
 // candidate the server resolved from task context, so the browser is handed a subject rather than
 // choosing a candidate. There is no path field here on purpose.
+//
+// `presence` is the catalogue's selection state: which of the comparison's two snapshots record
+// the identity. A retired (before-only) subject and a newly added (after-only) one travel in the
+// same list as the subjects both snapshots hold, so the entry can offer every one of them.
+export type ReviewSubjectPresence = "before_only" | "after_only" | "both";
+
 export interface ReviewEntry {
   selector_kind: ReviewSelectorKind;
   selector_id: string;
   label: string;
-  selected_item_count: number;
+  presence: ReviewSubjectPresence;
 }
 
 export interface ReviewEntryListResult {
@@ -379,6 +385,11 @@ export interface ReviewEntryListResult {
   master: string;
   leaf_id: string;
   entries?: ReviewEntry[];
+  // The labelled totals of the catalogue: every recorded subject, partitioned once into the two
+  // reviewable kinds. A caller traversing the list tells a whole catalogue from a first row here.
+  total_subjects: number;
+  invariant_total: number;
+  family_total: number;
   refusal?: ReviewRefusal;
 }
 

@@ -77,6 +77,7 @@ __all__ = [
     "ReviewSourcePane",
     "ReviewStaleness",
     "ReviewSubjectKind",
+    "ReviewSubjectPresence",
     "ReviewSubmission",
     "ReviewSurfaceRequest",
     "ReviewUnrepresentablePath",
@@ -120,6 +121,13 @@ ReviewRefusalCode = Literal[
 # the panes cannot come to disagree about which identities are reviewable. The name is the server's;
 # the browser's ``ReviewSelectorKind`` is the same two spellings on the wire.
 ReviewSubjectKind = Literal["invariant", "family"]
+
+# Which of the comparison's two snapshots record one catalogue subject, stated per row. The names
+# are the packet's own (ICR-R09): the knowledge history is append-only, so a subject the before
+# snapshot records and the candidate does not is ``before_only`` -- retired, but neither gone nor
+# unreviewable -- and one only the candidate records is ``after_only``. This is the catalogue's
+# selection state: which snapshot selections reach the row.
+ReviewSubjectPresence = Literal["before_only", "after_only", "both"]
 
 ReviewSideState = Literal["present", "absent", "binary", "unresolved"]
 
@@ -202,22 +210,24 @@ class ReviewCandidateRef(KnowledgeModel):
 
 
 class ReviewEntry(KnowledgeModel):
-    """One subject the resolved pair can be compared on, as the comparison itself selected it.
+    """One subject of the comparison's before/after population, as the catalogue lists it.
 
     This is the value the task-view entry carries, and it exists so that entry never has to invent
-    one: ``selector_id`` is the recorded identity of a subject the shipped comparison reached on
-    both of the candidate's own sides, and ``label`` is that identity's own recorded display label.
-    There is no field here for a path, a file, a display version or a ranking, so an entry cannot
-    point at a dataset the resolution did not select and cannot be ordered by a preference this
-    list invented.
+    one. ``selector_kind`` and ``selector_id`` are the recorded identity the review is opened with;
+    ``label`` is that identity's own recorded display label, read from the after snapshot when it
+    records the identity and from the before snapshot otherwise. ``presence`` states which of the
+    two snapshots record the identity, so a retired (before-only) subject and a newly added
+    (after-only) one are listed beside the subjects both snapshots hold rather than dropped to
+    imply a smaller complete population. There is no field here for a path, a file, a display
+    version, a ranking, or a comparison count, so an entry cannot point at a dataset the
+    resolution did not select, cannot be ordered by a preference this list invented, and cannot
+    oblige the catalogue read to compare every subject before answering.
     """
 
     selector_kind: ReviewSubjectKind
     selector_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     label: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    # How many of the comparison's own items the subject's selection reached. It is the operation's
-    # count and not a score: a subject with zero reached items is not offered at all.
-    selected_item_count: int = Field(ge=0)
+    presence: ReviewSubjectPresence
 
 
 class ComparisonIdentity(KnowledgeModel):
@@ -868,7 +878,10 @@ class ReviewEntryListResult(KnowledgeModel):
     ``entries`` is empty exactly when the read is refused, and a refused read carries its refusal --
     so a caller cannot read "no entry was offered" as "there is nothing to review". An empty
     ``entries`` on an ``entries`` state is a pair that selected no reviewable subject, which is a
-    fact about the datasets and is stated as one.
+    fact about the datasets and is stated as one; the task-context source review stays reachable
+    beside it. The three totals describe the population the entries come from -- every invariant
+    and family identity the comparison's before/after pair records -- so a caller can verify the
+    list it received is the whole catalogue rather than its first row.
     """
 
     state: Literal["entries", "refused"]
@@ -878,6 +891,13 @@ class ReviewEntryListResult(KnowledgeModel):
     leaf_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     entries: tuple[ReviewEntry, ...] = ()
     refusal: ReviewRefusal | None = None
+    # The labelled totals of the catalogue: every recorded subject, partitioned once into the two
+    # reviewable kinds. A refused read measured no catalogue, so its totals are zero; an answered
+    # read carries at least the page it returned, so a caller traversing the list can tell a whole
+    # catalogue from a first row.
+    total_subjects: int = Field(default=0, ge=0)
+    invariant_total: int = Field(default=0, ge=0)
+    family_total: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def _require_one_outcome(self) -> ReviewEntryListResult:
@@ -889,5 +909,28 @@ class ReviewEntryListResult(KnowledgeModel):
             raise ValueError(
                 "a refused entry read offers no subject; an entry beside a refusal is "
                 "how a caller comes to review a subject nothing admitted"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_the_totals_to_describe_the_catalogue(self) -> ReviewEntryListResult:
+        if self.total_subjects != self.invariant_total + self.family_total:
+            raise ValueError(
+                "the catalogue total is the two kind totals added once; a total beside a "
+                "partition it does not sum is how a caller comes to trust a count of a "
+                "population the response does not carry"
+            )
+        if self.state == "refused" and (
+            self.total_subjects or self.invariant_total or self.family_total
+        ):
+            raise ValueError(
+                "a refused entry read measured no catalogue, so its totals are zero; totals "
+                "beside a refusal would read as a population nothing admitted"
+            )
+        if self.state == "entries" and self.total_subjects < len(self.entries):
+            raise ValueError(
+                "the catalogue total describes the population the entries come from, so it "
+                "carries at least the page beside it; a smaller total is how a whole "
+                "catalogue comes to read as a first row"
             )
         return self

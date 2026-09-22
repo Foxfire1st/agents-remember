@@ -92,34 +92,40 @@ export function ChangeSetButton({
   );
 }
 
-// What the entry read answered, as the task view needs it: the subject the pair offers (if any), and
-// -- when the read did not answer with a subject list -- the reason, in the owner's own words.
-interface ReviewSubjectRead {
+// What the catalogue read answered, as the task view needs it: every subject the pair offers with
+// the labelled totals, and -- when the read did not answer with a subject list -- the reason, in
+// the owner's own words.
+interface ReviewCatalogueRead {
   loading: boolean;
-  entry?: ReviewEntry;
+  entries?: ReviewEntry[];
+  totalSubjects?: number;
+  invariantTotal?: number;
+  familyTotal?: number;
   // The read answered `entries` with none: a known-empty answer about the pair's recorded subjects,
-  // which is a fact about the datasets and not a failure.
+  // which is a fact about the datasets and not a failure. Zero subjects is a valid catalogue beside
+  // the source inventory, and the entry below still opens that inventory.
   empty?: boolean;
   // The read refused (a typed refusal, a transport-level failure, or an answer this client does not
   // admit). It is carried rather than swallowed: the entry must be able to say why it cannot refine.
   problem?: ReviewFailure;
 }
 
-// The reviewed subject of one live leaf, read from the server that owns the resolution. The id
-// returned is a recorded identity inside the candidate the server resolved from canonical task
+// The labelled subject catalogue of one live leaf, read from the server that owns the resolution.
+// Every id returned is a recorded identity inside the pair the server resolved from canonical task
 // context, so this hook chooses no candidate and invents no id: it asks, and every answer is carried
-// -- a subject, a known-empty list, or a typed refusal whose code, reason and next action are shown
-// beside the entry (ICR-R16). The route answers a refusal with its own status and the refusal in the
-// body, so the shared review decode reads the body whatever the status; `getJson` would have thrown
-// and the detail would have been lost. Nothing is fetched for a leaf that is not live, because there
-// is no candidate to resolve and the working change-set is hidden for the same reason.
-function useReviewSubject(
+// -- the whole catalogue with its totals, a known-empty list, or a typed refusal whose code, reason
+// and next action are shown beside the entry (ICR-R16). The route answers a refusal with its own
+// status and the refusal in the body, so the shared review decode reads the body whatever the status;
+// `getJson` would have thrown and the detail would have been lost. Nothing is fetched for a leaf that
+// is not live, because there is no candidate to resolve and the working change-set is hidden for the
+// same reason.
+function useReviewCatalogue(
   live: boolean,
   repo: string,
   master: string,
   leaf?: string,
-): ReviewSubjectRead {
-  const [read, setRead] = useState<ReviewSubjectRead>({ loading: false });
+): ReviewCatalogueRead {
+  const [read, setRead] = useState<ReviewCatalogueRead>({ loading: false });
   useEffect(() => {
     let current = true;
     if (!live || !leaf) {
@@ -132,7 +138,26 @@ function useReviewSubject(
         if (!current) return;
         if (result.state === "entries") {
           const entries = result.entries ?? [];
-          setRead({ loading: false, entry: entries[0], empty: entries.length === 0 });
+          // The totals are the server's own; a body that predates them falls back to the page it
+          // carried, so a short catalogue still reads as the whole answer it is.
+          const totalSubjects =
+            typeof result.total_subjects === "number" ? result.total_subjects : entries.length;
+          const invariantTotal =
+            typeof result.invariant_total === "number"
+              ? result.invariant_total
+              : entries.filter((entry) => entry.selector_kind === "invariant").length;
+          const familyTotal =
+            typeof result.family_total === "number"
+              ? result.family_total
+              : entries.filter((entry) => entry.selector_kind === "family").length;
+          setRead({
+            loading: false,
+            entries,
+            totalSubjects,
+            invariantTotal,
+            familyTotal,
+            empty: entries.length === 0,
+          });
           return;
         }
         if (result.state === "refused") {
@@ -159,8 +184,9 @@ function useReviewSubject(
 
 // The entry read's own state, printed beside the entry rather than hidden. It never gates the entry:
 // the button beside it is offered for an admitted live candidate whatever this read answered, so a
-// refusal here is a stated reason and not a missing control.
-function ReviewEntryState({ read }: { read: ReviewSubjectRead }) {
+// refusal here is a stated reason and not a missing control. A catalogue that answered carries its
+// own picker and totals below instead of this state.
+function ReviewEntryState({ read }: { read: ReviewCatalogueRead }) {
   if (read.loading) {
     return (
       <span
@@ -200,6 +226,132 @@ function ReviewEntryState({ read }: { read: ReviewSubjectRead }) {
   );
 }
 
+// One catalogue row's presence, in the reader's own words. A retired subject is still a subject:
+// it is listed and selectable, marked for what it is rather than dropped to imply a smaller
+// complete population.
+function presenceMarker(presence: ReviewEntry["presence"] | undefined): string {
+  if (presence === "before_only") return "retired · before-only";
+  if (presence === "after_only") return "new · after-only";
+  return "";
+}
+
+// The labelled subject catalogue beside the entry: every recorded subject is selectable here, with
+// the server's own totals. The Intent review button opens the selected row; the task context (the
+// whole task, no subject) stays reachable because the button carries `review: {}` while the read
+// is loading, empty, or refused.
+function ReviewCataloguePicker({
+  read,
+  selectedId,
+  onSelect,
+}: {
+  read: ReviewCatalogueRead;
+  selectedId: string | null;
+  onSelect: (selectorId: string) => void;
+}) {
+  const entries = read.entries ?? [];
+  if (!entries.length) return null;
+  const effective = entries.find((entry) => entry.selector_id === selectedId) ?? entries[0];
+  return (
+    <span style={{ display: "inline-flex", gap: "0.4rem", alignItems: "center" }}>
+      <select
+        data-testid="review-subject-picker"
+        aria-label="reviewed subject"
+        value={effective.selector_id}
+        onChange={(event) => onSelect(event.target.value)}
+      >
+        {entries.map((entry) => {
+          const marker = presenceMarker(entry.presence);
+          return (
+            <option
+              key={`${entry.selector_kind}:${entry.selector_id}`}
+              value={entry.selector_id}
+              data-testid="review-subject-option"
+              data-selector-kind={entry.selector_kind}
+              data-presence={entry.presence ?? ""}
+            >
+              {entry.selector_kind} · {entry.label}
+              {marker ? ` · ${marker}` : ""}
+            </option>
+          );
+        })}
+      </select>
+      <span style={{ color: "muted" }} data-testid="review-catalogue-totals">
+        {read.totalSubjects ?? entries.length} subject(s)
+        {read.invariantTotal !== undefined && read.familyTotal !== undefined
+          ? ` · ${read.invariantTotal} invariant(s) · ${read.familyTotal} family/families`
+          : ""}
+      </span>
+    </span>
+  );
+}
+
+// The live leaf's own entries: the working change-set, the reviewer entry with its catalogue
+// picker, and the entry read's own state. It mounts only while the leaf's enclosure is live, so
+// the catalogue read and the selection state live here rather than in the bar above.
+function LiveLeafEntries({
+  repo,
+  master,
+  leaf,
+  onOpen,
+}: {
+  repo: string;
+  master: string;
+  leaf: string;
+  onOpen: (target: ChangeSetTarget) => void;
+}) {
+  const catalogue = useReviewCatalogue(true, repo, master, leaf);
+  // The catalogue row the Intent review button opens. It defaults to the catalogue's first row
+  // and follows the reader's own choice afterwards; a choice that outlives the catalogue (a new
+  // answer that no longer lists it) falls back to the first row rather than opening a stale id.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const listed = catalogue.entries ?? [];
+  const selected =
+    listed.length > 0
+      ? (listed.find((entry) => entry.selector_id === selectedId) ?? listed[0])
+      : undefined;
+  // The working change-set, the reviewer entry and the entry read's own state. The entry is added
+  // BESIDE the working/committed actions and never in their place: it is offered for an admitted
+  // live curator candidate -- the same liveness the working change-set is gated on -- and **the
+  // task context is the entry**: the target names the repo/master/leaf the server resolves the
+  // candidate from and carries no filesystem path, because the browser never chooses the candidate.
+  //
+  // The server's subject catalogue is a REFINEMENT and never a gate. Every recorded subject is
+  // offered in the picker beside the button, and the selected identity travels with the target
+  // so the review is opened on it; when the read answers with no subject, refuses, or fails
+  // outright (ICR-R16: the route puts its refusal in the body of a non-2xx response, and this
+  // client reads it whatever the status), the target still carries `review: {}` and the review
+  // opens on the task's complete source change inventory. The read's own answer is printed
+  // beside the entry by `ReviewEntryState`, so a refusal is a visible reason rather than a
+  // silently missing refinement. Offering the entry only for a subject is exactly how a task
+  // with no knowledge lost its source review.
+  return (
+    <>
+      <ChangeSetButton
+        target={{ repo, master, leaf, mode: "working" }}
+        label="working"
+        onOpen={onOpen}
+      />
+      <ChangeSetButton
+        target={{
+          repo,
+          master,
+          leaf,
+          review: selected
+            ? {
+                selectorKind: selected.selector_kind,
+                selectorId: selected.selector_id,
+              }
+            : {},
+        }}
+        label="Intent review"
+        onOpen={onOpen}
+      />
+      <ReviewCataloguePicker read={catalogue} selectedId={selectedId} onSelect={setSelectedId} />
+      <ReviewEntryState read={catalogue} />
+    </>
+  );
+}
+
 // The change-set bar shown on a task-document READER (master or leaf), with identity taken from
 // the doc node — so it appears with NO active enclosure (previously the change-set buttons only
 // lived on the live enclosure spine). A master gets the SERIES net button; a leaf gets COMMITTED
@@ -221,7 +373,6 @@ export function DocChangeSetBar({
   const enclosures = useDashboard((s) => s.enclosures);
   const activeWorktreeGroups = useDashboard((s) => s.activeWorktreeGroups);
   const live = leaf ? leafIsLive(enclosures, activeWorktreeGroups, repo, leaf) : false;
-  const subject = useReviewSubject(live, repo, master, leaf);
   if (!onOpen || !repo || !master) return null;
   if (kind === "master") {
     return (
@@ -238,46 +389,7 @@ export function DocChangeSetBar({
         label="committed"
         onOpen={onOpen}
       />
-      {live ? (
-        // The working change-set, the reviewer entry and the entry read's own state, all gated on the
-        // same liveness. The entry is added BESIDE the working/committed actions and never in their
-        // place: it is offered for an admitted live curator candidate -- the same liveness the working
-        // change-set is gated on -- and **the task context is the entry**: the target names the
-        // repo/master/leaf the server resolves the candidate from and carries no filesystem path,
-        // because the browser never chooses the candidate.
-        //
-        // The server's subject list is a REFINEMENT and never a gate. When it offers a recorded
-        // subject, that identity travels with the target so the review is opened on it; when the read
-        // answers with no subject, refuses, or fails outright (ICR-R16: the route puts its refusal in
-        // the body of a non-2xx response, and this client reads it whatever the status), the target
-        // still carries `review: {}` and the review opens on the task's complete source change
-        // inventory. The read's own answer is printed beside the entry by `ReviewEntryState`, so a
-        // refusal is a visible reason rather than a silently missing refinement. Offering the entry
-        // only for a subject is exactly how a task with no knowledge lost its source review.
-        <>
-          <ChangeSetButton
-            target={{ repo, master, leaf, mode: "working" }}
-            label="working"
-            onOpen={onOpen}
-          />
-          <ChangeSetButton
-            target={{
-              repo,
-              master,
-              leaf,
-              review: subject.entry
-                ? {
-                    selectorKind: subject.entry.selector_kind,
-                    selectorId: subject.entry.selector_id,
-                  }
-                : {},
-            }}
-            label="Intent review"
-            onOpen={onOpen}
-          />
-          <ReviewEntryState read={subject} />
-        </>
-      ) : null}
+      {live ? <LiveLeafEntries repo={repo} master={master} leaf={leaf} onOpen={onOpen} /> : null}
     </div>
   );
 }

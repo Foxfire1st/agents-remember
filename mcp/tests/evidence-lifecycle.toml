@@ -1413,6 +1413,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_source_endpoints.py",
   "mcp/tests/test_knowledge_review_source_content.py",
   "mcp/tests/test_knowledge_review_evidence_channels.py",
+  "mcp/tests/test_review_subject_catalogue.py",
 ]
 
 [[artifact]]
@@ -1449,6 +1450,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_one_sided_statements.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_knowledge_review_evidence_channels.py",
+  "mcp/tests/test_review_subject_catalogue.py",
 ]
 
 [[artifact]]

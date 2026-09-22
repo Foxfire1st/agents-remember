@@ -158,6 +158,7 @@ unit-regression = [
   "mcp/tests/test_retired_door_publication_fields.py",
   "mcp/tests/test_retry_selection.py",
   "mcp/tests/test_review_state.py",
+  "mcp/tests/test_review_subject_catalogue.py",
   "mcp/tests/test_role_capsule_admission.py",
   "mcp/tests/test_role_capsule_compiler.py",
   "mcp/tests/test_role_instruction_corpus.py",
