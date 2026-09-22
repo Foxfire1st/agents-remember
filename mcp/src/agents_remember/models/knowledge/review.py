@@ -42,6 +42,7 @@ from agents_remember.models.knowledge.review_records import (
     ReviewRecordChannelState,
     ReviewRecordClassName,
 )
+from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
 
 __all__ = [
     "KNOWLEDGE_REVIEW_SURFACE_VERSION",
@@ -480,6 +481,12 @@ class ReviewKnowledgePane(KnowledgeModel):
     before_conditions: tuple[str, ...] = ()
     after_conditions: tuple[str, ...] = ()
     revision_groups: tuple[ReviewRevisionGroup, ...] = ()
+    # The explicit before/after revision selection the two statements were rendered from
+    # (ICR-R07@v1): the compared head pair, the one-sided head, or the explicit ambiguous or
+    # unresolved selection that rendered no winner. It is absent exactly when no subject was
+    # compared -- the task-context pane below -- because a review that compared no operand
+    # selected no revision either.
+    revision_selection: ReviewRevisionSelection | None = None
     field_changes: tuple[ReviewFieldChange, ...] = ()
     authored_effects: tuple[ReviewAuthoredEffect, ...] = ()
     signals: tuple[ReviewSignal, ...] = ()
@@ -506,6 +513,19 @@ class ReviewKnowledgePane(KnowledgeModel):
             raise ValueError(
                 "a task-context pane states why no subject was compared, and a pane that compared a "
                 "subject carries no task-context reason"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _require_a_compared_subject_to_record_its_selection(self) -> ReviewKnowledgePane:
+        # One direction only, and deliberately so: a recorded selection implies a compared
+        # subject, but a compared subject need not carry one -- a selector that names no
+        # identity (a path seed through the direct composition call) addresses no identity
+        # item, and recording a selection there would invent the identity it never named.
+        if self.revision_selection is not None and self.selection_state != "subject_selected":
+            raise ValueError(
+                "a recorded revision selection is a selection a compared subject was rendered "
+                "from; a task-context pane that compared nothing records none"
             )
         return self
 

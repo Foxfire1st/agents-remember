@@ -322,7 +322,15 @@ def signal(fixture: DiffFixture) -> DetectionSignalPayload:
 def test_the_knowledge_pane_renders_the_subjects_own_statements_and_the_comparisons_own_facts(
     fixture: DiffFixture,
 ) -> None:
-    """Pane 1 shows the reviewed subject's two recorded statements and its own classification."""
+    """Pane 1 shows the reviewed subject's recorded selection and its own classification.
+
+    The fixture's retry identity is branchy on both snapshots -- the baseline retains two
+    successor heads of the base revision, the candidate three -- so ICR-R07@v1 reports an
+    explicit ambiguous selection rather than silently rendering the retained predecessor both
+    snapshots happen to hold. Both statements state that ambiguity, the recorded selection
+    names every head and every retained revision, and the pane's field changes are exactly the
+    comparison's own -- it adds no field transition of its own making.
+    """
 
     shipped = diff_knowledge_scope(
         KnowledgeDiffRequest(
@@ -357,15 +365,44 @@ def test_the_knowledge_pane_renders_the_subjects_own_statements_and_the_comparis
     payload = render(fixture)
     knowledge = payload.knowledge
     assert fixture.retry_invariant_id in knowledge.invariant_ids
-    assert knowledge.before_statement.state == "present"
-    assert knowledge.after_statement.state == "present"
-    # Both rendered statements are recorded ones, and the pane's field changes are exactly the
-    # comparison's own -- it adds no field transition of its own making.
-    recorded = {item.before.statement for item in subject if item.before is not None} | {
-        item.after.statement for item in subject if item.after is not None
-    }
-    assert knowledge.before_statement.text in recorded
-    assert knowledge.after_statement.text in recorded
+    base_revision = fixture.before.fixture.base_revision_id
+    successor_revision = fixture.before.fixture.successor_revision_id
+    selection = knowledge.revision_selection
+    assert selection is not None, "a compared subject records its revision selection"
+    assert selection.record_kind == "invariant"
+    assert selection.record_id == fixture.retry_invariant_id
+    # Both snapshots retain multiple legitimate heads with no authored ordering between them,
+    # so the selection is explicitly ambiguous and records no pair.
+    assert selection.state == "ambiguous"
+    assert selection.before_revision_id is None
+    assert selection.after_revision_id is None
+    assert sorted(selection.before_heads) == sorted(
+        (fixture.subject_revision_id, successor_revision)
+    )
+    assert sorted(selection.after_heads) == sorted(
+        (successor_revision, fixture.revised_revision_id, fixture.unselected_revision_id)
+    )
+    assert sorted(selection.before_retained) == sorted(
+        (base_revision, fixture.subject_revision_id, successor_revision)
+    )
+    assert sorted(selection.after_retained) == sorted(
+        (
+            base_revision,
+            fixture.subject_revision_id,
+            successor_revision,
+            fixture.revised_revision_id,
+            fixture.unselected_revision_id,
+        )
+    )
+    assert "ambiguous revision selection" in selection.statement
+    # No head's text is rendered as the subject's operand: both sides state the ambiguity, and
+    # the retained revisions stay visible through the recorded selection above.
+    assert knowledge.before_statement.state == "unresolved"
+    assert knowledge.after_statement.state == "unresolved"
+    assert knowledge.before_statement.detail == selection.statement
+    assert knowledge.after_statement.detail == selection.statement
+    assert knowledge.before_conditions == ()
+    assert knowledge.after_conditions == ()
     assert {(change.item_id, change.field) for change in knowledge.field_changes} == {
         (item.item_id, name) for item in shipped.page.items for name in item.changed_fields
     }
@@ -1195,8 +1232,24 @@ def test_a_knowledge_only_change_leaves_an_openable_review_with_a_measured_empty
     assert payload.comparison.before_code_tree_id == fixture.before_tree_id
     assert payload.staleness.state == "current"
     assert payload.knowledge.selection_state == "subject_selected"
-    assert payload.knowledge.before_statement.state == "present"
-    assert payload.knowledge.after_statement.state == "present"
+    # The knowledge half is untouched by the empty source half: the same branchy retry identity
+    # is explicitly ambiguous here too, with the same recorded heads -- only the source
+    # measurement changed, and only the source pane answers for it.
+    successor_revision = fixture.before.fixture.successor_revision_id
+    selection = payload.knowledge.revision_selection
+    assert selection is not None, "a compared subject records its revision selection"
+    assert selection.state == "ambiguous"
+    assert selection.before_revision_id is None
+    assert selection.after_revision_id is None
+    assert sorted(selection.before_heads) == sorted(
+        (fixture.subject_revision_id, successor_revision)
+    )
+    assert sorted(selection.after_heads) == sorted(
+        (successor_revision, fixture.revised_revision_id, fixture.unselected_revision_id)
+    )
+    assert payload.knowledge.before_statement.state == "unresolved"
+    assert payload.knowledge.after_statement.state == "unresolved"
+    assert payload.knowledge.before_statement.detail == selection.statement
     # Attribution is the comparison's own statement about recorded claims, *intersected with the
     # measured change population* (ICR-R04). An empty source half has no changed path for a claim to
     # attribute, so the attributed list is empty -- and the partition reports that as a measurement

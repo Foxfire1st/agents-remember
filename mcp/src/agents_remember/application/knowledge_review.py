@@ -34,12 +34,17 @@ of the bound pair and renders the source pane; :mod:`agents_remember.application
 renders the record collections the caller supplied into the evidence and submission values;
 :mod:`agents_remember.application.review_statement_sides` projects one comparison item's recorded
 content into the pane's statement sides and mechanical field rows, where ICR-R06's one-sided contract
-lives; and :mod:`agents_remember.application.review_task_context` composes the entry that needs no
+lives; :mod:`agents_remember.application.review_revision_comparison` selects which retained
+revisions those sides render -- the before head and the after head from the snapshots' own
+authored successor relationships, with explicit ambiguity when no unique head exists, which is
+ICR-R07's explicit revision comparison; and
+:mod:`agents_remember.application.review_task_context` composes the entry that needs no
 selected subject. Each is one responsibility with one implementation, and every name an importer
 referenced is re-exported below so no importer had to learn a new home -- the statement-side helpers
 are the one move that leaves no alias, because they were private to this adapter and no module under
-``mcp/`` imported them: this adapter resolves, calls and assembles, and it grows no feature logic of
-its own while its file is over the soft rail.
+``mcp/`` imported them, and the head-selection rule likewise leaves no alias because the
+both-sides preference it replaces was private to this adapter: this adapter resolves, calls and
+assembles, and it grows no feature logic of its own while its file is over the soft rail.
 
 **Every absence is a state.** An unresolvable author, a missing operand, an absent assessment
 collection and a comparison the shipped operation refused each produce a named field or a typed
@@ -81,6 +86,10 @@ from agents_remember.application.review_record_rendering import (
     signal,
     subject_states,
     submission,
+)
+from agents_remember.application.review_revision_comparison import (
+    SubjectRevisionSelection,
+    select_subject_revisions,
 )
 from agents_remember.application.review_source_inventory import (
     inventory_limitations,
@@ -124,6 +133,7 @@ from agents_remember.models.knowledge.review import (
     ReviewKnowledgePane,
     ReviewRefusal,
     ReviewRevisionGroup,
+    ReviewSideContent,
     ReviewSourceInventory,
     ReviewStaleness,
     ReviewSubjectKind,
@@ -158,8 +168,6 @@ REVIEW_MATRIX_KINDS: tuple[str, ...] = (
     "unresolved_question",
     "evidence_claim",
 )
-
-_IDENTITY_ITEM_KINDS: frozenset[str] = frozenset({"invariant", "family"})
 
 
 def read_knowledge_review(
@@ -437,6 +445,16 @@ def compose_review(
     stale = (
         previous_binding_digest is not None and previous_binding_digest != identity.binding_digest
     )
+    # The reviewed identity's explicit revision selection is made here, from the comparison's
+    # own union items and the two snapshots' own authored edges, and the pane renders it: the
+    # adapter resolves, calls and assembles, and the head rule lives in its own module.
+    selected = select_subject_revisions(
+        page.items,
+        request.selector,
+        repository_id=comparison.repository_id,
+        before_database=resolved.baseline_database,
+        after_database=resolved.candidate_database,
+    )
     return KnowledgeReviewResult(
         state="review",
         repository_id=request.repository_id,
@@ -447,7 +465,7 @@ def compose_review(
                 master=request.master,
             ),
             comparison=identity,
-            knowledge=_knowledge_pane(comparison, rows, records, subjects, request.selector),
+            knowledge=_knowledge_pane(comparison, rows, records, subjects, selected),
             source=source_pane(comparison, inventory, _comparison_attribution(comparison)),
             evidence=evidence_pane(rows, records, subjects),
             staleness=_staleness(identity, previous_binding_digest),
@@ -696,21 +714,33 @@ def _knowledge_pane(
     rows: Sequence[ReviewMatrixRow],
     records: ReviewRecordInputs,
     subjects: Mapping[str, SubjectAssessmentState],
-    selector: KnowledgeReadSeed,
+    selected: SubjectRevisionSelection | None,
 ) -> ReviewKnowledgePane:
-    """Pane 1: identities, retained revisions, exact statements and separately authored records."""
+    """Pane 1: identities, retained revisions, exact statements and separately authored records.
+
+    The two statements are the reviewed identity's selected revisions: the before head's
+    statement and the after head's, chosen from the snapshots' own authored successor
+    relationships rather than by presence on both sides (ICR-R07@v1). An ambiguous or
+    unresolved selection renders no winner: both sides state the explicit ambiguity and the
+    recorded selection beside them still lists every head and every retained revision.
+    """
 
     assert comparison.page is not None
     items = comparison.page.items
-    identity = _identity_item(items, selector)
+    if selected is None:
+        selected = SubjectRevisionSelection(selection=None, before_item=None, after_item=None)
+    before_statement, after_statement, before_conditions, after_conditions = _selected_statements(
+        selected
+    )
     return ReviewKnowledgePane(
         invariant_ids=_identity_ids(items, "invariant"),
         family_ids=_identity_ids(items, "family"),
-        before_statement=side_content(identity, "before"),
-        after_statement=side_content(identity, "after"),
-        before_conditions=side_conditions(identity, "before"),
-        after_conditions=side_conditions(identity, "after"),
+        before_statement=before_statement,
+        after_statement=after_statement,
+        before_conditions=before_conditions,
+        after_conditions=after_conditions,
         revision_groups=_revision_groups(comparison),
+        revision_selection=selected.selection,
         field_changes=field_changes(items),
         authored_effects=tuple(
             _authored_effect(row)
@@ -727,44 +757,30 @@ def _knowledge_pane(
     )
 
 
-def _identity_item(
-    items: Sequence[KnowledgeDiffItem], selector: KnowledgeReadSeed
-) -> KnowledgeDiffItem | None:
-    """The **reviewed** subject's identity item, chosen by the selector that named it.
+def _selected_statements(
+    selected: SubjectRevisionSelection,
+) -> tuple[ReviewSideContent, ReviewSideContent, tuple[str, ...], tuple[str, ...]]:
+    """Render one head selection's two statement sides and their conditions.
 
-    A comparison over an identity selector selects every retained revision reachable from that
-    identity, so one page can hold several identity items -- siblings the selection reached as well
-    as the subject the review was opened for. The pane is about the subject, which is the item whose
-    own record id is the one the caller's selector named; a sibling's item is never substituted for
-    it, and a selector that names no identity addresses no identity item at all.
+    A compared or one-sided selection renders the selected head items' own recorded sides, so a
+    known-empty side stays the absent state ICR-R06@v1 already gives it. An ambiguous or
+    unresolved selection renders no head's text as the subject's operand: both sides carry the
+    explicit statement that says why no pair was chosen, and the recorded selection beside them
+    keeps every head and every retained revision visible.
     """
 
-    wanted = _selector_record_id(selector)
-    if wanted is None:
-        return None
-    candidates = [
-        item
-        for item in items
-        if item.record_id == wanted and (item.before is not None or item.after is not None)
-    ]
-    # A subject the comparison holds on both sides is preferred, because that is the item whose two
-    # operands are the reviewed pair. An item present on one side only is the honest answer when the
-    # subject itself was added or removed, and it is used only then.
-    for item in candidates:
-        if item.before is not None and item.after is not None:
-            return item
-    return candidates[0] if candidates else None
-
-
-def _selector_record_id(selector: KnowledgeReadSeed) -> str | None:
-    """The record id an identity selector names, or ``None`` for any other seed kind."""
-
-    kind = getattr(selector, "kind", None)
-    if kind == "invariant":
-        return str(selector.invariant_id)  # type: ignore[attr-defined]
-    if kind == "family":
-        return str(selector.family_id)  # type: ignore[attr-defined]
-    return None
+    selection = selected.selection
+    if selection is not None and selection.state in ("ambiguous", "unresolved"):
+        explicit = ReviewSideContent(
+            state="unresolved", language="text", detail=selection.statement
+        )
+        return (explicit, explicit, (), ())
+    return (
+        side_content(selected.before_item, "before"),
+        side_content(selected.after_item, "after"),
+        side_conditions(selected.before_item, "before"),
+        side_conditions(selected.after_item, "after"),
+    )
 
 
 def _identity_ids(items: Sequence[KnowledgeDiffItem], kind: str) -> tuple[str, ...]:
