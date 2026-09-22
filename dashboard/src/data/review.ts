@@ -32,6 +32,12 @@ export type { ReviewFailure, ReviewFailureToken, ReviewRefusalFacts } from "./re
 
 export type ReviewSideState = "present" | "absent" | "binary" | "unresolved";
 export type ReviewSelectorKind = "invariant" | "family";
+// The two bounded collections a review can be paged over (ICR-R10): the knowledge comparison's own
+// window, and the review-matrix records' window. They are named rather than inferred because their
+// cursors are different documents, and a cursor is only ever presented with the collection its owner
+// minted it for.
+export type ReviewPagedCollection = "knowledge" | "records";
+export const REVIEW_PAGED_COLLECTIONS: ReviewPagedCollection[] = ["knowledge", "records"];
 
 export interface ReviewSideContent {
   state: ReviewSideState;
@@ -320,7 +326,49 @@ export interface ReviewPayload {
   evidence: ReviewEvidencePane;
   staleness: ReviewStaleness;
   submission: ReviewSubmission;
+  // The one bounded collection this response rendered as a page of (ICR-R10). `null` -- or absent on
+  // an older body -- means the request named no collection and this is the whole review rather than a
+  // page of one; that is a different fact from a page with nothing left in it, and `remaining`
+  // distinguishes the two.
+  page?: ReviewCollectionPage | null;
+  // The refusal a *requested* page earned when the owner could not serve it (a cursor whose
+  // comparison moved, a collection that could not be read). A page value needs the owner's own
+  // counts, and a refused read has none, so this is the refusal itself: showing "no page" instead
+  // would leave the reader on a screen that claims nothing remains. Present exactly when a page was
+  // asked for and none came back.
+  page_refusal?: ReviewRefusal | null;
   limitations: string[];
+}
+
+// One bounded collection's page, as `models/knowledge/review.py::ReviewCollectionPage` publishes it.
+//
+// `continuation` is the *server's* own opaque cursor for the next page -- never a token this client
+// constructs -- and it is present exactly when `remaining` is greater than zero. That equivalence is
+// the contract: a body that reports a remainder without a cursor is the "remaining=100 with no way to
+// inspect them" this control exists to make impossible, so the control renders no "next" action for
+// such a body rather than a button that would fetch nothing.
+//
+// `scope` names the filters that were active for the counts beside it, in the server's own
+// vocabulary, so a number is never shown apart from what it counted.
+export interface ReviewCollectionPage {
+  collection: ReviewPagedCollection;
+  state: "first_page" | "continued" | "reset";
+  // What `total` counts. The two owners measure it differently and one rendered sentence must not
+  // carry two meanings: `selection` is the size of the whole selection the walk is a page of (the
+  // comparison's own constant total, with `returned` cumulative over the walk), and `walk` is the
+  // size of the selection this walk still covers (the view measures its remainder from where the
+  // walk stands, so its total shrinks as the walk advances). `pageBounds` words each one separately.
+  total_basis?: "selection" | "walk";
+  total: number;
+  returned: number;
+  remaining: number;
+  continuation?: string | null;
+  scope: string[];
+  // The cursor this page was asked to continue, echoed back. Absent on a first page and on a reset.
+  continued_from?: string | null;
+  // The refusal a cursor earned when it no longer bound its comparison: the explicit new-generation
+  // action. The page beside it is the first page of the comparison that is there now.
+  reset?: ReviewRefusal | null;
 }
 
 export interface ReviewRefusal {
@@ -345,6 +393,13 @@ export interface ReviewResult {
 // resolved on the server from the task context and the browser must not be able to choose which
 // dataset is reviewed. Omitting the selector asks for the task's own review -- the complete source
 // change inventory of the resolved pair -- which is the entry a task with no invariant still has.
+//
+// PAGING (ICR-R10). `page` names the bounded collection this call is a page of and `continuation` is
+// the cursor that collection's previous page published for it. They travel together or not at all:
+// the server refuses a cursor that names no collection, because which owner's walk it belongs to is
+// not a question a client may answer. Omitting both asks for the whole review, exactly as before.
+// `pageSize` is a *requested* bound, and the response's own `page.scope` states the bound the server
+// actually applied.
 export const intentReview = (
   repo: string,
   master: string,
@@ -352,13 +407,84 @@ export const intentReview = (
   selectorKind?: ReviewSelectorKind,
   selectorId?: string,
   base = "",
+  page?: { of: ReviewPagedCollection; continuation?: string | null; size?: number },
 ): Promise<ReviewResult> => {
   const params: Record<string, string> = { repo, master, leaf };
   if (selectorKind !== undefined && selectorId !== undefined) {
     params.selectorKind = selectorKind;
     params.selectorId = selectorId;
   }
+  if (page !== undefined) {
+    params.pageOf = page.of;
+    if (page.continuation !== undefined && page.continuation !== null) {
+      params.continuation = page.continuation;
+    }
+    if (page.size !== undefined) {
+      params.pageSize = String(page.size);
+    }
+  }
   return getReviewJson<ReviewResult>(`${base}/api/review/intent?${qs(params)}`);
+};
+
+// The one continuation a page makes reachable, or `null` when this response has none to offer.
+//
+// It is a function rather than a field read at each call site because the two facts have to agree:
+// a page that reported rows remaining while carrying no cursor has no next page, and a caller must
+// not be handed the current cursor for it -- presenting the same cursor again would return the page
+// it already has. The body's own `remaining` and `continuation` decide it here, so a renderer cannot
+// grow a "next" control that fetches nothing or one that cycles on one page.
+export const continuationOf = (
+  payload: Pick<ReviewPayload, "page"> | undefined,
+): { of: ReviewPagedCollection; continuation: string } | null => {
+  const page = payload?.page;
+  if (!page || !page.continuation || page.remaining <= 0) return null;
+  return { of: page.collection, continuation: page.continuation };
+};
+
+// One page's own statement about itself, for the control beside it: what was returned out of what,
+// what is left, and the filters the counts were taken over. `null` when this response is not a page
+// of any collection -- the whole review, which has no remainder to state.
+export const pageBounds = (
+  payload: Pick<ReviewPayload, "page"> | undefined,
+): string | null => {
+  const page = carriedPage(payload);
+  if (!page) return null;
+  const filters = page.scope.length ? ` · ${page.scope.join(" · ")}` : "";
+  // The gloss is worded from the refusal's own CODE, not from the state alone: a reset page can mean
+  // two different things and only one of them is a moved comparison. A page whose cursor was for
+  // another collection is also a `reset` -- nothing moved, the caller used the other walk's token --
+  // and calling that "this comparison moved" would assert a generation change that did not happen.
+  const state = page.state !== "reset" ? page.state : RESET_GLOSS[page.reset?.code ?? ""] ?? RESET_GLOSS.default;
+  // The two bases are worded apart on purpose. The comparison's total is the selection's size and its
+  // returned count is cumulative, so it reads "returned 16 of 112"; the view measures its remainder
+  // from where the walk stands, so its total is what this walk still covers and the same sentence
+  // would have claimed the collection was shrinking. An older body that carries no basis is worded as
+  // the selection, which is what that sentence always meant.
+  const counts =
+    page.total_basis === "walk"
+      ? `returned ${page.returned}, ${page.remaining} remaining of the ${page.total} rows this walk still covers`
+      : `returned ${page.returned} of ${page.total} in the selection · ${page.remaining} remaining`;
+  return `${page.collection}: ${counts} (${state})${filters}`;
+};
+
+// The page a payload carries, with the two spellings of "no page" collapsed into one value.
+//
+// The route serializes its result with `exclude_none=True`, so a payload whose page is absent **omits
+// the key** rather than sending `page: null`; a hand-written or older body may send the null. They
+// mean the same thing and no consumer should have to know which spelling arrived -- the round-1
+// refusal branch compared against `null` alone, so a real refused page skipped it and the reader got
+// the sentence the branch existed to remove. Every consumer reads the page through here.
+export const carriedPage = (
+  payload: Pick<ReviewPayload, "page"> | undefined,
+): ReviewCollectionPage | null => payload?.page ?? null;
+
+// What a `reset` page's state gloss says, chosen by the refusal's code because the state alone cannot
+// tell "the comparison moved" from "that cursor is not this collection's". An unrecognised or absent
+// code is glossed as the restart it is rather than as a move nothing established.
+export const RESET_GLOSS: Record<string, string> = {
+  comparison_page_reset: "reset — this comparison moved",
+  comparison_page_unreadable: "reset — that cursor is not this collection's",
+  default: "reset — this page restarted from the collection's first page",
 };
 
 // One subject the resolved candidate pair can be reviewed on, as the server selected it. This is

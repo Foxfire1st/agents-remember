@@ -43,8 +43,30 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "d2d6dc6ad331b6913b54262786be68f63158bb5b0ba91ab9351706ab1806748d"
+LIFECYCLE_CATALOG_SHA256 = "b4d4a7f9e9500ba10f763dacdc916c0b77054113fc388f3096869fbedeef92cd"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Twenty-first deliberate re-pin (260921-ICR-L10, at base ``dcf35a0e``, 2026-09-22) -- one new case
+module's three consumer rows.** ``260921-ICR-L10`` (requirement ``ICR-R10@v1``) registers no artifact
+and no contract of its own: its seven bounded-pagination cases live in the ordinary unit module
+``mcp/tests/test_review_bounded_pagination.py``, which builds its two dataset sizes by adding
+realization claims to the shared diff fixture's candidate through the public store operation, authors
+enough review-matrix records to page that collection through the admitted candidate batch, and drives
+the real composition and the real HTTP transport rather than a constructed payload. It is therefore a
+source-derived consumer of **three** rows, each derived from the census's own finding --
+``missing=['mcp/tests/test_review_bounded_pagination.py']`` with ``unsupported=[]`` on all three:
+``mcp/tests/diff_scope_test_support.py`` (the two snapshots and the two real trees the added
+realizations extend), ``mcp/tests/read_scope_test_support.py`` (the authorship envelope and the
+recorded topology the candidate is copied from) and ``mcp/tests/candidate_batch_test_support.py``
+(the admitted destination and the resolved context the matrix's own records are written through).
+All three ``consumer_scope = "exact"`` rows gained that one path each, and the module's own lane row
+was added to ``mcp/tests/test-evidence-lanes.toml``, which pins no digest and refuses an unregistered
+module at collection. **Nothing was registered, no row was removed and no artifact's identity
+moved**, so the population stays at **sixteen contracts / sixty-six artifacts**, and the catalog is
+re-pinned from ``d2d6dc6ad331b6913b54262786be68f63158bb5b0ba91ab9351706ab1806748d`` (the Twentieth) to
+``b4d4a7f9e9500ba10f763dacdc916c0b77054113fc388f3096869fbedeef92cd``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact delta remains
+exactly empty.
 
 **Twentieth deliberate re-pin (260921-ICR-L8's second fix round, at base ``02957762``,
 2026-09-22) -- a third case module's two consumer rows.** The second fix round added the authored-line

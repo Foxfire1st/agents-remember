@@ -78,8 +78,17 @@ from agents_remember.application.review_candidate_resolution import (
 )
 from agents_remember.application.review_evidence_records import (
     AUTHORED_EFFECT_KINDS,
+    MatrixSelection,
     review_records_for,
     with_selection_channels,
+)
+from agents_remember.application.review_pagination import (
+    RecordsPagePosition,
+    comparison_page,
+    comparison_reset,
+    records_page,
+    records_page_refusal,
+    reset_comparison_page,
 )
 from agents_remember.application.review_record_rendering import (
     EMPTY_REVIEW_RECORDS,
@@ -117,7 +126,10 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.diff_display import TreeDifferenceProbe
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.diff import (
+    DIFF_DISPLAY_MAX_ITEMS,
+    KnowledgeDiffBudget,
     KnowledgeDiffItem,
+    KnowledgeDiffPage,
     KnowledgeDiffRequest,
     KnowledgeDiffResult,
     KnowledgeDiffSide,
@@ -129,6 +141,7 @@ from agents_remember.models.knowledge.review import (
     KnowledgeReviewPayload,
     KnowledgeReviewResult,
     ReviewAuthoredEffect,
+    ReviewCollectionPage,
     ReviewEntryListResult,
     ReviewKnowledgePane,
     ReviewRefusal,
@@ -139,7 +152,15 @@ from agents_remember.models.knowledge.review import (
     ReviewSurfaceRequest,
     ReviewUnresolvedReference,
 )
-from agents_remember.models.knowledge.view import ReviewMatrixRow, ViewRequest, ViewResult
+from agents_remember.models.knowledge.view import (
+    MAX_VIEW_ROWS,
+    ReviewMatrixRow,
+    ViewContinuation,
+    ViewRefusal,
+    ViewRequest,
+    ViewResult,
+    rebuild_continuation,
+)
 from agents_remember.models.lifecycles.review_assessment import SubjectAssessmentState
 
 __all__ = [
@@ -317,6 +338,12 @@ def compose_review(
     operand was compared instead of rendering an empty one. A request that does name a selector keeps
     the shipped behaviour exactly, including its refusals, because a selected subject that cannot be
     compared is a different fact from a review that selected no subject.
+
+    **A request may continue either bounded collection, and only the one it names** (ICR-R10). The
+    knowledge cursor is the comparison's own; the records cursor is the matrix view's own; neither is
+    minted, decoded or re-derived here, and a request carries at most one of them. The page the
+    response publishes is that collection's own counts and active scope with the owner's cursor for
+    whatever lies beyond it, so a remainder is never visible without the way to reach it.
     """
 
     before_source = source_tree_side(resolved.baseline_code_tree_id, resolved.baseline_code_root)
@@ -333,7 +360,16 @@ def compose_review(
     if isinstance(opened, KnowledgeReviewResult):
         return opened
 
-    comparison = _compare(resolved, request.selector, probe=probe, namespace=opened)
+    # The knowledge cursor is the comparison's own, so it is offered to the comparison and to nothing
+    # else. A cursor that no longer binds the snapshot pair the resolution opened is the
+    # moved-generation case: the comparison refuses it, and the composition asks once more for the
+    # *first* page of the comparison that is there now rather than answering from the new generation
+    # at a position the old one issued.
+    cursor = request.continuation if request.page_of == "knowledge" else None
+    comparison = _compare(opened, resolved, request, probe=probe, cursor=cursor)
+    reset = comparison_reset(comparison, cursor=cursor)
+    if reset is not None:
+        comparison = _compare(opened, resolved, request, probe=probe, cursor=None)
     page = comparison.page
     if comparison.state != "page" or page is None or comparison.binding is None:
         return refused(
@@ -341,16 +377,40 @@ def compose_review(
             _comparison_refusal(comparison, request),
         )
 
-    matrix = _review_matrix(resolved, opened, request.repository_id)
-    if isinstance(matrix, KnowledgeReviewResult):
-        return matrix
-    rows: tuple[ReviewMatrixRow, ...] = tuple(getattr(matrix.payload, "rows", ()))
+    matrix = _review_matrix(resolved, opened, request)
+    matrix_refusal = _records_refusal(
+        matrix, request.continuation if request.page_of == "records" else None
+    )
+    page_refusal = (
+        matrix_refusal if request.page_of == "records" and matrix_refusal is not None else None
+    )
+    if isinstance(matrix, ViewRefusal):
+        rows: tuple[ReviewMatrixRow, ...] = ()
+    else:
+        rows = tuple(getattr(matrix[0].payload, "rows", ()))
 
     # The two collections that live in the review matrix are added here, where the view's own answer
     # is: a review that read the matrix reports what it returned, and a review that read none says so
     # rather than reporting an absence it never asked about (ICR-R14).
+    #
+    # The page handed to the channels is the one the *payload* publishes, not the raw matrix window:
+    # a review that named no collection publishes no page and therefore no cursor, so a channel that
+    # reported a remainder beside an unpublished cursor would be claiming a reachable action that is
+    # not on the wire. The channel note and the payload therefore read the same value.
+    published_page = _collection_page(request, page, comparison, matrix, reset)
     records = with_selection_channels(
-        records, rows, selected=True, rows_remaining=_rows_remaining(matrix)
+        records,
+        rows,
+        MatrixSelection(
+            # The page is handed over only when it is **this collection's** page: a request that paged
+            # the knowledge comparison publishes a comparison page whose cursor continues the
+            # comparison and reaches no records row, so the note beside the records remainder must not
+            # claim it. In that state the note names the request that does reach them
+            # (``pageOf=records``) instead.
+            page=published_page if request.page_of == "records" else None,
+            remaining=_matrix_rows_remaining(matrix),
+            unreadable=matrix_refusal,
+        ),
     )
 
     # The endpoints are re-derived here, after every read and immediately before the payload is
@@ -407,9 +467,34 @@ def compose_review(
             evidence=evidence_pane(rows, records, subjects),
             staleness=_staleness(identity, previous_binding_digest),
             submission=submission(stale),
+            page=published_page,
+            # A requested page the owner could not serve is stated as the refusal it is: a page value
+            # needs the owner's own counts, and inventing zeros for a read that never happened would
+            # be the measured-zero lie this composition refuses. The refusal carries the code, the
+            # offending cursor and the owner's identities, so the reader gets the action rather than
+            # a control claiming there is nothing left to reach.
+            page_refusal=page_refusal,
             limitations=_limitations(comparison, inventory),
         ),
     )
+
+
+def _compare(
+    opened: str,
+    resolved: ReviewCandidateResolution,
+    request: ReviewSurfaceRequest,
+    *,
+    probe: TreeDifferenceProbe | None,
+    cursor: str | None,
+) -> KnowledgeDiffResult:
+    """The comparison this request asked for, at the position its own cursor names, or the first page.
+
+    The page size is the caller's when it named one and the comparison's own display budget otherwise,
+    so the bound the response publishes is the bound the comparison applied. Nothing else about the
+    request reaches the comparison: this adapter adds no side, no selector and no filter.
+    """
+
+    return _compare_scope(resolved, request, probe=probe, namespace=opened, continuation=cursor)
 
 
 def _comparison_attribution(comparison: KnowledgeDiffResult) -> SourceAttribution:
@@ -423,6 +508,144 @@ def _comparison_attribution(comparison: KnowledgeDiffResult) -> SourceAttributio
     expansion = comparison.expansion
     assert expansion is not None and expansion.attribution is not None
     return expansion.attribution
+
+
+def _collection_page(
+    request: ReviewSurfaceRequest,
+    page: KnowledgeDiffPage,
+    comparison: KnowledgeDiffResult,
+    matrix: tuple[ViewResult, str] | ViewRefusal,
+    reset: ReviewRefusal | None,
+) -> ReviewCollectionPage | None:
+    """The one bounded collection this request named, stated as its own page, or nothing.
+
+    A request that named no collection pages nothing and this returns ``None``: that is a different
+    fact from a page with no rows left in it, and the payload keeps them apart. The knowledge page is
+    the comparison's own window; the records page is the matrix's own. A reset -- a cursor whose
+    comparison moved -- is stated on the page it belongs to, beside the *first* page of the
+    comparison that is there now.
+    """
+
+    collection = request.page_of
+    if collection is None:
+        return None
+    if collection == "knowledge":
+        scope = _knowledge_scope(request, comparison)
+        if reset is not None:
+            return reset_comparison_page(page, reset, collection=collection, scope=scope)
+        return comparison_page(
+            page, collection=collection, scope=scope, continued_from=request.continuation
+        )
+    if isinstance(matrix, ViewRefusal):
+        # The matrix view refused the page this request named, so there is no window to state and no
+        # cursor to publish: a page whose counts nothing measured would print a remainder over a read
+        # that never happened. The refusal travels twice, deliberately -- once on the matrix channels
+        # (so an unreadable matrix is ``unavailable`` rather than a measured zero) and once as
+        # ``page_refusal`` on the payload (so the reader is told which cursor failed and what reaches
+        # the collection instead of being shown a control that claims nothing remains).
+        return None
+    return _records_page(matrix, request)
+
+
+def _matrix_rows_remaining(matrix: tuple[ViewResult, str] | ViewRefusal) -> int:
+    """How many matrix rows the view declared beyond the window it returned, or none.
+
+    It is the owner's own count, read here for the channels rather than derived from a published
+    page, because a review that named no collection still read a bounded selection: the count is
+    measured either way, and only the *cursor* depends on the page being published.
+    """
+
+    if isinstance(matrix, ViewRefusal):
+        return 0
+    payload = matrix[0].payload
+    if payload is None:  # pragma: no cover - a served view always carries its payload
+        return 0
+    return int(payload.counts.rows_remaining.value or 0)
+
+
+def _records_page(
+    matrix: tuple[ViewResult, str] | ViewRefusal, request: ReviewSurfaceRequest
+) -> ReviewCollectionPage | None:
+    """The matrix view's own counts as the records collection's page, or nothing when it refused."""
+
+    if isinstance(matrix, ViewRefusal):
+        return None
+    payload = matrix[0].payload
+    if payload is None:  # pragma: no cover - a served view always carries its payload
+        return None
+    return records_page(
+        payload.counts,
+        collection="records",
+        position=RecordsPagePosition(
+            scope=_records_scope(request),
+            continuation=None if payload.continuation is None else payload.continuation.token,
+            continued_from=request.continuation if request.page_of == "records" else None,
+            page_size=_review_page_size(request),
+        ),
+    )
+
+
+def _records_refusal(
+    matrix: tuple[ViewResult, str] | ViewRefusal, cursor: str | None
+) -> ReviewRefusal | None:
+    """The refusal a records request earned, in the surface's own vocabulary, or ``None``.
+
+    A matrix the composition asked for and could not read is a state, not an absence: the two
+    matrix-sourced collections are reported ``unavailable`` with this refusal's reason and next action
+    rather than counted as a measured zero, which is the collapse ``ICR-R14@v1`` keeps apart. When the
+    refused thing was a *cursor* whose snapshot pair moved, the refusal carries the new-generation
+    action ICR-R10 requires -- the token is not re-resolved against the generation that is there now.
+    """
+
+    if not isinstance(matrix, ViewRefusal):
+        return None
+    return records_page_refusal(
+        matrix,
+        fallback_next_action="repair the candidate dataset, then reopen the review",
+        cursor=cursor,
+    )
+
+
+def _knowledge_scope(
+    request: ReviewSurfaceRequest, comparison: KnowledgeDiffResult
+) -> tuple[str, ...]:
+    """The filters that were **active** for one knowledge page, in the owner's own vocabulary.
+
+    The reviewed subject is the comparison's own selector digest rather than the selector's spelling,
+    because the digest is what the cursor binds and two spellings of one subject are one selection.
+    The display filter is the comparison's own declared policy, which is empty for this surface: the
+    review request carries no display filter, and reporting one it did not apply would be a scope
+    statement about a filter nobody set.
+    """
+
+    selector = request.selector
+    return (
+        f"selector_digest={comparison.selector_digest}",
+        f"selector_kind={'none' if selector is None else selector.kind}",
+        f"display_filter={comparison.policy or 'none'}",
+        f"page_size={_knowledge_page_size(request)}",
+    )
+
+
+def _records_scope(request: ReviewSurfaceRequest) -> tuple[str, ...]:
+    """The filters that were **active** for one records page, in the owner's own vocabulary.
+
+    The record kinds are the ones this composition asked the view for, which is the selection the
+    counts describe; the size is the bound the view applied. Both travel with the page, so a
+    ``remaining`` count is never read apart from the selection it is a remainder of.
+    """
+
+    return (
+        f"record_kinds={','.join(REVIEW_MATRIX_KINDS)}",
+        "ordering_input=stable_ordering",
+        f"page_size={_review_page_size(request)}",
+    )
+
+
+def _knowledge_page_size(request: ReviewSurfaceRequest) -> int:
+    """The comparison window's size: the caller's when it named one, the owner's budget otherwise."""
+
+    return DIFF_DISPLAY_MAX_ITEMS if request.page_size == 0 else request.page_size
 
 
 def _open_dataset_pair(
@@ -463,10 +686,19 @@ def _open_dataset_pair(
 
 
 def _review_matrix(
-    resolved: ReviewCandidateResolution, namespace: str, repository_id: str
-) -> ViewResult | KnowledgeReviewResult:
-    """Read L20's review matrix for the candidate, or the refusal the view earns."""
+    resolved: ReviewCandidateResolution, namespace: str, request: ReviewSurfaceRequest
+) -> tuple[ViewResult, str] | ViewRefusal:
+    """Read L20's review matrix for the candidate, or hand back the view's own refusal.
 
+    The refusal is returned **unmapped** on purpose: the composition is the layer that knows whether a
+    refused read is a page cursor whose comparison moved -- a state the surface states with a new
+    generation action (ICR-R10) -- or a matrix that genuinely could not be read, and it is the only
+    layer that still holds the cursor the refusal is about.
+    """
+
+    cursor = _records_cursor(request)
+    if isinstance(cursor, ViewRefusal):
+        return cursor
     matrix = read_knowledge_view(
         resolved.candidate_database,
         open_diff_side(
@@ -479,50 +711,72 @@ def _review_matrix(
             view="review_matrix",
             repository_id=namespace,
             record_kinds=REVIEW_MATRIX_KINDS,
+            limit=_review_page_size(request),
+            continuation=cursor,
         ),
     )
     if matrix.state == "view" and matrix.payload is not None:
-        return matrix
-    detail = matrix.refusal.detail if matrix.refusal is not None else "no rows were returned"
-    return refused(
-        repository_id,
-        refusal(
-            "comparison_refused",
-            f"the review-matrix view refused the candidate: {detail}",
-            next_action="repair the candidate dataset, then reopen the review",
+        return matrix, namespace
+    if matrix.refusal is not None:
+        return matrix.refusal
+    return ViewRefusal(
+        code="snapshot_unavailable",
+        view="review_matrix",
+        detail=(
+            "the review-matrix view returned neither a payload nor a refusal, so no row of the "
+            "selection can be reported and none is invented"
         ),
+        next_action="repair the candidate dataset, then reopen the review",
     )
 
 
-def _rows_remaining(result: ViewResult) -> int:
-    """How many rows the matrix view declared beyond the page it returned, or none.
+def _records_cursor(request: ReviewSurfaceRequest) -> ViewContinuation | ViewRefusal | None:
+    """The view continuation one request presents for the records collection, or the refusal it earns.
 
-    The view's own count is the authority, so a review that rendered a bounded page reports the bound
-    instead of presenting the page it read as the whole selection (ICR-R14).
+    The token is rebuilt through the shipped codec rather than parsed here: a token this substrate did
+    not mint, or one minted for another view's walk, rebuilds nothing and the codec's own refusal is
+    what the caller receives. The rebuilt continuation then travels as the *binding* the view checks
+    the snapshot against, so a cursor issued for one candidate and presented against another is
+    refused by the owner rather than re-resolved here.
     """
 
-    payload = result.payload
-    if payload is None:  # pragma: no cover - a served view always carries its payload
-        return 0
-    return int(payload.counts.rows_remaining.value or 0)
+    if request.page_of != "records" or request.continuation is None:
+        return None
+    return rebuild_continuation(request.continuation, view="review_matrix")
 
 
-def _compare(
+def _review_page_size(request: ReviewSurfaceRequest) -> int:
+    """The row bound this request asked for, or the view's own default when it named none.
+
+    The size is a request input rather than a constant of this adapter because the bound a response
+    publishes has to be the bound its owner applied: a caller that asks for fewer rows and is told
+    ``remaining`` from a walk of a different size could not reconcile the two.
+    """
+
+    return MAX_VIEW_ROWS if request.page_size == 0 else min(request.page_size, MAX_VIEW_ROWS)
+
+
+def _compare_scope(
     resolved: ReviewCandidateResolution,
-    selector: KnowledgeReadSeed,
+    request: ReviewSurfaceRequest,
     *,
     probe: TreeDifferenceProbe | None,
-    namespace: str | None = None,
+    namespace: str,
+    continuation: str | None,
 ) -> KnowledgeDiffResult:
     """Run the shipped comparison over the two resolved datasets, adding no side and no selector.
 
     The namespace the two sides are opened under is the candidate's **own recorded** one
     (:func:`review_namespace`), not the repository name the request carried: the datasets are bound
     to an id, and a side opened under the requested spelling refuses against its own binding.
+
+    ``continuation`` is the comparison's own cursor, carried through untouched: this adapter does not
+    mint one, decode one or hold a second position, so the page a caller receives is a function of the
+    cursor the comparison's owner issued and of nothing this surface computed.
     """
 
-    if namespace is None:
-        namespace = review_namespace(resolved.repository_id, resolved.candidate_database)
+    selector = request.selector
+    assert selector is not None  # a request with no selector is answered before any comparison runs
     return diff_knowledge_scope(
         KnowledgeDiffRequest(
             selector=selector,
@@ -542,6 +796,8 @@ def _compare(
                     code_tree_id=resolved.candidate_code_tree_id,
                 )
             ),
+            budget=KnowledgeDiffBudget(max_items=_knowledge_page_size(request)),
+            continuation=continuation,
         ),
         before_path=resolved.baseline_database,
         after_path=resolved.candidate_database,

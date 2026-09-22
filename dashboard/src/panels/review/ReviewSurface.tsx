@@ -31,8 +31,10 @@ import type {
   ReviewAssessmentDisplay,
   ReviewAuthoredEffect,
   ReviewChangedFile,
+  ReviewCollectionPage,
   ReviewFailure,
   ReviewKnowledgePane,
+  ReviewPagedCollection,
   ReviewPayload,
   ReviewSelectorKind,
   ReviewSignal,
@@ -41,10 +43,15 @@ import type {
   ReviewUnrepresentablePath,
 } from "../../data/review";
 import {
+  REVIEW_PAGED_COLLECTIONS,
+  carriedPage,
+  continuationOf,
   intentOnlyRefusal,
   intentReview,
+  pageBounds,
   reviewProblemFromCause,
 } from "../../data/review";
+import type { ReviewRefusal } from "../../data/review";
 import { KnowledgeStatements } from "./KnowledgeStatements";
 import { SourceContent } from "./SourceContent";
 import {
@@ -536,9 +543,242 @@ function targetKeyOf(
   instead: ReviewFailure | null,
   selectorKind?: ReviewSelectorKind,
   selectorId?: string,
+  page?: ReviewPageRequest,
 ): string {
   const question = instead !== null ? "task-context" : `${selectorKind ?? ""}:${selectorId ?? ""}`;
-  return `${repo}/${master}/${leaf}/${question}`;
+  // The page is part of the question, not a decoration on it: page 3 of one collection is a
+  // different answer from page 1 of it, and a retained page must never be rendered under another
+  // page's header.
+  const position =
+    page === undefined
+      ? "whole"
+      : `${page.of}:${page.continuation === undefined || page.continuation === null ? "first" : page.continuation}`;
+  return `${repo}/${master}/${leaf}/${question}/${position}`;
+}
+
+// Which bounded collection this surface is paging, and at which cursor. `undefined` is the whole
+// review -- the shape every read had before paging existed -- and it is what the "first page" control
+// returns to rather than a cursor that would re-present the page already on screen.
+interface ReviewPageRequest {
+  of: ReviewPagedCollection;
+  continuation?: string | null;
+}
+
+// The page control (ICR-R10): the active collection, the bounds and scope of the page on screen, and
+// the one action that reaches the rest of it.
+//
+// "next page" is rendered exactly when the response published a remainder *and* the owner's cursor
+// for it, and it sends that cursor back unchanged. A body that reported rows remaining without a
+// cursor therefore offers no control rather than a button that would fetch nothing -- the
+// non-conformance this packet names ("remaining=100 but no way to inspect them") is unrepresentable
+// in the rendering, not merely discouraged. A page whose cursor was reset states the refusal and
+// offers the first page of the comparison that is there now, so a moved generation is a stated
+// action rather than a dead end.
+// The refusal a *requested* page earned when the owner could not serve it (ICR-R10). A page value
+// carries the owner's own counts and a refused read has none, so the server states the refusal
+// instead -- and this renders it in full, with the code, the offending cursor and the owner's two
+// identities, plus the one action that reaches the collection: its first page. Rendering "no page"
+// here instead was a false sentence ("nothing remains to reach") over a request the reader had
+// explicitly made, which is the shape this packet exists to remove.
+function PageRefusalBlock({
+  refusal,
+  collection,
+  onSelect,
+}: {
+  refusal: ReviewRefusal;
+  collection: ReviewPagedCollection;
+  onSelect: (page: ReviewPageRequest | undefined) => void;
+}) {
+  return (
+    <section data-testid="review-page-refusal" data-page-refusal-code={refusal.code}>
+      <p style={{ margin: "0.3rem 0" }}>
+        {collection} could not be served as a page — {refusal.code}: {refusal.detail}
+      </p>
+      {refusal.expected !== undefined ? (
+        <p style={{ margin: "0.2rem 0", color: "muted" }} data-testid="review-page-refusal-expected">
+          expected: {refusal.expected}
+        </p>
+      ) : null}
+      {refusal.observed !== undefined ? (
+        <p style={{ margin: "0.2rem 0", color: "muted" }} data-testid="review-page-refusal-observed">
+          observed: {refusal.observed}
+        </p>
+      ) : null}
+      <p style={{ margin: "0.2rem 0" }} data-testid="review-page-refusal-action">
+        {refusal.next_action}
+      </p>
+      <button
+        type="button"
+        data-testid="review-page-refusal-first-page"
+        onClick={() => onSelect({ of: collection })}
+      >
+        first page of {collection}
+      </button>
+    </section>
+  );
+}
+
+// The collection picker: which bounded collection the next read is a page of. Choosing one is a new
+// question rather than a continuation, so it always starts at that collection's first page, and
+// "whole review" is the state every read had before paging existed.
+function PagePicker({
+  selection,
+  onSelect,
+}: {
+  selection: ReviewPageRequest | undefined;
+  onSelect: (page: ReviewPageRequest | undefined) => void;
+}) {
+  return (
+    <span style={{ display: "inline-flex", gap: "0.4rem", alignItems: "center" }}>
+      <label style={{ color: "muted" }} htmlFor="review-page-collection">
+        page over
+      </label>
+      <select
+        id="review-page-collection"
+        data-testid="review-page-collection"
+        value={selection?.of ?? ""}
+        onChange={(event) =>
+          onSelect(
+            event.target.value === ""
+              ? undefined
+              : { of: event.target.value as ReviewPagedCollection },
+          )
+        }
+      >
+        <option value="">whole review</option>
+        {REVIEW_PAGED_COLLECTIONS.map((collection) => (
+          <option key={collection} value={collection} data-testid="review-page-option">
+            {collection}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
+
+// The two reachable actions beside the bounds: advance with the cursor the server published, or
+// restart this collection at its first page. Neither is offered unless it can do what it says --
+// "next page" needs a published cursor, and "first page" needs a collection already being paged.
+function PageActions({
+  next,
+  page,
+  selection,
+  onSelect,
+}: {
+  next: { of: ReviewPagedCollection; continuation: string } | null;
+  page: ReviewCollectionPage | null | undefined;
+  selection: ReviewPageRequest | undefined;
+  onSelect: (page: ReviewPageRequest | undefined) => void;
+}) {
+  const paging = page !== null && page !== undefined && selection !== undefined;
+  return (
+    <>
+      {next ? (
+        <button
+          type="button"
+          data-testid="review-next-page"
+          data-continuation={next.continuation}
+          onClick={() => onSelect({ of: next.of, continuation: next.continuation })}
+        >
+          next page →
+        </button>
+      ) : null}
+      {paging ? (
+        <button
+          type="button"
+          data-testid="review-first-page"
+          onClick={() => onSelect({ of: page.collection })}
+        >
+          first page
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+// The refusal a requested page earned, when there is one: a page was asked for, the response carried
+// no page, and the payload states why. It is one value so the three render branches below cannot
+// disagree about whether a refusal is on screen.
+function refusedPageOf(
+  payload: ReviewPayload,
+  selection: ReviewPageRequest | undefined,
+): { refusal: ReviewRefusal; collection: ReviewPagedCollection } | null {
+  // `carriedPage` collapses the two spellings of "no page": the server omits the key (its serializer
+  // excludes None) while a hand-written body may send `null`. Comparing against `null` alone skipped
+  // this whole branch for every real refused page, which is how the round-1 false sentence survived
+  // its own case -- that case handed the component a `page: null` the route never sends.
+  if (selection === undefined || carriedPage(payload) !== null) return null;
+  const refusal = payload.page_refusal;
+  return refusal === undefined || refusal === null
+    ? null
+    : { refusal, collection: selection.of };
+}
+
+// What the control says about the answer's shape: the page's own bounds, or -- when a page was asked
+// for and refused -- nothing at all, because the bounds sentence describes a page and there is none.
+function PageBoundsLine({
+  payload,
+  page,
+  refused,
+}: {
+  payload: ReviewPayload;
+  page: ReviewCollectionPage | null | undefined;
+  refused: boolean;
+}) {
+  if (refused) return null;
+  if (page) {
+    return (
+      <p style={{ margin: "0.3rem 0" }} data-testid="review-page-bounds">
+        {pageBounds(payload)}
+      </p>
+    );
+  }
+  return (
+    <p style={{ margin: "0.3rem 0" }} data-testid="review-page-bounds">
+      whole review — no bounded collection was paged, so there is no remainder to reach
+    </p>
+  );
+}
+
+function PageControls({
+  payload,
+  selection,
+  onSelect,
+}: {
+  payload: ReviewPayload;
+  selection: ReviewPageRequest | undefined;
+  onSelect: (page: ReviewPageRequest | undefined) => void;
+}) {
+  const page = carriedPage(payload);
+  const next = continuationOf(payload);
+  const reset = page?.reset ?? null;
+  const refused = refusedPageOf(payload, selection);
+  return (
+    <section
+      data-testid="review-page-controls"
+      data-page-collection={page?.collection ?? ""}
+      data-page-requested={selection?.of ?? ""}
+      data-page-refused={refused === null ? "false" : "true"}
+    >
+      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+        <PagePicker selection={selection} onSelect={onSelect} />
+        <PageActions next={next} page={page} selection={selection} onSelect={onSelect} />
+      </div>
+      {refused === null ? null : (
+        <PageRefusalBlock
+          refusal={refused.refusal}
+          collection={refused.collection}
+          onSelect={onSelect}
+        />
+      )}
+      <PageBoundsLine payload={payload} page={page} refused={refused !== null} />
+      {reset ? (
+        <p style={{ margin: "0.3rem 0" }} data-testid="review-page-reset">
+          {reset.code}: {reset.detail} — {reset.next_action}
+        </p>
+      ) : null}
+    </section>
+  );
 }
 
 export function ReviewSurface({
@@ -558,7 +798,11 @@ export function ReviewSurface({
   // second, explicitly asked question -- never an automatic substitution -- so the refusal stays on
   // screen while its answer is shown.
   const [instead, setInstead] = useState<ReviewFailure | null>(null);
-  const targetKey = targetKeyOf(repo, master, leaf, instead, selectorKind, selectorId);
+  // Which bounded collection this surface is paging and at which cursor (ICR-R10). It is part of the
+  // question asked of the server, so it participates in the target key below rather than being
+  // applied to the response afterwards.
+  const [selection, setSelection] = useState<ReviewPageRequest | undefined>(undefined);
+  const targetKey = targetKeyOf(repo, master, leaf, instead, selectorKind, selectorId, selection);
 
   const load = useCallback(async () => {
     setRead({ phase: "loading" });
@@ -572,6 +816,8 @@ export function ReviewSurface({
         leaf,
         instead ? undefined : selectorKind,
         instead ? undefined : selectorId,
+        "",
+        selection,
       );
       setRead(readFrom(result));
       if (result.state === "review" && result.payload) {
@@ -580,7 +826,7 @@ export function ReviewSurface({
     } catch (cause) {
       setRead({ phase: "failed", problem: reviewProblemFromCause(cause) });
     }
-  }, [repo, master, leaf, selectorKind, selectorId, instead, targetKey]);
+  }, [repo, master, leaf, selectorKind, selectorId, instead, selection, targetKey]);
 
   useEffect(() => {
     void load();
@@ -620,6 +866,7 @@ export function ReviewSurface({
       {shown ? (
         <>
           <SubmissionBlock payload={shown} />
+          <PageControls payload={shown} selection={selection} onSelect={setSelection} />
           <div className={TAKEOVER} style={{ display: "grid", gap: "1rem" }}>
             <KnowledgePane payload={shown} />
             <SourcePane payload={shown} repo={repo} master={master} leaf={leaf} />

@@ -51,10 +51,14 @@ from agents_remember.models.knowledge.review_relationships import (
     ReviewRenameInference,
 )
 from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
+from agents_remember.models.knowledge.view import MAX_VIEW_ROWS
 
 __all__ = [
     "KNOWLEDGE_REVIEW_SURFACE_VERSION",
+    "MAXIMUM_REVIEW_PAGE_SIZE",
     "PROPOSED_ASSESSMENT_DISPOSITIONS",
+    "REVIEW_PAGED_COLLECTIONS",
+    "REVIEW_PAGE_RESET_NEXT_ACTION",
     "REVIEW_PANE_NAMES",
     "ComparisonIdentity",
     "KnowledgeReviewPayload",
@@ -64,6 +68,7 @@ __all__ = [
     "ReviewAuthoredLineage",
     "ReviewCandidateRef",
     "ReviewChangedFile",
+    "ReviewCollectionPage",
     "ReviewEntry",
     "ReviewEntryListResult",
     "ReviewEvidenceLink",
@@ -127,9 +132,42 @@ ReviewRefusalCode = Literal[
     "candidate_dataset_absent",
     "subject_unresolved",
     "comparison_refused",
+    "comparison_page_reset",
+    "comparison_page_unreadable",
     "source_content_unresolved",
     "review_adapter_unavailable",
 ]
+
+# The two bounded collections one review composes, declared once so the request, the payload and the
+# transport cannot come to disagree about which one a cursor addresses (ICR-R10). They are separate
+# because their cursors are separate shipped documents -- the comparison's own cursor positions a
+# page in a union of two snapshots, and the view's continuation positions one in a single selection
+# of one of them -- and presenting either to the other operation is a caller's mistake that the
+# owners refuse rather than a slice this surface may reinterpret.
+ReviewPagedCollection = Literal["knowledge", "records"]
+REVIEW_PAGED_COLLECTIONS: tuple[ReviewPagedCollection, ...] = ("knowledge", "records")
+
+# The one sentence a page cursor that no longer binds its comparison earns. It is the *new
+# generation* action ICR-R10 requires of a moved snapshot: the cursor is not re-resolved, not
+# silently answered from the new generation, and the reader is told exactly what to do instead.
+#
+# It belongs to ``comparison_page_reset`` alone. A cursor this surface did not mint for the
+# collection the request names is a *different* fact -- nothing moved, the caller used the other
+# walk's token -- and it is answered with ``comparison_page_unreadable`` and the owner's own next
+# action, because telling that caller to open a new comparison would assert a generation change that
+# did not happen.
+REVIEW_PAGE_RESET_NEXT_ACTION = (
+    "open a new comparison: a cursor is a position in one comparison of two named snapshots, so the "
+    "moved one cannot be continued; the surface serves the first page of the comparison that is "
+    "there now and this response names the comparison the cursor was minted at"
+)
+
+# The largest page a caller may ask this surface for, and it is the record owner's own declared
+# bound rather than a second page limit invented here: ``ViewRequest.limit`` caps at
+# ``MAX_VIEW_ROWS``, so a larger request would be narrowed by the owner while the response claimed
+# the size the caller named. The knowledge comparison keeps its own owner's budget, which is why
+# this is a ceiling for the request rather than the size of every page.
+MAXIMUM_REVIEW_PAGE_SIZE = MAX_VIEW_ROWS
 
 # The two subject kinds the surface reviews, declared once here so the transport, the entry list and
 # the panes cannot come to disagree about which identities are reviewable. The name is the server's;
@@ -201,12 +239,37 @@ class ReviewSurfaceRequest(KnowledgeModel):
     declared source comparison, and this request is how a caller asks for it. A request with no
     selector compares no knowledge operand at all -- it does not select "everything", and the
     payload states which of the two it did.
+
+    ``page_of`` names which of the two bounded collections this call continues, and ``continuation``
+    is the cursor that collection's own owner minted for it (ICR-R10). They travel as a pair: a
+    cursor presented without naming its collection would be a token this surface had to guess the
+    owner of, and naming a collection without a cursor is the first page of it. The cursor is an
+    *input* rather than a position the server recomputes, so a page is a function of the cursor and
+    the same comparison -- never of whatever the dataset holds when the request lands.
     """
 
     repository_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     master: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     leaf_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     selector: KnowledgeReadSeed | None = None
+    # One past the largest page either owner can return, so a caller cannot ask this surface for a
+    # page bigger than the owner's own declared bound: ``ViewRequest.limit`` caps at
+    # ``MAX_VIEW_ROWS``, and a budget above it would be silently narrowed by the owner -- a page the
+    # caller asked for and the response did not bound.
+    page_of: ReviewPagedCollection | None = None
+    continuation: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    page_size: int = Field(default=0, ge=0, le=MAXIMUM_REVIEW_PAGE_SIZE)
+
+    @model_validator(mode="after")
+    def _require_the_cursor_and_its_collection_together(self) -> ReviewSurfaceRequest:
+        """Refuse a continuation that names no collection, rather than guessing its owner."""
+
+        if self.continuation is not None and self.page_of is None:
+            raise ValueError(
+                "a continuation names the bounded collection it continues; presenting a cursor "
+                "without one would make this surface choose which owner's walk it belongs to"
+            )
+        return self
 
 
 class ReviewCandidateRef(KnowledgeModel):
@@ -281,6 +344,98 @@ class ComparisonIdentity(KnowledgeModel):
             raise ValueError(
                 "a comparison that compared no knowledge carries no selector or snapshot digest; "
                 "one beside the statement is how an invented selection becomes readable"
+            )
+        return self
+
+
+class ReviewRefusal(KnowledgeModel):
+    """One typed review refusal, naming the offending input and the concrete next action.
+
+    A refusal is a state and never a degraded success: a caller that receives one has no panes, and
+    must not be able to read the absence of panes as a review of an empty candidate.
+    """
+
+    code: ReviewRefusalCode
+    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    next_action: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    offending_input: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+    expected: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+    observed: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+
+
+class ReviewCollectionPage(KnowledgeModel):
+    """One bounded collection's page: its counts, its active scope, and its reachable continuation.
+
+    This is the value ICR-R10 exists for. The surface publishes **one** of these for the collection a
+    request continued, and it is the same value whether the request opened the collection or advanced
+    it: a first page and a later page are the same shape, so a reader never has to treat "page 1" as
+    a special case and a renderer cannot grow a continuation control that only one of them has.
+
+    ``returned`` and ``remaining`` are the owner's own numbers, not a subtraction this surface made:
+    the comparison reports ``items_returned`` cumulative over the walk, and the view reports the rows
+    it returned beside the rows it declared beyond them. Their sum is the collection's total, which is
+    the arithmetic a caller has to be able to trust before "page 3 of 5" means anything -- so it is a
+    constructor check here rather than a claim in prose.
+
+    ``continuation`` is the next page's cursor, and it is present **exactly** when rows remain. That
+    equivalence is the whole point: a response that reported ``remaining=100`` and offered no way to
+    reach them is the non-conformance this packet names, and a payload with rows left and no cursor
+    cannot be constructed. The token is the owner's own opaque cursor -- the comparison's for
+    ``knowledge``, the view's for ``records`` -- carried through this surface rather than re-minted,
+    because a second cursor format here would be a second pagination authority.
+
+    ``scope`` names the filters that were **active** for this page, in the owner's own vocabulary, so
+    a count is never read apart from what it counted: the reviewed subject, the record kinds the
+    matrix selected, the page size the owner honoured, and the display filter the comparison applied.
+    An empty active filter is carried as the empty tuple rather than omitted, so "no filter" and "a
+    filter this response did not report" are distinguishable.
+    """
+
+    collection: ReviewPagedCollection
+    state: Literal["first_page", "continued", "reset"]
+    # What ``total`` counts, declared by the builder that read the owner's own numbers, because the
+    # two owners measure it differently and one rendered sentence must not carry two meanings:
+    # ``selection`` is the size of the *whole* selection the walk is a page of (the comparison's own
+    # ``items_total``, constant on every page), and ``walk`` is the size of the selection this walk
+    # still covers (the view measures its remainder from where the walk stands, so its total shrinks
+    # as the walk advances). ``returned`` is cumulative only in the first case.
+    total_basis: Literal["selection", "walk"]
+    total: int = Field(ge=0)
+    returned: int = Field(ge=0)
+    remaining: int = Field(ge=0)
+    continuation: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    scope: tuple[str, ...] = ()
+    # The cursor this page was asked to continue, echoed back so a reader can see which position the
+    # returned window was taken at. It is absent on a first page and on a reset, where no cursor was
+    # followed -- ``state`` says which of the three happened rather than leaving it to be inferred.
+    continued_from: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
+    # The refusal a cursor earned when it could no longer bind its comparison. It is the *new
+    # generation* action of ICR-R10's failure behavior: the cursor is not re-resolved, the page
+    # served is the current comparison's first page, and this field names the comparison the cursor
+    # was minted at beside the one that is there now.
+    reset: ReviewRefusal | None = None
+
+    @model_validator(mode="after")
+    def _require_one_walk(self) -> ReviewCollectionPage:
+        if self.returned + self.remaining != self.total:
+            raise ValueError(
+                "returned plus remaining must equal the bounded collection's total; a page that "
+                "reports otherwise cannot be continued to the whole collection"
+            )
+        if (self.remaining > 0) != (self.continuation is not None):
+            raise ValueError(
+                "a page with rows remaining carries the cursor that reaches them and one with none "
+                "carries no cursor; a count with no reachable continuation is not a page of anything"
+            )
+        if (self.state == "reset") != (self.reset is not None):
+            raise ValueError(
+                "a reset page carries the refusal its cursor earned and no other state does; a "
+                "reset stated without its reason is indistinguishable from a first page"
+            )
+        if (self.state == "continued") != (self.continued_from is not None):
+            raise ValueError(
+                "a continued page names the cursor it was asked to continue, and a first page or a "
+                "reset continued nothing"
             )
         return self
 
@@ -824,6 +979,12 @@ class KnowledgeReviewPayload(KnowledgeModel):
     R02 requires, in which the source pane still carries the complete inventory of the bound pair.
     The absence is not a blank: it is held in agreement with the staleness state below, so a payload
     cannot omit the comparison and still claim to be current.
+
+    ``page`` is the bounded collection this response rendered as a page of (ICR-R10). It is present
+    exactly when the request named one, and it carries that collection's total, returned and remaining
+    counts, the filters that were active, and the cursor that reaches the rest -- so a reader is never
+    shown a remainder without the way to reach it. A request that named no collection pages nothing
+    and carries no page, which is a different fact from a page with nothing left in it.
     """
 
     surface_version: str = Field(
@@ -836,6 +997,14 @@ class KnowledgeReviewPayload(KnowledgeModel):
     evidence: ReviewEvidencePane
     staleness: ReviewStaleness
     submission: ReviewSubmission
+    page: ReviewCollectionPage | None = None
+    # The refusal a *requested* page earned when no page could be stated from it (ICR-R10). A page
+    # value needs the owner's own counts, and a refused read has none, so the honest shape is the
+    # refusal itself rather than a page of invented zeros: the code, the offending cursor and the
+    # owner's expected/observed identities all reach the reader, and the client can offer the first
+    # page of the collection as the live action. It is present exactly when a page was asked for and
+    # none could be served, which is why it is checked against ``page`` here.
+    page_refusal: ReviewRefusal | None = None
     limitations: tuple[str, ...] = ()
 
     @model_validator(mode="after")
@@ -857,6 +1026,17 @@ class KnowledgeReviewPayload(KnowledgeModel):
         return self
 
     @model_validator(mode="after")
+    def _require_one_page_outcome(self) -> KnowledgeReviewPayload:
+        """A payload states a page or the refusal a page earned, never both and never neither by accident."""
+
+        if self.page is not None and self.page_refusal is not None:
+            raise ValueError(
+                "a payload carries the page it served or the refusal a requested page earned; a "
+                "page beside its own refusal is two answers to one question"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _require_the_identity_and_staleness_to_agree(self) -> KnowledgeReviewPayload:
         absent = self.comparison is None
         if absent != (self.staleness.state == "not_compared"):
@@ -873,21 +1053,6 @@ class KnowledgeReviewPayload(KnowledgeModel):
                 "to disagree with itself"
             )
         return self
-
-
-class ReviewRefusal(KnowledgeModel):
-    """One typed review refusal, naming the offending input and the concrete next action.
-
-    A refusal is a state and never a degraded success: a caller that receives one has no panes, and
-    must not be able to read the absence of panes as a review of an empty candidate.
-    """
-
-    code: ReviewRefusalCode
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    next_action: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    offending_input: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    expected: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    observed: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
 
 
 class KnowledgeReviewResult(KnowledgeModel):

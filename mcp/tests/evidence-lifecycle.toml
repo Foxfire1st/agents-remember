@@ -1249,6 +1249,7 @@ consumers = [
   "mcp/tests/test_knowledge_change_sets.py",
   "mcp/tests/test_knowledge_curator_ingest.py",
   "mcp/tests/test_knowledge_effect_claims.py",
+  "mcp/tests/test_review_bounded_pagination.py",
 ]
 
 [[artifact]]
@@ -1417,6 +1418,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_relationship_movement.py",
   "mcp/tests/test_knowledge_review_relationship_reach.py",
   "mcp/tests/test_knowledge_review_relationship_line.py",
+  "mcp/tests/test_review_bounded_pagination.py",
 ]
 
 [[artifact]]
@@ -1457,6 +1459,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_relationship_movement.py",
   "mcp/tests/test_knowledge_review_relationship_reach.py",
   "mcp/tests/test_knowledge_review_relationship_line.py",
+  "mcp/tests/test_review_bounded_pagination.py",
 ]
 
 [[artifact]]

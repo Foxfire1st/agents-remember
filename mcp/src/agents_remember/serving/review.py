@@ -34,8 +34,11 @@ from agents_remember.models.knowledge.read import (
     KnowledgeReadSeed,
 )
 from agents_remember.models.knowledge.review import (
+    MAXIMUM_REVIEW_PAGE_SIZE,
+    REVIEW_PAGED_COLLECTIONS,
     KnowledgeReviewResult,
     ReviewEntryListResult,
+    ReviewPagedCollection,
     ReviewSurfaceRequest,
 )
 from agents_remember.models.knowledge.review_source_content import (
@@ -47,10 +50,17 @@ __all__ = [
     "KNOWLEDGE_REVIEW_ENTRIES_ROUTE",
     "KNOWLEDGE_REVIEW_ROUTE",
     "KNOWLEDGE_REVIEW_SOURCE_CONTENT_ROUTE",
+    "NO_PAGING",
+    "NO_SELECTOR",
+    "AdmittedPaging",
     "KnowledgeReviewEntriesPort",
     "KnowledgeReviewPort",
+    "ReviewPagingRef",
+    "ReviewSelectorRef",
     "ReviewSourceContentPort",
     "SourceContentRef",
+    "UnadmittedReviewQuery",
+    "paged_review_request",
     "register_review_routes",
     "review_request_from_query",
     "source_content_request_from_query",
@@ -189,6 +199,64 @@ class SourceContentRef:
     after_code_tree_id: Annotated[str, Query(alias="afterCodeTreeId")] = ""
 
 
+@dataclass(frozen=True)
+class ReviewSelectorRef:
+    """Which recorded subject a request reviews, as the two query parameters spelling it.
+
+    It is one value for the same reason the expansion's selector is: the two fields are one question
+    -- which subject, of which reviewable kind -- and a caller that supplied only half of it would be
+    asking for a subject this surface cannot address. FastAPI derives both from the query string.
+    """
+
+    selector_kind: Annotated[str | None, Query(alias="selectorKind")] = None
+    selector_id: Annotated[str | None, Query(alias="selectorId")] = None
+
+
+# The one no-subject value: the task-context request, which compares no knowledge operand. A module
+# singleton because the route's `Depends()` default must not be a call performed in the signature.
+NO_SELECTOR = ReviewSelectorRef()
+
+
+@dataclass(frozen=True)
+class ReviewPagingRef:
+    """Which bounded collection a request continues, and the cursor its owner minted for it.
+
+    It is a reference rather than three loose parameters for the same reason the expansion's selector
+    is one: the fields are one question -- "which walk, at which position" -- and FastAPI derives them
+    from the query string, so the transport never assembles a part of the question itself. Its default
+    is a module-level value rather than a call in the signature, so the route's dependency is one
+    shared immutable object instead of one built per request.
+    """
+
+    page_of: Annotated[str | None, Query(alias="pageOf")] = None
+    continuation: Annotated[str | None, Query()] = None
+    # The bound is deliberately *not* a ``Query(le=...)``: this route admits or refuses the pair in
+    # its own vocabulary, so an over-bound size reaches the caller as the route's actionable
+    # ``bad-request`` naming the maximum rather than as a framework 422 or -- as it was before this
+    # was fixed -- an uncaught model error and an opaque 500.
+    page_size: Annotated[int, Query(alias="pageSize")] = 0
+
+
+# The one no-paging value: a request that continues nothing. It is a module singleton because the
+# route's `Depends()` default must not be a call performed in the signature.
+NO_PAGING = ReviewPagingRef()
+
+
+@dataclass(frozen=True)
+class UnadmittedReviewQuery:
+    """One query this route will not turn into a request, and the input that stopped it.
+
+    It exists because the refusal body's own contract is to name *the offending input*: a caller that
+    sent a bad collection name and was pointed at its (perfectly good) subject selector cannot repair
+    the request. The field is therefore filled by the branch that failed rather than by a fallback
+    order over everything the caller sent.
+    """
+
+    offending_input: str
+    detail: str
+    expected: str
+
+
 def review_request_from_query(
     repository_id: str,
     master: str,
@@ -196,7 +264,7 @@ def review_request_from_query(
     selector_kind: str | None,
     selector_id: str | None,
 ) -> ReviewSurfaceRequest | None:
-    """Parse one query string into the typed request, or ``None`` when a selector is not admitted.
+    """Parse one query string into the typed request, or ``None`` when the selector is not admitted.
 
     Two shapes are admitted and they are different questions. **No selector at all** is the task
     context: the review is opened from the task and lists the complete source change inventory of the
@@ -205,30 +273,169 @@ def review_request_from_query(
     this surface does not review, are both refused with ``None`` rather than guessed at, because a
     caller that asked for a specific subject and received a whole-task review would be reading an
     answer to a question it did not ask.
+
+    The paging pair is admitted by :func:`paged_review_request`, which this function calls; both
+    spellings of the request therefore go through one place that decides which shapes are admitted.
     """
 
-    if selector_kind is None and selector_id is None:
+    admitted = paged_review_request(
+        repository_id,
+        master,
+        leaf_id,
+        ReviewSelectorRef(selector_kind=selector_kind, selector_id=selector_id),
+        NO_PAGING,
+    )
+    # This spelling is the selector-only one its existing callers and tests use, so a problem is
+    # reported the way it always was here; the richer answer is :func:`paged_review_request`'s.
+    return None if isinstance(admitted, UnadmittedReviewQuery) else admitted
+
+
+def paged_review_request(
+    repository_id: str,
+    master: str,
+    leaf_id: str,
+    selector: ReviewSelectorRef,
+    paging: ReviewPagingRef,
+) -> ReviewSurfaceRequest | UnadmittedReviewQuery:
+    """Parse one query string, with its paging pair, into the typed request or the refusal it earns.
+
+    ``paging`` is the paging pair (ICR-R10): the collection this call continues and the cursor that
+    collection's own owner minted for it. A cursor without a collection is refused here rather than
+    forwarded -- which owner's walk it belongs to is not a question this transport may answer -- and a
+    collection name outside the two the surface pages is refused for the same reason the selector kind
+    is. A page size above the surface's declared maximum is refused here too, in this route's own
+    vocabulary, because the model's own bound would otherwise be an uncaught validation error. The
+    transport *parses* them and decides nothing else: whether the cursor binds the comparison this
+    request resolves to is the owners' own answer.
+    """
+
+    admitted = _admitted_paging(paging)
+    if isinstance(admitted, UnadmittedReviewQuery):
+        return admitted
+    if selector.selector_kind is None and selector.selector_id is None:
         return ReviewSurfaceRequest(
             repository_id=repository_id,
             master=master,
             leaf_id=leaf_id,
             selector=None,
+            page_of=admitted.collection,
+            continuation=admitted.continuation,
+            page_size=admitted.page_size,
         )
-    if not selector_kind or not selector_id:
-        return None
+    if not selector.selector_kind or not selector.selector_id:
+        return _unadmitted(
+            offending_input=selector.selector_kind or selector.selector_id or "",
+            detail=(
+                "the review selector is half-named: a subject kind without its record id, or a record "
+                "id without its kind, names no reviewable subject and is not the task context either"
+            ),
+            expected="selectorKind=invariant|family together with selectorId, or neither",
+        )
     seed: KnowledgeReadSeed | None = None
-    if selector_kind == "invariant":
-        seed = InvariantIdentitySeed(invariant_id=selector_id)
-    elif selector_kind == "family":
-        seed = FamilyIdentitySeed(family_id=selector_id)
+    if selector.selector_kind == "invariant":
+        seed = InvariantIdentitySeed(invariant_id=selector.selector_id)
+    elif selector.selector_kind == "family":
+        seed = FamilyIdentitySeed(family_id=selector.selector_id)
     if seed is None:
-        return None
+        return _unadmitted(
+            offending_input=selector.selector_kind,
+            detail=(
+                "the review selector names no admitted subject kind; the surface reviews one recorded "
+                "invariant or family identity, or no subject at all when both selector parameters "
+                "are omitted"
+            ),
+            expected=f"{', '.join(SELECTOR_KINDS)}, or no selector at all",
+        )
     return ReviewSurfaceRequest(
         repository_id=repository_id,
         master=master,
         leaf_id=leaf_id,
         selector=seed,
+        page_of=admitted.collection,
+        continuation=admitted.continuation,
+        page_size=admitted.page_size,
     )
+
+
+@dataclass(frozen=True)
+class AdmittedPaging:
+    """The three paging fields once this route has admitted them, in the request's own types.
+
+    It exists so the admission's answers are typed rather than assembled as a loose mapping: the
+    collection is the request model's own literal union, and a caller cannot hand a string the
+    membership test never passed.
+    """
+
+    collection: ReviewPagedCollection | None = None
+    continuation: str | None = None
+    page_size: int = 0
+
+
+def _admitted_paging(paging: ReviewPagingRef) -> AdmittedPaging | UnadmittedReviewQuery:
+    """The three paging fields as one request mapping, or the admission problem the pair earns.
+
+    The three checks are one decision -- "is this a paging pair this route admits" -- so they live
+    together and each names the value that failed. A page size above the surface's declared maximum is
+    refused here in this route's own vocabulary rather than raised out of the request model as an
+    uncaught validation error.
+    """
+
+    # An empty query spelling is an absent parameter, not a value: ``pageOf=`` is what a form sends
+    # when the reader picked "whole review", and forwarding it as a collection name would fail the
+    # request model's own literal (an uncaught validation error) instead of answering as the absence
+    # it is.
+    collection = None if not paging.page_of else _admitted_collection(paging.page_of)
+    continuation = paging.continuation or None
+    if paging.page_of and collection is None:
+        return _unadmitted(
+            offending_input=paging.page_of,
+            detail=(
+                "pageOf names no bounded collection this surface pages; the surface publishes a page "
+                "of the knowledge comparison or of the review-matrix records and of nothing else"
+            ),
+            expected=f"{', '.join(REVIEW_PAGED_COLLECTIONS)}",
+        )
+    if continuation is not None and collection is None:
+        return _unadmitted(
+            offending_input=continuation,
+            detail=(
+                "a continuation was presented without the collection it continues; which owner's walk "
+                "a cursor belongs to is not a question this transport may answer"
+            ),
+            expected="pageOf beside every continuation",
+        )
+    if not 0 <= paging.page_size <= MAXIMUM_REVIEW_PAGE_SIZE:
+        return _unadmitted(
+            offending_input=str(paging.page_size),
+            detail=(
+                f"pageSize is outside the bound this surface applies: a page is between 1 and "
+                f"{MAXIMUM_REVIEW_PAGE_SIZE} rows, and 0 asks for the owner's own declared bound; a "
+                "size the surface would have to narrow is refused rather than silently shrunk"
+            ),
+            expected=f"0 (the owner's bound) or 1..{MAXIMUM_REVIEW_PAGE_SIZE}",
+        )
+    return AdmittedPaging(
+        collection=collection, continuation=continuation, page_size=paging.page_size
+    )
+
+
+def _admitted_collection(value: str) -> ReviewPagedCollection | None:
+    """One admitted collection name as the request model's own literal, or ``None``.
+
+    The membership test is the loop: the tuple's element type is the literal union, so a name that
+    matches an admitted entry *is* that value rather than a string this module asserts is one.
+    """
+
+    for admitted in REVIEW_PAGED_COLLECTIONS:
+        if value == admitted:
+            return admitted
+    return None
+
+
+def _unadmitted(*, offending_input: str, detail: str, expected: str) -> UnadmittedReviewQuery:
+    """One admission problem, naming the input that actually stopped the request."""
+
+    return UnadmittedReviewQuery(offending_input=offending_input, detail=detail, expected=expected)
 
 
 def source_content_request_from_query(
@@ -309,8 +516,8 @@ def register_review_routes(
         repo: str,
         master: str,
         leaf: str,
-        selectorKind: Annotated[str | None, Query(alias="selectorKind")] = None,
-        selectorId: Annotated[str | None, Query(alias="selectorId")] = None,
+        selector: Annotated[ReviewSelectorRef, Depends()] = NO_SELECTOR,
+        paging: Annotated[ReviewPagingRef, Depends()] = NO_PAGING,
     ) -> Response:
         if port is None:
             return JSONResponse(
@@ -328,21 +535,22 @@ def register_review_routes(
                 },
                 status_code=503,
             )
-        request = review_request_from_query(repo, master, leaf, selectorKind, selectorId)
-        if request is None:
+        request = paged_review_request(repo, master, leaf, selector, paging)
+        if isinstance(request, UnadmittedReviewQuery):
+            # The body names the input the admission actually refused. It used to fall back over
+            # everything the caller sent, so a bad pageOf was reported as the (admitted) selector
+            # kind -- pointing a caller repairing the request at the one parameter that was fine.
             return JSONResponse(
                 {
                     "status": "bad-request",
-                    "detail": (
-                        "the review selector names no admitted subject kind; the surface reviews "
-                        "one recorded invariant or family identity, or no subject at all when both "
-                        "selector parameters are omitted"
-                    ),
-                    "offendingInput": selectorKind or selectorId,
-                    "expected": f"{', '.join(SELECTOR_KINDS)}, or no selector at all",
+                    "detail": request.detail,
+                    "offendingInput": request.offending_input,
+                    "expected": request.expected,
                     "nextAction": (
                         "name selectorKind=invariant|family together with the subject's record id, "
-                        "or omit both to review the task's complete source change inventory"
+                        "or omit both to review the task's complete source change inventory; to "
+                        "advance a page, send back the continuation the previous response published "
+                        "beside the pageOf it was published for"
                     ),
                 },
                 status_code=400,
