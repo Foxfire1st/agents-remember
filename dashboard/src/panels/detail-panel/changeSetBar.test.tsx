@@ -1,6 +1,7 @@
 import { act, fireEvent, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { dashboardStore } from "../../data/store";
 import { DetailPanel } from "./DetailPanel";
 import {
   enclosure,
@@ -68,6 +69,75 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
     expect(onOpenChangeSet).toHaveBeenCalledWith({
       repo: "agents-remember",
       master: "260628_operations-integration",
+    });
+  });
+
+  it("opens the series view bound to the generation the net published", async () => {
+    // The master net names its exact endpoints; the entry carries those pins into the viewer so
+    // the view -- and each file expansion inside it -- reads the listed generation rather than
+    // re-resolving the live tip.
+    const generation = {
+      codeBase: "b0",
+      codeTip: "t2",
+      memoryBase: "",
+      memoryTip: "",
+      digest: "ab".repeat(32),
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.startsWith("/api/task-document")) {
+          const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
+          const docPath = params.get("path") ?? "";
+          const doc =
+            dashboardStore.getState().analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
+            taskDoc({ kind: docPath.endsWith("/task.json") ? "master" : "subTask", docPath });
+          return { ok: true, status: 200, json: async () => doc } as unknown as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            counters: {
+              code: { files: 0, insertions: 0, deletions: 0 },
+              memory: { files: 0, insertions: 0, deletions: 0 },
+            },
+            generation,
+            currentness: "current",
+            scope: "integrated",
+          }),
+        } as unknown as Response;
+      }),
+    );
+    const master = taskDoc({
+      lifecycleId: undefined,
+      kind: "master",
+      title: "Operations Integration",
+      repository: "agents-remember",
+      docPath: "/tasks/agents-remember/260628_operations-integration/task.json",
+      objective: "Master objective.",
+    });
+    seedTaskDocuments([master]);
+    const onOpenChangeSet = vi.fn();
+    const { findAllByTestId } = render(
+      <DetailPanel
+        selectedId="taskdoc:/tasks/agents-remember/260628_operations-integration/task.json"
+        onOpenChangeSet={onOpenChangeSet}
+      />,
+    );
+    const buttons = await findAllByTestId("open-changeset");
+    expect(buttons).toHaveLength(1);
+    await act(async () => {});
+    fireEvent.click(buttons[0]);
+    expect(onOpenChangeSet).toHaveBeenCalledWith({
+      repo: "agents-remember",
+      master: "260628_operations-integration",
+      generation: {
+        codeBase: "b0",
+        codeTip: "t2",
+        memoryBase: "",
+        memoryTip: "",
+      },
     });
   });
 

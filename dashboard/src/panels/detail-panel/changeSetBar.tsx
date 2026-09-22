@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import {
   type ChangeCounters,
+  type MasterNetPins,
   leafChangeset,
   masterChangeset,
   taskChangeset,
@@ -37,17 +38,39 @@ export function ChangeSetButton({
   const [counters, setCounters] = useState<{ code: ChangeCounters; memory: ChangeCounters } | null>(
     null,
   );
+  // The generation the fetched net published, when it names one (only the master net does). The
+  // entry opens the viewer bound to it, so the view -- and each file expansion inside it -- reads
+  // the listed generation rather than re-resolving the live tip.
+  const [generation, setGeneration] = useState<MasterNetPins | null>(null);
   useEffect(() => {
     let live = true;
     setCounters(null);
+    setGeneration(null);
     const req = target.leaf
       ? leafChangeset(target.repo, target.master ?? "", target.leaf, target.mode ?? "committed")
       : target.master
         ? masterChangeset(target.repo, target.master, { includeLeaves: false })
         : taskChangeset(target.repo, target.scope ?? "");
     void req.then(
-      (d) => live && setCounters(d.counters),
-      () => live && setCounters(null),
+      (d) => {
+        if (!live) return;
+        setCounters(d.counters);
+        setGeneration(
+          "generation" in d && d.generation
+            ? {
+                codeBase: d.generation.codeBase,
+                codeTip: d.generation.codeTip,
+                memoryBase: d.generation.memoryBase,
+                memoryTip: d.generation.memoryTip,
+              }
+            : null,
+        );
+      },
+      () => {
+        if (!live) return;
+        setCounters(null);
+        setGeneration(null);
+      },
     );
     return () => {
       live = false;
@@ -60,7 +83,7 @@ export function ChangeSetButton({
     <button
       type="button"
       className={changeSetBtn}
-      onClick={() => onOpen(target)}
+      onClick={() => onOpen(generation ? { ...target, generation } : target)}
       data-testid="open-changeset"
     >
       ⇄ {label}

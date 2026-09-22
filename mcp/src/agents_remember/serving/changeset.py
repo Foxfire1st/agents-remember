@@ -10,9 +10,13 @@ commits and diffs the task's full ``base -> current`` range -- ``base_commit -> 
 worktree`` for an active enclosure, ``base_commit -> code_commit`` for a completed leaf
 whose worktree is gone (the commits live on the source repo after integration).
 ``file-diff`` emits BEFORE + AFTER content (not unified-diff text) so the L4 pane feeds
-CodeMirror MergeView ``a``/``b`` directly. ``master`` is the NET ``base -> series-tip``
-diff (one coherent range, inspectable per file), with a per-leaf counter breakdown
-alongside. Mainline has no base, so a mainline scope is a 404.
+CodeMirror MergeView ``a``/``b`` directly. ``master`` is the NET ``base -> selected-result``
+diff between the master's declared endpoints (one coherent range, inspectable per file),
+bound to a generation with a deterministic digest and ``current``/``superseded`` currentness --
+so a recorded result keeps resolving after the source branch advances -- with a per-leaf
+counter breakdown alongside. Generation pins on the master routes freeze the result to the
+listed generation; a missing endpoint is refused by name, never substituted with a later tip.
+Mainline has no base, so a mainline scope is a 404.
 
 L4a adds the doc-reader views: a ``leaf`` change-set resolved by leaf-id from the persisted
 enclosure contract (so it works with no live worktree, for a completed leaf) in one of two
@@ -28,7 +32,7 @@ exactly the uncommitted delta its name claims.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -45,6 +49,14 @@ from agents_remember.serving.changeset_endpoints import (
     RecordedEndpointAbsent,
     recorded_committed_range,
 )
+from agents_remember.serving.master_net_generation import (
+    MASTER_NET_SCOPE,
+    MasterEndpointAbsent,
+    MasterNetPins,
+    load_master_contract,
+    master_task_root,
+    select_master_net,
+)
 from agents_remember.serving.response_contract import (
     SCOPED_READ_RESPONSES,
     FileDiff,
@@ -54,7 +66,6 @@ from agents_remember.serving.response_contract import (
 )
 from agents_remember.serving.scope import FileScope, language_for, run_scoped
 from agents_remember.worktrees.modules.git import (
-    branch_exists,
     changed_files_with_counts,
     commit_text_or_none,
     head_commit,
@@ -153,59 +164,25 @@ def _leaf_counts(contract: WorktreeContract, *, memory: bool) -> list[dict[str, 
     return []
 
 
-def _master_task_root(config: McpRuntimeConfig, repo_id: str, master: str) -> Path | None:
-    """Return the exact requested master task root when ``master`` is one safe path segment."""
-    if not master or "/" in master or "\\" in master or master.startswith("."):
-        return None
-    return config.coordination_root / "tasks" / repo_id / master
-
-
 def _master_enclosure_contracts(config: McpRuntimeConfig, repo_id: str, master: str) -> list[Path]:
     """Leaf contracts directly under ``tasks/<repo>/<master>/enclosures`` only."""
-    task_root = _master_task_root(config, repo_id, master)
+    task_root = master_task_root(config, repo_id, master)
     if task_root is None:
         return []
     return sorted((task_root / "enclosures").glob("*/series-contract.md"))
 
 
-def _load_master_contract(
-    config: McpRuntimeConfig, repo_id: str, master: str
-) -> WorktreeContract | None:
-    """The series (root) contract at ``tasks/<repo>/<master>/series-contract.md``, or None."""
-    task_root = _master_task_root(config, repo_id, master)
-    if task_root is None:
-        return None
-    try:
-        return load_contract(task_root / "series-contract.md")
-    except (ContractError, OSError):
-        return None
+def _leaf_state(contract: WorktreeContract) -> str:
+    """Whether a leaf breakdown row shows live uncommitted work or its landed delta.
 
+    A leaf whose code worktree is still live reports ``working`` -- its counters move with the
+    worktree -- while a cleaned or never-live leaf reports ``committed``. The label travels on
+    the breakdown row so an in-flight preview is never mixed into the net silently.
+    """
 
-def _series_tip(repo_path: Path | None, source_branch: str, work_branch: str) -> str | None:
-    """Resolve the master series tip: live work branch first, landed source branch otherwise."""
-    if repo_path is None or not source_branch:
-        return None
-    try:
-        if work_branch and branch_exists(repo_path, work_branch):
-            return head_commit(repo_path, work_branch)
-        return head_commit(repo_path, source_branch)
-    except (RuntimeError, OSError):
-        return None
-
-
-def _net_changed(
-    repo_path: Path | None, base: str, source_branch: str, work_branch: str
-) -> list[dict[str, Any]]:
-    """Net change-set ``base -> resolved series tip`` (``[]`` when unresolvable)."""
-    if repo_path is None or not base:
-        return []
-    tip = _series_tip(repo_path, source_branch, work_branch)
-    if tip is None:
-        return []
-    try:
-        return changed_files_with_counts(repo_path, base, tip)
-    except (RuntimeError, OSError):
-        return []
+    if contract.code_worktree is not None and contract.code_worktree.exists():
+        return "working"
+    return "committed"
 
 
 def _master_leaf_summaries(
@@ -228,44 +205,100 @@ def _master_leaf_summaries(
         except (RuntimeError, OSError):
             continue  # a leaf whose commits/worktree are unreadable never aborts the breakdown
         leaves.append(
-            {"leafId": contract.leaf_id, "counters": {"code": _sum(code), "memory": _sum(memory)}}
+            {
+                "leafId": contract.leaf_id,
+                "state": _leaf_state(contract),
+                "counters": {"code": _sum(code), "memory": _sum(memory)},
+            }
         )
     return leaves
 
 
+def _net_diff(
+    repo_path: Path | None, base: str, tip: str, *, side: str, master: str
+) -> list[dict[str, Any]]:
+    """One side's net change-set between two commits this selection already validated.
+
+    An empty endpoint pair is a degraded leg -- nothing selected, nothing to show -- and keeps
+    degrading to ``[]``. A diff that fails *after* validation is refused by name instead: the
+    endpoints resolved, so an empty net would publish a measurement never made, and an exact
+    zero is exactly what this view must never invent.
+    """
+
+    if not base or not tip:
+        return []
+    if repo_path is None:
+        raise MasterEndpointAbsent(
+            f"the contract names no {side} repository for master {master!r}, so this side has "
+            "no net range to read; the net comparison publishes nothing for a side the task "
+            "does not run",
+            kind="no-repository",
+        )
+    try:
+        return changed_files_with_counts(repo_path, base, tip)
+    except (RuntimeError, OSError) as err:
+        raise MasterEndpointAbsent(
+            f"the master {master!r} net {side} range {base}..{tip} was validated but cannot "
+            f"be read ({err}); the net is refused rather than reported as an empty range",
+            kind="unresolvable",
+        ) from err
+
+
 def master_changeset(
-    config: McpRuntimeConfig, repo_id: str, master: str, *, include_leaves: bool = True
+    config: McpRuntimeConfig,
+    repo_id: str,
+    master: str,
+    *,
+    include_leaves: bool = True,
+    pins: MasterNetPins | None = None,
 ) -> dict[str, Any]:
-    """The series NET change-set: ``git diff <master-base> <series-tip>`` for code + memory.
+    """The series NET change-set between the master's declared endpoints, bound to a generation.
 
     Unlike a sum of the leaf change-sets (which double-counts a file two leaves touched and has
-    no single base to diff against), the net range from the master's recorded base to the live
-    source-branch tip is one coherent diff -- so every changed file is inspectable via
-    :func:`master_file_diff`. ``leaves`` keeps the optional per-leaf counter breakdown alongside it.
-    Callers that render only the net range can skip those extra per-leaf git diffs. Reflects the
-    COMMITTED/landed series state; an in-flight leaf not yet integrated is excluded.
+    no single base to diff against), the net range from the master's recorded base to the
+    selected result is one coherent diff -- so every changed file is inspectable via
+    :func:`master_file_diff`. The selection (see
+    :mod:`agents_remember.serving.master_net_generation`) is the declared integrated result for
+    a live request, or the exact recorded endpoints a pinned request names; it is published as
+    ``generation`` with a deterministic digest and ``current``/``superseded`` currentness, so a
+    completed master's recorded result keeps resolving after its source branch advances.
+    ``leaves`` keeps the optional per-leaf counter breakdown alongside it, each row labelled
+    ``committed`` or ``working``. Callers that render only the net range can skip those extra
+    per-leaf git diffs. An in-flight leaf not yet integrated is excluded from the net.
     """
-    contract = _load_master_contract(config, repo_id, master)
-    code: list[dict[str, Any]] = []
-    memory: list[dict[str, Any]] = []
+    selection = select_master_net(config, repo_id, master, pins or MasterNetPins())
+    if selection is None:
+        return {
+            "master": master,
+            "leaves": [],
+            "code": [],
+            "memory": [],
+            "counters": {"code": _sum([]), "memory": _sum([])},
+            "generation": None,
+            "currentness": "unmeasured",
+            "scope": MASTER_NET_SCOPE,
+        }
+    contract = load_master_contract(config, repo_id, master)
     onboarding_root: Path | None = None
-    if contract is not None:
-        code = _net_changed(
-            contract.code_repo_path,
-            contract.code_base_commit,
-            contract.code_source_branch,
-            contract.code_work_branch,
-        )
-        memory = _net_changed(
-            contract.memory_repo_path,
-            contract.memory_base_commit,
-            contract.memory_source_branch,
-            contract.memory_work_branch,
-        )
-        if contract.memory_repo_path is not None:
-            candidate = contract.memory_repo_path / "onboarding"
-            if candidate.is_dir():
-                onboarding_root = candidate
+    if contract is not None and contract.memory_repo_path is not None:
+        candidate = contract.memory_repo_path / "onboarding"
+        if candidate.is_dir():
+            onboarding_root = candidate
+    endpoints = selection.endpoints
+    code = _net_diff(
+        contract.code_repo_path if contract is not None else None,
+        endpoints.code_base,
+        endpoints.code_tip,
+        side="code",
+        master=master,
+    )
+    memory = _net_diff(
+        contract.memory_repo_path if contract is not None else None,
+        endpoints.memory_base,
+        endpoints.memory_tip,
+        side="memory",
+        master=master,
+    )
     for entry in code:
         entry["hasSidecar"] = (
             onboarding_root is not None
@@ -277,37 +310,45 @@ def master_changeset(
         "code": code,
         "memory": memory,
         "counters": {"code": _sum(code), "memory": _sum(memory)},
+        "generation": {
+            "codeBase": endpoints.code_base,
+            "codeTip": endpoints.code_tip,
+            "memoryBase": endpoints.memory_base,
+            "memoryTip": endpoints.memory_tip,
+            "digest": selection.digest,
+        },
+        "currentness": selection.currentness,
+        "scope": selection.scope,
     }
 
 
-def master_file_diff(
-    config: McpRuntimeConfig, repo_id: str, master: str, kind: str, rel: str
-) -> dict[str, Any]:
-    """BEFORE (master base) + AFTER (series tip) content for one file in the net series diff."""
-    contract = _load_master_contract(config, repo_id, master)
-    if contract is None:
-        raise FileNotFoundError(f"no series contract for {master!r}")
-    if kind == "memory":
+def master_file_diff(config: McpRuntimeConfig, ref: MasterFileRef) -> dict[str, Any]:
+    """BEFORE (master base) + AFTER (selected result) content for one file in the net diff.
+
+    Without pins the AFTER side is the live integrated result; with pins it is the exact
+    recorded tip the listing published (``ICR-R03@v1``'s listing-pinned expansion idiom), so an
+    opened entry stays bound to its generation after the branch advances. A pinned endpoint the
+    repository does not hold is refused by name, never re-resolved to the current tip.
+    """
+    selection = select_master_net(config, ref.repo, ref.master, ref.pins)
+    contract = load_master_contract(config, ref.repo, ref.master)
+    if selection is None or contract is None:
+        raise FileNotFoundError(f"no series contract for {ref.master!r}")
+    endpoints = selection.endpoints
+    if ref.kind == "memory":
         repo_path = contract.memory_repo_path
-        base = contract.memory_base_commit
-        source_branch = contract.memory_source_branch
-        work_branch = contract.memory_work_branch
+        base, tip = endpoints.memory_base, endpoints.memory_tip
     else:
         repo_path = contract.code_repo_path
-        base = contract.code_base_commit
-        source_branch = contract.code_source_branch
-        work_branch = contract.code_work_branch
-    if repo_path is None or not base or not source_branch:
-        raise FileNotFoundError(rel)
-    relp = confine_rel(repo_path, rel)
-    tip = _series_tip(repo_path, source_branch, work_branch)
-    if tip is None:
-        raise FileNotFoundError(source_branch)
+        base, tip = endpoints.code_base, endpoints.code_tip
+    if repo_path is None or not base or not tip:
+        raise FileNotFoundError(ref.path)
+    relp = confine_rel(repo_path, ref.path)
     before = commit_text_or_none(repo_path, base, relp)
     after = commit_text_or_none(repo_path, tip, relp)
     return {
-        "scope": master,
-        "kind": "memory" if kind == "memory" else "code",
+        "scope": ref.master,
+        "kind": "memory" if ref.kind == "memory" else "code",
         "path": relp,
         "language": language_for(Path(relp)),
         "before": {"content": before} if before is not None else None,
@@ -442,6 +483,10 @@ class ChangesetFileRef:
     locate the change-set, ``kind`` picks the code or memory half of it, ``mode`` picks committed
     or working, and ``path`` names the file inside it. Any one of them alone selects nothing, so
     the selector travels as one value from the query string down to the diff.
+
+    A master file diff additionally carries the generation pins the listing published
+    (``codeBase``/``codeTip``/``memoryBase``/``memoryTip``): the pair matching ``kind`` freezes
+    the AFTER side to the listed generation instead of the live tip. Empty means unpinned.
     """
 
     repo: str
@@ -451,6 +496,82 @@ class ChangesetFileRef:
     master: str = ""
     leaf: str = ""
     mode: str = ""
+    code_base: Annotated[str, Query(alias="codeBase")] = ""
+    code_tip: Annotated[str, Query(alias="codeTip")] = ""
+    memory_base: Annotated[str, Query(alias="memoryBase")] = ""
+    memory_tip: Annotated[str, Query(alias="memoryTip")] = ""
+
+
+def _pins_from_ref(ref: ChangesetFileRef) -> MasterNetPins:
+    """The master generation pins a file-diff selector carries, if any."""
+
+    return MasterNetPins(
+        code_base=ref.code_base,
+        code_tip=ref.code_tip,
+        memory_base=ref.memory_base,
+        memory_tip=ref.memory_tip,
+    )
+
+
+@dataclass(frozen=True)
+class MasterFileRef:
+    """Which file of a master net, at which generation.
+
+    The repo and master locate the series, ``kind`` picks the code or memory half, ``path``
+    names the file inside it, and ``pins`` freezes the range to the listed generation instead
+    of the live integrated result. Any one of them alone selects nothing, so the selector
+    travels as one value from the file ref down to the diff.
+    """
+
+    repo: str
+    master: str
+    kind: str = "code"
+    path: str = ""
+    pins: MasterNetPins = field(default_factory=MasterNetPins)
+
+
+@dataclass(frozen=True)
+class MasterChangesetRef:
+    """Which master net, at which generation, with how much leaf detail.
+
+    ``pins`` names the exact recorded endpoints a listing published; empty means the declared
+    integrated result. ``include_leaves`` keeps the per-leaf counter breakdown alongside the
+    net for callers that render it.
+    """
+
+    repo: str
+    master: str
+    include_leaves: Annotated[bool, Query(alias="includeLeaves")] = True
+    code_base: Annotated[str, Query(alias="codeBase")] = ""
+    code_tip: Annotated[str, Query(alias="codeTip")] = ""
+    memory_base: Annotated[str, Query(alias="memoryBase")] = ""
+    memory_tip: Annotated[str, Query(alias="memoryTip")] = ""
+
+
+def _pins_from_master_ref(ref: MasterChangesetRef) -> MasterNetPins:
+    """The master generation pins a change-set selector carries, if any."""
+
+    return MasterNetPins(
+        code_base=ref.code_base,
+        code_tip=ref.code_tip,
+        memory_base=ref.memory_base,
+        memory_tip=ref.memory_tip,
+    )
+
+
+def _master_json(produce: Any) -> Response:
+    """Run ``produce`` with the change-set 400/404 status idiom for a master range.
+
+    The one implementation of this mapping for the two master routes, so a missing endpoint's
+    named refusal cannot come to differ between the list and the file view.
+    """
+
+    try:
+        return JSONResponse(produce(), status_code=200)
+    except AuthorityError as err:
+        return JSONResponse({"status": "bad-path", "detail": str(err)}, status_code=400)
+    except FileNotFoundError as err:
+        return JSONResponse({"status": "not-found", "path": str(err)}, status_code=404)
 
 
 def leaf_file_diff(config: McpRuntimeConfig, ref: ChangesetFileRef) -> dict[str, Any]:
@@ -544,27 +665,36 @@ def register_changeset_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
         if ref.leaf:
             return _leaf_json(lambda: leaf_file_diff(config, ref), ref.master, ref.mode)
         if ref.master:
-            # Series net diff (master base -> source-branch tip); no enclosure scope, so it does
-            # not go through run_scoped -- map its domain errors to the same status idiom.
-            try:
-                return JSONResponse(
-                    master_file_diff(config, ref.repo, ref.master, ref.kind, ref.path),
-                    status_code=200,
+            # Series net diff (master base -> selected result); no enclosure scope, so it does
+            # not go through run_scoped -- the shared master mapping below carries the same
+            # status idiom. Generation pins freeze the AFTER side to the listed generation.
+            return _master_json(
+                lambda: master_file_diff(
+                    config,
+                    MasterFileRef(
+                        repo=ref.repo,
+                        master=ref.master,
+                        kind=ref.kind,
+                        path=ref.path,
+                        pins=_pins_from_ref(ref),
+                    ),
                 )
-            except AuthorityError as err:
-                return JSONResponse({"status": "bad-path", "detail": str(err)}, status_code=400)
-            except FileNotFoundError as err:
-                return JSONResponse({"status": "not-found", "path": str(err)}, status_code=404)
+            )
         return run_scoped(lambda fs: file_diff(fs, ref.kind, ref.path), config, ref.repo, ref.scope)
 
-    # An unresolvable master degrades to empty lists rather than refusing, so this route has no
-    # refusal shape to declare.
-    @app.get("/api/changeset/master", response_model=MasterChangeSet)
-    def api_changeset_master(
-        repo: str,
-        master: str,
-        include_leaves: Annotated[bool, Query(alias="includeLeaves")] = True,
-    ) -> Response:
-        return JSONResponse(
-            master_changeset(config, repo, master, include_leaves=include_leaves), status_code=200
+    # An unknown master (no series contract) degrades to empty lists rather than refusing. A
+    # master the contract names but whose code endpoints are missing is refused by name instead
+    # of being answered from a later branch tip.
+    @app.get(
+        "/api/changeset/master", response_model=MasterChangeSet, responses=SCOPED_READ_RESPONSES
+    )
+    def api_changeset_master(ref: Annotated[MasterChangesetRef, Depends()]) -> Response:
+        return _master_json(
+            lambda: master_changeset(
+                config,
+                ref.repo,
+                ref.master,
+                include_leaves=ref.include_leaves,
+                pins=_pins_from_master_ref(ref),
+            )
         )

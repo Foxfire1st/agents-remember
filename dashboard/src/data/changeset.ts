@@ -40,17 +40,39 @@ export interface FileDiff {
   after: { content: string } | null;
 }
 // `masterChangeset` — the series master's NET change-set: the single `git diff <master-base> ->
-// <series-tip>` for code + memory (so each file is inspectable, unlike a sum of leaves), plus a
-// per-leaf counter breakdown alongside.
+// <selected-result>` for code + memory (so each file is inspectable, unlike a sum of leaves),
+// bound to a generation with a deterministic digest and currentness, plus a per-leaf counter
+// breakdown alongside (each row labelled committed/working).
+export interface MasterNetPins {
+  codeBase?: string;
+  codeTip?: string;
+  memoryBase?: string;
+  memoryTip?: string;
+}
+export interface MasterNetGeneration {
+  codeBase: string;
+  codeTip: string;
+  memoryBase: string;
+  memoryTip: string;
+  digest: string;
+}
 export interface MasterChangeset {
   master: string;
-  leaves: { leafId: string; counters: { code: ChangeCounters; memory: ChangeCounters } }[];
+  leaves: {
+    leafId: string;
+    state?: "committed" | "working";
+    counters: { code: ChangeCounters; memory: ChangeCounters };
+  }[];
   code: ChangedFile[];
   memory: ChangedFile[];
   counters: { code: ChangeCounters; memory: ChangeCounters };
+  generation?: MasterNetGeneration | null;
+  currentness?: "current" | "superseded" | "unmeasured";
+  scope?: "integrated";
 }
 export interface MasterChangesetOptions {
   includeLeaves?: boolean;
+  pins?: MasterNetPins;
 }
 
 export const taskChangeset = (repo: string, scope: string, base = ""): Promise<TaskChangeset> =>
@@ -75,19 +97,32 @@ export const masterChangeset = (
   if (options.includeLeaves !== undefined) {
     params.includeLeaves = String(options.includeLeaves);
   }
+  // Generation pins freeze the net to the listed generation; unset pins are omitted so the
+  // request selects the declared integrated result.
+  for (const [key, value] of Object.entries(options.pins ?? {})) {
+    if (value) params[key] = value;
+  }
   return getJson<MasterChangeset>(`${base}/api/changeset/master?${qs(params)}`);
 };
 
-// `masterFileDiff` — BEFORE (master base) + AFTER (series tip) content for one file in the net
-// series diff. Same /api/changeset/file-diff route, with `master` instead of an enclosure `scope`.
+// `masterFileDiff` — BEFORE (master base) + AFTER (selected result) content for one file in the
+// net series diff. Same /api/changeset/file-diff route, with `master` instead of an enclosure
+// `scope`. `pins` binds the AFTER side to the generation the listing published, so an opened
+// entry stays bound after the branch advances.
 export const masterFileDiff = (
   repo: string,
   master: string,
   kind: "code" | "memory",
   path: string,
+  pins: MasterNetPins = {},
   base = "",
-): Promise<FileDiff> =>
-  getJson<FileDiff>(`${base}/api/changeset/file-diff?${qs({ repo, master, kind, path })}`);
+): Promise<FileDiff> => {
+  const params: Record<string, string> = { repo, master, kind, path };
+  for (const [key, value] of Object.entries(pins)) {
+    if (value) params[key] = value;
+  }
+  return getJson<FileDiff>(`${base}/api/changeset/file-diff?${qs(params)}`);
+};
 
 // L4a leaf views — a single leaf's change-set straight off its enclosure contract (so it works
 // with NO live worktree, unlike `taskChangeset`'s scope). `mode`:

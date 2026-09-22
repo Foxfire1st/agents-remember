@@ -16,6 +16,7 @@ import {
   type FileDiff,
   type LeafMode,
   type MasterChangeset,
+  type MasterNetPins,
   type TaskChangeset,
   fileDiff,
   leafChangeset,
@@ -32,9 +33,14 @@ import { ChangeSetPane } from "./ChangeSetPane";
 export interface ChangeSetTarget {
   repo: string;
   scope?: string; // one active enclosure (full base->worktree diff)
-  master?: string; // a series master (net base->tip); also QUALIFIES a `leaf`
+  master?: string; // a series master (net base->selected result); also QUALIFIES a `leaf`
   leaf?: string; // a single leaf (committed/working), resolved by leaf-id; needs `master` + `mode`
   mode?: LeafMode; // committed = landed delta (base->code_commit), working = uncommitted delta (live)
+  // The master net's generation pins: the exact recorded endpoints a listing published. Empty /
+  // absent means the declared integrated result. Carried into the list request (a pinned list
+  // reopens the recorded net after the branch advances) and -- via the list response -- into
+  // each file expansion, so an opened entry stays bound to its generation (R03's idiom).
+  generation?: MasterNetPins;
   // The Intent Reviewer's own selector: the reviewed subject's recorded identity, when the server
   // offered one. Its PRESENCE is what marks this target as a review and the cockpit's takeover
   // dispatch is what reads it -- the change-set viewer is never mounted for one, so no change-set
@@ -79,6 +85,9 @@ const back = css({
 });
 const title = css({ fontSize: "0.82rem", color: "ink", fontWeight: "600" });
 const counterRow = css({ display: "flex", gap: "0.8rem", marginLeft: "auto", fontSize: "0.74rem", fontFamily: "mono" });
+// The bound net generation: short digest + currentness + the one scope this view ever serves.
+// Rendered only when the list response names its generation, so older payloads read unchanged.
+const generationTag = css({ fontSize: "0.7rem", fontFamily: "mono", color: "muted" });
 const ins = css({ color: "mint" });
 const del = css({ color: "amber" });
 const colList = css({ height: "100%", minHeight: "0", display: "flex", flexDirection: "column", background: "bgPanel" });
@@ -167,11 +176,12 @@ function changesetListRequest(
   master: string | undefined,
   leaf: string | undefined,
   mode: LeafMode | undefined,
+  generation: MasterNetPins | undefined,
 ): Promise<TaskChangeset | MasterChangeset> {
   return leaf
     ? leafChangeset(repo, master ?? "", leaf, mode ?? "committed")
     : master
-      ? masterChangeset(repo, master, { includeLeaves: false })
+      ? masterChangeset(repo, master, { includeLeaves: false, ...(generation ? { pins: generation } : {}) })
       : taskChangeset(repo, scope ?? "");
 }
 
@@ -181,13 +191,14 @@ function diffRequestFor(
   master: string | undefined,
   leaf: string | undefined,
   mode: LeafMode | undefined,
+  generation: MasterNetPins | undefined,
   kind: "code" | "memory",
   path: string,
 ): Promise<FileDiff | null> {
   return leaf
     ? leafFileDiff(repo, master ?? "", leaf, kind, path, mode ?? "committed")
     : master
-      ? masterFileDiff(repo, master, kind, path)
+      ? masterFileDiff(repo, master, kind, path, generation ?? {})
       : fileDiff(repo, scope ?? "", kind, path);
 }
 
@@ -225,6 +236,46 @@ function CounterRow({ counters }: { counters: TaskChangeset["counters"] }) {
         memory <span className={ins}>+{counters.memory.insertions}</span>{" "}
         <span className={del}>−{counters.memory.deletions}</span> ({counters.memory.files})
       </span>
+    </span>
+  );
+}
+
+// The series list response when it names its bound generation, else null. A task/leaf payload
+// never carries one, so the check is the discriminant -- not the target the view opened with.
+function seriesListMeta(
+  isSeries: boolean,
+  data: TaskChangeset | MasterChangeset | null,
+): MasterChangeset | null {
+  if (!isSeries || data === null || !("generation" in data)) return null;
+  return data;
+}
+
+// The generation the open series view is bound to: the list response's own generation when it
+// names one (it is newer than the entry's), else the entry's pins. Every file expansion below
+// carries it, so an opened entry stays bound after the branch advances.
+function boundSeriesGeneration(
+  isSeries: boolean,
+  data: TaskChangeset | MasterChangeset | null,
+  entry: MasterNetPins | undefined,
+): MasterNetPins | undefined {
+  const listed = seriesListMeta(isSeries, data)?.generation ?? undefined;
+  return listed ?? entry;
+}
+
+// The bound net generation as a header caption: short digest + currentness + the one scope this
+// view ever serves. Rendered only when the list response names its generation, so older
+// payloads read unchanged.
+function SeriesGenerationTag({ meta }: { meta: MasterChangeset | null }) {
+  const generation = meta?.generation;
+  if (!generation) return null;
+  const currentness = meta?.currentness ?? "unmeasured";
+  return (
+    <span
+      className={generationTag}
+      data-testid="changeset-generation"
+      title={`net generation ${generation.digest} · scope integrated · ${currentness}`}
+    >
+      gen {generation.digest.slice(0, 8)} · {currentness} · integrated
     </span>
   );
 }
@@ -287,6 +338,7 @@ function useChangesetLoad(
   master: string | undefined,
   leaf: string | undefined,
   mode: LeafMode | undefined,
+  generation: MasterNetPins | undefined,
   setData: (data: TaskChangeset | MasterChangeset | null) => void,
   setError: (error: string | null) => void,
   setActive: (active: { kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null) => void,
@@ -300,7 +352,7 @@ function useChangesetLoad(
     setActive(null);
     setDiff(null);
     setPartner(null);
-    const req = changesetListRequest(repo, scope, master, leaf, mode);
+    const req = changesetListRequest(repo, scope, master, leaf, mode, generation);
     void req.then(
       (d) => live && setData(d),
       (e: unknown) => live && setError(e instanceof FilesApiError ? `${e.code} (${e.httpStatus})` : "Failed to load change-set"),
@@ -308,7 +360,7 @@ function useChangesetLoad(
     return () => {
       live = false;
     };
-  }, [repo, scope, master, leaf, mode, setData, setError, setActive, setDiff, setPartner]);
+  }, [repo, scope, master, leaf, mode, generation, setData, setError, setActive, setDiff, setPartner]);
 }
 
 function useWorkingChangesetPoll(
@@ -421,7 +473,7 @@ function ChangeSetWorkspace({
   );
 }
 
-export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: ChangeSetTarget & { onBack: () => void }) {
+export function ChangeSetViewer({ repo, scope, master, leaf, mode, generation, onBack }: ChangeSetTarget & { onBack: () => void }) {
   const [data, setData] = useState<TaskChangeset | MasterChangeset | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState<{ kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null>(null);
@@ -431,8 +483,10 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
   // (qualified by `master`); `master` alone is the series net; otherwise an enclosure `scope`.
   const isSeries = Boolean(master) && !leaf;
   const hasData = data !== null;
+  const seriesMeta = seriesListMeta(isSeries, data);
+  const boundGeneration = boundSeriesGeneration(isSeries, data, generation);
 
-  useChangesetLoad(repo, scope, master, leaf, mode, setData, setError, setActive, setDiff, setPartner);
+  useChangesetLoad(repo, scope, master, leaf, mode, generation, setData, setError, setActive, setDiff, setPartner);
 
   // L4a: the WORKING view is the LIVE uncommitted delta, so it must not be a frozen snapshot taken
   // when the button was clicked. Refresh the change-set after each prior refresh settles so a file edited *after* opening
@@ -446,9 +500,10 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
   useWorkingChangesetPoll(mode, leaf, repo, master, active, hasData, setData, setDiff);
 
   // Each selector diffs its own range, all into the same MergeView: a leaf its committed/working
-  // range, `master` the NET series range (base -> tip), an enclosure `scope` its base -> worktree.
+  // range, `master` the NET series range between the bound generation's endpoints, an enclosure
+  // `scope` its base -> worktree.
   const loadDiff = (kind: "code" | "memory", path: string) =>
-    diffRequestFor(repo, scope, master, leaf, mode, kind, path);
+    diffRequestFor(repo, scope, master, leaf, mode, boundGeneration, kind, path);
 
   const open = (kind: "code" | "memory", file: Row, withPartner = false) => {
     if (!leaf && !master && !scope) return;
@@ -470,6 +525,7 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, onBack }: Cha
           ← back
         </button>
         <span className={title}>change-set · {headerLabel}</span>
+        <SeriesGenerationTag meta={seriesMeta} />
         {counters ? <CounterRow counters={counters} /> : null}
       </header>
 

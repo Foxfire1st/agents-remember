@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fileDiff, leafChangeset, leafFileDiff, masterChangeset, taskChangeset } from "./changeset";
+import { fileDiff, leafChangeset, leafFileDiff, masterChangeset, masterFileDiff, taskChangeset } from "./changeset";
 import { FilesApiError } from "./files";
 
 function stubFetch(payload: unknown, ok = true, status = 200) {
@@ -54,5 +54,25 @@ describe("data/changeset client", () => {
   it("throws FilesApiError carrying the server status on a 404 (e.g. a completed task / no worktree)", async () => {
     stubFetch({ status: "not-found" }, false, 404);
     await expect(taskChangeset("agents-remember", "gone")).rejects.toBeInstanceOf(FilesApiError);
+  });
+
+  it("carries generation pins on the master URLs and omits unset pins", async () => {
+    const fn = stubFetch({});
+    await masterChangeset("agents-remember", "260921_complete-code-and-intent-review", {
+      includeLeaves: false,
+      pins: { codeBase: "base0", codeTip: "tip2", memoryBase: "", memoryTip: "" },
+    });
+    await masterFileDiff("agents-remember", "260921_complete-code-and-intent-review", "code", "a.ts", {
+      codeBase: "base0",
+      codeTip: "tip2",
+    });
+    const urls = (fn.mock.calls as unknown as string[][]).map((c) => c[0]);
+    // Unset pins are omitted so the request selects the declared integrated result.
+    expect(urls[0]).toBe(
+      "/api/changeset/master?repo=agents-remember&master=260921_complete-code-and-intent-review&includeLeaves=false&codeBase=base0&codeTip=tip2",
+    );
+    expect(urls[1]).toBe(
+      "/api/changeset/file-diff?repo=agents-remember&master=260921_complete-code-and-intent-review&kind=code&path=a.ts&codeBase=base0&codeTip=tip2",
+    );
   });
 });

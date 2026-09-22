@@ -276,6 +276,40 @@ describe("ChangeSetViewer screen", () => {
     fireEvent.click(getByText("a.ts"));
     expect((await findByTestId("changeset-pane")).textContent).toBe("a.ts");
   });
+
+  it("binds master file expansions to the generation the net listing published", async () => {
+    // The listing names its exact endpoints; the viewer shows the bound generation and carries
+    // its pins into each file expansion, so an opened entry stays bound after the branch
+    // advances instead of re-resolving the live tip.
+    const generation = {
+      codeBase: "b0",
+      codeTip: "t2",
+      memoryBase: "",
+      memoryTip: "",
+      digest: "d".repeat(64),
+    };
+    const fetchFn = vi.fn(async (url: string) => {
+      const body = url.includes("/api/changeset/file-diff")
+        ? FILE_DIFF
+        : { ...MASTER_CHANGESET, generation, currentness: "current", scope: "integrated" };
+      return { ok: true, status: 200, json: async () => body } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchFn);
+    const { findByTestId, getByText, getByTestId } = render(
+      <ChangeSetViewer repo="agents-remember" master="browser-dashboard" onBack={vi.fn()} />,
+    );
+    await findByTestId("changeset-counters");
+    expect(getByTestId("changeset-generation").textContent).toContain("gen dddddddd");
+    expect(getByTestId("changeset-generation").textContent).toContain("current");
+    fireEvent.click(getByText("a.ts"));
+    expect((await findByTestId("changeset-pane")).textContent).toBe("a.ts");
+    const diffUrls = (fetchFn.mock.calls as unknown as string[][])
+      .map((c) => String(c[0]))
+      .filter((u) => u.includes("/api/changeset/file-diff"));
+    expect(diffUrls).toHaveLength(1);
+    expect(diffUrls[0]).toContain("codeBase=b0");
+    expect(diffUrls[0]).toContain("codeTip=t2");
+  });
 });
 
 describe("DetailPanel change-set entry (L4)", () => {

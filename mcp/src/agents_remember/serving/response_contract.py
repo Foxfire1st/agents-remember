@@ -850,7 +850,23 @@ class LeafSummary(WireResponse):
     """One leaf's counter breakdown alongside the master's net diff."""
 
     leaf_id: str
+    state: Literal["committed", "working"] = "committed"
     counters: ChangeSetCounters
+
+
+class MasterNetGeneration(WireResponse):
+    """The exact endpoints one master net comparison was computed over, and their identity.
+
+    The four commits are the generation: a completed master's recorded result re-resolves from
+    these rather than from the live branch tip. Empty memory commits mean the master shows no
+    memory half. ``digest`` is the deterministic content id of the four endpoints.
+    """
+
+    code_base: str
+    code_tip: str
+    memory_base: str = ""
+    memory_tip: str = ""
+    digest: str
 
 
 class MasterChangeSet(WireResponse):
@@ -861,6 +877,9 @@ class MasterChangeSet(WireResponse):
     code: list[ChangedCodeFile]
     memory: list[ChangedFile]
     counters: ChangeSetCounters
+    generation: MasterNetGeneration | None = None
+    currentness: Literal["current", "superseded", "unmeasured"] = "unmeasured"
+    scope: Literal["integrated"] = "integrated"
 
 
 class DiffSide(WireResponse):
