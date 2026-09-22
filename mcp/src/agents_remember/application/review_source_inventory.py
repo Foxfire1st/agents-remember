@@ -45,9 +45,9 @@ from agents_remember.memory.knowledge.diff_display import (
     no_tree_difference_probe,
 )
 from agents_remember.models.knowledge.diff import (
-    KnowledgeDiffExpansion,
     KnowledgeDiffItem,
     KnowledgeDiffResult,
+    SourceAttribution,
 )
 from agents_remember.models.knowledge.read import ReadItem
 from agents_remember.models.knowledge.review import (
@@ -55,6 +55,7 @@ from agents_remember.models.knowledge.review import (
     ReviewFileContent,
     ReviewFileStatus,
     ReviewRemainingCount,
+    ReviewRemainingCountName,
     ReviewSourceInventory,
     ReviewSourceLocation,
     ReviewSourcePane,
@@ -64,6 +65,7 @@ from agents_remember.models.knowledge.review import (
 
 __all__ = [
     "SOURCE_INVENTORY_REFERENCE",
+    "attribution_limitations",
     "byte_form",
     "inventory_command",
     "inventory_limitations",
@@ -426,7 +428,11 @@ def inventory_command(before: TreeSide, after: TreeSide) -> str:
 
 
 def review_inventory(
-    before: TreeSide, after: TreeSide, *, probe: TreeDifferenceProbe | None = None
+    before: TreeSide,
+    after: TreeSide,
+    *,
+    probe: TreeDifferenceProbe | None = None,
+    observed: TreePaths | None = None,
 ) -> ReviewSourceInventory:
     """Return the review's own inventory value for one bound pair: measured, partial or unavailable.
 
@@ -435,21 +441,31 @@ def review_inventory(
     paths *without* the statuses beside them is still listed -- one entry per path, each stating that
     its status and content were not measured -- because the alternative is a measured-empty list,
     which is the one thing a partial observation must never become.
+
+    ``observed`` is the measurement to render, for a caller that has already made exactly this one:
+    the attribution partition counts that same observation as its denominator, and handing it in is
+    what keeps the inventory and the partition two renderings of one measurement rather than two
+    measurements that have to agree.
     """
 
-    observed = tree_difference_observation(before, after) if probe is None else probe(before, after)
-    entries = _entries(observed)
+    if observed is not None:
+        observation = observed
+    elif probe is None:
+        observation = tree_difference_observation(before, after)
+    else:
+        observation = probe(before, after)
+    entries = _entries(observation)
     return ReviewSourceInventory(
-        state="measured" if observed.available else "unavailable",
+        state="measured" if observation.available else "unavailable",
         entries=entries,
         listed_total=len(entries),
-        partial=observed.partial or (bool(observed.paths) and not observed.entries),
-        detail=observed.detail or _measured_detail(len(entries)),
+        partial=observation.partial or (bool(observation.paths) and not observation.entries),
+        detail=observation.detail or _measured_detail(len(entries)),
         command=inventory_command(before, after),
         before_code_tree_id=before.tree_id,
         after_code_tree_id=after.tree_id,
         unrepresentable_paths=tuple(
-            _unrepresentable_path(change) for change in observed.unrepresentable
+            _unrepresentable_path(change) for change in observation.unrepresentable
         ),
     )
 
@@ -538,14 +554,22 @@ _REALIZATION_READ_KIND = "realization_claim"
 
 
 def source_pane(
-    comparison: KnowledgeDiffResult | None, inventory: ReviewSourceInventory
+    comparison: KnowledgeDiffResult | None,
+    inventory: ReviewSourceInventory,
+    attribution: SourceAttribution,
 ) -> ReviewSourcePane:
-    """Pane 2: the whole-task inventory, the selected locations, and what the selection did not reach.
+    """Pane 2: the whole-task inventory, the selected locations and the measured attribution.
 
-    The inventory is the pane's own first fact and it is present whether or not a knowledge
-    comparison was made: a selection filters *attribution*, never the source changes in the declared
-    comparison. The remaining counts and the attribution lists are the shipped comparison's own
-    values, carried verbatim when there is one and stated as not measured when there is not.
+    The inventory is the pane's own first fact and it is present whether or not a knowledge comparison
+    was made: a selection filters *attribution*, never the source changes in the declared comparison.
+
+    ``attribution`` is the measured partition of that same inventory -- one accounting, at the
+    changed-path granularity, of which of those changes either bound snapshot registers a valid
+    mapping for -- and every attribution field and count below is read from it rather than recomputed
+    from the displayed items. That is the correction this pane needed: the three buckets are disjoint
+    and exhaustive over the measured changes, so an unchanged mapped file can no longer appear in a
+    list of changed ones, and a path whose attribution a side's silence left undetermined is carried
+    beside the two conclusions instead of being folded into either.
     """
 
     items = () if comparison is None or comparison.page is None else comparison.page.items
@@ -556,15 +580,15 @@ def source_pane(
         locations=tuple(
             location for location in (_location(item) for item in items) if location is not None
         ),
-        remaining=_remaining(comparison, expansion, outside),
+        remaining=_remaining(comparison, attribution, outside),
         expansion_reference=SOURCE_INVENTORY_REFERENCE
         if expansion is None
         else expansion.reference,
         expansion_command=inventory.command if expansion is None else expansion.command,
-        unattributed_changed_paths=()
-        if expansion is None
-        else expansion.unattributed_changed_paths,
-        attributed_changed_paths=() if expansion is None else expansion.attributed_changed_paths,
+        unattributed_changed_paths=attribution.confirmed_unregistered_paths,
+        attributed_changed_paths=attribution.attributed_paths,
+        unknown_attribution_changed_paths=attribution.unknown_attribution_paths,
+        attribution=attribution,
         unresolved=tuple(
             ReviewUnresolvedReference(
                 field="attribution",
@@ -580,75 +604,161 @@ def source_pane(
     )
 
 
+# The reason each count states when it has no value, kept as one value per count so the same absence
+# is never spelled two ways in two compositions.
+_LOCATIONS_ABSENT = (
+    "no knowledge subject was selected for this review, so no selection was made and no locations "
+    "were reached or left"
+)
+_OUTSIDE_SELECTION_ABSENT = (
+    "no invariant or family subject was selected for this review, so no change is inside or outside "
+    "one; the inventory above is the complete source change set of the bound pair"
+)
+_OUTSIDE_RECORDS_ABSENT = "no knowledge subject was selected, so neither snapshot was selected over"
+_REFERENCES_ABSENT = "no knowledge subject was selected, so no reference was resolved"
+
+
 def _remaining(
     comparison: KnowledgeDiffResult | None,
-    expansion: KnowledgeDiffExpansion | None,
+    attribution: SourceAttribution,
     outside: Sequence[KnowledgeDiffItem],
 ) -> tuple[ReviewRemainingCount, ...]:
-    """Return the pane's persistent counts, each stating its own measurement or its own reason."""
+    """Return the pane's persistent counts, each stating its own measurement or its own reason.
 
-    if comparison is None or comparison.page is None:
-        return (
-            ReviewRemainingCount(
-                name="locations_remaining",
-                value=None,
-                reason=(
-                    "no knowledge subject was selected for this review, so no selection was made and "
-                    "no locations were reached or left"
-                ),
-            ),
-            ReviewRemainingCount(
-                name="changed_paths_outside_selection",
-                value=None,
-                reason=(
-                    "no knowledge subject was selected, so no attribution was computed; the "
-                    "inventory above is the complete source change set of the bound pair"
-                ),
-            ),
-            ReviewRemainingCount(
-                name="unattributed_changed_paths",
-                value=None,
-                reason="no knowledge subject was selected, so no path was attributed or left out",
-            ),
-            ReviewRemainingCount(
-                name="records_present_outside_selection",
-                value=None,
-                reason="no knowledge subject was selected, so neither snapshot was selected over",
-            ),
-            ReviewRemainingCount(
-                name="references_unresolved",
-                value=None,
-                reason="no knowledge subject was selected, so no reference was resolved",
-            ),
-        )
-    counts = comparison.page.counts
-    attributed = () if expansion is None else expansion.attributed_changed_paths
-    unattributed = () if expansion is None else expansion.unattributed_changed_paths
+    Two of the five are the attribution partition's own numbers and they are counted at the
+    changed-path granularity: the paths confirmed to carry no valid registered attribution, and the
+    measured changed paths that no link to the selected subject reaches. ``changed_paths_outside_
+    selection`` is that second number and not the length of two other lists summed -- the population
+    it names is the measured change population, so a mapped *unchanged* file cannot increment it.
+
+    A count the attribution could not measure states why rather than reporting zero: an unmeasured
+    population has no count, and the reason carries the partition's own sentence about which side or
+    scope was not inspected.
+    """
+
+    counts = None if comparison is None or comparison.page is None else comparison.page.counts
     return (
-        ReviewRemainingCount(name="locations_remaining", value=counts.items_remaining),
-        ReviewRemainingCount(
-            name="changed_paths_outside_selection",
-            value=None if expansion is None else len(attributed) + len(unattributed),
-            reason=(
-                None
-                if expansion is not None
-                else "the comparison published no source expansion for this selection"
-            ),
+        _stated_or_absent(
+            "locations_remaining",
+            None if counts is None else counts.items_remaining,
+            _LOCATIONS_ABSENT,
         ),
-        ReviewRemainingCount(
-            name="unattributed_changed_paths",
-            value=None if expansion is None else len(unattributed),
-            reason=(
-                None
-                if expansion is not None
-                else (
-                    "the comparison made no tree observation, so no path is reported as "
-                    "attributed or unattributed"
-                )
-            ),
+        _stated_or_absent(
+            "changed_paths_outside_selection",
+            _outside_selection_total(attribution),
+            _outside_selection_reason(attribution),
         ),
-        ReviewRemainingCount(name="records_present_outside_selection", value=len(outside)),
-        ReviewRemainingCount(name="references_unresolved", value=counts.suppressed_total),
+        _stated_or_absent(
+            "unattributed_changed_paths",
+            attribution.confirmed_unregistered_total,
+            _unregistered_reason(attribution),
+        ),
+        # The two attribution counts the reader has to see together (ICR-R04): the confirmed negative
+        # conclusion and the measured population that conclusion could not be drawn for. A bare zero
+        # for the first, with no second row beside it, is the "measured zero implies completeness"
+        # reading; the pair states the scope of both in one place, in the units the pane already
+        # prints and the surface already renders.
+        _stated_or_absent(
+            "unknown_attribution_changed_paths",
+            attribution.unknown_attribution_total,
+            _undetermined_reason(attribution),
+        ),
+        _stated_or_absent(
+            "records_present_outside_selection",
+            None if counts is None else len(outside),
+            _OUTSIDE_RECORDS_ABSENT,
+        ),
+        _stated_or_absent(
+            "references_unresolved",
+            None if counts is None else counts.suppressed_total,
+            _REFERENCES_ABSENT,
+        ),
+    )
+
+
+def _stated_or_absent(
+    name: ReviewRemainingCountName, value: int | None, reason: str
+) -> ReviewRemainingCount:
+    """One count as its measured value, or as the reason it has none -- never both and never zero.
+
+    ``ReviewRemainingCount`` refuses a value and a reason together, which is the point: a zero that
+    means "none" and a zero that means "not measured here" must not be the same value.
+    """
+
+    if value is None:
+        return ReviewRemainingCount(name=name, value=None, reason=reason)
+    return ReviewRemainingCount(name=name, value=value)
+
+
+def _outside_selection_total(attribution: SourceAttribution) -> int | None:
+    """The measured changed paths no known link to the selected subject reaches, or ``None``."""
+
+    if attribution.state != "measured" or attribution.subject_scope_complete is None:
+        return None
+    return len(attribution.paths) - len(attribution.selected_subject_paths)
+
+
+def _outside_selection_reason(attribution: SourceAttribution) -> str:
+    """Why the outside-selection count has no value, naming which of the two states applies."""
+
+    if attribution.state != "measured":
+        return (
+            "the source change population was not measured, so no count of changes outside the "
+            f"selected subject exists ({attribution.detail})"
+        )
+    return _OUTSIDE_SELECTION_ABSENT
+
+
+def _unregistered_reason(attribution: SourceAttribution) -> str:
+    """Why the confirmed-unregistered count has no value, naming which of the two states applies."""
+
+    if attribution.state != "measured":
+        return (
+            "the source change population was not measured, so no path is reported as confirmed to "
+            f"carry no registered attribution ({attribution.detail})"
+        )
+    return (
+        "the measured population was completely inspected and every changed path carries a valid "
+        "registered attribution"
+    )
+
+
+def _undetermined_reason(attribution: SourceAttribution) -> str:
+    """Why the undetermined-attribution count has no value, naming which state applies."""
+
+    if attribution.state != "measured":
+        return (
+            "the source change population was not measured, so no path is reported as of "
+            f"undetermined attribution ({attribution.detail})"
+        )
+    return (
+        "every measured changed path's attribution is determined: each one either carries a valid "
+        "registered attribution or was confirmed to carry none, in snapshots that were completely "
+        "inspected or legitimately known empty"
+    )
+
+
+def attribution_limitations(attribution: SourceAttribution) -> tuple[str, ...]:
+    """The limits one partition establishes, in the spelling the comparison route already uses.
+
+    A route that made no comparison has no ``KnowledgeDiffResult`` to carry its own declaration, so it
+    states the same two facts from the partition itself and in the same spelling: the limitation token
+    the result vocabulary declares, and the counted omission behind it. Both are emitted exactly when
+    the partition establishes them, so a response cannot claim a limit it does not have, and a reader
+    that sees only the top-level strings is told which bucket the counts below are short of.
+    """
+
+    if attribution.state != "measured":
+        # No counted omission, in the same spelling the comparison route uses for this state: there is
+        # no population to count, so the missing measurement *is* the limit and a count would be the
+        # fabricated zero this requirement forbids.
+        return ("limitation:unknown_attribution_changed_paths",)
+    undetermined = len(attribution.unknown_attribution_paths)
+    if not undetermined:
+        return ()
+    return (
+        "limitation:unknown_attribution_changed_paths",
+        f"omitted:attribution_not_determined:{undetermined}",
     )
 
 

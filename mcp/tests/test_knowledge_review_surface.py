@@ -1197,16 +1197,26 @@ def test_a_knowledge_only_change_leaves_an_openable_review_with_a_measured_empty
     assert payload.knowledge.selection_state == "subject_selected"
     assert payload.knowledge.before_statement.state == "present"
     assert payload.knowledge.after_statement.state == "present"
-    # Attribution is the comparison's own statement about recorded claims and not about the trees:
-    # the fixture's claims still name their paths, and an empty source half does not erase them. What
-    # the empty change set does establish is that no changed path is *unattributed* -- there is no
-    # change to attribute -- which is precisely the opposite of the fabricated-empty reading this
-    # case exists to prevent.
-    assert payload.source.attributed_changed_paths
+    # Attribution is the comparison's own statement about recorded claims, *intersected with the
+    # measured change population* (ICR-R04). An empty source half has no changed path for a claim to
+    # attribute, so the attributed list is empty -- and the partition reports that as a measurement
+    # rather than by dropping the question: the denominator is zero because the two trees were
+    # compared and agreed. The recorded claims are not erased by it, which is what the pane's
+    # locations beside this list show. What the empty change set establishes is that no changed path
+    # is *unattributed* -- there is no change to attribute -- which is precisely the opposite of the
+    # fabricated-empty reading this case exists to prevent. It is also the correction of the earlier
+    # behaviour, which listed the fixture's *unchanged* mapped paths as attributed changes and so
+    # reported seven attributed changed paths for a five-path change set.
+    attribution = payload.source.attribution
+    assert attribution is not None
+    assert attribution.state == "measured"
+    assert attribution.granularity == "changed_path"
+    assert attribution.changed_total == 0
+    assert attribution.complete is True
+    assert payload.source.attributed_changed_paths == ()
     assert payload.source.unattributed_changed_paths == ()
-    assert set(payload.source.attributed_changed_paths) != {
-        entry.path for entry in inventory.entries
-    }
+    assert payload.source.unknown_attribution_changed_paths == ()
+    assert payload.source.locations, "the recorded claims are still displayed as locations"
     assert "limitation:source_inventory_unavailable" not in payload.limitations
 
 

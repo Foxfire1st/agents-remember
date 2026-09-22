@@ -181,10 +181,11 @@ def test_the_expansion_names_both_requested_trees_and_every_path_they_differ_at(
     # is expanded by (ICR-R02).
     assert "HEAD" not in expansion.command
     assert "--raw -z" in expansion.command and "--name-only" not in expansion.command
-    # Every changed path is classified exactly once across the two lists, and the two lists do not
-    # overlap. ``attributed_changed_paths`` lists every path a selected claim attributes -- which is
-    # the union the comparison's own record half reaches, not only the paths that moved -- so the
-    # changed set is the subset of it the two trees actually differ at.
+    # Every changed path is classified exactly once across the lists, and the first two do not
+    # overlap. ``attributed_changed_paths`` is the *measured* changed set intersected with the paths a
+    # registered claim resolves (ICR-R04): the union the comparison's record half reaches also names
+    # paths the two trees agree at, and those are context rather than changes, so they appear in no
+    # list here.
     assert not set(expansion.attributed_changed_paths) & set(expansion.unattributed_changed_paths)
     changed = {
         fixture.changed_source_path,
@@ -827,6 +828,22 @@ def test_an_unavailable_observation_is_reported_as_unavailable_and_never_as_a_ch
         omission
         for omission in result.omissions
         if omission.reason == "change_not_attributed_to_a_recorded_realization"
+    ]
+    # ... AND THE MISSING MEASUREMENT IS DECLARED RATHER THAN COUNTED AS ZERO (ICR-R04). The partition
+    # carries no total at all, the third list is empty because nothing was measured, and the response
+    # declares the limit whose producer is the missing measurement itself -- so a reader is told that
+    # attribution was not determined instead of being shown a zero nothing established.
+    partition = expansion.attribution
+    assert partition is not None and partition.state == "unavailable"
+    assert partition.changed_total is None
+    assert partition.attributed_total is None
+    assert partition.confirmed_unregistered_total is None
+    assert partition.unknown_attribution_total is None
+    assert expansion.attributed_changed_paths == ()
+    assert expansion.unknown_attribution_changed_paths == ()
+    assert "unknown_attribution_changed_paths" in result.limitations
+    assert not [
+        omission for omission in result.omissions if omission.reason == "attribution_not_determined"
     ]
 
 

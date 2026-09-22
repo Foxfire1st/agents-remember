@@ -58,9 +58,15 @@ from agents_remember.models.knowledge.read import (
 from agents_remember.models.knowledge.result import KnowledgeRefusal, KnowledgeRefusalCode
 
 __all__ = [
+    "ATTRIBUTION_GRANULARITY",
     "DIFF_DISPLAY_MAX_ITEMS",
     "DIFF_POLICY_VERSION",
     "KNOWLEDGE_DIFF_FIELD_NAMES",
+    "AttributionBucket",
+    "AttributionLink",
+    "AttributionSide",
+    "AttributionSideState",
+    "ChangedPathAttribution",
     "DiffCoverage",
     "DiffItemKind",
     "DiffLimitation",
@@ -83,6 +89,7 @@ __all__ = [
     "ReadSide",
     "SideAbsence",
     "SideRevisionGroups",
+    "SourceAttribution",
     "continue_diff_from_cursor",
     "diff_binding_digest",
     "diff_cursor_for",
@@ -148,15 +155,23 @@ DiffOmissionReason = Literal[
     "outside_the_display_filter",
     "present_outside_the_declared_selection",
     "change_not_attributed_to_a_recorded_realization",
+    "attribution_not_determined",
 ]
 
 # Every declared limit a comparison can carry. Each is a statement about what this response cannot
 # claim, and each is checked against the item and omission data by this module's own validator so a
 # gap cannot be omitted from the declaration that is supposed to advertise it.
+#
+# ``unattributed_changed_paths`` and ``unknown_attribution_changed_paths`` are two limits and not one
+# (ICR-R04): the first says the two snapshots' registered mappings establish no attribution for a
+# measured change, which is a conclusion this response reached; the second says it could not reach
+# that conclusion at all, because a required snapshot was not completely inspected. Collapsing them
+# would render "nobody registered this" and "nobody looked" as the same sentence.
 DiffLimitation = Literal[
     "display_filtered",
     "records_present_outside_the_selection",
     "unattributed_changed_paths",
+    "unknown_attribution_changed_paths",
     "no_semantic_assessment_performed",
 ]
 
@@ -403,6 +418,215 @@ def side_revision_groups(
     return SideRevisionGroups(before=before, after=after)
 
 
+# --- the attribution partition (ICR-R04) --------------------------------------------------------
+#
+# One measured change population, partitioned once. The arithmetic is the packet's own and it is
+# exhaustive by construction: every measured change is attributed, confirmed unregistered, or of
+# undetermined attribution, and a change is in exactly one of the three however many realization
+# claims name its path. The buckets answer whether any *valid* registered attribution is established
+# for a path -- never whether every association, every revision or every changed line inside that
+# path is covered, which no recorded path mapping can establish.
+#
+# The granularity is stated rather than implied because it is the whole of the claim: attribution is
+# recorded per realization claim and per path, so a count that did not name its unit could be read as
+# coverage of the changed lines inside a path.
+
+# The one granularity every attribution count in this package is stated at.
+ATTRIBUTION_GRANULARITY: Literal["changed_path"] = "changed_path"
+
+AttributionBucket = Literal["attributed", "confirmed_unregistered", "unknown_attribution"]
+
+# How one attributed changed path relates to the subject a review selected. The two ``outside``
+# members are different facts and the difference is the whole of the precedence rule: an outside link
+# can be called *exclusively* outside only when every required snapshot/scope was completely
+# inspected, and otherwise the honest label is that the link is known and the selection's membership
+# is not established.
+AttributionLink = Literal[
+    "selected_subject",
+    "outside_selection_complete",
+    "outside_selection_membership_unknown",
+    "no_subject_selected",
+]
+
+# What one bound snapshot contributed to the partition. ``inspected`` is a completed scan of that
+# snapshot's registered mappings over the measured paths; ``known_empty`` is the same scan over a side
+# an origin record identifies as an explicitly empty first generation, which is a stronger statement
+# than a scan that found nothing; ``unavailable`` is a side that was not scanned at all and whose
+# silence therefore supports no negative conclusion.
+AttributionSideState = Literal["inspected", "known_empty", "unavailable"]
+
+
+class AttributionSide(KnowledgeModel):
+    """What one bound snapshot contributed to the partition, and how completely it was inspected.
+
+    ``registered_mapping_count`` is the number of realization claims that snapshot registers at the
+    measured changed paths, or ``None`` when the side was not scanned. It is a count of *links* and
+    not of paths: one path may carry several claims, and the partition counts the path once.
+    """
+
+    side: ReadSide
+    state: AttributionSideState
+    registered_mapping_count: int | None = Field(default=None, ge=0)
+    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+
+
+class ChangedPathAttribution(KnowledgeModel):
+    """One measured changed path in exactly one bucket, with the links that put it there.
+
+    ``link`` is ``None`` for a path that is not attributed: there is no link to characterise, and a
+    value in that field would describe an association that was not established. ``mapped_sides`` names
+    the snapshots whose registered mappings hold their recorded bytes at this path, and
+    ``unresolved_mapping_count`` counts the purported mappings that do **not** -- a *stale* recording
+    whose identity the bytes no longer match, a locator that does not bind, a path that is not there.
+    They are carried rather than dropped, because "no registered mapping" and "a mapping whose evidence
+    did not resolve" are different facts about a path, and only the first is an absence of attribution.
+    """
+
+    path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
+    bucket: AttributionBucket
+    link: AttributionLink | None = None
+    mapped_sides: tuple[ReadSide, ...] = ()
+    unresolved_mapping_count: int = Field(default=0, ge=0)
+    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+
+    @model_validator(mode="after")
+    def _require_the_bucket_and_its_links_to_agree(self) -> ChangedPathAttribution:
+        attributed = self.bucket == "attributed"
+        if attributed != (self.link is not None):
+            raise ValueError(
+                "an attributed path carries the link that establishes it and an unattributed path "
+                "carries none; a link beside a non-attributed bucket describes an association no "
+                "bucket recorded"
+            )
+        if attributed != bool(self.mapped_sides):
+            raise ValueError(
+                "a path is attributed exactly when a snapshot's registered mapping resolved it, so "
+                "the mapped sides and the bucket are one statement"
+            )
+        return self
+
+
+class SourceAttribution(KnowledgeModel):
+    """The partition of one measured source change population by its recorded attribution.
+
+    ``state`` is the honesty boundary and it is the first thing a reader needs: ``measured`` means the
+    three totals beside it describe a population that was actually measured, and ``unavailable`` means
+    the source measurement itself was not made -- in which case every total is ``None`` and **not**
+    zero, because a zero would be a measured claim this response never established.
+
+    The three totals are checked against ``paths`` by this model's own validator, so "disjoint and
+    exhaustive" is a property of the value rather than a promise a test has to keep. ``changed_total``
+    is the denominator: the **carriable** measured changed paths of the bound pair, at the declared
+    granularity -- and ``detail`` states that scope itself, including the count of changed paths whose
+    *names* could not be carried as text, so a partial measurement's total is never read as a whole
+    population by a consumer that does not open the inventory beside it.
+    """
+
+    state: Literal["measured", "unavailable"]
+    granularity: Literal["changed_path"] = ATTRIBUTION_GRANULARITY
+    changed_total: int | None = Field(default=None, ge=0)
+    attributed_total: int | None = Field(default=None, ge=0)
+    confirmed_unregistered_total: int | None = Field(default=None, ge=0)
+    unknown_attribution_total: int | None = Field(default=None, ge=0)
+    complete: bool | None = None
+    subject_scope_complete: bool | None = None
+    sides: tuple[AttributionSide, ...] = ()
+    paths: tuple[ChangedPathAttribution, ...] = ()
+    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+
+    @model_validator(mode="after")
+    def _require_the_three_buckets_to_partition_the_population(self) -> SourceAttribution:
+        if self.state == "unavailable":
+            totals = (
+                self.changed_total,
+                self.attributed_total,
+                self.confirmed_unregistered_total,
+                self.unknown_attribution_total,
+            )
+            if self.paths or any(total is not None for total in totals):
+                raise ValueError(
+                    "an unavailable attribution measurement states no total and lists no path; a "
+                    "number beside it would be read as a measurement that was never made"
+                )
+            if self.complete is not None or self.subject_scope_complete is not None:
+                raise ValueError(
+                    "an attribution measurement that was not made states nothing about how "
+                    "completely either snapshot was inspected"
+                )
+            return self
+        buckets = {
+            bucket: sum(1 for entry in self.paths if entry.bucket == bucket)
+            for bucket in ("attributed", "confirmed_unregistered", "unknown_attribution")
+        }
+        if len({entry.path for entry in self.paths}) != len(self.paths):
+            raise ValueError(
+                "a path appears once in the partition; a repeated path would be counted twice in "
+                "the totals it is the denominator of"
+            )
+        if self.changed_total != len(self.paths) or self.changed_total != sum(buckets.values()):
+            raise ValueError(
+                "the three buckets are the measured population: their counts must sum to the "
+                "measured changed paths this value carries, and to nothing else"
+            )
+        if (
+            self.attributed_total != buckets["attributed"]
+            or self.confirmed_unregistered_total != buckets["confirmed_unregistered"]
+            or self.unknown_attribution_total != buckets["unknown_attribution"]
+        ):
+            raise ValueError(
+                "each bucket total is the count of the paths in that bucket; a total that describes "
+                "a population the value does not carry is how a partial partition is read as whole"
+            )
+        return self
+
+    def bucket_paths(self, bucket: AttributionBucket) -> tuple[str, ...]:
+        """Every measured changed path in one bucket, sorted by path."""
+
+        return tuple(sorted(entry.path for entry in self.paths if entry.bucket == bucket))
+
+    @property
+    def attributed_paths(self) -> tuple[str, ...]:
+        """The measured changed paths at least one valid registered mapping resolves."""
+
+        return self.bucket_paths("attributed")
+
+    @property
+    def confirmed_unregistered_paths(self) -> tuple[str, ...]:
+        """The changed paths confirmed to carry no valid registered attribution in either snapshot."""
+
+        return self.bucket_paths("confirmed_unregistered")
+
+    @property
+    def unknown_attribution_paths(self) -> tuple[str, ...]:
+        """The changed paths whose attribution could not be determined from the inspected snapshots."""
+
+        return self.bucket_paths("unknown_attribution")
+
+    def linked_paths(self, link: AttributionLink) -> tuple[str, ...]:
+        """Every attributed changed path carrying one link label, sorted by path."""
+
+        return tuple(sorted(entry.path for entry in self.paths if entry.link == link))
+
+    @property
+    def selected_subject_paths(self) -> tuple[str, ...]:
+        """The attributed changed paths a known link to the selected subject establishes."""
+
+        return self.linked_paths("selected_subject")
+
+    @property
+    def outside_selection_paths(self) -> tuple[str, ...]:
+        """The attributed changed paths known only outside the selected subject, either label."""
+
+        return tuple(
+            sorted(
+                (
+                    *self.linked_paths("outside_selection_complete"),
+                    *self.linked_paths("outside_selection_membership_unknown"),
+                )
+            )
+        )
+
+
 class KnowledgeDiffExpansion(KnowledgeModel):
     """The reference to the full selected-candidate source diff this response was cut from.
 
@@ -413,9 +637,15 @@ class KnowledgeDiffExpansion(KnowledgeModel):
     *attribution* of source, and a document dump would be a different operation with a different
     limit.
 
-    ``unattributed_changed_paths`` is the packet's other visible gap: a path that changed between the
-    two trees and that **no** recorded realization claim attributes. Those paths are listed rather
-    than dropped, because dropping them would hide exactly the changes a reviewer most needs to see.
+    ``attributed_changed_paths`` and ``unattributed_changed_paths`` are the two lists a path-level
+    attribution question answers with, and both are drawn from the *measured change population*: a
+    path a recorded claim names but the two trees agree at is context and not a change, so it is
+    listed nowhere here (ICR-R04). ``unknown_attribution_changed_paths`` is the third list, for the
+    changes whose attribution could not be determined because a required snapshot was not completely
+    inspected: they are neither attributed nor confirmed unregistered, and dropping them would let an
+    unmeasured side read as an empty one. ``attribution`` carries the whole partition, its
+    denominator and each bound snapshot's own inspection state, so the three lists are readable as
+    one accounting rather than as three independent counts.
     """
 
     reference: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
@@ -426,6 +656,8 @@ class KnowledgeDiffExpansion(KnowledgeModel):
     after_code_tree_id: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
     attributed_changed_paths: tuple[str, ...] = ()
     unattributed_changed_paths: tuple[str, ...] = ()
+    unknown_attribution_changed_paths: tuple[str, ...] = ()
+    attribution: SourceAttribution | None = None
     detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
 
 
@@ -561,6 +793,22 @@ class KnowledgeDiffResult(KnowledgeModel):
                     f"{limitation!r} limitation, and one that declares it must have omitted "
                     "something for that reason"
                 )
+        # The undetermined-attribution limit has two producers and either one establishes it: an
+        # omission counting the paths a *completed* measurement could not attribute, or an attribution
+        # measurement that was never made at all -- where there is no population to count, so no
+        # omission can carry it and the missing measurement is itself the limit. Reading the second
+        # producer off the expansion is what keeps this response from reporting an unmeasured
+        # population as an empty one.
+        undetermined = "attribution_not_determined" in reasons or _attribution_not_measured(
+            self.expansion
+        )
+        if undetermined != ("unknown_attribution_changed_paths" in declared):
+            raise ValueError(
+                "a comparison whose attribution could not be determined -- by a counted omission or "
+                "by a source attribution measurement that was not made -- must declare the "
+                "'unknown_attribution_changed_paths' limitation, and one that declares it must have "
+                "had something undetermined"
+            )
         if "no_semantic_assessment_performed" not in declared:
             raise ValueError(
                 "every comparison states that it performs no semantic assessment; a response that "
@@ -568,6 +816,16 @@ class KnowledgeDiffResult(KnowledgeModel):
                 "nothing to assess"
             )
         return self
+
+
+def _attribution_not_measured(expansion: KnowledgeDiffExpansion | None) -> bool:
+    """Whether one expansion says its own attribution partition was never measured."""
+
+    return (
+        expansion is not None
+        and expansion.attribution is not None
+        and expansion.attribution.state != "measured"
+    )
 
 
 class KnowledgeDiffCursor(KnowledgeModel):

@@ -35,6 +35,7 @@ from agents_remember.models.knowledge.base import (
     SHA256_PATTERN,
     KnowledgeModel,
 )
+from agents_remember.models.knowledge.diff import SourceAttribution
 from agents_remember.models.knowledge.read import KnowledgeReadSeed
 from agents_remember.models.knowledge.review_records import (
     ReviewRecordChannel,
@@ -66,6 +67,7 @@ __all__ = [
     "ReviewRefusal",
     "ReviewRefusalCode",
     "ReviewRemainingCount",
+    "ReviewRemainingCountName",
     "ReviewRevisionGroup",
     "ReviewSideContent",
     "ReviewSignal",
@@ -395,6 +397,23 @@ class ReviewObservation(KnowledgeModel):
     limitations: tuple[str, ...] = ()
 
 
+# The six persistent counts the source pane exposes, declared once so the pane's own vocabulary and
+# the composition that fills it cannot come to disagree about which counts exist. The attribution
+# counts are three and not two (ICR-R04): ``unattributed_changed_paths`` is the confirmed negative
+# conclusion, ``unknown_attribution_changed_paths`` is the measured population that conclusion could
+# not be drawn for, and a reader must be able to see both numbers beside each other -- a bare zero
+# with no undetermined count next to it is the "measured zero implies completeness" reading this
+# vocabulary exists to prevent.
+ReviewRemainingCountName = Literal[
+    "locations_remaining",
+    "changed_paths_outside_selection",
+    "unattributed_changed_paths",
+    "unknown_attribution_changed_paths",
+    "references_unresolved",
+    "records_present_outside_selection",
+]
+
+
 class ReviewRemainingCount(KnowledgeModel):
     """One persistent count exposing what the selection did not reach.
 
@@ -403,13 +422,7 @@ class ReviewRemainingCount(KnowledgeModel):
     different facts and a reviewer must be able to tell them apart.
     """
 
-    name: Literal[
-        "locations_remaining",
-        "changed_paths_outside_selection",
-        "unattributed_changed_paths",
-        "references_unresolved",
-        "records_present_outside_selection",
-    ]
+    name: ReviewRemainingCountName
     value: int | None = Field(default=None, ge=0)
     reason: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
 
@@ -629,6 +642,12 @@ class ReviewSourcePane(KnowledgeModel):
     field below it is the *attribution* half -- which of those changes a recorded realization claim
     reaches -- and that half may legitimately be empty, filtered or unmeasured without shortening the
     inventory above it.
+
+    ``attribution`` is that half as **one** accounting rather than three independent lists: the
+    measured change population partitioned once into attributed, confirmed unregistered and
+    undetermined, with each bound snapshot's inspection state beside it. The three path lists below it
+    are that value's own buckets, so a path can appear in exactly one of them and a change nobody
+    looked for is never listed as a change nobody registered.
     """
 
     inventory: ReviewSourceInventory
@@ -638,6 +657,8 @@ class ReviewSourcePane(KnowledgeModel):
     expansion_command: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
     unattributed_changed_paths: tuple[str, ...] = ()
     attributed_changed_paths: tuple[str, ...] = ()
+    unknown_attribution_changed_paths: tuple[str, ...] = ()
+    attribution: SourceAttribution | None = None
     unresolved: tuple[ReviewUnresolvedReference, ...] = ()
 
 

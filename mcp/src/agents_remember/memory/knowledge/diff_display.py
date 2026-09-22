@@ -20,19 +20,50 @@ Three jobs, and they are one job: a response must never be readable as more than
   as Git recorded it plus what happened to it, so a tab or a newline inside a name stays part of the
   address a caller expands the same file with, and an addition, a deletion, a mode or type change and
   a path whose content cannot be rendered are all still *listed* rather than dropped from the set.
+* **Attribution is one partition of one population.** :func:`partition_attribution` -- re-exported
+  here from :mod:`agents_remember.memory.knowledge.diff_attribution`, which owns it -- divides the
+  *measured* changed paths, the source measurement's own denominator, into attributed, confirmed
+  unregistered and undetermined. The three buckets are disjoint and exhaustive by construction, several
+  links to one path count it once, and a purported mapping that did not resolve is listed with that fact
+  rather than promoted. This module's own job is to carry that partition onto the expansion and to state
+  the two omissions it establishes.
+* **One name left and is deliberately not replaced.** The module used to define
+  ``attributed_paths(comparison)``: every path a *selected* claim named, with no intersection against the
+  measured change set, which is the calculation ``ICR-R04`` corrects. It is deleted rather than
+  re-exported -- an unchanged mapped path is context and never a change -- and what replaces it is
+  :attr:`SourceAttribution.attributed_paths`, the partition value's own bucket. No module in this
+  repository imported the old name, and this note is here so a reader comparing the two versions does not
+  have to guess whether it moved or went.
 
-The unattributed-path computation is delegated through :data:`TreeDifferenceProbe` rather than
-performed here: Git is the application layer's seam (:mod:`agents_remember.memory.knowledge.read_anchors`
-observes anchors the same way), and a storage module that shelled out would put a subprocess on a
-read path whose whole persistence argument is that it only ever issues a ``SELECT``.
+The source observation itself is delegated through :data:`TreeDifferenceProbe` rather than performed
+here: Git is the application layer's seam
+(:mod:`agents_remember.memory.knowledge.read_anchors` observes anchors the same way), and a storage
+module that shelled out would put a subprocess on a read path whose whole persistence argument is that
+it only ever issues a ``SELECT``. The observation vocabulary it produces travels for the same reason it
+is shared -- :mod:`agents_remember.memory.knowledge.tree_observation` -- and is re-exported here.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from agents_remember.memory.knowledge.diff import DiffComparison, DiffItemComparison
+from agents_remember.memory.knowledge.diff_attribution import (
+    AttributionReader,
+    MappingFact,
+    SideInspection,
+    licenses_absence,
+    partition_attribution,
+    unavailable_attribution,
+)
+from agents_remember.memory.knowledge.tree_observation import (
+    TreeChange,
+    TreeDifferenceProbe,
+    TreePaths,
+    TreeSide,
+    no_tree_difference_probe,
+)
 from agents_remember.models.knowledge.diff import (
     DiffItemKind,
     DiffLimitation,
@@ -41,18 +72,25 @@ from agents_remember.models.knowledge.diff import (
     KnowledgeDiffExpansion,
     KnowledgeDiffItem,
     OmittedChanges,
+    SourceAttribution,
 )
 
 __all__ = [
     "DIFF_EXPANSION_REFERENCE",
     "DIFF_LIMITATION_ORDER",
+    "AttributionReader",
     "DiffDisplay",
+    "MappingFact",
+    "SideInspection",
+    "SourceObservation",
     "TreeChange",
     "TreeDifferenceProbe",
     "TreePaths",
-    "attributed_paths",
     "build_display",
+    "licenses_absence",
     "no_tree_difference_probe",
+    "partition_attribution",
+    "unavailable_attribution",
 ]
 
 # The reference a response publishes for the whole comparison. It names the operation and the
@@ -80,114 +118,29 @@ DIFF_LIMITATION_ORDER: tuple[DiffLimitation, ...] = (
     "display_filtered",
     "records_present_outside_the_selection",
     "unattributed_changed_paths",
+    "unknown_attribution_changed_paths",
     "no_semantic_assessment_performed",
 )
 
 
 @dataclass(frozen=True)
-class TreeSide:
-    """One side's source binding: the exact code tree, and the repository root it lives in.
+class SourceObservation:
+    """The source half one display is built from: the two bound sides and the seams that read them.
 
-    Both are carried because they answer different questions: the tree id is the *identity* the
-    comparison resolved against, and the root is *where* a caller runs the command the expansion
-    publishes. ``tree_id`` is ``None`` when the side requested no source resolution, which is a
-    supported state and not a failure -- the record half of the comparison is complete without it.
+    They travel together because they are one measurement. The probe observes the two trees once, and
+    the attribution reader is handed exactly that observation, so the partition's denominator and the
+    expansion's own path lists cannot come from two different measurements of the same pair.
+
+    ``attribution`` is required rather than defaulted: a comparison that reports source changes has
+    always measured *whether* they are attributed, and a display built without that measurement would
+    have to render its absence as one of the buckets. A reader whose own measurement was not made
+    returns :func:`unavailable_attribution`, which is the state that says exactly that.
     """
 
-    tree_id: str | None
-    root: str | None
-
-
-@dataclass(frozen=True)
-class TreeChange:
-    """One path two code trees differ at, with Git's own status and what can be rendered.
-
-    ``path`` is the raw filename exactly as Git recorded it -- a tab or a newline inside a name is
-    part of the address and not a separator, which is why the observation that produces these values
-    reads a NUL-delimited Git interface rather than lines. ``status`` and ``content`` are the two
-    separate facts a listing needs: what happened to the path, and whether its content could be
-    rendered at all. A mode change is a ``modified`` entry that also says so, because "the bytes are
-    the same and the mode moved" is a different change from "the bytes moved".
-
-    ``detail`` states why ``content`` is ``unknown``; it is empty for a measured classification, so a
-    reader never has to guess whether an unknown was measured and failed or simply not reported.
-    """
-
-    path: str
-    status: str
-    content: str
-    mode_change: bool = False
-    detail: str = ""
-
-
-@dataclass(frozen=True)
-class TreePaths:
-    """The paths two code trees differ at, as the probe observed them.
-
-    ``available`` is separate from ``paths`` on purpose: a probe that could not run (an absent root,
-    a tree this repository does not hold) has not observed *no changes*, and reporting its silence
-    as "nothing changed between the trees" would be a fabricated fact. An unavailable probe
-    therefore contributes no expansion at all and says so through its ``detail``.
-
-    ``entries`` is the same measurement at full resolution -- one :class:`TreeChange` per *carriable*
-    path, in the same order ``paths`` reports them -- and the two are held in agreement by
-    construction: a value that named paths its entries do not carry would make one measurement into
-    two. ``partial`` says the path set was measured while part of it could not be reported whole:
-    either one field of the entries could not be classified, or some changed paths had to travel in
-    ``unrepresentable`` instead. ``detail`` states whichever of those happened, so a partial
-    observation is never a quiet one.
-
-    ``unrepresentable`` is the second half of that honesty rule, and it is not an empty list a caller
-    may ignore. A Git pathname is *bytes* and this surface carries *text*; a name that is not valid
-    UTF-8 decodes to lone surrogates, which is a value the surface's own text fields refuse. Dropping
-    such a path would make a partial change set read as a whole one, so it is measured, kept here in
-    full, and rendered by its byte form by whoever can state that fact to a reader.
-    """
-
-    available: bool
-    paths: tuple[str, ...] = ()
-    detail: str = ""
-    entries: tuple[TreeChange, ...] = ()
-    partial: bool = False
-    unrepresentable: tuple[TreeChange, ...] = ()
-
-    def __post_init__(self) -> None:
-        if self.entries and self.paths != tuple(entry.path for entry in self.entries):
-            raise ValueError(
-                "a tree observation's paths and its entries are two renderings of one measurement, "
-                "so a value whose paths are not exactly the entry paths describes no observation"
-            )
-        if self.unrepresentable and not self.partial:
-            raise ValueError(
-                "an observation that could not carry some of its changed paths as text is a partial "
-                "one; a complete observation beside an unrepresentable path describes no measurement"
-            )
-
-
-# The Git seam, narrowed to one question. It is a callable rather than a class so the application
-# layer can pass the same kind of seam the anchor resolver is, and so a case can substitute an
-# observation without a repository.
-TreeDifferenceProbe = Callable[[TreeSide, TreeSide], TreePaths]
-
-
-def no_tree_difference_probe(before: TreeSide, after: TreeSide) -> TreePaths:
-    """Return the probe that observes nothing, for a comparison whose sides named no code tree.
-
-    It is the honest answer for a comparison with no source half: there is no pair of trees to
-    compare, so nothing was observed, and the expansion says exactly that instead of reporting an
-    empty change set as though it had been measured.
-    """
-
-    if before.tree_id is None or after.tree_id is None:
-        return TreePaths(
-            available=False,
-            detail=(
-                "at least one side named no exact code tree, so no source expansion was observed; "
-                "the record half of this comparison is complete and the source half was not "
-                "requested for every side"
-            ),
-        )
-    return TreePaths(available=True)
+    probe: TreeDifferenceProbe
+    before: TreeSide
+    after: TreeSide
+    attribution: AttributionReader
 
 
 @dataclass(frozen=True)
@@ -198,59 +151,85 @@ class DiffDisplay:
     omissions: tuple[OmittedChanges, ...]
     limitations: tuple[DiffLimitation, ...]
     expansion: KnowledgeDiffExpansion
+    attribution: SourceAttribution
 
 
 def build_display(
     comparison: DiffComparison,
     *,
     display_filter: DisplayFilter | None,
-    probe: TreeDifferenceProbe,
-    before: TreeSide,
-    after: TreeSide,
+    source: SourceObservation,
 ) -> DiffDisplay:
     """Build one display of a comparison: the shown items, the omissions and the expansion.
 
     The filter is applied to the union and never to the comparison: ``comparison.items`` is the whole
     selected union and stays that way, which is what keeps the raw and displayed totals two different
     numbers a caller can compare.
+
+    The source is observed **once**, here, and the same :class:`TreePaths` is handed to the
+    attribution reader the caller supplied. That is what makes the partition's denominator and the
+    expansion's own path list two renderings of one measurement rather than two measurements that
+    could disagree.
     """
 
     shown, filtered_out = _apply_filter(comparison, display_filter)
-    observed = probe(before, after)
+    observed = source.probe(source.before, source.after)
+    partition = source.attribution(observed)
     omissions: tuple[OmittedChanges, ...] = (
         *_unselected_omissions(comparison),
-        *_unattributed_omission(comparison, observed),
+        *_attribution_omissions(partition),
         *filtered_out,
     )
     limitations: tuple[DiffLimitation, ...] = tuple(
-        limitation for limitation in DIFF_LIMITATION_ORDER if _declared(limitation, omissions)
+        limitation
+        for limitation in DIFF_LIMITATION_ORDER
+        if _declared(limitation, omissions, partition)
     )
     return DiffDisplay(
         items=shown,
         omissions=omissions,
         limitations=limitations,
-        expansion=_expansion(comparison, observed=observed, before=before, after=after),
+        expansion=_expansion(
+            observed=observed,
+            before=source.before,
+            after=source.after,
+            attribution=partition,
+        ),
+        attribution=partition,
     )
 
 
-def _declared(limitation: DiffLimitation, omissions: Sequence[OmittedChanges]) -> bool:
-    """Return whether one limitation is established by the omissions beside it.
+def _declared(
+    limitation: DiffLimitation,
+    omissions: Sequence[OmittedChanges],
+    attribution: SourceAttribution,
+) -> bool:
+    """Return whether one limitation is established by the omissions and partition beside it.
 
     ``no_semantic_assessment_performed`` is unconditional: it is not established by an omission but
-    by the operation's contract, and it is always declared.
+    by the operation's contract, and it is always declared. ``unknown_attribution_changed_paths`` has
+    two producers and either one establishes it: an omission counting the paths a completed
+    measurement could not attribute, or an attribution measurement that was never made -- where there
+    is no population to count and the limit is the missing measurement itself.
     """
 
+    if limitation == "unknown_attribution_changed_paths":
+        return attribution.state != "measured" or any(
+            omission.reason == "attribution_not_determined" for omission in omissions
+        )
     reason = _LIMITATION_REASONS.get(limitation)
     if reason is None:
         return True
     return any(omission.reason == reason for omission in omissions)
 
 
-# The omission each limitation advertises, as one table. Two of the four limitations are established
-# by an omission and the other two are not: ``no_semantic_assessment_performed`` is a statement about
-# the operation's own contract, and a limitation with no reason row would be one this response
-# declared without having established it -- which the result model refuses at construction, so the
-# absence of a row here is never a quiet pass.
+# The omission each limitation advertises, as one table. Three of the five limitations are
+# established by an omission and the other two are not: ``no_semantic_assessment_performed`` is a
+# statement about the operation's own contract, and ``unknown_attribution_changed_paths`` has a second
+# producer (a measurement that was not made at all, which counts nothing), so both are decided by
+# ``_declared`` rather than by a reason row here. A limitation with no reason row that had no other
+# producer would be one this response declared without having established it -- which the result model
+# refuses at construction, so the absence of a row here is never a quiet pass.
 _LIMITATION_REASONS: Mapping[DiffLimitation, DiffOmissionReason] = {
     "display_filtered": "outside_the_display_filter",
     "records_present_outside_the_selection": "present_outside_the_declared_selection",
@@ -347,29 +326,50 @@ def _unselected_omissions(comparison: DiffComparison) -> tuple[OmittedChanges, .
     )
 
 
-def _unattributed_omission(
-    comparison: DiffComparison, observed: TreePaths
-) -> tuple[OmittedChanges, ...]:
-    """Return the omission for changed paths no recorded realization attributes, if any exist."""
+def _attribution_omissions(attribution: SourceAttribution) -> tuple[OmittedChanges, ...]:
+    """Return one omission per attribution bucket that holds any measured changed path.
 
-    if not observed.available:
-        return ()
-    unattributed = _unattributed_paths(comparison, observed.paths)
-    if not unattributed:
-        return ()
-    return (
-        OmittedChanges(
-            reason="change_not_attributed_to_a_recorded_realization",
-            item_kind=None,
-            omitted_count=len(unattributed),
-            detail=(
-                f"{_count(len(unattributed), 'changed path')} between the two code trees that no "
-                "recorded realization claim attributes: this response has no knowledge half for "
-                "them, and they are listed in the expansion rather than dropped. No assessment of "
-                "their consequence is made or implied here"
-            ),
-        ),
-    )
+    Both buckets are omissions *from the knowledge half* and neither is a judgement about the change:
+    the confirmed-unregistered bucket is a conclusion this measurement reached -- nobody registered
+    this path -- and the undetermined bucket is the statement that no conclusion was available. They
+    are two omissions with two reasons rather than one count, because a reader who saw them summed
+    could not tell "nobody registered this" from "nobody looked".
+    """
+
+    unregistered = attribution.confirmed_unregistered_paths
+    undetermined = attribution.unknown_attribution_paths
+    omissions: list[OmittedChanges] = []
+    if unregistered:
+        omissions.append(
+            OmittedChanges(
+                reason="change_not_attributed_to_a_recorded_realization",
+                item_kind=None,
+                omitted_count=len(unregistered),
+                detail=(
+                    f"{_count(len(unregistered), 'changed path')} between the two code trees that no "
+                    "registered realization claim resolves, in snapshots that were completely "
+                    "inspected: this response has no knowledge half for them, and they are listed in "
+                    "the expansion rather than dropped. No assessment of their consequence is made or "
+                    "implied here"
+                ),
+            )
+        )
+    if undetermined:
+        omissions.append(
+            OmittedChanges(
+                reason="attribution_not_determined",
+                item_kind=None,
+                omitted_count=len(undetermined),
+                detail=(
+                    f"{_count(len(undetermined), 'changed path')} whose attribution could not be "
+                    "determined, because a required snapshot or scope was not completely inspected "
+                    "and cannot be read as one that registered nothing: the paths are listed in the "
+                    "expansion, the snapshot that was not inspected is named beside this response, "
+                    "and no conclusion is drawn about them either way"
+                ),
+            )
+        )
+    return tuple(omissions)
 
 
 # The noun each item kind is named by in a prose omission. It is a table rather than an f-string so
@@ -401,65 +401,36 @@ def _count(count: int, noun: str) -> str:
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
 
 
+# --- the attribution partition, and the reader seam the display is handed ---------------------
+#
+# The partition itself lives next door, in `agents_remember.memory.knowledge.diff_attribution`, and
+# every name below is re-exported from it: this module's file-size budget is better spent on the
+# display, the partition is a responsibility of its own, and an importer that has always read these
+# names from here keeps working. There is one implementation and it is that module's.
+
 # --- the expansion --------------------------------------------------------------------------
 
 
-def attributed_paths(comparison: DiffComparison) -> tuple[str, ...]:
-    """Return every path either selected set attributes, sorted and deduplicated.
-
-    A path is attributed when a realization claim the comparison selected names it, on **either**
-    side. The two sides are unioned rather than intersected, and that is the exact question the
-    packet's own omission is about: ``unattributed_changed_path`` means a change no recorded
-    realization attributes at all. A path the baseline's claim names and the candidate's selection no
-    longer reaches is attributed -- the relationship's removal is its own item in the union, reported
-    with its before-side source -- so counting it as unattributed would tell a reviewer that the
-    earlier code had no recorded attribution when it had exactly that.
-    """
-
-    before_paths = _claim_paths(comparison, side="before")
-    after_paths = _claim_paths(comparison, side="after")
-    return tuple(sorted(before_paths | after_paths))
-
-
-def _claim_paths(comparison: DiffComparison, *, side: str) -> frozenset[str]:
-    paths: set[str] = set()
-    for entry in comparison.items:
-        if entry.kind != "realization":
-            continue
-        item = entry.before if side == "before" else entry.after
-        if item is not None and item.anchor is not None:
-            paths.add(item.anchor.path)
-    return frozenset(paths)
-
-
-def _unattributed_paths(
-    comparison: DiffComparison, changed_paths: Sequence[str]
-) -> tuple[str, ...]:
-    """Return the changed paths no selected realization claim attributes."""
-
-    attributed = set(attributed_paths(comparison))
-    return tuple(sorted(path for path in changed_paths if path not in attributed))
-
-
 def _expansion(
-    comparison: DiffComparison,
     *,
     observed: TreePaths,
     before: TreeSide,
     after: TreeSide,
+    attribution: SourceAttribution,
 ) -> KnowledgeDiffExpansion:
     """Return the reference to the full selected-candidate source diff.
 
-    The changed-path set comes from the one observation the caller passed in, so the omission count
-    and the expansion's own path list are two renderings of the same measurement rather than two
+    The changed-path set comes from the one observation the caller passed in, so the omission counts
+    and the expansion's own path lists are two renderings of the same measurement rather than two
     measurements that could disagree. The command is always published, with the two tree ids
     substituted: a caller can reproduce the diff itself even when this operation did not observe it,
     and a command naming the two requested trees is what "never substitute another HEAD" means in
     practice.
+
+    The three path lists are the partition's own buckets and nothing else, so a path that a recorded
+    claim names but the two trees agree at is listed in none of them -- it is context, not a change.
     """
 
-    attributed = attributed_paths(comparison)
-    unattributed = _unattributed_paths(comparison, observed.paths) if observed.available else ()
     return KnowledgeDiffExpansion(
         reference=DIFF_EXPANSION_REFERENCE,
         command=TREE_DIFF_COMMAND.format(
@@ -470,34 +441,48 @@ def _expansion(
         after_root=after.root,
         before_code_tree_id=before.tree_id,
         after_code_tree_id=after.tree_id,
-        attributed_changed_paths=attributed,
-        unattributed_changed_paths=unattributed,
-        detail=_expansion_detail(observed, attributed, unattributed),
+        attributed_changed_paths=attribution.attributed_paths,
+        unattributed_changed_paths=attribution.confirmed_unregistered_paths,
+        unknown_attribution_changed_paths=attribution.unknown_attribution_paths,
+        attribution=attribution,
+        detail=_expansion_detail(observed, attribution),
     )
 
 
-def _expansion_detail(
-    observed: TreePaths, attributed: Sequence[str], unattributed: Sequence[str]
-) -> str:
+def _expansion_detail(observed: TreePaths, attribution: SourceAttribution) -> str:
     """Return what the expansion states about itself: the measurement, its limits, and nothing more.
 
-    A partial observation states its limit *here* as well as counting less, because the two counts
-    beside this sentence describe only the paths that could be carried: a reader who is not told that
-    two changed paths could not be named would read a smaller change set as the whole one. The
-    unavailable case reports the observation's own reason verbatim, as it always has.
+    A partial observation states its limit *here* as well as counting less, because the counts beside
+    this sentence describe only the paths that could be carried: a reader who is not told that two
+    changed paths could not be named would read a smaller change set as the whole one. The unavailable
+    case reports the observation's own reason verbatim, as it always has.
     """
 
     if not observed.available:
         return observed.detail
-    stated = (
-        f"the two code trees differ at {len(observed.paths)} path(s); "
-        f"{len(attributed)} are attributed by a realization claim both sides selected and "
-        f"{len(unattributed)} are not. This reference names the whole comparison so a filtered or "
-        "partial response can be expanded rather than trusted"
-    )
+    stated = _stated_attribution(observed, attribution)
     if not observed.partial:
         return stated
     return f"{stated} This observation is partial: {observed.detail}"
+
+
+def _stated_attribution(observed: TreePaths, attribution: SourceAttribution) -> str:
+    """Return the sentence the expansion publishes about its own attribution accounting."""
+
+    if attribution.state != "measured":
+        return (
+            f"the two code trees differ at {len(observed.paths)} path(s); this comparison measured no "
+            "attribution for them, so none of them is reported as attributed, confirmed unregistered "
+            f"or undetermined rather than as an empty set. {attribution.detail}"
+        )
+    return (
+        f"the two code trees differ at {len(observed.paths)} path(s); "
+        f"{attribution.attributed_total} are attributed by a registered realization claim, "
+        f"{attribution.confirmed_unregistered_total} are confirmed to have no valid registered "
+        f"attribution, and {attribution.unknown_attribution_total} are of undetermined attribution. "
+        "This reference names the whole comparison so a filtered or partial response can be expanded "
+        "rather than trusted"
+    )
 
 
 # --- one union item, typed ------------------------------------------------------------------

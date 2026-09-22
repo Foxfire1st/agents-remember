@@ -36,13 +36,20 @@ from typing import Any
 
 import apsw
 
+from agents_remember.application.review_attribution import (
+    AttributionSideInput,
+    review_attribution,
+    selected_subject,
+)
 from agents_remember.application.review_source_inventory import (
     tree_difference_observation,
 )
 from agents_remember.memory.knowledge.connection import inspect_schema, open_read_only_database
 from agents_remember.memory.knowledge.diff import DiffComparison, compare_selected_scopes
 from agents_remember.memory.knowledge.diff_display import (
+    AttributionReader,
     DiffDisplay,
+    SourceObservation,
     TreeDifferenceProbe,
     TreePaths,
     TreeSide,
@@ -89,6 +96,7 @@ from agents_remember.models.knowledge.diff import (
     KnowledgeDiffSummary,
     ReadSide,
     SideAbsence,
+    SourceAttribution,
     continue_diff_from_cursor,
     diff_binding_digest,
     diff_cursor_for,
@@ -403,14 +411,17 @@ def _select_and_compare(
     display = build_display(
         comparison,
         display_filter=request.display_filter,
-        probe=opened.probe,
-        before=TreeSide(
-            tree_id=request.before.context.code_tree_id,
-            root=request.before.context.repository_root,
-        ),
-        after=TreeSide(
-            tree_id=request.after.context.code_tree_id,
-            root=request.after.context.repository_root,
+        source=SourceObservation(
+            probe=opened.probe,
+            before=TreeSide(
+                tree_id=request.before.context.code_tree_id,
+                root=request.before.context.repository_root,
+            ),
+            after=TreeSide(
+                tree_id=request.after.context.code_tree_id,
+                root=request.after.context.repository_root,
+            ),
+            attribution=_registered_mapping_reader(request, paths, open_pair),
         ),
     )
     position = 0 if cursor is None else cursor.position
@@ -435,6 +446,42 @@ def _select_and_compare(
         page=_page(comparison, display, request, binding, position),
         refusal=None,
     )
+
+
+def _registered_mapping_reader(
+    request: KnowledgeDiffRequest,
+    paths: SnapshotPair,
+    open_pair: OpenPair,
+) -> AttributionReader:
+    """The registered-mapping reader for this comparison's own two open snapshots.
+
+    Both sides are read through the connections this comparison already opened, so the partition is
+    decided from exactly the bytes the selection was made from -- there is no second open, no second
+    namespace and no possibility of the two halves being read at two different instants. The reader is
+    a closure over those handles rather than a value computed here because the measured paths are not
+    known until the source observation has been made, and that observation belongs to the display.
+    """
+
+    sides = (
+        AttributionSideInput(
+            side="before",
+            database=paths.before,
+            context=request.before.context,
+            connection=open_pair.before,
+        ),
+        AttributionSideInput(
+            side="after",
+            database=paths.after,
+            context=request.after.context,
+            connection=open_pair.after,
+        ),
+    )
+    subject = selected_subject(request.selector)
+
+    def read(observed: TreePaths) -> SourceAttribution:
+        return review_attribution(observed, sides=sides, subject=subject)
+
+    return read
 
 
 def _any_side_snapshot_refusal(

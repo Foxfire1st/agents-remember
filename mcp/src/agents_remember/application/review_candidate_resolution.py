@@ -35,6 +35,7 @@ from pathlib import Path
 from agents_remember.errors import FutureCodeCandidateError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.candidate_receipt import read_candidate_receipt
+from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.review import (
     ReviewCandidateRef,
     ReviewRefusal,
@@ -60,12 +61,14 @@ __all__ = [
     "REVIEW_CANDIDATE_DIRECTORY",
     "REVIEW_CANDIDATE_RELATIVE_ROOT",
     "ReviewCandidateResolution",
+    "candidate_receipt_refusal",
     "candidate_ref",
     "missing_dataset_half",
     "refusal",
     "require_current_candidate_identity",
     "resolve_review_candidate",
     "review_namespace",
+    "unreadable_candidate_refusal",
 ]
 
 # Where a leaf's reviewable datasets live. Both are inside the leaf's **disposable** local root --
@@ -323,6 +326,49 @@ def review_namespace(requested: str, candidate_database: Path) -> str:
     if not receipt_path.exists():
         return requested
     return read_candidate_receipt(receipt_path).repository_id
+
+
+# The next action one unreadable candidate record earns. It is stated once because the whole point of
+# the refusal is that an operator can act on it: the subject route, the entry route and the task-context
+# route all answer the same bytes, and three copies of this sentence is how they stop agreeing.
+_REPAIR_CANDIDATE_ACTION = (
+    "repair the candidate's receipt and dataset in the leaf's disposable knowledge root, then reopen "
+    "the review; the surface substitutes no other dataset"
+)
+
+
+def unreadable_candidate_refusal(resolved: ReviewCandidateResolution, reason: str) -> ReviewRefusal:
+    """The one refusal a candidate whose own recorded receipt cannot be read earns.
+
+    Every route that opens this candidate answers this state with this value: the entry list, the
+    subject review and the task-context review. The code is the shipped ``candidate_dataset_absent``
+    -- this vocabulary's code for a pair input that cannot be opened -- and the detail names the
+    candidate's own failure rather than the caller's, so the three routes cannot drift apart about the
+    same bytes.
+    """
+
+    return refusal(
+        "candidate_dataset_absent",
+        f"the resolved candidate could not be opened for review: {reason}",
+        next_action=_REPAIR_CANDIDATE_ACTION,
+        offending_input=resolved.candidate_database.parent.name,
+    )
+
+
+def candidate_receipt_refusal(resolved: ReviewCandidateResolution) -> ReviewRefusal | None:
+    """The refusal this candidate's own receipt earns, or ``None`` when it reads as one.
+
+    This is the *preflight* form, for a caller that wants the state as a value instead of an exception:
+    it asks the same question :func:`review_namespace` answers and turns its failure into the typed
+    refusal above. A caller that would rather catch the storage error can still build the identical
+    value from it with :func:`unreadable_candidate_refusal`.
+    """
+
+    try:
+        review_namespace(resolved.repository_id, resolved.candidate_database)
+    except (KnowledgeStorageError, OSError, ValueError) as error:
+        return unreadable_candidate_refusal(resolved, str(error))
+    return None
 
 
 def refusal(

@@ -58,12 +58,14 @@ from agents_remember.application.review_candidate_resolution import (
     REVIEW_CANDIDATE_DIRECTORY,
     REVIEW_CANDIDATE_RELATIVE_ROOT,
     ReviewCandidateResolution,
+    candidate_receipt_refusal,
     candidate_ref,
     missing_dataset_half,
     refusal,
     require_current_candidate_identity,
     resolve_review_candidate,
     review_namespace,
+    unreadable_candidate_refusal,
 )
 from agents_remember.application.review_evidence_records import (
     AUTHORED_EFFECT_KINDS,
@@ -85,6 +87,7 @@ from agents_remember.application.review_source_inventory import (
     review_inventory,
     source_pane,
     source_tree_side,
+    tree_difference_observation,
 )
 from agents_remember.application.review_statement_sides import (
     field_changes,
@@ -104,6 +107,7 @@ from agents_remember.models.knowledge.diff import (
     KnowledgeDiffRequest,
     KnowledgeDiffResult,
     KnowledgeDiffSide,
+    SourceAttribution,
 )
 from agents_remember.models.knowledge.read import (
     FamilyIdentitySeed,
@@ -247,22 +251,19 @@ def list_knowledge_review_entries(
     unreadable = unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database)
     if unreadable is not None:
         return _entry_refused(repository_id, master, leaf_id, unreadable)
+    unreadable_receipt = candidate_receipt_refusal(resolved)
+    if unreadable_receipt is not None:
+        return _entry_refused(repository_id, master, leaf_id, unreadable_receipt)
     try:
         entries = _reviewable_entries(resolved, probe=probe)
     except KnowledgeStorageError as error:
+        # The preflight above reads the same bytes; this guard exists so that a candidate record which
+        # moves between the two reads is still the same typed refusal rather than a traceback.
         return _entry_refused(
             repository_id,
             master,
             leaf_id,
-            refusal(
-                "candidate_dataset_absent",
-                f"the resolved candidate could not be opened for review: {error}",
-                next_action=(
-                    "repair the candidate's receipt and dataset in the leaf's disposable knowledge "
-                    "root, then reopen the review; the surface substitutes no other dataset"
-                ),
-                offending_input=resolved.candidate_database.parent.name,
-            ),
+            unreadable_candidate_refusal(resolved, str(error)),
         )
     return ReviewEntryListResult(
         state="entries",
@@ -390,13 +391,16 @@ def compose_review(
     compared is a different fact from a review that selected no subject.
     """
 
-    inventory = review_inventory(
-        source_tree_side(resolved.baseline_code_tree_id, resolved.baseline_code_root),
-        source_tree_side(resolved.candidate_code_tree_id, resolved.candidate_code_root),
-        probe=probe,
+    before_source = source_tree_side(resolved.baseline_code_tree_id, resolved.baseline_code_root)
+    after_source = source_tree_side(resolved.candidate_code_tree_id, resolved.candidate_code_root)
+    observed = (
+        tree_difference_observation(before_source, after_source)
+        if probe is None
+        else probe(before_source, after_source)
     )
+    inventory = review_inventory(before_source, after_source, observed=observed)
     if request.selector is None:
-        return task_context_review(resolved, request, records, inventory)
+        return task_context_review(resolved, request, records, inventory, observed)
     opened = _open_dataset_pair(resolved, request)
     if isinstance(opened, KnowledgeReviewResult):
         return opened
@@ -444,13 +448,26 @@ def compose_review(
             ),
             comparison=identity,
             knowledge=_knowledge_pane(comparison, rows, records, subjects, request.selector),
-            source=source_pane(comparison, inventory),
+            source=source_pane(comparison, inventory, _comparison_attribution(comparison)),
             evidence=evidence_pane(rows, records, subjects),
             staleness=_staleness(identity, previous_binding_digest),
             submission=submission(stale),
             limitations=_limitations(comparison, inventory),
         ),
     )
+
+
+def _comparison_attribution(comparison: KnowledgeDiffResult) -> SourceAttribution:
+    """The attribution partition the comparison itself measured, carried verbatim.
+
+    It is not recomputed here: the comparison read both snapshots through its own two connections and
+    partitioned the population its own source observation measured, so a second measurement in the
+    composition could only disagree with the one the payload's expansion already publishes.
+    """
+
+    expansion = comparison.expansion
+    assert expansion is not None and expansion.attribution is not None
+    return expansion.attribution
 
 
 def _open_dataset_pair(
@@ -487,18 +504,7 @@ def _open_dataset_pair(
     try:
         return review_namespace(resolved.repository_id, resolved.candidate_database)
     except KnowledgeStorageError as error:
-        return refused(
-            request.repository_id,
-            refusal(
-                "candidate_dataset_absent",
-                f"the resolved candidate could not be opened for review: {error}",
-                next_action=(
-                    "repair the candidate's receipt and dataset in the leaf's disposable knowledge "
-                    "root, then reopen the review; the surface substitutes no other dataset"
-                ),
-                offending_input=resolved.candidate_database.parent.name,
-            ),
-        )
+        return refused(request.repository_id, unreadable_candidate_refusal(resolved, str(error)))
 
 
 def _review_matrix(
