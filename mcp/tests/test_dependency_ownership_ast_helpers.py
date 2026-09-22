@@ -43,8 +43,68 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "8d60a34cf56a9740e234823658312c8b6f5ae4e958344fe8ba2ea152b8ff6891"
+LIFECYCLE_CATALOG_SHA256 = "d2d6dc6ad331b6913b54262786be68f63158bb5b0ba91ab9351706ab1806748d"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Twentieth deliberate re-pin (260921-ICR-L8's second fix round, at base ``02957762``,
+2026-09-22) -- a third case module's two consumer rows.** The second fix round added the authored-line
+cases the ruling requires (a relationship recorded at an intermediate descendant, a split whose
+successors each record one, the split-only sentence, and a membership re-recorded onto an unselected
+successor family revision). They live in the ordinary unit module
+``mcp/tests/test_knowledge_review_relationship_line.py``, which authors its fixtures through the same
+public store operations and the same existing endpoint enclosure, importing the shared builders from
+its sibling case modules rather than duplicating them. It is therefore a source-derived consumer of
+the same **two** rows and both ``consumer_scope = "exact"`` rows gained that one path each, derived
+from the census's own finding --
+``missing=['mcp/tests/test_knowledge_review_relationship_line.py']`` with ``unsupported=[]`` on both.
+Its lane row was added to ``mcp/tests/test-evidence-lanes.toml``. **Nothing was registered, no row was
+removed and no artifact's identity moved**, so the population stays at **sixteen contracts /
+sixty-six artifacts**, and the catalog is re-pinned from
+``b1ed783810951a0af6bc142507f18b4f612bcc52835dd37ac6bf68a9fac0ea42`` (the Nineteenth) to
+``d2d6dc6ad331b6913b54262786be68f63158bb5b0ba91ab9351706ab1806748d``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact delta remains
+exactly empty.
+
+**Nineteenth deliberate re-pin (260921-ICR-L8's fix round, at base ``02957762``, 2026-09-22) --
+one further case module's two consumer rows.** The leaf's fix round added the reach cases the ruling
+requires (a member identity's relationship read at its own established head, a non-unique head stated
+unresolved with its reason, a re-recorded citation the withdrawn rows must name rather than deny, and
+member-wise family pairing). They live in the ordinary unit module
+``mcp/tests/test_knowledge_review_relationship_reach.py``, which authors its fixtures through the same
+public store operations and the same existing endpoint enclosure, importing the shared builders from
+the sibling case module rather than duplicating them. It is therefore a source-derived consumer of the
+same **two** rows as its sibling and both ``consumer_scope = "exact"`` rows gained that one path each,
+derived from the census's own finding --
+``missing=['mcp/tests/test_knowledge_review_relationship_reach.py']`` with ``unsupported=[]`` on both.
+Its lane row was added to ``mcp/tests/test-evidence-lanes.toml``. **Nothing was registered, no row was
+removed and no artifact's identity moved**, so the population stays at **sixteen contracts /
+sixty-six artifacts**, and the catalog is re-pinned from
+``c676b0a07480beeaf39e0093bddf15e30db4f4c9b3e0014095a96cd214548dbc`` (the leaf's first measurement) to
+``b1ed783810951a0af6bc142507f18b4f612bcc52835dd37ac6bf68a9fac0ea42``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact delta remains
+exactly empty.
+
+**Eighteenth deliberate re-pin (260921-ICR-L8, at base ``02957762``, 2026-09-22) -- one new case
+module's two consumer rows.** ``260921-ICR-L8`` (requirement ``ICR-R08@v1``) registers no artifact
+and no contract of its own: its twelve relationship-movement cases live in the ordinary unit module
+``mcp/tests/test_knowledge_review_relationship_movement.py``, which curates the shared diff fixture's
+two datasets through the public store operations inside the existing
+``mcp/tests/test_knowledge_review_source_endpoints.py`` enclosure -- rather than introducing a second
+enclosure or a second two-snapshot topology. It is therefore a source-derived consumer of **two**
+rows, each derived from the census's own finding --
+``missing=['mcp/tests/test_knowledge_review_relationship_movement.py']`` with ``unsupported=[]`` on
+both: ``mcp/tests/diff_scope_test_support.py`` (the candidate's own transitions, its
+``_claim_row_digest`` removal helper and the two real trees the enclosure is built over) and
+``mcp/tests/read_scope_test_support.py`` (the repository, the recorded paths and the family topology
+the moved associations are read from). Both ``consumer_scope = "exact"`` rows gained that one path
+each, and the module's own lane row was added to ``mcp/tests/test-evidence-lanes.toml``, which pins
+no digest and refuses an unregistered module at collection. **Nothing was registered, no row was
+removed and no artifact's identity moved**, so the population stays at **sixteen contracts /
+sixty-six artifacts**, and the catalog is re-pinned from
+``8d60a34cf56a9740e234823658312c8b6f5ae4e958344fe8ba2ea152b8ff6891`` (L9's measurement above) to
+``c676b0a07480beeaf39e0093bddf15e30db4f4c9b3e0014095a96cd214548dbc``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact delta remains
+exactly empty.
 
 **Seventeenth deliberate re-pin (260921-ICR-L9, at base ``f141d164``, 2026-09-22) -- one new case
 module's two consumer rows.** ``260921-ICR-L9`` (requirement ``ICR-R09@v1``) registers no artifact and

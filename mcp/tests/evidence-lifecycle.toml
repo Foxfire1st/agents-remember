@@ -1414,6 +1414,9 @@ consumers = [
   "mcp/tests/test_knowledge_review_source_content.py",
   "mcp/tests/test_knowledge_review_evidence_channels.py",
   "mcp/tests/test_review_subject_catalogue.py",
+  "mcp/tests/test_knowledge_review_relationship_movement.py",
+  "mcp/tests/test_knowledge_review_relationship_reach.py",
+  "mcp/tests/test_knowledge_review_relationship_line.py",
 ]
 
 [[artifact]]
@@ -1451,6 +1454,9 @@ consumers = [
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_knowledge_review_evidence_channels.py",
   "mcp/tests/test_review_subject_catalogue.py",
+  "mcp/tests/test_knowledge_review_relationship_movement.py",
+  "mcp/tests/test_knowledge_review_relationship_reach.py",
+  "mcp/tests/test_knowledge_review_relationship_line.py",
 ]
 
 [[artifact]]

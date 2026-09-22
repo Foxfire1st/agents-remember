@@ -42,6 +42,14 @@ from agents_remember.models.knowledge.review_records import (
     ReviewRecordChannelState,
     ReviewRecordClassName,
 )
+from agents_remember.models.knowledge.review_relationships import (
+    ReviewAuthoredLineage,
+    ReviewRelationshipGap,
+    ReviewRelationshipMovement,
+    ReviewRelationshipSide,
+    ReviewRelationshipTransition,
+    ReviewRenameInference,
+)
 from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
 
 __all__ = [
@@ -53,6 +61,7 @@ __all__ = [
     "KnowledgeReviewResult",
     "ReviewAssessmentDisplay",
     "ReviewAuthoredEffect",
+    "ReviewAuthoredLineage",
     "ReviewCandidateRef",
     "ReviewChangedFile",
     "ReviewEntry",
@@ -67,8 +76,13 @@ __all__ = [
     "ReviewRecordClassName",
     "ReviewRefusal",
     "ReviewRefusalCode",
+    "ReviewRelationshipGap",
+    "ReviewRelationshipMovement",
+    "ReviewRelationshipSide",
+    "ReviewRelationshipTransition",
     "ReviewRemainingCount",
     "ReviewRemainingCountName",
+    "ReviewRenameInference",
     "ReviewRevisionGroup",
     "ReviewSideContent",
     "ReviewSignal",
@@ -454,6 +468,16 @@ class ReviewSourceLocation(KnowledgeModel):
     ``role`` is the author's recorded word and stays ``None`` when the record carries none: a
     missing role is displayed as unclassified rather than guessed from a path, and there is no
     field here for an importance or a ranking derived from a name.
+
+    ``invariant_id`` is the **preserved canonical identity** the location's recorded relationship
+    sits under (ICR-R08@v1), which is what makes two rows one association: a realization the author
+    moved from A to B is two locations carrying the same ``invariant_id``, each naming the side of the
+    movement its own address is (``recorded_side``) and carrying the whole relationship in
+    ``movement``. ``counterpart_path`` is the other side's recorded address when the movement records
+    exactly one there, and is absent when the other side records several or none -- the movement lists
+    every one of them, and no single address is chosen to stand for them. The identity is absent
+    exactly when the traversal could not establish it, and the movement beside it states that as a gap
+    rather than the location inventing one.
     """
 
     claim_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
@@ -467,6 +491,11 @@ class ReviewSourceLocation(KnowledgeModel):
     change_state: Literal["changed", "unchanged", "not_selected"]
     before_only: bool = False
     reached_via: tuple[str, ...] = ()
+    invariant_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
+    transition: ReviewRelationshipTransition = "unchanged"
+    recorded_side: Literal["before", "after"] | None = None
+    counterpart_path: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
+    movement: ReviewRelationshipMovement | None = None
 
 
 class ReviewKnowledgePane(KnowledgeModel):
@@ -682,6 +711,13 @@ class ReviewSourcePane(KnowledgeModel):
 
     inventory: ReviewSourceInventory
     locations: tuple[ReviewSourceLocation, ...] = ()
+    # The recorded before/after relationship union this review traversed (ICR-R08@v1): every
+    # realization, family membership, advertised frontier link and the reviewed identity's governing
+    # route, each displayed with both sides. It is a separate collection from ``locations`` because
+    # it holds the relationships that have no source address at all -- a membership and a route
+    # association -- and because a movement whose two sides are one row at one address is still one
+    # relationship rather than two locations.
+    relationships: tuple[ReviewRelationshipMovement, ...] = ()
     remaining: tuple[ReviewRemainingCount, ...] = ()
     expansion_reference: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     expansion_command: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)

@@ -34,8 +34,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
+from agents_remember.application.review_relationship_movement import source_locations
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge.diff_display import (
     TreeChange,
@@ -49,7 +49,6 @@ from agents_remember.models.knowledge.diff import (
     KnowledgeDiffResult,
     SourceAttribution,
 )
-from agents_remember.models.knowledge.read import ReadItem
 from agents_remember.models.knowledge.review import (
     ReviewChangedFile,
     ReviewFileContent,
@@ -57,11 +56,11 @@ from agents_remember.models.knowledge.review import (
     ReviewRemainingCount,
     ReviewRemainingCountName,
     ReviewSourceInventory,
-    ReviewSourceLocation,
     ReviewSourcePane,
     ReviewUnrepresentablePath,
     ReviewUnresolvedReference,
 )
+from agents_remember.models.knowledge.review_relationships import ReviewRelationshipMovement
 
 __all__ = [
     "SOURCE_INVENTORY_REFERENCE",
@@ -548,15 +547,21 @@ def _measured_detail(count: int) -> str:
 
 
 # --- the source pane -------------------------------------------------------------------------
-
-_REALIZATION_ITEM_KIND = "realization"
-_REALIZATION_READ_KIND = "realization_claim"
+#
+# The pane's recorded-association half -- one location per selected claim, and the two-sided
+# relationship movement each location belongs to -- is ``ICR-R08@v1``'s. The traversal and its display
+# live in :mod:`agents_remember.application.review_relationship_movement` and
+# :mod:`agents_remember.application.review_relationship_display`, which own the before/after union and
+# the rendering of one relationship of it; this module measures the source change set and renders the
+# pane's attribution facts. There is one implementation, the address view below is that module's own
+# ``source_locations``, and the pane composes its result rather than re-deriving a location.
 
 
 def source_pane(
     comparison: KnowledgeDiffResult | None,
     inventory: ReviewSourceInventory,
     attribution: SourceAttribution,
+    relationships: Sequence[ReviewRelationshipMovement] = (),
 ) -> ReviewSourcePane:
     """Pane 2: the whole-task inventory, the selected locations and the measured attribution.
 
@@ -570,6 +575,11 @@ def source_pane(
     and exhaustive over the measured changes, so an unchanged mapped file can no longer appear in a
     list of changed ones, and a path whose attribution a side's silence left undetermined is carried
     beside the two conclusions instead of being folded into either.
+
+    ``relationships`` is the recorded before/after relationship union the composition traversed
+    (ICR-R08@v1), carried whole beside the location rows it also renders as addresses. The pane
+    neither builds it nor adds to it: a relationship this pane displayed without the traversal would
+    be the one-sided projection the union exists to correct.
     """
 
     items = () if comparison is None or comparison.page is None else comparison.page.items
@@ -577,9 +587,8 @@ def source_pane(
     outside = tuple(item for item in items if item.coverage == "present_outside_selection")
     return ReviewSourcePane(
         inventory=inventory,
-        locations=tuple(
-            location for location in (_location(item) for item in items) if location is not None
-        ),
+        locations=source_locations(relationships),
+        relationships=tuple(relationships),
         remaining=_remaining(comparison, attribution, outside),
         expansion_reference=SOURCE_INVENTORY_REFERENCE
         if expansion is None
@@ -760,45 +769,3 @@ def attribution_limitations(attribution: SourceAttribution) -> tuple[str, ...]:
         "limitation:unknown_attribution_changed_paths",
         f"omitted:attribution_not_determined:{undetermined}",
     )
-
-
-def _location(item: KnowledgeDiffItem) -> ReviewSourceLocation | None:
-    """One selected source location with its recorded role and its own change state."""
-
-    if item.kind != _REALIZATION_ITEM_KIND:
-        return None
-    claim = _realization_read_item(item)
-    if claim is None:
-        return None
-    anchor = claim.anchor
-    return ReviewSourceLocation(
-        claim_id=claim.claim_id or item.item_id,
-        invariant_revision_id=claim.invariant_revision_id,
-        path="" if anchor is None else anchor.path,
-        role=claim.role,
-        rationale=claim.rationale,
-        recorded_source_identity=(
-            item.item_id if anchor is None else anchor.recorded_source_identity
-        ),
-        observed_source_identity=None if anchor is None else anchor.observed_source_identity,
-        resolution="unsupported_locator" if anchor is None else anchor.resolution,
-        change_state=_change_state(item),
-        before_only=item.before is not None and item.after is None,
-        reached_via=tuple(item.reached_via),
-    )
-
-
-def _realization_read_item(item: KnowledgeDiffItem) -> ReadItem | None:
-    for candidate in (item.after, item.before):
-        if candidate is not None and candidate.kind == _REALIZATION_READ_KIND:
-            return candidate
-    return None
-
-
-def _change_state(item: KnowledgeDiffItem) -> Literal["changed", "unchanged", "not_selected"]:
-    change = item.source_change
-    if change is None:
-        return "not_selected"
-    if change.source_observation_changed or change.source_change_only:
-        return "changed"
-    return "unchanged"

@@ -91,6 +91,10 @@ from agents_remember.application.review_record_rendering import (
     subject_states,
     submission,
 )
+from agents_remember.application.review_relationship_movement import (
+    RelationshipSources,
+    relationship_movements,
+)
 from agents_remember.application.review_revision_comparison import (
     SubjectRevisionSelection,
     select_subject_revisions,
@@ -371,6 +375,21 @@ def compose_review(
         before_database=resolved.baseline_database,
         after_database=resolved.candidate_database,
     )
+    # The recorded before/after relationship union is traversed here, from the comparison's own
+    # union items and the two snapshots' own authored edges, and the source pane renders both of its
+    # views: the addresses one location per selected claim, and the two-sided movement each location
+    # belongs to (ICR-R08@v1). The traversal is its own module, called and not re-implemented.
+    relationships = relationship_movements(
+        page.items,
+        RelationshipSources(
+            repository_id=comparison.repository_id,
+            before_database=resolved.baseline_database,
+            after_database=resolved.candidate_database,
+            selector=request.selector,
+            before_code=before_source,
+            after_code=after_source,
+        ),
+    )
     return KnowledgeReviewResult(
         state="review",
         repository_id=request.repository_id,
@@ -382,7 +401,9 @@ def compose_review(
             ),
             comparison=identity,
             knowledge=_knowledge_pane(comparison, rows, records, subjects, selected),
-            source=source_pane(comparison, inventory, _comparison_attribution(comparison)),
+            source=source_pane(
+                comparison, inventory, _comparison_attribution(comparison), relationships
+            ),
             evidence=evidence_pane(rows, records, subjects),
             staleness=_staleness(identity, previous_binding_digest),
             submission=submission(stale),
