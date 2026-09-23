@@ -798,6 +798,7 @@ consumers = [
   "mcp/tests/test_worktree_status_terminal_next_tool.py",
   "mcp/tests/test_knowledge_review_evidence_channels.py",
   "mcp/tests/test_knowledge_review_subject_isolation.py",
+  "mcp/tests/test_review_final_output_receipt.py",
 ]
 
 [[artifact]]
@@ -1424,6 +1425,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_relationship_reach.py",
   "mcp/tests/test_knowledge_review_relationship_line.py",
   "mcp/tests/test_review_bounded_pagination.py",
+  "mcp/tests/test_review_final_output_receipt.py",
 ]
 
 [[artifact]]
@@ -1467,6 +1469,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_relationship_reach.py",
   "mcp/tests/test_knowledge_review_relationship_line.py",
   "mcp/tests/test_review_bounded_pagination.py",
+  "mcp/tests/test_review_final_output_receipt.py",
 ]
 
 [[artifact]]

@@ -209,6 +209,7 @@ unit-regression = [
   "mcp/tests/test_transaction_only_worktree_delivery.py",
   "mcp/tests/test_worktree_quality_gate_runner.py",
   "mcp/tests/test_review_assessments.py",
+  "mcp/tests/test_review_final_output_receipt.py",
   "mcp/tests/test_knowledge_change_sets.py",
   "mcp/tests/test_knowledge_effect_claims.py",
   "mcp/tests/test_next_step_address_binding.py",

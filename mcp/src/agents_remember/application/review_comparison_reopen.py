@@ -9,7 +9,10 @@ channel the record binds against the world it names:
   shows now rather than the custody that was recorded at freeze time;
 * each retained knowledge snapshot, re-read as a dataset and compared against the exact logical
   identity that was frozen, with a digest read-back beside it;
-* each cited owner-produced artifact, re-read and compared against the digest it was cited for.
+* each cited owner-produced artifact, re-read and compared against the digest it was cited for;
+* what the task's own closeout and integration recorded for it (ICR-R21@v1), read through that
+  record's owner, so the reopened comparison identifies the code, memory and published-knowledge
+  outputs the task actually delivered as well as the inputs it was compared against.
 
 Each channel answers with its own state and never with one verdict for the generation. The states are
 deliberately distinct, because a consumer acts on them differently:
@@ -57,6 +60,10 @@ from agents_remember.application.review_comparison_generation import (
     read_history_deletion,
     read_manifest,
     task_root_for_review,
+)
+from agents_remember.application.review_final_output_receipt import (
+    FinalOutputReceiptRead,
+    read_final_output_receipts,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.logical import dataset_identity
@@ -157,6 +164,15 @@ class ComparisonReopen:
     absence is *not* an unavailability, because nothing was ever claimed to be there. ``unavailable``
     means at least one expected channel did not resolve, and ``unavailable_channels()`` names which,
     so a consumer can keep the channels that did resolve instead of discarding the generation.
+
+    ``final_output`` is the fourth kind of channel and the newest: what normal closeout and integration
+    are asked about for this generation (ICR-R21@v1), one entry per phase in phase order whenever the
+    reopen measured a generation. A phase that recorded nothing is still an entry carrying
+    ``not-recorded``, because omitting it would make "nothing was recorded" and "no phase was asked
+    about" the same answer. It is a tuple rather than an optional single value because closeout and
+    integration are separate measurements taken at separate moments, and a reader that got only one of
+    them would have to guess which. The tuple is empty exactly when the reopen measured no generation at
+    all -- the ``absent``, ``ambiguous`` and ``manifest-unreadable`` states, which ask no phase anything.
     """
 
     state: Literal["available", "unavailable", "absent", "ambiguous", "manifest-unreadable"]
@@ -168,6 +184,7 @@ class ComparisonReopen:
     source: ComparisonSourceChannel | None = None
     knowledge: tuple[ComparisonKnowledgeChannel, ...] = ()
     evidence: tuple[ComparisonEvidenceChannel, ...] = ()
+    final_output: tuple[FinalOutputReceiptRead, ...] = ()
     refusal: ReviewRefusal | None = None
 
     def available(self) -> bool:
@@ -311,6 +328,14 @@ def _read_and_measure(
         source=source,
         knowledge=knowledge,
         evidence=evidence,
+        # What the task delivered for this generation (ICR-R21@v1). Read here, in the one place a
+        # generation is resolved and measured, so a reader of the recorded comparison sees the final
+        # output beside the inputs it was compared against rather than having to know the receipt's
+        # file name. A phase that recorded nothing is still an entry: "not-recorded" is a fact, and
+        # omitting it would make "nothing was recorded" and "no phase was asked about" the same answer.
+        final_output=read_final_output_receipts(
+            task_root, addressed.leaf_id, manifest.generation_id
+        ),
     )
 
 

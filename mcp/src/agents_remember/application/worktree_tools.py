@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.completion_cleanup import auto_complete_seats
+from agents_remember.application.review_final_output_receipt import (
+    attach_closeout_receipt,
+    attach_integration_receipt,
+    attach_prepared_selection,
+)
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_status import project_contract_status
 from agents_remember.errors import TaskIntentError
@@ -439,6 +444,8 @@ def worktree_integrate_tool(
         "worktree_integrate",
         git_worktree_manager.integrate_result(args, configured.contract),
     )
+    if result.get("ok") and not dry_run:
+        result = attach_integration_receipt(result, configured.contract)
     if result["ok"] and not dry_run and config.retirement.auto_land_on_integration:
         result.update(
             auto_complete_seats(
@@ -982,7 +989,10 @@ def _worktree_closeout(
         gate_policy=config.orchestration.gate_policy,
     )
     result = git_worktree_manager.closeout_result(args, configured.contract)
-    return _worktree_result(operation, result)
+    payload = _worktree_result(operation, result)
+    if operation == "worktree_closeout_preview":
+        return attach_prepared_selection(payload, configured.contract)
+    return attach_closeout_receipt(payload, configured.contract)
 
 
 def _normalize_worktree_closeout(

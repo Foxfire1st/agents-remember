@@ -1,0 +1,26 @@
+________ ERROR collecting mcp/tests/test_review_final_output_receipt.py ________
+ImportError while importing test module '/home/firefox/projects/ar-coordination/temp/icr-l21-base/mcp/tests/test_review_final_output_receipt.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+../../../../.local/share/agents-remember/python/cpython-3.13.15/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+mcp/tests/test_review_final_output_receipt.py:49: in <module>
+    from agents_remember.application.review_final_output_receipt import (
+E   ModuleNotFoundError: No module named 'agents_remember.application.review_final_output_receipt'
+=========================== short test summary info ============================
+ERROR mcp/tests/test_review_final_output_receipt.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 19.47s
+                CloseoutApproval(intent_note="base probe"),
+            )
+        assert applied["ok"] is True, applied
+        assert preview["ok"] is True, preview
+>       assert "final_comparison_selection" in preview, sorted(preview)
+E       AssertionError: ['approval_question', 'approved_for_commit', 'changed_code_paths', 'changed_code_paths_committed', 'cleanup', 'closeout_gate', ...]
+E       assert 'final_comparison_selection' in {'state': 'would-closeout', 'task_id': 'MASTER', 'task_name': 'master', 'code_repository_name': 'repo', ...}
+
+mcp/tests/test_icr_l21_base_probe.py:63: AssertionError
+=========================== short test summary info ============================
+FAILED mcp/tests/test_icr_l21_base_probe.py::test_closeout_result_carries_the_final_output_receipt
+1 failed in 17.82s
