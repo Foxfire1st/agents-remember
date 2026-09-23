@@ -799,6 +799,8 @@ consumers = [
   "mcp/tests/test_knowledge_review_evidence_channels.py",
   "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_review_final_output_receipt.py",
+  "mcp/tests/test_review_sync_rebinding.py",
+  "mcp/tests/test_review_sync_movement_read.py",
 ]
 
 [[artifact]]
@@ -1302,6 +1304,8 @@ consumers = [
   "mcp/tests/test_knowledge_merge_right_side_writes.py",
   "mcp/tests/test_sync_parked_candidate.py",
   "mcp/tests/test_worktree_sync.py",
+  "mcp/tests/test_review_sync_rebinding.py",
+  "mcp/tests/test_review_sync_movement_read.py",
 ]
 
 [[artifact]]
@@ -1426,6 +1430,8 @@ consumers = [
   "mcp/tests/test_knowledge_review_relationship_line.py",
   "mcp/tests/test_review_bounded_pagination.py",
   "mcp/tests/test_review_final_output_receipt.py",
+  "mcp/tests/test_review_sync_rebinding.py",
+  "mcp/tests/test_review_sync_movement_read.py",
 ]
 
 [[artifact]]
@@ -1470,6 +1476,8 @@ consumers = [
   "mcp/tests/test_knowledge_review_relationship_line.py",
   "mcp/tests/test_review_bounded_pagination.py",
   "mcp/tests/test_review_final_output_receipt.py",
+  "mcp/tests/test_review_sync_rebinding.py",
+  "mcp/tests/test_review_sync_movement_read.py",
 ]
 
 [[artifact]]

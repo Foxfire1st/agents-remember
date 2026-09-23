@@ -297,6 +297,8 @@ integration = [
   "mcp/tests/test_worktree_support.py",
   "mcp/tests/test_worktree_support_tests_1.py",
   "mcp/tests/test_worktree_sync.py",
+  "mcp/tests/test_review_sync_rebinding.py",
+  "mcp/tests/test_review_sync_movement_read.py",
   "mcp/tests/test_curator_review_assessment_publication.py",
   "mcp/tests/test_knowledge_family_integrity_pipeline.py",
   "mcp/tests/test_knowledge_projection_vault_safety.py",

@@ -1,0 +1,17 @@
+### G1 bite-proof: the new case against the PRE-FIX module (sha256 baa0282bc9faa0dff9416d5b835a009c21603430effa0ee2aed5dcf0d4d87b82 — the bytes round 2 graded)
+
+$ cp <pre-fix module> mcp/src/agents_remember/application/review_sync_movement.py
+$ pytest mcp/tests/test_review_sync_rebinding.py -q -m '' -p no:randomly -k uncompared_knowledge_channel
+
+            movement = body.sync_movement
+            assert movement is not None, read
+>           assert movement.binding_state == "not-measured", movement
+E           AssertionError: ReviewSyncMovement(binding_state='current', moved_identities=(), reason=None, statement='a managed sync completed and ...ssion as the successor's own lineage", record_readable=True, reuse_permitted=False, reinterpreted_for_new_inputs=False)
+E           assert 'current' == 'not-measured'
+E             
+E             - not-measured
+E             + current
+mcp/tests/test_review_sync_rebinding.py:923: AssertionError
+=========================== short test summary info ============================
+FAILED mcp/tests/test_review_sync_rebinding.py::ManagedSyncReviewRebindingTests::test_an_uncompared_knowledge_channel_is_rendered_unmeasured
+1 failed in 17.50s

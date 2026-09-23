@@ -37,7 +37,7 @@ say *why* unless a deletion record says so.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -64,6 +64,11 @@ from agents_remember.application.review_comparison_generation import (
 from agents_remember.application.review_final_output_receipt import (
     FinalOutputReceiptRead,
     read_final_output_receipts,
+)
+from agents_remember.application.review_sync_rebinding import (
+    ReviewSyncRebindingRead,
+    read_review_sync_rebinding,
+    rebinding_names_the_generation,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.logical import dataset_identity
@@ -173,6 +178,15 @@ class ComparisonReopen:
     integration are separate measurements taken at separate moments, and a reader that got only one of
     them would have to guess which. The tuple is empty exactly when the reopen measured no generation at
     all -- the ``absent``, ``ambiguous`` and ``manifest-unreadable`` states, which ask no phase anything.
+
+    ``sync_rebinding`` is the fifth kind of channel and the second one a task's own transactions write:
+    what this leaf's managed syncs measured against this generation (ICR-R22@v1). It is one value rather
+    than a tuple because a rebinding is a measurement of one generation and a later sync replaces it --
+    one file per (leaf, generation) -- while the generations themselves are retained history, so a reader
+    that wants the earlier measurements reads the earlier generations. It is ``None`` exactly when the
+    reopen measured no generation, and ``not-recorded`` rather than ``None`` when a generation was
+    measured and no sync has reported against it: omitting it would make "no managed sync has run" and
+    "a sync ran and recorded nothing" the same answer.
     """
 
     state: Literal["available", "unavailable", "absent", "ambiguous", "manifest-unreadable"]
@@ -185,6 +199,7 @@ class ComparisonReopen:
     knowledge: tuple[ComparisonKnowledgeChannel, ...] = ()
     evidence: tuple[ComparisonEvidenceChannel, ...] = ()
     final_output: tuple[FinalOutputReceiptRead, ...] = ()
+    sync_rebinding: ReviewSyncRebindingRead | None = None
     refusal: ReviewRefusal | None = None
 
     def available(self) -> bool:
@@ -336,10 +351,43 @@ def _read_and_measure(
         final_output=read_final_output_receipts(
             task_root, addressed.leaf_id, manifest.generation_id
         ),
+        # What this leaf's own managed syncs measured against this generation (ICR-R22@v1). Read beside
+        # the final output and for the same reason: a reader resolving a recorded comparison needs to
+        # know whether the pair it bound is still the pair the task holds, and the sync's own
+        # measurement is the record of that rather than something the reader has to re-derive from a
+        # live worktree it may no longer have. A generation no sync has reported against reads
+        # ``not-recorded``, which is a fact and not an absence of one.
+        sync_rebinding=_measured_rebinding(task_root, addressed.leaf_id, manifest),
     )
 
 
 _SIDES: tuple[KnowledgeSide, ...] = ("before", "after")
+
+
+def _measured_rebinding(
+    task_root: Path, leaf_id: str, manifest: ComparisonGenerationManifest
+) -> ReviewSyncRebindingRead:
+    """What this leaf's syncs measured against this generation, or the record that does not name it.
+
+    The location is read first and then checked against the generation itself, because a record whose
+    identity fields were forged is internally consistent and would otherwise read as a measurement of
+    *this* generation. A record that does not describe it reads back ``not-recorded`` with the reason,
+    which is the honest answer: nothing was measured here, whatever is at the location.
+    """
+
+    read = read_review_sync_rebinding(task_root, leaf_id, manifest.generation_id)
+    if read.rebinding is None or rebinding_names_the_generation(read, manifest) is not None:
+        return read
+    return replace(
+        read,
+        state="not-recorded",
+        rebinding=None,
+        detail=(
+            f"a rebinding record exists at {read.destination} and does not describe comparison "
+            f"generation {manifest.generation_id}: its recorded reviewed identities are not this "
+            "generation's, so no measurement of this generation is recorded there"
+        ),
+    )
 
 
 def _all_resolved(

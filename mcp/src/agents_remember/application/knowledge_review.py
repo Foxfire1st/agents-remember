@@ -140,6 +140,10 @@ from agents_remember.application.review_statement_sides import (
     side_content,
 )
 from agents_remember.application.review_subject_catalogue import read_subject_catalogue
+from agents_remember.application.review_sync_movement import (
+    review_staleness_with_sync_movement,
+    review_sync_movement,
+)
 from agents_remember.application.review_task_context import task_context_review
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.diff_display import TreeDifferenceProbe
@@ -463,7 +467,15 @@ def compose_review(
     # One comparison and one answer about it: the state the payload publishes and the submission
     # state beside it are read from the same rule, so "an assessment is never submitted against a
     # comparison that has moved" cannot be true of one field and false of the other.
-    staleness = review_staleness(identity, request.previous_binding_digest)
+    # What this leaf's own managed syncs measured against the generation it published (ICR-R22@v1).
+    # The measurement is the rebinding record's, read and checked against the generation by its own
+    # owner; a measured movement outranks the reader's carried identity, so a review whose inputs a
+    # sync moved never reads as untouched. ``None`` means no measurement is recorded, which is a
+    # different fact from a measured agreement and is carried as one.
+    sync_movement = review_sync_movement(resolved)
+    staleness = review_staleness_with_sync_movement(
+        review_staleness(identity, request.previous_binding_digest), sync_movement
+    )
     stale = staleness.state == "stale"
     # The reviewed identity's explicit revision selection is made here, from the comparison's
     # own union items and the two snapshots' own authored edges, and the pane renders it: the
@@ -522,6 +534,7 @@ def compose_review(
             evidence=evidence_pane(displayed_rows, records, subjects, applicability),
             staleness=staleness,
             submission=submission(stale),
+            sync_movement=sync_movement,
             page=published_page,
             # A requested page the owner could not serve is stated as the refusal it is: a page value
             # needs the owner's own counts, and inventing zeros for a read that never happened would

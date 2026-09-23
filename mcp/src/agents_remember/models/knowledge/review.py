@@ -58,6 +58,11 @@ from agents_remember.models.knowledge.review_relationships import (
     ReviewRelationshipTransition,
     ReviewRenameInference,
 )
+from agents_remember.models.knowledge.review_staleness import (
+    ReviewStaleness,
+    ReviewSubmission,
+    ReviewSyncMovement,
+)
 from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
 from agents_remember.models.knowledge.view import MAX_VIEW_ROWS
 
@@ -113,6 +118,7 @@ __all__ = [
     "ReviewSubjectPresence",
     "ReviewSubmission",
     "ReviewSurfaceRequest",
+    "ReviewSyncMovement",
     "ReviewUnrepresentablePath",
     "ReviewUnresolvedReference",
 ]
@@ -982,51 +988,6 @@ class ReviewEvidencePane(KnowledgeModel):
         return self
 
 
-class ReviewStaleness(KnowledgeModel):
-    """Whether the displayed comparison is still the candidate's comparison, and if not, what was.
-
-    A stale payload keeps the last displayed comparison as a *labelled previous input*: the identity
-    is retained and named as previous, so a reviewer can see what was reviewed while being unable to
-    mistake it for a review of what is there now.
-
-    ``not_compared`` is the task-context state and not a third flavour of current: a review opened
-    from the task alone compared no knowledge operand, so there is no comparison binding that could
-    be current or stale, and the response says that instead of borrowing the word for either.
-    """
-
-    state: Literal["current", "stale", "not_compared"]
-    statement: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    previous_comparison_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
-    moved: tuple[str, ...] = ()
-
-    @model_validator(mode="after")
-    def _require_the_previous_input_to_be_labelled(self) -> ReviewStaleness:
-        if self.state == "stale" and self.previous_comparison_ref is None:
-            raise ValueError(
-                "a stale comparison retains the comparison it is labelling as previous input"
-            )
-        if self.state != "stale" and self.previous_comparison_ref is not None:
-            raise ValueError("only a stale comparison has a previous input to label")
-        return self
-
-
-class ReviewSubmission(KnowledgeModel):
-    """Whether an assessment may be submitted against this comparison, and through what.
-
-    This increment ships the review surface **display-only**, and the state says so rather than
-    leaving it implicit: there is no serving route that publishes an assessment, so the surface
-    reports the absence and names the existing authority that does. ``proposed_dispositions``
-    publishes which judgements the authority accepts, and ``none_is_approval`` states the boundary
-    the vocabulary itself enforces -- none of the three is publication approval.
-    """
-
-    state: Literal["unavailable", "disabled_stale"]
-    reason: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    next_action: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    proposed_dispositions: tuple[str, ...] = ()
-    none_is_approval: bool = True
-
-
 class KnowledgeReviewPayload(KnowledgeModel):
     """The whole surface one response renders: identity, three panes, staleness and submission.
 
@@ -1058,6 +1019,11 @@ class KnowledgeReviewPayload(KnowledgeModel):
     evidence: ReviewEvidencePane
     staleness: ReviewStaleness
     submission: ReviewSubmission
+    # What this leaf's own managed syncs measured against the generation it published (ICR-R22@v1),
+    # or ``None`` when no rebinding is recorded for it -- "no sync has reported" is a different fact
+    # from "a sync reported agreement", and the field states which. A stale movement is folded into
+    # ``staleness`` beside it, so a review whose inputs a sync moved can never read as current.
+    sync_movement: ReviewSyncMovement | None = None
     page: ReviewCollectionPage | None = None
     # The refusal a *requested* page earned when no page could be stated from it (ICR-R10). A page
     # value needs the owner's own counts, and a refused read has none, so the honest shape is the

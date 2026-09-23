@@ -43,8 +43,68 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "81a518b567b654375bd1ea4e5af5395cefe3a3464563308c17f31278e276134c"
+LIFECYCLE_CATALOG_SHA256 = "d07c2f9d456b0f658228c91aecb2a1f3da8d13e2b6575b6b40b0b0d2ca165f6b"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Twenty-sixth deliberate re-pin (260921-ICR-L22's fix round 3, at base ``e605822e``, 2026-09-23) --
+the read-side cases' own module, and the rail that forced it.** Fix round 3's H1 case pushed
+``mcp/tests/test_review_sync_rebinding.py`` to 1263 lines, which would have made it a **new** offender in
+the whole-tree ≥1200 census (26 → 27) -- the exact condition this master's ruling refuses. The fix is
+extraction at the seam the production owners already have: the five *read-side* cases (what the shipped
+``read_knowledge_review`` renders about a sync that moved its inputs, plus the movement validator's own
+refusals) moved into a new ``mcp/tests/test_review_sync_movement_read.py`` (356 lines), which imports the
+enclosure fixture from its sibling ``mcp/tests/test_review_sync_rebinding.py`` (now 942 lines) rather than
+duplicating it -- the same sibling-fixture pattern ``test_review_sync_binding``'s own consumers already
+use. The census derived the delta exactly: the new module is a consumer of these four rows, each reporting
+``missing=['mcp/tests/test_review_sync_movement_read.py']`` with ``unsupported=[]``, so each gained that one
+path, and its lane row was added to ``mcp/tests/test-evidence-lanes.toml`` in the integration lane beside
+its sibling. **Nothing was registered, no row was removed and no artifact's identity moved**, so the
+population stays at **sixteen contracts / sixty-six artifacts**, and the catalog is re-pinned from
+``7c8c1646272ca4a17f87a16ecbe105a4aea558c0e0d0c4d62b1883d6d69e683c`` (the Twenty-fifth) to
+``d07c2f9d456b0f658228c91aecb2a1f3da8d13e2b6575b6b40b0b0d2ca165f6b``, measured with ``sha256sum mcp/tests/evidence-lifecycle.toml`` on the resolved candidate.
+The proof's own artifact delta remains exactly empty.
+
+**Twenty-fifth deliberate re-pin (260921-ICR-L22's fix round 1, at base ``e605822e``, 2026-09-23) --
+the module split's own closure change.** The F5 ruling moved this leaf's four managed-sync rebinding
+cases, their fixture and their module-level helpers out of ``mcp/tests/test_worktree_sync.py`` into a
+new ``mcp/tests/test_review_sync_rebinding.py``, so the case module that already owned the
+managed-sync evidence is back in the soft band and the whole-tree hard-rail census returns to its base
+count. The census derived the delta exactly: ``mcp/tests/test_sync_parked_candidate.py`` and
+``mcp/tests/test_worktree_sync.py`` are **no longer** consumers of the endpoint and scope support rows
+(their only route to them was the case module's own import, which moved), and the new module is a
+consumer of four rows -- ``mcp/tests/fixtures/repository_profiles/node/package-lock.json``,
+``mcp/tests/merge_case_test_support.py``, ``mcp/tests/diff_scope_test_support.py`` and
+``mcp/tests/read_scope_test_support.py`` -- reporting ``missing=['mcp/tests/test_review_sync_rebinding.py']``
+with ``unsupported=['mcp/tests/test_sync_parked_candidate.py', 'mcp/tests/test_worktree_sync.py']`` on the
+three that had carried them. Each row was corrected to exactly the derived set: three lost the two
+paths, ``merge_case_test_support.py`` kept both and gained the new one. The new module's lane row was
+added to ``mcp/tests/test-evidence-lanes.toml`` in the integration lane beside its sibling. **Nothing was
+registered, no row was removed and no artifact's identity moved**, so the population stays at
+**sixteen contracts / sixty-six artifacts**, and the catalog is re-pinned from
+``8ce61c57b8660011b1cb81f0c2f21bd493ce3e2295359228d8804f0b8192b9d1`` (the Twenty-fourth) to
+``7c8c1646272ca4a17f87a16ecbe105a4aea558c0e0d0c4d62b1883d6d69e683c``, measured with ``sha256sum mcp/tests/evidence-lifecycle.toml`` on the resolved candidate.
+The proof's own artifact delta remains exactly empty.
+
+**Twenty-fourth deliberate re-pin (260921-ICR-L22, at base ``e605822e``, 2026-09-23) -- the managed-sync
+case module's three newly reached consumer rows.** ``260921-ICR-L22`` (requirement ``ICR-R22@v1``)
+registers no artifact and no contract of its own: its three managed-sync rebinding cases live in the
+module the packet's own anchor names, ``mcp/tests/test_worktree_sync.py``, which already owns the
+managed merge/conflict production-operation evidence. What moved is that module's **consumer
+closure**: the new cases build the leaf enclosure the review leaves use, so the module now imports the
+shared endpoint fixture and the authorship envelope, and the census derives three further consumers
+from that -- ``mcp/tests/fixtures/repository_profiles/node/package-lock.json``,
+``mcp/tests/diff_scope_test_support.py`` and ``mcp/tests/read_scope_test_support.py`` -- each reporting
+``missing=['mcp/tests/test_sync_parked_candidate.py', 'mcp/tests/test_worktree_sync.py']`` with
+``unsupported=[]``. ``test_sync_parked_candidate.py`` reaches the same rows transitively because it
+already imports ``SyncFixture`` from the case module, which is a fact of the existing tree rather than
+of this leaf. All three ``consumer_scope = "exact"`` rows gained those two paths, in the position each
+row already lists the sibling case modules. **Nothing was registered, no row was removed, no artifact's
+identity moved and no lane row changed**, so the population stays at **sixteen contracts / sixty-six
+artifacts**, and the catalog is re-pinned from
+``81a518b567b654375bd1ea4e5af5395cefe3a3464563308c17f31278e276134c`` (the Twenty-third) to
+``8ce61c57b8660011b1cb81f0c2f21bd493ce3e2295359228d8804f0b8192b9d1``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact delta remains
+exactly empty.
 
 **Twenty-third deliberate re-pin (260921-ICR-L12, at base ``870701b4``, 2026-09-22) -- one new case
 module's three consumer rows.** ``260921-ICR-L12`` (requirement ``ICR-R12@v1``) registers no artifact

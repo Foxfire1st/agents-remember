@@ -11,6 +11,7 @@ from agents_remember.application.review_final_output_receipt import (
     attach_integration_receipt,
     attach_prepared_selection,
 )
+from agents_remember.application.review_sync_rebinding import rebinding_result_block
 from agents_remember.application.task_docs.task_ref import TaskRef
 from agents_remember.application.worktree_status import project_contract_status
 from agents_remember.errors import TaskIntentError
@@ -367,7 +368,11 @@ def worktree_sync_tool(
         knowledge_resolution=resolution.knowledge if resolution is not None else None,
         dry_run=dry_run,
     )
-    return _worktree_result("worktree_sync", git_worktree_manager.sync_result(args))
+    payload = _worktree_result("worktree_sync", git_worktree_manager.sync_result(args))
+    # The sync has already finished its Git work and written its contract by this point, so the
+    # rebinding measures what it resolved and never participates in the transaction's admission
+    # (ICR-R22@v1): a sync that cannot be measured is returned unchanged, carrying the reason.
+    return rebinding_result_block(configured.contract, payload)
 
 
 def worktree_closeout_preview_tool(
