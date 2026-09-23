@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 from agents_remember.models.knowledge.detection import DetectionSignalPayload
 from agents_remember.models.knowledge.evidence import VerificationObservationPayload
@@ -28,6 +29,7 @@ from agents_remember.models.knowledge.review import (
     PROPOSED_ASSESSMENT_DISPOSITIONS,
     KnowledgeReviewResult,
     ReviewAssessmentDisplay,
+    ReviewAuthoredEffect,
     ReviewEvidenceLink,
     ReviewEvidencePane,
     ReviewObservation,
@@ -36,6 +38,12 @@ from agents_remember.models.knowledge.review import (
     ReviewSignal,
     ReviewSubmission,
     ReviewUnresolvedReference,
+)
+from agents_remember.models.knowledge.review_applicability import (
+    ReviewApplicabilityClass,
+    ReviewApplicabilitySummary,
+    ReviewContextRecord,
+    ReviewDisplayedApplicability,
 )
 from agents_remember.models.knowledge.view import ReviewMatrixRow
 from agents_remember.models.lifecycles.review_assessment import (
@@ -46,15 +54,19 @@ from agents_remember.models.lifecycles.review_assessment import (
 
 __all__ = [
     "EMPTY_REVIEW_RECORDS",
+    "EVIDENCE_APPLICABILITY_CLASSES",
+    "KNOWLEDGE_APPLICABILITY_CLASSES",
     "ReviewClaimRecord",
     "ReviewRecordInputs",
     "assessment_displays",
+    "authored_effects",
     "evidence_pane",
     "observation",
     "refused",
     "signal",
     "subject_states",
     "submission",
+    "unresolved_authors",
 ]
 
 
@@ -70,6 +82,12 @@ class ReviewClaimRecord:
     declared (``""`` is that declaration, verbatim, and never "unknown") and the coverage endpoints
     the author asserted.
 
+    ``subject_revision_id`` is the claim's own recorded **subject** -- the exact invariant revision
+    the claim is about, read from the owner's own subject edge (``ICR-R26@v1``'s extension of this
+    bundle, so the review can attribute a claim to a subject instead of displaying it unattributed).
+    It is absent exactly when the claim records a facet-revision subject or none at all, and an
+    absent subject is never filled with the candidate's or the selection's identity.
+
     It is a *renderer input* and not a record: nothing here is derived, ranked or filtered.
     """
 
@@ -79,6 +97,7 @@ class ReviewClaimRecord:
     limitations: str = ""
     claimed_coverage: tuple[str, ...] = ()
     assessment_refs: tuple[str, ...] = ()
+    subject_revision_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +123,48 @@ class ReviewRecordInputs:
     observations: tuple[VerificationObservationPayload, ...] = ()
     claims: tuple[ReviewClaimRecord, ...] = ()
     channels: tuple[ReviewRecordChannel, ...] = ()
+
+
+# Which supplied collections each pane displays as its own, in the order the pane lists them. The
+# knowledge pane shows the assessments, the detection signals and the matrix's authored effects; the
+# evidence pane shows the assessments, the execution observations and the matrix's evidence claims.
+# Declared once so a pane's channels, its labelled values and its counts describe one population.
+KNOWLEDGE_APPLICABILITY_CLASSES: tuple[ReviewApplicabilityClass, ...] = (
+    "assessments",
+    "detection_signals",
+    "authored_effects",
+)
+EVIDENCE_APPLICABILITY_CLASSES: tuple[ReviewApplicabilityClass, ...] = (
+    "assessments",
+    "verification_observations",
+    "evidence_claims",
+)
+
+
+class ReviewApplicabilityProjection(Protocol):
+    """What a pane needs from the applicability projection, stated as the port it consumes.
+
+    The projection itself is :mod:`agents_remember.application.review_record_applicability`, which
+    reads the comparison, the recorded relationships and the known subjects -- all things this
+    renderer must not reach. The port is what keeps the dependency one-way: this module renders the
+    values it is handed, and the projection is the module that decided which values those are.
+    """
+
+    def label_of(self, record_id: str) -> ReviewDisplayedApplicability | None:
+        """The treatment one supplied record earned, or ``None`` when it is not displayed here."""
+        ...
+
+    def context_of(
+        self, classes: Sequence[ReviewApplicabilityClass]
+    ) -> tuple[ReviewContextRecord, ...]:
+        """The labelled context rows of the named collections, in recorded order."""
+        ...
+
+    def summaries_of(
+        self, classes: Sequence[ReviewApplicabilityClass]
+    ) -> tuple[ReviewApplicabilitySummary, ...]:
+        """The six-way counts of the named collections, in the order given."""
+        ...
 
 
 # The empty record set, as one module-level value: a call in an argument default would rebuild it on
@@ -153,17 +214,31 @@ def evidence_pane(
     rows: Sequence[ReviewMatrixRow],
     records: ReviewRecordInputs,
     subjects: Mapping[str, SubjectAssessmentState],
+    applicability: ReviewApplicabilityProjection,
 ) -> ReviewEvidencePane:
-    """Pane 3: evidence references, execution observations and the authored assessments."""
+    """Pane 3: evidence references, execution observations and the authored assessments.
+
+    ``rows`` are only the rows the applicability projection kept for this subject, and every value
+    rendered here carries the label its own recorded binding earned (``ICR-R26@v1``): a record of
+    another subject is not in these collections at all, and the pane states the counts -- including
+    the records it does not display as this subject's judgments -- beside them.
+    """
 
     claims = {claim.claim_id: claim for claim in records.claims}
     links = tuple(
-        _evidence_link(row, claims.get(row.subject.record_id))
+        _evidence_link(
+            row, claims.get(row.subject.record_id), applicability.label_of(row.subject.record_id)
+        )
         for row in rows
         if row.subject.record_kind == "evidence_claim"
+        and applicability.label_of(row.subject.record_id) is not None
     )
-    observations = tuple(observation(entry) for entry in records.observations)
-    assessments = assessment_displays(records, subjects)
+    observations = tuple(
+        observation(entry, applicability.label_of(entry.command_name))
+        for entry in records.observations
+        if applicability.label_of(entry.command_name) is not None
+    )
+    assessments = assessment_displays(records, subjects, applicability)
     return ReviewEvidencePane(
         evidence_state="recorded" if links or observations else "none_recorded",
         assessment_state="assessed" if assessments else "unassessed",
@@ -172,6 +247,8 @@ def evidence_pane(
         assessments=assessments,
         source_inspection_available=True,
         channels=records.channels,
+        context=applicability.context_of(EVIDENCE_APPLICABILITY_CLASSES),
+        applicability=applicability.summaries_of(EVIDENCE_APPLICABILITY_CLASSES),
     )
 
 
@@ -200,8 +277,14 @@ def subject_states(records: ReviewRecordInputs) -> Mapping[str, SubjectAssessmen
 def assessment_displays(
     records: ReviewRecordInputs,
     subjects: Mapping[str, SubjectAssessmentState],
+    applicability: ReviewApplicabilityProjection,
 ) -> tuple[ReviewAssessmentDisplay, ...]:
-    """The authored assessments as displayed, each with its own binding status."""
+    """The assessments this subject may be judged by, each with its binding status and its label.
+
+    Only records the applicability projection kept are rendered: an assessment whose recorded subject
+    is another identity is either labelled context or not displayed as this subject's judgment at
+    all, and it never reaches this collection (``ICR-R26@v1``'s correction of F09).
+    """
 
     by_id = {assessment.assessmentId: assessment for assessment in records.assessments}
     displayed: list[ReviewAssessmentDisplay] = []
@@ -211,15 +294,21 @@ def assessment_displays(
             record = by_id.get(entry.assessmentId)
             if record is None or entry.assessmentId in seen:
                 continue
+            label = applicability.label_of(entry.assessmentId)
+            if label is None:
+                continue
             seen.add(entry.assessmentId)
-            displayed.append(_assessment_display(record, entry.currentness))
+            displayed.append(_assessment_display(record, entry.currentness, label))
     return tuple(displayed)
 
 
-def _assessment_display(record: ReviewAssessment, currentness: str) -> ReviewAssessmentDisplay:
-    """One stored assessment as the pane's own display value."""
+def _assessment_display(
+    record: ReviewAssessment, currentness: str, applicability: ReviewDisplayedApplicability
+) -> ReviewAssessmentDisplay:
+    """One stored assessment as the pane's own display value, with why it may be displayed here."""
 
     return ReviewAssessmentDisplay(
+        applicability=applicability,
         assessment_id=record.assessmentId,
         disposition=record.disposition,
         finding=record.finding or record.rationale,
@@ -233,7 +322,11 @@ def _assessment_display(record: ReviewAssessment, currentness: str) -> ReviewAss
     )
 
 
-def _evidence_link(row: ReviewMatrixRow, claim: ReviewClaimRecord | None) -> ReviewEvidenceLink:
+def _evidence_link(
+    row: ReviewMatrixRow,
+    claim: ReviewClaimRecord | None,
+    applicability: ReviewDisplayedApplicability | None,
+) -> ReviewEvidenceLink:
     """One matrix row's claim, with the claim's own recorded fields where its owner supplied them.
 
     A claim this composition supplied carries its author, lifecycle, declared limitations and asserted
@@ -244,6 +337,7 @@ def _evidence_link(row: ReviewMatrixRow, claim: ReviewClaimRecord | None) -> Rev
 
     if claim is not None:
         return ReviewEvidenceLink(
+            applicability=applicability,
             claim_id=row.subject.record_id,
             revision_id=row.subject.revision_id,
             claimed_coverage=claim.claimed_coverage,
@@ -255,6 +349,7 @@ def _evidence_link(row: ReviewMatrixRow, claim: ReviewClaimRecord | None) -> Rev
             lifecycle=claim.lifecycle,
         )
     return ReviewEvidenceLink(
+        applicability=applicability,
         claim_id=row.subject.record_id,
         revision_id=row.subject.revision_id,
         assessment_refs=row.assessment_ids,
@@ -273,11 +368,75 @@ def _evidence_link(row: ReviewMatrixRow, claim: ReviewClaimRecord | None) -> Rev
     )
 
 
-def observation(entry: VerificationObservationPayload) -> ReviewObservation:
+def authored_effects(
+    rows: Sequence[ReviewMatrixRow],
+    applicability: ReviewApplicabilityProjection,
+) -> tuple[ReviewAuthoredEffect, ...]:
+    """The matrix's authored effects, preservation claims and open questions, as recorded.
+
+    Each carries the label its own recorded references earned: a row whose references name the
+    selected subject's revisions or relationships is the subject's own record, and a row whose
+    references name none of them is displayed with those references and the reason it could not be
+    attributed (``ICR-R26@v1``) -- never as a judgment on the selected subject.
+    """
+
+    return tuple(
+        _authored_effect(row, applicability.label_of(row.subject.record_id))
+        for row in rows
+        if applicability.label_of(row.subject.record_id) is not None
+    )
+
+
+def unresolved_authors(rows: Sequence[ReviewMatrixRow]) -> tuple[ReviewUnresolvedReference, ...]:
+    """One unresolved author per displayed row, because the matrix publishes no author for them.
+
+    The matrix view's own contract is that it publishes a record's identity and classification and
+    not its author, so the attribution is displayed as unresolved rather than rendered anonymously
+    or filled with the current actor. It is a fact about what the owner served, and it stays beside
+    the row it is about.
+    """
+
+    return tuple(_unresolved_author(row) for row in rows)
+
+
+def _authored_effect(
+    row: ReviewMatrixRow, applicability: ReviewDisplayedApplicability | None
+) -> ReviewAuthoredEffect:
+    """One authored effect, preservation claim or unresolved question, as recorded."""
+
+    return ReviewAuthoredEffect(
+        applicability=applicability,
+        record_kind=row.subject.record_kind,  # type: ignore[arg-type]
+        record_id=row.subject.record_id,
+        revision_id=row.subject.revision_id,
+        label=row.provenance.provenance_class,
+        rationale=None if row.consequence is None else row.consequence.detail,
+        author_ref=None,
+        examined_inputs=tuple(row.record_ids),
+    )
+
+
+def _unresolved_author(row: ReviewMatrixRow) -> ReviewUnresolvedReference:
+    return ReviewUnresolvedReference(
+        field="author",
+        recorded_reference=row.subject.record_id,
+        detail=(
+            "the review matrix publishes this record's identity and classification but no author "
+            "for it, so the attribution is displayed as unresolved rather than rendered "
+            "anonymously or filled with the current actor"
+        ),
+    )
+
+
+def observation(
+    entry: VerificationObservationPayload,
+    applicability: ReviewDisplayedApplicability | None,
+) -> ReviewObservation:
     """One verification observation displayed exactly, with its authored limitations."""
 
     artifact = entry.result_artifact
     return ReviewObservation(
+        applicability=applicability,
         observation_id=entry.command_name,
         tested_candidate=(
             None if entry.knowledge_candidate is None else entry.knowledge_candidate.logical_digest
@@ -294,10 +453,13 @@ def observation(entry: VerificationObservationPayload) -> ReviewObservation:
     )
 
 
-def signal(entry: DetectionSignalPayload) -> ReviewSignal:
+def signal(
+    entry: DetectionSignalPayload, applicability: ReviewDisplayedApplicability | None
+) -> ReviewSignal:
     """One detection fact, carried with its inputs, versions and scope limitations only."""
 
     return ReviewSignal(
+        applicability=applicability,
         signal_id=entry.signal_id,
         condition=entry.condition,
         input_set=entry.input_set.declared,

@@ -37,6 +37,14 @@ from agents_remember.models.knowledge.base import (
 )
 from agents_remember.models.knowledge.diff import SourceAttribution
 from agents_remember.models.knowledge.read import KnowledgeReadSeed
+from agents_remember.models.knowledge.review_applicability import (
+    ReviewApplicabilityClass,
+    ReviewApplicabilityState,
+    ReviewApplicabilitySummary,
+    ReviewContextRecord,
+    ReviewDisplayedApplicability,
+    ReviewDisplayedApplicabilityState,
+)
 from agents_remember.models.knowledge.review_records import (
     ReviewRecordChannel,
     ReviewRecordChannelState,
@@ -63,12 +71,18 @@ __all__ = [
     "ComparisonIdentity",
     "KnowledgeReviewPayload",
     "KnowledgeReviewResult",
+    "ReviewApplicabilityClass",
+    "ReviewApplicabilityState",
+    "ReviewApplicabilitySummary",
     "ReviewAssessmentDisplay",
     "ReviewAuthoredEffect",
     "ReviewAuthoredLineage",
     "ReviewCandidateRef",
     "ReviewChangedFile",
     "ReviewCollectionPage",
+    "ReviewContextRecord",
+    "ReviewDisplayedApplicability",
+    "ReviewDisplayedApplicabilityState",
     "ReviewEntry",
     "ReviewEntryListResult",
     "ReviewEvidenceLink",
@@ -473,8 +487,14 @@ class ReviewAuthoredEffect(KnowledgeModel):
     prose. The record is displayed because an identified author wrote it, and the surface adds
     nothing to it -- there is no field here for a computed effect or a preservation the author did
     not claim.
+
+    ``applicability`` is why this row may be displayed beside the selected subject at all
+    (``ICR-R26@v1``): the matrix row's own recorded references either resolve to the selection or
+    they do not, and a row that resolves to nothing is displayed as unresolved input with the
+    references and the reason rather than as this subject's judgment.
     """
 
+    applicability: ReviewDisplayedApplicability | None = None
     record_kind: Literal["invariant_effect_claim", "preservation_claim", "unresolved_question"]
     record_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     revision_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
@@ -493,6 +513,7 @@ class ReviewSignal(KnowledgeModel):
     limitations travel with it so a partial detection can never be read as a whole one.
     """
 
+    applicability: ReviewDisplayedApplicability | None = None
     signal_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     condition: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     input_set: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
@@ -511,6 +532,7 @@ class ReviewAssessmentDisplay(KnowledgeModel):
     conclusion.
     """
 
+    applicability: ReviewDisplayedApplicability | None = None
     assessment_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     revision_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     disposition: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
@@ -547,6 +569,7 @@ class ReviewAssessmentDisplay(KnowledgeModel):
 class ReviewEvidenceLink(KnowledgeModel):
     """One evidence claim reference as recorded, with its own authored limitations."""
 
+    applicability: ReviewDisplayedApplicability | None = None
     claim_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     revision_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     claimed_coverage: tuple[str, ...] = ()
@@ -566,6 +589,7 @@ class ReviewObservation(KnowledgeModel):
     invariant being satisfied.
     """
 
+    applicability: ReviewDisplayedApplicability | None = None
     observation_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     revision_id: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     tested_candidate: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
@@ -686,6 +710,14 @@ class ReviewKnowledgePane(KnowledgeModel):
     signals: tuple[ReviewSignal, ...] = ()
     assessment: ReviewAssessmentDisplay | None = None
     assessments: tuple[ReviewAssessmentDisplay, ...] = ()
+    # The records of *other* subjects this selection reaches through an explicit recorded
+    # relationship, displayed as labelled context with their true subject and none of their
+    # judgment content (ICR-R26@v1). Nothing in ``assessments`` above is another subject's record.
+    context: tuple[ReviewContextRecord, ...] = ()
+    # The six-way count of every supplied collection this pane displays, including the records it
+    # does not display as the selected subject's judgments. Filtering is therefore stated as
+    # arithmetic rather than performed silently.
+    applicability: tuple[ReviewApplicabilitySummary, ...] = ()
     unresolved: tuple[ReviewUnresolvedReference, ...] = ()
     selection_state: Literal["subject_selected", "task_context"] = "subject_selected"
     selection_detail: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
@@ -904,6 +936,11 @@ class ReviewEvidencePane(KnowledgeModel):
     assessments: tuple[ReviewAssessmentDisplay, ...] = ()
     source_inspection_available: bool
     channels: tuple[ReviewRecordChannel, ...] = ()
+    # The labelled context rows and the six-way counts this pane displays (ICR-R26@v1), carried here
+    # exactly as on the knowledge pane: the two panes show the same assessments, so a record that is
+    # context for one is context for both, and neither may drop it silently.
+    context: tuple[ReviewContextRecord, ...] = ()
+    applicability: tuple[ReviewApplicabilitySummary, ...] = ()
     unresolved: tuple[ReviewUnresolvedReference, ...] = ()
 
     @model_validator(mode="after")

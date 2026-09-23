@@ -74,6 +74,7 @@ from agents_remember.models.knowledge.evidence import (
 )
 from agents_remember.models.knowledge.evidence_read import (
     ClaimCoverage,
+    ClaimSubject,
     EvidenceClaimRecord,
     EvidenceReadRequest,
     EvidenceReadResult,
@@ -560,20 +561,29 @@ def _claim_records(
         try:
             record = evidence_records.claim_record(store, claim_id)
             coverage = evidence_records.claimed_coverage_of_claim(store, claim_id)
+            subject = evidence_records.subject_of_claim(store, claim_id)
         except _DAMAGED_RECORD_ERRORS:
             unreadable.append(claim_id)
             continue
         if record is None:  # a listed identity whose own envelope cannot be read is damaged
             unreadable.append(claim_id)
             continue
-        claims.append(_claim_record(record, coverage))
+        claims.append(_claim_record(record, coverage, subject))
     return tuple(claims), tuple(unreadable)
 
 
 def _claim_record(
-    record: EvidenceClaimRecord, coverage: Sequence[ClaimCoverage]
+    record: EvidenceClaimRecord,
+    coverage: Sequence[ClaimCoverage],
+    subject: ClaimSubject | None,
 ) -> ReviewClaimRecord:
-    """One claim's authored fields, rendered as the pane's own input value."""
+    """One claim's authored fields, rendered as the pane's own input value.
+
+    The subject travels as the identity the owner's own subject edge records, and it is the
+    *invariant revision* subject only: a facet-revision subject is a different kind of identity and
+    the review's selected subject is never a facet, so it is reported as the absence it is rather
+    than narrowed into an invariant revision id (``ICR-R26@v1``).
+    """
 
     return ReviewClaimRecord(
         claim_id=record.claim_id,
@@ -584,7 +594,19 @@ def _claim_record(
             f"{edge.endpoint.kind}:{coverage_identity(edge.endpoint)}" for edge in coverage
         ),
         assessment_refs=tuple(record.payload.assessment_refs),
+        subject_revision_id=_claim_subject_revision(subject),
     )
+
+
+def _claim_subject_revision(subject: ClaimSubject | None) -> str | None:
+    """The exact invariant revision one claim's own recorded subject edge names, or ``None``."""
+
+    if subject is None:
+        return None
+    recorded = subject.subject
+    if getattr(recorded, "kind", None) != "invariant_revision":
+        return None
+    return str(recorded.revision_id)
 
 
 def _candidate_context(

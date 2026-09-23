@@ -48,7 +48,10 @@ from agents_remember.application.review_candidate_resolution import (
     unreadable_candidate_refusal,
 )
 from agents_remember.application.review_evidence_records import without_selected_matrix
+from agents_remember.application.review_record_applicability import task_context_applicability
 from agents_remember.application.review_record_rendering import (
+    KNOWLEDGE_APPLICABILITY_CLASSES,
+    ReviewApplicabilityProjection,
     ReviewRecordInputs,
     assessment_displays,
     evidence_pane,
@@ -124,6 +127,10 @@ def task_context_review(
         unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database) or receipt
     )
     subjects = subject_states(records)
+    # A task-context review selected no subject, so nothing can be a judgment on one: the records
+    # are labelled as the candidate's own input, each with its recorded subject beside it, and the
+    # counts state the whole supplied population (ICR-R26@v1).
+    applicability = task_context_applicability(records)
     return KnowledgeReviewResult(
         state="review",
         repository_id=request.repository_id,
@@ -134,10 +141,10 @@ def task_context_review(
                 master=request.master,
             ),
             comparison=None,
-            knowledge=_task_context_pane(resolved, records, subjects, unreadable),
+            knowledge=_task_context_pane(resolved, records, subjects, applicability, unreadable),
             # No comparison travels beside the inventory: this review selected no subject.
             source=source_pane(None, inventory, attribution),
-            evidence=evidence_pane((), records, subjects),
+            evidence=evidence_pane((), records, subjects, applicability),
             staleness=ReviewStaleness(
                 state="not_compared",
                 statement=(
@@ -171,6 +178,7 @@ def _task_context_pane(
     resolved: ReviewCandidateResolution,
     records: ReviewRecordInputs,
     subjects: Mapping[str, SubjectAssessmentState],
+    applicability: ReviewApplicabilityProjection,
     unreadable: ReviewRefusal | None = None,
 ) -> ReviewKnowledgePane:
     """Pane 1 for a task-context review: no operand compared, and the reason it was not.
@@ -186,8 +194,14 @@ def _task_context_pane(
     return ReviewKnowledgePane(
         before_statement=side,
         after_statement=side,
-        signals=tuple(signal(entry) for entry in records.signals),
-        assessments=assessment_displays(records, subjects),
+        signals=tuple(
+            signal(entry, applicability.label_of(entry.signal_id))
+            for entry in records.signals
+            if applicability.label_of(entry.signal_id) is not None
+        ),
+        assessments=assessment_displays(records, subjects, applicability),
+        context=applicability.context_of(KNOWLEDGE_APPLICABILITY_CLASSES),
+        applicability=applicability.summaries_of(KNOWLEDGE_APPLICABILITY_CLASSES),
         selection_state="task_context",
         selection_detail=detail,
     )

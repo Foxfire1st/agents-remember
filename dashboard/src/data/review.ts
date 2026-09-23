@@ -89,6 +89,7 @@ export interface ReviewFieldChange {
 }
 
 export interface ReviewAuthoredEffect {
+  applicability?: ReviewDisplayedApplicability;
   record_kind: string;
   record_id: string;
   revision_id?: string;
@@ -99,7 +100,49 @@ export interface ReviewAuthoredEffect {
   unresolved: ReviewUnresolvedReference[];
 }
 
+// Why one displayed record may appear beside the selected subject (ICR-R26): the treatment its own
+// recorded binding earned, with the true subject that binding names and the exact references the
+// treatment was decided from. A record of another subject is never in the assessments below; it is
+// displayed as labelled context with none of its finding, which belongs to its own review.
+export interface ReviewDisplayedApplicability {
+  records: string;
+  record_id: string;
+  state: "direct" | "historical" | "candidate" | "unresolved";
+  subject_kind?: string;
+  subject_id?: string;
+  subject_revision_ids: string[];
+  references: string[];
+  detail: string;
+}
+
+export interface ReviewContextRecord {
+  records: string;
+  record_id: string;
+  label: string;
+  subject_kind: string;
+  subject_id: string;
+  subject_revision_ids: string[];
+  relationship: string;
+  author_ref?: string;
+  role_ref?: string;
+  references: string[];
+  detail: string;
+}
+
+export interface ReviewApplicabilitySummary {
+  records: string;
+  supplied: number;
+  direct: number;
+  historical: number;
+  context: number;
+  candidate: number;
+  unresolved: number;
+  unrelated: number;
+  detail: string;
+}
+
 export interface ReviewSignal {
+  applicability?: ReviewDisplayedApplicability;
   signal_id: string;
   condition: string;
   input_set: string;
@@ -111,6 +154,7 @@ export interface ReviewSignal {
 }
 
 export interface ReviewAssessmentDisplay {
+  applicability?: ReviewDisplayedApplicability;
   assessment_id: string;
   disposition: string;
   finding: string;
@@ -134,6 +178,11 @@ export interface ReviewKnowledgePane {
   authored_effects: ReviewAuthoredEffect[];
   signals: ReviewSignal[];
   assessments: ReviewAssessmentDisplay[];
+  // Records of *other* subjects this selection reaches through a recorded relationship, and the
+  // six-way count of every supplied collection -- including the records the pane does not display
+  // as this subject's judgments (ICR-R26).
+  context?: ReviewContextRecord[];
+  applicability?: ReviewApplicabilitySummary[];
   unresolved: ReviewUnresolvedReference[];
   // Which question this pane answered: a compared subject, or the task context with no operand.
   selection_state: "subject_selected" | "task_context";
@@ -272,6 +321,7 @@ export interface ReviewSourceContentResult {
 }
 
 export interface ReviewEvidenceLink {
+  applicability?: ReviewDisplayedApplicability;
   claim_id: string;
   revision_id?: string;
   assessment_refs: string[];
@@ -279,6 +329,7 @@ export interface ReviewEvidenceLink {
 }
 
 export interface ReviewObservation {
+  applicability?: ReviewDisplayedApplicability;
   observation_id: string;
   revision_id?: string;
   tested_candidate?: string;
@@ -297,6 +348,8 @@ export interface ReviewEvidencePane {
   observations: ReviewObservation[];
   assessments: ReviewAssessmentDisplay[];
   source_inspection_available: boolean;
+  context?: ReviewContextRecord[];
+  applicability?: ReviewApplicabilitySummary[];
   unresolved: ReviewUnresolvedReference[];
 }
 

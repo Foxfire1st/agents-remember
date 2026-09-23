@@ -28,10 +28,13 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type {
+  ReviewApplicabilitySummary,
   ReviewAssessmentDisplay,
   ReviewAuthoredEffect,
   ReviewChangedFile,
   ReviewCollectionPage,
+  ReviewContextRecord,
+  ReviewDisplayedApplicability,
   ReviewFailure,
   ReviewKnowledgePane,
   ReviewPagedCollection,
@@ -93,6 +96,61 @@ const attribution = (author?: string, inputs: string[] = []) =>
     ? `author: unresolved reference${inputs.length ? ` · inputs: ${inputs.join(", ")}` : ""}`
     : `author: ${author}${inputs.length ? ` · inputs: ${inputs.join(", ")}` : ""}`;
 
+// Why one displayed record may appear beside the selected subject (ICR-R26), printed with the true
+// subject its own recorded binding names. A record whose binding could not be resolved says so with
+// the references it carries; a record of a previous generation says so and never reads as the
+// displayed generation's result. A server that sends no label prints nothing extra, which is how a
+// payload from before this requirement still renders.
+const applicabilityNote = (entry: { applicability?: ReviewDisplayedApplicability }) => {
+  const label = entry.applicability;
+  if (label === undefined) {
+    return null;
+  }
+  const subject =
+    label.subject_kind !== undefined && label.subject_id !== undefined
+      ? ` (${label.subject_kind} ${label.subject_id})`
+      : "";
+  return (
+    <div style={{ color: "muted" }} data-applicability={label.state}>
+      applicability: {label.state}
+      {subject} · {label.detail}
+    </div>
+  );
+};
+
+// The records of *other* subjects this selection reaches through an explicit recorded relationship,
+// with the relationship that reached each one and no judgment content: a sibling's finding belongs
+// to the sibling's own review, and showing it here is the cross-subject contamination ICR-R26
+// exists to prevent. The count of every supplied collection travels beside them, so a reader can
+// see that filtering is arithmetic rather than erasure.
+const contextList = (records?: ReviewContextRecord[]) =>
+  records?.length ? (
+    <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-context">
+      {records.map((entry) => (
+        <li key={`${entry.records}:${entry.record_id}`} data-context-of={`${entry.subject_kind}:${entry.subject_id}`}>
+          context {entry.records} {entry.record_id} · {entry.label} · of {entry.subject_kind}{" "}
+          {entry.subject_id} · via {entry.relationship}
+          <div style={{ color: "muted" }}>
+            {attribution(entry.author_ref)} · references: {entry.references.join(", ")}
+          </div>
+        </li>
+      ))}
+    </ul>
+  ) : null;
+
+const applicabilityCounts = (summaries?: ReviewApplicabilitySummary[]) =>
+  summaries?.length ? (
+    <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-applicability">
+      {summaries.map((row) => (
+        <li key={row.records}>
+          supplied {row.records}: {row.supplied} · direct {row.direct} · historical {row.historical}{" "}
+          · context {row.context} · candidate {row.candidate} · unresolved {row.unresolved} · not
+          displayed {row.unrelated} — {row.detail}
+        </li>
+      ))}
+    </ul>
+  ) : null;
+
 const unresolvedList = (entries: ReviewUnresolvedReference[]) =>
   entries.length ? (
     <ul style={{ margin: "0.2rem 0 0.6rem", paddingLeft: "1.1rem" }} data-testid="review-unresolved">
@@ -122,6 +180,7 @@ function assessmentBlock(entry: ReviewAssessmentDisplay) {
         {attribution(entry.author_ref, entry.examined_inputs)} · binding: {entry.binding_state}
         {entry.role_ref ? ` · role: ${entry.role_ref}` : ""}
       </div>
+      {applicabilityNote(entry)}
     </li>
   );
 }
@@ -135,6 +194,7 @@ function authoredEffect(effect: ReviewAuthoredEffect) {
       <div style={{ color: "muted" }}>
         {attribution(effect.author_ref, effect.examined_inputs)}
       </div>
+      {applicabilityNote(effect)}
       {unresolvedList(effect.unresolved)}
     </li>
   );
@@ -155,6 +215,7 @@ function signalBlock(signal: ReviewSignal) {
           scope limitations: {signal.scope_limitations.join(", ")}
         </div>
       ) : null}
+      {applicabilityNote(signal)}
     </li>
   );
 }
@@ -234,6 +295,8 @@ function KnowledgePane({ payload }: { payload: ReviewPayload }) {
       ) : (
         muted("UNASSESSED — no assessment is recorded against this subject.", "review-unassessed")
       )}
+      {contextList(knowledge.context)}
+      {applicabilityCounts(knowledge.applicability)}
       {unresolvedList(knowledge.unresolved)}
     </>,
   );
@@ -441,6 +504,7 @@ function EvidencePane({ payload }: { payload: ReviewPayload }) {
                 {link.assessment_refs.length
                   ? ` · assessments: ${link.assessment_refs.join(", ")}`
                   : ""}
+                {applicabilityNote(link)}
                 {unresolvedList(link.unresolved)}
               </li>
             ))}
@@ -456,6 +520,7 @@ function EvidencePane({ payload }: { payload: ReviewPayload }) {
                   {observation.result_artifact_digest ?? "no digest"}) · environment:{" "}
                   {observation.environment_identity ?? "not recorded"}
                 </div>
+                {applicabilityNote(observation)}
               </li>
             ))}
           </ul>
@@ -473,6 +538,8 @@ function EvidencePane({ payload }: { payload: ReviewPayload }) {
       ) : (
         muted("UNASSESSED — no assessment is recorded against this subject.", "review-unassessed")
       )}
+      {contextList(evidence.context)}
+      {applicabilityCounts(evidence.applicability)}
       {unresolvedList(evidence.unresolved)}
     </>,
   );

@@ -43,8 +43,34 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "b4d4a7f9e9500ba10f763dacdc916c0b77054113fc388f3096869fbedeef92cd"
+LIFECYCLE_CATALOG_SHA256 = "4d874fb54c627549db098177caa477040e09ca63c7ae2cba2246bd1390a338e0"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Twenty-second deliberate re-pin (260921-ICR-L26, at base ``2edad477``, 2026-09-22) -- one new case
+module's four consumer rows.** ``260921-ICR-L26`` (requirement ``ICR-R26@v1``) registers no artifact
+and no contract of its own: its ten subject-and-comparison-isolation cases live in the ordinary unit
+module ``mcp/tests/test_knowledge_review_subject_isolation.py``, which builds one real leaf enclosure
+with an external memory half through the existing endpoint fixture, produces every supplied record
+class through the operation that owns it -- four assessments through the curator-coherence
+publication, a detection run holding two signals, an evidence claim and a verification observation
+through the application evidence writer, and an authored open question through the admitted candidate
+batch -- and then drives the **production composition** (``cli.dashboard.serving_collaborators``), once
+before and once after a source movement that makes the same assessment a previous generation's
+record. It is therefore a source-derived consumer of **four** rows, each derived from the census's own
+finding -- ``missing=['mcp/tests/test_knowledge_review_subject_isolation.py']`` with ``unsupported=[]``
+on all four: ``mcp/tests/curator_coherence_test_support.py`` (the recorded task topology the
+publication binds), ``mcp/tests/fixtures/repository_profiles/node/package-lock.json``,
+``mcp/tests/diff_scope_test_support.py`` (the two snapshots, their recorded identities and the two
+real trees the enclosure is built over) and ``mcp/tests/read_scope_test_support.py`` (the authorship
+envelope and the recorded family/membership topology the classification's recorded relationships are
+read from). All four ``consumer_scope = "exact"`` rows gained that one path each, and the module's own
+lane row was added to ``mcp/tests/test-evidence-lanes.toml``, which pins no digest and refuses an
+unregistered module at collection. **Nothing was registered, no row was removed and no artifact's
+identity moved**, so the population stays at **sixteen contracts / sixty-six artifacts**, and the
+catalog is re-pinned from ``b4d4a7f9e9500ba10f763dacdc916c0b77054113fc388f3096869fbedeef92cd`` (the
+Twenty-first) to ``4d874fb54c627549db098177caa477040e09ca63c7ae2cba2246bd1390a338e0``, measured with
+``sha256sum mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact
+delta remains exactly empty.
 
 **Twenty-first deliberate re-pin (260921-ICR-L10, at base ``dcf35a0e``, 2026-09-22) -- one new case
 module's three consumer rows.** ``260921-ICR-L10`` (requirement ``ICR-R10@v1``) registers no artifact

@@ -90,16 +90,24 @@ from agents_remember.application.review_pagination import (
     records_page_refusal,
     reset_comparison_page,
 )
+from agents_remember.application.review_record_applicability import (
+    AppliedRecords,
+    review_applicability,
+)
 from agents_remember.application.review_record_rendering import (
     EMPTY_REVIEW_RECORDS,
+    KNOWLEDGE_APPLICABILITY_CLASSES,
     ReviewRecordInputs,
     assessment_displays,
+    authored_effects,
     evidence_pane,
     refused,
     signal,
     subject_states,
     submission,
+    unresolved_authors,
 )
+from agents_remember.application.review_recorded_selection import ComparisonFacts
 from agents_remember.application.review_relationship_movement import (
     RelationshipSources,
     relationship_movements,
@@ -140,7 +148,6 @@ from agents_remember.models.knowledge.review import (
     ComparisonIdentity,
     KnowledgeReviewPayload,
     KnowledgeReviewResult,
-    ReviewAuthoredEffect,
     ReviewCollectionPage,
     ReviewEntryListResult,
     ReviewKnowledgePane,
@@ -150,7 +157,6 @@ from agents_remember.models.knowledge.review import (
     ReviewSourceInventory,
     ReviewStaleness,
     ReviewSurfaceRequest,
-    ReviewUnresolvedReference,
 )
 from agents_remember.models.knowledge.view import (
     MAX_VIEW_ROWS,
@@ -450,6 +456,21 @@ def compose_review(
             after_code=after_source,
         ),
     )
+    # Which supplied record may be displayed beside *this* subject, and why, is decided once, here,
+    # before either pane renders anything (ICR-R26@v1); the panes receive what it kept.
+    applicability = review_applicability(
+        resolved,
+        request,
+        records,
+        rows,
+        ComparisonFacts(
+            items=page.items,
+            selected=selected,
+            generation=identity,
+            relationships=relationships,
+        ),
+    )
+    displayed_rows = applicability.displayed_rows(rows)
     return KnowledgeReviewResult(
         state="review",
         repository_id=request.repository_id,
@@ -460,11 +481,11 @@ def compose_review(
                 master=request.master,
             ),
             comparison=identity,
-            knowledge=_knowledge_pane(comparison, rows, records, subjects, selected),
+            knowledge=_knowledge_pane(comparison, displayed_rows, records, subjects, applicability),
             source=source_pane(
                 comparison, inventory, _comparison_attribution(comparison), relationships
             ),
-            evidence=evidence_pane(rows, records, subjects),
+            evidence=evidence_pane(displayed_rows, records, subjects, applicability),
             staleness=_staleness(identity, previous_binding_digest),
             submission=submission(stale),
             page=published_page,
@@ -907,7 +928,7 @@ def _knowledge_pane(
     rows: Sequence[ReviewMatrixRow],
     records: ReviewRecordInputs,
     subjects: Mapping[str, SubjectAssessmentState],
-    selected: SubjectRevisionSelection | None,
+    applicability: AppliedRecords,
 ) -> ReviewKnowledgePane:
     """Pane 1: identities, retained revisions, exact statements and separately authored records.
 
@@ -920,8 +941,12 @@ def _knowledge_pane(
 
     assert comparison.page is not None
     items = comparison.page.items
-    if selected is None:
-        selected = SubjectRevisionSelection(selection=None, before_item=None, after_item=None)
+    # The selection the statements render from is the one the classification was made against, read
+    # from the projection rather than passed a second time: two spellings of "which revisions were
+    # selected" is how a pane comes to render one selection beside another selection's records.
+    selected = applicability.revision_selection or SubjectRevisionSelection(
+        selection=None, before_item=None, after_item=None
+    )
     before_statement, after_statement, before_conditions, after_conditions = _selected_statements(
         selected
     )
@@ -935,17 +960,20 @@ def _knowledge_pane(
         revision_groups=_revision_groups(comparison),
         revision_selection=selected.selection,
         field_changes=field_changes(items),
-        authored_effects=tuple(
-            _authored_effect(row)
-            for row in rows
-            if row.subject.record_kind in AUTHORED_EFFECT_KINDS
+        authored_effects=authored_effects(
+            tuple(row for row in rows if row.subject.record_kind in AUTHORED_EFFECT_KINDS),
+            applicability,
         ),
-        signals=tuple(signal(entry) for entry in records.signals),
-        assessments=assessment_displays(records, subjects),
-        unresolved=tuple(
-            _unresolved_author(row)
-            for row in rows
-            if row.subject.record_kind in AUTHORED_EFFECT_KINDS
+        signals=tuple(
+            signal(entry, applicability.label_of(entry.signal_id))
+            for entry in records.signals
+            if applicability.label_of(entry.signal_id) is not None
+        ),
+        assessments=assessment_displays(records, subjects, applicability),
+        context=applicability.context_of(KNOWLEDGE_APPLICABILITY_CLASSES),
+        applicability=applicability.summaries_of(KNOWLEDGE_APPLICABILITY_CLASSES),
+        unresolved=unresolved_authors(
+            tuple(row for row in rows if row.subject.record_kind in AUTHORED_EFFECT_KINDS)
         ),
     )
 
@@ -1005,30 +1033,4 @@ def _revision_groups(comparison: KnowledgeDiffResult) -> tuple[ReviewRevisionGro
             )
             for group in groups.after
         ]
-    )
-
-
-def _authored_effect(row: ReviewMatrixRow) -> ReviewAuthoredEffect:
-    """One authored effect, preservation claim or unresolved question, as recorded."""
-
-    return ReviewAuthoredEffect(
-        record_kind=row.subject.record_kind,  # type: ignore[arg-type]
-        record_id=row.subject.record_id,
-        revision_id=row.subject.revision_id,
-        label=row.provenance.provenance_class,
-        rationale=None if row.consequence is None else row.consequence.detail,
-        author_ref=None,
-        examined_inputs=tuple(row.record_ids),
-    )
-
-
-def _unresolved_author(row: ReviewMatrixRow) -> ReviewUnresolvedReference:
-    return ReviewUnresolvedReference(
-        field="author",
-        recorded_reference=row.subject.record_id,
-        detail=(
-            "the review matrix publishes this record's identity and classification but no author "
-            "for it, so the attribution is displayed as unresolved rather than rendered "
-            "anonymously or filled with the current actor"
-        ),
     )
