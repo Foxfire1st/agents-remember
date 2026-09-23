@@ -197,6 +197,12 @@ ReviewSubjectPresence = Literal["before_only", "after_only", "both"]
 
 ReviewSideState = Literal["present", "absent", "binary", "unresolved"]
 
+# Which record a review read is addressed to (ICR-R12). One value, because the surface addresses
+# exactly one historical record: the leaf's own published comparison generation. A second spelling
+# would be a second way to ask for the same record, and there is deliberately no way to ask for a
+# generation that is not this leaf's.
+ReviewHistoryRef = Literal["recorded"]
+
 
 class ReviewUnresolvedReference(KnowledgeModel):
     """One reference the surface could not resolve, named rather than dropped or made anonymous.
@@ -260,6 +266,14 @@ class ReviewSurfaceRequest(KnowledgeModel):
     owner of, and naming a collection without a cursor is the first page of it. The cursor is an
     *input* rather than a position the server recomputes, so a page is a function of the cursor and
     the same comparison -- never of whatever the dataset holds when the request lands.
+
+    ``history`` names **which record the caller is reading** (ICR-R12). Its absence is the live
+    review, which is what every caller that names none asks for, and ``recorded`` asks for the
+    comparison the leaf's own durable generation bound -- the same answer whether the leaf's worktree
+    is still there or cleanup removed it, because the record and not the enclosure is what the review
+    is read from. A caller cannot ask for "some other generation": the leaf's own record is the only
+    historical comparison this surface addresses, and its own resolution refuses a leaf that
+    recorded none.
     """
 
     repository_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
@@ -273,6 +287,7 @@ class ReviewSurfaceRequest(KnowledgeModel):
     page_of: ReviewPagedCollection | None = None
     continuation: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
     page_size: int = Field(default=0, ge=0, le=MAXIMUM_REVIEW_PAGE_SIZE)
+    history: ReviewHistoryRef | None = None
 
     @model_validator(mode="after")
     def _require_the_cursor_and_its_collection_together(self) -> ReviewSurfaceRequest:

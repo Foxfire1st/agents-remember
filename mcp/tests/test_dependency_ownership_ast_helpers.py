@@ -43,8 +43,31 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "4d874fb54c627549db098177caa477040e09ca63c7ae2cba2246bd1390a338e0"
+LIFECYCLE_CATALOG_SHA256 = "4ab067e360c7807c3051ad71058c09058225f1e9155e7111da6e95c73cac0258"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Twenty-third deliberate re-pin (260921-ICR-L12, at base ``870701b4``, 2026-09-22) -- one new case
+module's three consumer rows.** ``260921-ICR-L12`` (requirement ``ICR-R12@v1``) registers no artifact
+and no contract of its own: its six committed-leaf cases live in the ordinary unit module
+``mcp/tests/test_historical_committed_leaf_review.py``, which builds on the existing
+``mcp/tests/test_knowledge_review_source_endpoints.py`` enclosure fixture -- freezing a real
+comparison through R11's freeze owner, removing the real worktree group, serving the same request
+through the production HTTP composition in this process and in a **fresh interpreter**, and driving
+the entry, subject, expansion and refusal routes -- rather than introducing a second enclosure or a
+second support module. It is therefore a source-derived consumer of **three** rows, each derived from
+the census's own finding -- ``missing=['mcp/tests/test_historical_committed_leaf_review.py']`` with
+``unsupported=[]`` on all three: ``mcp/tests/diff_scope_test_support.py`` (the two snapshots and the
+two real trees the enclosure is built over), ``mcp/tests/read_scope_test_support.py`` (the repository,
+the recorded anchors and the tracked paths) and the Node ``package-lock.json`` fixture, which the
+census's own propagation rule reaches through the support modules those rows already name. All three
+``consumer_scope = "exact"`` rows gained that one path each, and the module's own lane row was added
+to ``mcp/tests/test-evidence-lanes.toml``, which pins no digest and refuses an unregistered module at
+collection. **Nothing was registered, no row was removed and no artifact's identity moved**, so the
+population stays at **sixteen contracts / sixty-six artifacts**, and the catalog is re-pinned from
+``4d874fb54c627549db098177caa477040e09ca63c7ae2cba2246bd1390a338e0`` (the Twenty-second) to
+``4ab067e360c7807c3051ad71058c09058225f1e9155e7111da6e95c73cac0258``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact delta remains
+exactly empty.
 
 **Twenty-second deliberate re-pin (260921-ICR-L26, at base ``2edad477``, 2026-09-22) -- one new case
 module's four consumer rows.** ``260921-ICR-L26`` (requirement ``ICR-R26@v1``) registers no artifact

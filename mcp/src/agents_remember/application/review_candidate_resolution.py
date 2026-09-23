@@ -1,4 +1,4 @@
-"""The exact source endpoints and the dataset pair one live curator review binds.
+"""The exact source endpoints and the dataset pair one curator review binds.
 
 A review reads two things at once: the *records* two knowledge datasets hold, and the *source* the
 candidate's recorded anchors are resolved against. The record half names its own two files; the
@@ -17,6 +17,16 @@ derives them:
 
 Each root travels with its tree id, because a tree id without the repository that holds it is not
 resolvable; the read context refuses a half-resolution rather than falling back to a working tree.
+Both sides of a live leaf therefore name the **repository** the contract records: a linked worktree
+shares its repository's object store, so the two bound objects resolve in either, and the repository
+is the root a durable comparison generation records -- which is what lets a closed leaf's review
+reproduce the live one (ICR-R12).
+
+**A leaf whose enclosure is closed is resolved from its records, not refused.**
+:mod:`agents_remember.application.review_committed_leaf` owns that resolution -- the leaf's published
+comparison generation, or the source range its enclosure contract recorded -- and this module
+delegates to it. ``candidate_not_live`` remains the answer only for a leaf that is neither live nor
+recorded, which is a state no record can answer for.
 
 Every way the derivation can fail is a **named state**: a contract that records no base commit, a
 capture the shipped owner refused, and a capture whose inputs moved while the review was being
@@ -31,6 +41,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agents_remember.errors import FutureCodeCandidateError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -56,6 +67,9 @@ from agents_remember.worktrees.worktree_contract import (
     load_contract,
 )
 
+if TYPE_CHECKING:  # pragma: no cover - the annotation only; the value's owner imports this module
+    from agents_remember.application.review_committed_leaf import ClosedLeafReview
+
 __all__ = [
     "REVIEW_BASELINE_DIRECTORY",
     "REVIEW_CANDIDATE_DIRECTORY",
@@ -64,6 +78,7 @@ __all__ = [
     "candidate_receipt_refusal",
     "candidate_ref",
     "missing_dataset_half",
+    "recorded_leaf_contract",
     "refusal",
     "require_current_candidate_identity",
     "resolve_review_candidate",
@@ -133,12 +148,32 @@ class ReviewCandidateResolution:
     # The captured candidate identity, when this resolution derived one. Never re-derived here: the
     # recheck belongs to the composition, immediately before the comparison is published.
     candidate_identity: FutureCodeCandidateIdentity | None = None
+    # The durable record this resolution was reopened from, when it was not resolved from a live
+    # enclosure (ICR-R12). A live resolution carries none: ``None`` here means "this candidate has a
+    # worktree and was captured from it", and a resolved value means "the leaf is closed and this is
+    # the record the surface re-opened". Its own owner is
+    # :mod:`agents_remember.application.review_committed_leaf`, which is also the only thing that
+    # constructs one.
+    closed_leaf: ClosedLeafReview | None = None
 
 
 def resolve_review_candidate(
-    config: McpRuntimeConfig, repository_id: str, master: str, leaf_id: str
+    config: McpRuntimeConfig,
+    repository_id: str,
+    master: str,
+    leaf_id: str,
+    *,
+    recorded: bool = False,
 ) -> ReviewCandidateResolution | ReviewRefusal:
-    """Resolve one admitted live curator candidate from canonical task context, or refuse by name."""
+    """Resolve one curator candidate from canonical task context, or refuse by name.
+
+    ``recorded`` is the caller's own statement of *which record it is reading* (ICR-R12):
+    ``True`` resolves the leaf's published comparison generation -- the same answer whether the
+    enclosure is live or cleanup has removed it -- and the default resolves the live candidate when
+    there is one. A leaf whose enclosure is **closed** resolves from its records either way, because
+    there is no live candidate to resolve; that fallback is what the intake defect needed, and it is
+    a resolution rather than a refusal so the same comparison stays openable after cleanup.
+    """
 
     for segment, value in (("repository", repository_id), ("master", master), ("leaf", leaf_id)):
         if not value or "/" in value or "\\" in value or value.startswith("."):
@@ -148,7 +183,7 @@ def resolve_review_candidate(
                 next_action="name the canonical task context: repository, master and leaf id",
                 offending_input=value,
             )
-    contract = _leaf_contract(config, repository_id, master, leaf_id)
+    contract = recorded_leaf_contract(config, repository_id, master, leaf_id)
     if contract is None:
         return refusal(
             "candidate_unresolved",
@@ -159,16 +194,17 @@ def resolve_review_candidate(
             ),
             offending_input=f"{master}/{leaf_id}",
         )
-    if contract.code_worktree is None or not contract.code_worktree.exists():
-        return refusal(
-            "candidate_not_live",
-            "the leaf's enclosure has no live worktree, so there is no candidate to review",
-            next_action=(
-                "review a leaf whose worktree is live; a landed leaf's committed change-set stays "
-                "inspectable through the existing change-set views and is not this surface"
-            ),
-            offending_input=contract.leaf_id,
+    if recorded or contract.code_worktree is None or not contract.code_worktree.exists():
+        # Either the caller named the leaf's recorded comparison, or the leaf's enclosure is closed
+        # and its records are the only candidate there is. The owner of that resolution is
+        # :mod:`agents_remember.application.review_committed_leaf`; the import is local because that
+        # module resolves through this one's contract accessor, so a module-level import would be a
+        # cycle with a type annotation on it.
+        from agents_remember.application.review_committed_leaf import (  # noqa: PLC0415 - cycle
+            resolve_committed_leaf_review,
         )
+
+        return resolve_committed_leaf_review(config, repository_id, master, leaf_id)
     if not contract.code_base_commit:
         return refusal(
             "candidate_unresolved",
@@ -193,8 +229,17 @@ def resolve_review_candidate(
         # The candidate side resolves to **both** a root and a tree id or to neither: the read
         # context refuses a root without a tree id, and correctly so -- that is an incomplete source
         # resolution rather than a licence to read a working tree. Both are supplied from the same
-        # capture: the tree the isolated index produced, and the worktree it was derived in.
-        candidate_code_root=contract.code_worktree,
+        # capture: the tree the isolated index produced, and the repository that holds it.
+        #
+        # The root is the *repository* rather than the disposable checkout the capture was taken in,
+        # because a tree id is resolvable exactly where the object lives: a linked worktree shares
+        # its repository's object store, so both objects resolve in both roots, and naming the
+        # repository is what makes the comparison the surface composes identical to the one its
+        # durable generation records (ICR-R12) -- an inventory whose reproduction command names a
+        # checkout that cleanup removes is not reproducible from the record. The capture itself still
+        # reads the live worktree; only the root the two bound objects are read in is the
+        # repository's.
+        candidate_code_root=contract.code_repo_path,
         baseline_code_tree_id=contract.code_base_commit,
         candidate_code_tree_id=captured.codeCandidateTree,
         contract=contract,
@@ -425,10 +470,17 @@ def _status_text(error: FutureCodeCandidateError) -> str:
     return str(getattr(error, "status", "unavailable"))
 
 
-def _leaf_contract(
+def recorded_leaf_contract(
     config: McpRuntimeConfig, repository_id: str, master: str, leaf_id: str
 ) -> WorktreeContract | None:
-    """The one enclosure contract recorded for this leaf, or ``None`` when none is readable."""
+    """The one enclosure contract recorded for this leaf, or ``None`` when none is readable.
+
+    It is public because two resolutions read it and they must read the *same* record: the live
+    resolution below, and the closed-leaf resolution
+    :mod:`agents_remember.application.review_committed_leaf` owns. Two scans of the enclosure
+    directory would be two answers to "which contract is this leaf's", and the second one is exactly
+    how a review comes to be composed for a leaf nobody addressed.
+    """
 
     task_root = config.coordination_root / "tasks" / repository_id / master
     if not task_root.is_dir():

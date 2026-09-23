@@ -14,8 +14,11 @@ import {
 describe("DetailPanel doc-reader change-set bar (L4a)", () => {
   const leafPath = "/tasks/agents-remember/260628_operations-integration/04a_changeset-everywhere.json";
 
-  it("shows a committed button on a leaf doc reader (no live enclosure) and opens the leaf target", async () => {
-    stubCounters();
+  // The closed leaf's own entry set: committed (its landed delta) plus the Intent review, which is
+  // read from the leaf's recorded comparison because there is no live candidate to read (ICR-R12).
+  // The WORKING change-set is absent -- there is no uncommitted delta once the enclosure is closed --
+  // so liveness still selects one of the three buttons and is no longer the gate on the review entry.
+  const closedLeaf = () => {
     const doc = taskDoc({
       id: "260628-L4a",
       lifecycleId: undefined,
@@ -26,21 +29,104 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
       objective: "Leaf objective.",
     });
     seedTaskDocuments([doc]);
+    return doc;
+  };
+
+  it("shows a committed button on a leaf doc reader (no live enclosure) and opens the leaf target", async () => {
+    stubCounters();
+    closedLeaf();
     const onOpenChangeSet = vi.fn();
     const { findAllByTestId } = render(
       <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
     );
     // identity comes from the doc node, so the bar shows with NO active enclosure (the L4 gap);
-    // committed is always present, working only when live -> exactly one button here.
+    // committed is always present, working only when live.
     const buttons = await findAllByTestId("open-changeset");
-    expect(buttons).toHaveLength(1);
-    expect(buttons[0].textContent).toContain("committed");
-    fireEvent.click(buttons[0]);
+    const committed = buttons.find((b) => (b.textContent ?? "").includes("committed"));
+    expect(committed).toBeDefined();
+    fireEvent.click(committed as HTMLElement);
     expect(onOpenChangeSet).toHaveBeenCalledWith({
       repo: "agents-remember",
       master: "260628_operations-integration",
       leaf: "260628-L4a",
       mode: "committed",
+    });
+  });
+
+  it("offers the Intent review for a closed leaf, bound to its recorded comparison", async () => {
+    // The packet's defect: a cleaned leaf's Intent Review answered candidate_not_live. The entry that
+    // opens it must exist for a leaf with no live enclosure, and it must name the record it is
+    // addressed to -- the leaf's own durable generation -- rather than the live candidate.
+    stubCounters({
+      state: "entries",
+      operation: "list_knowledge_review_entries",
+      repository_id: "agents-remember",
+      master: "260628_operations-integration",
+      leaf_id: "260628-L4a",
+      entries: [
+        {
+          selector_kind: "invariant",
+          selector_id: "inv-1",
+          label: "Retries share one budget",
+          presence: "both",
+        },
+      ],
+      total_subjects: 1,
+      invariant_total: 1,
+      family_total: 0,
+    });
+    closedLeaf();
+    const onOpenChangeSet = vi.fn();
+    const { findAllByTestId, findByTestId } = render(
+      <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
+    );
+    const labels = (await findAllByTestId("open-changeset")).map((b) => b.textContent ?? "");
+    expect(labels.some((t) => t.includes("working"))).toBe(false);
+    const entry = (await findAllByTestId("open-changeset")).find((b) =>
+      (b.textContent ?? "").includes("Intent review"),
+    );
+    expect(entry).toBeDefined();
+    // The catalogue still refines the entry: the recorded subject travels with the historical target.
+    const picker = await findByTestId("review-subject-picker");
+    expect(picker).toBeDefined();
+    fireEvent.click(entry as HTMLElement);
+    expect(onOpenChangeSet).toHaveBeenCalledWith({
+      repo: "agents-remember",
+      master: "260628_operations-integration",
+      leaf: "260628-L4a",
+      review: { selectorKind: "invariant", selectorId: "inv-1", historical: true },
+    });
+  });
+
+  it("keeps the closed leaf's Intent review when its record offers no subject", async () => {
+    // The read is a refinement and never the gate: a closed leaf whose record holds no catalogue, or
+    // whose read refused, still opens the review on its recorded comparison (the task-context entry).
+    stubCounters({
+      state: "entries",
+      operation: "list_knowledge_review_entries",
+      repository_id: "agents-remember",
+      master: "260628_operations-integration",
+      leaf_id: "260628-L4a",
+      entries: [],
+      total_subjects: 0,
+      invariant_total: 0,
+      family_total: 0,
+    });
+    closedLeaf();
+    const onOpenChangeSet = vi.fn();
+    const { findAllByTestId } = render(
+      <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
+    );
+    const entry = (await findAllByTestId("open-changeset")).find((b) =>
+      (b.textContent ?? "").includes("Intent review"),
+    );
+    expect(entry).toBeDefined();
+    fireEvent.click(entry as HTMLElement);
+    expect(onOpenChangeSet).toHaveBeenCalledWith({
+      repo: "agents-remember",
+      master: "260628_operations-integration",
+      leaf: "260628-L4a",
+      review: { historical: true },
     });
   });
 

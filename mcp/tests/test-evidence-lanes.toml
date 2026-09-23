@@ -74,6 +74,7 @@ unit-regression = [
   "mcp/tests/test_harness_control.py",
   "mcp/tests/test_harness_launch.py",
   "mcp/tests/test_harness_submission_authority.py",
+  "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_hosted_interactions.py",
   "mcp/tests/test_hosted_readiness.py",
   "mcp/tests/test_inbox_arrival_guarantee.py",

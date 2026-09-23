@@ -180,14 +180,21 @@ def review_records_for(
 ) -> ReviewRecordInputs:
     """The complete available record collection for the candidate this request resolves to.
 
-    The candidate is resolved exactly as the surface resolves it, so the records a caller is handed
-    belong to the comparison the same request renders. A candidate that does not resolve supplies no
-    records and says so per collection -- the surface refuses that request, and a bundle that claimed
-    an absence instead would be reporting an unresolvable candidate as a candidate with no records.
+    The candidate is resolved exactly as the surface resolves it -- including *which record* the
+    request named (ICR-R12), so a review of a leaf's recorded comparison is handed the records of
+    that same recorded pair rather than of whatever the leaf holds now -- so the records a caller is
+    handed belong to the comparison the same request renders. A candidate that does not resolve
+    supplies no records and says so per collection -- the surface refuses that request, and a bundle
+    that claimed an absence instead would be reporting an unresolvable candidate as a candidate with
+    no records.
     """
 
     resolved = resolve_review_candidate(
-        config, request.repository_id, request.master, request.leaf_id
+        config,
+        request.repository_id,
+        request.master,
+        request.leaf_id,
+        recorded=request.history == "recorded",
     )
     if isinstance(resolved, ReviewRefusal):
         return ReviewRecordInputs(channels=_unresolved_channels(resolved))

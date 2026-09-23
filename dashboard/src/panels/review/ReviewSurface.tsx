@@ -36,6 +36,7 @@ import type {
   ReviewContextRecord,
   ReviewDisplayedApplicability,
   ReviewFailure,
+  ReviewHistory,
   ReviewKnowledgePane,
   ReviewPagedCollection,
   ReviewPayload,
@@ -74,6 +75,11 @@ export interface ReviewTarget {
   // inventory, which is what a task with no recorded invariant -- or no datasets yet -- still has.
   selectorKind?: ReviewSelectorKind;
   selectorId?: string;
+  // Which record this read is addressed to (ICR-R12): absent is the live candidate, and "recorded"
+  // is the comparison the leaf's own durable generation bound -- the answer a closed leaf's entry
+  // opens. It is part of the question, so it participates in the target key rather than being
+  // applied to a response read for another record.
+  history?: ReviewHistory;
 }
 
 const TAKEOVER = "changeset-viewer";
@@ -611,6 +617,7 @@ function targetKeyOf(
   selectorKind?: ReviewSelectorKind,
   selectorId?: string,
   page?: ReviewPageRequest,
+  history?: ReviewHistory,
 ): string {
   const question = instead !== null ? "task-context" : `${selectorKind ?? ""}:${selectorId ?? ""}`;
   // The page is part of the question, not a decoration on it: page 3 of one collection is a
@@ -620,7 +627,7 @@ function targetKeyOf(
     page === undefined
       ? "whole"
       : `${page.of}:${page.continuation === undefined || page.continuation === null ? "first" : page.continuation}`;
-  return `${repo}/${master}/${leaf}/${question}/${position}`;
+  return `${repo}/${master}/${leaf}/${history ?? "live"}/${question}/${position}`;
 }
 
 // Which bounded collection this surface is paging, and at which cursor. `undefined` is the whole
@@ -848,12 +855,90 @@ function PageControls({
   );
 }
 
+// The three panes and the two controls above them, rendered together for one payload: the knowledge,
+// source and evidence panes read the same comparison, so they are mounted as one block rather than
+// assembled at the call site.
+function ReviewPanes({
+  shown,
+  selection,
+  onSelect,
+  repo,
+  master,
+  leaf,
+}: {
+  shown: ReviewPayload | null;
+  selection: ReviewPageRequest | undefined;
+  onSelect: (page: ReviewPageRequest | undefined) => void;
+  repo: string;
+  master: string;
+  leaf: string;
+}) {
+  if (shown === null) return null;
+  return (
+    <>
+      <SubmissionBlock payload={shown} />
+      <PageControls payload={shown} selection={selection} onSelect={onSelect} />
+      <div className={TAKEOVER} style={{ display: "grid", gap: "1rem" }}>
+        <KnowledgePane payload={shown} />
+        <SourcePane payload={shown} repo={repo} master={master} leaf={leaf} />
+        <EvidencePane payload={shown} />
+      </div>
+    </>
+  );
+}
+
+// The surface's header: which task context is open, which subject of it, and WHICH RECORD the panes
+// below are read from (ICR-R12). It is one component rather than markup inside the surface because
+// the record statement is a claim about everything under it: a reader looking at a comparison has to
+// be able to see, without opening a pane, whether it is the live candidate's or the one the leaf's
+// own durable generation bound.
+function ReviewHeader({
+  repo,
+  master,
+  leaf,
+  selectorKind,
+  selectorId,
+  instead,
+  history,
+  onBack,
+}: {
+  repo: string;
+  master: string;
+  leaf: string;
+  selectorKind?: ReviewSelectorKind;
+  selectorId?: string;
+  instead: ReviewFailure | null;
+  history?: ReviewHistory;
+  onBack: () => void;
+}) {
+  return (
+    <>
+      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.75rem" }}>
+        <button type="button" onClick={onBack} data-testid="review-back">
+          ← back
+        </button>
+        <strong>Intent review</strong>
+        <span style={{ color: "muted" }} data-testid="review-subject">
+          {repo} · {master} · {leaf} · {subjectLabel(selectorKind, selectorId, instead)}
+        </span>
+      </div>
+      {history === "recorded" ? (
+        <p style={{ color: "muted", margin: "0 0 0.75rem" }} data-testid="review-history">
+          recorded comparison — this leaf&apos;s durable generation, re-read from its own record: the
+          panes below are the comparison it bound, not whatever the repository holds now.
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 export function ReviewSurface({
   repo,
   master,
   leaf,
   selectorKind,
   selectorId,
+  history,
   onBack,
 }: ReviewTarget & { onBack: () => void }) {
   const [read, setRead] = useState<ReviewRead>({ phase: "loading" });
@@ -869,7 +954,7 @@ export function ReviewSurface({
   // question asked of the server, so it participates in the target key below rather than being
   // applied to the response afterwards.
   const [selection, setSelection] = useState<ReviewPageRequest | undefined>(undefined);
-  const targetKey = targetKeyOf(repo, master, leaf, instead, selectorKind, selectorId, selection);
+  const targetKey = targetKeyOf(repo, master, leaf, instead, selectorKind, selectorId, selection, history);
 
   const load = useCallback(async () => {
     setRead({ phase: "loading" });
@@ -885,6 +970,7 @@ export function ReviewSurface({
         instead ? undefined : selectorId,
         "",
         selection,
+        history,
       );
       setRead(readFrom(result));
       if (result.state === "review" && result.payload) {
@@ -893,7 +979,7 @@ export function ReviewSurface({
     } catch (cause) {
       setRead({ phase: "failed", problem: reviewProblemFromCause(cause) });
     }
-  }, [repo, master, leaf, selectorKind, selectorId, instead, selection, targetKey]);
+  }, [repo, master, leaf, selectorKind, selectorId, instead, selection, targetKey, history]);
 
   useEffect(() => {
     void load();
@@ -912,16 +998,18 @@ export function ReviewSurface({
       data-testid="review-surface"
       data-comparison={shown?.comparison?.reference}
       data-review-target={`${repo}/${master}/${leaf}`}
+      data-review-history={history ?? "live"}
     >
-      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.75rem" }}>
-        <button type="button" onClick={onBack} data-testid="review-back">
-          ← back
-        </button>
-        <strong>Intent review</strong>
-        <span style={{ color: "muted" }} data-testid="review-subject">
-          {repo} · {master} · {leaf} · {subjectLabel(selectorKind, selectorId, instead)}
-        </span>
-      </div>
+      <ReviewHeader
+        repo={repo}
+        master={master}
+        leaf={leaf}
+        selectorKind={selectorKind}
+        selectorId={selectorId}
+        instead={instead}
+        history={history}
+        onBack={onBack}
+      />
       <ReviewOutcomeRegion
         read={read}
         instead={instead}
@@ -930,17 +1018,14 @@ export function ReviewSurface({
         onRetry={retryFor(read, load)}
         onOpenTaskContext={insteadFor(read, problem, instead, setInstead)}
       />
-      {shown ? (
-        <>
-          <SubmissionBlock payload={shown} />
-          <PageControls payload={shown} selection={selection} onSelect={setSelection} />
-          <div className={TAKEOVER} style={{ display: "grid", gap: "1rem" }}>
-            <KnowledgePane payload={shown} />
-            <SourcePane payload={shown} repo={repo} master={master} leaf={leaf} />
-            <EvidencePane payload={shown} />
-          </div>
-        </>
-      ) : null}
+      <ReviewPanes
+        shown={shown}
+        selection={selection}
+        onSelect={setSelection}
+        repo={repo}
+        master={master}
+        leaf={leaf}
+      />
     </div>
   );
 }

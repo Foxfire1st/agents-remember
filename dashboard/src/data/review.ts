@@ -453,6 +453,12 @@ export interface ReviewResult {
 // not a question a client may answer. Omitting both asks for the whole review, exactly as before.
 // `pageSize` is a *requested* bound, and the response's own `page.scope` states the bound the server
 // actually applied.
+//
+// HISTORY (ICR-R12). `history` names which record this read is addressed to. Omitting it asks for the
+// live candidate, which is what every ordinary entry asks for; `"recorded"` asks for the comparison
+// the leaf's own durable generation bound, which is the same answer whether the leaf's worktree is
+// still there or cleanup has removed it. It carries the one value the server admits, so a client
+// cannot ask for a generation that is not this leaf's.
 export const intentReview = (
   repo: string,
   master: string,
@@ -461,6 +467,7 @@ export const intentReview = (
   selectorId?: string,
   base = "",
   page?: { of: ReviewPagedCollection; continuation?: string | null; size?: number },
+  history?: ReviewHistory,
 ): Promise<ReviewResult> => {
   const params: Record<string, string> = { repo, master, leaf };
   if (selectorKind !== undefined && selectorId !== undefined) {
@@ -476,8 +483,16 @@ export const intentReview = (
       params.pageSize = String(page.size);
     }
   }
+  if (history !== undefined) {
+    params.history = history;
+  }
   return getReviewJson<ReviewResult>(`${base}/api/review/intent?${qs(params)}`);
 };
+
+// Which record a review read is addressed to: the live candidate, or the leaf's recorded comparison.
+// One value on purpose -- the surface addresses exactly one historical record, the leaf's own
+// published generation -- so a caller cannot ask for a comparison the leaf does not hold.
+export type ReviewHistory = "recorded";
 
 // The one continuation a page makes reachable, or `null` when this response has none to offer.
 //

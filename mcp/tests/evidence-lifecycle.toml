@@ -726,6 +726,7 @@ consumers = [
   "mcp/tests/test_harness_control_ipc.py",
   "mcp/tests/test_harness_launch.py",
   "mcp/tests/test_hosted_readiness.py",
+  "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_inbox_rebinding_mechanics.py",
   "mcp/tests/test_install_runtime.py",
   "mcp/tests/test_integration_branch_authority.py",
@@ -1408,6 +1409,7 @@ replacement_contract = "contract:knowledge-diff-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_review_comparison_generation.py",
+  "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_diff_scope.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_detection_runs.py",
@@ -1440,6 +1442,7 @@ replacement_contract = "contract:knowledge-read-scope-cases"
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_review_comparison_generation.py",
+  "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_curator_ingest.py",
   "mcp/tests/test_knowledge_detection_runs.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",

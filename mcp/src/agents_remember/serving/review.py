@@ -38,6 +38,7 @@ from agents_remember.models.knowledge.review import (
     REVIEW_PAGED_COLLECTIONS,
     KnowledgeReviewResult,
     ReviewEntryListResult,
+    ReviewHistoryRef,
     ReviewPagedCollection,
     ReviewSurfaceRequest,
 )
@@ -52,10 +53,12 @@ __all__ = [
     "KNOWLEDGE_REVIEW_SOURCE_CONTENT_ROUTE",
     "NO_PAGING",
     "NO_SELECTOR",
+    "RECORDED_HISTORY",
     "AdmittedPaging",
     "KnowledgeReviewEntriesPort",
     "KnowledgeReviewPort",
     "ReviewPagingRef",
+    "ReviewQuestionRef",
     "ReviewSelectorRef",
     "ReviewSourceContentPort",
     "SourceContentRef",
@@ -65,6 +68,12 @@ __all__ = [
     "review_request_from_query",
     "source_content_request_from_query",
 ]
+
+# The one historical form a review query may name (ICR-R12): the leaf's own recorded comparison
+# generation. It is the request model's own literal, re-exported under a name this transport's
+# admission can read, so the admitted vocabulary has one owner and the route decides nothing about
+# which records exist.
+RECORDED_HISTORY: ReviewHistoryRef = "recorded"
 
 # The one route the reviewer surface is reached through. It is GET-only: the surface produces no
 # record, and the assessment path this increment does not ship would not be reached from here.
@@ -200,21 +209,33 @@ class SourceContentRef:
 
 
 @dataclass(frozen=True)
-class ReviewSelectorRef:
-    """Which recorded subject a request reviews, as the two query parameters spelling it.
+class ReviewQuestionRef:
+    """The question one review request asks: which recorded subject, and which record it is read from.
 
-    It is one value for the same reason the expansion's selector is: the two fields are one question
-    -- which subject, of which reviewable kind -- and a caller that supplied only half of it would be
-    asking for a subject this surface cannot address. FastAPI derives both from the query string.
+    It is one value for the same reason the expansion's selector is: the fields are one question --
+    which subject of which reviewable kind (ICR-R09), and whether the caller is reading the live
+    candidate or the leaf's recorded comparison (ICR-R12) -- and a caller that supplied only part of
+    it would be asking a question this surface cannot address. FastAPI derives all three from the
+    query string. The two are bundled rather than passed beside each other because they travel
+    together everywhere: the route, the admission and the request model all take the question whole.
     """
 
     selector_kind: Annotated[str | None, Query(alias="selectorKind")] = None
     selector_id: Annotated[str | None, Query(alias="selectorId")] = None
+    # Which record the request is addressed to. An absent or empty spelling is the live candidate,
+    # which is what every caller that names none asks for.
+    history: Annotated[str | None, Query()] = None
+
+
+# The name this ref was first published under, kept as one alias so the modules and cases that
+# already spell it keep working: the value is the same value, and a second class would be a second
+# admission of the same three fields.
+ReviewSelectorRef = ReviewQuestionRef
 
 
 # The one no-subject value: the task-context request, which compares no knowledge operand. A module
 # singleton because the route's `Depends()` default must not be a call performed in the signature.
-NO_SELECTOR = ReviewSelectorRef()
+NO_SELECTOR = ReviewQuestionRef()
 
 
 @dataclass(frozen=True)
@@ -276,13 +297,16 @@ def review_request_from_query(
 
     The paging pair is admitted by :func:`paged_review_request`, which this function calls; both
     spellings of the request therefore go through one place that decides which shapes are admitted.
+    Which *record* a request is addressed to is that same admission's business and is carried by the
+    question ref, so a caller that names one reaches it through :func:`paged_review_request` -- the
+    spelling this module's own route uses.
     """
 
     admitted = paged_review_request(
         repository_id,
         master,
         leaf_id,
-        ReviewSelectorRef(selector_kind=selector_kind, selector_id=selector_id),
+        ReviewQuestionRef(selector_kind=selector_kind, selector_id=selector_id),
         NO_PAGING,
     )
     # This spelling is the selector-only one its existing callers and tests use, so a problem is
@@ -294,10 +318,10 @@ def paged_review_request(
     repository_id: str,
     master: str,
     leaf_id: str,
-    selector: ReviewSelectorRef,
+    question: ReviewQuestionRef,
     paging: ReviewPagingRef,
 ) -> ReviewSurfaceRequest | UnadmittedReviewQuery:
-    """Parse one query string, with its paging pair, into the typed request or the refusal it earns.
+    """Parse one query string, with its paging pair and record selector, into the typed request.
 
     ``paging`` is the paging pair (ICR-R10): the collection this call continues and the cursor that
     collection's own owner minted for it. A cursor without a collection is refused here rather than
@@ -307,11 +331,21 @@ def paged_review_request(
     vocabulary, because the model's own bound would otherwise be an uncaught validation error. The
     transport *parses* them and decides nothing else: whether the cursor binds the comparison this
     request resolves to is the owners' own answer.
+
+    ``question`` names the subject and the record (ICR-R12). An absent or empty history spelling is
+    the live review, which is what every caller that names none asks for; ``recorded`` is the one
+    historical record this surface addresses, and any other name is refused in this route's own
+    vocabulary rather than resolved to the leaf's record -- a caller that asked for a generation the
+    surface does not address must not be handed a different one.
     """
 
     admitted = _admitted_paging(paging)
     if isinstance(admitted, UnadmittedReviewQuery):
         return admitted
+    record = _admitted_history(question.history)
+    if isinstance(record, UnadmittedReviewQuery):
+        return record
+    selector = question
     if selector.selector_kind is None and selector.selector_id is None:
         return ReviewSurfaceRequest(
             repository_id=repository_id,
@@ -321,6 +355,7 @@ def paged_review_request(
             page_of=admitted.collection,
             continuation=admitted.continuation,
             page_size=admitted.page_size,
+            history=record,
         )
     if not selector.selector_kind or not selector.selector_id:
         return _unadmitted(
@@ -354,6 +389,29 @@ def paged_review_request(
         page_of=admitted.collection,
         continuation=admitted.continuation,
         page_size=admitted.page_size,
+        history=record,
+    )
+
+
+def _admitted_history(value: str | None) -> ReviewHistoryRef | UnadmittedReviewQuery | None:
+    """Which record one query names, or the admission problem the spelling earns.
+
+    An empty spelling is an absent parameter, not a value -- ``history=`` is what a form sends when
+    the reader picked the live view -- and the one historical form is the model's own literal, so a
+    name outside it cannot reach the request model as an uncaught validation error.
+    """
+
+    if not value:
+        return None
+    if value == RECORDED_HISTORY:
+        return RECORDED_HISTORY
+    return _unadmitted(
+        offending_input=value,
+        detail=(
+            "history names no record this surface addresses; a review is read either from the "
+            "candidate the leaf holds now or from the leaf's own recorded comparison generation"
+        ),
+        expected=f"omitted, or {RECORDED_HISTORY}",
     )
 
 
@@ -502,6 +560,10 @@ def register_review_routes(
     def api_review_intent_entries(repo: str, master: str, leaf: str) -> Response:
         if entries_port is None:
             return JSONResponse(_UNWIRED_ENTRIES, status_code=503)
+        # The entry route addresses the same task context as the review route and needs no record
+        # selector of its own: a list is offered for a *leaf*, and a leaf whose enclosure is closed
+        # lists the subjects of the comparison its records hold (ICR-R12) -- the one record a review
+        # of that leaf can be opened on.
         result = entries_port(repo, master, leaf)
         return JSONResponse(
             _json(result), status_code=200 if result.state == "entries" else _status_for(result)
@@ -516,7 +578,7 @@ def register_review_routes(
         repo: str,
         master: str,
         leaf: str,
-        selector: Annotated[ReviewSelectorRef, Depends()] = NO_SELECTOR,
+        question: Annotated[ReviewQuestionRef, Depends()] = NO_SELECTOR,
         paging: Annotated[ReviewPagingRef, Depends()] = NO_PAGING,
     ) -> Response:
         if port is None:
@@ -535,7 +597,7 @@ def register_review_routes(
                 },
                 status_code=503,
             )
-        request = paged_review_request(repo, master, leaf, selector, paging)
+        request = paged_review_request(repo, master, leaf, question, paging)
         if isinstance(request, UnadmittedReviewQuery):
             # The body names the input the admission actually refused. It used to fall back over
             # everything the caller sent, so a bad pageOf was reported as the (admitted) selector
@@ -550,7 +612,8 @@ def register_review_routes(
                         "name selectorKind=invariant|family together with the subject's record id, "
                         "or omit both to review the task's complete source change inventory; to "
                         "advance a page, send back the continuation the previous response published "
-                        "beside the pageOf it was published for"
+                        "beside the pageOf it was published for; to read the leaf's recorded "
+                        "comparison, send the history the surface declares"
                     ),
                 },
                 status_code=400,

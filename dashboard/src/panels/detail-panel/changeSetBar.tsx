@@ -1,6 +1,8 @@
-// The change-set buttons shown on a task-document READER: a master gets the series net button,
-// a leaf gets committed (always) plus working (while its enclosure is live). Counters come from
-// the changeset data layer; liveness is read from the dashboard store.
+// The change-set buttons shown on a task-document READER: a master gets the series net button, a leaf
+// gets committed (always), working (while its enclosure is live) and the Intent review (always — the
+// live candidate while the enclosure is live, and the leaf's own recorded comparison once it is
+// closed, ICR-R12). Counters come from the changeset data layer; liveness is read from the dashboard
+// store, and it selects WHICH record the review entry is addressed to rather than whether it exists.
 import { useEffect, useState } from "react";
 
 import {
@@ -110,17 +112,17 @@ interface ReviewCatalogueRead {
   problem?: ReviewFailure;
 }
 
-// The labelled subject catalogue of one live leaf, read from the server that owns the resolution.
-// Every id returned is a recorded identity inside the pair the server resolved from canonical task
-// context, so this hook chooses no candidate and invents no id: it asks, and every answer is carried
-// -- the whole catalogue with its totals, a known-empty list, or a typed refusal whose code, reason
-// and next action are shown beside the entry (ICR-R16). The route answers a refusal with its own
-// status and the refusal in the body, so the shared review decode reads the body whatever the status;
-// `getJson` would have thrown and the detail would have been lost. Nothing is fetched for a leaf that
-// is not live, because there is no candidate to resolve and the working change-set is hidden for the
-// same reason.
+// The labelled subject catalogue of one leaf, read from the server that owns the resolution. Every id
+// returned is a recorded identity inside the pair the server resolved from canonical task context --
+// the live candidate while the enclosure is live, and the leaf's own recorded comparison once it is
+// closed (ICR-R12) -- so this hook chooses no candidate and invents no id: it asks, and every answer
+// is carried: the whole catalogue with its totals, a known-empty list, or a typed refusal whose code,
+// reason and next action are shown beside the entry (ICR-R16). The route answers a refusal with its
+// own status and the refusal in the body, so the shared review decode reads the body whatever the
+// status; `getJson` would have thrown and the detail would have been lost. The read is made for any
+// named leaf and needs no liveness: a closed leaf's catalogue is what its record holds, and the entry
+// beside it stays openable either way.
 function useReviewCatalogue(
-  live: boolean,
   repo: string,
   master: string,
   leaf?: string,
@@ -128,7 +130,7 @@ function useReviewCatalogue(
   const [read, setRead] = useState<ReviewCatalogueRead>({ loading: false });
   useEffect(() => {
     let current = true;
-    if (!live || !leaf) {
+    if (!leaf) {
       setRead({ loading: false });
       return () => void (current = false);
     }
@@ -178,14 +180,15 @@ function useReviewCatalogue(
     return () => {
       current = false;
     };
-  }, [live, repo, master, leaf]);
+  }, [repo, master, leaf]);
   return read;
 }
 
 // The entry read's own state, printed beside the entry rather than hidden. It never gates the entry:
-// the button beside it is offered for an admitted live candidate whatever this read answered, so a
-// refusal here is a stated reason and not a missing control. A catalogue that answered carries its
-// own picker and totals below instead of this state.
+// the button beside it is offered for the leaf whatever this read answered -- for a live candidate and
+// for a closed leaf's recorded comparison alike -- so a refusal here is a stated reason and not a
+// missing control. A catalogue that answered carries its own picker and totals below instead of this
+// state.
 function ReviewEntryState({ read }: { read: ReviewCatalogueRead }) {
   if (read.loading) {
     return (
@@ -285,21 +288,30 @@ function ReviewCataloguePicker({
   );
 }
 
-// The live leaf's own entries: the working change-set, the reviewer entry with its catalogue
-// picker, and the entry read's own state. It mounts only while the leaf's enclosure is live, so
-// the catalogue read and the selection state live here rather than in the bar above.
-function LiveLeafEntries({
+// One leaf's own entries: the working change-set (live only), the reviewer entry with its
+// catalogue picker, and the entry read's own state. The catalogue read and the selection state live
+// here rather than in the bar above, because they belong to one leaf's question.
+//
+// `live` selects WHICH record the entry is addressed to (ICR-R12) and nothing else: a live leaf's
+// review is the candidate it holds now, and a closed leaf's is the comparison its own durable
+// generation bound. It is not a gate. A closed leaf keeps the Intent review entry -- that is the
+// whole point of the packet, because its worktree is gone and the recorded comparison is the only
+// comparison there is -- while the WORKING change-set stays live-gated, since "what is not committed
+// yet" genuinely does not exist once the enclosure is closed.
+function LeafEntries({
   repo,
   master,
   leaf,
+  live,
   onOpen,
 }: {
   repo: string;
   master: string;
   leaf: string;
+  live: boolean;
   onOpen: (target: ChangeSetTarget) => void;
 }) {
-  const catalogue = useReviewCatalogue(true, repo, master, leaf);
+  const catalogue = useReviewCatalogue(repo, master, leaf);
   // The catalogue row the Intent review button opens. It defaults to the catalogue's first row
   // and follows the reader's own choice afterwards; a choice that outlives the catalogue (a new
   // answer that no longer lists it) falls back to the first row rather than opening a stale id.
@@ -310,10 +322,11 @@ function LiveLeafEntries({
       ? (listed.find((entry) => entry.selector_id === selectedId) ?? listed[0])
       : undefined;
   // The working change-set, the reviewer entry and the entry read's own state. The entry is added
-  // BESIDE the working/committed actions and never in their place: it is offered for an admitted
-  // live curator candidate -- the same liveness the working change-set is gated on -- and **the
-  // task context is the entry**: the target names the repo/master/leaf the server resolves the
-  // candidate from and carries no filesystem path, because the browser never chooses the candidate.
+  // BESIDE the working/committed actions and never in their place: it is offered for the leaf -- a
+  // live curator candidate while the enclosure is live, and the leaf's own recorded comparison once
+  // it is closed (ICR-R12) -- and **the task context is the entry**: the target names the
+  // repo/master/leaf the server resolves the candidate from and carries no filesystem path, because
+  // the browser never chooses the candidate.
   //
   // The server's subject catalogue is a REFINEMENT and never a gate. Every recorded subject is
   // offered in the picker beside the button, and the selected identity travels with the target
@@ -326,24 +339,29 @@ function LiveLeafEntries({
   // with no knowledge lost its source review.
   return (
     <>
-      <ChangeSetButton
-        target={{ repo, master, leaf, mode: "working" }}
-        label="working"
-        onOpen={onOpen}
-      />
+      {live ? (
+        <ChangeSetButton
+          target={{ repo, master, leaf, mode: "working" }}
+          label="working"
+          onOpen={onOpen}
+        />
+      ) : null}
       <ChangeSetButton
         target={{
           repo,
           master,
           leaf,
-          review: selected
-            ? {
-                selectorKind: selected.selector_kind,
-                selectorId: selected.selector_id,
-              }
-            : {},
+          review: {
+            ...(selected
+              ? {
+                  selectorKind: selected.selector_kind,
+                  selectorId: selected.selector_id,
+                }
+              : {}),
+            ...(live ? {} : { historical: true }),
+          },
         }}
-        label="Intent review"
+        label={live ? "Intent review" : "Intent review (recorded)"}
         onOpen={onOpen}
       />
       <ReviewCataloguePicker read={catalogue} selectedId={selectedId} onSelect={setSelectedId} />
@@ -355,8 +373,10 @@ function LiveLeafEntries({
 // The change-set bar shown on a task-document READER (master or leaf), with identity taken from
 // the doc node — so it appears with NO active enclosure (previously the change-set buttons only
 // lived on the live enclosure spine). A master gets the SERIES net button; a leaf gets COMMITTED
-// (always — its landed delta) plus WORKING (only while its enclosure is live — the uncommitted
-// delta). Liveness is read from the store here, so callers thread only `onOpen`.
+// (always — its landed delta), WORKING (only while its enclosure is live — the uncommitted delta)
+// and the INTENT REVIEW (always — the live candidate while the enclosure is live, and the leaf's
+// own recorded comparison once it is closed, which is what `live` selects). Liveness is read from
+// the store here, so callers thread only `onOpen`.
 export function DocChangeSetBar({
   kind,
   repo,
@@ -389,14 +409,14 @@ export function DocChangeSetBar({
         label="committed"
         onOpen={onOpen}
       />
-      {live ? <LiveLeafEntries repo={repo} master={master} leaf={leaf} onOpen={onOpen} /> : null}
+      <LeafEntries repo={repo} master={master} leaf={leaf} live={live} onOpen={onOpen} />
     </div>
   );
 }
 
-// Whether THIS leaf's enclosure is live, which is what both the working change-set and the reviewer
-// entry are gated on. One predicate for the two entries, so they cannot come to disagree about what
-// "live" means and the bar's own branching stays readable.
+// Whether THIS leaf's enclosure is live: what the working change-set is gated on, and which record
+// the reviewer entry is addressed to. One predicate for both, so they cannot come to disagree about
+// what "live" means and the bar's own branching stays readable.
 function leafIsLive(
   enclosures: Record<string, { repoName: string; leafId: string; worktreeGroup: string }>,
   activeWorktreeGroups: string[],

@@ -47,6 +47,10 @@ from agents_remember.application.review_candidate_resolution import (
     review_namespace,
     unreadable_candidate_refusal,
 )
+from agents_remember.application.review_committed_leaf import (
+    closed_leaf_intent_detail,
+    closed_leaf_limitations,
+)
 from agents_remember.application.review_evidence_records import without_selected_matrix
 from agents_remember.application.review_record_applicability import task_context_applicability
 from agents_remember.application.review_record_rendering import (
@@ -159,6 +163,9 @@ def task_context_review(
                 *unreadable_half_limitations(unreadable),
                 *attribution_limitations(attribution),
                 *inventory_limitations(inventory),
+                # A reopened review declares which record answered and what it recorded about the
+                # intent half (ICR-R12); a live candidate contributes no token.
+                *closed_leaf_limitations(resolved),
             ),
         ),
     )
@@ -212,12 +219,20 @@ def task_context_detail(
 ) -> str:
     """Why a task-context review compared no operand, naming the dataset half that answers for it.
 
-    Three states, each named with its own fact and in the order that decides them: a half whose bytes
-    are there and cannot be read (the pair's own preflight, stated here because this review raises
-    nothing for it), a half that is absent, and a pair that is present and simply was not selected
-    over. The last is not a degraded first: it is what a review of the task alone is.
+    Five states, each named with its own fact and in the order that decides them. A **closed leaf
+    whose review was reopened from its records** answers first and in its record's own words
+    (ICR-R12): an intent generation the leaf never recorded is a typed absence about the
+    repository's history, and one that was recorded and no longer resolves is unavailable content --
+    the two must not be reported as each other, and neither is content that was expected and lost on
+    a live candidate. Then, for a live candidate: a half whose bytes are there and cannot be read
+    (the pair's own preflight, stated here because this review raises nothing for it), a half that is
+    absent, and a pair that is present and simply was not selected over. The last is not a degraded
+    first: it is what a review of the task alone is.
     """
 
+    historical = closed_leaf_intent_detail(resolved)
+    if historical is not None:
+        return historical
     if unreadable is not None:
         return (
             "no invariant or family subject was selected for this review, so no knowledge operand "

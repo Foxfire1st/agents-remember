@@ -573,13 +573,17 @@ function ChangeSetTakeover({
       >
         {target.review ? (
           // A review target may carry a subject's selector or none at all: the task-context entry
-          // opens the review on the task, and the surface asks for exactly what it was handed.
+          // opens the review on the task, and the surface asks for exactly what it was handed. It
+          // may also name the record it is addressed to (ICR-R12): a closed leaf's entry carries
+          // `historical`, and the surface then asks for that leaf's recorded comparison rather than
+          // for a live candidate there is none of.
           <ReviewSurface
             repo={target.repo}
             master={target.master ?? ""}
             leaf={target.leaf ?? ""}
             selectorKind={target.review.selectorKind}
             selectorId={target.review.selectorId}
+            history={target.review.historical ? "recorded" : undefined}
             onBack={onBack}
           />
         ) : (

@@ -47,7 +47,11 @@ export interface ChangeSetTarget {
   // request is made from a review. An EMPTY object is the task-context entry: the review is opened
   // from the task alone and lists the complete source inventory, which is what a task with no
   // recorded invariant still has.
-  review?: { selectorKind?: ReviewSelectorKind; selectorId?: string };
+  //
+  // `historical` says which record that review is read from (ICR-R12): absent is the live candidate,
+  // and true is the leaf's own recorded comparison -- the entry a closed leaf offers, where the
+  // worktree is gone and the durable generation is the only comparison there is.
+  review?: { selectorKind?: ReviewSelectorKind; selectorId?: string; historical?: boolean };
 }
 
 const screen = css({

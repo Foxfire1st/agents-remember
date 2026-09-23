@@ -456,9 +456,20 @@ def test_the_live_candidate_binds_the_recorded_base_and_the_captured_tree(
         == capture_future_code_candidate(fixture.contract).codeCandidateTree
     )
     # Root and tree travel together on both sides: a tree id with no repository is unresolvable, and
-    # a repository with no tree id would be a licence to read a working tree.
+    # a repository with no tree id would be a licence to read a working tree. Both roots name the
+    # **repository** the objects live in, which is the root a durable comparison generation records
+    # (ICR-R12): the candidate tree is written through the linked worktree's private index into the
+    # repository's shared object store, so it resolves there, and this is measured rather than
+    # assumed -- `git cat-file -e` in the repository the resolution named.
     assert resolved.baseline_code_root == fixture.contract.code_repo_path
-    assert resolved.candidate_code_root == fixture.contract.code_worktree
+    assert resolved.candidate_code_root == fixture.contract.code_repo_path
+    candidate_root = resolved.candidate_code_root
+    assert candidate_root is not None
+    for tree_id in (resolved.baseline_code_tree_id, resolved.candidate_code_tree_id):
+        assert tree_id is not None
+        # `_git` refuses a non-zero exit, so this is the measurement that both bound objects really
+        # resolve in the repository the resolution named as their root.
+        assert _git(candidate_root, ["cat-file", "-t", tree_id]) in {"tree", "commit"}
     candidate_paths = _tree_paths(fixture.contract.code_repo_path, _captured_tree(resolved))
     assert {STAGED_ADDITION_PATH, ELIGIBLE_UNTRACKED_PATH, UNMAPPED_PATH} <= candidate_paths
     assert MODIFIED_PATH in candidate_paths

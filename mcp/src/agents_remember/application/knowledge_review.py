@@ -76,6 +76,10 @@ from agents_remember.application.review_candidate_resolution import (
     review_namespace,
     unreadable_candidate_refusal,
 )
+from agents_remember.application.review_committed_leaf import (
+    closed_leaf_dataset_refusal,
+    closed_leaf_limitations,
+)
 from agents_remember.application.review_evidence_records import (
     AUTHORED_EFFECT_KINDS,
     MatrixSelection,
@@ -214,7 +218,11 @@ def read_knowledge_review(
     """
 
     resolved = resolve_review_candidate(
-        config, request.repository_id, request.master, request.leaf_id
+        config,
+        request.repository_id,
+        request.master,
+        request.leaf_id,
+        recorded=request.history == "recorded",
     )
     if isinstance(resolved, ReviewRefusal):
         return refused(request.repository_id, resolved)
@@ -232,6 +240,8 @@ def list_knowledge_review_entries(
     repository_id: str,
     master: str,
     leaf_id: str,
+    *,
+    recorded: bool = False,
 ) -> ReviewEntryListResult:
     """The subjects the resolved pair records, or the one refusal that says why not.
 
@@ -255,31 +265,18 @@ def list_knowledge_review_entries(
     which is a traceback where this surface promises a state naming the side.
     """
 
-    resolved = resolve_review_candidate(config, repository_id, master, leaf_id)
+    resolved = resolve_review_candidate(config, repository_id, master, leaf_id, recorded=recorded)
     if isinstance(resolved, ReviewRefusal):
         return _entry_refused(repository_id, master, leaf_id, resolved)
-    absent = missing_dataset_half(resolved)
-    if absent is not None:
-        half, database = absent
-        return _entry_refused(
-            repository_id,
-            master,
-            leaf_id,
-            refusal(
-                "candidate_dataset_absent",
-                (
-                    f"the resolved {half} dataset is absent, so the pair has nothing to compare; "
-                    "the review reads neither of its two halves out of the live coordination tree "
-                    "and substitutes no other dataset"
-                ),
-                next_action=(
-                    "author the candidate's knowledge in the leaf's disposable knowledge root, and "
-                    "place the dataset it forks from in the baseline half if this leaf has one; the "
-                    "surface substitutes no other dataset"
-                ),
-                offending_input=database.name,
-            ),
-        )
+    # The pair's own refusals come first and are one answer: a closed leaf's record answers in its
+    # own words -- the absence of an intent generation this leaf never recorded is a fact about the
+    # repository's history, and reporting it as "the resolved half is absent" would read as content
+    # that was expected and lost (ICR-R12) -- and a live pair with an absent half earns the shipped
+    # one. Both are stated before any subject is listed, so the catalogue can never answer for a pair
+    # nothing could open.
+    pair = closed_leaf_dataset_refusal(resolved) or _absent_pair_refusal(resolved)
+    if pair is not None:
+        return _entry_refused(repository_id, master, leaf_id, pair)
     unreadable = unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database)
     if unreadable is not None:
         return _entry_refused(repository_id, master, leaf_id, unreadable)
@@ -307,6 +304,35 @@ def list_knowledge_review_entries(
         total_subjects=len(entries),
         invariant_total=invariant_total,
         family_total=len(entries) - invariant_total,
+    )
+
+
+def _absent_pair_refusal(resolved: ReviewCandidateResolution) -> ReviewRefusal | None:
+    """The refusal one half of a resolved pair being absent earns, or ``None`` when both are there.
+
+    It is the *live* pair's answer and it is deliberately narrower than the closed leaf's: it names
+    the half and the file, and it says that neither half is read out of the live coordination tree.
+    Which half is missing is the fact a reader acts on -- authoring a candidate and placing the
+    dataset it forks from are different actions -- so the two are never reported as one.
+    """
+
+    absent = missing_dataset_half(resolved)
+    if absent is None:
+        return None
+    half, database = absent
+    return refusal(
+        "candidate_dataset_absent",
+        (
+            f"the resolved {half} dataset is absent, so the pair has nothing to compare; the review "
+            "reads neither of its two halves out of the live coordination tree and substitutes no "
+            "other dataset"
+        ),
+        next_action=(
+            "author the candidate's knowledge in the leaf's disposable knowledge root, and place the "
+            "dataset it forks from in the baseline half if this leaf has one; the surface substitutes "
+            "no other dataset"
+        ),
+        offending_input=database.name,
     )
 
 
@@ -362,6 +388,13 @@ def compose_review(
     inventory = review_inventory(before_source, after_source, observed=observed)
     if request.selector is None:
         return task_context_review(resolved, request, records, inventory, observed)
+    # A closed leaf's pair answers for itself before the shipped preflight does (ICR-R12): a half the
+    # record states this leaf never had is a fact about the repository's history and one the record
+    # kept and that no longer resolves is unavailable now, and the two are different refusals. A live
+    # candidate, and a closed leaf whose recorded halves both resolve, fall through unchanged.
+    historical = closed_leaf_dataset_refusal(resolved)
+    if historical is not None:
+        return refused(request.repository_id, historical)
     opened = _open_dataset_pair(resolved, request)
     if isinstance(opened, KnowledgeReviewResult):
         return opened
@@ -495,7 +528,15 @@ def compose_review(
             # offending cursor and the owner's identities, so the reader gets the action rather than
             # a control claiming there is nothing left to reach.
             page_refusal=page_refusal,
-            limitations=_limitations(comparison, inventory),
+            # The record this review was reopened from, when it was not composed from a live
+            # enclosure, is declared beside the comparison's own limits (ICR-R12): which record
+            # answered, which generation it was, and whether each intent half was ever recorded.
+            # A live candidate contributes no token and this response is byte-identical to the one
+            # it always was.
+            limitations=(
+                *_limitations(comparison, inventory),
+                *closed_leaf_limitations(resolved),
+            ),
         ),
     )
 
