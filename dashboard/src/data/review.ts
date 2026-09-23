@@ -354,7 +354,13 @@ export interface ReviewEvidencePane {
 }
 
 export interface ReviewStaleness {
-  state: "current" | "stale" | "not_compared";
+  // `not-measured` is the raw-Git identity boundary's state (ICR-R23@v1): the boundary that compares
+  // the leaf's declared identities against the repository could not take its comparison at all (a
+  // checkout that left its declared branch, a recorded object that is gone, a generation that could
+  // not be read), so this surface may not claim the displayed comparison is the candidate's current
+  // one. It is not `stale`, which would assert a movement nobody observed and which additionally
+  // disables submission.
+  state: "current" | "stale" | "not_compared" | "not-measured";
   statement: string;
   previous_comparison_ref?: string;
   moved: string[];

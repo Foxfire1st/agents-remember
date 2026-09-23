@@ -554,6 +554,15 @@ function SubmissionBlock({ payload }: { payload: ReviewPayload }) {
           {staleness.statement} — previous input: {staleness.previous_comparison_ref}
         </p>
       ) : null}
+      {/* The boundary could not compare every declared identity (ICR-R23@v1). No previous input is
+          named, because nothing was observed to move; what is rendered is the boundary's own
+          sentence, so a switched checkout or an unreadable generation can never read as an ordinary
+          current review on the one line this block mounts. */}
+      {staleness.state === "not-measured" ? (
+        <p style={{ margin: "0.2rem 0" }} data-testid="review-staleness-unmeasured">
+          {staleness.statement}
+        </p>
+      ) : null}
       <p style={{ color: "muted", margin: "0.2rem 0" }} data-submission-state={submission.state}>
         assessment submission: {submission.state === "disabled_stale" ? "DISABLED" : "not offered"} —{" "}
         {submission.reason}

@@ -59,14 +59,24 @@ class ReviewStaleness(KnowledgeModel):
     from the task alone compared no knowledge operand, so there is no comparison binding that could
     be current or stale, and the response says that instead of borrowing the word for either.
 
-    A ``stale`` state has three possible causes and the statement names which one it is: the reader
+    ``not-measured`` is the fourth state and it is **not** a softer ``current``: the boundary that
+    compares the leaf's declared identities against the repository could not take its comparison at
+    all -- a checkout that left its declared branch, a recorded object that is gone, a generation
+    that could not be read -- so this surface cannot claim the displayed comparison is the
+    candidate's current one, and it carries the movement's own sentence instead
+    (``ICR-R23@v1``). It is deliberately not ``stale``: nothing was observed to move, and reporting
+    a movement nobody measured is the other false claim. Submission is not disabled by it, because
+    disabling is the ``stale`` rule; what changes is that the sentence no longer asserts currency.
+
+    A ``stale`` state has four possible causes and the statement names which one it is: the reader
     carried a comparison identity that no longer matches (``ICR-R17@v1``), a recorded managed sync
     moved the reviewed inputs of the generation this leaf published (``ICR-R22@v1``, which
-    ``ReviewSyncMovement`` reports beside it), or both. The previous input is whichever identity was
-    actually displayed or reviewed, so the field never labels an identity nobody held.
+    ``ReviewSyncMovement`` reports beside it), a raw Git operation replaced a declared identity
+    (``ICR-R23@v1``), or some combination. The previous input is whichever identity was actually
+    displayed or reviewed, so the field never labels an identity nobody held.
     """
 
-    state: Literal["current", "stale", "not_compared"]
+    state: Literal["current", "stale", "not_compared", "not-measured"]
     statement: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
     previous_comparison_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     moved: tuple[str, ...] = ()

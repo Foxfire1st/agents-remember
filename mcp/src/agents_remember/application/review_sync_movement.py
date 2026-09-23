@@ -45,6 +45,7 @@ from agents_remember.application.review_sync_rebinding import (
     rebinding_names_the_generation,
 )
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
+from agents_remember.models.knowledge.review_external_movement import ExternalGitMovement
 from agents_remember.models.knowledge.review_staleness import (
     ReviewStaleness,
     ReviewSyncMovement,
@@ -57,6 +58,7 @@ from agents_remember.models.knowledge.review_sync_rebinding import (
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 __all__ = [
+    "review_staleness_with_external_movement",
     "review_staleness_with_sync_movement",
     "review_sync_movement",
 ]
@@ -304,6 +306,52 @@ def _measured_clause(record: ReviewSyncRebinding, manifest: ComparisonGeneration
             "the declared publication location"
         )
     return ", and ".join(clauses)
+
+
+def review_staleness_with_external_movement(
+    staleness: ReviewStaleness,
+    movement: ExternalGitMovement | None,
+    sync_movement: ReviewSyncMovement | None,
+) -> ReviewStaleness:
+    """Fold a measured raw-Git movement into the staleness a review publishes (ICR-R23@v1).
+
+    **A replaced identity is the strongest fact either measurement can report**, and it outranks both
+    the reader's carried comparison identity and a recorded managed-sync rebinding: R17's ``current``
+    means "the displayed comparison is the candidate's current comparison", which stops being true the
+    moment the branch was rewritten under it, and a rebinding that a *later* raw operation has already
+    invalidated describes a pair the leaf no longer holds. The packet's failure clause is exactly this
+    state -- an unrecognized transition reusing stale assessment as current -- so the movement both
+    sets ``stale`` and publishes the exact identities that were replaced.
+
+    **An absence is folded too, and it is not promoted into a movement.** When the boundary reports
+    ``not-measured`` or ``unavailable`` -- a checkout that left its declared branch, a recorded object
+    that is gone, a generation that could not be read -- this surface cannot claim the displayed
+    comparison is the candidate's current one either, because the comparison was composed from
+    whatever the checkout holds and nothing compared it against the leaf's declared identities. It
+    becomes ``not-measured``, carrying the boundary's own sentence and reason, and it is deliberately
+    *not* ``stale``: no movement was observed, and ``stale`` additionally disables submission, which
+    is a consequence the absence has not earned. A recorded *measurement* of movement still wins over
+    the absence -- R22's rebinding measured a moved input, and one measured movement outranks one
+    unperformed comparison.
+    """
+
+    if movement is not None and movement.binding_state == "stale":
+        return ReviewStaleness(
+            state="stale",
+            statement=movement.statement,
+            previous_comparison_ref=(
+                staleness.previous_comparison_ref or movement.reviewed_binding_digest
+            ),
+            moved=movement.moved_identities,
+        )
+    folded = review_staleness_with_sync_movement(staleness, sync_movement)
+    if (
+        movement is not None
+        and movement.binding_state in {"not-measured", "unavailable"}
+        and folded.state != "stale"
+    ):
+        return ReviewStaleness(state="not-measured", statement=movement.statement)
+    return folded
 
 
 def review_staleness_with_sync_movement(

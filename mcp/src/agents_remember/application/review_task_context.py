@@ -52,6 +52,7 @@ from agents_remember.application.review_committed_leaf import (
     closed_leaf_limitations,
 )
 from agents_remember.application.review_evidence_records import without_selected_matrix
+from agents_remember.application.review_external_git_movement import external_git_movement
 from agents_remember.application.review_record_applicability import task_context_applicability
 from agents_remember.application.review_record_rendering import (
     KNOWLEDGE_APPLICABILITY_CLASSES,
@@ -158,6 +159,13 @@ def task_context_review(
                 ),
             ),
             submission=submission(stale=False),
+            # The raw-Git boundary is measured on this entry too (ICR-R23@v1), and for the same
+            # reason it is measured on the subject review: a task-context review is a review boundary,
+            # and a declared identity replaced under it is a fact about the task rather than about a
+            # selected subject. The value states which identities were replaced and which recovery
+            # routes exist; nothing here refuses on it, because this entry carries no comparison a
+            # stale state could disable.
+            external_git_movement=external_git_movement(resolved),
             limitations=(
                 "limitation:no_knowledge_subject_selected",
                 *unreadable_half_limitations(unreadable),

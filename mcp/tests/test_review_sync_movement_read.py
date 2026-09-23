@@ -1,4 +1,4 @@
-"""ICR-R22@v1: what the *live* review read renders about a sync that moved its inputs.
+"""ICR-R22@v1: what the *live* review read renders about the movement a managed sync measured.
 
 `test_review_sync_rebinding.py` owns the sync-side cases: the states a managed sync can report and the
 durable rebinding record it publishes. This module owns the other half of the same obligation -- what a
@@ -12,7 +12,9 @@ It shares its enclosure fixture with the sync-side module rather than duplicatin
 two places for "what a leaf enclosure is" to drift, and the sibling already owns that construction -- the
 same way the repository's other case modules build on a sibling's fixture. It is a separate module because
 the two together are past the file-size rail, and the seam chosen is the one the production owners already
-have: *what the sync measured* beside *what the read says about it*.
+have: *what the sync measured* beside *what the read says about it*. The raw-Git boundary this surface
+also publishes is `test_review_external_git_movement_read.py`'s, which owns the other half of the same
+question: what the read says when no managed sync ran at all.
 """
 
 from __future__ import annotations

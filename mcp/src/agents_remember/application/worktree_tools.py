@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.completion_cleanup import auto_complete_seats
+from agents_remember.application.review_external_git_movement import (
+    external_git_movement_result_block,
+)
 from agents_remember.application.review_final_output_receipt import (
     attach_closeout_receipt,
     attach_integration_receipt,
@@ -451,6 +454,11 @@ def worktree_integrate_tool(
     )
     if result.get("ok") and not dry_run:
         result = attach_integration_receipt(result, configured.contract)
+    if result.get("ok"):
+        # The raw-Git identity boundary is stated on this result too (ICR-R23@v1), for the landing
+        # preview as well as the landing: an attached measurement, never a gate -- it refuses nothing
+        # and the integration's own admission has already run by here.
+        result = external_git_movement_result_block(configured.contract, result)
     if result["ok"] and not dry_run and config.retirement.auto_land_on_integration:
         result.update(
             auto_complete_seats(
@@ -995,9 +1003,18 @@ def _worktree_closeout(
     )
     result = git_worktree_manager.closeout_result(args, configured.contract)
     payload = _worktree_result(operation, result)
+    # The raw-Git identity boundary is stated beside the receipt on both closeout results (ICR-R23@v1):
+    # the preview says what the leaf's declared identities look like right now, and the applied result
+    # says it about the work it just committed. It is an attached statement and never a gate -- the
+    # closeout door's own source-lineage checks remain the only checks on the transaction, and this
+    # block returns the payload unchanged when it cannot measure.
     if operation == "worktree_closeout_preview":
-        return attach_prepared_selection(payload, configured.contract)
-    return attach_closeout_receipt(payload, configured.contract)
+        return external_git_movement_result_block(
+            configured.contract, attach_prepared_selection(payload, configured.contract)
+        )
+    return external_git_movement_result_block(
+        configured.contract, attach_closeout_receipt(payload, configured.contract)
+    )
 
 
 def _normalize_worktree_closeout(

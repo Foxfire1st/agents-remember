@@ -43,7 +43,14 @@ totals and per-row presence, comparing no subject to earn its row (ICR-R09); and
 :mod:`agents_remember.application.review_task_context` composes the entry that needs no
 selected subject; and :mod:`agents_remember.application.review_comparison_staleness` carries the
 comparison's own declared identity and the staleness that identity earns against the previous
-binding a refresh read supplies (ICR-R17). Each is one responsibility with one implementation, and
+binding a refresh read supplies (ICR-R17). **Two movement readings are delegated the same way, and
+they are the two the read renders beside that staleness**: the leaf's own managed syncs
+(:mod:`agents_remember.application.review_sync_movement`, ICR-R22) and the identities a *raw* Git
+operation replaced with no managed transaction behind it
+(:mod:`agents_remember.application.review_external_git_movement`, ICR-R23, which also owns the
+transition vocabulary and the support matrix of routes this system does and does not reconcile).
+Each is one responsibility with one implementation, the external reading outranks both the carried
+identity and a recorded rebinding when it measured a replacement, and
 every name an importer
 referenced is re-exported below so no importer had to learn a new home -- the statement-side helpers
 are the one move that leaves no alias, because they were private to this adapter and no module under
@@ -93,6 +100,7 @@ from agents_remember.application.review_evidence_records import (
     review_records_for,
     with_selection_channels,
 )
+from agents_remember.application.review_external_git_movement import external_git_movement
 from agents_remember.application.review_pagination import (
     RecordsPagePosition,
     comparison_page,
@@ -141,7 +149,7 @@ from agents_remember.application.review_statement_sides import (
 )
 from agents_remember.application.review_subject_catalogue import read_subject_catalogue
 from agents_remember.application.review_sync_movement import (
-    review_staleness_with_sync_movement,
+    review_staleness_with_external_movement,
     review_sync_movement,
 )
 from agents_remember.application.review_task_context import task_context_review
@@ -473,8 +481,18 @@ def compose_review(
     # sync moved never reads as untouched. ``None`` means no measurement is recorded, which is a
     # different fact from a measured agreement and is carried as one.
     sync_movement = review_sync_movement(resolved)
-    staleness = review_staleness_with_sync_movement(
-        review_staleness(identity, request.previous_binding_digest), sync_movement
+    # What a *raw* Git operation moved under the same generation (ICR-R23@v1). The measurement is the
+    # boundary's own -- the reviewed generation's declared identities beside what the repository shows
+    # now, taken by the module that owns it -- and a replaced identity outranks both the reader's
+    # carried comparison and a recorded rebinding, because neither survives the branch being rewritten
+    # under it. ``None`` is "no boundary was measured": a pair with no enclosure, a closed leaf's
+    # record, a branch that published nothing. The transition vocabulary, the support matrix and the
+    # routes this system does not reconcile live in that module; the adapter calls it and renders it.
+    external_movement = external_git_movement(resolved)
+    staleness = review_staleness_with_external_movement(
+        review_staleness(identity, request.previous_binding_digest),
+        external_movement,
+        sync_movement,
     )
     stale = staleness.state == "stale"
     # The reviewed identity's explicit revision selection is made here, from the comparison's
@@ -535,6 +553,7 @@ def compose_review(
             staleness=staleness,
             submission=submission(stale),
             sync_movement=sync_movement,
+            external_git_movement=external_movement,
             page=published_page,
             # A requested page the owner could not serve is stated as the refusal it is: a page value
             # needs the owner's own counts, and inventing zeros for a read that never happened would

@@ -45,6 +45,7 @@ from agents_remember.models.knowledge.review_applicability import (
     ReviewDisplayedApplicability,
     ReviewDisplayedApplicabilityState,
 )
+from agents_remember.models.knowledge.review_external_movement import ExternalGitMovement
 from agents_remember.models.knowledge.review_records import (
     ReviewRecordChannel,
     ReviewRecordChannelState,
@@ -74,6 +75,7 @@ __all__ = [
     "REVIEW_PAGE_RESET_NEXT_ACTION",
     "REVIEW_PANE_NAMES",
     "ComparisonIdentity",
+    "ExternalGitMovement",
     "KnowledgeReviewPayload",
     "KnowledgeReviewResult",
     "ReviewApplicabilityClass",
@@ -1024,6 +1026,15 @@ class KnowledgeReviewPayload(KnowledgeModel):
     # from "a sync reported agreement", and the field states which. A stale movement is folded into
     # ``staleness`` beside it, so a review whose inputs a sync moved can never read as current.
     sync_movement: ReviewSyncMovement | None = None
+    # What a *raw* Git operation moved under this generation (ICR-R23@v1): the declared identities
+    # the repository no longer shows, the transition shape measured, and the recovery routes the
+    # support matrix publishes. ``None`` is "no boundary was measured" -- a pair resolved without an
+    # enclosure, a closed leaf's record, a branch with no publication -- a different fact from a
+    # boundary that compared and found nothing replaced. A replaced identity is folded into
+    # ``staleness`` beside it, so an unrecognized transition never leaves stale assessment able to
+    # read as current; the vocabulary, matrix and states live in
+    # ``models.knowledge.review_external_movement``.
+    external_git_movement: ExternalGitMovement | None = None
     page: ReviewCollectionPage | None = None
     # The refusal a *requested* page earned when no page could be stated from it (ICR-R10). A page
     # value needs the owner's own counts, and a refused read has none, so the honest shape is the

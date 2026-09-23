@@ -881,4 +881,35 @@ describe("the review surface's refresh control and read race (ICR-R17)", () => {
     expect(live).not.toContain("previousBindingDigest");
     expect(view.queryByTestId("review-generation-notice")).toBeNull();
   });
+
+  it("renders the boundary's own sentence when it could not compare the declared identities (L23)", async () => {
+    // ICR-R23@v1: the raw-Git identity boundary reports `not-measured` when it could not take its
+    // comparison at all -- a checkout that left its declared branch, a recorded object that is gone,
+    // a generation that could not be read. The mounted line is the only place the reader meets this
+    // surface's own sentence, so it must not read as an ordinary current review: the boundary's
+    // sentence is rendered, and no previous input is named, because nothing was observed to move.
+    const payload = subjectPayload("1".repeat(64));
+    payload.staleness = {
+      state: "not-measured",
+      statement:
+        "this boundary did not compare every declared identity of the reviewed generation: " +
+        "code-work-branch was not compared: the code worktree is on super, not on the declared " +
+        "work branch ar/icr-r01-l1",
+      moved: [],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => response(200, reviewed(payload))),
+    );
+
+    const view = mountSubject();
+
+    const unmeasured = await view.findByTestId("review-staleness-unmeasured");
+    expect(unmeasured.textContent).toContain("did not compare every declared identity");
+    expect(unmeasured.textContent).toContain("not on the declared work branch");
+    // Nothing claims a previous input, and nothing claims the comparison is current.
+    expect(unmeasured.textContent).not.toContain("previous input");
+    expect(unmeasured.textContent).not.toContain("current comparison");
+    expect(view.queryByTestId("review-stale")).toBeNull();
+  });
 });

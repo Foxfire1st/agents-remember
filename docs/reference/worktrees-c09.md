@@ -110,6 +110,42 @@ The explicit `worktree_legacy_operation` tool can inspect and migrate only the p
 blank-message incident, or archive exact terminal evidence. It binds the inspected digest and
 never runs from a normal reader.
 
+## Raw Git Identity Boundary
+
+`worktree_sync` is the only route that moves a task's declared identities *under measurement*: it
+merges the official line into the work branch, re-captures the candidate, and records a rebinding that
+names what moved. Everything else that can move them is ordinary Git, and ordinary Git leaves no
+record behind. The review surface therefore measures the boundary itself — the recorded work-branch
+head, the code-base commit the capture was taken from, and the memory work branch's recorded base,
+each asked of the repository they name — and states which of them the repository no longer shows. It
+performs no reconciliation: a replaced identity marks the review stale, disables submission against
+it, names the identity that was replaced, and leaves the reviewed comparison generation exactly where
+it is so it stays inspectable. A boundary that could not take its comparison at all — a checkout that
+left its declared branch, a recorded object that is gone, a generation that could not be read —
+renders `not-measured` with the reason rather than a current review, and it does not disable
+submission, because no movement was observed. The same statement is attached to the closeout and
+integration results, where it is a statement and never a gate: it refuses nothing, and the closeout
+door's own source-lineage checks remain the only checks on that transaction.
+
+There are no global Git hooks, no replacement Git layer, and no speculative compatibility layer. The
+table below is the support matrix the code publishes and reports against; the shapes are the ones a
+repository's own history can show, `unchanged` is the measured absence of any of them, and the four
+this system does not reconcile say so rather than being implied by omission.
+
+| Transition | Measured signature | Boundary state | Reconciliation | Recovery |
+| --- | --- | --- | --- | --- |
+| `unchanged` | every declared identity is still exactly the identity the generation recorded: the work-branch head, the code-base commit and the memory work branch's base are all at their recorded values, so nothing was observed to move | `current` | **supported** | none required for the declared identities; this boundary compared all of them and found each still exactly where the reviewed generation recorded it, so no shape was observed to reconcile |
+| `ordinary-append` | the recorded work-branch head is still an ancestor of the branch tip and the tip has moved past it: the branch advanced without replacing anything the generation recorded | `current` | **supported** | none required for the recorded identities; the branch moved forward from the recorded head without replacing it, which is the ordinary shape of work continuing under an already-frozen generation |
+| `rebase` | the recorded work-branch head is a readable commit object that is not an ancestor of the branch tip, so the branch was rewritten | `stale` | **unsupported** | publish a successor generation from the rebased tip with freeze_review_comparison, naming the reviewed generation as its predecessor; the reviewed generation is kept and remains inspectable, and this system does not replay or reverse a rebase |
+| `cherry-pick` | the branch tip differs from the recorded head while the recorded head is still an ancestor, or the tree and dataset differ while both commits still resolve | `current` | **unsupported** | publish a successor generation from the advanced tip -- the pick is never identified from an ancestry check alone, and no record that already exists measures it: the managed-sync rebinding exists only once a sync has carried the official line and resolved a pair, the reopen channel reports the recorded generation's availability rather than the pick, and this boundary's own state stays 'current'. A sync that carries nothing resolves no pair and records no rebinding, so it is not a measurement of the pick either |
+| `revert` | the branch advances by exactly the commits that undo earlier ones: the recorded head stays an ancestor and no ancestry check can tell the undo from any other new commit | `current` | **unsupported** | publish a successor generation from the branch as it now stands; a revert is never inferred from an ancestry check, and the code tree and knowledge dataset this boundary does not compare are the existing owners' measurements to take |
+| `branch-switch` | the code worktree is not on the branch the contract declared -- a detached HEAD or another branch -- so the work-branch comparison cannot be taken at all | `not-measured` | **unsupported** | return the worktree to its declared work branch, then read the boundary again; this system never checks a branch out on a reader's behalf and never mutates a checkout |
+
+The recovery this system does perform is the successor generation the freeze owner publishes with the
+reviewed generation as its recorded predecessor. A boundary that could not compare a channel reports
+that absence with its reason instead of a verdict, and no state that was not measured is rendered as
+one that was.
+
 ## Integration And Landing Serialization
 
 `worktree_integrate` lands the closed task into its configured source branch. It preserves
