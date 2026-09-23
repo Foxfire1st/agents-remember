@@ -32,10 +32,15 @@ KNOWLEDGE_REVIEW_HEADING = "knowledgeReview"
 
 # The limitation codes this section counts. Each one is a *fact about the collection*, never a
 # verdict about an assessment's content: ``unresolved`` counts records whose author could not
-# conclude, ``stale`` counts records whose binding moved, and ``partial-scope`` counts records whose
-# scope manifest is not the one the current candidate declares.
+# conclude, ``stale`` counts records whose binding a measurement found moved, ``not-measured`` counts
+# records no measurement covered, and ``partial-scope`` counts records whose scope manifest is not the
+# one the current candidate declares. ``stale`` and ``not-measured`` are separate codes because a
+# measured movement and an unmeasured binding are different facts: a section that counted an
+# unmeasured record as stale would state a movement nobody measured, and one that counted it as
+# nothing at all would let a zero read as "nothing moved" (``ICR-R15@v1``).
 UNRESOLVED_DISPOSITION = "unresolved"
 STALE_BINDING = "stale"
+NOT_MEASURED_BINDING = "not-measured"
 PARTIAL_SCOPE = "partial-scope"
 
 
@@ -54,6 +59,7 @@ class AssessmentSummary:
     scopeRefs: tuple[str, ...] = ()
     unresolvedCount: int = 0
     staleCount: int = 0
+    notMeasuredCount: int = 0
     dispositions: tuple[str, ...] = ()
 
 
@@ -118,7 +124,11 @@ def knowledge_review_section(summaries: tuple[AssessmentSummary, ...]) -> Knowle
             f"| `{UNRESOLVED_DISPOSITION}` | {_count(summaries, 'unresolvedCount')} | "
             "The author examined the inputs and could not conclude |",
             f"| `{STALE_BINDING}` | {_count(summaries, 'staleCount')} | "
-            "The recorded inputs moved; the finding stays readable and is not reused |",
+            "A measurement of the current inputs found this record's binding moved; the finding "
+            "stays readable and is not reused |",
+            f"| `{NOT_MEASURED_BINDING}` | {_count(summaries, 'notMeasuredCount')} | "
+            "No measurement covered what these records examined; they are reported neither current "
+            "nor stale |",
             f"| `{PARTIAL_SCOPE}` | {_partial_scope_count(summaries)} | "
             "No comparison or scope reference is recorded for the subject |",
             "",
@@ -148,17 +158,23 @@ class AssessmentSummaryInput:
     scopeRefs: tuple[str, ...] = ()
     unresolvedCount: int = 0
     staleCount: int = 0
+    notMeasuredCount: int = 0
 
 
 def summarise_assessment_state(measured: AssessmentSummaryInput) -> AssessmentSummary:
     """Build one subject's summary from a projection, refusing a count that contradicts its records."""
 
-    if measured.assessmentCount < 0 or measured.unresolvedCount < 0 or measured.staleCount < 0:
+    if (
+        measured.assessmentCount < 0
+        or measured.unresolvedCount < 0
+        or measured.staleCount < 0
+        or measured.notMeasuredCount < 0
+    ):
         raise ValueError("an assessment summary counts records, so no count may be negative")
     if measured.unresolvedCount > measured.assessmentCount:
         raise ValueError("the unresolved count cannot exceed the records it counts")
-    if measured.staleCount > measured.assessmentCount:
-        raise ValueError("the stale count cannot exceed the records it counts")
+    if measured.staleCount + measured.notMeasuredCount > measured.assessmentCount:
+        raise ValueError("the binding counts cannot exceed the records they count")
     if len(measured.dispositions) != measured.assessmentCount:
         raise ValueError("the dispositions listed must be one per recorded assessment")
     return AssessmentSummary(
@@ -168,6 +184,7 @@ def summarise_assessment_state(measured: AssessmentSummaryInput) -> AssessmentSu
         scopeRefs=tuple(measured.scopeRefs),
         unresolvedCount=measured.unresolvedCount,
         staleCount=measured.staleCount,
+        notMeasuredCount=measured.notMeasuredCount,
         dispositions=tuple(measured.dispositions),
     )
 
@@ -180,6 +197,8 @@ def _limitations(summaries: tuple[AssessmentSummary, ...]) -> tuple[str, ...]:
         counted.append(UNRESOLVED_DISPOSITION)
     if _count(summaries, "staleCount"):
         counted.append(STALE_BINDING)
+    if _count(summaries, "notMeasuredCount"):
+        counted.append(NOT_MEASURED_BINDING)
     if _partial_scope_count(summaries):
         counted.append(PARTIAL_SCOPE)
     return tuple(counted)
@@ -199,6 +218,7 @@ def _cell(value: str) -> str:
 
 __all__ = [
     "KNOWLEDGE_REVIEW_HEADING",
+    "NOT_MEASURED_BINDING",
     "PARTIAL_SCOPE",
     "STALE_BINDING",
     "UNRESOLVED_DISPOSITION",

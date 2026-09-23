@@ -42,8 +42,10 @@ from agents_remember.models.lifecycles.review_assessment import (
     assessment_state_for,
     assessment_subject_id,
 )
+from agents_remember.models.lifecycles.review_assessment_binding import (
+    supplied_measurement_statuses,
+)
 from agents_remember.models.lifecycles.review_assessment_store import (
-    assessment_currentness_for_record,
     assessment_edge_name,
     recorded_assessment_digest,
 )
@@ -608,17 +610,15 @@ def curator_coherence_assessments(
     """Project the stored assessment collection without deciding anything about it.
 
     ``current`` is the caller's measurement of the world -- ``assessmentId -> (kind, name) ->
-    (algorithm, digest)`` -- and an assessment the caller supplied no entry for is reported ``stale``
-    rather than ``current``: "not measured" is never "still matches", which is requirement 5.2's rule
-    read in the direction that matters for a projection. Omitting ``current`` therefore reports the
-    collection itself (identities and dispositions) with every record marked stale, and never
-    silently promotes an unmeasured assessment to current.
+    (algorithm, digest)`` -- and omitting it means *nothing measured anything*, which is its own
+    state: every record is then reported ``not-measured`` rather than ``stale``, because a projection
+    that turned an absent measurement into a measured movement published a fact the store never held
+    (``ICR-R15@v1``). A supplied measurement is read the shipped comparison's way: an identity it
+    covers and that disagrees is a measured movement, an identity it does not cover is unmeasured, and
+    only a record whose whole declaration is covered and agrees is reported ``current``.
     """
 
-    return assessment_state_for(
-        validated.record.assessments,
-        stale_ids=_stale_assessment_ids(validated.record.assessments, current or {}),
-    ).assessments
+    return _measured_state(validated.record.assessments, current).assessments
 
 
 def curator_coherence_subject_assessment_state(
@@ -627,18 +627,18 @@ def curator_coherence_subject_assessment_state(
     *,
     current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]] | None = None,
 ) -> SubjectAssessmentState:
-    """Report one subject's assessment state as one of the four distinct reportable states.
+    """Report one subject's assessment state as one of the distinct reportable states.
 
     A subject with no stored assessment answers ``none-recorded`` with a zero count -- never a
     disposition, never ``no_concern_found``, never ``compatible``. A subject whose record is
     ``unresolved`` answers ``unresolved``. A subject whose record no longer matches its recorded
-    inputs answers ``stale`` and stays readable. Those three, plus ``current``, are the whole of the
-    read layer's vocabulary for this question, and no path here manufactures a fourth. ``subject_id``
-    is compared against :func:`assessment_subject_id`, which is the one spelling both a writer and a
-    reader derive rather than two spellings that have to agree.
+    inputs answers ``stale`` and stays readable. A subject nobody measured answers ``not-measured``,
+    and one whose measurement failed answers ``unavailable``. Those, plus ``current``, are the whole
+    of the read layer's vocabulary for this question, and no path here manufactures another.
+    ``subject_id`` is compared against :func:`assessment_subject_id`, which is the one spelling both
+    a writer and a reader derive rather than two spellings that have to agree.
     """
 
-    measured = current or {}
     subject = [
         assessment
         for assessment in validated.record.assessments
@@ -646,7 +646,23 @@ def curator_coherence_subject_assessment_state(
     ]
     if not subject:
         return assessment_state_for(())
-    return assessment_state_for(subject, stale_ids=_stale_assessment_ids(subject, measured))
+    return _measured_state(subject, current)
+
+
+def _measured_state(
+    assessments: Sequence[ReviewAssessment],
+    current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]] | None,
+) -> SubjectAssessmentState:
+    """One subject's (or collection's) state, from the caller's per-record measurement.
+
+    The conversion is the shipped binding module's, in one implementation: ``None`` measures nothing
+    and an empty mapping measures nothing either, so neither can promote a stored record to current
+    (``ICR-R15@v1``).
+    """
+
+    return assessment_state_for(
+        assessments, statuses=supplied_measurement_statuses(assessments, current)
+    )
 
 
 def all_assessment_subject_ids(validated: ValidatedCuratorCoherence) -> tuple[str, ...]:
@@ -657,17 +673,6 @@ def all_assessment_subject_ids(validated: ValidatedCuratorCoherence) -> tuple[st
             assessment_subject_id(assessment) for assessment in validated.record.assessments
         )
     )
-
-
-def _stale_assessment_ids(
-    assessments: Sequence[ReviewAssessment],
-    current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]],
-) -> list[str]:
-    return [
-        currentness.assessmentId
-        for currentness in assessment_currentness_for_record(assessments, current)
-        if currentness.is_stale
-    ]
 
 
 def _require_leaf_external_memory(contract: WorktreeContract) -> None:

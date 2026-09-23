@@ -8,9 +8,10 @@ two surfaces come to disagree about what an unassessed subject looks like.
 Nothing here selects a record, resolves a reference or decides an outcome. Every function takes the
 typed value another owner published and returns the surface's own display value:
 
-* an assessment collection is projected per subject with its currentness **as measured** -- a caller
-  that supplied no ``current`` mapping gets every assessment reported ``stale``, because the shipped
-  projection refuses to promote an unmeasured assessment and this module does not improve on it;
+* an assessment collection is projected per subject with its currentness **as measured**: the
+  shipped comparison decides each binding over the identities the supplied measurement covers, and a
+  binding it does not cover is reported ``not-measured`` -- neither ``current`` (a currency nobody
+  established) nor ``stale`` (a movement nobody measured);
 * an empty assessment collection is ``unassessed`` and an empty evidence collection is
   ``none_recorded``, and neither has a favourable member to default to;
 * a detection signal is carried with its condition, inputs, versions and scope limitations, and there
@@ -50,6 +51,10 @@ from agents_remember.models.lifecycles.review_assessment import (
     ReviewAssessment,
     SubjectAssessmentState,
     assessment_state_for,
+)
+from agents_remember.models.lifecycles.review_assessment_binding import (
+    AssessmentCurrentnessMeasurement,
+    measured_binding_statuses,
 )
 
 __all__ = [
@@ -115,10 +120,16 @@ class ReviewRecordInputs:
     empty tuple from standing for three different facts, and it is deliberately *not* derived from
     the collection lengths here -- an empty collection is exactly what this module must be able to
     render without claiming which of the three it is.
+
+    ``currentness`` is the *measurement* the composition produced for the comparison being viewed,
+    not a mapping whose presence stands for one: the shipped comparison decides each binding's state
+    over the identities the measurement covers, and a binding the measurement does not cover is
+    reported ``not-measured`` rather than current or stale (``ICR-R15@v1``). ``None`` is a bundle
+    nobody measured, and it is a state of its own.
     """
 
     assessments: tuple[ReviewAssessment, ...] = ()
-    current: Mapping[str, Mapping[tuple[str, str], tuple[str, str]]] | None = None
+    currentness: AssessmentCurrentnessMeasurement | None = None
     signals: tuple[DetectionSignalPayload, ...] = ()
     observations: tuple[VerificationObservationPayload, ...] = ()
     claims: tuple[ReviewClaimRecord, ...] = ()
@@ -255,22 +266,26 @@ def evidence_pane(
 def subject_states(records: ReviewRecordInputs) -> Mapping[str, SubjectAssessmentState]:
     """Every stored assessment projected per subject, with currentness left as measured.
 
-    A caller that supplied no ``current`` measurement gets every assessment reported ``stale``:
-    the shipped projection refuses to promote an unmeasured assessment to current, and this surface
-    does not improve on that by guessing.
+    ``records.currentness`` is the measurement the composing read produced for the comparison being
+    viewed; the shipped comparison decides each binding's state over the identities that measurement
+    covers, and a binding it does not cover is reported ``not-measured``. So this surface neither
+    promotes an unmeasured assessment to current nor demotes one to stale: a bundle nobody measured
+    reports every record unmeasured, and an empty measurement covers nothing and is therefore not a
+    measurement of anything.
     """
 
+    statuses = measured_binding_statuses(records.assessments, records.currentness)
     grouped: dict[str, list[ReviewAssessment]] = {}
     for assessment in records.assessments:
         grouped.setdefault(assessment.subject.recordId, []).append(assessment)
     states: dict[str, SubjectAssessmentState] = {}
     for subject_id, stored in grouped.items():
-        stale_ids = (
-            ()
-            if records.current is not None
-            else tuple(assessment.assessmentId for assessment in stored)
+        states[subject_id] = assessment_state_for(
+            stored,
+            statuses={
+                assessment.assessmentId: statuses[assessment.assessmentId] for assessment in stored
+            },
         )
-        states[subject_id] = assessment_state_for(stored, stale_ids=stale_ids)
     return states
 
 

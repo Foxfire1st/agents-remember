@@ -46,6 +46,12 @@ from agents_remember.application.knowledge import (
     write_knowledge_evidence,
 )
 from agents_remember.application.knowledge_diff import open_diff_side
+from agents_remember.application.review_assessment_currentness import (
+    comparison_currentness_measurement,
+    currentness_channel,
+)
+from agents_remember.application.review_candidate_resolution import ReviewCandidateResolution
+from agents_remember.application.review_comparison_freeze import freeze_review_comparison
 from agents_remember.application.review_evidence_records import review_records_for
 from agents_remember.cli.dashboard import serving_collaborators
 from agents_remember.memory.knowledge.detection import (
@@ -97,6 +103,9 @@ from agents_remember.models.lifecycles.review_assessment import (
     AssessmentSubject,
     ReviewAssessmentRevision,
 )
+from agents_remember.models.lifecycles.review_assessment_binding import (
+    no_currentness_measurement,
+)
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import TaskIntentIdentity
 from agents_remember.worktrees.integration.closeout.curator_coherence import (
@@ -107,7 +116,11 @@ from agents_remember.worktrees.integration.closeout.curator_coherence_publicatio
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 from curator_coherence_test_support import write_curator_task_topology
-from test_knowledge_review_source_endpoints import EndpointFixture, build_endpoint_fixture
+from test_knowledge_review_source_endpoints import (
+    EndpointFixture,
+    _commit,
+    build_endpoint_fixture,
+)
 from test_worktree_support import write_passing_route_review
 
 pytestmark = pytest.mark.evidence_unit
@@ -121,6 +134,11 @@ ASSESSMENT_FINDING = "The retry budget is still shared, and the candidate moved 
 # A code tree no observation of this candidate names: the identity a case records against to show the
 # evidence owner selects by candidate binding rather than by "every observation in the dataset".
 FOREIGN_CANDIDATE_TREE = "e" * 40
+
+# The one path a later change lands, so "the candidate moved after the assessment was published" is a
+# measurement about a named file rather than a claim about a digest.
+MOVED_PATH = "src/icr_l15_moved.py"
+MOVED_TEXT = "# a change that landed after the assessment was published\n"
 
 # The two observation command names, distinct so that "the foreign candidate's run was not selected"
 # is a statement about an identity that would be visible had it been selected.
@@ -328,9 +346,7 @@ def _record_evidence_claim(endpoint: EndpointFixture, destination) -> str:
             limitations="Asserted coverage only; the claim states no sufficiency.",
         ),
     )
-    result = write_knowledge_evidence(
-        destination, admitted_evidence_request(destination, command)
-    )
+    result = write_knowledge_evidence(destination, admitted_evidence_request(destination, command))
     assert result.state == "applied", result.refusal
     return command.claim_id
 
@@ -366,9 +382,7 @@ def _record_observation(
             environment=RunEnvironment(host="fixture-builder", interpreter="cpython-3.13"),
         ),
     )
-    result = write_knowledge_evidence(
-        destination, admitted_evidence_request(destination, command)
-    )
+    result = write_knowledge_evidence(destination, admitted_evidence_request(destination, command))
     assert result.state == "applied", result.refusal
     return command.observation_id
 
@@ -676,20 +690,136 @@ def test_a_task_context_review_reports_the_matrix_collection_as_not_selected(
     assert channels["assessments"].state == "recorded"
 
 
-def test_no_measurement_is_reported_as_one(recorded: RecordedFixture) -> None:
-    """An empty measurement never grants currentness, and "not measured" is a stated fact."""
+def test_the_composition_measures_the_bindings_it_reads(recorded: RecordedFixture) -> None:
+    """``ICR-R15@v1``: a measured world, and the identities it publishes no value for named.
+
+    The measurement is the composition's own -- not a mapping whose presence stands for one -- and
+    the two facts it carries are asserted against the store: it holds a value for the comparison's
+    own candidate endpoint (so it measured something real), and the identities it publishes no value
+    for are named on the channel instead of being read as agreement. The stored assessment is
+    therefore reported ``not-measured``: its declaration is wider than what this comparison
+    publishes, and neither currency nor movement may be claimed from a partial measurement.
+    """
 
     records = recorded.records()
-    assert records.current is None
+    assert records.currentness is not None
+    assert records.currentness.state == "measured"
+    assert ("code-tree", "candidate") in records.currentness.values
+    assert records.currentness.values[("code-tree", "candidate")][1] == (recorded.candidate_tree_id)
+
     channels = {channel.records: channel for channel in records.channels}
     currentness = channels["assessment_currentness"]
-    assert currentness.state == "not_measured"
-    assert currentness.record_count is None
-    assert currentness.next_action
+    assert currentness.state == "recorded"
+    assert currentness.record_count == 1
+    assert currentness.record_count == channels["assessments"].record_count
+    # The declared identities this comparison publishes no value for are named, not absorbed.
+    assert "candidate-state:knowledge-candidate-pair" in currentness.unreadable
+    assert "memory-tree:candidate" in currentness.unreadable
+    assert "semantic-topology:registered-scope" in currentness.unreadable
+    assert "task-intent:requirement-identities" in currentness.unreadable
+    assert "not measured" in currentness.detail
 
     payload = recorded.payload()
+    assert [row.assessment_id for row in payload.evidence.assessments] == [ASSESSMENT_ID]
+    assert payload.evidence.assessments[0].binding_state == "not-measured"
     assert all(row.binding_state != "current" for row in payload.evidence.assessments)
-    assert _channels(payload)["assessment_currentness"].state == "not_measured"
+    assert _channels(payload)["assessment_currentness"].state == "recorded"
+
+
+def _move_the_candidate(recorded: RecordedFixture) -> None:
+    """Land one real change in the leaf's worktree, so the captured candidate tree moves.
+
+    A commit alone does not move the *content* the capture binds -- the capture is the add-all tree --
+    so the change is a new eligible file that is then committed, which is what a later task landing on
+    the leaf's branch really does.
+    """
+
+    worktree = recorded.endpoint.worktree
+    added = worktree / MOVED_PATH
+    added.parent.mkdir(parents=True, exist_ok=True)
+    added.write_text(MOVED_TEXT, encoding="utf-8")
+    _commit(worktree, "land a change after the assessment was published")
+
+
+def test_a_moved_candidate_marks_the_stored_assessment_stale_on_the_measured_axis(
+    recorded: RecordedFixture,
+) -> None:
+    """The packet's conforming example, through the production port: changing source is a movement.
+
+    The assessment was published against this candidate's captured tree. One landed change later the
+    comparison the review renders binds a different tree, and the measurement says so -- by name --
+    while the record's disposition, author and examined inputs stay exactly what their author wrote.
+    """
+
+    assert recorded.payload().evidence.assessments[0].binding_state == "not-measured"
+
+    published_tree = recorded.candidate_tree_id
+    _move_the_candidate(recorded)
+    assert recorded.candidate_tree_id != published_tree
+
+    stale = recorded.payload().evidence.assessments[0]
+    assert stale.binding_state == "stale"
+    assert stale.assessment_id == ASSESSMENT_ID
+    assert stale.disposition == "concern_found"
+    assert stale.role_ref == "architect"
+    assert stale.author_ref
+    assert stale.examined_inputs
+    assert stale.finding == ASSESSMENT_FINDING
+
+
+def test_a_recorded_review_measures_its_recorded_generation_not_todays_branch(
+    recorded: RecordedFixture,
+) -> None:
+    """The packet's boundary example: a branch advance does not rewrite the recorded comparison.
+
+    One fixture, two explicitly selected reads. The *live* read measures the stored assessment
+    against the candidate captured now and reports the movement; the *recorded* read measures it
+    against the generation the leaf published and keeps the recorded endpoints -- so advancing
+    today's branch changed the live answer and left the recorded one exactly where it was.
+    """
+
+    outcome = freeze_review_comparison(recorded.endpoint.config, recorded.endpoint.request())
+    assert outcome.state == "published", outcome.refusal
+    assert outcome.manifest is not None
+    recorded_tree = outcome.manifest.source.candidate_code_tree_id
+    assert recorded_tree == recorded.candidate_tree_id
+
+    _move_the_candidate(recorded)
+    assert recorded.candidate_tree_id != recorded_tree
+
+    live = recorded.payload()
+    assert live.evidence.assessments[0].binding_state == "stale"
+    assert live.comparison is not None
+    assert live.comparison.after_code_tree_id == recorded.candidate_tree_id
+
+    historical = recorded.endpoint.request().model_copy(update={"history": "recorded"})
+    history_records = review_records_for(recorded.endpoint.config, historical)
+    assert history_records.currentness is not None
+    assert history_records.currentness.values[("code-tree", "candidate")][1] == recorded_tree
+    result = review_through_port(recorded.endpoint, historical)
+    assert result.payload is not None
+    # The recorded generation's own endpoint is what the stored binding is measured against, so the
+    # branch advance did not make the historical assessment stale and did not rewrite its comparison.
+    assert result.payload.evidence.assessments[0].binding_state == "not-measured"
+    assert result.payload.comparison is not None
+    assert result.payload.comparison.after_code_tree_id == recorded_tree
+
+
+def test_an_unreadable_authority_reports_the_measurement_unavailable(tmp_path: Path) -> None:
+    """A failed measurement is its own state: nothing is promoted to current or to stale by it."""
+
+    recorded = build_recorded_fixture(tmp_path / "unmeasurable")
+    curator_coherence_paths(recorded.contract).canonical.write_bytes(b"corrupt")
+
+    payload = recorded.payload()
+    channels = _channels(payload)
+
+    assert channels["assessments"].state == "unavailable"
+    currentness = channels["assessment_currentness"]
+    assert currentness.state == "unavailable"
+    assert currentness.record_count is None
+    assert currentness.next_action
+    assert payload.evidence.assessments == ()
 
 
 def test_a_damaged_detection_run_is_named_while_its_siblings_are_supplied(tmp_path: Path) -> None:
@@ -697,9 +827,7 @@ def test_a_damaged_detection_run_is_named_while_its_siblings_are_supplied(tmp_pa
 
     recorded = build_recorded_fixture(tmp_path / "damaged-run")
     resolved = recorded.endpoint.resolve()
-    _, healthy_signal = _record_detection_run(
-        recorded.endpoint, resolved, recorded.authorship
-    )
+    _, healthy_signal = _record_detection_run(recorded.endpoint, resolved, recorded.authorship)
     damaged_run, damaged_signal = _record_detection_run(
         recorded.endpoint, resolved, recorded.authorship
     )
@@ -720,9 +848,7 @@ def test_a_damaged_evidence_claim_is_named_while_its_siblings_are_supplied(tmp_p
     """One undecodable claim is named, its sibling keeps every authored field, and no silence."""
 
     recorded = build_recorded_fixture(tmp_path / "damaged-claim")
-    destination = _destination(
-        recorded.endpoint, recorded.candidate_database, recorded.authorship
-    )
+    destination = _destination(recorded.endpoint, recorded.candidate_database, recorded.authorship)
     damaged_claim = _record_evidence_claim(recorded.endpoint, destination)
     _damage_claim(recorded.endpoint, damaged_claim)
 
@@ -783,6 +909,50 @@ def test_the_channel_model_refuses_a_count_no_owner_measured() -> None:
             owner="curator_coherence.load_curator_coherence_authority",
             record_count=0,
             detail="no assessment was supplied",
+        )
+
+
+def test_the_currentness_collection_has_exactly_three_product_states() -> None:
+    """A resolved candidate is always measured, so this collection never reports ``not_measured``.
+
+    ``comparison_currentness_measurement`` holds a value for the two validator identities the shipped
+    assessment publication declares whatever else a resolution binds, so its state is always
+    ``measured`` -- the identities it holds vary, the state does not. The channel therefore states one
+    of ``recorded`` / ``none_recorded`` / ``unavailable``, and a measurement nobody performed is
+    refused loudly rather than rendered as a comparison that never happened.
+    """
+
+    bare = ReviewCandidateResolution(
+        repository_id="repo-a",
+        leaf_id="",
+        baseline_database=Path("/nonexistent-baseline.sqlite"),
+        candidate_database=Path("/nonexistent-candidate.sqlite"),
+        baseline_code_root=None,
+        candidate_code_root=None,
+        baseline_code_tree_id=None,
+        candidate_code_tree_id=None,
+    )
+    measurement = comparison_currentness_measurement(bare)
+    assert measurement.state == "measured"
+    assert {kind for kind, _name in measurement.values} == {"validator"}
+    assert "validator:curator-evidence-resolver/v1" in measurement.detail
+
+    collection = ReviewRecordChannel(
+        records="assessments",
+        state="recorded",
+        owner="curator_coherence.load_curator_coherence_authority",
+        record_count=1,
+        detail="one assessment supplied by its owner",
+    )
+    recorded = currentness_channel(collection, measurement, ())
+    assert recorded.state == "recorded"
+    assert recorded.record_count == 1
+
+    with pytest.raises(AssertionError, match="always measures a resolved candidate"):
+        currentness_channel(
+            collection,
+            no_currentness_measurement("nothing measured this comparison"),
+            (),
         )
 
 

@@ -14,8 +14,8 @@ naming the state its owner's answer earned:
 * ``recorded`` / ``none_recorded`` -- the owner answered, and this is what it holds;
 * ``unavailable`` -- expected content that could not be read (an absent dataset, an unreadable
   authority, a damaged record), carried with the owner's own refusal text as its provenance;
-* ``not_measured`` -- a quantity nothing measured (dependency currentness, whose measurement owner is
-  named rather than guessed at);
+* ``not_measured`` -- a quantity nothing measured (dependency currentness when this composition
+  produced none, whose measurement owner is named rather than guessed at);
 * ``not_selected`` -- a collection this composition did not read because the review selected no
   operand that reaches it.
 
@@ -27,9 +27,16 @@ left to the shipped projection's own unmeasured state.
 per collection, so a damaged detection run leaves the observations, claims and assessments supplied
 and names the run it could not serve -- the failure behavior ``ICR-R14@v1`` states.
 
+**The one measurement this composition produces is delegated.** Dependency currentness is not a
+collection an owner holds; it is measured against the comparison the resolution bound, and
+:mod:`agents_remember.application.review_assessment_currentness` owns that measurement and its
+availability statement (``ICR-R15@v1``). This module calls it and supplies what it answers, so a
+stored binding is reported from a measurement rather than from the presence of a mapping.
+
 **What this module does not do.** It does not filter records by subject or generation (that is
-``ICR-R26@v1``'s applicability classification), it does not measure dependency currentness
-(``ICR-R15@v1``), and it does not re-run detection, execute a command or author anything.
+``ICR-R26@v1``'s applicability classification), it does not re-derive the measurement itself
+(``ICR-R15@v1``'s owner does, and this module calls it), and it does not re-run detection, execute a
+command or author anything.
 
 **Authored effects are the matrix's collection, and the matrix reports them.** They live in the
 knowledge dataset and are read by the shipped review-matrix view inside the composition, which is why
@@ -50,6 +57,11 @@ from pydantic import ValidationError
 
 from agents_remember.application.knowledge_diff import open_diff_side
 from agents_remember.application.knowledge_evidence import read_evidence_scope
+from agents_remember.application.review_assessment_currentness import (
+    CURRENTNESS_OWNER,
+    comparison_currentness_measurement,
+    currentness_channel,
+)
 from agents_remember.application.review_candidate_resolution import (
     ReviewCandidateResolution,
     resolve_review_candidate,
@@ -122,16 +134,13 @@ AUTHORED_EFFECT_KINDS: frozenset[str] = frozenset(
 )
 EVIDENCE_CLAIM_KINDS: frozenset[str] = frozenset({"evidence_claim"})
 
-# Every collection this composition reports, with the owner whose read answers for it. The owner name
-# travels on the channel so a reader of an absent or unreadable collection knows which authority to
-# look at rather than which code path happened to run.
 _COLLECTION_OWNERS: Mapping[ReviewRecordClassName, str] = {
     "assessments": "curator_coherence.load_curator_coherence_authority",
     "detection_signals": "detection.read_detection_run",
     "verification_observations": "knowledge_evidence.read_evidence_scope",
     "authored_effects": "knowledge_views.read_knowledge_view:review_matrix",
     "evidence_claims": "evidence_records.claim_record",
-    "assessment_currentness": "review_assessment_store.assessment_currentness_for_record",
+    "assessment_currentness": CURRENTNESS_OWNER,
 }
 
 # The five collections a review of a resolved candidate supplies, in the order the surface reads them
@@ -143,22 +152,6 @@ _COLLECTION_NAMES: tuple[ReviewRecordClassName, ...] = (
     "verification_observations",
     "authored_effects",
     "evidence_claims",
-)
-
-_CURRENTNESS = ReviewRecordChannel(
-    records="assessment_currentness",
-    state="not_measured",
-    owner=_COLLECTION_OWNERS["assessment_currentness"],
-    detail=(
-        "no dependency-currentness measurement was supplied with this bundle, so every stored "
-        "assessment keeps the unmeasured state the shipped projection reports for it; an unmeasured "
-        "assessment is never promoted to current, and an empty measurement is not a measurement"
-    ),
-    next_action=(
-        "measure each stored assessment's recorded dependencies through the shipped "
-        "dependency-currentness owner (ICR-R15@v1); this composition supplies no measurement of its "
-        "own and reports none"
-    ),
 )
 
 # The two collections the composition adds once it has read the review matrix, with the kinds each
@@ -204,14 +197,24 @@ def review_records_for(
 
 
 def _resolved_records(resolved: ReviewCandidateResolution) -> ReviewRecordInputs:
-    """Every collection one resolved candidate's owners can answer for, with its own availability."""
+    """Every collection one resolved candidate's owners can answer for, with its own availability.
+
+    The dependency-currentness measurement is produced here, from the comparison this resolution
+    bound, and it is a measurement rather than a bare mapping: the identities the comparison
+    publishes are compared against the stored bindings, and the ones it publishes no value for stay
+    unmeasured instead of being read as agreement (``ICR-R15@v1``). It is measured against **this**
+    resolution -- the recorded generation when the request named one, the live candidate otherwise --
+    so a historical assessment is never silently measured against today's branch.
+    """
 
     assessments, assessment_channel = _assessments(resolved)
     signals, signal_channel = _detection_signals(resolved)
     observations, observation_channel = _observations(resolved)
     claims, claim_channel = _evidence_claims(resolved)
+    measurement = comparison_currentness_measurement(resolved)
     return ReviewRecordInputs(
         assessments=assessments,
+        currentness=measurement,
         signals=signals,
         observations=observations,
         claims=claims,
@@ -220,7 +223,7 @@ def _resolved_records(resolved: ReviewCandidateResolution) -> ReviewRecordInputs
             signal_channel,
             observation_channel,
             claim_channel,
-            _CURRENTNESS,
+            currentness_channel(assessment_channel, measurement, assessments),
         ),
     )
 
@@ -702,7 +705,14 @@ def _unresolved_channels(refusal_value: ReviewRefusal | None) -> tuple[ReviewRec
     channels = tuple(
         _unavailable(name, detail, next_action=next_action) for name in _COLLECTION_NAMES
     )
-    return (*channels, _CURRENTNESS)
+    currentness = ReviewRecordChannel(
+        records="assessment_currentness",
+        state="unavailable",
+        owner=CURRENTNESS_OWNER,
+        detail=detail,
+        next_action=next_action,
+    )
+    return (*channels, currentness)
 
 
 def _answered(

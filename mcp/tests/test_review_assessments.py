@@ -45,6 +45,8 @@ from agents_remember.models.lifecycles.evidence_dependencies import (
 )
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.lifecycles.review_assessment import (
+    ASSESSMENT_BINDING_STATUSES,
+    SUBJECT_ASSESSMENT_STATUSES,
     AssessmentEntry,
     AssessmentEvidenceByte,
     AssessmentEvidenceReference,
@@ -296,7 +298,10 @@ class TestDispositionVocabulary:
 
         assert unresolved.disposition != cleared.disposition
         assert assessment_state_for([unresolved]).status == "unresolved"
-        assert assessment_state_for([cleared]).status == "current"
+        # ``no_concern_found`` is a disposition and nothing more: with no measurement of the binding
+        # the record answers ``not-measured``, which is neither a clearance nor a movement
+        # (``ICR-R15@v1``).
+        assert assessment_state_for([cleared]).status == "not-measured"
         assert unresolved.finding and not cleared.finding
 
     def test_no_concern_found_may_not_carry_a_finding(self) -> None:
@@ -571,7 +576,7 @@ class TestEvidenceBytesAreRecordedAsThreeFacts:
 
 
 class TestReadStates:
-    """Requirements 4.1, 4.3 and 4.4: absence, unresolved and stale are three states."""
+    """Requirements 4.1, 4.3 and 4.4 plus ``ICR-R15@v1``: five states, and none invented."""
 
     def test_a_subject_with_no_assessment_is_none_recorded_and_never_a_disposition(self) -> None:
         state = assessment_state_for([])
@@ -581,6 +586,8 @@ class TestReadStates:
         assert state.assessments == ()
         assert state.unresolvedCount == 0
         assert state.staleCount == 0
+        assert state.notMeasuredCount == 0
+        assert state.unavailableCount == 0
 
     def test_the_three_states_are_distinct(self) -> None:
         unresolved = _bound(_Binding(disposition="unresolved", finding="Could not decide."))
@@ -588,7 +595,7 @@ class TestReadStates:
 
         none_recorded = assessment_state_for([])
         recorded_unresolved = assessment_state_for([unresolved])
-        recorded_stale = assessment_state_for([cleared], stale_ids=[cleared.assessmentId])
+        recorded_stale = assessment_state_for([cleared], statuses={cleared.assessmentId: "stale"})
 
         assert len({none_recorded.status, recorded_unresolved.status, recorded_stale.status}) == 3
         assert recorded_stale.staleCount == 1
@@ -600,19 +607,56 @@ class TestReadStates:
         assert assessment_state_for([]).assessmentCount == 0
         assert assessment_state_for([record]).assessmentCount == 1
 
-    def test_a_subject_projection_marks_an_unmeasured_assessment_stale(self) -> None:
-        """ "Not measured" is never "still matches", in the projection as well as the comparison."""
+    def test_an_absent_measurement_is_not_measured_and_never_stale(self) -> None:
+        """``ICR-R15@v1``'s first correction: nothing measured is its own reportable state.
+
+        The old projection turned "nobody measured this" into ``stale``, which is a *measured*
+        movement -- a fact about the world the store never held. Both directions are asserted on one
+        record: no measurement supplied at all, and a measurement supplied that covers nothing.
+        """
 
         record = _bound()
 
-        assert subject_state([record], current={}).status == "stale"
-        assert (
-            subject_state([record], current={record.assessmentId: _current_map(record)}).status
-            == "current"
-        )
+        assert subject_state([record]).status == "not-measured"
+        assert subject_state([record], current={}).status == "not-measured"
+        assert subject_state([record], current={}).staleCount == 0
+        assert subject_state([record], current={}).notMeasuredCount == 1
+        assert subject_state([record], current={}).assessments[0].currentness == "not-measured"
+
+    def test_only_a_completed_measurement_that_covers_the_declaration_reports_current(self) -> None:
+        """Coverage decides, and the shipped comparison decides equality within it.
+
+        Four inputs, four different answers, and none of them is derived from the presence of a
+        mapping: a complete matching measurement is ``current``; a complete measurement with one
+        moved identity is ``stale``; a *partial* measurement that happens to agree is
+        ``not-measured`` (it covered neither the whole declaration nor a disagreement); and a failed
+        measurement is ``unavailable``.
+        """
+
+        record = _bound()
+        coverage = _current_map(record)
+
+        complete = subject_state([record], current={record.assessmentId: coverage})
+        assert complete.status == "current"
+        assert complete.assessments[0].currentness == "current"
+
+        moved = dict(coverage)
+        moved[("code-tree", "candidate")] = ("git-object", "f" * 40)
+        assert subject_state([record], current={record.assessmentId: moved}).status == "stale"
+
+        partial = dict(coverage)
+        dropped = next(iter(partial))
+        del partial[dropped]
+        partially_measured = subject_state([record], current={record.assessmentId: partial})
+        assert partially_measured.status == "not-measured"
+        assert partially_measured.staleCount == 0
+
+        unavailable = assessment_state_for([record], statuses={record.assessmentId: "unavailable"})
+        assert unavailable.status == "unavailable"
+        assert unavailable.unavailableCount == 1
 
     def test_per_item_coverage_is_not_inherited_from_a_sibling(self) -> None:
-        """5.5: a sibling item does not inherit its neighbour's verdict."""
+        """5.5: a sibling item does not inherit its neighbour's verdict, in either direction."""
 
         measured = _bound(_Binding(assessment_id="assessment-covered"))
         sibling = _bound(_Binding(assessment_id="assessment-sibling"))
@@ -624,7 +668,36 @@ class TestReadStates:
 
         by_id = {entry.assessmentId: entry.currentness for entry in state.assessments}
         assert by_id["assessment-covered"] == "current"
-        assert by_id["assessment-sibling"] == "stale"
+        # The sibling is neither promoted to ``current`` nor demoted to ``stale``: nothing measured
+        # it, and that is what it reports.
+        assert by_id["assessment-sibling"] == "not-measured"
+        assert state.status == "not-measured"
+
+    def test_the_five_binding_states_are_the_closed_vocabulary(self) -> None:
+        """The states the packet names are spelled once, and the vocabulary refuses a sixth."""
+
+        assert ASSESSMENT_BINDING_STATUSES == (
+            "not-measured",
+            "current",
+            "stale",
+            "unavailable",
+        )
+        assert set(SUBJECT_ASSESSMENT_STATUSES) == {
+            "none-recorded",
+            "unresolved",
+            "stale",
+            "not-measured",
+            "unavailable",
+            "current",
+        }
+        with pytest.raises(ValidationError):
+            AssessmentEntry.model_validate(
+                {
+                    "assessmentId": "assessment-B-M-F1-curator",
+                    "disposition": "concern_found",
+                    "currentness": "probably-fine",
+                }
+            )
 
     def test_a_projection_cannot_report_a_disposition_for_an_absent_subject(self) -> None:
         with pytest.raises(ValidationError):
@@ -652,6 +725,81 @@ class TestReadStates:
                 unresolvedCount=0,
                 staleCount=0,
             )
+
+    def test_a_status_that_contradicts_its_records_is_refused(self) -> None:
+        """A subject summary cannot claim currency its records do not state."""
+
+        record = _bound(_Binding(disposition="no_concern_found", finding=""))
+
+        with pytest.raises(ValidationError, match="does not follow from the records"):
+            SubjectAssessmentState(
+                status="current",
+                assessmentCount=1,
+                unresolvedCount=0,
+                staleCount=0,
+                notMeasuredCount=1,
+                assessments=(
+                    AssessmentEntry(
+                        assessmentId=record.assessmentId,
+                        disposition=record.disposition,
+                        currentness="not-measured",
+                    ),
+                ),
+            )
+
+    def test_a_count_that_does_not_describe_its_records_is_refused(self) -> None:
+        """The counts partition the records: a `current` summary cannot hold an unmeasured entry.
+
+        The counts are derived from the entries and compared back, so this state -- the one the
+        docstring's partition claims to forbid -- is unconstructible rather than merely unlikely. Both
+        refusal directions are measured: the same contradictory state under-counts `not-measured` for
+        a `not-measured` entry, and under-counts `unavailable` for an `unavailable` one.
+        """
+
+        unmeasured = AssessmentEntry(
+            assessmentId="AS-1", disposition="concern_found", currentness="not-measured"
+        )
+        with pytest.raises(
+            ValidationError, match="not-measured count does not describe the records"
+        ):
+            SubjectAssessmentState(
+                status="current",
+                assessmentCount=1,
+                unresolvedCount=0,
+                staleCount=0,
+                notMeasuredCount=0,
+                unavailableCount=0,
+                assessments=(unmeasured,),
+            )
+
+        unavailable = AssessmentEntry(
+            assessmentId="AS-2", disposition="concern_found", currentness="unavailable"
+        )
+        with pytest.raises(
+            ValidationError, match="unavailable count does not describe the records"
+        ):
+            SubjectAssessmentState(
+                status="unavailable",
+                assessmentCount=1,
+                unresolvedCount=0,
+                staleCount=0,
+                notMeasuredCount=0,
+                unavailableCount=0,
+                assessments=(unavailable,),
+            )
+
+        # The same records are representable once the counts tell the truth about them.
+        honest = SubjectAssessmentState(
+            status="not-measured",
+            assessmentCount=1,
+            unresolvedCount=0,
+            staleCount=0,
+            notMeasuredCount=1,
+            unavailableCount=0,
+            assessments=(unmeasured,),
+        )
+        assert honest.notMeasuredCount == 1
+        assert honest.assessments[0].currentness == "not-measured"
 
 
 class TestKnowledgeReviewSection:

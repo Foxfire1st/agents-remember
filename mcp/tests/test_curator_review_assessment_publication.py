@@ -548,18 +548,58 @@ class TestReadStatesOverAStoredCollection:
         # The record is still there: a mismatch is marked, never deleted to hide it.
         assert validated.record.assessments
 
-    def test_an_unmeasured_assessment_is_reported_stale_not_current(
+    def test_an_unmeasured_assessment_is_reported_not_measured_not_current(
         self, enclosure: tuple[WorktreeContract, TaskDocumentRef]
     ) -> None:
+        """``ICR-R15@v1``: an absent measurement is neither a movement nor a clearance.
+
+        The closeout projection and the review surface answer one question, so they answer it the
+        same way: a caller that supplied no measurement gets ``not-measured`` -- the state that says
+        nothing established whether the record still matches -- instead of a ``stale`` the store
+        never recorded. The two defects this replaces are asserted against each other here: an
+        absent measurement is not stale, and an empty one is not current.
+        """
+
         contract, sprint = enclosure
         _publish(contract, sprint, assessments=[_revision()])
 
         validated = require_current_curator_coherence(contract)
 
-        assert (
-            curator_coherence_subject_assessment_state(validated, "family:FAM-F").status == "stale"
-        )
+        state = curator_coherence_subject_assessment_state(validated, "family:FAM-F")
+        assert state.status == "not-measured"
+        assert state.notMeasuredCount == 1
+        assert state.staleCount == 0
+        assert state.assessments[0].currentness == "not-measured"
+
+        empty = curator_coherence_subject_assessment_state(validated, "family:FAM-F", current={})
+        assert empty.status == "not-measured"
+        assert empty.staleCount == 0
         assert all_assessment_subject_ids(validated) == ("family:FAM-F",)
+
+    def test_only_a_complete_measured_match_reports_the_stored_assessment_current(
+        self, enclosure: tuple[WorktreeContract, TaskDocumentRef]
+    ) -> None:
+        """Presence of a mapping decides nothing: coverage and equality do, through the comparison."""
+
+        contract, sprint = enclosure
+        _publish(contract, sprint, assessments=[_revision()])
+        validated = require_current_curator_coherence(contract)
+        stored = _stored(validated.record)
+        complete = dict(stored.examinedInputs.identities)
+
+        measured = curator_coherence_subject_assessment_state(
+            validated, "family:FAM-F", current={ASSESSMENT_ID: complete}
+        )
+        assert measured.status == "current"
+        assert measured.assessments[0].currentness == "current"
+
+        partial = dict(complete)
+        del partial[("code-tree", "candidate")]
+        uncovered = curator_coherence_subject_assessment_state(
+            validated, "family:FAM-F", current={ASSESSMENT_ID: partial}
+        )
+        assert uncovered.status == "not-measured"
+        assert uncovered.staleCount == 0
 
 
 class TestAssessmentRefusals:

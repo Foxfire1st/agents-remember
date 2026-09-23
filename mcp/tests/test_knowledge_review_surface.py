@@ -82,6 +82,7 @@ from agents_remember.models.lifecycles.review_assessment import (
     ReviewAssessmentDisposition,
     ReviewAssessmentRevision,
 )
+from agents_remember.models.lifecycles.review_assessment_binding import measured_currentness
 from agents_remember.models.lifecycles.review_assessment_store import (
     AssessmentInputs,
     bind_assessment,
@@ -720,18 +721,70 @@ def test_two_disagreeing_assessments_are_both_displayed_with_their_authors_and_n
     assert payload.evidence.assessment_state == "assessed"
     fields = set(ReviewAssessmentDisplay.model_fields)
     assert fields & {"resolution", "winner", "resolved", "conflict"} == set()
-    # An unmeasured assessment is reported stale rather than promoted to current.
-    assert {entry.binding_state for entry in shown} == {"stale"}
+    # Nothing measured these bindings, so they are reported `not-measured` -- never promoted to
+    # `current`, and never demoted to `stale`, which is a *measured* movement (``ICR-R15@v1``).
+    assert {entry.binding_state for entry in shown} == {"not-measured"}
 
 
-def test_a_measured_matching_binding_reports_the_assessment_current(fixture: DiffFixture) -> None:
-    """A caller that measured the world gets the assessment's own status, carried verbatim."""
+def test_only_a_complete_matching_measurement_reports_the_assessment_current(
+    fixture: DiffFixture,
+) -> None:
+    """``ICR-R15@v1``: the four measurement inputs, and only one of them is a currency claim.
+
+    The S26 anchor case asserted that supplying ``current={}`` yields ``current``; that is the
+    non-conforming example the packet names, and this case asserts the corrected behaviour for every
+    measurement input the adapter can be handed: absent, empty, mismatched and matching. Coverage
+    decides, and the shipped comparison decides equality within it -- an empty measurement covers
+    nothing and is therefore not a measurement of anything.
+    """
 
     stored = published_assessment(fixture)
-    payload = render(fixture, ReviewRecordInputs(assessments=(stored,), current={}))
-    assert [entry.binding_state for entry in payload.evidence.assessments] == ["current"]
-    assert payload.evidence.assessments[0].author_ref == "curator-3"
-    assert payload.evidence.assessments[0].examined_inputs
+    declared = dict(stored.examinedInputs.identities)
+
+    absent = render(fixture, ReviewRecordInputs(assessments=(stored,)))
+    assert [entry.binding_state for entry in absent.evidence.assessments] == ["not-measured"]
+
+    empty = render(
+        fixture,
+        ReviewRecordInputs(
+            assessments=(stored,),
+            currentness=measured_currentness({}, detail="the fixture measured nothing"),
+        ),
+    )
+    assert [entry.binding_state for entry in empty.evidence.assessments] == ["not-measured"]
+
+    moved = dict(declared)
+    moved[("code-tree", "candidate")] = ("git-object", "9" * 40)
+    mismatched = render(
+        fixture,
+        ReviewRecordInputs(
+            assessments=(stored,),
+            currentness=measured_currentness(moved, detail="the fixture measured a moved source"),
+        ),
+    )
+    assert [entry.binding_state for entry in mismatched.evidence.assessments] == ["stale"]
+
+    partial = dict(declared)
+    del partial[("code-tree", "candidate")]
+    incomplete = render(
+        fixture,
+        ReviewRecordInputs(
+            assessments=(stored,),
+            currentness=measured_currentness(partial, detail="the fixture measured part of it"),
+        ),
+    )
+    assert [entry.binding_state for entry in incomplete.evidence.assessments] == ["not-measured"]
+
+    matching = render(
+        fixture,
+        ReviewRecordInputs(
+            assessments=(stored,),
+            currentness=measured_currentness(declared, detail="the fixture measured the world"),
+        ),
+    )
+    assert [entry.binding_state for entry in matching.evidence.assessments] == ["current"]
+    assert matching.evidence.assessments[0].author_ref == "curator-3"
+    assert matching.evidence.assessments[0].examined_inputs
 
 
 # -- the worked review --------------------------------------------------------------------------
@@ -752,36 +805,63 @@ def test_the_worked_review_journey_renders_every_step_it_walks(fixture: DiffFixt
     assert fixture.unattributed_path in payload.source.unattributed_changed_paths
     # 4. Author an assessment bound to the exact examined inputs and read it back as authored.
     stored = published_assessment(fixture)
-    authored = render(fixture, ReviewRecordInputs(assessments=(stored,), current={}))
+    declared = dict(stored.examinedInputs.identities)
+    authored = render(
+        fixture,
+        ReviewRecordInputs(
+            assessments=(stored,),
+            currentness=measured_currentness(declared, detail="the journey measured the world"),
+        ),
+    )
     displayed = authored.evidence.assessments[0]
     assert displayed.author_ref == "curator-3"
     assert displayed.role_ref == "curator"
     assert displayed.binding_state == "current"
     assert displayed.evidence_refs == ("code:src/retry_interval.py",)
-    # 5. Change only the source: the assessment is stale, still readable, and never current again.
-    moved = render(fixture, ReviewRecordInputs(assessments=(stored,)))
+    # 5. Change only the source: the new measurement of the same world makes the assessment stale,
+    #    still readable, and never current again.
+    moved_world = dict(declared)
+    moved_world[("code-tree", "candidate")] = ("git-object", "9" * 40)
+    moved = render(
+        fixture,
+        ReviewRecordInputs(
+            assessments=(stored,),
+            currentness=measured_currentness(
+                moved_world, detail="the journey remeasured the source"
+            ),
+        ),
+    )
     after = moved.evidence.assessments[0]
     assert after.binding_state == "stale"
     assert after.assessment_id == displayed.assessment_id
     assert moved.evidence.assessment_state == "assessed"
+    # ... and a read that measured nothing says so instead of inheriting either answer.
+    unmeasured = render(fixture, ReviewRecordInputs(assessments=(stored,)))
+    assert unmeasured.evidence.assessments[0].binding_state == "not-measured"
 
 
 def test_a_stale_assessment_is_never_reused_as_a_review_of_the_new_candidate(
     fixture: DiffFixture,
 ) -> None:
-    """The stale assessment stays displayed as stale, and submission against it is disabled."""
+    """A measured-stale assessment stays displayed as stale, and submission against it is disabled."""
 
     stored = published_assessment(fixture)
+    moved_world = dict(stored.examinedInputs.identities)
+    moved_world[("code-tree", "candidate")] = ("git-object", "9" * 40)
     payload = render(
         fixture,
-        ReviewRecordInputs(assessments=(stored,)),
+        ReviewRecordInputs(
+            assessments=(stored,),
+            currentness=measured_currentness(moved_world, detail="the comparison moved"),
+        ),
         previous_binding_digest="9" * 64,
     )
     assert payload.evidence.assessments[0].binding_state == "stale"
     assert payload.submission.state == "disabled_stale"
-    # Re-rendering against the current comparison does not carry the old status forward.
-    fresh = render(fixture, ReviewRecordInputs(assessments=(stored,), current={}))
-    assert fresh.evidence.assessments[0].binding_state == "current"
+    # Re-rendering against the current comparison does not carry the old status forward, and a read
+    # nobody measured reports `not-measured` rather than inheriting either answer.
+    fresh = render(fixture, ReviewRecordInputs(assessments=(stored,)))
+    assert fresh.evidence.assessments[0].binding_state == "not-measured"
 
 
 # -- resolution and transport -------------------------------------------------------------------

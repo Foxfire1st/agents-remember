@@ -72,16 +72,47 @@ ASSESSMENT_SUBJECT_KINDS: tuple[AssessmentSubjectKind, ...] = (
 # appear without a decision, rather than being discovered by the resolver at read time.
 AssessmentEvidenceNamespace = Literal["code", "memory", "task"]
 
+# The states one stored assessment's *binding* can be in, and the four are four different facts
+# (``ICR-R15@v1``). ``not-measured`` is the state of a binding nothing measured: it is neither a
+# favourable answer nor a staleness, because reporting an unmeasured binding as either would publish
+# a fact the store never held. ``unavailable`` is a measurement that was attempted and failed.
+# ``current`` and ``stale`` are the two states a *completed* measurement can produce, and
+# ``stale`` is produced only by a measured disagreement -- the shipped comparison's own answer.
+AssessmentBindingStatus = Literal["not-measured", "current", "stale", "unavailable"]
+ASSESSMENT_BINDING_STATUSES: tuple[AssessmentBindingStatus, ...] = (
+    "not-measured",
+    "current",
+    "stale",
+    "unavailable",
+)
+
 # The states the read layer must report distinctly (requirement 4.3). ``none-recorded`` is a state of
 # the *subject*, not a disposition: it exists precisely so absence never has to be spelled as a
-# fourth disposition value.
-SubjectAssessmentStatus = Literal["none-recorded", "unresolved", "stale", "current"]
+# fourth disposition value. ``not-measured`` and ``unavailable`` are the two states a subject with
+# stored records is in when nothing established whether those records still match: an unassessed
+# subject, an unmeasured one and an unreadable measurement are three different answers, and the
+# subject status carries them apart exactly as the per-record status does.
+SubjectAssessmentStatus = Literal[
+    "none-recorded",
+    "unresolved",
+    "stale",
+    "not-measured",
+    "unavailable",
+    "current",
+]
 SUBJECT_ASSESSMENT_STATUSES: tuple[SubjectAssessmentStatus, ...] = (
     "none-recorded",
     "unresolved",
     "stale",
+    "not-measured",
+    "unavailable",
     "current",
 )
+
+# The currentness states a subject's records are counted by. Declared once, beside the vocabulary,
+# because the projection's counts and its status must describe one population: the status is the
+# most consequential of these that the subject holds, and the counts are how many of each.
+CURRENTNESS_STATES: tuple[AssessmentBindingStatus, ...] = ASSESSMENT_BINDING_STATUSES
 
 
 class _StrictAssessmentModel(BaseModel):
@@ -406,11 +437,17 @@ def recorded_assessment_digest(assessment: ReviewAssessment) -> str:
 
 
 class AssessmentEntry(_StrictAssessmentModel):
-    """One assessment as a projection reports it: identity, disposition and currentness."""
+    """One assessment as a projection reports it: identity, disposition and currentness.
+
+    ``currentness`` is one of :data:`AssessmentBindingStatus` -- the state a *measurement* put this
+    record's binding in, or ``not-measured`` when nothing measured it. There is no default that
+    promotes an unmeasured record to ``current`` and none that demotes it to ``stale``: a record
+    whose binding nothing measured is reported as exactly that.
+    """
 
     assessmentId: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     disposition: ReviewAssessmentDisposition
-    currentness: Literal["current", "stale"]
+    currentness: AssessmentBindingStatus
 
 
 class SubjectAssessmentState(_StrictAssessmentModel):
@@ -419,12 +456,22 @@ class SubjectAssessmentState(_StrictAssessmentModel):
     ``status`` is one of :data:`SubjectAssessmentStatus`. ``none-recorded`` carries an empty
     ``assessments`` tuple and a zero count, and there is no path through this model that produces a
     disposition for a subject with no stored assessment.
+
+    The four currentness counts partition the stored records: ``staleCount`` counts measured
+    disagreements, ``notMeasuredCount`` counts records no measurement covered, ``unavailableCount``
+    counts records whose measurement failed, and the remainder are measured current. The partition is
+    *enforced*, not promised: every count must equal the number of entries that carry its state, the
+    three of them together may not exceed the records, and ``status`` must be the status those entries
+    themselves state. A summary able to disagree with the records it summarises -- a ``current``
+    subject holding an entry nothing measured, say -- is therefore unrepresentable.
     """
 
     status: SubjectAssessmentStatus
     assessmentCount: int = Field(ge=0)
     unresolvedCount: int = Field(ge=0)
     staleCount: int = Field(ge=0)
+    notMeasuredCount: int = Field(ge=0, default=0)
+    unavailableCount: int = Field(ge=0, default=0)
     assessments: tuple[AssessmentEntry, ...] = ()
 
     @model_validator(mode="after")
@@ -435,30 +482,92 @@ class SubjectAssessmentState(_StrictAssessmentModel):
             raise ValueError("a subject with no recorded assessment cannot report one")
         if self.status != "none-recorded" and not self.assessments:
             raise ValueError("a subject with a recorded assessment cannot report none")
+        self._require_the_counts_to_partition_the_records()
+        if self.unresolvedCount > self.assessmentCount:
+            raise ValueError("the unresolved count cannot exceed the records it counts")
+        if self.assessmentCount and self._status_of_records() != self.status:
+            raise ValueError(
+                f"status {self.status!r} does not follow from the records: their states are "
+                f"{', '.join(entry.currentness for entry in self.assessments)}"
+            )
         return self
+
+    def _require_the_counts_to_partition_the_records(self) -> None:
+        """Refuse a count that does not describe the entries carrying its state.
+
+        Each currentness count is derived from the records and compared back to the field, and the
+        three plus the measured-current remainder are required to be exactly the record set. This is
+        the check that makes "the counts partition the records" a property of the model rather than a
+        sentence in its docstring: without it a state could report ``current`` with
+        ``notMeasuredCount=0`` while its own entry declares ``not-measured``.
+        """
+
+        counted = {
+            "stale": self.staleCount,
+            "not-measured": self.notMeasuredCount,
+            "unavailable": self.unavailableCount,
+        }
+        carried = {
+            state: sum(1 for entry in self.assessments if entry.currentness == state)
+            for state in counted
+        }
+        for state, declared in counted.items():
+            if carried[state] != declared:
+                raise ValueError(
+                    f"the {state} count does not describe the records: {declared} claimed, "
+                    f"{carried[state]} of the stored records carry that state"
+                )
+        current = sum(1 for entry in self.assessments if entry.currentness == "current")
+        if current != self.assessmentCount - sum(counted.values()):
+            raise ValueError(
+                "the currentness counts do not partition the records: every stored record is in "
+                "exactly one binding state"
+            )
+
+    def _status_of_records(self) -> SubjectAssessmentStatus:
+        """Return the status these records themselves state, in precedence order."""
+
+        states = {entry.currentness for entry in self.assessments}
+        if "stale" in states:
+            return "stale"
+        if "unavailable" in states:
+            return "unavailable"
+        if self.unresolvedCount:
+            return "unresolved"
+        if "not-measured" in states:
+            return "not-measured"
+        return "current"
 
 
 def assessment_state_for(
     assessments: Sequence[ReviewAssessment],
     *,
-    stale_ids: Sequence[str] = (),
+    statuses: Mapping[str, AssessmentBindingStatus] | None = None,
 ) -> SubjectAssessmentState:
     """Project stored assessments onto the distinct states the read layer must report.
 
-    The states are ``none-recorded`` (no stored record for the subject), ``unresolved`` (a stored
-    record whose disposition is ``unresolved``), ``stale`` (a stored record no longer bound to
-    current inputs) and ``current``. They are not one "not compatible" state, and this function never
-    manufactures a disposition: ``assessmentCount`` counts records that exist, so a subject with no
-    stored assessment answers zero and ``none-recorded`` -- requirement 4.4's rule, expressed as the
-    only place this package produces such a count.
+    ``statuses`` is the *measured* binding status of each assessment -- the answer of the currentness
+    measurement, keyed by assessment identity. An assessment the caller measured nothing for is
+    reported ``not-measured``, which is requirement 4.3's fifth state and the one this signature
+    exists to make unavoidable: there is no argument that means "assume current" and none that means
+    "assume stale", so a projection can neither grant currency nor manufacture a staleness from the
+    absence of a measurement.
+
+    The states a subject answers are ``none-recorded`` (no stored record for the subject),
+    ``stale`` (a measured record whose binding moved), ``unavailable`` (a measurement that failed),
+    ``unresolved`` (a stored record whose disposition is ``unresolved``), ``not-measured`` (stored
+    records nothing measured) and ``current`` (every stored record measured and matching). They are
+    ordered by what a reader has to act on first, and they are not one "not compatible" state: this
+    function never manufactures a disposition, and ``assessmentCount`` counts records that exist --
+    requirement 4.4's rule, expressed as the only place this package produces such a count.
     """
 
-    stale = frozenset(stale_ids)
+    measured = {} if statuses is None else dict(statuses)
     entries = tuple(
         AssessmentEntry(
             assessmentId=assessment.assessmentId,
             disposition=assessment.disposition,
-            currentness="stale" if assessment.assessmentId in stale else "current",
+            currentness=measured.get(assessment.assessmentId, "not-measured"),
         )
         for assessment in assessments
     )
@@ -466,8 +575,12 @@ def assessment_state_for(
         status: SubjectAssessmentStatus = "none-recorded"
     elif any(entry.currentness == "stale" for entry in entries):
         status = "stale"
+    elif any(entry.currentness == "unavailable" for entry in entries):
+        status = "unavailable"
     elif any(entry.disposition == "unresolved" for entry in entries):
         status = "unresolved"
+    elif any(entry.currentness == "not-measured" for entry in entries):
+        status = "not-measured"
     else:
         status = "current"
     return SubjectAssessmentState(
@@ -475,14 +588,19 @@ def assessment_state_for(
         assessmentCount=len(entries),
         unresolvedCount=sum(1 for entry in entries if entry.disposition == "unresolved"),
         staleCount=sum(1 for entry in entries if entry.currentness == "stale"),
+        notMeasuredCount=sum(1 for entry in entries if entry.currentness == "not-measured"),
+        unavailableCount=sum(1 for entry in entries if entry.currentness == "unavailable"),
         assessments=entries,
     )
 
 
 __all__ = [
+    "ASSESSMENT_BINDING_STATUSES",
     "ASSESSMENT_SUBJECT_KINDS",
+    "CURRENTNESS_STATES",
     "REVIEW_ASSESSMENT_DISPOSITIONS",
     "SUBJECT_ASSESSMENT_STATUSES",
+    "AssessmentBindingStatus",
     "AssessmentEntry",
     "AssessmentEvidenceByte",
     "AssessmentEvidenceNamespace",

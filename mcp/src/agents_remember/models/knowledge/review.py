@@ -551,9 +551,9 @@ class ReviewSignal(KnowledgeModel):
 class ReviewAssessmentDisplay(KnowledgeModel):
     """One authored assessment as displayed: disposition, author, examined inputs, binding status.
 
-    ``binding_state`` is the authority's own recorded status, carried verbatim: the surface never
-    upgrades a stale assessment to current, and it never re-labels a recorded disposition as its own
-    conclusion.
+    ``binding_state`` is what a *measurement* put this binding in, carried verbatim: ``current`` and
+    ``stale`` are a completed measurement's two answers, ``not-measured`` says nothing measured the
+    record, and ``unavailable`` says the measurement failed (``ICR-R15@v1``).
     """
 
     applicability: ReviewDisplayedApplicability | None = None

@@ -811,6 +811,7 @@ def curator_knowledge_review_summaries(
                     scopeRefs=tuple(dict.fromkeys(item.scopeManifestRef for item in records)),
                     unresolvedCount=state.unresolvedCount,
                     staleCount=state.staleCount,
+                    notMeasuredCount=state.notMeasuredCount,
                 )
             )
         )

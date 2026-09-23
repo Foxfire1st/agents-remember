@@ -513,14 +513,17 @@ def _selector_id(selector: KnowledgeReadSeed | None) -> str | None:
 def _record_binding(records: ReviewRecordInputs) -> ComparisonRecordBinding:
     """Bind the record collections the composition supplied, as counts and one digest.
 
-    ``current`` is deliberately *not* digested: it is a caller measurement keyed by tuples, which has
-    no canonical JSON spelling, and inventing one would make the digest depend on an encoding this
-    record does not own. Whether a measurement was supplied at all is recorded instead -- the fact a
-    reader needs -- and what the measurement said remains the projection owner's to report.
+    A currentness measurement is deliberately *not* digested: it is a measurement keyed by tuple
+    identities, which has no canonical JSON spelling, and inventing one would make the digest depend
+    on an encoding this record does not own. Whether a measurement was **performed** is recorded
+    instead -- the fact a reader needs -- and what the measurement established remains the projection
+    owner's to report. A bundle that carried no measurement, or one that failed, is therefore not
+    recorded as measured (``ICR-R15@v1``): the presence of a value is not a measurement.
     """
 
+    measured = records.currentness is not None and records.currentness.state == "measured"
     counts = (len(records.assessments), len(records.signals), len(records.observations))
-    supplied = any(counts) or records.current is not None
+    supplied = any(counts) or measured
     digest = sha256_digest(
         {
             "assessments": [record.model_dump(mode="json") for record in records.assessments],
@@ -528,17 +531,17 @@ def _record_binding(records: ReviewRecordInputs) -> ComparisonRecordBinding:
             "observations": [record.model_dump(mode="json") for record in records.observations],
         }
     )
-    measured = ", with a currentness measurement" if records.current is not None else ""
+    note = ", with a currentness measurement" if measured else ""
     return ComparisonRecordBinding(
         state="supplied" if supplied else "not-supplied",
         assessments=counts[0],
         signals=counts[1],
         observations=counts[2],
-        current_measured=records.current is not None,
+        current_measured=measured,
         collection_digest=digest,
         detail=(
             f"the composition supplied {counts[0]} assessments, {counts[1]} signals and "
-            f"{counts[2]} observations{measured}; whether an owner published none or could not be "
+            f"{counts[2]} observations{note}; whether an owner published none or could not be "
             "read is R14's fact, and this record asserts neither"
         ),
     )

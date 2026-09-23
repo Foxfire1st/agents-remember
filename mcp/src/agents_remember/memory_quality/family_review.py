@@ -428,6 +428,7 @@ def family_review_summaries(
                     scopeRefs=tuple(dict.fromkeys(record.scopeManifestRef for record in records)),
                     unresolvedCount=state.unresolvedCount,
                     staleCount=state.staleCount,
+                    notMeasuredCount=state.notMeasuredCount,
                 )
             )
         )
@@ -441,9 +442,13 @@ def reported_subject_status(
 ) -> SubjectAssessmentStatus:
     """Return one subject's reportable state, through ``KS-R15@v1``'s own projection.
 
-    The states are ``none-recorded``, ``unresolved``, ``stale`` and ``current``; there is no
-    "compatible" and no default, so a subject nobody reviewed answers ``none-recorded`` rather than the
-    absence being rendered as a clearance (``Doc13:104``).
+    The states are ``none-recorded``, ``stale``, ``unavailable``, ``unresolved``, ``not-measured`` and
+    ``current`` -- the whole of :data:`…review_assessment.SUBJECT_ASSESSMENT_STATUSES`, in the order
+    the projection prefers them. ``not-measured`` is what a caller whose measurement covered none of
+    the record's declared inputs gets, and ``unavailable`` is what a failed measurement gets; neither
+    is a clearance and neither is a movement. There is no "compatible" and no default, so a subject
+    nobody reviewed answers ``none-recorded`` rather than the absence being rendered as a clearance
+    (``Doc13:104``).
     """
 
     records = [
