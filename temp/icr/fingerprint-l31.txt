@@ -1,0 +1,58 @@
+# Candidate fingerprint for 260921-ICR-L31 (ICR-R31@v1) — FIX ROUND 1
+
+Recipe: temp/icr/fingerprint-l31.sh — reading 1 is `git diff | sha256sum`; reading 2 is
+`git status --porcelain` (LC_ALL=C sorted) plus its entry count; reading 3 is one sha256sum
+per deliverable changed/untracked file rendered '<sha256>  <path>', sorted by path, joined by
+newlines, hashed whole. Exclusions: temp/ (this leaf's evidence, named by reading 2 anyway) and
+__pycache__/ + *.pyc. Two readings were taken >90 s apart with no writes between them and are
+byte-identical (39 lines each, diff exit 0):
+
+== 1. tracked delta ==
+3d55a9273d62c7d829ed03cc88e30f03b6d01391cf12fe08d72ae5519aa8a3d4  -
+== 2. status entries ==
+ M mcp/src/agents_remember/application/knowledge_review.py
+ M mcp/src/agents_remember/application/review_task_context.py
+ M mcp/src/agents_remember/models/knowledge/review.py
+ M mcp/tests/evidence-lifecycle.toml
+ M mcp/tests/test-evidence-lanes.toml
+ M mcp/tests/test_dependency_ownership_ast_helpers.py
+?? mcp/src/agents_remember/application/review_family_context.py
+?? mcp/src/agents_remember/application/review_family_rosters.py
+?? mcp/src/agents_remember/models/knowledge/review_family_context.py
+?? mcp/tests/test_review_family_context.py
+?? mcp/tests/test_review_family_context_population.py
+?? mcp/tests/test_review_family_context_values.py
+?? temp/icr/base-defect-l31.txt
+?? temp/icr/fingerprint-l31.sh
+?? temp/icr/fingerprint-l31.txt
+?? temp/icr/fix-round-1-prefix-failures.txt
+?? temp/icr/mutations-l31.py
+?? temp/icr/mutations-l31.txt
+?? temp/icr/probe-l31-base-defect.py
+?? temp/icr/report-l31.md
+?? temp/icr/verify-l31.md
+status_entry_count=21
+== 3. deliverable per-file digests, sorted by path ==
+65373258e91b02346ecdc13c6a01749778862b623b81da773ed46a4d55f316de  mcp/src/agents_remember/application/knowledge_review.py
+29661d3b57f8e0ddb1129a47f97fa0d57654379a278b39cb20f92096bbb7bbd0  mcp/src/agents_remember/application/review_family_context.py
+e517443a546e1f997c015dfb485504d9872874d07a813f92fbc54fce6deb95bf  mcp/src/agents_remember/application/review_family_rosters.py
+4df1c560d1d649334894fe94f8615c1a789c83634c28f60d46a2dd63cd63b9e9  mcp/src/agents_remember/application/review_task_context.py
+d43ceb7c824acc0f541313f23356144aa866612abb1412dd26d2d5eb35cd336a  mcp/src/agents_remember/models/knowledge/review.py
+9d71d9e04626f6bc3658728ab565eee92e67ec25b233deda56d0e85e0fe45a2b  mcp/src/agents_remember/models/knowledge/review_family_context.py
+23dd7c0f85b50585e8968122f60f50e87e15bfbfa241b28b77b7c71b2a41e252  mcp/tests/evidence-lifecycle.toml
+8020b0dc2d1226dfef0348d85e1be06bc2f4b75b177a6c0211ab2d2ed9d467d5  mcp/tests/test-evidence-lanes.toml
+efa018effb069abe7c5a003da15b6ec2dfcc28b8aa61da4ada32afd218742ff0  mcp/tests/test_dependency_ownership_ast_helpers.py
+375b90f94f66f86172b8f22b171f73ce51dcec03a1228176ce7a8a0bdb72f0e8  mcp/tests/test_review_family_context.py
+0a850b4efe02a9d5bd27cb8c69a306be4f5a8ff8b8050fc7e3093b2f7682f58c  mcp/tests/test_review_family_context_population.py
+7621a3d4a5d0c2e6171225d6fcf7811a321c7ba5dd9fb4f4073d8b82181820e7  mcp/tests/test_review_family_context_values.py
+1a86bb47f4d3feeb25da3e38412d71abb32b1b5f2cf03f080476b0619fa0c6e8  -
+
+READING 2 (taken >90 s after READING 1, no writes between them) is byte-identical to READING 1.
+
+The round-0 readings (before this fix round) were: tracked delta 69136411…, whole-list
+5e80ce61…, 34 lines; this fix round changed eight deliverable files and added three, which is the
+delta between the two readings.
+
+Note: this evidence file itself is written after both readings, so the status list of a re-run
+gains temp/icr/fingerprint-l31.txt. Readings 1 and 3 are unaffected: they cover the tracked delta
+and the deliverable paths only.

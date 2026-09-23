@@ -84,6 +84,7 @@ from agents_remember.models.knowledge.review import (
     ReviewStaleness,
     ReviewSurfaceRequest,
 )
+from agents_remember.models.knowledge.review_family_context import ReviewFamilyContext
 from agents_remember.models.lifecycles.review_assessment import SubjectAssessmentState
 
 __all__ = ["pair_attribution", "task_context_review"]
@@ -150,6 +151,17 @@ def task_context_review(
             # No comparison travels beside the inventory: this review selected no subject.
             source=source_pane(None, inventory, attribution),
             evidence=evidence_pane((), records, subjects, applicability),
+            # A review that selected no subject composed no family context, and it says so with the
+            # one state that claims nothing: the recorded families of a subject nobody named are not
+            # an unread scope, an unavailable one or a measured zero (ICR-R31@v1).
+            family_context=ReviewFamilyContext(
+                state="no_subject_selected",
+                detail=(
+                    "no knowledge subject was selected for this review, so no recorded family, "
+                    "guarantee or member roster was resolved; the Source pane carries the complete "
+                    "inventory of the bound source pair independently of any family membership"
+                ),
+            ),
             staleness=ReviewStaleness(
                 state="not_compared",
                 statement=(

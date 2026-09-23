@@ -101,6 +101,12 @@ from agents_remember.application.review_evidence_records import (
     with_selection_channels,
 )
 from agents_remember.application.review_external_git_movement import external_git_movement
+from agents_remember.application.review_family_context import (
+    FAMILY_MEMBERS_COLLECTION,
+    FamilyContextSources,
+    review_family_context,
+)
+from agents_remember.application.review_family_rosters import family_collection_refusal
 from agents_remember.application.review_pagination import (
     RecordsPagePosition,
     comparison_page,
@@ -520,6 +526,36 @@ def compose_review(
             after_code=after_source,
         ),
     )
+    # The recorded families this selection belongs to, their independently authored guarantees and
+    # their complete recorded member rosters are composed here, once, after the relationship union
+    # the member contexts reference (ICR-R31@v1). The composition calls the shipped read operation
+    # and the family/membership owners; it selects no subject, widens no scope and concludes nothing
+    # about a guarantee, and its one bounded collection is continued with the read owner's own cursor.
+    family = review_family_context(
+        FamilyContextSources(
+            repository_id=resolved.repository_id,
+            namespace=opened,
+            before_database=resolved.baseline_database,
+            after_database=resolved.candidate_database,
+            selector=request.selector,
+            before_code_root=resolved.baseline_code_root,
+            after_code_root=resolved.candidate_code_root,
+            before_code_tree_id=resolved.baseline_code_tree_id,
+            after_code_tree_id=resolved.candidate_code_tree_id,
+            movements=relationships,
+            page_size=_review_page_size(request),
+        ),
+        continuation=request.continuation if request.page_of == FAMILY_MEMBERS_COLLECTION else None,
+    )
+    # The family roster is the third bounded collection and its page is the projection's own: the
+    # read owner minted the cursor and measured the counts, so neither is restated here. A request
+    # naming that collection without a cursor addressed no single walk -- it is a set of per-family
+    # walks -- and earns the collection's own refusal instead of an arbitrary one of them.
+    if request.page_of == FAMILY_MEMBERS_COLLECTION:
+        published_page = family.page
+        page_refusal = family.refusal or (
+            None if family.page is not None else family_collection_refusal()
+        )
     # Which supplied record may be displayed beside *this* subject, and why, is decided once, here,
     # before either pane renders anything (ICR-R26@v1); the panes receive what it kept.
     applicability = review_applicability(
@@ -550,6 +586,7 @@ def compose_review(
                 comparison, inventory, _comparison_attribution(comparison), relationships
             ),
             evidence=evidence_pane(displayed_rows, records, subjects, applicability),
+            family_context=family.context,
             staleness=staleness,
             submission=submission(stale),
             sync_movement=sync_movement,
@@ -622,7 +659,9 @@ def _collection_page(
     """
 
     collection = request.page_of
-    if collection is None:
+    if collection is None or collection == FAMILY_MEMBERS_COLLECTION:
+        # A request that named no collection pages nothing, and the family roster collection is the
+        # projection's own page rather than one of this function's two owners.
         return None
     if collection == "knowledge":
         scope = _knowledge_scope(request, comparison)

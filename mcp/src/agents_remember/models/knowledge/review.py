@@ -46,6 +46,7 @@ from agents_remember.models.knowledge.review_applicability import (
     ReviewDisplayedApplicabilityState,
 )
 from agents_remember.models.knowledge.review_external_movement import ExternalGitMovement
+from agents_remember.models.knowledge.review_family_context import ReviewFamilyContext
 from agents_remember.models.knowledge.review_records import (
     ReviewRecordChannel,
     ReviewRecordChannelState,
@@ -160,14 +161,19 @@ ReviewRefusalCode = Literal[
     "review_adapter_unavailable",
 ]
 
-# The two bounded collections one review composes, declared once so the request, the payload and the
-# transport cannot come to disagree about which one a cursor addresses (ICR-R10). They are separate
-# because their cursors are separate shipped documents -- the comparison's own cursor positions a
-# page in a union of two snapshots, and the view's continuation positions one in a single selection
-# of one of them -- and presenting either to the other operation is a caller's mistake that the
-# owners refuse rather than a slice this surface may reinterpret.
-ReviewPagedCollection = Literal["knowledge", "records"]
-REVIEW_PAGED_COLLECTIONS: tuple[ReviewPagedCollection, ...] = ("knowledge", "records")
+# The three bounded collections one review composes, declared once so the request, the payload and
+# the transport cannot come to disagree about which one a cursor addresses (ICR-R10). They are
+# separate because their cursors are separate shipped documents -- the comparison's own cursor
+# positions a page in a union of two snapshots, the view's continuation positions one in a single
+# selection of one of them, and the family roster's cursor is the read operation's own position in
+# one recorded family revision's scope (ICR-R31) -- and presenting one to another collection's owner
+# is a caller's mistake that the owners refuse rather than a slice this surface may reinterpret.
+ReviewPagedCollection = Literal["knowledge", "records", "family_members"]
+REVIEW_PAGED_COLLECTIONS: tuple[ReviewPagedCollection, ...] = (
+    "knowledge",
+    "records",
+    "family_members",
+)
 
 # The one sentence a page cursor that no longer binds its comparison earns. It is the *new
 # generation* action ICR-R10 requires of a moved snapshot: the cursor is not re-resolved, not
@@ -1008,7 +1014,10 @@ class KnowledgeReviewPayload(KnowledgeModel):
     exactly when the request named one, and it carries that collection's total, returned and remaining
     counts, the filters that were active, and the cursor that reaches the rest -- so a reader is never
     shown a remainder without the way to reach it. A request that named no collection pages nothing
-    and carries no page, which is a different fact from a page with nothing left in it.
+    and carries no page, which is a different fact from a page with nothing left in it. The one
+    collection that is a *set* of walks rather than a single one is the family roster: a request names
+    it with the cursor of the walk it continues, and naming it without one earns the refusal below
+    instead of an arbitrary walk's page.
     """
 
     surface_version: str = Field(
@@ -1019,6 +1028,11 @@ class KnowledgeReviewPayload(KnowledgeModel):
     knowledge: ReviewKnowledgePane
     source: ReviewSourcePane
     evidence: ReviewEvidencePane
+    # The recorded families the selected subject belongs to on each bound snapshot, with each selected
+    # family revision's own guarantee and its recorded member roster (ICR-R31@v1). It is required, not
+    # optional: every review answers the question, and a selection that read its scope and holds no
+    # family states ``no_family_recorded`` rather than leaving an absent field to be read as one.
+    family_context: ReviewFamilyContext
     staleness: ReviewStaleness
     submission: ReviewSubmission
     # What this leaf's own managed syncs measured against the generation it published (ICR-R22@v1),
