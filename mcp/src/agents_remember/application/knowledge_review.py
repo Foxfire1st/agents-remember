@@ -28,7 +28,7 @@ because resolution is a responsibility of its own and because this adapter is at
 file-size rail; ``review_candidate_resolution`` is the one implementation, and the names re-exported
 below are that module's -- there is no second resolution path here.
 
-**Five more responsibilities this adapter hands to their own modules, for the same reason.**
+**Six more responsibilities this adapter hands to their own modules, for the same reason.**
 :mod:`agents_remember.application.review_source_inventory` measures the exact source-change inventory
 of the bound pair and renders the source pane; :mod:`agents_remember.application.review_record_rendering`
 renders the record collections the caller supplied into the evidence and submission values;
@@ -41,7 +41,10 @@ ICR-R07's explicit revision comparison; :mod:`agents_remember.application.review
 enumerates the entry's labelled subject catalogue from both snapshots' own identity tables, with
 totals and per-row presence, comparing no subject to earn its row (ICR-R09); and
 :mod:`agents_remember.application.review_task_context` composes the entry that needs no
-selected subject. Each is one responsibility with one implementation, and every name an importer
+selected subject; and :mod:`agents_remember.application.review_comparison_staleness` carries the
+comparison's own declared identity and the staleness that identity earns against the previous
+binding a refresh read supplies (ICR-R17). Each is one responsibility with one implementation, and
+every name an importer
 referenced is re-exported below so no importer had to learn a new home -- the statement-side helpers
 are the one move that leaves no alias, because they were private to this adapter and no module under
 ``mcp/`` imported them, the head-selection rule likewise leaves no alias because the
@@ -79,6 +82,10 @@ from agents_remember.application.review_candidate_resolution import (
 from agents_remember.application.review_committed_leaf import (
     closed_leaf_dataset_refusal,
     closed_leaf_limitations,
+)
+from agents_remember.application.review_comparison_staleness import (
+    comparison_identity,
+    review_staleness,
 )
 from agents_remember.application.review_evidence_records import (
     AUTHORED_EFFECT_KINDS,
@@ -149,7 +156,6 @@ from agents_remember.models.knowledge.diff import (
 )
 from agents_remember.models.knowledge.read import KnowledgeReadSeed
 from agents_remember.models.knowledge.review import (
-    ComparisonIdentity,
     KnowledgeReviewPayload,
     KnowledgeReviewResult,
     ReviewCollectionPage,
@@ -159,7 +165,6 @@ from agents_remember.models.knowledge.review import (
     ReviewRevisionGroup,
     ReviewSideContent,
     ReviewSourceInventory,
-    ReviewStaleness,
     ReviewSurfaceRequest,
 )
 from agents_remember.models.knowledge.view import (
@@ -205,16 +210,17 @@ def read_knowledge_review(
     request: ReviewSurfaceRequest,
     records: ReviewRecordInputs = EMPTY_REVIEW_RECORDS,
     *,
-    previous_binding_digest: str | None = None,
     probe: TreeDifferenceProbe | None = None,
 ) -> KnowledgeReviewResult:
     """Resolve the candidate the task context names, then render its review.
 
-    ``previous_binding_digest`` is the comparison an already-displayed assessment was made against.
+    ``request.previous_binding_digest`` is the comparison an already-displayed assessment was made
+    against -- the identity a reader was looking at, carried on the read that replaces it (ICR-R17).
     When it disagrees with the comparison rendered now, the payload is ``stale``: the previous
     comparison is retained as a *labelled previous input* and submission is disabled against it, so
     a judgement made about inputs that have since moved is never re-presented as a review of what is
-    there now.
+    there now. It travels on the request rather than beside it because there is one spelling of what
+    was asked, and the composition below reads it from there.
     """
 
     resolved = resolve_review_candidate(
@@ -226,13 +232,7 @@ def read_knowledge_review(
     )
     if isinstance(resolved, ReviewRefusal):
         return refused(request.repository_id, resolved)
-    return compose_review(
-        resolved,
-        request,
-        records,
-        previous_binding_digest=previous_binding_digest,
-        probe=probe,
-    )
+    return compose_review(resolved, request, records, probe=probe)
 
 
 def list_knowledge_review_entries(
@@ -355,7 +355,6 @@ def compose_review(
     request: ReviewSurfaceRequest,
     records: ReviewRecordInputs = EMPTY_REVIEW_RECORDS,
     *,
-    previous_binding_digest: str | None = None,
     probe: TreeDifferenceProbe | None = None,
 ) -> KnowledgeReviewResult:
     """Render one review over two already-resolved datasets. Selects nothing; calls the operations.
@@ -459,11 +458,13 @@ def compose_review(
     if moved is not None:
         return refused(request.repository_id, moved)
 
-    identity = _comparison_identity(comparison)
+    identity = comparison_identity(comparison)
     subjects = subject_states(records)
-    stale = (
-        previous_binding_digest is not None and previous_binding_digest != identity.binding_digest
-    )
+    # One comparison and one answer about it: the state the payload publishes and the submission
+    # state beside it are read from the same rule, so "an assessment is never submitted against a
+    # comparison that has moved" cannot be true of one field and false of the other.
+    staleness = review_staleness(identity, request.previous_binding_digest)
+    stale = staleness.state == "stale"
     # The reviewed identity's explicit revision selection is made here, from the comparison's
     # own union items and the two snapshots' own authored edges, and the pane renders it: the
     # adapter resolves, calls and assembles, and the head rule lives in its own module.
@@ -519,7 +520,7 @@ def compose_review(
                 comparison, inventory, _comparison_attribution(comparison), relationships
             ),
             evidence=evidence_pane(displayed_rows, records, subjects, applicability),
-            staleness=_staleness(identity, previous_binding_digest),
+            staleness=staleness,
             submission=submission(stale),
             page=published_page,
             # A requested page the owner could not serve is stated as the refusal it is: a page value
@@ -901,25 +902,6 @@ def _comparison_refusal(
     )
 
 
-def _comparison_identity(comparison: KnowledgeDiffResult) -> ComparisonIdentity:
-    """The comparison's own declared identity, carried verbatim and never recomputed."""
-
-    binding = comparison.binding
-    digest = comparison.binding_digest
-    selector_digest = comparison.selector_digest
-    assert binding is not None and digest is not None and selector_digest is not None
-    return ComparisonIdentity(
-        reference=digest,
-        policy_version=comparison.policy_version,
-        binding_digest=digest,
-        selector_digest=selector_digest,
-        before_snapshot_digest=binding.before.logical_digest,
-        after_snapshot_digest=binding.after.logical_digest,
-        before_code_tree_id=binding.before_code_tree_id,
-        after_code_tree_id=binding.after_code_tree_id,
-    )
-
-
 def _limitations(
     comparison: KnowledgeDiffResult, inventory: ReviewSourceInventory
 ) -> tuple[str, ...]:
@@ -943,24 +925,6 @@ def _limitations(
             ),
             *inventory_limitations(inventory),
         ]
-    )
-
-
-def _staleness(
-    identity: ComparisonIdentity, previous_binding_digest: str | None
-) -> ReviewStaleness:
-    """Whether the comparison rendered now is still the one an assessment was made against."""
-
-    if previous_binding_digest is None or previous_binding_digest == identity.binding_digest:
-        return ReviewStaleness(
-            state="current",
-            statement="the displayed comparison is the candidate's current comparison",
-        )
-    return ReviewStaleness(
-        state="stale",
-        statement="Candidate changed — open a new comparison",
-        previous_comparison_ref=previous_binding_digest,
-        moved=("comparison-binding",),
     )
 
 

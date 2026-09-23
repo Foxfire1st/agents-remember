@@ -459,6 +459,14 @@ export interface ReviewResult {
 // the leaf's own durable generation bound, which is the same answer whether the leaf's worktree is
 // still there or cleanup has removed it. It carries the one value the server admits, so a client
 // cannot ask for a generation that is not this leaf's.
+//
+// REFRESH (ICR-R17). `previousBindingDigest` is the comparison the reader was already looking at --
+// the `binding_digest` the displayed payload published -- carried only by a read that is REPLACING a
+// display rather than making a first one. The response compares it against the comparison it
+// rendered, so a candidate that moved while the panel stayed open arrives as the `stale` state with
+// the previous identity labelled, instead of silently passing as the same generation. It is the
+// *previous* identity and never a substitute for the current one: the read still renders the
+// resolved candidate's own comparison, and a caller cannot use this parameter to choose a dataset.
 export const intentReview = (
   repo: string,
   master: string,
@@ -468,26 +476,51 @@ export const intentReview = (
   base = "",
   page?: { of: ReviewPagedCollection; continuation?: string | null; size?: number },
   history?: ReviewHistory,
+  previousBindingDigest?: string,
 ): Promise<ReviewResult> => {
-  const params: Record<string, string> = { repo, master, leaf };
-  if (selectorKind !== undefined && selectorId !== undefined) {
-    params.selectorKind = selectorKind;
-    params.selectorId = selectorId;
-  }
-  if (page !== undefined) {
-    params.pageOf = page.of;
-    if (page.continuation !== undefined && page.continuation !== null) {
-      params.continuation = page.continuation;
-    }
-    if (page.size !== undefined) {
-      params.pageSize = String(page.size);
-    }
-  }
-  if (history !== undefined) {
-    params.history = history;
-  }
-  return getReviewJson<ReviewResult>(`${base}/api/review/intent?${qs(params)}`);
+  return getReviewJson<ReviewResult>(
+    `${base}/api/review/intent?${qs(
+      reviewQuery({ repo, master, leaf, selectorKind, selectorId, page, history, previousBindingDigest }),
+    )}`,
+  );
 };
+
+// The one request's query string, assembled in one place. It is a function rather than a run of
+// conditionals inside `intentReview` so that adding a parameter cannot quietly raise the client's
+// branch count, and so the two spellings of "absent" (undefined and the empty string a form sends)
+// are collapsed once: neither is a value the server should be handed.
+function reviewQuery(parts: {
+  repo: string;
+  master: string;
+  leaf: string;
+  selectorKind?: ReviewSelectorKind;
+  selectorId?: string;
+  page?: { of: ReviewPagedCollection; continuation?: string | null; size?: number };
+  history?: ReviewHistory;
+  previousBindingDigest?: string;
+}): Record<string, string> {
+  const params: Record<string, string> = { repo: parts.repo, master: parts.master, leaf: parts.leaf };
+  if (parts.selectorKind !== undefined && parts.selectorId !== undefined) {
+    params.selectorKind = parts.selectorKind;
+    params.selectorId = parts.selectorId;
+  }
+  if (parts.page !== undefined) {
+    params.pageOf = parts.page.of;
+    if (parts.page.continuation !== undefined && parts.page.continuation !== null) {
+      params.continuation = parts.page.continuation;
+    }
+    if (parts.page.size !== undefined) {
+      params.pageSize = String(parts.page.size);
+    }
+  }
+  if (parts.history !== undefined) {
+    params.history = parts.history;
+  }
+  if (parts.previousBindingDigest !== undefined && parts.previousBindingDigest !== "") {
+    params[PREVIOUS_BINDING_QUERY] = parts.previousBindingDigest;
+  }
+  return params;
+}
 
 // Which record a review read is addressed to: the live candidate, or the leaf's recorded comparison.
 // One value on purpose -- the surface addresses exactly one historical record, the leaf's own
@@ -545,6 +578,12 @@ export const pageBounds = (
 export const carriedPage = (
   payload: Pick<ReviewPayload, "page"> | undefined,
 ): ReviewCollectionPage | null => payload?.page ?? null;
+
+// The one query parameter that names the comparison a refresh is replacing. It is spelled once here
+// because the server's admission reads it by this exact name (`serving/review.py`, alias
+// `previousBindingDigest`) and a second spelling at a call site is how a refresh silently stops
+// carrying the identity it is measured against.
+export const PREVIOUS_BINDING_QUERY = "previousBindingDigest";
 
 // What a `reset` page's state gloss says, chosen by the refusal's code because the state alone cannot
 // tell "the comparison moved" from "that cursor is not this collection's". An unrecognised or absent

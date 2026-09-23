@@ -961,7 +961,7 @@ export function ReviewSurface({
           <ReviewRefresh
             onRefresh={refresh}
             busy={read.phase === "loading"}
-            generation={generationOf(read, carried, shown)}
+            generation={generationOf(carried, shown)}
           />
         }
       />

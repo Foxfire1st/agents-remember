@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from re import Pattern
+from re import compile as re_compile
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Query
@@ -28,6 +30,7 @@ from fastapi.responses import JSONResponse, Response
 
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.models.knowledge.base import SHA256_PATTERN
 from agents_remember.models.knowledge.read import (
     FamilyIdentitySeed,
     InvariantIdentitySeed,
@@ -91,6 +94,11 @@ KNOWLEDGE_REVIEW_ENTRIES_ROUTE = "/api/review/intent/entries"
 # row a reader opened, naming the generation the listing published. Like the other two it is GET-only
 # and it accepts no filesystem path: the repository is resolved from canonical task context.
 KNOWLEDGE_REVIEW_SOURCE_CONTENT_ROUTE = "/api/review/intent/source-content"
+
+# The digest shape the previous-binding parameter is admitted against, compiled from the models'
+# own published pattern rather than re-spelled here: one definition, so the transport cannot come
+# to accept a shape the request model would refuse.
+_SHA256_DIGEST: Pattern[str] = re_compile(SHA256_PATTERN)
 
 # The two selector kinds the surface reviews. They are the two identity seeds R07 declares; every
 # other seed kind addresses a revision, a membership or a claim rather than a subject a curator
@@ -225,6 +233,11 @@ class ReviewQuestionRef:
     # Which record the request is addressed to. An absent or empty spelling is the live candidate,
     # which is what every caller that names none asks for.
     history: Annotated[str | None, Query()] = None
+    # The comparison the caller was already looking at, when this read replaces one (ICR-R17@v1). It
+    # is admitted here rather than as a sixth route parameter because it is part of the same question
+    # -- which subject, which record, and which generation the answer must be measured against -- and
+    # because the admission's own vocabulary check belongs with the other two fields it guards.
+    previous_binding_digest: Annotated[str | None, Query(alias="previousBindingDigest")] = None
 
 
 # The name this ref was first published under, kept as one alias so the modules and cases that
@@ -337,14 +350,22 @@ def paged_review_request(
     historical record this surface addresses, and any other name is refused in this route's own
     vocabulary rather than resolved to the leaf's record -- a caller that asked for a generation the
     surface does not address must not be handed a different one.
+
+    ``question.previous_binding_digest`` is the comparison the caller was already looking at, when a
+    refresh is replacing one (ICR-R17@v1). This transport does not compare it, resolve it or repair
+    it: it is carried onto the request whole once its shape is admitted, so a value that names no
+    generation this surface could have published is refused here rather than asserted as a previous
+    input. Which comparison is current is the owners' answer, not this route's.
     """
 
     admitted = _admitted_paging(paging)
     if isinstance(admitted, UnadmittedReviewQuery):
         return admitted
-    record = _admitted_history(question.history)
-    if isinstance(record, UnadmittedReviewQuery):
-        return record
+    asked = _admitted_question(question)
+    if isinstance(asked, UnadmittedReviewQuery):
+        return asked
+    record = asked.history
+    digest = asked.previous_binding_digest
     selector = question
     if selector.selector_kind is None and selector.selector_id is None:
         return ReviewSurfaceRequest(
@@ -356,6 +377,7 @@ def paged_review_request(
             continuation=admitted.continuation,
             page_size=admitted.page_size,
             history=record,
+            previous_binding_digest=digest,
         )
     if not selector.selector_kind or not selector.selector_id:
         return _unadmitted(
@@ -390,6 +412,7 @@ def paged_review_request(
         continuation=admitted.continuation,
         page_size=admitted.page_size,
         history=record,
+        previous_binding_digest=digest,
     )
 
 
@@ -413,6 +436,68 @@ def _admitted_history(value: str | None) -> ReviewHistoryRef | UnadmittedReviewQ
         ),
         expected=f"omitted, or {RECORDED_HISTORY}",
     )
+
+
+def _admitted_binding_digest(value: str | None) -> str | UnadmittedReviewQuery | None:
+    """The previous comparison's identity when the query carries one, or the problem the spelling earns.
+
+    An empty spelling is an absent parameter, not a value -- ``previousBindingDigest=`` is what a form
+    sends when nothing was displayed -- and the digest's own published shape is checked here in this
+    route's vocabulary rather than raised out of the request model as an uncaught validation error:
+    the page-size parameter is admitted the same way for the same reason. This transport only checks
+    the shape; whether the digest is the comparison that is there now is the owners' answer, and a
+    digest that does not match is reported as ``stale`` rather than refused.
+    """
+
+    if not value:
+        return None
+    if not _SHA256_DIGEST.match(value):
+        return _unadmitted(
+            offending_input=value,
+            detail=(
+                "previousBindingDigest is not a comparison binding digest; the field names the "
+                "identity the caller was already looking at, which is the digest a previous "
+                "response published as its comparison binding"
+            ),
+            expected="omitted, or a 64-character lowercase hexadecimal sha256 digest",
+        )
+    return value
+
+
+@dataclass(frozen=True)
+class AdmittedQuestion:
+    """The question fields once this route has admitted them, in the request's own types.
+
+    It exists for the same reason :class:`AdmittedPaging` does: the answers are typed rather than
+    assembled as a loose mapping, and a caller cannot hand a value the membership or shape test never
+    passed. The two fields travel together because they are one question -- which record this read is
+    addressed to, and which comparison it is replacing -- so the admission answers for both at once.
+    """
+
+    history: ReviewHistoryRef | None = None
+    previous_binding_digest: str | None = None
+
+
+def _admitted_question(question: ReviewQuestionRef) -> AdmittedQuestion | UnadmittedReviewQuery:
+    """The record this read is addressed to and the comparison it replaces, or the problem earned.
+
+    The two admissions are one decision -- "is this a question this route can address" -- so they are
+    answered together and each names the value that failed. The history spelling is admitted against
+    the one historical form the model declares; the previous binding identity is admitted against the
+    digest shape the model declares, rather than raised out of the request model as an uncaught
+    validation error, which is how the page-size parameter is admitted for the same reason. This
+    transport only checks the shape of the previous identity: whether it is the comparison that is
+    there now is the owners' answer, and a digest that no longer matches is reported as ``stale``
+    rather than refused.
+    """
+
+    record = _admitted_history(question.history)
+    if isinstance(record, UnadmittedReviewQuery):
+        return record
+    digest = _admitted_binding_digest(question.previous_binding_digest)
+    if isinstance(digest, UnadmittedReviewQuery):
+        return digest
+    return AdmittedQuestion(history=record, previous_binding_digest=digest)
 
 
 @dataclass(frozen=True)

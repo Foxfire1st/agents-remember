@@ -274,6 +274,9 @@ class ReviewSurfaceRequest(KnowledgeModel):
     is read from. A caller cannot ask for "some other generation": the leaf's own record is the only
     historical comparison this surface addresses, and its own resolution refuses a leaf that
     recorded none.
+
+    ``previous_binding_digest`` names the comparison the caller was already looking at when the read
+    replaces one (ICR-R17@v1); its absence means the read replaces nothing, which is ``current``.
     """
 
     repository_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
@@ -288,6 +291,12 @@ class ReviewSurfaceRequest(KnowledgeModel):
     continuation: str | None = Field(default=None, max_length=PROSE_MAX_LENGTH)
     page_size: int = Field(default=0, ge=0, le=MAXIMUM_REVIEW_PAGE_SIZE)
     history: ReviewHistoryRef | None = None
+    # The binding identity a refresh is replacing: the *previous* identity, never a substitute for
+    # the current one -- it selects no dataset, resolves no candidate and is never rendered as the
+    # comparison. The pattern is the digest's published shape, so a value that names no generation
+    # this surface could have published cannot be asserted as a previous input; the composition
+    # answers a digest the comparison does not match as `stale` (ICR-R17@v1).
+    previous_binding_digest: str | None = Field(default=None, pattern=SHA256_PATTERN)
 
     @model_validator(mode="after")
     def _require_the_cursor_and_its_collection_together(self) -> ReviewSurfaceRequest:

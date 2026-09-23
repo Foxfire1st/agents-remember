@@ -189,14 +189,17 @@ def render(
     *,
     previous_binding_digest: str | None = None,
 ) -> KnowledgeReviewPayload:
-    """Render one review and return its payload, failing loudly on a refusal."""
+    """Render one review and return its payload, failing loudly on a refusal.
 
-    result = compose_review(
-        resolution_for(fixture),
-        review_request(fixture),
-        records,
-        previous_binding_digest=previous_binding_digest,
+    The previous comparison identity travels on the REQUEST (ICR-R17@v1), which is where the transport
+    admits it and where the composition reads it, so this helper asks the way a refresh asks rather
+    than passing a parallel keyword beside the request.
+    """
+
+    request = review_request(fixture).model_copy(
+        update={"previous_binding_digest": previous_binding_digest}
     )
+    result = compose_review(resolution_for(fixture), request, records)
     assert result.state == "review", result.refusal
     assert result.payload is not None
     return result.payload
@@ -1091,6 +1094,85 @@ def test_the_route_serves_the_typed_result_and_refuses_by_name_with_no_adapter(
         )
         assert refused.status_code == 503
         assert refused.json()["status"] == "unavailable"
+
+
+def test_the_previous_binding_identity_reaches_the_port_and_is_compared_against_the_read(
+    fixture: DiffFixture,
+) -> None:
+    """A refresh's identity travels the whole way and the answer names it (ICR-R17@v1).
+
+    One property per hop. The TRANSPORT admits the previous identity in its own vocabulary -- a
+    spelling that is not a comparison digest is refused with the offending input named, exactly as
+    the page-size parameter is -- and hands it to the port on the request rather than dropping it;
+    the COMPOSITION compares it against the comparison it rendered, where a disagreement is the
+    ``stale`` state that labels the identity the reader was looking at and disables submission
+    against the new one. The identity is the caller's recorded input and never a substitute for the
+    current one: the digest that comes back as ``comparison.binding_digest`` is the comparison
+    operation's, and the previous one only ever appears as ``previous_comparison_ref``.
+    """
+
+    config = review_config()
+    request = review_request(fixture)
+    previous = "9" * 64
+    asked: list[ReviewSurfaceRequest] = []
+    served = FastAPI()
+    register_review_routes(
+        served,
+        config,
+        lambda incoming: (
+            asked.append(incoming),
+            compose_review(resolution_for(fixture), incoming),
+        )[1],
+    )
+    with TestClient(served) as client:
+        refreshed = client.get(
+            "/api/review/intent",
+            params={
+                "repo": request.repository_id,
+                "master": request.master,
+                "leaf": request.leaf_id,
+                "selectorKind": "invariant",
+                "selectorId": fixture.retry_invariant_id,
+                "previousBindingDigest": previous,
+            },
+        )
+        assert refreshed.status_code == 200
+        assert asked[-1].previous_binding_digest == previous
+        body = refreshed.json()["payload"]
+        assert body["staleness"]["state"] == "stale"
+        assert body["staleness"]["previous_comparison_ref"] == previous
+        assert body["submission"]["state"] == "disabled_stale"
+        assert body["comparison"]["binding_digest"] != previous
+
+        # A read that replaces nothing carries nothing, and is current by construction rather than by
+        # assumption: there is no previous input to label.
+        plain = client.get(
+            "/api/review/intent",
+            params={
+                "repo": request.repository_id,
+                "master": request.master,
+                "leaf": request.leaf_id,
+                "selectorKind": "invariant",
+                "selectorId": fixture.retry_invariant_id,
+            },
+        )
+        assert plain.status_code == 200
+        assert asked[-1].previous_binding_digest is None
+        assert plain.json()["payload"]["staleness"]["state"] == "current"
+
+        malformed = client.get(
+            "/api/review/intent",
+            params={
+                "repo": request.repository_id,
+                "master": request.master,
+                "leaf": request.leaf_id,
+                "selectorKind": "invariant",
+                "selectorId": fixture.retry_invariant_id,
+                "previousBindingDigest": "not-a-digest",
+            },
+        )
+        assert malformed.status_code == 400
+        assert malformed.json()["offendingInput"] == "not-a-digest"
 
 
 def test_the_published_assessment_loader_returns_nothing_for_an_unresolvable_candidate() -> None:

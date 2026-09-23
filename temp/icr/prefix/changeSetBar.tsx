@@ -145,12 +145,8 @@ function reviewDependencyFacts(analytics: Analytics | null): string {
 
 // The entry's explicit refresh control. It is always offered -- the reader's own way to ask again,
 // which is the packet's "explicit refresh control" and the reason the workspace signal above can stay
-// a signal rather than a polling loop -- and it is marked for exactly as long as the list beside it is
-// behind the workspace: from the publication that moved the projection until the answer for that
-// projection is filed. The mark is therefore observable in the state it describes (a settled DOM while
-// the re-read is in flight), and it is gone once the re-read answers -- including when the answer is a
-// refusal or a failure, because then the projection HAS been answered and the list beside it is the
-// best available reading of it.
+// a signal rather than a polling loop -- and it is marked when the projection has moved since the
+// catalogue was read, so a reader is told the list may be behind before they click.
 function ReviewCatalogueRefresh({ stale, onRefresh }: { stale: boolean; onRefresh: () => void }) {
   return (
     <button
@@ -243,12 +239,7 @@ function useReviewCatalogue(
   const reads = useRef(0);
   const factsRef = useRef(facts);
   factsRef.current = facts;
-  // Whether the list on screen was read from facts the workspace has since moved past. It is derived
-  // from the facts recorded WITH THE LAST ANSWER, not from the live value: that is what makes it a
-  // statement about the list beside it ("this was read before the projection moved") rather than a
-  // guess about a read that has not happened. Deliberately NOT gated on `loading` -- gating it there
-  // is what made the mark appear and vanish inside one flush, so a reader was never told at all.
-  const stale = read.facts !== facts;
+  const stale = !read.loading && read.facts !== facts;
   useEffect(() => {
     let mounted = true;
     // The facts in force when the read starts, taken from the ref so the answer is filed under the
