@@ -88,6 +88,7 @@ unit-regression = [
   "mcp/tests/test_knowledge_curator_ingest_list.py",
   "mcp/tests/test_knowledge_ingest_comparison_generation.py",
   "mcp/tests/test_knowledge_ingest_failure_windows.py",
+  "mcp/tests/test_knowledge_bootstrap.py",
   "mcp/tests/test_knowledge_ingest_publication_route.py",
   "mcp/tests/test_knowledge_detection_runs.py",
   "mcp/tests/test_knowledge_detection_signals.py",

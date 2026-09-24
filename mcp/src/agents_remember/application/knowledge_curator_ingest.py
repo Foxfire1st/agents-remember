@@ -43,11 +43,12 @@ repository's obligation became a different record at each baseline while two dif
 that shared a base commit were handed the same record identity. Note that the *resolution* tree and
 the *identity* anchor are two different commits on purpose: see the next paragraph.
 
-**A producer may cite the code its own leaf is producing.** The objective commits into the leaf's
+**A producer may cite the code its own line is producing.** The objective commits into the admitted
 draft-candidate, and a draft is unlanded work by definition, so the tree a target is resolved against
-is the leaf's **own line** -- the code work branch tip the worktree stands on -- rather than the
-``code_base_commit`` the contract recorded when the enclosure was created. Binding the resolver to the
-branch base made the leaf's own deliverable a non-member of the tree it was resolved against: a file
+is the admitted code **line** -- the branch tip the root stands on -- rather than the
+``code_base_commit`` the admission recorded when the enclosure was cut or the bootstrap observed the
+line. Binding the resolver to the
+branch base made the producer's own deliverable a non-member of the tree it was resolved against: a file
 the leaf added was refused as *gone*, and a file the leaf modified made the resolver raise before any
 report existed. The two trees are kept apart where they must be: the resolution tree is the leaf's
 line (so the leaf's new and changed files resolve, and the recorded ``source_identity`` is the blob id
@@ -146,6 +147,10 @@ from agents_remember.application.knowledge_snapshot import (
     open_knowledge_candidate,
     publish_knowledge_snapshot,
 )
+from agents_remember.application.knowledge_write_admission import (
+    KnowledgeWriteAdmission,
+    as_write_admission,
+)
 from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.kernel.canonical_json import canonical_json_bytes, decoded_json, sha256_digest
 from agents_remember.kernel.git_command import run_git
@@ -190,7 +195,7 @@ from agents_remember.models.knowledge.source import (
     SourceLocator,
     SymbolLocator,
 )
-from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
+from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 __all__ = [
     "COMMITTED",
@@ -449,6 +454,33 @@ class IngestCounts:
 
 
 @dataclass(frozen=True)
+class HeldOperation:
+    """One entry's creation operation, as the candidate's allocation journal records it.
+
+    This is the **retained identity-bound progress** of an interrupted ingest, and it is read from
+    the journal rather than from the plan on purpose. A plan mints an identity before the batch runs,
+    so a run that wrote nothing holds a pair in memory that no reader can find afterwards; the
+    journal is the only place a *held* identity exists, and this record states exactly that fact.
+
+    ``content_digest`` is the digest the journal minted the pair for, which is what a later run
+    compares against to refuse the same retry key arriving with different content.
+    """
+
+    entry_id: str
+    invariant_id: str
+    revision_id: str
+    content_digest: str
+
+    def as_record(self) -> dict[str, str]:
+        return {
+            "entryId": self.entry_id,
+            "invariantId": self.invariant_id,
+            "revisionId": self.revision_id,
+            "contentDigest": self.content_digest,
+        }
+
+
+@dataclass(frozen=True)
 class IngestReport:
     """The ingest's whole result: the destination it used, the batch's state, every outcome.
 
@@ -472,11 +504,18 @@ class IngestReport:
     bounded external-source manifest the list declared with the origin references that name it. Both
     carry their own state, so a plane this run did not write says so instead of rendering as an empty
     result a reader could take for a measured one.
+
+    ``held_operations`` is what the candidate's allocation journal recorded, in the hand-off list's
+    own order, and it is the one place a caller can see the identities an interrupted run still
+    holds: an entry absent from it holds no identity, which is a fact about the journal rather than a
+    claim about the plan. ``allocation_journal`` names the file that answer came from.
     """
 
-    contract_path: str
+    admission_source: str
     candidate_directory: str
     candidate_receipt: str | None
+    allocation_journal: str
+    held_operations: tuple[HeldOperation, ...]
     lane: str
     code_tree_id: str
     memory_tree_id: str
@@ -752,9 +791,16 @@ class _TreeIds:
 
 @dataclass(frozen=True)
 class _Paths:
-    """The two local inputs the operation names: the enclosure contract and the candidate."""
+    """The two local inputs the operation names: the admission's source document, and the candidate.
 
-    contract_path: Path
+    ``admission_source`` is the document the admission was read from -- a leaf enclosure contract, or
+    the setup document a repository bootstrap resolved its repository entry in -- and it is carried
+    for the report rather than for a decision: the facts the operation acts on travel in
+    :class:`~agents_remember.application.knowledge_write_admission.KnowledgeWriteAdmission`, and this
+    value only lets a reader find where they came from.
+    """
+
+    admission_source: Path
     candidate: Path
 
 
@@ -987,6 +1033,7 @@ class _ReportTarget:
     trees: _TreeIds
     coordination_top_level: frozenset[str]
     planes: CuratorPlanes
+    scope: str
 
     def with_read(self, read: _Read) -> _ReportTarget:
         """The same report inputs with a later read, keeping the trees it resolved against."""
@@ -999,6 +1046,7 @@ class _ReportTarget:
             self.trees,
             self.coordination_top_level,
             self.planes,
+            self.scope,
         )
 
 
@@ -1020,7 +1068,7 @@ class _Source:
     order, and an identity in neither is refused.
     """
 
-    contract: WorktreeContract
+    admission: KnowledgeWriteAdmission
     code_root: Path
     memory_root: Path
     tree_ids: _TreeIds
@@ -1072,11 +1120,20 @@ class IngestSelection:
 
 
 def ingest_curator_list(
-    contract_path: str | Path,
+    admission: KnowledgeWriteAdmission | WorktreeContract | str | Path,
     entries: Sequence[Mapping[str, Any]] | str | Path,
     selection: IngestSelection,
 ) -> IngestReport:
-    """Commit one hand-off list into the enclosure's candidate, or report why it was not.
+    """Commit one hand-off list into the admitted candidate, or report why it was not.
+
+    ``admission`` is **the admission this write is bound to**: a
+    :class:`~agents_remember.application.knowledge_write_admission.KnowledgeWriteAdmission`, which
+    the caller may have resolved itself (a repository bootstrap resolves one from the setup and
+    repository authority), or a leaf enclosure contract -- given as a loaded contract or as its path,
+    in which case the one enclosure adapter derives the admission from it. Both spellings reach the
+    identical operation below; there is no second write path, and nothing about the batch, the
+    candidate, the namespace, the identity allocation, the snapshot or the publication changes with
+    the kind of admission.
 
     ``entries`` is the hand-off list in revision 1's shape -- the parsed list, or the path of the
     file carrying it. ``candidate_directory`` is named by the caller and echoed in the report: a
@@ -1092,7 +1149,9 @@ def ingest_curator_list(
     No input this operation can *read* makes it raise. A target the citation machinery cannot resolve
     -- an unreadable identity, an unaddressable path, a construct the file does not define -- is
     refused with the reason that names the failure and the run continues to the next entry, because
-    the caller receives a report rather than a traceback for exactly those inputs.
+    the caller receives a report rather than a traceback for exactly those inputs. An admission that
+    cannot be derived at all (an unreadable or invalid contract document) is the caller's own input
+    and still raises, exactly as it did when this operation loaded the contract itself.
     """
 
     authorization_ref = selection.authorization_ref
@@ -1100,24 +1159,24 @@ def ingest_curator_list(
     baseline = selection.baseline
     dry_run = selection.dry_run
     _require_authorization(authorization_ref)
-    paths = _Paths(contract_path=Path(contract_path), candidate=Path(candidate_directory))
-    contract = load_contract(paths.contract_path)
-    code_root, memory_root = _roots(contract)
-    repository = _repository_identity(contract, baseline)
+    write_admission = as_write_admission(admission)
+    paths = _Paths(admission_source=write_admission.source_ref, candidate=Path(candidate_directory))
+    code_root, memory_root = _roots(write_admission)
+    repository = _repository_identity(write_admission, baseline)
     source = _Source(
-        contract=contract,
+        admission=write_admission,
         code_root=code_root,
         memory_root=memory_root,
-        tree_ids=_tree_ids(contract, code_root, memory_root),
-        coordination_top_level=_coordination_top_level(contract),
+        tree_ids=_tree_ids(write_admission, code_root, memory_root),
+        coordination_top_level=_coordination_top_level(write_admission),
         repository=repository,
         anchors=tuple(
             one for one in (paths.candidate, baseline) if one is not None and Path(one).is_file()
         ),
     )
-    resolution = _resolution(contract, source.tree_ids)
+    resolution = _resolution(write_admission, source.tree_ids)
     raw = _read_entries(entries)
-    planes = read_curator_planes(raw, paths.candidate, _retry_scope(source.contract))
+    planes = read_curator_planes(raw, paths.candidate, _retry_scope(source.admission))
     allocations = _read_allocations(paths.candidate)
     plans, refused, resolved_before_refusal = _plan_entries(raw, source, allocations, planes)
     read = _Read(
@@ -1137,6 +1196,7 @@ def ingest_curator_list(
                 source.tree_ids,
                 source.coordination_top_level,
                 planes,
+                _retry_scope(write_admission),
             ),
             _projected(read.planned),
             committed=_projected_outcomes(read.planned),
@@ -1147,8 +1207,10 @@ def ingest_curator_list(
         authorization_ref=authorization_ref,
         origin_refs=planes.refs,
     )
-    admission = _admitted_candidate(paths.candidate, repository, resolution, baseline=baseline)
-    if admission.state == "refused" or admission.result.identity is None:
+    candidate_admission = _admitted_candidate(
+        paths.candidate, repository, resolution, baseline=baseline
+    )
+    if candidate_admission.state == "refused" or candidate_admission.result.identity is None:
         # The destination itself refused, so nothing was planned and nothing was written -- and the
         # planned entries are folded into ``refused`` rather than silently dropped. The report says
         # an entry appears in EXACTLY ONE of committed/rulings/refused, and that promise is what a
@@ -1159,12 +1221,13 @@ def ingest_curator_list(
                 paths,
                 resolution,
                 repository,
-                _with_refused(read, _admission_refused(read.planned, admission.result)),
+                _with_refused(read, _admission_refused(read.planned, candidate_admission.result)),
                 source.tree_ids,
                 source.coordination_top_level,
                 planes,
+                _retry_scope(write_admission),
             ),
-            _Run(batch_state="not_attempted", refusal=admission.refusal),
+            _Run(batch_state="not_attempted", refusal=candidate_admission.refusal),
         )
     admitted = admitted_candidate_destination(paths.candidate, repository, resolution)
     destination = candidate_write_destination(admitted, authorship)
@@ -1183,6 +1246,7 @@ def ingest_curator_list(
             source.tree_ids,
             source.coordination_top_level,
             planes,
+            _retry_scope(write_admission),
         ),
         destination,
     )
@@ -1538,11 +1602,11 @@ def _repository_namespace(database_path: Path | None) -> RepositoryIdentity | No
     """The namespace one knowledge database already records, or ``None`` when it records none.
 
     This is the durable anchor, and it is read rather than derived. ``models/knowledge/repository.py``
-    requires a namespace to be a *stored* identifier, and the contract a run is handed carries no
-    stable repository key to derive one from -- ``code_repo_path`` differs per worktree,
-    ``code_source_branch`` is a branch name, and ``repo_name`` is the display name that module names
-    as explicitly not an identity. So the value that survives a baseline change cannot come from the
-    contract; it comes from the repository's own dataset.
+    requires a namespace to be a *stored* identifier, and the admission a run is bound to carries no
+    stable repository key to derive one from -- ``code_repo_path`` differs per worktree, the admitted
+    branch is a branch name, and ``repository_name`` is the display name that module names as
+    explicitly not an identity. So the value that survives a baseline change cannot come from the
+    admission; it comes from the repository's own dataset.
 
     An absent, unreadable or repository-less database is not an error here: it means this repository
     has no stored namespace yet, and the caller derives one. ``apsw`` is caught narrowly because a
@@ -1568,7 +1632,7 @@ def _repository_namespace(database_path: Path | None) -> RepositoryIdentity | No
 
 
 def _repository_identity(
-    contract: WorktreeContract, baseline: Path | None = None
+    admission: KnowledgeWriteAdmission | WorktreeContract, baseline: Path | None = None
 ) -> RepositoryIdentity:
     """The namespace this repository's candidates are created under, read then derived.
 
@@ -1577,8 +1641,8 @@ def _repository_identity(
     to read.** A repository that already holds knowledge keeps the namespace that knowledge lives
     under, whatever baseline the next task starts from.
 
-    This used to derive from ``_enclosure(contract)``, which is the enclosure's recorded code base
-    commit. That made the namespace a function of the baseline, so one repository ingested at a
+    This used to derive from ``_enclosure(admission)``, which is the admitted code base commit.
+    That made the namespace a function of the baseline, so one repository ingested at a
     later baseline was handed a *different* namespace, its candidate held only the new entry, and
     every revision recorded at the earlier baseline was stranded under a namespace nothing would
     look in again -- while two different repositories that shared a base commit were handed the
@@ -1589,106 +1653,111 @@ def _repository_identity(
     The derivation that remains is the cold-start fallback, and it is keyed on ``authority_home``
     rather than on the baseline. It is stable for one repository across baselines, which is what
     the finding needs; it deliberately claims nothing about telling two repositories apart, because
-    the contract cannot supply that distinction -- the stored namespace is what does, and the first
-    run that publishes one makes it authoritative from then on.
+    no admission can supply that distinction -- the stored namespace is what does, and the first run
+    that publishes one makes it authoritative from then on.
     """
 
+    admitted = as_write_admission(admission)
     stored = _repository_namespace(baseline)
     if stored is not None:
         return stored
     return RepositoryIdentity(
-        repository_id=str(uuid5(_INGEST_NAMESPACE, f"repository:{contract.repo_name}")),
-        authority_home=contract.repo_name,
+        repository_id=str(uuid5(_INGEST_NAMESPACE, f"repository:{admitted.repository_name}")),
+        authority_home=admitted.repository_name,
     )
 
 
-def _resolution(contract: WorktreeContract, tree_ids: _TreeIds) -> CandidateResolution:
-    """The candidate inputs, read from the enclosure's recorded pair rather than asserted."""
+def _resolution(admission: KnowledgeWriteAdmission, tree_ids: _TreeIds) -> CandidateResolution:
+    """The candidate inputs, read from the admission's exact recorded revisions rather than asserted."""
 
-    leaf = _enclosure(contract)
+    scope = _enclosure(admission)
     return CandidateResolution(
         lane=_CANDIDATE_LANE,
         code_tree_id=tree_ids.code,
         memory_tree_id=tree_ids.memory,
-        snapshot_ref=f"curator-ingest:{leaf}",
-        candidate_ref=f"curator-ingest:{leaf}",
-        code_commit_id=contract.code_base_commit,
-        memory_commit_id=contract.memory_base_commit,
-        task_ref=_retry_scope(contract),
+        snapshot_ref=f"curator-ingest:{scope}",
+        candidate_ref=f"curator-ingest:{scope}",
+        code_commit_id=admission.code_base_commit,
+        memory_commit_id=admission.memory_base_commit,
+        task_ref=_retry_scope(admission),
     )
 
 
-def _enclosure(contract: WorktreeContract) -> str:
-    """The one string that identifies this enclosure for identity derivation.
+def _enclosure(admission: KnowledgeWriteAdmission) -> str:
+    """The one string that identifies this write's generation for identity derivation.
 
-    Its recorded code base commit, because that is the fact distinguishing one enclosure's base
-    from another's and it is already recorded in the contract the operation was handed.
+    The admission's exact code base commit, because that is the fact distinguishing one code line's
+    base from another's and it was read from the real checkout rather than asserted -- for an
+    enclosure it is the commit the contract recorded when the enclosure was cut, and for a
+    repository bootstrap it is the commit the code line stood at when the context was admitted.
     """
 
-    return contract.code_base_commit
+    return admission.code_base_commit
 
 
-def _roots(contract: WorktreeContract) -> tuple[Path, Path]:
-    """The code worktree and the memory worktree the contract records, both required."""
+def _roots(admission: KnowledgeWriteAdmission) -> tuple[Path, Path]:
+    """The two roots the citation machinery admits, both required."""
 
-    if contract.memory_worktree is None:
+    if admission.memory_worktree is None:
         raise ValueError(
-            f"contract {contract.contract_path} records no memory worktree, so the two roots the "
-            "citation machinery admits cannot both be named"
+            f"the admission read from {admission.source_ref} names no memory line, so the two roots "
+            "the citation machinery admits cannot both be named"
         )
-    return contract.code_worktree, contract.memory_worktree
+    return admission.code_worktree, admission.memory_worktree
 
 
-def _tree_ids(contract: WorktreeContract, code_root: Path, memory_root: Path) -> _TreeIds:
-    """The tree each side is read through: the leaf's own code line, and the memory base.
+def _tree_ids(admission: KnowledgeWriteAdmission, code_root: Path, memory_root: Path) -> _TreeIds:
+    """The tree each side is read through: the code line, and the admitted memory revision.
 
-    The code side is the **work branch tip the worktree stands on**, not the recorded base commit,
-    because the operation runs inside a leaf's enclosure and the leaf is citing the code it is
-    producing: its own new module and its own edits exist in the line and not in the tree the
-    enclosure was cut from. Reading the base tree made both of those unanswerable -- the added file
-    was reported *gone* and the modified file raised before a report existed.
+    The code side is the **line tip the admitted code root stands on**, not the recorded base
+    commit, because the operation runs on a code line that is producing knowledge: a leaf's own new
+    module and its own edits exist in the line and not in the tree the enclosure was cut from, and a
+    bootstrap observes the line it read. Reading the base tree made both of those unanswerable -- the
+    added file was reported *gone* and the modified file raised before a report existed.
 
-    The memory side stays the recorded memory base commit: the memory worktree is read at the exact
-    tree the enclosure recorded, and a memory citation is a claim about the memory line's content
+    The memory side stays the admission's exact memory base commit: the memory root is read at the
+    tree the admission recorded, and a memory citation is a claim about the memory line's content
     rather than about unlanded local edits.
 
-    A worktree with no readable code line falls back to the recorded base commit rather than
-    refusing the run: the base is the one tree the contract itself guarantees, and a run that has to
-    fall back says so in the report's ``code_tree_source`` instead of silently resolving against a
-    tree the caller did not expect.
+    A code root with no readable line falls back to the admitted base commit rather than refusing the
+    run: the base is the one tree the admission guarantees, and a run that has to fall back says so
+    in the report's ``code_tree_source`` instead of silently resolving against a tree the caller did
+    not expect.
     """
 
-    code_line, code_source = _code_line(code_root, contract)
+    code_line, code_source = _code_line(code_root, admission)
     return _TreeIds(
-        code=_tree_of(code_root, code_line, contract.contract_path),
-        memory=_tree_of(memory_root, contract.memory_base_commit, contract.contract_path),
-        base=contract.code_base_commit,
+        code=_tree_of(code_root, code_line, admission.source_ref),
+        memory=_tree_of(memory_root, admission.memory_base_commit, admission.source_ref),
+        base=admission.code_base_commit,
         code_source=code_source,
     )
 
 
-def _code_line(code_root: Path, contract: WorktreeContract) -> tuple[str, str]:
-    """The leaf's own line as a commit id, with the fact of which answer it is.
+def _code_line(code_root: Path, admission: KnowledgeWriteAdmission) -> tuple[str, str]:
+    """The code line as a commit id, with the fact of which answer it is.
 
-    The work branch is asked for by name first, and the worktree's own ``HEAD`` second, because the
-    branch is the enclosure's declared line and ``HEAD`` is what the checkout happens to stand on.
-    Both are read from the worktree rather than from the shared checkout.
+    The admitted branch is asked for by name first, and the checkout's own ``HEAD`` second, because
+    the branch is the line the admission declares and ``HEAD`` is what the checkout happens to stand
+    on. Both are read from the admitted code root rather than from a shared checkout.
     """
 
-    for reference in (contract.code_work_branch, "HEAD"):
+    for reference in (admission.code_work_branch, "HEAD"):
         if not reference:
             continue
         result = run_git(code_root, ["rev-parse", "--verify", f"{reference}^{{commit}}"])
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip(), f"work-line:{reference}"
-    return contract.code_base_commit, "recorded-base-fallback"
+    return admission.code_base_commit, "recorded-base-fallback"
 
 
-def _tree_of(root: Path, commit: str, contract_path: Path) -> str:
+def _tree_of(root: Path, commit: str, admission_source: Path) -> str:
     """One recorded commit's tree object id, or a named error for an input that cannot answer."""
 
     if not commit:
-        raise ValueError(f"contract {contract_path} records no base commit for {root}")
+        raise ValueError(
+            f"the admission read from {admission_source} records no base commit for {root}"
+        )
     result = run_git(root, ["rev-parse", f"{commit}^{{tree}}"])
     if result.returncode != 0:
         raise ValueError(
@@ -1703,29 +1772,33 @@ def _tree_of(root: Path, commit: str, contract_path: Path) -> str:
 # --------------------------------------------------------------------------------------------
 
 
-def _retry_scope(contract: WorktreeContract) -> str:
-    """The enclosure's own name for this operation's task, as the retry key's scoping half.
+def _retry_scope(admission: KnowledgeWriteAdmission) -> str:
+    """The admission's own name for this operation, as the retry key's scoping half.
 
     One declaration, used by the candidate resolution and by the retry key, because the two are the
-    same fact about the enclosure and a second spelling of it could drift from the one the rest of
-    the operation already reports.
+    same fact about the operation and a second spelling of it could drift from the one the rest of
+    the operation already reports. Inside an enclosure it is the leaf's own identity; for a
+    repository bootstrap it is the bootstrap operation's name for the repository, which is what makes
+    an exact retry of a taskless bootstrap find the identities it already holds instead of minting a
+    second set.
     """
 
-    return contract.leaf_id or contract.task_name
+    return admission.scope
 
 
-def _retry_key(contract: WorktreeContract, entry_id: str) -> str:
+def _retry_key(admission: KnowledgeWriteAdmission, entry_id: str) -> str:
     """The idempotency key of one entry's creation operation.
 
     It is **not** an identity input and never becomes one. It is the question a retry asks -- "has
-    this operation already been allocated?" -- and it is scoped by the enclosure's own task identity,
-    which is exactly what the ruling permits enclosure identity to scope. Two independent tasks
-    numbering an entry ``R-LOCAL`` therefore ask two different questions and receive two different
-    identities, while a rerun of one task's operation asks its own question and receives what it
-    already holds.
+    this operation already been allocated?" -- and it is scoped by the admission's own operation
+    identity, which is exactly what the ruling permits admission identity to scope. Two independent
+    tasks numbering an entry ``R-LOCAL`` therefore ask two different questions and receive two
+    different identities, while a rerun of one operation asks its own question and receives what it
+    already holds. A repository bootstrap's scope is its own name for the repository, so a bootstrap
+    retry and a leaf's ingest of the same repository never share a key.
     """
 
-    return f"{_retry_scope(contract)}|{entry_id}"
+    return f"{_retry_scope(admission)}|{entry_id}"
 
 
 def _content_digest(fields: _EntryFields, targets: Sequence[_TargetPlan]) -> str:
@@ -1870,7 +1943,7 @@ def _creation(
     :func:`_require_minted_content`, once the places it covers are resolved.
     """
 
-    retry_key = _retry_key(source.contract, fields.entry_id)
+    retry_key = _retry_key(source.admission, fields.entry_id)
     held = allocations.records.get(retry_key)
     if held is None and allocations.unreadable is not None:
         return None, _Refusal(
@@ -2511,7 +2584,7 @@ def _complete_target(written: str, source: _Source) -> _Resolved | _Refusal:
     return _Refusal(
         "target_path_unresolved",
         _unresolved_reason(
-            written, code_tree, memory_tree, source.contract, source.coordination_top_level
+            written, code_tree, memory_tree, source.admission, source.coordination_top_level
         ),
     )
 
@@ -2600,7 +2673,7 @@ def _unresolved_reason(
     written: str,
     code_tree: Trees,
     memory_tree: Trees,
-    contract: WorktreeContract,
+    admission: KnowledgeWriteAdmission,
     top_level: frozenset[str],
 ) -> str:
     """Which of the three ways a *confined* path resolves to nothing this path took.
@@ -2627,7 +2700,7 @@ def _unresolved_reason(
             "roots and the resolved tree holds no file at that path, which is the damage a move or "
             "a deletion leaves behind"
         )
-    if outside := _outside_the_roots(written, contract, top_level):
+    if outside := _outside_the_roots(written, admission, top_level):
         return (
             f"{_REASON_THIRD_ROOT}: {written!r} names {outside}, a place under the coordination "
             "root which the two admitted roots do not hold, so it is out of scope by design rather "
@@ -2671,7 +2744,7 @@ def _first_segment_admitted(
 
 
 def _outside_the_roots(
-    written: str, contract: WorktreeContract, top_level: frozenset[str]
+    written: str, admission: KnowledgeWriteAdmission, top_level: frozenset[str]
 ) -> Path | None:
     """The coordination-tree place a repository-relative path names, when it names one at all.
 
@@ -2690,10 +2763,10 @@ def _outside_the_roots(
         return None
     if first not in top_level:
         return None
-    return _within(contract.coordination_root, written) or Path(contract.coordination_root, first)
+    return _within(admission.coordination_root, written) or Path(admission.coordination_root, first)
 
 
-def _coordination_top_level(contract: WorktreeContract) -> frozenset[str]:
+def _coordination_top_level(admission: KnowledgeWriteAdmission) -> frozenset[str]:
     """The names of the coordination root's own top-level directories, minus the two admitted roots.
 
     Read **once per run**, when the enclosure's trees are bound, and carried with them. That is the
@@ -2705,10 +2778,10 @@ def _coordination_top_level(contract: WorktreeContract) -> frozenset[str]:
     """
 
     admitted = {
-        root.resolve() for root in (contract.code_repo_path, contract.memory_repo_path) if root
+        root.resolve() for root in (admission.code_repo_path, admission.memory_repo_path) if root
     }
     try:
-        entries = list(Path(contract.coordination_root).iterdir())
+        entries = list(Path(admission.coordination_root).iterdir())
     except OSError:  # pragma: no cover - an unreadable coordination root owns no directory
         return frozenset()
     # ENTRIES, not directories. A file directly at the coordination root is a coordination-root
@@ -3434,7 +3507,7 @@ def _identity(
     the base commit made one repository's knowledge a function of the baseline it happened to be read
     at: the same obligation under the same local label was a different record at each baseline, while
     two different repositories that shared a base commit were handed the SAME record identity. The
-    contract carries no stable repository key to derive from
+    admission carries no stable repository key to derive from
     (``models/knowledge/repository.py``), so the namespace is the one the selected baseline stores --
     the dataset is the durable home of that value, and a repository that has published one keeps it
     whatever baseline the next task runs at. Only a run that selects no baseline derives, through
@@ -3734,6 +3807,38 @@ class _Run:
         return 0 if self.ledger is None else self.ledger.route_rows
 
 
+def _held_operations(read: _Read, journal: _Allocations, scope: str) -> tuple[HeldOperation, ...]:
+    """The creation operations the candidate's journal holds, in the hand-off list's own order.
+
+    The journal is re-read here rather than the plans being asked, and that is the whole point: a
+    plan carries an identity it *minted* whether or not the batch that would have written it ever
+    ran, while the journal holds an identity only once a run recorded one. Reporting the plan's pair
+    as held would tell a reader that an interrupted run had retained identities it never retained.
+
+    A journal that is there and unreadable answers with no records -- and it is not read as "no entry
+    holds an identity": the run's own refusal for that condition is already in ``refused``, and this
+    field is a statement about the journal, so an empty tuple beside that refusal is the truth rather
+    than a claim about the entries.
+    """
+
+    if journal.unreadable is not None:
+        return ()
+    held: list[HeldOperation] = []
+    for entry_id in read.ids:
+        record = journal.records.get(f"{scope}|{entry_id}")
+        if record is None:
+            continue
+        held.append(
+            HeldOperation(
+                entry_id=entry_id,
+                invariant_id=record.invariant_id,
+                revision_id=record.revision_id,
+                content_digest=record.content_digest or "",
+            )
+        )
+    return tuple(held)
+
+
 def _report(
     target: _ReportTarget,
     run: _Run,
@@ -3758,6 +3863,8 @@ def _report(
         target.repository,
         target.read,
     )
+    journal = _read_allocations(paths.candidate)
+    held = _held_operations(read, journal, target.scope)
     family, sources = plane_coverage(
         PlaneCoverageInputs(
             candidate=paths.candidate,
@@ -3772,9 +3879,11 @@ def _report(
         )
     )
     return IngestReport(
-        contract_path=str(paths.contract_path),
+        admission_source=str(paths.admission_source),
         candidate_directory=str(paths.candidate),
         candidate_receipt=str(paths.candidate / CANDIDATE_RECEIPT_NAME),
+        allocation_journal=str(journal.path),
+        held_operations=held,
         lane=resolution.lane,
         code_tree_id=resolution.code_tree_id,
         memory_tree_id=resolution.memory_tree_id,

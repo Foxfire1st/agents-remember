@@ -1,8 +1,8 @@
 """Umbrella command-line entrypoint: ``agents-remember <subcommand>``.
 
 The single front door for the package's CLI tools. It carries ``dashboard``, the memory
-maintenance and migration commands, the knowledge write plane's ingest, and the existing
-``context_packet`` adapter as subparsers. The MCP server keeps its own ``agents-remember-mcp``
+maintenance and migration commands, the knowledge write plane's ingest and its **taskless**
+``knowledge-bootstrap`` entry, and the existing ``context_packet`` adapter as subparsers. The MCP server keeps its own ``agents-remember-mcp``
 console script -- harness configs launch the server by that exact name, so it is never folded in
 here.
 """
@@ -11,7 +11,13 @@ from __future__ import annotations
 
 import argparse
 
-from agents_remember.cli import dashboard, knowledge_ingest, memory_backfill, memory_citations
+from agents_remember.cli import (
+    dashboard,
+    knowledge_bootstrap,
+    knowledge_ingest,
+    memory_backfill,
+    memory_citations,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,6 +47,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     knowledge_ingest.add_arguments(ingest)
     ingest.set_defaults(func=knowledge_ingest.run)
+    bootstrap = sub.add_parser(
+        "knowledge-bootstrap",
+        help=(
+            "Initialize or resume a repository's knowledge foundation without a leaf enclosure; "
+            "the taskless bootstrap's production entry point."
+        ),
+    )
+    knowledge_bootstrap.add_arguments(bootstrap)
+    bootstrap.set_defaults(func=knowledge_bootstrap.run)
     return parser
 
 

@@ -43,8 +43,25 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "97ae9cbefd756a6def6e8048baa2066beef2c06300f73eb93b4ab23b4ebf6879"
+LIFECYCLE_CATALOG_SHA256 = "f3dd258c161eee057edee9bdb7b7a4874220c8a4201c04a516dc146c14526589"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Twenty-ninth deliberate re-pin (260921-ICR-L29, at base ``0d7910f9``, 2026-09-24) -- the taskless
+bootstrap case module's one consumer row.** ``260921-ICR-L29`` (requirement ``ICR-R29@v1``)
+registers no artifact and no contract of its own: its nineteen cases live in the new ordinary unit
+module ``mcp/tests/test_knowledge_bootstrap.py``, which drives the shipped
+``agents-remember knowledge-bootstrap`` subcommand over a real coordination world (a real code
+checkout, a real external memory repository and a real MCP settings document) and reads every claim
+back through the read route's own owners. The census derived the delta exactly, and the finding was
+one row: ``mcp/tests/fixtures/repository_profiles/node/package-lock.json`` reported
+``missing=['mcp/tests/test_knowledge_bootstrap.py'], unsupported=[]``, so that row gained that one
+path, and the module's lane row was added to ``mcp/tests/test-evidence-lanes.toml`` in the
+unit-regression lane beside its sibling. **Nothing was registered, no row was removed and no
+artifact's identity moved**, so the population stays at **sixteen contracts / sixty-six artifacts**,
+and the catalog is re-pinned from
+``97ae9cbefd756a6def6e8048baa2066beef2c06300f73eb93b4ab23b4ebf6879`` (the Twenty-eighth) to
+``f3dd258c161eee057edee9bdb7b7a4874220c8a4201c04a516dc146c14526589``, measured with ``sha256sum mcp/tests/evidence-lifecycle.toml`` on the resolved
+candidate. The proof's own artifact delta remains exactly empty.
 
 **Twenty-eighth deliberate re-pin (260921-ICR-L31's fix round 1, at base ``4c000b11``, 2026-09-23) --
 one further case module's two consumer rows.** Fix round 1 moved the family-population cases

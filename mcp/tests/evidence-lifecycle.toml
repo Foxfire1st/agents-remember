@@ -731,6 +731,7 @@ consumers = [
   "mcp/tests/test_inbox_rebinding_mechanics.py",
   "mcp/tests/test_install_runtime.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_knowledge_bootstrap.py",
   "mcp/tests/test_knowledge_curator_ingest_list.py",
   "mcp/tests/test_knowledge_ingest_comparison_generation.py",
   "mcp/tests/test_knowledge_ingest_failure_windows.py",

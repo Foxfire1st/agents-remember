@@ -41,9 +41,11 @@ def summary(
     """The report as a reader scans it: the mode, the counts, and one line per outcome."""
 
     lines = [
-        f"knowledge-ingest {'dry run' if report.dry_run else 'commit'} on {report.contract_path}",
+        f"knowledge-ingest {'dry run' if report.dry_run else 'commit'} on {report.admission_source}",
         f"  candidate: {report.candidate_directory}",
         f"  lane: {report.lane}  repository: {report.repository_id}",
+        f"  held operations: {len(report.held_operations)} of {len(report.entries_read)} entries "
+        f"({report.allocation_journal})",
         f"  code tree: {report.code_tree_id} ({report.code_tree_source} at "
         f"{report.code_base_commit})",
         f"  memory tree: {report.memory_tree_id}",
@@ -91,10 +93,12 @@ def payload(
     """
 
     return {
-        "contractPath": report.contract_path,
+        "admissionSource": report.admission_source,
         "candidateDirectory": report.candidate_directory,
         "reviewBaseline": review_baseline,
         "candidateReceipt": report.candidate_receipt,
+        "allocationJournal": report.allocation_journal,
+        "heldOperations": [one.as_record() for one in report.held_operations],
         "lane": report.lane,
         "repositoryId": report.repository_id,
         "codeTreeId": report.code_tree_id,

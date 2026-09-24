@@ -7,11 +7,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.knowledge_bootstrap_admission import (
+    BootstrapRefusal,
+    admit_bootstrap_context,
+)
 from agents_remember.application.memory_scope import (
     MemoryScope,
 )
 from agents_remember.application.memory_scope import (
     resolve_memory_scope as _memory_scope,
+)
+from agents_remember.application.published_intent import (
+    PublishedIntentUnavailable,
+    resolve_published_intent,
 )
 from agents_remember.application.runtime.startup import measuring_build_stamp
 from agents_remember.errors import AuthorityError
@@ -327,6 +335,14 @@ def route_index_refresh_tool(
     }
 
 
+# The one route that populates a repository's knowledge foundation, named once because two
+# different operations have to hand the developer the same next step.
+KNOWLEDGE_BOOTSTRAP_ROUTE = (
+    "run the taskless bootstrap: agents-remember knowledge-bootstrap --repo <repo_id> "
+    "--list <curator hand-off list> --authorization-ref <ref> --commit"
+)
+
+
 def memory_init_tool(
     config: McpRuntimeConfig,
     *,
@@ -335,13 +351,70 @@ def memory_init_tool(
     initialize_git: bool = True,
     initial_branch: str | None = None,
 ) -> dict[str, Any]:
-    return initialize_memory(
+    """Scaffold a repository's memory root, and report what its knowledge foundation is.
+
+    The scaffold this calls has never created knowledge storage, and that is correct: a memory root
+    is a *place*, while the knowledge dataset is an authored result no initializer may invent. What
+    was missing is the other half of that statement -- the initializer said nothing at all about
+    where knowledge will live, so "the normal memory initializer never creates knowledge storage"
+    read as "the product has no knowledge step" rather than as "the next step is the curator's
+    bootstrap". The ``knowledge`` block below is that half, and it is a **measurement**: the location
+    is the one the ordinary read route selects, its state is what a read of that location finds now
+    (``not-recorded``, ``recorded`` or ``unusable``), and a location whose context cannot be admitted
+    yet reports the admission's own refusal rather than a hopeful path.
+    """
+
+    result = initialize_memory(
         config,
         repo_id=repo_id,
         dry_run=dry_run,
         initialize_git=initialize_git,
         initial_branch=initial_branch,
     )
+    result["knowledge"] = _knowledge_foundation_state(config, repo_id)
+    return result
+
+
+def _knowledge_foundation_state(config: McpRuntimeConfig, repo_id: str) -> dict[str, Any]:
+    """Where this repository's knowledge foundation lives, and what is there now.
+
+    The admission used here is the bootstrap's own, so the location a curator is told to populate is
+    the location the bootstrap publishes to, which is the location the ordinary read route selects.
+    Nothing here writes: an initializer that created knowledge would be inventing authored content,
+    and the whole point of the split is that it does not.
+    """
+
+    admitted = admit_bootstrap_context(config, repo_id)
+    if isinstance(admitted, BootstrapRefusal):
+        return {
+            "state": "context-not-admitted",
+            "datasetPath": None,
+            "code": admitted.code,
+            "detail": admitted.detail,
+            "nextAction": admitted.next_action,
+        }
+    resolved = resolve_published_intent(admitted.context)
+    if isinstance(resolved, PublishedIntentUnavailable):
+        return {
+            "state": resolved.state,
+            "datasetPath": resolved.dataset_path.as_posix(),
+            "code": resolved.code,
+            "detail": resolved.detail,
+            "nextAction": KNOWLEDGE_BOOTSTRAP_ROUTE,
+        }
+    return {
+        "state": "recorded",
+        "datasetPath": resolved.database_path.as_posix(),
+        "code": None,
+        "detail": (
+            f"the repository's published knowledge dataset {resolved.logical_digest} is recorded "
+            f"at the location the ordinary read route selects, bound to {resolved.repository_id}"
+        ),
+        "nextAction": (
+            "resume or extend it through the ordinary curator ingest: agents-remember "
+            "knowledge-ingest, or knowledge-bootstrap for a taskless run"
+        ),
+    }
 
 
 @dataclass(frozen=True)
