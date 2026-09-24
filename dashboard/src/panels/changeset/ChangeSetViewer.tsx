@@ -25,7 +25,7 @@ import {
   masterFileDiff,
   taskChangeset,
 } from "../../data/changeset";
-import { FilesApiError } from "../../data/files";
+import { type ReviewFailure, reviewProblemFromCause } from "../../data/review";
 import { EmptyStateBackdrop } from "../EmptyStateBackdrop";
 import type { ReviewSelectorKind } from "../../data/review";
 import { ChangeSetPane } from "./ChangeSetPane";
@@ -151,6 +151,37 @@ const sidecarBtn = css({
   _hover: { borderColor: "cyan" },
 });
 const handle = css({ width: "3px", flexShrink: "0", background: "grid", cursor: "col-resize", _hover: { background: "amber" } });
+// The per-leaf state chip a series read reports ("committed" / "working") — what the row's click
+// resolves, so the reader knows which record opens before opening it.
+const leafState = css({
+  flex: "none",
+  fontFamily: "mono",
+  fontSize: "0.64rem",
+  color: "muted",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "2px",
+  paddingInline: "0.25rem",
+});
+const leafCounts = css({
+  marginLeft: "auto",
+  fontFamily: "mono",
+  fontSize: "0.66rem",
+  color: "muted",
+  whiteSpace: "nowrap",
+});
+// The measured-empty statement, printed in the pane instead of the pick-a-file backdrop: an empty
+// change-set is a measurement, and a reader is told which measurement they are looking at.
+const emptyNotice = css({
+  height: "100%",
+  display: "grid",
+  placeItems: "center",
+  padding: "1rem",
+  color: "muted",
+  fontSize: "0.8rem",
+  textAlign: "center",
+});
 const placeholder = css({ height: "100%", display: "grid", placeItems: "center", padding: "1rem", color: "muted", fontSize: "0.8rem", textAlign: "center" });
 // EmptyStateBackdrop's flex:1 canvas needs a flex-column host to fill the diff Panel.
 const emptyHost = css({ height: "100%", minHeight: "0", display: "flex", flexDirection: "column" });
@@ -185,7 +216,10 @@ function changesetListRequest(
   return leaf
     ? leafChangeset(repo, master ?? "", leaf, mode ?? "committed")
     : master
-      ? masterChangeset(repo, master, { includeLeaves: false, ...(generation ? { pins: generation } : {}) })
+      ? // The master net's own attribution (R33.2): the route already answers with one row per
+        // leaf, and asking for it is what makes the net reviewable leaf by leaf instead of as a
+        // single total nobody can attribute.
+        masterChangeset(repo, master, { includeLeaves: true, ...(generation ? { pins: generation } : {}) })
       : taskChangeset(repo, scope ?? "");
 }
 
@@ -252,6 +286,17 @@ function seriesListMeta(
 ): MasterChangeset | null {
   if (!isSeries || data === null || !("generation" in data)) return null;
   return data;
+}
+
+// The per-leaf attribution a series read answered with (R33.2). A task/leaf payload has no `leaves`
+// field at all, so the discriminant is the field's presence -- and a body that predates the
+// breakdown reads as no breakdown rather than as an invented one.
+function seriesLeaves(
+  isSeries: boolean,
+  data: TaskChangeset | MasterChangeset | null,
+): MasterChangeset["leaves"] {
+  if (!isSeries || data === null || !("leaves" in data)) return [];
+  return data.leaves ?? [];
 }
 
 // The generation the open series view is bound to: the list response's own generation when it
@@ -336,6 +381,54 @@ function ChangeList({
   );
 }
 
+// How much of the net ONE leaf accounts for, printed beside it (R33.2): both halves with their file
+// count and their insertions/deletions, so the reviewer can attribute the master's total to a leaf
+// and then open that leaf's own change-set from the same row.
+function leafCountText(counters: MasterChangeset["leaves"][number]["counters"]): string {
+  const half = (part: { files: number; insertions: number; deletions: number }) =>
+    `${part.files} file(s) +${part.insertions} −${part.deletions}`;
+  return `code ${half(counters.code)} · memory ${half(counters.memory)}`;
+}
+
+// One row per leaf the series read reported, under the net counters it is the attribution OF. A
+// landed leaf opens its COMMITTED change-set -- the historical route L12 built, which needs no live
+// worktree (R33.3) -- and a leaf the read reports as still working opens its working delta, which is
+// the range that actually exists for it.
+function LeafBreakdown({
+  leaves,
+  onOpenLeaf,
+}: {
+  leaves: MasterChangeset["leaves"];
+  onOpenLeaf?: (leaf: string, mode: LeafMode) => void;
+}) {
+  if (leaves.length === 0) return null;
+  return (
+    <div className={section} data-testid="changeset-leaves">
+      <div className={sectionHead}>by leaf ({leaves.length})</div>
+      {leaves.map((leaf) => (
+        <div key={leaf.leafId} className={row} data-testid="changeset-leaf-row">
+          <button
+            type="button"
+            className={rowMain}
+            data-leaf-id={leaf.leafId}
+            data-leaf-state={leaf.state ?? ""}
+            disabled={!onOpenLeaf}
+            onClick={() =>
+              onOpenLeaf?.(leaf.leafId, leaf.state === "working" ? "working" : "committed")
+            }
+          >
+            <span className={pathText}>{leaf.leafId}</span>
+            <span className={leafState}>{leaf.state ?? ""}</span>
+            <span className={leafCounts} data-testid="changeset-leaf-counters">
+              {leafCountText(leaf.counters)}
+            </span>
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function useChangesetLoad(
   repo: string,
   scope: string | undefined,
@@ -344,7 +437,7 @@ function useChangesetLoad(
   mode: LeafMode | undefined,
   generation: MasterNetPins | undefined,
   setData: (data: TaskChangeset | MasterChangeset | null) => void,
-  setError: (error: string | null) => void,
+  setError: (error: ReviewFailure | null) => void,
   setActive: (active: { kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null) => void,
   setDiff: (diff: FileDiff | null) => void,
   setPartner: (diff: FileDiff | null) => void,
@@ -359,7 +452,12 @@ function useChangesetLoad(
     const req = changesetListRequest(repo, scope, master, leaf, mode, generation);
     void req.then(
       (d) => live && setData(d),
-      (e: unknown) => live && setError(e instanceof FilesApiError ? `${e.code} (${e.httpStatus})` : "Failed to load change-set"),
+      // The refusal is an ANSWER and is carried as one (the same doctrine as the change-set bar's
+      // own counter read, L32/D01): the route publishes its code, its reason, the input it refused
+      // and the next action, and all of it is kept so this pane can NAME what it cannot show rather
+      // than printing a bare status. A cause that is not this route's refusal is named as the
+      // failure it is rather than guessed into one.
+      (cause: unknown) => live && setError(reviewProblemFromCause(cause)),
     );
     return () => {
       live = false;
@@ -401,6 +499,92 @@ function useWorkingChangesetPoll(
   }, [mode, leaf, repo, master, active, hasData, setData, setDiff]);
 }
 
+// WHAT COULD NOT BE SHOWN, NAMED (R33.3). A refused read says which read it was (the owner's own code,
+// kept in its own element so the status line still reads exactly as it always did), the reason in the
+// owner's words, the input it refused and the next action it published -- never an empty pane that
+// leaves the reader guessing whether there was nothing to show or nothing was read.
+function ChangeSetRefusal({ error }: { error: ReviewFailure }) {
+  return (
+    <div
+      className={placeholder}
+      data-testid="pane-placeholder"
+      data-review-state={error.token}
+      data-review-code={error.code}
+    >
+      this change-set could not be shown:{" "}
+      <span data-testid="changeset-refusal">
+        {error.code}
+        {error.httpStatus ? ` (${error.httpStatus})` : ""}
+      </span>
+      {" — "}
+      {error.detail}
+      {error.offendingInput ? ` — offending input: ${error.offendingInput}` : ""}
+      {error.nextAction ? ` — next: ${error.nextAction}` : ""}
+    </div>
+  );
+}
+
+// The middle pane: the picked file's diff, or one of the two states that are NOT a missing selection —
+// a change-set measured empty in both halves (named, because a measurement is not an absence), and
+// the pick-a-file backdrop that says a file is waiting to be picked.
+function ChangeSetMainPane({ diff, changed }: { diff: FileDiff | null; changed: number }) {
+  if (diff) return <ChangeSetPane diff={diff} keyPrefix="changeset.main" />;
+  if (changed === 0) {
+    return (
+      <div className={emptyNotice} data-testid="changeset-empty">
+        no changed file in either half — this change-set is measured empty (code 0 file(s) · memory 0
+        file(s)).
+      </div>
+    );
+  }
+  return (
+    // No file picked yet: the same faint boomerang backdrop the File Viewer / Operations use.
+    <div className={emptyHost}>
+      {/* Brighter than the shared 0.14 default — the siege-tank clip reads darker; matches DualPane. */}
+      <EmptyStateBackdrop src="/assets/sc2-siege-tank-boomerang.mp4" opacity={0.18}>
+        Select a changed file
+      </EmptyStateBackdrop>
+    </div>
+  );
+}
+
+// The changed files of one half plus, for a series read, the net's own per-leaf attribution beneath
+// them: one row per leaf (R33.2), each opening that leaf's own range (R33.3).
+function ChangeSetRail({
+  data,
+  active,
+  onOpen,
+  leaves,
+  onOpenLeaf,
+}: {
+  data: TaskChangeset | MasterChangeset;
+  active: { kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null;
+  onOpen: (kind: "code" | "memory", file: ChangedFile, withPartner?: boolean) => void;
+  leaves: MasterChangeset["leaves"];
+  onOpenLeaf?: (leaf: string, mode: LeafMode) => void;
+}) {
+  return (
+    <div className={colList}>
+      <ChangeList
+        files={data.code ?? []}
+        kind="code"
+        active={active}
+        onOpen={onOpen}
+        partnerHint={(file) => file.hasSidecar === true}
+        testPrefix="changeset-open-sidecar"
+      />
+      <ChangeList
+        files={data.memory ?? []}
+        kind="memory"
+        active={active}
+        onOpen={onOpen}
+        partnerHint={(file) => partnerTargetFor("memory", file.path) !== null}
+      />
+      <LeafBreakdown leaves={leaves} onOpenLeaf={onOpenLeaf} />
+    </div>
+  );
+}
+
 function ChangeSetWorkspace({
   error,
   data,
@@ -408,21 +592,19 @@ function ChangeSetWorkspace({
   diff,
   partner,
   onOpen,
+  leaves,
+  onOpenLeaf,
 }: {
-  error: string | null;
+  error: ReviewFailure | null;
   data: TaskChangeset | MasterChangeset | null;
   active: { kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null;
   diff: FileDiff | null;
   partner: FileDiff | null;
   onOpen: (kind: "code" | "memory", file: ChangedFile, withPartner?: boolean) => void;
+  leaves: MasterChangeset["leaves"];
+  onOpenLeaf?: (leaf: string, mode: LeafMode) => void;
 }) {
-  if (error) {
-    return (
-      <div className={placeholder} data-testid="pane-placeholder">
-        {error}
-      </div>
-    );
-  }
+  if (error) return <ChangeSetRefusal error={error} />;
   if (!data) {
     return (
       <div className={placeholder} data-testid="pane-placeholder">
@@ -433,37 +615,20 @@ function ChangeSetWorkspace({
   return (
     <PanelGroup direction="horizontal" autoSaveId="changeset.outer" className={css({ flex: "1", minHeight: "0" })}>
       <Panel defaultSize={26} minSize={16}>
-        <div className={colList}>
-          <ChangeList
-            files={data?.code ?? []}
-            kind="code"
-            active={active}
-            onOpen={onOpen}
-            partnerHint={(file) => file.hasSidecar === true}
-            testPrefix="changeset-open-sidecar"
-          />
-          <ChangeList
-            files={data?.memory ?? []}
-            kind="memory"
-            active={active}
-            onOpen={onOpen}
-            partnerHint={(file) => partnerTargetFor("memory", file.path) !== null}
-          />
-        </div>
+        <ChangeSetRail
+          data={data}
+          active={active}
+          onOpen={onOpen}
+          leaves={leaves}
+          onOpenLeaf={onOpenLeaf}
+        />
       </Panel>
       <PanelResizeHandle className={handle} />
       <Panel minSize={20}>
-        {diff ? (
-          <ChangeSetPane diff={diff} keyPrefix="changeset.main" />
-        ) : (
-          // No file picked yet: the same faint boomerang backdrop the File Viewer / Operations use.
-          <div className={emptyHost}>
-            {/* Brighter than the shared 0.14 default — the siege-tank clip reads darker; matches DualPane. */}
-            <EmptyStateBackdrop src="/assets/sc2-siege-tank-boomerang.mp4" opacity={0.18}>
-              Select a changed file
-            </EmptyStateBackdrop>
-          </div>
-        )}
+        <ChangeSetMainPane
+          diff={diff}
+          changed={(data.code?.length ?? 0) + (data.memory?.length ?? 0)}
+        />
       </Panel>
       {partner ? (
         <>
@@ -477,9 +642,18 @@ function ChangeSetWorkspace({
   );
 }
 
-export function ChangeSetViewer({ repo, scope, master, leaf, mode, generation, onBack }: ChangeSetTarget & { onBack: () => void }) {
+export function ChangeSetViewer({
+  repo,
+  scope,
+  master,
+  leaf,
+  mode,
+  generation,
+  onBack,
+  onOpenLeaf,
+}: ChangeSetTarget & { onBack: () => void; onOpenLeaf?: (target: ChangeSetTarget) => void }) {
   const [data, setData] = useState<TaskChangeset | MasterChangeset | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ReviewFailure | null>(null);
   const [active, setActive] = useState<{ kind: "code" | "memory"; path: string; hasSidecar?: boolean } | null>(null);
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [partner, setPartner] = useState<FileDiff | null>(null);
@@ -488,6 +662,7 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, generation, o
   const isSeries = Boolean(master) && !leaf;
   const hasData = data !== null;
   const seriesMeta = seriesListMeta(isSeries, data);
+  const leaves = seriesLeaves(isSeries, data);
   const boundGeneration = boundSeriesGeneration(isSeries, data, generation);
 
   useChangesetLoad(repo, scope, master, leaf, mode, generation, setData, setError, setActive, setDiff, setPartner);
@@ -540,6 +715,10 @@ export function ChangeSetViewer({ repo, scope, master, leaf, mode, generation, o
         diff={diff}
         partner={partner}
         onOpen={open}
+        leaves={leaves}
+        onOpenLeaf={
+          onOpenLeaf ? (id, leafMode) => onOpenLeaf({ repo, master, leaf: id, mode: leafMode }) : undefined
+        }
       />
     </div>
   );

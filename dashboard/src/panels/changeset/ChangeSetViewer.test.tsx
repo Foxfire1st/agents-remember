@@ -265,9 +265,11 @@ describe("ChangeSetViewer screen", () => {
       <ChangeSetViewer repo="agents-remember" master="browser-dashboard" onBack={vi.fn()} />,
     );
     await findByTestId("changeset-counters");
+    // The master read carries the net's per-leaf attribution (ICR-R33.2): the breakdown the route
+    // answers with is asked for, so the total above the file lists is attributable leaf by leaf.
     expect(
       (vi.mocked(fetch).mock.calls as unknown as string[][]).some((call) =>
-        String(call[0]).includes("includeLeaves=false"),
+        String(call[0]).includes("includeLeaves=true"),
       ),
     ).toBe(true);
     // master mode now lists the net changed files with the normal empty-state backdrop prompt
@@ -309,6 +311,164 @@ describe("ChangeSetViewer screen", () => {
     expect(diffUrls).toHaveLength(1);
     expect(diffUrls[0]).toContain("codeBase=b0");
     expect(diffUrls[0]).toContain("codeTip=t2");
+  });
+
+  // ── ICR-R33: the net's leaves, the range each one opens, and what a read that cannot answer says ──
+  // The delivered defect: the master view asked for `includeLeaves: false` and threw the per-leaf
+  // breakdown away, so a reviewer saw one net total with no leaf attribution — and a landed leaf's
+  // own range was reachable only from its own document reader, if the reviewer could find it at all.
+  const MASTER_WITH_LEAVES = {
+    master: "260921_complete-code-and-intent-review",
+    leaves: [
+      {
+        leafId: "260921-ICR-L1",
+        state: "committed" as const,
+        counters: {
+          code: { files: 8, insertions: 1258, deletions: 235 },
+          memory: { files: 20, insertions: 1326, deletions: 406 },
+        },
+      },
+      {
+        leafId: "260921-ICR-L25",
+        state: "working" as const,
+        counters: {
+          code: { files: 2, insertions: 10, deletions: 3 },
+          memory: { files: 1, insertions: 4, deletions: 0 },
+        },
+      },
+    ],
+    code: [{ path: "dashboard/src/x.ts", insertions: 3, deletions: 1, status: "M" }],
+    memory: [{ path: "onboarding/dashboard/src/x.ts.md", insertions: 2, deletions: 0, status: "A" }],
+    counters: { code: { files: 1, insertions: 3, deletions: 1 }, memory: { files: 1, insertions: 2, deletions: 0 } },
+    generation: { codeBase: "b0", codeTip: "t2", memoryBase: "", memoryTip: "", digest: "d".repeat(64) },
+    currentness: "current" as const,
+    scope: "integrated" as const,
+  };
+
+  function stubMaster(body: unknown, status = 200) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          ({
+            ok: status < 400,
+            status,
+            statusText: status === 200 ? "OK" : "Not Found",
+            json: async () => body,
+          }) as unknown as Response,
+      ),
+    );
+  }
+
+  it("lists the master net's leaves, each with its own code and memory counters (R33.2)", async () => {
+    stubMaster(MASTER_WITH_LEAVES);
+    const { findAllByTestId, findByTestId, getByText } = render(
+      <ChangeSetViewer
+        repo="agents-remember"
+        master="260921_complete-code-and-intent-review"
+        onBack={vi.fn()}
+      />,
+    );
+    await findByTestId("changeset-counters");
+
+    // The net total is printed beside the breakdown it is the sum of.
+    expect(getByText("by leaf (2)")).toBeTruthy();
+    const rows = await findAllByTestId("changeset-leaf-row");
+    expect(rows).toHaveLength(2);
+    // Each row carries the leaf's OWN half-by-half measurement: files, insertions and deletions for
+    // code and for memory — the attribution a reviewer rates the leaf on.
+    const counters = await findAllByTestId("changeset-leaf-counters");
+    expect(counters[0].textContent).toBe("code 8 file(s) +1258 −235 · memory 20 file(s) +1326 −406");
+    expect(counters[1].textContent).toBe("code 2 file(s) +10 −3 · memory 1 file(s) +4 −0");
+    expect(rows[0].querySelector("[data-leaf-id]")?.getAttribute("data-leaf-state")).toBe(
+      "committed",
+    );
+  });
+
+  it("opens a landed leaf's committed change-set — and a working leaf's working delta — from the net (R33.3)", async () => {
+    stubMaster(MASTER_WITH_LEAVES);
+    const onOpenLeaf = vi.fn();
+    const { findAllByTestId, findByTestId } = render(
+      <ChangeSetViewer
+        repo="agents-remember"
+        master="260921_complete-code-and-intent-review"
+        onBack={vi.fn()}
+        onOpenLeaf={onOpenLeaf}
+      />,
+    );
+    await findByTestId("changeset-counters");
+    const rows = await findAllByTestId("changeset-leaf-row");
+
+    // A landed leaf (state "committed") opens the historical committed route — the one that needs no
+    // live worktree.
+    fireEvent.click(rows[0].querySelector("button") as HTMLElement);
+    expect(onOpenLeaf).toHaveBeenCalledWith({
+      repo: "agents-remember",
+      master: "260921_complete-code-and-intent-review",
+      leaf: "260921-ICR-L1",
+      mode: "committed",
+    });
+    // A leaf the read reports as still working opens the range that exists for it.
+    fireEvent.click(rows[1].querySelector("button") as HTMLElement);
+    expect(onOpenLeaf).toHaveBeenLastCalledWith({
+      repo: "agents-remember",
+      master: "260921_complete-code-and-intent-review",
+      leaf: "260921-ICR-L25",
+      mode: "working",
+    });
+  });
+
+  it("names the refusal when a landed leaf's committed range cannot be shown (R33.3)", async () => {
+    // THE REAL ANSWER, captured from the running route:
+    //   HTTP 404 {"status":"not-found","path":"no leaf contract for '260921-ICR-L99'"}
+    // The changeset family publishes `bad-path` / `not-found` / `bad-request` only
+    // (mcp/src/agents_remember/serving/changeset.py), so the token this client renders is
+    // `not-found` — not the generic `?? "domain-refused"` fallback an invented code would produce,
+    // which would let this case pass while pinning nothing the product actually does.
+    stubMaster({ status: "not-found", path: "no leaf contract for '260921-ICR-L99'" }, 404);
+    const { findByTestId, queryByText } = render(
+      <ChangeSetViewer
+        repo="agents-remember"
+        master="260921_complete-code-and-intent-review"
+        leaf="260921-ICR-L99"
+        mode="committed"
+        onBack={vi.fn()}
+      />,
+    );
+
+    // Waited for BY NAME: the refusal element only exists once the read has answered, so this cannot
+    // race the loading placeholder the way a wait on the shared testid would.
+    const refusal = await findByTestId("changeset-refusal");
+    expect(refusal.textContent).toBe("not-found (404)");
+    const placeholder = refusal.closest("[data-testid='pane-placeholder']") as HTMLElement;
+    // The reason the route published reaches the reader verbatim (it is the body's `path`, which this
+    // family uses for the reason)…
+    expect(placeholder.textContent).toContain("no leaf contract for '260921-ICR-L99'");
+    // …under the token the route's own code maps to.
+    expect(placeholder.getAttribute("data-review-state")).toBe("not-found");
+    expect(placeholder.getAttribute("data-review-code")).toBe("not-found");
+    // Not an empty pane: nothing claims the change-set was measured empty.
+    expect(queryByText(/measured empty/)).toBeNull();
+  });
+
+  it("names a measured-empty change-set instead of leaving the pane to the pick-a-file backdrop (R33.3)", async () => {
+    stubMaster({
+      master: "260921_complete-code-and-intent-review",
+      leaves: [],
+      code: [],
+      memory: [],
+      counters: { code: { files: 0, insertions: 0, deletions: 0 }, memory: { files: 0, insertions: 0, deletions: 0 } },
+      generation: { codeBase: "b0", codeTip: "b0", memoryBase: "m0", memoryTip: "m0", digest: "e".repeat(64) },
+      currentness: "current",
+      scope: "integrated",
+    });
+    const { findByTestId, queryByText } = render(
+      <ChangeSetViewer repo="agents-remember" master="m" onBack={vi.fn()} />,
+    );
+
+    const empty = await findByTestId("changeset-empty");
+    expect(empty.textContent).toContain("measured empty");
+    expect(queryByText("Select a changed file")).toBeNull();
   });
 });
 

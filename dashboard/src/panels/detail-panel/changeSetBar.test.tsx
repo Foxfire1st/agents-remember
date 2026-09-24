@@ -159,6 +159,80 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
     });
   });
 
+  it("carries the master net's leaf attribution beside its total (R33.2)", async () => {
+    // The delivered defect: this read asked for `includeLeaves: false`, so the master's net total
+    // stood alone — a number with no leaf to attribute it to. The read now asks for the breakdown and
+    // the control prints it beside the total, which is where the reviewer decides what to open.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.startsWith("/api/task-document")) {
+          const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
+          const docPath = params.get("path") ?? "";
+          const doc =
+            dashboardStore.getState().analytics?.taskDocuments.find((item) => item.docPath === docPath) ??
+            taskDoc({ kind: docPath.endsWith("/task.json") ? "master" : "subTask", docPath });
+          return { ok: true, status: 200, json: async () => doc } as unknown as Response;
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            leaves: [
+              {
+                leafId: "260921-ICR-L1",
+                state: "committed",
+                counters: {
+                  code: { files: 8, insertions: 1258, deletions: 235 },
+                  memory: { files: 20, insertions: 1326, deletions: 406 },
+                },
+              },
+              {
+                leafId: "260921-ICR-L25",
+                state: "working",
+                counters: {
+                  code: { files: 2, insertions: 10, deletions: 3 },
+                  memory: { files: 1, insertions: 4, deletions: 0 },
+                },
+              },
+            ],
+            counters: {
+              code: { files: 10, insertions: 1268, deletions: 238 },
+              memory: { files: 21, insertions: 1330, deletions: 406 },
+            },
+          }),
+        } as unknown as Response;
+      }),
+    );
+    const master = taskDoc({
+      lifecycleId: undefined,
+      kind: "master",
+      title: "Complete code and intent review",
+      repository: "agents-remember",
+      docPath: "/tasks/agents-remember/260921_complete-code-and-intent-review/task.json",
+      objective: "Master objective.",
+    });
+    seedTaskDocuments([master]);
+    const { findAllByTestId } = render(
+      <DetailPanel
+        selectedId="taskdoc:/tasks/agents-remember/260921_complete-code-and-intent-review/task.json"
+        onOpenChangeSet={vi.fn()}
+      />,
+    );
+
+    const attribution = await findAllByTestId("changeset-leaf-attribution");
+    expect(attribution).toHaveLength(1);
+    expect(attribution[0].textContent).toBe("2 leaf/leaves · 1 committed · 1 working");
+    // Beside the net total, not instead of it: the button still carries the summed counters.
+    const button = (await findAllByTestId("open-changeset"))[0];
+    expect(button.textContent).toContain("+2598 −644");
+    expect(
+      (vi.mocked(fetch).mock.calls as unknown as string[][]).some((call) =>
+        String(call[0]).includes("includeLeaves=true"),
+      ),
+    ).toBe(true);
+  });
+
   it("opens the series view bound to the generation the net published", async () => {
     // The master net names its exact endpoints; the entry carries those pins into the viewer so
     // the view -- and each file expansion inside it -- reads the listed generation rather than

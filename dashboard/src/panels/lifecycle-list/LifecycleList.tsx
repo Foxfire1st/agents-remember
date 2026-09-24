@@ -53,6 +53,17 @@ import {
 } from "../ChatActivityIndicator";
 import { TaskGroupDisclosure } from "../TaskGroupDisclosure";
 import { useCollapsedTaskGroups } from "../useCollapsedTaskGroups";
+import {
+  type ChildFacts,
+  type CollapseState,
+  NO_CHILDREN,
+  childFactsByParent,
+  enclosureForDoc,
+  landedLeafDocs,
+  markAutoCollapsed,
+  rowChildFacts,
+  rowIsCollapsed,
+} from "./landedLeaves";
 
 // The single unit list (note 01: the lifecycle is THE unit; note 06 IA). A BY REPO | BY PHASE pivot
 // (React Aria ToggleButtonGroup) over every lifecycle (fleeting + persistent), presented as a React
@@ -231,7 +242,7 @@ function LifecycleListImpl({
   active?: boolean;
 }) {
   const [pivot, setPivot] = useState<Pivot>("repo");
-  const { collapsedKeys, toggleCollapsed } = useCollapsedTaskGroups();
+  const { collapsedKeys, openedKeys, setCollapsed } = useCollapsedTaskGroups();
   const lifecycles = useDashboard((s) => s.lifecycles);
   const enclosures = useDashboard((s) => s.enclosures);
   const analytics = useDashboard((s) => s.analytics);
@@ -248,7 +259,8 @@ function LifecycleListImpl({
       pivot={pivot}
       setPivot={setPivot}
       collapsedKeys={collapsedKeys}
-      toggleCollapsed={toggleCollapsed}
+      openedKeys={openedKeys}
+      setCollapsed={setCollapsed}
       lifecycles={lifecycles}
       enclosures={enclosures}
       analytics={analytics}
@@ -265,7 +277,8 @@ interface LifecycleListRenderProps {
   pivot: Pivot;
   setPivot: (pivot: Pivot) => void;
   collapsedKeys: ReadonlySet<string>;
-  toggleCollapsed: (key: string) => void;
+  openedKeys: ReadonlySet<string>;
+  setCollapsed: (key: string, collapsed: boolean) => void;
   lifecycles: Record<string, LifecycleProjection>;
   enclosures: Record<string, EnclosureNode>;
   analytics: Analytics | null;
@@ -280,7 +293,8 @@ const LifecycleListRender = memo(
     pivot,
     setPivot,
     collapsedKeys,
-    toggleCollapsed,
+    openedKeys,
+    setCollapsed,
     lifecycles,
     enclosures,
     analytics,
@@ -291,17 +305,21 @@ const LifecycleListRender = memo(
     const series = analytics ? analytics.series : [];
     const agentPickups = analytics ? analytics.agentPickups : [];
     const enclosuresByLifecycle = groupEnclosuresByLifecycle(Object.values(enclosures));
-    const rows = operationRows({
-      lifecycles: Object.values(lifecycles),
-      lifecycleById: lifecycles,
-      enclosures,
-      enclosuresByLifecycle,
-      docs,
-      series,
-      agentPickups,
-      sessions,
-      nowMs,
-    });
+    const collapse: CollapseState = { collapsedKeys, openedKeys };
+    const rows = operationRows(
+      {
+        lifecycles: Object.values(lifecycles),
+        lifecycleById: lifecycles,
+        enclosures,
+        enclosuresByLifecycle,
+        docs,
+        series,
+        agentPickups,
+        sessions,
+        nowMs,
+      },
+      collapse,
+    );
     const groups = groupRows(rows, pivot);
     const selectedSelection = parseTaskSelection(selectedId, lifecycles, analytics);
     const selectedKey = selectedSelection ? selectionKey(selectedSelection) : selectedId;
@@ -336,8 +354,8 @@ const LifecycleListRender = memo(
                 key={group.key}
                 group={group}
                 pivot={pivot}
-                collapsedKeys={collapsedKeys}
-                onToggleCollapsed={toggleCollapsed}
+                collapse={collapse}
+                onSetCollapsed={setCollapsed}
               />
             ))}
           </ListBox>
@@ -390,6 +408,16 @@ interface OperationRow {
   tier?: RankTier;
   fleeting: boolean;
   inferred: boolean;
+  // What this row carries as children in the PROJECTION (not as materialized rows): the live leaf
+  // docs that always render for it plus the landed leaf docs it holds. `autoCollapsed` is the
+  // default the projection itself sets (ICR-R33.4): a master with no live worktree work is closed,
+  // because the only children it has are its landed leaves, and a list that opened all of them
+  // would be one row per task document.
+  childCount: number;
+  landedCount: number;
+  autoCollapsed: boolean;
+  // This row IS a landed leaf, reached under its open master (ICR-R33.1).
+  landed: boolean;
 }
 
 // The 22px indent grammar: tier rows indent by their full depth; a non-tier row's
@@ -406,7 +434,7 @@ interface OperationGroup {
   rows: OperationRow[];
 }
 
-function operationRows(input: OperationRowsInput): OperationRow[] {
+function operationRows(input: OperationRowsInput, collapse: CollapseState): OperationRow[] {
   const representedLifecycleIds = new Set<string>();
   // The identity rule: one task entry per enclosureId. A doc row that resolved through an
   // enclosure CLAIMS that leaf; a lifecycle bound to the same enclosure annotates the claimed row
@@ -425,9 +453,15 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
     activeEnclosureList.map((item) => [item.enclosure, item]),
   );
   const activeEnclosuresByLifecycle = groupEnclosuresByLifecycle(activeEnclosureList);
+  const childFacts = childFactsByParent(
+    input.docs,
+    input.series,
+    docPaths,
+    activeEnclosureList,
+  );
   const rows: OperationRow[] = [];
 
-  appendDocRows(
+  const materialized = appendDocRows(
     input,
     rows,
     representedLifecycleIds,
@@ -436,6 +470,7 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
     enclosureList,
     docPaths,
     pickupsByLifecycle,
+    childFacts,
   );
   appendSeriesRows(
     input,
@@ -444,6 +479,7 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
     docPaths,
     enclosureList,
     pickupsByLifecycle,
+    childFacts,
   );
   appendLifecycleRows(
     input,
@@ -455,6 +491,22 @@ function operationRows(input: OperationRowsInput): OperationRow[] {
     activeEnclosures,
     activeEnclosuresByLifecycle,
     docPaths,
+  );
+  // Every row that is not a landed leaf exists now, so the default collapse rule can see what each
+  // row carries besides its landed leaves. Only then are the landed leaves materialized — under the
+  // parents that are open.
+  markAutoCollapsed(rows);
+  appendLandedLeafRows(
+    input,
+    rows,
+    representedLifecycleIds,
+    representedEnclosureIds,
+    materialized,
+    enclosureList,
+    docPaths,
+    pickupsByLifecycle,
+    childFacts,
+    collapse,
   );
 
   return rows
@@ -474,7 +526,9 @@ function appendDocRows(
   enclosureList: EnclosureNode[],
   docPaths: Set<string>,
   pickupsByLifecycle: ReturnType<typeof groupPickups>,
-): void {
+  childFacts: Map<string, ChildFacts>,
+): Set<string> {
+  const materialized = new Set<string>();
   for (const doc of input.docs) {
     const enclosure = enclosureForDoc(doc, activeEnclosureList);
     if (!isRootTaskDoc(doc) && !enclosure) continue;
@@ -485,6 +539,8 @@ function appendDocRows(
         : undefined);
     if (lifecycle) representedLifecycleIds.add(lifecycle.id);
     if (enclosure) representedEnclosureIds.add(enclosure.enclosureId);
+    const facts = childFacts.get(taskDocSelectionKey(doc.docPath)) ?? NO_CHILDREN;
+    materialized.add(taskDocSelectionKey(doc.docPath));
     rows.push(
       docRow(
         doc,
@@ -494,6 +550,61 @@ function appendDocRows(
         pickupForLifecycle(lifecycle, pickupsByLifecycle),
         input.docs,
         input.nowMs,
+        facts,
+        false,
+      ),
+    );
+  }
+  return materialized;
+}
+
+// The landed leaves, reached UNDER their master (ICR-R33.1). They are materialized only while the
+// parent that carries them is open — the reader's own open past the default, or the default itself
+// when the parent still has live work — so the operations list never becomes one row per task
+// document (R33.4): the projection carries 496 leaf docs and 38 masters, and this admits the
+// landed ones one open master at a time.
+function appendLandedLeafRows(
+  input: OperationRowsInput,
+  rows: OperationRow[],
+  representedLifecycleIds: Set<string>,
+  representedEnclosureIds: Set<string>,
+  materialized: Set<string>,
+  enclosureList: EnclosureNode[],
+  docPaths: Set<string>,
+  pickupsByLifecycle: ReturnType<typeof groupPickups>,
+  childFacts: Map<string, ChildFacts>,
+  collapse: CollapseState,
+): void {
+  const parents = new Map(rows.map((item) => [item.key, item]));
+  for (const doc of landedLeafDocs({
+    docs: input.docs,
+    seriesList: input.series,
+    docPaths,
+    materialized,
+    parents,
+    collapse,
+  })) {
+    const key = taskDocSelectionKey(doc.docPath);
+    const enclosure = enclosureForDoc(doc, enclosureList);
+    const lifecycle =
+      runtimeForDoc(doc, input.lifecycleById, enclosureList) ??
+      (enclosure
+        ? lifecycleForEnclosure(enclosure, input.lifecycles, input.lifecycleById)
+        : undefined);
+    if (lifecycle) representedLifecycleIds.add(lifecycle.id);
+    if (enclosure) representedEnclosureIds.add(enclosure.enclosureId);
+    materialized.add(key);
+    rows.push(
+      docRow(
+        doc,
+        lifecycle,
+        input.series,
+        docPaths,
+        pickupForLifecycle(lifecycle, pickupsByLifecycle),
+        input.docs,
+        input.nowMs,
+        childFacts.get(key) ?? NO_CHILDREN,
+        true,
       ),
     );
   }
@@ -506,6 +617,7 @@ function appendSeriesRows(
   docPaths: Set<string>,
   enclosureList: EnclosureNode[],
   pickupsByLifecycle: ReturnType<typeof groupPickups>,
+  childFacts: Map<string, ChildFacts>,
 ): void {
   for (const series of input.series) {
     if (docPaths.has(series.docPath)) continue;
@@ -518,6 +630,7 @@ function appendSeriesRows(
         pickupForLifecycle(lifecycle, pickupsByLifecycle),
         input.docs,
         input.nowMs,
+        childFacts.get(seriesSelectionKey(series.seriesId)) ?? NO_CHILDREN,
       ),
     );
   }
@@ -571,7 +684,21 @@ function TaskPivotBar({
 }) {
   return (
     <div className={headRow}>
-      <h2 className={headTitle}>Tasks · {count}</h2>
+      {/* The count is the number of task ENTRIES this list carries — every master, series and
+          lifecycle entry, every leaf whose worktree is live, and the landed leaves of the parents
+          that are OPEN. It is deliberately not the projection's document count (534 documents
+          against 57 entries when this was written): a list that carried one entry per document
+          would be the thing R33.4 forbids, so the header says what it counts.
+          "Open" — not "opened by you": on a fresh render with no clicks at all, a parent that still
+          holds live work is open by default and its landed leaves are already counted (110 of them
+          on the live projection). The sentence below is written for that case, because that case is
+          the one this leaf exists for. */}
+      <h2
+        className={headTitle}
+        title={`${count} task entries this list carries: every master, series and lifecycle entry, every leaf with live work, and the landed leaves of the parents that are open right now — including the parents open by default because they still hold live work`}
+      >
+        Tasks · {count}
+      </h2>
       <ToggleButtonGroup
         className={pivotBar}
         selectionMode="single"
@@ -597,17 +724,22 @@ function TaskPivotBar({
 function TaskGroupSection({
   group,
   pivot,
-  collapsedKeys,
-  onToggleCollapsed,
+  collapse,
+  onSetCollapsed,
 }: {
   group: OperationGroup;
   pivot: Pivot;
-  collapsedKeys: ReadonlySet<string>;
-  onToggleCollapsed: (key: string) => void;
+  collapse: CollapseState;
+  onSetCollapsed: (key: string, collapsed: boolean) => void;
 }) {
   const descendantKeys = descendantBearingKeys(group.rows);
+  // The rows this group holds closed, resolved once so the depth-stack walk and the row's own
+  // disclosure agree about which rows are open.
+  const collapsedHere = new Set(
+    group.rows.filter((item) => rowIsCollapsed(item, collapse)).map((item) => item.key),
+  );
   const visibleRows =
-    pivot === "repo" ? visibleHierarchyRows(group.rows, collapsedKeys) : group.rows;
+    pivot === "repo" ? visibleHierarchyRows(group.rows, collapsedHere) : group.rows;
   return (
     <ListBoxSection key={group.key} className={section}>
       <Header className={groupHeader}>{group.label}</Header>
@@ -619,10 +751,10 @@ function TaskGroupSection({
           hasDescendants={Boolean(
             pivot === "repo" &&
               item.secondary === "master" &&
-              descendantKeys.has(item.key),
+              (descendantKeys.has(item.key) || item.childCount > 0),
           )}
-          collapsed={collapsedKeys.has(item.key)}
-          onToggleCollapsed={onToggleCollapsed}
+          collapsed={collapsedHere.has(item.key)}
+          onToggleCollapsed={() => onSetCollapsed(item.key, !collapsedHere.has(item.key))}
         />
       ))}
     </ListBoxSection>
@@ -640,7 +772,7 @@ function TaskRow({
   pivot: Pivot;
   hasDescendants: boolean;
   collapsed: boolean;
-  onToggleCollapsed: (key: string) => void;
+  onToggleCollapsed: () => void;
 }) {
   const secondary = pivot === "repo" ? item.secondary : item.repo;
   return (
@@ -659,12 +791,16 @@ function TaskRow({
       data-depth={item.depth}
       data-parent-key={item.parentKey}
       data-tier={item.tier}
+      // A landed leaf reached under its master (R33.1): observable in the DOM so the row's own
+      // record — not a styling accident — is what a reader (or a test) reads.
+      data-landed={item.landed ? "true" : undefined}
+      data-auto-collapsed={item.autoCollapsed ? "true" : undefined}
     >
       {hasDescendants ? (
         <TaskGroupDisclosure
           label={item.label}
           collapsed={collapsed}
-          onToggle={() => onToggleCollapsed(item.key)}
+          onToggle={onToggleCollapsed}
         />
       ) : null}
       <span
@@ -743,6 +879,8 @@ function docRow(
   pickup: AgentPickupNode | undefined,
   allDocs: TaskDocNode[],
   nowMs: number,
+  facts: ChildFacts,
+  landed: boolean,
 ): OperationRow {
   const progress = doc.kind === "master" ? subTaskProgress(doc.subTasks) : taskStepProgress(doc);
   const label = taskDocHierarchyLabel(doc, seriesList);
@@ -751,6 +889,7 @@ function docRow(
   const variant = taskVariant(doc, lifecycle);
   const gate = taskGate(lifecycle);
   const command = commandFacts(doc, allDocs);
+  const children = rowChildFacts(facts);
   return {
     key: taskDocSelectionKey(doc.docPath),
     label,
@@ -768,7 +907,7 @@ function docRow(
     secondary: doc.kind,
     variant,
     meta: rowMetaText(
-      progressHint(progress, doc.discardedCount ?? 0),
+      landedProgressHint(progress, doc.discardedCount ?? 0, children.landedCount),
       doc.status,
       servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs),
     ),
@@ -782,6 +921,9 @@ function docRow(
     tier: command.tier,
     fleeting: lifecycle?.fleeting ?? false,
     inferred: lifecycle?.inferred ?? false,
+    ...children,
+    autoCollapsed: false,
+    landed,
   };
 }
 
@@ -791,12 +933,14 @@ function seriesRow(
   pickup: AgentPickupNode | undefined,
   allDocs: TaskDocNode[],
   nowMs: number,
+  facts: ChildFacts,
 ): OperationRow {
   const repo = series.repository ?? lifecycle?.repoId ?? "—";
   const phase = lifecycle?.phase ?? series.status;
   const variant = lifecycle?.state ?? statusVariant(series.status);
   const gate = taskGate(lifecycle);
   const flags = lifecycleFlags(lifecycle);
+  const children = rowChildFacts(facts);
   // A folder-keyed series fallback row is still a master seat: it answers to its seriesId (the
   // task folder), its title, or its doc folder when an orchestration doc names it.
   const commander = seriesCommanderParent(series, allDocs);
@@ -816,9 +960,10 @@ function seriesRow(
     secondary: "master",
     variant,
     meta: rowMetaText(
-      progressHint(
+      landedProgressHint(
         { done: series.doneCount, total: series.totalCount },
         series.discardedCount,
+        children.landedCount,
       ),
       series.status,
       servedAgeSeconds(lifecycle, lifecycle?.staleSeconds, nowMs),
@@ -833,6 +978,9 @@ function seriesRow(
     tier: commander ? "management" : undefined,
     fleeting: flags.fleeting,
     inferred: flags.inferred,
+    ...children,
+    autoCollapsed: false,
+    landed: false,
   };
 }
 
@@ -911,6 +1059,10 @@ function lifecycleRow(
     depth: 0,
     fleeting: lifecycle.fleeting,
     inferred: lifecycle.inferred,
+    childCount: 0,
+    landedCount: 0,
+    autoCollapsed: false,
+    landed: false,
   };
 }
 
@@ -1093,25 +1245,6 @@ function isRootTaskDoc(doc: Pick<TaskDocNode, "kind" | "docPath">): boolean {
   return doc.kind === "master" || pathStem(doc.docPath) === "task";
 }
 
-function enclosureForDoc(
-  doc: Pick<TaskDocNode, "id" | "docPath" | "lifecycleId">,
-  enclosures: EnclosureNode[],
-): EnclosureNode | undefined {
-  const dir = pathDir(doc.docPath);
-  // Enclosure leaf ids are lowercase directory names while doc ids are
-  // uppercase: every leafId comparison here is case-insensitive, matching the
-  // normalization RailChat and the change-set bar already use. Exact joins only: since
-  // task_reopen, reopening a leaf reuses its EXACT leaf id, so the old `-rN`
-  // suffix admission heuristic is gone.
-  const stem = pathStem(doc.docPath).toLowerCase();
-  const docId = doc.id ? doc.id.toLowerCase() : undefined;
-  return enclosures.find((enclosure) => {
-    if (enclosure.taskRoot !== dir) return false;
-    const leafId = enclosure.leafId.toLowerCase();
-    return leafId === stem || (docId !== undefined && leafId === docId);
-  });
-}
-
 // The lifecycle bound to an enclosure, following the cross-ref in either direction: the
 // contract's recorded lifecycleId, or a live lifecycle still anchored to the enclosure
 // (lifecycle.enclosure). This is the annotation source for a doc row whose own lifecycleId is
@@ -1155,6 +1288,19 @@ function progressHint(progress: { done: number; total: number }, discardedCount 
   const completed = progress.total > 0 ? `${progress.done}/${progress.total}` : "";
   const discarded = discardedCount > 0 ? `${discardedCount} discarded` : "";
   return [completed, discarded].filter(Boolean).join(" · ");
+}
+
+// A master row says how much landed work it carries, so a CLOSED master (R33.4's default) is still
+// readable: "31/33 · inProgress · 31 landed" tells the reader there is finished work behind the
+// disclosure before they open it. Silent for every row that carries none, which is every row the
+// list rendered before this change.
+function landedProgressHint(
+  progress: { done: number; total: number },
+  discardedCount: number,
+  landedCount: number,
+): string {
+  const landed = landedCount > 0 ? `${landedCount} landed` : "";
+  return [progressHint(progress, discardedCount), landed].filter(Boolean).join(" · ");
 }
 
 function rowMetaText(progress: string, status: string, staleSeconds: number | undefined): string {

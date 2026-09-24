@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   type ChangeCounters,
+  type MasterChangeset,
   type MasterNetPins,
   leafChangeset,
   masterChangeset,
@@ -30,6 +31,19 @@ import {
   changeSetCounts,
 } from "./styles";
 
+// The net's leaf attribution as one phrase: how many leaves the master carries and how many of them
+// have landed, or nothing at all when the read was not a master's (or predates the breakdown) -- an
+// absent answer is not rendered as a zero.
+function leafAttribution(leaves: MasterChangeset["leaves"] | null): string | null {
+  if (!leaves || leaves.length === 0) return null;
+  const committed = leaves.filter((leaf) => leaf.state === "committed").length;
+  const working = leaves.length - committed;
+  return [
+    `${leaves.length} leaf/leaves`,
+    working > 0 ? `${committed} committed · ${working} working` : `${committed} committed`,
+  ].join(" · ");
+}
+
 export function ChangeSetButton({
   target,
   label,
@@ -46,6 +60,9 @@ export function ChangeSetButton({
   // entry opens the viewer bound to it, so the view -- and each file expansion inside it -- reads
   // the listed generation rather than re-resolving the live tip.
   const [generation, setGeneration] = useState<MasterNetPins | null>(null);
+  // The net's own leaves, when this read is a master's: how many the master carries and how many of
+  // them have landed, which is what makes the total beside it attributable at a glance.
+  const [leaves, setLeaves] = useState<MasterChangeset["leaves"] | null>(null);
   // WHAT THE READ SAID WHEN IT DID NOT ANSWER (L32/D01). The route publishes a refusal's own code
   // and its reason in the body of its non-2xx response, and the rejection below used to take no error
   // parameter at all: the refusal was in hand and discarded, so a REFUSED read rendered
@@ -57,16 +74,21 @@ export function ChangeSetButton({
     let live = true;
     setCounters(null);
     setGeneration(null);
+    setLeaves(null);
     setProblem(null);
     const req = target.leaf
       ? leafChangeset(target.repo, target.master ?? "", target.leaf, target.mode ?? "committed")
       : target.master
-        ? masterChangeset(target.repo, target.master, { includeLeaves: false })
+        ? // The master read asks for its per-leaf attribution (R33.2) -- the route answers one row
+          // per leaf, and this control is where the reviewer sees that the net total IS those leaves
+          // summed rather than a single number with no owner.
+          masterChangeset(target.repo, target.master, { includeLeaves: true })
         : taskChangeset(target.repo, target.scope ?? "");
     void req.then(
       (d) => {
         if (!live) return;
         setCounters(d.counters);
+        setLeaves("leaves" in d ? (d.leaves ?? []) : null);
         setGeneration(
           "generation" in d && d.generation
             ? {
@@ -86,6 +108,7 @@ export function ChangeSetButton({
         if (!live) return;
         setCounters(null);
         setGeneration(null);
+        setLeaves(null);
         setProblem(reviewProblemFromCause(cause));
       },
     );
@@ -105,6 +128,11 @@ export function ChangeSetButton({
     >
       ⇄ {label}
       {total ? <span className={changeSetCounts}>{total}</span> : null}
+      {leafAttribution(leaves) ? (
+        <span className={changeSetCounts} data-testid="changeset-leaf-attribution">
+          {leafAttribution(leaves)}
+        </span>
+      ) : null}
       <ChangeSetReadState counters={counters} problem={problem} />
     </button>
   );

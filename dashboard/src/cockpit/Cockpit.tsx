@@ -561,9 +561,14 @@ function useCockpitShellActions(
 function ChangeSetTakeover({
   target,
   onBack,
+  onOpenChangeSet,
 }: {
   target: ChangeSetTarget;
   onBack: () => void;
+  // Re-targeting this one takeover is how a leaf becomes reachable FROM the master's net listing
+  // (ICR-R33.3): the row names a leaf, the cockpit opens that leaf's own committed change-set, and
+  // the reader stays in the same screen instead of having to find the leaf somewhere else.
+  onOpenChangeSet: (target: ChangeSetTarget) => void;
 }) {
   return (
     <div className={cx(bodyGrid({ bleed: true }), "shell__body")} data-fullbleed={true}>
@@ -587,7 +592,7 @@ function ChangeSetTakeover({
             onBack={onBack}
           />
         ) : (
-          <ChangeSetViewer {...target} onBack={onBack} />
+          <ChangeSetViewer {...target} onBack={onBack} onOpenLeaf={onOpenChangeSet} />
         )}
       </main>
     </div>
@@ -902,7 +907,11 @@ export function CockpitShell({ initialView = "operations" }: { initialView?: Coc
       <div className="crt-overlay" aria-hidden="true" />
       <TopBar />
       {state.changeSet ? (
-        <ChangeSetTakeover target={state.changeSet} onBack={actions.closeChangeSet} />
+        <ChangeSetTakeover
+          target={state.changeSet}
+          onBack={actions.closeChangeSet}
+          onOpenChangeSet={actions.openChangeSet}
+        />
       ) : null}
       {/* The Notes Reader takeover: mounted once opened and kept mounted (hidden via display) even
           after Back — like the File Viewer — so its listing + open note survive back/forward. Its own
