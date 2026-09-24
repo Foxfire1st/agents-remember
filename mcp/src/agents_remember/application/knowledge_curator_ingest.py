@@ -101,6 +101,32 @@ from uuid import UUID, uuid4, uuid5
 
 import apsw
 
+from agents_remember.application.curator_family_authoring import (
+    FamilyAssignment,
+    no_family_condition,
+)
+from agents_remember.application.curator_family_coverage import (
+    FamilyCoverage,
+    StoredFamilyFacts,
+)
+from agents_remember.application.curator_family_planning import (
+    CuratorFamilyAuthoring,
+    plan_entry_family,
+    projected_family_commands,
+    read_family_allocations,
+    read_stored_family_facts,
+    record_family_allocations,
+)
+from agents_remember.application.curator_ingest_planes import (
+    CuratorPlanes,
+    PlaneCoverageInputs,
+    plane_coverage,
+    read_curator_planes,
+)
+from agents_remember.application.curator_source_manifest import (
+    SourceCoverage,
+    write_source_manifest,
+)
 from agents_remember.application.knowledge import (
     open_admitted_knowledge_store,
     write_authorship,
@@ -110,7 +136,7 @@ from agents_remember.application.knowledge_ingest import (
     CuratorCitation,
     CuratorEntry,
     commit_curator_entries,
-    curator_entry_commands,
+    curator_command_list,
 )
 from agents_remember.application.knowledge_snapshot import (
     admitted_candidate_destination,
@@ -127,7 +153,10 @@ from agents_remember.memory.knowledge import routes
 from agents_remember.memory.knowledge.anchors import read_anchor
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.read_anchors import observe_anchor
-from agents_remember.memory.knowledge.records import decode_repository_row
+from agents_remember.memory.knowledge.records import (
+    decode_repository_row,
+    decode_typed_column,
+)
 from agents_remember.memory.knowledge.refusals import selected_input_unavailable_refusal
 from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
 from agents_remember.memory_quality.style.citations import grammars
@@ -437,6 +466,12 @@ class IngestReport:
     committed; ``None`` means nothing was published, and ``batch_state`` says why: either the caller
     selected no destination, or the batch did not commit and a candidate that did not change is not
     published.
+
+    ``family`` and ``sources`` are the two awarded planes this operation added for the curator's
+    foundation: the family guarantees and exact memberships this list authored or examined, and the
+    bounded external-source manifest the list declared with the origin references that name it. Both
+    carry their own state, so a plane this run did not write says so instead of rendering as an empty
+    result a reader could take for a measured one.
     """
 
     contract_path: str
@@ -459,6 +494,8 @@ class IngestReport:
     batch_digest_before: str | None
     batch_digest_after: str | None
     batch_refusal: KnowledgeRefusal | None
+    family: FamilyCoverage
+    sources: SourceCoverage
     publication: SnapshotPublicationResult | None = None
 
 
@@ -493,6 +530,7 @@ class _Plan:
     predecessors: tuple[str, ...] = ()
     allocation: _Allocation | None = None
     replayed: bool = False
+    family: CuratorFamilyAuthoring | None = None
 
 
 @dataclass(frozen=True)
@@ -940,7 +978,7 @@ class _Read:
 
 @dataclass(frozen=True)
 class _ReportTarget:
-    """What one report names: the two local paths, the resolution, the trees, and the read."""
+    """What one report names: the two local paths, the resolution, the trees, the read, the planes."""
 
     paths: _Paths
     resolution: CandidateResolution
@@ -948,6 +986,7 @@ class _ReportTarget:
     read: _Read
     trees: _TreeIds
     coordination_top_level: frozenset[str]
+    planes: CuratorPlanes
 
     def with_read(self, read: _Read) -> _ReportTarget:
         """The same report inputs with a later read, keeping the trees it resolved against."""
@@ -959,6 +998,7 @@ class _ReportTarget:
             read,
             self.trees,
             self.coordination_top_level,
+            self.planes,
         )
 
 
@@ -1077,8 +1117,9 @@ def ingest_curator_list(
     )
     resolution = _resolution(contract, source.tree_ids)
     raw = _read_entries(entries)
+    planes = read_curator_planes(raw, paths.candidate, _retry_scope(source.contract))
     allocations = _read_allocations(paths.candidate)
-    plans, refused, resolved_before_refusal = _plan_entries(raw, source, allocations)
+    plans, refused, resolved_before_refusal = _plan_entries(raw, source, allocations, planes)
     read = _Read(
         ids=tuple(str(one["id"]) for one in raw),
         rulings=tuple(_ruling_outcome(plan) for plan in plans if plan.ruling),
@@ -1095,6 +1136,7 @@ def ingest_curator_list(
                 read,
                 source.tree_ids,
                 source.coordination_top_level,
+                planes,
             ),
             _projected(read.planned),
             committed=_projected_outcomes(read.planned),
@@ -1103,7 +1145,7 @@ def ingest_curator_list(
     authorship = write_authorship(
         actor_ref=authorization_ref,
         authorization_ref=authorization_ref,
-        origin_refs=("curator-handoff:revision-1",),
+        origin_refs=planes.refs,
     )
     admission = _admitted_candidate(paths.candidate, repository, resolution, baseline=baseline)
     if admission.state == "refused" or admission.result.identity is None:
@@ -1120,20 +1162,18 @@ def ingest_curator_list(
                 _with_refused(read, _admission_refused(read.planned, admission.result)),
                 source.tree_ids,
                 source.coordination_top_level,
+                planes,
             ),
             _Run(batch_state="not_attempted", refusal=admission.refusal),
         )
     admitted = admitted_candidate_destination(paths.candidate, repository, resolution)
     destination = candidate_write_destination(admitted, authorship)
-    # The allocation is recorded BEFORE the batch, and it is recorded only now: the candidate that
-    # holds the journal is the one admission just produced, so this never creates the destination it
-    # writes into. A batch that then refuses has still made this creation operation's allocation, and
-    # the retry of that operation resolves to it instead of minting a second identity for one truth.
-    _record_allocations(allocations, read.planned)
     # ... and only a candidate that already HOLDS a plan's revision makes that plan a replay, which
     # is a question the dataset answers and the journal cannot: the journal cannot know whether the
-    # batch that ran after it was written committed.
+    # batch that ran after it was written committed. It is asked BEFORE anything is recorded, because
+    # what is recorded depends on it.
     read = _with_replays(read, admitted.database_path)
+    planes = _record_what_the_batch_will_write(destination, paths, read, planes, allocations)
     report = _run(
         _ReportTarget(
             paths,
@@ -1142,6 +1182,7 @@ def ingest_curator_list(
             read,
             source.tree_ids,
             source.coordination_top_level,
+            planes,
         ),
         destination,
     )
@@ -1153,18 +1194,125 @@ def ingest_curator_list(
     return replace(report, publication=_publish_candidate(admitted, selection.publication))
 
 
+def _with_unwritable_family_outcomes(read: _Read, database: Path) -> _Read:
+    """Refuse a deliberate no-family outcome this run cannot write, instead of claiming it recorded one.
+
+    A no-family outcome has no row of its own: it is retained in the revision's recorded conditions,
+    and a revision is immutable. So when an entry's revision **replays** -- the dataset already holds
+    it, authored by an earlier run -- a *different* basis authored now has nowhere to go, and reporting
+    it as this run's outcome would be a claim the store does not support. The one case that is not a
+    contradiction is an exact retry: the stored revision already carries exactly the condition this
+    list authors, so the outcome is recorded, by that run, and is reported as recorded.
+
+    A membership is not affected: it is a row of its own, so a replayed revision can still be placed
+    in a family this run authors. That is why this guard is about the no-family outcome alone.
+    """
+
+    conditions = _stored_conditions(database)
+    kept: list[_Plan] = []
+    refused: list[EntryOutcome] = []
+    for plan in read.planned:
+        basis = None if plan.family is None else plan.family.no_family_basis
+        if not plan.replayed or basis is None:
+            kept.append(plan)
+            continue
+        if no_family_condition(basis) in conditions.get(plan.revision_id, ()):
+            kept.append(plan)
+            continue
+        refused.append(
+            _refused_entry(
+                _fields_of(plan),
+                "family_outcome_not_writable",
+                "this entry's revision is already recorded, and a no-family outcome is retained in the "
+                "revision's own conditions, so the basis this list authors cannot be recorded on it; an "
+                "exact retry of the recorded basis is reported as recorded, and a changed one is "
+                "authored as a successor entry naming the stored invariant_id and "
+                "predecessor_revision_ids",
+            )
+        )
+    if not refused:
+        return read
+    return replace(read, planned=tuple(kept), refused=(*read.refused, *refused))
+
+
+def _stored_conditions(database: Path) -> dict[str, tuple[str, ...]]:
+    """The conditions every stored revision records, so a replay can be told from a changed decision.
+
+    It is read from the dataset itself, through the shipped decoder for the typed column, and never
+    from the plan: the question is what the store holds, and a plan cannot answer it.
+    """
+
+    connection = open_read_only_database(database)
+    try:
+        return {
+            str(row[0]): tuple(str(item) for item in decode_typed_column(str(row[1])))
+            for row in connection.execute("SELECT revision_id, conditions FROM invariant_revision")
+        }
+    finally:
+        connection.close()
+
+
+def _record_what_the_batch_will_write(
+    destination: AdmittedKnowledgeDestination,
+    paths: _Paths,
+    read: _Read,
+    planes: CuratorPlanes,
+    allocations: _Allocations,
+) -> CuratorPlanes:
+    """Record the identities and the manifest **only** for a run that has something to write.
+
+    The question is asked of the batch's own commands -- the same question :func:`_run` asks before it
+    decides to skip the batch -- so the two can never disagree about whether this run writes anything.
+    An exact replay writes nothing, and recording an allocation for it would spend identities the
+    dataset never receives: measured, a replayed invariant whose entry authored a *new* family left the
+    family journal naming a family no dataset held, and a further run of that key was then answered as
+    an already-allocated identity with nothing to examine.
+
+    Everything here is recorded **before** the batch, and only now, because the candidate that holds
+    the journals is the one admission just produced, so this never creates the destination it writes
+    into. A batch that then REFUSES has still made this creation operation's allocation, and the retry
+    of that operation resolves to it instead of minting a second identity for one truth -- that is a
+    different fact from a run that never opened a batch at all, and it keeps the semantics the
+    invariant journal has had since it was written.
+    """
+
+    if not curator_command_list(destination, tuple(_curator_entry(plan) for plan in read.planned)):
+        return planes
+    _record_allocations(allocations, read.planned)
+    record_family_allocations(
+        read_family_allocations(paths.candidate), planes.declarations.declarations
+    )
+    if planes.manifest is None:
+        return planes
+    # The source manifest is written here for the same reason: the origin references the batch is
+    # about to stamp name its digest, and a manifest written afterwards could leave rows whose origin
+    # names bytes no reader can find.
+    write_source_manifest(paths.candidate, planes.manifest)
+    return replace(planes, manifest_written=True)
+
+
 def _run(target: _ReportTarget, destination: AdmittedKnowledgeDestination) -> IngestReport:
     """Author the routes, commit the one batch, attach the routes, and report every outcome.
 
-    The batch carries only the plans this run must **write**. A replayed plan's revision is already
-    in the candidate, so re-issuing its commands would be refused by the batch's own insert-absence
-    precondition -- which is the right answer to "write this again" and the wrong answer to "repeat
-    the operation that already wrote it". A replay is therefore reported committed with the identities
-    it already holds and contributes no command, no row and no route attachment.
+    The batch carries every command this run must **write**, which is not the same list as the plans
+    whose invariant revision is new. A replayed plan's revision and citations are already in the
+    candidate -- re-issuing them would be refused by the batch's own insert-absence precondition, which
+    is the right answer to "write this again" and the wrong answer to "repeat the operation that
+    already wrote it" -- but such a plan can still carry a family declaration or membership nobody has
+    written, and those commands are this run's to write. A run with nothing left to write at all is
+    reported as a replay, with the identities the dataset already holds and no row of its own.
     """
 
     resolution, repository, read = target.resolution, target.repository, target.read
+    read = _with_unwritable_family_outcomes(read, destination.database_path)
     fresh = tuple(plan for plan in read.planned if not plan.replayed)
+    # What this run still owes the dataset is a fact about the batch's own commands, never about the
+    # invariant-replay set: a replayed entry whose invariant revision is already stored can still carry
+    # a family declaration nobody has written, and deciding from ``fresh`` alone skipped that batch
+    # while the report went on describing the rows it never wrote.
+    pending = curator_command_list(
+        destination, tuple(_curator_entry(plan) for plan in read.planned)
+    )
     # A replay's route facts are the candidate's own rows, so they are read from it once and used for
     # both the ledger's seeds and the entries' receipts: a second read could disagree with the first,
     # and the id this run derives for a declared path is not a row any dataset has to hold.
@@ -1179,16 +1327,22 @@ def _run(target: _ReportTarget, destination: AdmittedKnowledgeDestination) -> In
         attached={},
         authored=set(),
     )
-    if read.planned and not fresh:
-        # Every plan this run was handed is already in the candidate. There is no batch to run: the
-        # routes are the ones the admitting runs wrote, so the ledger answers them as reused and
-        # accepts nothing, which is exactly the rows this run wrote -- none.
+    if read.planned and not pending:
+        # Every command this list becomes is already in the candidate, so there is no batch to run:
+        # the routes are the ones the admitting runs wrote, so the ledger answers them as reused and
+        # accepts nothing, which is exactly the rows this run wrote -- none. The family plane is read
+        # back all the same: the rows it reports are the candidate's own, and ``examined``/``reused``
+        # is what they are rather than something this run claimed to have written.
+        #
+        # A list that planned NOTHING is not this case and does not take this branch: there is nothing
+        # to have replayed, so the ordinary path runs and reports that nothing committed.
         return _report(
             target,
             _Run(batch_state=_REPLAYED_BATCH_STATE, ledger=ledger),
             committed=tuple(
                 _replayed_outcome(plan, stored.get(plan.entry_id, ())) for plan in read.planned
             ),
+            after=read_stored_family_facts(destination.database_path),
         )
     route_refusals = _author_routes(destination, repository, ledger, fresh)
     if route_refusals:
@@ -1196,10 +1350,10 @@ def _run(target: _ReportTarget, destination: AdmittedKnowledgeDestination) -> In
             target.with_read(_with_refused(read, route_refusals)),
             _Run(batch_state="not_attempted"),
         )
-    result = _commit(destination, resolution, fresh)
+    result = _commit(destination, resolution, read.planned)
     if result is None or result.state == "refused":
         return _report(
-            target.with_read(_with_refused(read, _batch_refused(fresh, result))),
+            target.with_read(_with_refused(read, _batch_refused(read.planned, result))),
             _Run(result=result, ledger=ledger),
         )
     _attach_routes(destination, repository, fresh, ledger)
@@ -1209,14 +1363,15 @@ def _run(target: _ReportTarget, destination: AdmittedKnowledgeDestination) -> In
         else _committed_outcome(plan, ledger.attached.get(plan.entry_id, ()))
         for plan in read.planned
     )
-    commands = sum(len(curator_entry_commands(destination, _curator_entry(plan))) for plan in fresh)
-    # The same projection the dry mode reports, so the two modes agree on what the batch carries
-    # before the receipt is read: four rows per citation, one per command.
-    projected = _projected(fresh).batch_rows
+    # The commands this run actually handed the batch, and the same projection the dry mode reports,
+    # so the two modes agree on what the batch carries before the receipt is read.
+    commands = len(pending)
+    projected = _projected(read.planned).batch_rows
     return _report(
         target,
         _Run(result=result, commands=commands, records=projected, ledger=ledger),
         committed=committed,
+        after=read_stored_family_facts(destination.database_path),
     )
 
 
@@ -1829,7 +1984,10 @@ def _read_entries(
 
 
 def _plan_entries(
-    entries: Sequence[Mapping[str, Any]], source: _Source, allocations: _Allocations
+    entries: Sequence[Mapping[str, Any]],
+    source: _Source,
+    allocations: _Allocations,
+    planes: CuratorPlanes,
 ) -> tuple[tuple[_Plan, ...], tuple[EntryOutcome, ...], tuple[_TargetPlan, ...]]:
     """Read every entry into a plan, keeping each entry's own refusals beside the plans.
 
@@ -1843,7 +2001,7 @@ def _plan_entries(
     refused: list[EntryOutcome] = []
     resolved_before_refusal: list[_TargetPlan] = []
     for raw in entries:
-        plan, refusal = _plan_entry(raw, source, allocations)
+        plan, refusal = _plan_entry(raw, source, allocations, planes)
         if refusal is not None:
             refused.append(refusal.entry(_EntryFields.read(raw)))
             resolved_before_refusal.extend(refusal.planned)
@@ -1856,6 +2014,7 @@ def _plan_entry(
     raw: Mapping[str, Any],
     source: _Source,
     allocations: _Allocations,
+    planes: CuratorPlanes,
 ) -> tuple[_Plan | None, _Refusal | None]:
     """Read one entry: its ruling, or its targets completed, each anchor observed, and its identity.
 
@@ -1865,50 +2024,42 @@ def _plan_entry(
     minted for is settled last, once the places are resolved, so the guard against a changed entry
     arriving under one idempotency key is unchanged.
 
-    A ruling decides nothing: it writes nothing, so it is allocated nothing.
+    The two awarded planes are read before either, because a family decision that cannot be resolved
+    to exact revisions or an external source that cannot be found again is a fact about the entry's
+    authoring rather than about its citations.
+
+    A ruling decides nothing: it writes nothing, so it is allocated nothing -- and a ruling that
+    carries a family decision is refused instead, because a membership names an exact invariant
+    revision and a ruling has none.
     """
 
     fields = _EntryFields.read(raw)
+    plane_refusal = planes.refusal_of(fields.entry_id)
+    if plane_refusal is not None:
+        return None, _Refusal(*plane_refusal)
+    assignment = planes.family.assignment_of(fields.entry_id)
     targets = list(raw.get("target") or [])
     if not targets:
-        return _ruling_plan(fields), None
-    allocation, refusal = _creation(source, fields, allocations)
+        return _plan_or_refuse_ruling(fields, assignment)
+    allocation, planned, refusal = _resolve_creation(source, fields, allocations, targets)
     if refusal is not None:
-        return None, _Refusal(refusal.code, refusal.reason)
-    if allocation is None:  # pragma: no cover - a creation and its refusal are exclusive
-        raise ValueError("an entry with targets resolved without a creation or a refusal")
-    planned: list[_TargetPlan] = []
-    seen: set[tuple[str, str, str]] = set()
-    for target in targets:
-        plan, refusal = _plan_target(
-            fields,
-            target,
-            source,
-            allocation.revision_id,
-        )
-        if refusal is not None:
-            # The refusal carries the places this entry's earlier targets already resolved, so an
-            # entry refused at its second target still shows the first one: the report's entry
-            # count and its target count then describe the same run.
-            return None, _Refusal(
-                refusal.code,
-                refusal.reason,
-                _refused_targets(planned),
-                tuple(planned),
-            )
-        if plan is None:  # pragma: no cover - a plan and its refusal are exclusive
-            continue
-        if plan.target_key in seen:
-            return None, _Refusal(
-                "duplicate_target_path",
-                f"the entry names {plan.completed_path!r} twice, so one of the two places the "
-                "producer named would be filed under the other's identity",
-                _refused_targets(planned),
-                tuple(planned),
-            )
-        seen.add(plan.target_key)
-        planned.append(plan)
+        return None, refusal
+    assert allocation is not None  # pragma: no cover - a creation and its refusal are exclusive
     allocation, refusal = _require_minted_content(allocation, fields, planned)
+    if refusal is not None:
+        return None, _Refusal(
+            refusal.code,
+            refusal.reason,
+            _refused_targets(planned),
+            tuple(planned),
+        )
+    family, refusal = plan_entry_family(
+        fields.entry_id,
+        assignment,
+        revision_id=allocation.revision_id,
+        declarations=planes.declarations,
+        stored=planes.stored,
+    )
     if refusal is not None:
         return None, _Refusal(
             refusal.code,
@@ -1926,14 +2077,94 @@ def _plan_entry(
             evidence=fields.evidence,
             invariant_id=allocation.invariant_id,
             revision_id=allocation.revision_id,
-            targets=tuple(planned),
+            targets=planned,
             ruling=False,
             declares_invariant=fields.declares_invariant,
             predecessors=fields.predecessors,
             allocation=allocation,
+            family=family,
         ),
         None,
     )
+
+
+def _plan_or_refuse_ruling(
+    fields: _EntryFields, assignment: FamilyAssignment | None
+) -> tuple[_Plan | None, _Refusal | None]:
+    """The no-target case: a ruling, or the refusal a family decision on a ruling earns.
+
+    A ruling writes nothing, so it has no invariant revision for a membership to cite and no record
+    for a no-family outcome to live in. Refusing it by name keeps the alternative -- dropping the
+    curator's authored decision silently -- out of reach.
+    """
+
+    if assignment is not None:
+        return None, _Refusal(
+            "family_without_obligation",
+            "the entry carries a family decision and no target, so it is a ruling: nothing is "
+            "recorded for it and a membership has no exact invariant revision to cite",
+        )
+    return _ruling_plan(fields), None
+
+
+def _resolve_creation(
+    source: _Source,
+    fields: _EntryFields,
+    allocations: _Allocations,
+    targets: Sequence[Mapping[str, Any]],
+) -> tuple[_Allocation | None, tuple[_TargetPlan, ...], _Refusal | None]:
+    """One entry's identity pair and its planned targets, or the refusal that stopped either.
+
+    Both are decided before anything is written and in this order: the identity pair first, because a
+    claim's identity is the edge it records and that edge names the revision, and the targets second,
+    because each anchor identity is keyed on the creation that authored it.
+    """
+
+    allocation, refusal = _creation(source, fields, allocations)
+    if refusal is not None:
+        return None, (), _Refusal(refusal.code, refusal.reason)
+    if allocation is None:  # pragma: no cover - a creation and its refusal are exclusive
+        raise ValueError("an entry with targets resolved without a creation or a refusal")
+    planned, refusal = _plan_targets(fields, targets, source, allocation.revision_id)
+    if refusal is not None:
+        return None, (), refusal
+    return allocation, planned, None
+
+
+def _plan_targets(
+    fields: _EntryFields,
+    targets: Sequence[Mapping[str, Any]],
+    source: _Source,
+    revision_id: str,
+) -> tuple[tuple[_TargetPlan, ...], _Refusal | None]:
+    """Every one of an entry's targets, planned in order, or the refusal that names the first failure.
+
+    The refusal carries the places this entry's earlier targets already resolved, so an entry refused
+    at its second target still shows the first one: the report's entry count and its target count then
+    describe the same run.
+    """
+
+    planned: list[_TargetPlan] = []
+    seen: set[tuple[str, str, str]] = set()
+    for target in targets:
+        plan, refusal = _plan_target(fields, target, source, revision_id)
+        if refusal is not None:
+            return (), _Refusal(
+                refusal.code, refusal.reason, _refused_targets(planned), tuple(planned)
+            )
+        if plan is None:  # pragma: no cover - a plan and its refusal are exclusive
+            continue
+        if plan.target_key in seen:
+            return (), _Refusal(
+                "duplicate_target_path",
+                f"the entry names {plan.completed_path!r} twice, so one of the two places the "
+                "producer named would be filed under the other's identity",
+                _refused_targets(planned),
+                tuple(planned),
+            )
+        seen.add(plan.target_key)
+        planned.append(plan)
+    return tuple(planned), None
 
 
 def _refused_targets(planned: Sequence[_TargetPlan]) -> tuple[TargetOutcome, ...]:
@@ -3071,7 +3302,7 @@ def _unattached(plans: tuple[_Plan, ...], detail: str) -> dict[str, tuple[RouteO
 
 
 def _curator_entry(plan: _Plan) -> CuratorEntry:
-    """One plan as the write module's entry: the invariant, its revision, and its citations."""
+    """One plan as the write module's entry: the invariant, its revision, its citations, its family."""
 
     return CuratorEntry(
         invariant_id=plan.invariant_id,
@@ -3084,17 +3315,28 @@ def _curator_entry(plan: _Plan) -> CuratorEntry:
         predecessors=plan.predecessors,
         declares_invariant=plan.declares_invariant,
         citations=tuple(target.citation() for target in plan.targets),
+        family=plan.family,
+        replayed=plan.replayed,
     )
 
 
 def _conditions(plan: _Plan) -> tuple[str, ...]:
-    """The entry's own provenance, carried into the revision rather than left in the report."""
+    """The entry's own provenance, carried into the revision rather than left in the report.
+
+    The family plane contributes one condition exactly when the curator recorded a *deliberate*
+    no-family outcome: that outcome has no row of its own to live in, so the revision's recorded
+    conditions are where it is retained, and a reader of the dataset can then tell an obligation
+    examined and found family-free from one never examined at all.
+    """
 
     conditions = [f"Hand-off kind: {plan.kind}.", f"Producer's disposition: {plan.disposition}."]
     if plan.disposition_source is not None:
         conditions.append(f"Disposition source: {plan.disposition_source}")
     if plan.evidence:
         conditions.append(f"Evidence: {plan.evidence}")
+    basis = None if plan.family is None else plan.family.no_family_basis
+    if basis is not None:
+        conditions.append(no_family_condition(basis))
     return tuple(conditions)
 
 
@@ -3344,10 +3586,14 @@ def _projected(planned: tuple[_Plan, ...]) -> _Run:
     uses.
 
     Counting them here is arithmetic over the plans the run already built, not a second construction
-    of the batch, so a dry report's command and row counts are the counts the real run reports.
+    of the batch, so a dry report's command and row counts are the counts the real run reports. The
+    family plane contributes its own commands -- one per identity, revision, membership and retirement
+    it would write -- and each of those is one row, so it is counted the same way.
     """
 
-    batch_rows = sum(2 + 2 * len(plan.targets) for plan in planned)
+    batch_rows = sum(
+        2 + 2 * len(plan.targets) + projected_family_commands(plan.family) for plan in planned
+    )
     route_paths = {one.route_path for plan in planned for one in plan.targets if one.route_path}
     return _Run(
         batch_state=_DRY_BATCH_STATE,
@@ -3494,14 +3740,36 @@ def _report(
     *,
     committed: tuple[EntryOutcome, ...] = (),
     dry_run: bool = False,
+    after: StoredFamilyFacts | None = None,
 ) -> IngestReport:
-    """Assemble the one report every mode returns, from what the run already measured."""
+    """Assemble the one report every mode returns, from what the run already measured.
+
+    The two awarded planes are assembled here from the run's own outcome rather than from an argument,
+    so every path that returns a report returns the same shape and each plane's state names what this
+    run actually established. ``after`` is the family plane's post-batch read of the candidate and is
+    passed only by the paths whose batch committed: without it the coverage reports ``not-recorded``,
+    which is the truth for a refused, un-attempted or projected batch and is not a zero a reader could
+    mistake for a measured empty family.
+    """
 
     paths, resolution, repository, read = (
         target.paths,
         target.resolution,
         target.repository,
         target.read,
+    )
+    family, sources = plane_coverage(
+        PlaneCoverageInputs(
+            candidate=paths.candidate,
+            entry_ids=read.ids,
+            placed=tuple(one.entry_id for one in committed),
+            authoring={
+                plan.entry_id: plan.family for plan in read.planned if plan.family is not None
+            },
+            planes=target.planes,
+            dry_run=dry_run,
+            after=after,
+        )
     )
     return IngestReport(
         contract_path=str(paths.contract_path),
@@ -3521,11 +3789,15 @@ def _report(
             "already holds; a citation's route, anchor and claim are derived as uuid5 over one fixed "
             "curator-ingest namespace, the repository's own namespace identity, which identity it is, "
             "and the entry's own id -- plus, for a target, what inside the written path the citation "
-            "is about: a symbol's qualified name, or the locator kind when there is nothing finer. No "
-            "allocated identity contains the enclosure, the branch, the baseline or the label, because "
-            "a stored identity must stay usable from any task; the derived half's stable component is "
-            "the repository namespace and never the enclosure's recorded code base commit, because "
-            "identity must not move when the baseline or the line advances"
+            "is about: a symbol's qualified name, or the locator kind when there is nothing finer. A "
+            "family identity and its guarantee revision are ALLOCATED the same way under the "
+            "enclosure's scope joined with the family's local key, so a family key two tasks spell "
+            "alike does not alias one stored family, while a membership's identity is derived from "
+            "exactly the two revisions it relates. No allocated identity contains the enclosure, the "
+            "branch, the baseline or the label, because a stored identity must stay usable from any "
+            "task; the derived half's stable component is the repository namespace and never the "
+            "enclosure's recorded code base commit, because identity must not move when the baseline "
+            "or the line advances"
         ),
         dry_run=dry_run,
         entries_read=read.ids,
@@ -3537,6 +3809,8 @@ def _report(
         batch_digest_before=None if run.result is None else run.result.before.logical_digest,
         batch_digest_after=None if run.result is None else run.result.after.logical_digest,
         batch_refusal=run.refusal if run.refusal is not None else _batch_refusal(run),
+        family=family,
+        sources=sources,
     )
 
 

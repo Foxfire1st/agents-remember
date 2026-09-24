@@ -27,6 +27,13 @@ locator's extent is a rendering of the recorded construct rather than the record
 revision draft is built here with the admitted destination's own envelope, exactly as
 :func:`~agents_remember.application.knowledge.admitted_revision_request` states the split, and the
 batch operation re-stamps it, so nothing a caller authors can become the stored provenance.
+
+**The family plane is delegated, not re-implemented.** An entry may carry the curator's resolved
+family authoring -- the family identities and joint-guarantee revisions it declares, the exact
+memberships it places, and the stored memberships it retires. Those commands come from
+:func:`~agents_remember.application.curator_family_authoring.family_commands`, which is the one
+implementation of that mapping, and they join the same command list so one entry's family plane and
+its citations commit or refuse together under the batch's one lock.
 """
 
 from __future__ import annotations
@@ -34,6 +41,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from agents_remember.application.curator_family_planning import (
+    CuratorFamilyAuthoring,
+    family_commands,
+)
 from agents_remember.application.knowledge import (
     change_knowledge_candidate,
     resolve_candidate_context,
@@ -54,12 +65,18 @@ from agents_remember.models.knowledge.graph import RealizationClaimDraft, Realiz
 from agents_remember.models.knowledge.result import RevisionDraft
 from agents_remember.models.knowledge.source import SourceAnchorDraft
 
+# The two commands that create a family identity and its guarantee revision. They are the only
+# commands a *membership* can cite an endpoint of without the citing entry having written it, which is
+# why they are the ones hoisted to the front of the batch.
+_FAMILY_IDENTITY_KINDS = frozenset({"add_family", "add_family_revision"})
+
 __all__ = [
     "CuratorCitation",
     "CuratorEntry",
     "commit_curator_entries",
     "commit_curator_entry",
     "curator_batch",
+    "curator_command_list",
     "curator_entry_commands",
 ]
 
@@ -106,6 +123,12 @@ class CuratorEntry:
     predecessors: tuple[str, ...] = ()
     citations: tuple[CuratorCitation, ...] = ()
     declares_invariant: bool = True
+    family: CuratorFamilyAuthoring | None = None
+    # Whether this entry's invariant revision and citations are ALREADY stored, so the only thing it
+    # can still owe the dataset is its family plane. A replayed entry that emitted its invariant
+    # commands again would be refused by the batch's own insert-absence precondition, and skipping it
+    # entirely is what let a new family decision travel on a replayed entry and never be written.
+    replayed: bool = False
 
 
 def curator_entry_commands(
@@ -130,14 +153,43 @@ def curator_entry_commands(
     claim that cites it and leaves the anchor row as it stands. Re-declaring it would be refused with
     the same ``batch_stale_precondition``, which is what makes "reuse a stored anchor" expressible at
     all rather than a second spelling of "insert a duplicate of it".
+
+    The family plane is appended last and comes from its own module: the declaration commands an entry
+    authored, the memberships it places (skipping the ones the candidate already records), and the
+    retirements it names. One implementation of that mapping lives in
+    :mod:`~agents_remember.application.curator_family_authoring`; this function only asks it for the
+    commands and keeps them in the one batch.
+
+    A **replayed** entry contributes its family plane alone. Its invariant revision and its citations
+    are already in the dataset -- that is what "replayed" means -- so re-issuing them would be refused
+    with ``batch_stale_precondition``, while dropping the entry wholesale is what let an entry whose
+    revision already existed carry a *new* family decision that was never written and was still
+    reported as authored. The family module's own guards decide what is new there: a stored revision,
+    a stored membership and a stored identity each contribute nothing.
     """
 
     commands: list[ProposedCommand] = []
-    if entry.declares_invariant:
-        commands.append(
-            AddInvariant(invariant_id=entry.invariant_id, display_label=entry.display_label)
-        )
-    commands.append(AddInvariantRevision(revision=_revision_draft(destination, entry)))
+    if not entry.replayed:
+        if entry.declares_invariant:
+            commands.append(
+                AddInvariant(invariant_id=entry.invariant_id, display_label=entry.display_label)
+            )
+        commands.append(AddInvariantRevision(revision=_revision_draft(destination, entry)))
+        commands.extend(_citation_commands(entry))
+    if entry.family is not None:
+        commands.extend(family_commands(destination, entry.family))
+    return tuple(commands)
+
+
+def _citation_commands(entry: CuratorEntry) -> tuple[ProposedCommand, ...]:
+    """Every anchor and claim one entry's resolved citations contribute, in the order they apply.
+
+    An anchor is written before the claim that cites it, so the claim's anchor endpoint resolves
+    against a row this same batch declared; a citation that is *reusing* a stored anchor
+    (``declares_anchor`` false) contributes only its claim.
+    """
+
+    commands: list[ProposedCommand] = []
     for citation in entry.citations:
         if citation.declares_anchor:
             commands.append(AddSourceAnchor(anchor=citation.anchor))
@@ -166,13 +218,47 @@ def curator_batch(
     the candidate actually holds. The whole list travels in the one batch because the operation is
     all-or-nothing under one lock: a batch per entry pays the commit boundary once per entry, and a
     list that fails halfway leaves a partially recorded ingest that nothing can reconcile.
+
+    The command order is load-bearing across entries, not only inside one. A membership write checks
+    its family-revision endpoint against the rows that exist at that instant, so a membership that
+    cites a family another entry in the same list declares must be applied after that declaration --
+    and the entries arrive in the producer's order, which says nothing about that. The two identity
+    commands are therefore hoisted to the front of the batch, in their own relative order (a family
+    before the revision that belongs to it); every other command keeps the order its entry states,
+    and the invariant revision a membership cites still precedes it because one entry contributes
+    both.
     """
 
     return ChangeBatch(
         expected=resolve_candidate_context(destination, resolution),
-        commands=tuple(
-            command for entry in entries for command in curator_entry_commands(destination, entry)
-        ),
+        commands=curator_command_list(destination, entries),
+    )
+
+
+def curator_command_list(
+    destination: AdmittedKnowledgeDestination, entries: Sequence[CuratorEntry]
+) -> tuple[ProposedCommand, ...]:
+    """Every command a whole hand-off list becomes, in the order the batch applies them.
+
+    This is the one composition, and it is separable from the batch because the operation asks it a
+    question the batch cannot answer: *is there anything left to write?* A list whose every entry
+    replays still owes whatever family plane its entries carry, so the question is a fact about these
+    commands and not about the replay set.
+
+    The order is load-bearing across entries, not only inside one. A membership write checks its
+    family-revision endpoint against the rows that exist at that instant, so a membership citing a
+    family another entry in the same list declares must be applied after that declaration -- and the
+    entries arrive in the producer's order, which says nothing about that. The two identity commands
+    are therefore hoisted to the front, in their own relative order (a family before the revision that
+    belongs to it); every other command keeps the order its entry states, and the invariant revision a
+    membership cites still precedes it because one entry contributes both.
+    """
+
+    commands = tuple(
+        command for entry in entries for command in curator_entry_commands(destination, entry)
+    )
+    return tuple(command for command in commands if command.kind in _FAMILY_IDENTITY_KINDS) + tuple(
+        command for command in commands if command.kind not in _FAMILY_IDENTITY_KINDS
     )
 
 

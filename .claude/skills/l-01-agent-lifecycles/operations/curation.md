@@ -69,7 +69,26 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    independent read found (`confirmed` / `mismatch` / `unavailable`), and a refused publication established nothing.
    A partial hand-off therefore stays partial and visible; it is never rounded up to "the batch went through". Carry
    the confirmed published identity into the handoff, because it is what the next task's planner reads.
-4. **Route every change-set item and every notes item to the right home** through the
+4. **Examine family coverage and author it as part of the same list.** For every scoped obligation, decide whether
+   the evidence and the project's intent justify a joint obligation with others. Where they do, author the `family`
+   key `../templates/curator-handoff-list.md` states: the family identity (reusing a stored `family_id` where the
+   identity is the same, allocating a new one otherwise), the family's **own** guarantee revision with its own text
+   and predecessors, and the exact memberships that place exact invariant revisions in it — one obligation may
+   belong to several families. Where they do not, author the deliberate `no_family` outcome **with its basis**.
+   Nothing is grouped by directory, route, label or shared anchor, and an obligation the pass did not examine is
+   left without either key so the report names it as **unexamined** rather than as family-free. A member or
+   membership change **prompts a fresh look at the affected recorded guarantee**: author a successor revision
+   (a new key naming the stored `family_id` and the revision it supersedes) only where that is justified, preserve
+   the earlier revision and its memberships exactly as recorded, and never let an implementation change rewrite
+   member intent or family meaning by itself. For every external source the pass inspected, declare it under
+   `external_sources` with its document identity, its version or retrieval time, the digest of what was inspected
+   when one was taken, and the location read: the run retains it in a bounded manifest and binds the authored
+   records' origin references to that manifest, so a document is never misrepresented as a repository path with a
+   Git blob. Read both planes back from the report — `family` and `sources`, each with its own state, the guarantees
+   authored and examined, the memberships added/reused/retired, the no-family bases, the measured sibling members,
+   and the entries neither plane examined — and carry that coverage into the handoff. A plane that did not record
+   measured nothing: its counts are null, never zero.
+5. **Route every change-set item and every notes item to the right home** through the
    `c-05-create-or-update-onboarding-files` skill workflow:
    - changed source files → their file-level sidecars with compact current contracts and a newest
      semantic-history entry; a mechanical consumer change with no contract impact gets a precise
@@ -80,11 +99,11 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    - a notes item with no file, route, or entity home → the L3 Operational-Notes target, **last
      resort only**, never the default drop point for an inconvenient finding;
    - generated route indexes → regenerate with `route_index_refresh` scoped to this leaf.
-5. **Reject overview-dumping and task-log-dumping.** Preserve a truth when it is important to future
+6. **Reject overview-dumping and task-log-dumping.** Preserve a truth when it is important to future
    correctness, non-obvious, and expensive to rediscover. Omit code narration, temporary branch
    facts, raw test totals, generic implementation-round chronology, and facts obvious from code and
    tests.
-6. **Run the complete curation check set** and report each as passed, failed, blocked, or not-run with
+7. **Run the complete curation check set** and report each as passed, failed, blocked, or not-run with
    its exact command and scope. At minimum inspect the changed sidecars and the affected
    overviews/indexes/entities, run `git diff --check` in the memory worktree, and run the full
    `memory_quality_check` operation. Curation is always complete: a named scoped check never stands in
@@ -95,7 +114,7 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    missing or stale: that is the coherence gate, not another repair — clear it by publishing the
    `curator_coherence` authority with `prepare` → `publish` → `validate`, because `closeoutReady` becomes
    true only once that validation passes.
-7. **Repair, then republish.** After each repair, re-run the full operation before handoff.
+8. **Repair, then republish.** After each repair, re-run the full operation before handoff.
 
 ## Authority gates
 

@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from agents_remember.application.curator_family_coverage import FamilyCoverage
+from agents_remember.application.curator_source_manifest import SourceCoverage
 from agents_remember.application.knowledge_curator_ingest import EntryOutcome, IngestReport
 from agents_remember.application.knowledge_publication_route import PublishedIdentityReadBack
 
@@ -61,6 +63,8 @@ def summary(
         lines.append(f"  published identity: {_identity_line(published_identity)}")
     if review_baseline is not None:
         lines.append(f"  review baseline: {review_baseline}")
+    lines.append(f"  family: {_family_line(report.family)}")
+    lines.append(f"  sources: {_source_line(report.sources)}")
     for outcome in report.committed:
         lines.append(f"  committed {outcome.entry_id}: {_targets(outcome)}")
     for outcome in report.rulings:
@@ -112,9 +116,95 @@ def payload(
         ),
         "publishedIdentity": _read_back_block(published_identity),
         "counts": _counts(report),
+        "family": _family_block(report.family),
+        "sources": _source_block(report.sources),
         "committed": [_outcome(one) for one in report.committed],
         "rulings": [_outcome(one) for one in report.rulings],
         "refused": [_outcome(one) for one in report.refused],
+    }
+
+
+def _family_block(coverage: FamilyCoverage) -> dict[str, Any]:
+    """The family plane as one JSON object, with its state and its own sentence.
+
+    ``state`` is the field a caller branches on, and it is never implied: ``recorded`` means every
+    count here was read back from the candidate, ``projected`` means this was a planning run, and
+    ``not-recorded`` means no family row was written, with ``detail`` saying why. ``membersRecorded``
+    and ``unchangedSiblingMembers`` are ``null`` unless the plane was recorded, because a zero there
+    would read as a measured empty family.
+    """
+
+    return {
+        "state": coverage.state,
+        "detail": coverage.detail,
+        "guarantees": [
+            {
+                "familyKey": one.family_key,
+                "familyId": one.family_id,
+                "familyRevisionId": one.family_revision_id,
+                "state": one.state,
+                "displayVersion": one.display_version,
+                "jointGuarantee": one.joint_guarantee,
+                "predecessors": list(one.predecessors),
+                "membersRecorded": one.members_recorded,
+                "unchangedSiblingMembers": one.unchanged_sibling_members,
+            }
+            for one in coverage.guarantees
+        ],
+        "memberships": [
+            {
+                "entryId": one.entry_id,
+                "familyKey": one.family_key,
+                "familyRevisionId": one.family_revision_id,
+                "invariantRevisionId": one.invariant_revision_id,
+                "memberId": one.member_id,
+                "state": one.state,
+                "basis": one.basis,
+            }
+            for one in coverage.memberships
+        ],
+        "noFamily": [
+            {
+                "entryId": one.entry_id,
+                "invariantRevisionId": one.invariant_revision_id,
+                "basis": one.basis,
+            }
+            for one in coverage.no_family
+        ],
+        "unexamined": list(coverage.unexamined),
+        "unresolved": list(coverage.unresolved),
+    }
+
+
+def _source_block(coverage: SourceCoverage) -> dict[str, Any]:
+    """The external-source plane as one JSON object: the manifest, and per-entry coverage.
+
+    ``declared`` counts what the manifest records and ``contentDigestsRecorded`` how many of those
+    carried an inspected-content digest, so a declared source whose digest was not taken is visible as
+    what it is. ``unexamined`` names committed entries the curator did not examine for external
+    sources at all, which is a different fact from an entry that examined and declared none.
+    """
+
+    return {
+        "state": coverage.state,
+        "detail": coverage.detail,
+        "manifestPath": coverage.path,
+        "manifestDigest": coverage.digest,
+        "originRefs": list(coverage.refs),
+        "declared": coverage.declared,
+        "contentDigestsRecorded": coverage.content_digests_recorded,
+        "entries": [
+            {
+                "entryId": one.entry_id,
+                "examined": one.examined,
+                "declared": one.declared,
+                "contentDigestsRecorded": one.content_digests_recorded,
+                "sourceIds": list(one.source_ids),
+            }
+            for one in coverage.entries
+        ],
+        "unexamined": list(coverage.unexamined),
+        "unresolved": list(coverage.unresolved),
     }
 
 
@@ -142,6 +232,35 @@ def _read_back_block(read_back: PublishedIdentityReadBack | None) -> dict[str, A
         "refusalCode": read_back.refusal_code,
         "detail": read_back.detail,
     }
+
+
+def _family_line(coverage: FamilyCoverage) -> str:
+    """The family plane as the one line a reader scans it on, with what it measured named."""
+
+    if coverage.state != "recorded":
+        return f"{coverage.state} ({coverage.detail})"
+    return (
+        f"{coverage.state}: guarantees authored/examined "
+        f"{sum(1 for one in coverage.guarantees if one.state == 'authored')}/"
+        f"{sum(1 for one in coverage.guarantees if one.state == 'examined')}, memberships "
+        f"{sum(1 for one in coverage.memberships if one.state == 'added')} added, "
+        f"{sum(1 for one in coverage.memberships if one.state == 'reused')} reused, "
+        f"{sum(1 for one in coverage.memberships if one.state == 'retired')} retired, "
+        f"{len(coverage.no_family)} deliberate no-family, "
+        f"{len(coverage.unexamined)} not examined"
+    )
+
+
+def _source_line(coverage: SourceCoverage) -> str:
+    """The external-source plane as the one line a reader scans it on."""
+
+    if coverage.state != "recorded":
+        return f"{coverage.state} ({coverage.detail})"
+    return (
+        f"{coverage.state}: {coverage.declared} declared source(s), "
+        f"{coverage.content_digests_recorded} with an inspected-content digest, manifest "
+        f"{coverage.digest}"
+    )
 
 
 def _targets(outcome: EntryOutcome) -> str:

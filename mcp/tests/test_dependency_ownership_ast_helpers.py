@@ -43,7 +43,7 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "23dd7c0f85b50585e8968122f60f50e87e15bfbfa241b28b77b7c71b2a41e252"
+LIFECYCLE_CATALOG_SHA256 = "97ae9cbefd756a6def6e8048baa2066beef2c06300f73eb93b4ab23b4ebf6879"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
 **Twenty-eighth deliberate re-pin (260921-ICR-L31's fix round 1, at base ``4c000b11``, 2026-09-23) --

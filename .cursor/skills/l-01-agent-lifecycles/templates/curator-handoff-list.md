@@ -222,6 +222,74 @@ by the commit it was measured at:
   field: a verdict imported from another document is an input the curator must be able to see, and an
   unaudited verdict has already cost a master one sealed review finding.
 
+## The curator's two authored keys beside the thirteen fields
+
+The thirteen fields above are the producer's contract and they do not change: nine producer fields and
+four curator fields, at revision 1. Two further keys belong to the **curator** — a producer emits
+neither — and they are how a grounded foundation records what the curator *examined*, rather than only
+what the producer found. Both are optional on any entry, and an entry that carries neither is reported
+as **unexamined**, which is deliberately not the same fact as one the curator examined and recorded an
+outcome for.
+
+**`family` — the justified joint obligation and this entry's exact memberships.** A family exists only
+where the curator declared one; nothing here infers a family from a path, a directory, a route, a label
+or a shared anchor, because that inference is the bulk import this shape exists to refuse.
+
+```json
+"family": { "state": "member",
+  "memberships": [
+    { "family": "<the local key this list spells>",
+      "basis": "<why this obligation shares this joint guarantee>",
+      "declares": { "label": "<display label>", "version": "v1",
+                    "guarantee": "<the family's own text, never its members' statements>",
+                    "predecessor_revision_ids": [],
+                    "family_id": "<absent for a new family; the stored identity when revising one>" },
+      "family_revision_id": "<absent unless this membership joins a revision already stored>" } ],
+  "retire": [ "<a stored membership identity this run can read>" ] }
+```
+
+```json
+"family": { "state": "no_family", "basis": "<why no joint obligation is supported>" }
+```
+
+- **`basis` is required wherever you decide**: on every membership, and on `no_family`. The run refuses
+  a blank one rather than storing an unexplained claim, and the `no_family` basis is recorded in the
+  revision's own conditions so the dataset — not only the report — distinguishes a family-free
+  obligation from an unexamined one.
+- **One declaration per key.** The key is a local handle for one creation operation, not an identity.
+  An entry that declares a key authors the family identity (unless it names a stored `family_id`) and
+  its guarantee revision; every other entry naming that key **joins** it and carries no `declares`.
+- **Reuse is by identity.** `family_id` must name a family the dataset holds, and `family_revision_id`
+  a recorded revision; naming either without the record present is refused rather than written.
+- **A changed guarantee is a successor**, declared under a **new key** that names the stored `family_id`
+  and the revision it supersedes in `predecessor_revision_ids`. Re-authoring a changed guarantee under
+  an already-allocated key is refused: one key names one declaration operation.
+- **A retirement names a stored membership identity** the run can read, so a removal is never authored
+  against a row nobody read. `memberships` may be absent when `retire` is present.
+- A membership always cites *this entry's own* exact revision; the family revision and the invariant
+  revision are separate recorded endpoints, and an older membership keeps citing the revision it was
+  authored against.
+
+**`external_sources` — the bounded manifest, and the origin reference that names it.** An external
+document is not a repository path with a Git blob, so it never becomes a source anchor: the run records
+it in a bounded manifest beside the candidate and binds every authored record's `origin_refs` to that
+manifest's own digest.
+
+```json
+"external_sources": [
+  { "id": "<local id>", "document": "<URL or document identity>",
+    "version": "<document revision | null>", "retrieved_at": "<ISO instant | null>",
+    "content_digest": "<sha256 of what was inspected | null>",
+    "location": "<the passage or section it was read at>" } ]
+```
+
+- **At least one of `version` / `retrieved_at`.** A source nobody can find again is refused by name.
+- **`content_digest` is the digest of what you inspected, or `null`** when none was taken. It is never
+  filled with a favourable default, and the report says how many declared sources carried one.
+- **`external_sources: []` means you examined and declared none. Omitting the key means you did not
+  examine it.** The report keeps the two apart.
+- At most 32 sources per entry: a manifest is bounded and attributable, not a second store.
+
 ## What this template is not
 
 It is not the curator's side. The curator consumes this list as data, fills `resolution`,

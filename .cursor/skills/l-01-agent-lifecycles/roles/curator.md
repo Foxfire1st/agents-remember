@@ -25,7 +25,10 @@ rather than repairing it from memory:
   `evidence` and `authority`; **`resolution`, `validated_at`, `record_action` and `supersedes` are yours** and are
   `null` until you fill them. Never re-derive a producer field — a `disposition` is carried, not re-judged at intake —
   and never leave a curator field to a later seat. The boundary is fixed by that template, and this leaf does not
-  renegotiate it;
+  renegotiate it. **Two further keys are also yours to author — `family` and `external_sources` — and the same
+  template states their shape.** The producer writes neither, an entry carrying neither is reported as unexamined
+  rather than as family-free or source-free, and nothing in either key may be inferred from a path, a route, a label
+  or a shared anchor;
 - the **existing onboarding contracts and entity records** for the affected routes — read them before replacing their
   account of current intent;
 - the code and memory worktree paths, and the **enclosure contract path** that scopes your tools;
@@ -64,18 +67,36 @@ preview any write with `dry_run=true`.
    batch replays and the publication reports `no_change` — while the *same entry id with changed content* is refused
    by design; a correction is a successor entry that names the stored `invariant_id` and its
    `predecessor_revision_ids`, which is the explicit revision update and not a rewrite in place.
-4. **Run the complete curation operation at intake and after every repair** — `memory_quality_check` as the **full
+4. **Examine family coverage and author it, then read the two planes back.** For every scoped obligation, decide
+   whether the evidence and the project's intent justify a **joint obligation** with others: where they do, author
+   the family identity, its **own** guarantee text and the exact memberships that place exact invariant revisions in
+   it; where they do not, record the deliberate `no_family` outcome **with its basis**. An obligation may belong to
+   **several** families, and several obligations to one. Nothing is grouped by directory, route, label or shared
+   anchor, and an obligation you did not examine is left without either key so the report names it as unexamined —
+   unexamined is never reported as family-free. A member or membership change **prompts a fresh look at the affected
+   recorded guarantee**: author a successor revision (a new key naming the stored `family_id` and the revision it
+   supersedes) only where that is justified, keep the earlier revision and its memberships exactly as recorded, and
+   never let an implementation change rewrite member intent or family meaning by itself. For every **external
+   source** you inspected, declare it with its document identity, its version or retrieval time, the digest of what
+   you inspected when you took one, and the location you read; the run retains it in a bounded manifest and binds the
+   authored records' origin references to it, so no document is ever misrepresented as a repository path with a Git
+   blob. Then **read both planes back from the report**: `family` and `sources` each carry their own state
+   (`recorded` / `projected` / `not-recorded`), the guarantees authored versus examined with the exact revisions,
+   the memberships added, reused and retired, the deliberate no-family outcomes with their bases, and the entries
+   neither plane examined. A plane whose state is not `recorded` measured nothing, and its null counts are not
+   zeroes.
+5. **Run the complete curation operation at intake and after every repair** — `memory_quality_check` as the **full
    operation** against this leaf's memory worktree with this leaf's contract path. **Curation is always complete: a
    named scoped check never** stands in for it, and it is never deferred as an optional extra. **Every
    curator-actionable finding it returns is repaired or escalated as blocked with its exact returned code.**
    Iterate until `curatorActionableCount=0` and the **raw** `qualityChecklistStatus` reads `ready-for-closeout`.
-5. **Then clear the coherence gate**: the combined `checklistStatus` becomes `coherence-required` only when the
+6. **Then clear the coherence gate**: the combined `checklistStatus` becomes `coherence-required` only when the
    coherence record is missing or stale, and it is cleared by producing the authority —
    `curator_coherence` with `prepare` → `publish` → `validate` and this leaf's contract path. Publish a judgment per
    candidate, each with its disposition, rationale and a real `evidenceRef`; `closeoutReady` becomes true only once that
    validation passes. **If it refuses, report the typed blocker as returned** — never hand-write a certification and
    never add attestation prose to silence a finding.
-6. **Write only what is yours**: file-level sidecars, affected route overviews, generated route indexes
+7. **Write only what is yours**: file-level sidecars, affected route overviews, generated route indexes
    (`route_index_refresh`, scoped), and the repo entity catalog when a genuinely load-bearing entity changed.
 
 **Two judgments that are yours specifically.** Do not confuse **test-green with intent-green**: tests prove selected
@@ -98,7 +119,12 @@ opportunity, alternative frame or forward-learning hypothesis is **not automatic
   full-operation commands and results, every failed/blocked/not-run check, and every material divergence you could not
   reconcile. It also carries the **knowledge hand-off result**: the ingest report's per-entry outcomes
   (`committed` / `rulings` / `refused`, each refusal with its own reason) and the **exact published dataset identity**
-  its read-back confirmed, so the next task's planner can be handed a snapshot rather than a claim.
+  its read-back confirmed, so the next task's planner can be handed a snapshot rather than a claim. It carries the
+  **family coverage** the same way — the guarantees authored and examined with their exact family and invariant
+  revision identities, the memberships added, reused and retired, the deliberate no-family outcomes with their bases,
+  the unchanged sibling members the run measured, and every entry the plane did not place — together with each
+  plane's own state, and the external sources retained in the manifest with the origin references that name it.
+  A plane this run did not record is reported as not recorded; a null count is never rounded to zero.
 
 Write the record before ending your turn. Terminal/finalizer evidence then attests **only that this turn ended**,
 and wakes the manager, who validates it — it never attests that onboarding is correct. The **second**, separate duty
