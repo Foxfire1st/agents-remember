@@ -64,8 +64,9 @@ Run this sequence in order:
 5. Bootstrap: when a new memory repo was scaffolded, hand off to
    `c-03-repo-bootstrap`; then reach the repository's knowledge foundation through
    `c-14-knowledge-bootstrap`. That procedure is the curator's work, and the seat
-   that carries it — the taskless bootstrap seat before a task exists, or a curator
-   opened on a task document — is stated there.
+   that carries it — a **taskless curator session** (admitted by the developer's
+   2026-09-24 ruling), the taskless bootstrap seat before a task exists, or a
+   curator opened on a task document — is stated there.
 6. Providers: when providers are enabled, start/refresh indexing and verify
    readiness.
 
@@ -289,8 +290,9 @@ something an existing memory repo is guaranteed to have. Stage 5 has three parts
 
 1. **Reach the repository's knowledge foundation** - hand off to
    `c-14-knowledge-bootstrap`. That procedure is the curator's work and states its own
-   carriers; before a task exists, the taskless bootstrap seat reaches the step and
-   the authoring is carried as that procedure states. Read the state first:
+   carriers; before a task exists, a **taskless curator session** (admitted by the
+   developer's 2026-09-24 ruling) authors it and the taskless bootstrap seat reaches
+   the read-and-report step, as that procedure states. Read the state first:
    `memory_init` returns a `knowledge` block naming where the repository's
    foundation lives and what a read of that location finds now (`not-recorded`,
    `recorded` at an exact identity, `unusable`, or a refused admission with its
@@ -307,9 +309,9 @@ something an existing memory repo is guaranteed to have. Stage 5 has three parts
    populates a database itself, never invents records to make setup look
    finished, and never creates a development leaf, worktree or enclosure to give
    the writer an argument list it does not need — and it never names a role the
-   opener will not admit: a session opened for the curator with no task document is
-   refused (`task-binding-required`), so the authoring is handed on as
-   `c-14-knowledge-bootstrap` states. The knowledge write needs the developer's
+   opener will not admit: a taskless curator seat IS admitted (the developer's
+   2026-09-24 ruling), so the authoring is handed on as `c-14-knowledge-bootstrap`
+   states rather than worked around. The knowledge write needs the developer's
    commit word, exactly as the other effectful stages do.
 
 2. **Scaffold onboarding** - hand off to `c-03-repo-bootstrap` to generate initial

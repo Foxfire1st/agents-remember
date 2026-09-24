@@ -145,14 +145,31 @@ def read_curator_planes(
     raw: tuple[Mapping[str, Any], ...],
     candidate: Path,
     retry_scope: str,
+    *,
+    fork_point: Path | None = None,
 ) -> CuratorPlanes:
     """Read both awarded planes once, before a single entry is planned.
 
-    Everything here is read and resolved against the candidate as it stands, and nothing is written:
-    the family identities are allocated in memory and journalled only after admission has produced the
-    candidate they belong to. ``read_stored_family_facts`` answers ``None`` for a candidate that does
-    not exist yet, which is how a first run's "this dataset records no family" stays distinguishable
-    from "there is no dataset here".
+    Everything here is read and resolved against the destination this run will write into, and
+    nothing is written: the family identities are allocated in memory and journalled only after
+    admission has produced the candidate they belong to. ``read_stored_family_facts`` answers
+    ``None`` for a candidate that does not exist yet, which is how a first run's "this dataset
+    records no family" stays distinguishable from "there is no dataset here".
+
+    ``fork_point`` is the database an **absent** candidate will be forked from, and it is the whole
+    reason this read is not simply "the candidate's own bytes yet". A run whose destination does not
+    exist yet and that selected a baseline does not start empty: admission clones that baseline, so
+    the family revisions the candidate holds on its first write are the baseline's. Reading only the
+    candidate answered ``None`` — "there is no dataset here" — for exactly that run, and a membership
+    naming a revision the *baseline* stores was then refused ``family_revision_not_stored`` while
+    sitting one step away from a candidate that would hold it. That is why the fallback is here
+    rather than after admission: the CLI's **planning run is the default**, it writes nothing by
+    contract, and it asks the same question — so a fix that only covered the committing run would
+    leave the ordinary dry run refusing the same stored revision.
+
+    The caller supplies only a database that reads as a dataset of this code (see
+    :func:`…knowledge_curator_ingest._fork_point`), because the admission answers an unreadable fork
+    point with its own typed refusal and that refusal must not become a storage error raised here.
 
     ``retry_scope`` is the enclosure's own idempotency scope, passed in rather than derived here: the
     operation owns that derivation and this module must not hold a second spelling of it.
@@ -161,6 +178,8 @@ def read_curator_planes(
     list_digest = sha256_digest([dict(one) for one in raw])
     family = read_family_plane(raw)
     stored = read_stored_family_facts(candidate_database_path(candidate))
+    if stored is None and fork_point is not None:
+        stored = read_stored_family_facts(Path(fork_point))
     declarations = plan_declarations(
         family,
         retry_scope=retry_scope,

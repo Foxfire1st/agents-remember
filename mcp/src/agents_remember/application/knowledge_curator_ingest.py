@@ -1176,7 +1176,9 @@ def ingest_curator_list(
     )
     resolution = _resolution(write_admission, source.tree_ids)
     raw = _read_entries(entries)
-    planes = read_curator_planes(raw, paths.candidate, _retry_scope(source.admission))
+    planes = read_curator_planes(
+        raw, paths.candidate, _retry_scope(source.admission), fork_point=_fork_point(baseline)
+    )
     allocations = _read_allocations(paths.candidate)
     plans, refused, resolved_before_refusal = _plan_entries(raw, source, allocations, planes)
     read = _Read(
@@ -1519,6 +1521,31 @@ class _Admission:
     @property
     def refusal(self) -> KnowledgeRefusal | None:
         return self.result.refusal
+
+
+def _fork_point(baseline: Path | None) -> Path | None:
+    """The database this run's absent candidate will be forked from, or ``None`` when it will not be.
+
+    ``_admitted_candidate`` clones the selected baseline exactly when the candidate directory does
+    not exist **and** the baseline reads as a dataset of this code; when it does not read, the
+    admission answers with its own typed refusal and no clone happens at all. The same predicate is
+    applied here for two reasons: the family facts a first run plans against are then the ones its
+    destination will actually hold, and an unreadable fork point stays the admission's named refusal
+    instead of becoming a storage error raised from inside a plane read.
+
+    ``None`` is the honest answer for a run that selected no baseline: its candidate is created
+    empty, and "this dataset records no family" is then true rather than assumed. The reader applies
+    the value only when the candidate's own database is absent, which is the one state the fallback
+    exists for; a candidate directory that exists without a database is refused by the admission and
+    never forked, and the refusal report names its family state as not-recorded either way.
+    """
+
+    if baseline is None:
+        return None
+    selected = Path(baseline)
+    if not selected.is_file():
+        return None
+    return None if isinstance(read_dataset_identity(selected), str) else selected
 
 
 def _admitted_candidate(

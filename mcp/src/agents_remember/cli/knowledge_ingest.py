@@ -111,7 +111,8 @@ repository now holds them, is exactly the mistake these three fields exist to ma
 
 This is the production caller for :func:`agents_remember.application.knowledge_curator_ingest.
 ingest_curator_list`. The mounted ``knowledge_change`` tool does NOT write and says so; the write
-plane's reachable entry points are this subcommand and the operation it calls.
+plane has ONE writer, and this subcommand is one of the TWO shipped entry points that reach it — the
+other is ``agents-remember knowledge-bootstrap``, which the taskless repository foundation uses.
 """
 
 from __future__ import annotations

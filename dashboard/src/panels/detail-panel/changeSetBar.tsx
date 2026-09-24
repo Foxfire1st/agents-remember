@@ -46,10 +46,18 @@ export function ChangeSetButton({
   // entry opens the viewer bound to it, so the view -- and each file expansion inside it -- reads
   // the listed generation rather than re-resolving the live tip.
   const [generation, setGeneration] = useState<MasterNetPins | null>(null);
+  // WHAT THE READ SAID WHEN IT DID NOT ANSWER (L32/D01). The route publishes a refusal's own code
+  // and its reason in the body of its non-2xx response, and the rejection below used to take no error
+  // parameter at all: the refusal was in hand and discarded, so a REFUSED read rendered
+  // byte-identically to one that had NOT ANSWERED -- `⇄ committed` either way, naming neither the
+  // code nor the reason. It is carried here in the same `ReviewFailure` shape the catalogue read
+  // beside it uses, and rendered by `ChangeSetReadState` below.
+  const [problem, setProblem] = useState<ReviewFailure | null>(null);
   useEffect(() => {
     let live = true;
     setCounters(null);
     setGeneration(null);
+    setProblem(null);
     const req = target.leaf
       ? leafChangeset(target.repo, target.master ?? "", target.leaf, target.mode ?? "committed")
       : target.master
@@ -70,10 +78,15 @@ export function ChangeSetButton({
             : null,
         );
       },
-      () => {
+      (cause: unknown) => {
+        // A refusal is an ANSWER and is filed as one. `live` still guards the write -- a read whose
+        // props moved, or whose control unmounted, must not publish into state -- but it is no longer
+        // what discards the refusal: while this is still the control on screen, the refusal it earned
+        // is what it shows.
         if (!live) return;
         setCounters(null);
         setGeneration(null);
+        setProblem(reviewProblemFromCause(cause));
       },
     );
     return () => {
@@ -92,7 +105,68 @@ export function ChangeSetButton({
     >
       ⇄ {label}
       {total ? <span className={changeSetCounts}>{total}</span> : null}
+      <ChangeSetReadState counters={counters} problem={problem} />
     </button>
+  );
+}
+
+// The counter read's own state, printed in the control rather than hidden in the absence of a total,
+// and modelled on `ReviewEntryState` below -- one span, `data-review-state` for the state it is in
+// and `data-review-code` for the owner's own code -- because five different things have to stay
+// tellable apart and only three of them are states of the change-set itself:
+//
+//   * `loading`     -- the read is in flight: nothing was measured, so nothing is claimed;
+//   * `known-empty` -- the read ANSWERED and the delta is measured empty (no changed file in either
+//                      half). A measured zero is a measurement, and it is neither a failure nor an
+//                      absence of an answer -- so it is printed as the zero it is;
+//   * an answer carrying changed files prints no state here at all: the counters beside it ARE the
+//                      answer, exactly as the catalogue is the answer to the entry read;
+//   * a refusal     -- the route named it. Its code, its reason in the owner's own words and the
+//                      identifier the route echoed are all shown (and the next action too, when a
+//                      route publishes one — this family's refusals put their guidance in the reason
+//                      itself), so a reader is never left with a bare count and no explanation;
+//   * an unreadable or unreachable answer -- the same span under its own token (`unreadable`: a
+//                      response this route did not produce; `network`: no response at all), each
+//                      saying which of the two happened.
+//
+// The token is the shared one (`reviewFailureToken`), so this control and the review surface cannot
+// come to disagree about what a refusal's code means. What is NOT claimed here is anything about a
+// delta that did not answer: no code, no total, and no "empty".
+function ChangeSetReadState({
+  counters,
+  problem,
+}: {
+  counters: { code: ChangeCounters; memory: ChangeCounters } | null;
+  problem: ReviewFailure | null;
+}) {
+  if (problem) {
+    return (
+      <span
+        className={changeSetCounts}
+        data-testid="changeset-state"
+        data-review-state={problem.token}
+        data-review-code={problem.code}
+      >
+        this change-set could not be read ({problem.code}): {problem.detail}
+        {problem.offendingInput ? ` — offending input: ${problem.offendingInput}` : ""}
+        {problem.nextAction ? ` — next: ${problem.nextAction}` : ""}
+      </span>
+    );
+  }
+  if (!counters) {
+    return (
+      <span className={changeSetCounts} data-testid="changeset-state" data-review-state="loading">
+        reading this change-set…
+      </span>
+    );
+  }
+  // `files` and not the line totals: a rename or a mode change lists a file with no line delta, so a
+  // zero insertion/deletion count is not a zero change-set.
+  if (counters.code.files > 0 || counters.memory.files > 0) return null;
+  return (
+    <span className={changeSetCounts} data-testid="changeset-state" data-review-state="known-empty">
+      no changed file in either half — this change-set is measured empty.
+    </span>
   );
 }
 

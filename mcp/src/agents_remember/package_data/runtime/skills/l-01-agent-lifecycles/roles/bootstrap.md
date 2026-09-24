@@ -48,14 +48,15 @@ wins. This section states only the obligations that are yours while running it.
    says so, not when the call returned without raising.
 5. **Reach the knowledge foundation and report its outcome — the authoring is not yours.** The repository's
    knowledge foundation is the curator's procedure, the `c-14-knowledge-bootstrap` skill, and **this seat is the
-   carrier that exists for it before a task does**: a session opened for the curator *with no task document is
-   refused* (`task-binding-required`), while this seat is admitted taskless. So read the state at the declared
-   knowledge location — the `knowledge` block `memory_init` returns says where it lives and what a read finds
-   there now — report it, and hand the authoring to a curator: on a task document for a real task, or through the
-   taskless writer an instructed session holds. Say in your report whether the foundation is absent, recorded at
-   an exact identity, or unusable, and whether the curator's run has happened. **A repository whose knowledge is
-   not recorded is not reported as ready**: the onboarding and baseline can both be complete while the knowledge
-   foundation is still absent, and those are separate facts, not one verdict.
+   read-and-report carrier that exists for it before a task does**: sessions are admitted without a task document
+   only for the taskless seats — `chat`, a plain `terminal` pane, this seat, and a **curator seat** (the
+   developer's 2026-09-24 ruling). So read the state at the declared knowledge location — the `knowledge` block
+   `memory_init` returns says where it lives and what a read finds there now — report it, and hand the authoring
+   to a curator: a **taskless curator session** for a repository with no task at all, a curator on a task document
+   for a real task, or the taskless writer an instructed session holds. Say in your report whether the foundation
+   is absent, recorded at an exact identity, or unusable, and whether the curator's run has happened. **A
+   repository whose knowledge is not recorded is not reported as ready**: the onboarding and baseline can both be
+   complete while the knowledge foundation is still absent, and those are separate facts, not one verdict.
 6. **Write the report — § Outputs — and stop.**
 
 ## Outputs

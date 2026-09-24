@@ -3,8 +3,10 @@
 This is the first production caller of the knowledge write plane. Until this module existed, every
 importer of :mod:`agents_remember.application.knowledge` was a test and the mounted change tool
 refused every record kind, so the closed write path had no reachable entry point at all. The seam
-below is that entry point: a curator entry -- the requirement-shaped item the orchestrator hands over
--- is turned into the commands one batch carries and committed through
+below is the entry point this module provided — one of the two routes the write plane is reachable
+from today, the other being the taskless repository-foundation route: a curator entry -- the
+requirement-shaped item the orchestrator hands over -- is turned into the commands one batch carries
+and committed through
 :func:`~agents_remember.application.knowledge.change_knowledge_candidate`.
 
 **Where the citation lives, and why nothing is sealed.** An invariant is a citation beside code, so

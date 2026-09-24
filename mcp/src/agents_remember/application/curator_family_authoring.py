@@ -182,9 +182,10 @@ def read_family_plane(entries: Sequence[Mapping[str, Any]]) -> FamilyPlaneRead:
 
     Whether a membership that names **no** declaration still resolves is deliberately not answered
     here. A key this list does not declare is a question about the dataset as much as about the list --
-    the membership may name a stored ``family_revision_id``, and only the candidate knows whether it
-    exists -- so it is answered once, where the candidate is in hand, by
-    :func:`…curator_family_planning.plan_entry_family`. One refusal, one implementation.
+    the membership may name a stored ``family_revision_id``, and only the dataset this run will write
+    into knows whether it exists (the candidate's own database once it exists, and otherwise the
+    baseline that destination will be forked from) -- so it is answered once, where those bytes are in
+    hand, by :func:`…curator_family_planning.plan_entry_family`. One refusal, one implementation.
     """
 
     assignments: dict[str, FamilyAssignment] = {}

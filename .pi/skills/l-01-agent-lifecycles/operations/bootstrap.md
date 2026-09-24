@@ -72,14 +72,15 @@ Each step names the surface that owns it. This operation **runs** that surface a
    onboarding yet.)
 6. **Reach the repository's knowledge foundation.** The foundation — the authored records in the
    knowledge database, as distinct from the Markdown onboarding and from the baseline — is the
-   curator's procedure, the `c-14-knowledge-bootstrap` skill. **This seat is the carrier that exists
-   for it before a task does**: a session opened for the curator with no task document is refused
-   (`400 task-binding-required`, "named role scope is required"), because the roles this operation's
-   own carrier belongs to — `bootstrap`, `chat`, `terminal` — are the only ones admitted without one.
-   So read the state first: the `knowledge` block `memory_init` returns says where the repository's
-   foundation lives and what a read of that location finds now — `not-recorded`, `recorded` at an
-   exact identity, `unusable`, or a refused admission with its own next action. Report which of those
-   it is, whether the curator's run has happened, and hand the authoring on: to a curator opened on a
+   curator's procedure, the `c-14-knowledge-bootstrap` skill. **This seat is the read-and-report
+   carrier that exists for it before a task does**: the roles admitted without a task document are the
+   taskless seats `bootstrap`, `chat`, `terminal` and — since the developer's 2026-09-24 ruling —
+   `curator`; every other role is refused (`400 task-binding-required`, "named role scope is
+   required"). So read the state first: the `knowledge` block `memory_init` returns says where the
+   repository's foundation lives and what a read of that location finds now — `not-recorded`,
+   `recorded` at an exact identity, `unusable`, or a refused admission with its own next action.
+   Report which of those it is, whether the curator's run has happened, and hand the authoring on: to
+   a **taskless curator session** for a repository with no task at all, to a curator opened on a
    **task document** for a real task, or to the taskless writer an instructed session holds — never to
    this seat, which authors no records.
    **The knowledge step is not conditional on this operation's other steps**: it needs a memory line

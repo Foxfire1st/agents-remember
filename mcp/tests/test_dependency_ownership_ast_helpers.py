@@ -43,8 +43,36 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "cbe71c9ad9b6d2851220069bc10d8e80b2eaca5b60bccda56a91758bce05bf7a"
+LIFECYCLE_CATALOG_SHA256 = "49b1e98bdf4adead6a36038ecfb182646ab6de324d0a4e4f3c3ac81a28372e83"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Thirty-first deliberate re-pin (260921-ICR-L32, at base ``71a17079``, 2026-09-24) -- one module split
+across the file-size rail, and the TWO consumer rows the census derived for the new half.**
+``260921-ICR-L32`` is the master's developer-approved pre-R25 repair leaf and **owns no ICR
+requirement**: it closes six must-close findings in leaves that already landed, and it registers no
+artifact and no contract of its own. Its own item here is D54: the module
+``mcp/tests/test_curator_family_authoring.py`` had reached **1320** lines, past the **1200**-line File
+Size Budget hard limit -- a breach of the standing condition that the census must not gain a new
+offender -- so the nine run-level cases its own fourth section held moved into the new ordinary unit
+module ``mcp/tests/test_curator_ingest_write_and_retention.py``, which imports the sibling's authoring
+and read-back helpers rather than duplicating them. The nine are the external-source manifest and its
+two refusals, the identity a refused entry does not spend, the two replays, the changed no-family
+basis, the dry run, and the command line. The two modules collect the same **twenty** cases the one
+module collected before (**eleven** and **nine**), and they measure **818** and **578** lines. The
+census derived the delta exactly, and the finding named **two** rows, each reporting
+``missing=['mcp/tests/test_curator_ingest_write_and_retention.py'], unsupported=[]``:
+``mcp/tests/fixtures/repository_profiles/node/package-lock.json`` and
+``mcp/tests/snapshot_lifecycle_test_support.py``, the two rows its sibling
+``mcp/tests/test_curator_family_authoring.py`` already consumes. Both ``consumer_scope = "exact"``
+rows gained that one path, in the position each row already lists the sibling case module, and the
+module's own lane row
+was added to ``mcp/tests/test-evidence-lanes.toml`` in the unit-regression lane beside its sibling.
+**Nothing was registered, no row was removed and no artifact's identity moved**, so the population
+stays at **sixteen contracts / sixty-six artifacts**, and the catalog is re-pinned from
+``cbe71c9ad9b6d2851220069bc10d8e80b2eaca5b60bccda56a91758bce05bf7a`` (the Thirtieth) to
+``49b1e98bdf4adead6a36038ecfb182646ab6de324d0a4e4f3c3ac81a28372e83``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact delta remains
+exactly empty.
 
 **Thirtieth deliberate re-pin (260921-ICR-L27, at base ``06ed70cf``, 2026-09-24) -- the delivered
 knowledge-bootstrap procedure's three consumer rows.** ``260921-ICR-L27`` (requirement ``ICR-R27@v1``)

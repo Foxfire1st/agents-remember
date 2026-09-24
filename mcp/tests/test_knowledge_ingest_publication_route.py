@@ -11,7 +11,7 @@ root. The declared location is then resolved by the read route's own owner rathe
 here, so the fixture cannot quietly agree with the implementation about a path neither of them
 should be computing.
 
-Six user operations, and one refusal family that guards them:
+Seven user operations, and one refusal family that guards them:
 
 * **the ordinary first publication** -- the location the ordinary read route declares receives the
   committed candidate, and the route reads that location back through the owner a later task's
@@ -24,6 +24,9 @@ Six user operations, and one refusal family that guards them:
 * **an explicit update** -- a second run that forks from the published dataset and republishes onto
   it replaces exactly the identity it admitted, and the earlier truth survives inside the successor
   (the continuity a next task inherits);
+* **a reuse membership on the forking run's FIRST attempt** -- a list that places a new obligation
+  in a family by naming the revision its baseline already stores commits without a priming run, so
+  the reuse form of a membership is an ordinary route rather than a workaround (L32/D57);
 * **an exact retry** -- the same list again changes nothing, publishes ``no_change``, and still reads
   its identity back confirmed;
 * **no destination named** -- a run that commits and publishes nothing SAYS so, because exit zero is
@@ -754,3 +757,175 @@ def test_a_declared_location_that_cannot_be_resolved_is_refused_rather_than_gues
     assert "declared published dataset location could not be resolved" in refusal, refusal
     assert str(enclosure.contract_path) in refusal, refusal
     assert not candidate.exists(), "a refused invocation created a candidate"
+
+
+# --------------------------------------------------------------------------------------------
+# The reuse form of a membership, on the FIRST run that forks from a published baseline.
+#
+# The defect this case seals: ``read_curator_planes`` read the family plane from the candidate
+# directory, and on a run whose destination does not exist yet -- the ordinary shape for a task that
+# begins from what the previous task published -- that answered "there is no dataset here". A
+# membership naming a family revision the BASELINE plainly stores was then refused
+# ``family_revision_not_stored``, one step away from a candidate that would hold it. The disclosed
+# workaround was a priming committing run with an EMPTY list and then the real run, which is a route
+# only its author knew.
+# --------------------------------------------------------------------------------------------
+FAMILY_KEY = "pkg/added_by_the_leaf.py::presentation"
+FAMILY_DECLARATION = {
+    "label": "The added construct presents the obligation",
+    "version": "1",
+    "guarantee": "Every construct that presents the obligation keeps its statement true.",
+}
+
+
+def _family_entry(entry_id: str, symbol_name: str, family: dict[str, Any]) -> dict[str, Any]:
+    """One hand-off entry carrying the curator's authored family plane."""
+
+    authored = entry(
+        entry_id, targets=[target(CODE_FILE, locator=symbol(symbol_name), route="pkg")]
+    )
+    authored["family"] = family
+    return authored
+
+
+def _stored_family_revision(database: Path) -> tuple[str, str]:
+    """The family key and revision id a published dataset stores, read from the file itself."""
+
+    connection = open_read_only_database(database)
+    try:
+        rows = [
+            (str(row[0]), str(row[1]), str(row[2]))
+            for row in connection.execute(
+                "SELECT family_id, revision_id, display_version FROM family_revision"
+            )
+        ]
+    finally:
+        connection.close()
+    assert len(rows) == 1, f"expected exactly one stored family revision, read {rows}"
+    return rows[0][0], rows[0][1]
+
+
+def _family_members(database: Path, family_revision_id: str) -> int:
+    """How many member rows one stored family revision carries, read from the file itself."""
+
+    connection = open_read_only_database(database)
+    try:
+        row = next(
+            connection.execute(
+                "SELECT COUNT(*) FROM family_member WHERE family_revision_id = ?",
+                (family_revision_id,),
+            )
+        )
+    finally:
+        connection.close()
+    return int(row[0])
+
+
+def test_the_first_forking_run_members_the_family_revision_its_baseline_stores(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A list that REUSES a stored family revision commits on the forking run's first attempt.
+
+    Run one declares the family while it publishes the repository's knowledge. Run two is a fresh
+    candidate directory forked from what run one published, and it places a second obligation in
+    that same family by naming the revision the baseline already stores -- the reuse form, and the
+    only one that does not author a second guarantee for one joint obligation.
+
+    There is deliberately **no priming run** in this case: the assertion is on the first `--commit`
+    run that hands the membership over. Restoring the candidate-only family read is the mutation,
+    and this case then refuses with ``family_revision_not_stored`` against a revision the baseline
+    holds.
+    """
+
+    enclosure = _ordinary_enclosure(tmp_path / "forked-family")
+    published = _declared_location(enclosure)
+
+    declaring = tmp_path / "declaring.json"
+    declaring.write_text(
+        json.dumps(
+            [
+                _family_entry(
+                    "E-DECLARED",
+                    CODE_SYMBOL,
+                    {
+                        "state": "member",
+                        "memberships": [
+                            {
+                                "family": FAMILY_KEY,
+                                "basis": "One construct presents the obligation.",
+                                "declares": dict(FAMILY_DECLARATION),
+                            }
+                        ],
+                    },
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+    first = _cli_json(
+        _ordinary_argv(
+            enclosure,
+            declaring,
+            tmp_path / "candidate-first",
+            "--commit",
+            "--publish",
+            "--json",
+        ),
+        capsys,
+    )
+    assert first["batchState"] == "changed", first
+    assert first["publication"]["state"] == "published", first["publication"]
+    family_id, stored_revision = _stored_family_revision(published)
+    assert _family_members(published, stored_revision) == 1, (
+        "the declaring run placed no member row"
+    )
+
+    reusing = tmp_path / "reusing.json"
+    reusing.write_text(
+        json.dumps(
+            [
+                _family_entry(
+                    "E-REUSED",
+                    CODE_OTHER_SYMBOL,
+                    {
+                        "state": "member",
+                        "memberships": [
+                            {
+                                "family": FAMILY_KEY,
+                                "basis": "The other construct presents the same obligation.",
+                                "family_revision_id": stored_revision,
+                            }
+                        ],
+                    },
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+    second = _cli_json(
+        _ordinary_argv(
+            enclosure,
+            reusing,
+            tmp_path / "candidate-reusing",
+            "--commit",
+            "--publish",
+            "--baseline",
+            str(published),
+            "--json",
+        ),
+        capsys,
+    )
+
+    assert second["refused"] == [], (
+        "the first forking run refused a membership naming a family revision its own baseline "
+        f"stores: {second['refused']}"
+    )
+    assert second["batchState"] == "changed", second
+    assert second["publication"]["state"] == "published", second["publication"]
+    assert _family_members(published, stored_revision) == 2, (
+        "the reuse membership did not join the STORED family revision: the family on the line holds "
+        f"{_family_members(published, stored_revision)} member rows rather than two"
+    )
+    assert _stored_family_revision(published) == (family_id, stored_revision), (
+        "the reuse membership authored a second family revision instead of citing the stored one"
+    )

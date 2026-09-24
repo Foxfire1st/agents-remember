@@ -23,6 +23,12 @@ The load-bearing properties, one case each:
   substitution with a later branch tip -- while an unknown master keeps degrading to empty;
 * a live leaf is labelled ``working`` beside the integrated net, and its uncommitted delta
   never leaks into the net.
+
+The change inventory's own addresses are measured here too, because this is the module that owns
+"the change-set the dashboard really calls" over real Git: a name holding a tab or a newline is
+the row ``ACCEPTANCE.md`` A24 requires, and the four cases below drive it through the operations
+that serve it -- the enumeration functions and the ``/api/changeset/task`` route -- rather than
+through a private helper.
 """
 
 from __future__ import annotations
@@ -44,6 +50,11 @@ from agents_remember.serving.master_net_generation import (
     MasterEndpointAbsent,
     MasterNetPins,
     select_master_net,
+)
+from agents_remember.worktrees.modules.git import (
+    changed_files_with_counts,
+    changed_worktree_paths,
+    committed_changed_paths,
 )
 from agents_remember.worktrees.worktree_contract import (
     WorktreeContract,
@@ -486,3 +497,211 @@ def test_a_diff_failure_after_validation_is_refused_never_reported_as_zero(
     assert "simulated unreadable tree" in message
     assert "refused rather than reported as an empty range" in message
     print(f"L13EVIDENCE post_validation_diff_refused=True kind={caught.value.kind}")
+
+
+# --- the change inventory's own addresses: names Git must quote (A24) ----------------------
+#
+# Git C-quotes a name holding a tab, a newline or a non-ASCII byte on every interface that is not
+# NUL-delimited -- so a reader of such an interface receives `"tab\tname.py"`, an escaped spelling
+# of the name rather than the name. These cases hold the inventory to the address Git itself
+# reports for those files.
+
+TAB_NAME = "src/tab\tname.py"
+NEWLINE_NAME = "src/new\nline.py"
+UNTRACKED_TAB_NAME = "src/untracked\ttab.py"
+UNTRACKED_PLAIN_NAME = "src/plain_untracked.py"
+PLAIN_NAME = "src/plain.py"
+RENAME_SOURCE = "src/orig.py"
+RENAMED_TAB_NAME = "src/renamed\torig.py"
+# A name Git does not quote, but whose FIRST byte is a space: read as a stripped line it loses that
+# space and stops naming the file. That is the other half of the same defect -- the line-oriented
+# read is not only a quoting problem, and `git ls-files` puts this path first.
+LEADING_SPACE_NAME = " leading_space.py"
+# A name holding a LITERAL BACKSLASH -- a legal POSIX filename character, and the one class that
+# separates the two mechanisms of the original defect. `-z` stops Git quoting a tab or a newline, so
+# the trailing `.replace("\\", "/")` became a no-op for THOSE names and looked harmless; for a name
+# that really contains a backslash it is still a corruption, rewriting a legal byte into a separator
+# and then dropping the file through the `is_file` guard. Both spellings are here: one the tracked
+# half reports (name-status/numstat) and one the untracked half reports (ls-files).
+BACKSLASH_NAME = "src/back\\slash.py"
+UNTRACKED_BACKSLASH_NAME = "src/untracked\\back.py"
+INVENTORY_NAMES = frozenset(
+    {
+        TAB_NAME,
+        NEWLINE_NAME,
+        UNTRACKED_TAB_NAME,
+        UNTRACKED_PLAIN_NAME,
+        PLAIN_NAME,
+        LEADING_SPACE_NAME,
+        BACKSLASH_NAME,
+        UNTRACKED_BACKSLASH_NAME,
+    }
+)
+
+
+def _nul_git_paths(repo: Path, args: list[str]) -> set[str]:
+    """Git's own answer to a path question, read NUL-delimited: the oracle these cases compare to."""
+
+    completed = subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    return {record for record in completed.stdout.split("\0") if record}
+
+
+def _quoted_name_repo(path: Path) -> Path:
+    """One real repository holding eight changed files, six a line read cannot carry."""
+
+    repo = _init_repo(path, {RENAME_SOURCE: "a\nb\nc\n", PLAIN_NAME: "unchanged\n"})
+    (repo / PLAIN_NAME).write_text("changed\n", encoding="utf-8")
+    (repo / TAB_NAME).write_text("one\ntwo\n", encoding="utf-8")
+    (repo / NEWLINE_NAME).write_text("x\ny\nz\n", encoding="utf-8")
+    (repo / BACKSLASH_NAME).write_text("b1\n", encoding="utf-8")
+    _git(repo, ["add", "-A"])
+    (repo / UNTRACKED_PLAIN_NAME).write_text("p1\np2\n", encoding="utf-8")
+    (repo / UNTRACKED_TAB_NAME).write_text("u1\n", encoding="utf-8")
+    (repo / LEADING_SPACE_NAME).write_text("s1\n", encoding="utf-8")
+    (repo / UNTRACKED_BACKSLASH_NAME).write_text("b2\n", encoding="utf-8")
+    return repo
+
+
+def test_a_quoted_name_reaches_the_change_inventory_as_its_own_address(tmp_path: Path) -> None:
+    """Eight real changed files in, eight rows out, each naming the file it says it names.
+
+    The falsifier is the measurement that filed this defect: on the same fixture the inventory
+    returned FOUR rows for five changes, two of them addresses (``"new/nline.py"``,
+    ``"tab/tname.py"``) that resolve to nothing because the escape's backslash had been rewritten
+    into a separator, and one real untracked change was absent entirely with nothing said about it.
+    """
+
+    repo = _quoted_name_repo(tmp_path / "quoted-names")
+
+    rows = changed_files_with_counts(repo, "HEAD", None)
+    by_path = {str(row["path"]): row for row in rows}
+
+    oracle = _nul_git_paths(repo, ["diff", "--name-only", "-z", "HEAD", "--"])
+    oracle |= _nul_git_paths(repo, ["ls-files", "--others", "--exclude-standard", "-z"])
+    assert oracle == INVENTORY_NAMES
+    assert set(by_path) == oracle, "the inventory must account for every path Git reports"
+    assert len(rows) == 8
+    for name in by_path:
+        assert (repo / name).is_file(), name
+        assert '"' not in name, name
+    # The literal backslashes survive as THEMSELVES, which is the property the old trailing
+    # ``.replace("\\", "/")`` destroyed and which ``-z`` alone does not defend: with the quoting
+    # gone, that rewrite is a no-op for a tab or a newline and a corruption for a real backslash.
+    assert BACKSLASH_NAME in by_path and UNTRACKED_BACKSLASH_NAME in by_path
+    assert {name: by_path[name]["status"] for name in INVENTORY_NAMES} == {
+        TAB_NAME: "A",
+        NEWLINE_NAME: "A",
+        UNTRACKED_TAB_NAME: "A",
+        UNTRACKED_PLAIN_NAME: "A",
+        LEADING_SPACE_NAME: "A",
+        BACKSLASH_NAME: "A",
+        UNTRACKED_BACKSLASH_NAME: "A",
+        PLAIN_NAME: "M",
+    }
+    assert by_path[TAB_NAME]["insertions"] == 2
+    assert by_path[NEWLINE_NAME]["insertions"] == 3
+    assert by_path[BACKSLASH_NAME]["insertions"] == 1
+    assert by_path[PLAIN_NAME] == {
+        "path": PLAIN_NAME,
+        "insertions": 1,
+        "deletions": 1,
+        "status": "M",
+    }
+    assert [str(row["path"]) for row in rows] == sorted(str(row["path"]) for row in rows)
+
+
+def test_the_closeout_worklists_keep_a_quoted_name(tmp_path: Path) -> None:
+    """Both changed-path worklists carry every deliverable a line read cannot name.
+
+    A tab, a newline, a leading space or a literal backslash: ``changed_worktree_paths`` is the
+    uncommitted half of the closeout's worklist and ``committed_changed_paths`` the committed one, and
+    a deliverable that vanishes from either is a silent omission, which is the shape this master has
+    already paid for once.
+    """
+
+    repo = _quoted_name_repo(tmp_path / "quoted-worklists")
+
+    assert set(changed_worktree_paths(repo)) == INVENTORY_NAMES
+
+    base = _git(repo, ["rev-parse", "HEAD"])
+    _commit(repo, "the quoted names and the plain edit, committed")
+    committed = set(committed_changed_paths(repo, base, ""))
+    assert committed == INVENTORY_NAMES
+    assert committed == _nul_git_paths(repo, ["diff", "--name-only", "-z", f"{base}..HEAD", "--"])
+
+
+def test_a_rename_into_a_quoted_name_reports_its_destination(tmp_path: Path) -> None:
+    """The two-field rename forms are paired positionally, not re-split on tabs.
+
+    ``--numstat -z`` reports a rename as its counts, an EMPTY path field and then the source and
+    the destination as two further records; ``--name-status -z`` reports the status and then both
+    paths. A parser that splits either on tabs, or that reconstructs the ``a => b`` spelling the
+    line-oriented form uses, cannot pair them once the destination itself holds a tab.
+    """
+
+    repo = _init_repo(tmp_path / "quoted-rename", {RENAME_SOURCE: "a\nb\nc\n"})
+    base = _git(repo, ["rev-parse", "HEAD"])
+    _git(repo, ["mv", RENAME_SOURCE, RENAMED_TAB_NAME])
+    tip = _commit(repo, "rename into a name holding a tab")
+
+    rows = changed_files_with_counts(repo, base, tip)
+
+    assert [str(row["path"]) for row in rows] == [RENAMED_TAB_NAME]
+    assert rows[0]["status"] == "R"
+    assert rows[0]["insertions"] == 0 and rows[0]["deletions"] == 0
+    assert (repo / str(rows[0]["path"])).is_file()
+    assert RENAME_SOURCE not in {str(row["path"]) for row in rows}
+    assert set(committed_changed_paths(repo, base, "")) == {RENAMED_TAB_NAME}
+
+
+def test_the_change_set_route_serves_a_quoted_name_as_an_address(tmp_path: Path) -> None:
+    """The route the dashboard's committed/working buttons call publishes the quoted addresses."""
+
+    fixture = build_master_fixture(tmp_path / "quoted-route")
+    live_dir = fixture.config.workspace_root / "worktrees" / "wt-quoted"
+    live_dir.parent.mkdir(parents=True, exist_ok=True)
+    _git(fixture.code_repo, ["worktree", "add", "-b", "ar/fixture-quoted", str(live_dir), "series"])
+    (live_dir / TAB_NAME).write_text("one\ntwo\n", encoding="utf-8")
+    (live_dir / NEWLINE_NAME).write_text("x\ny\nz\n", encoding="utf-8")
+    series_root = fixture.config.coordination_root / "tasks" / REPO / MASTER
+    live_contract_path = _contract_path(series_root, "fixture-quoted")
+    live_contract_path.parent.mkdir(parents=True, exist_ok=True)
+    write_contract(
+        live_contract_path,
+        WorktreeContract(
+            task_id="260921_TEST_MASTER_NET",
+            task_name=MASTER,
+            repo_name=REPO,
+            workflow_kind="light-task",
+            memory_mode="disabled",
+            coordination_root=fixture.config.coordination_root,
+            task_root=series_root,
+            contract_path=live_contract_path,
+            task_artifact=series_root / "task.md",
+            worktree_group=fixture.config.workspace_root / "worktrees",
+            code_repo_path=fixture.code_repo,
+            code_source_branch="series",
+            code_work_branch="ar/fixture-quoted",
+            code_base_commit=fixture.tip_two,
+            code_worktree=live_dir,
+            kind="leaf",
+            leaf_id="fixture-quoted",
+            parent_task_name=MASTER,
+        ),
+    )
+
+    app = FastAPI()
+    register_changeset_routes(app, fixture.config)
+    client = TestClient(app)
+    response = client.get(
+        "/api/changeset/task",
+        params={"repo": REPO, "master": MASTER, "leaf": "fixture-quoted", "mode": "working"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["mode"] == "working"
+    assert {entry["path"] for entry in body["code"]} == {TAB_NAME, NEWLINE_NAME}
+    for entry in body["code"]:
+        assert (live_dir / entry["path"]).is_file(), entry["path"]
+    assert body["counters"]["code"] == {"files": 2, "insertions": 5, "deletions": 0}

@@ -1,11 +1,19 @@
 // Same-origin client for the L3 read-only change-set API (mcp/.../serving/changeset.py).
 // Mirrors data/files.ts: a `base` arg (same-origin default), typed results, a thrown
 // FilesApiError, and NO store mutation — the Change-Set Viewer owns its component state.
+// The thrown error is a `ReviewTransportError` (which IS a `FilesApiError`, so `code`/`httpStatus`
+// catchers are unaffected) and it carries the route's own refusal, reason included — see
+// `getChangeSetJson` below.
 // Endpoints (all GET, camelCase JSON):
 //   /api/changeset/task?repo&scope                 -> one active enclosure's changed code + memory + counters
 //   /api/changeset/file-diff?repo&scope&kind&path  -> BEFORE + AFTER content for one changed file (MergeView a/b)
 //   /api/changeset/master?repo&master              -> the master's accumulated change-set (dedup by path, sum counts)
-import { getJson, qs } from "./files";
+import { qs } from "./files";
+import {
+  type ReviewFailure,
+  ReviewTransportError,
+  reviewFailureToken,
+} from "./reviewTransport";
 
 // One changed file: insertion/deletion counts (null for binary) + the git status letter
 // (A/M/D/R). `hasSidecar` (code files) drives the L4 code->sidecar split affordance.
@@ -75,8 +83,80 @@ export interface MasterChangesetOptions {
   pins?: MasterNetPins;
 }
 
+// The refusal bodies this route family publishes (serving/response_contract.py): `StatusRefusal`
+// `{status, detail}`, `UnknownScopeRefusal` `{status, scope}`, and `MissingPathRefusal`
+// `{status, path}`. For THIS family the 404's `path` carries the reason in the owner's own words --
+// `str(FileNotFoundError)`, which for a missing recorded endpoint is the whole explicit refusal
+// sentence (`serving/master_net_generation.py`, `changeset_endpoints.py`) -- so it is read here as a
+// reason. `repo`/`scope` are the identifiers a 404 echoes back when it has no separate reason.
+interface ChangeSetRefusalBody {
+  status?: unknown;
+  detail?: unknown;
+  path?: unknown;
+  repo?: unknown;
+  scope?: unknown;
+}
+
+const text = (value: unknown): string | undefined =>
+  typeof value === "string" && value !== "" ? value : undefined;
+
+// `404 Not Found`, or just `404` when the response carries no reason phrase (HTTP/2, a test stub).
+const statusLine = (response: Response): string =>
+  `${response.status}${response.statusText ? ` ${response.statusText}` : ""}`;
+
+// A non-2xx (or unreadable) answer as the failure it is. A body that names a refusal keeps the
+// owner's code, reason and echoed identifier; a body that names none is reported as a response this
+// route did not produce rather than guessed into a refusal.
+function changeSetFailure(response: Response, body: ChangeSetRefusalBody | null): ReviewFailure {
+  const status = statusLine(response);
+  const named = text(body?.status);
+  if (named === undefined) {
+    return {
+      token: "unreadable",
+      code: status,
+      detail: `the change-set route answered ${status} with a body that names no refusal, so no change-set was read`,
+      httpStatus: response.status,
+    };
+  }
+  return {
+    token: reviewFailureToken(named),
+    code: named,
+    detail:
+      text(body?.detail) ??
+      text(body?.path) ??
+      `the change-set route refused this read (${named}) without publishing a reason`,
+    offendingInput: text(body?.repo) ?? text(body?.scope),
+    httpStatus: response.status,
+  };
+}
+
+// THE ONE DECODE EVERY READ IN THIS FILE MAKES, so a refusal reaches its reader instead of stopping
+// at the status line. This family answers with its typed body and maps a refusal onto a 400/404
+// status, so the refusal IS the body of a non-2xx response; the shared `getJson` reads only
+// `body.status` and throws, which dropped the reason before any caller could see it. The body is
+// therefore read whatever the status, exactly as the review client reads its own route
+// (`data/reviewTransport.ts`, same doctrine and the same `ReviewFailure`/token vocabulary), and the
+// thrown error stays a `FilesApiError` with the same `code`/`httpStatus`/message it always had.
+async function getChangeSetJson<T>(url: string): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(url);
+  } catch (cause) {
+    throw new ReviewTransportError({
+      token: "network",
+      code: "network",
+      detail: `the change-set read could not reach the server: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    });
+  }
+  const body = (await response.json().catch(() => null)) as (ChangeSetRefusalBody & T) | null;
+  if (response.ok && body !== null) return body as T;
+  throw new ReviewTransportError(changeSetFailure(response, body));
+}
+
 export const taskChangeset = (repo: string, scope: string, base = ""): Promise<TaskChangeset> =>
-  getJson<TaskChangeset>(`${base}/api/changeset/task?${qs({ repo, scope })}`);
+  getChangeSetJson<TaskChangeset>(`${base}/api/changeset/task?${qs({ repo, scope })}`);
 
 export const fileDiff = (
   repo: string,
@@ -85,7 +165,7 @@ export const fileDiff = (
   path: string,
   base = "",
 ): Promise<FileDiff> =>
-  getJson<FileDiff>(`${base}/api/changeset/file-diff?${qs({ repo, scope, kind, path })}`);
+  getChangeSetJson<FileDiff>(`${base}/api/changeset/file-diff?${qs({ repo, scope, kind, path })}`);
 
 export const masterChangeset = (
   repo: string,
@@ -102,7 +182,7 @@ export const masterChangeset = (
   for (const [key, value] of Object.entries(options.pins ?? {})) {
     if (value) params[key] = value;
   }
-  return getJson<MasterChangeset>(`${base}/api/changeset/master?${qs(params)}`);
+  return getChangeSetJson<MasterChangeset>(`${base}/api/changeset/master?${qs(params)}`);
 };
 
 // `masterFileDiff` — BEFORE (master base) + AFTER (selected result) content for one file in the
@@ -121,7 +201,7 @@ export const masterFileDiff = (
   for (const [key, value] of Object.entries(pins)) {
     if (value) params[key] = value;
   }
-  return getJson<FileDiff>(`${base}/api/changeset/file-diff?${qs(params)}`);
+  return getChangeSetJson<FileDiff>(`${base}/api/changeset/file-diff?${qs(params)}`);
 };
 
 // L4a leaf views — a single leaf's change-set straight off its enclosure contract (so it works
@@ -139,7 +219,7 @@ export const leafChangeset = (
   mode: LeafMode,
   base = "",
 ): Promise<TaskChangeset> =>
-  getJson<TaskChangeset>(`${base}/api/changeset/task?${qs({ repo, master, leaf, mode })}`);
+  getChangeSetJson<TaskChangeset>(`${base}/api/changeset/task?${qs({ repo, master, leaf, mode })}`);
 
 // `leafFileDiff` — BEFORE + AFTER for one file in a leaf's committed/working change-set. Same
 // /api/changeset/file-diff route, with `leaf` + `mode` (+ the qualifying `master`).
@@ -152,4 +232,4 @@ export const leafFileDiff = (
   mode: LeafMode,
   base = "",
 ): Promise<FileDiff> =>
-  getJson<FileDiff>(`${base}/api/changeset/file-diff?${qs({ repo, master, leaf, kind, path, mode })}`);
+  getChangeSetJson<FileDiff>(`${base}/api/changeset/file-diff?${qs({ repo, master, leaf, kind, path, mode })}`);

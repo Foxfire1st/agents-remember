@@ -83,8 +83,13 @@ export class FilesApiError extends Error {
   }
 }
 
-// Shared by the files client and the change-set client (data/changeset.ts) so the
-// serving error idiom (404 unknown-repo/unknown-scope/not-found, 400 bad-path) is mapped once.
+// Shared by the files, notes and requirements clients so the serving error idiom
+// (404 unknown-repo/unknown-scope/not-found, 400 bad-path) is mapped once. The change-set client
+// (`data/changeset.ts`) deliberately does NOT decode through here: that route family publishes its
+// refusal in the BODY of a non-2xx response, and reading only `body.status` is what dropped the
+// reason before any caller could render it. It carries its own `getChangeSetJson` for that reason,
+// and the error it throws is still a `FilesApiError` (a `ReviewTransportError`), so a catcher written
+// against this class is unaffected.
 // `timeoutMs` bounds the socket for hung-transport-prone reads (see fetchRepos); omitted, the
 // request is unbounded exactly as before.
 export async function getJson<T>(url: string, timeoutMs?: number): Promise<T> {

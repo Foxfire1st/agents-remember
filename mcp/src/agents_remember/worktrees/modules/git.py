@@ -263,20 +263,54 @@ def head_text_or_none(repo: Path, relative_path: str) -> str | None:
     return commit_text_or_none(repo, "HEAD", relative_path)
 
 
+def _nul_git(repo: Path, args: list[str]) -> str:
+    """Git output read verbatim, for a caller that parses a NUL-delimited interface.
+
+    :func:`require_git` answers with the *stripped* text, which is the right shape for the
+    single-value reads it serves and the wrong one here: a space is part of a path, and the only
+    thing separating one record from the next is the NUL after it. The NUL interface is this
+    repository's house rule for path enumeration -- ``-z`` is used across ``memory_quality/``,
+    ``certification/`` and the worktree mutation, sync and terminal-validation reads -- and this
+    family was the exception.
+    """
+
+    result = run_git(repo, args)
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"git {' '.join(args)} failed"
+        raise RuntimeError(_transport_safe_git_diagnostic(detail))
+    return result.stdout
+
+
+def _nul_records(raw: str) -> list[str]:
+    """The NUL-delimited records of one ``-z`` read. No record of these commands is empty."""
+
+    return [record for record in raw.split("\0") if record]
+
+
 def changed_worktree_paths(repo: Path) -> list[str]:
-    tracked = require_git(repo, ["diff", "--name-only", "HEAD", "--"]).splitlines()
-    untracked = require_git(repo, ["ls-files", "--others", "--exclude-standard"]).splitlines()
-    paths = {
-        path.strip().replace("\\", "/")
-        for path in [*tracked, *untracked]
-        if path.strip() and filesystem.is_file(repo / path.strip())
-    }
-    return sorted(paths)
+    """Every changed path of the working tree -- tracked and untracked -- as Git reports it.
+
+    Both halves are read NUL-delimited. Read as lines instead, Git quotes a name containing a tab,
+    a newline or a non-ASCII byte, and the trailing backslash-to-slash normalisation this function
+    used to apply then rewrote the *escape's* backslash into a separator -- so the address returned
+    named a path no file held and the ``is_file`` guard below dropped the real file from the answer
+    with nothing said about it. ``is_file`` remains the deliberate filter (a submodule, a directory
+    entry, or a path a commit deleted is not a path this worklist carries); what it can no longer
+    do is drop a file whose name Git would quote.
+    """
+
+    tracked = _nul_records(_nul_git(repo, ["diff", "--name-only", "-z", "HEAD", "--"]))
+    untracked = _nul_records(_nul_git(repo, ["ls-files", "--others", "--exclude-standard", "-z"]))
+    return sorted({path for path in [*tracked, *untracked] if filesystem.is_file(repo / path)})
 
 
 def _diff_paths(repo: Path, from_commit: str) -> set[str]:
-    lines = require_git(repo, ["diff", "--name-only", f"{from_commit}..HEAD", "--"]).splitlines()
-    return {line.strip().replace("\\", "/") for line in lines if line.strip()}
+    """Every path of the ``from_commit..HEAD`` tree diff, exactly as Git reports it."""
+
+    records = _nul_records(
+        _nul_git(repo, ["diff", "--name-only", "-z", f"{from_commit}..HEAD", "--"])
+    )
+    return set(records)
 
 
 def committed_changed_paths(repo: Path, base_commit: str, verified_commit: str) -> list[str]:
@@ -285,7 +319,9 @@ def committed_changed_paths(repo: Path, base_commit: str, verified_commit: str) 
     Tree-diff against the recorded base, intersected with the tree-diff against
     the last verified commit when one exists: content the synced source branch
     already carries and content a previous closeout already verified both drop
-    out of the worklist.
+    out of the worklist. Every path is reported exactly as Git reports it, so a
+    name holding a tab or a newline is the address of the file it names rather
+    than a rewritten one the guard below would then discard.
     """
     changed = _diff_paths(repo, base_commit)
     if verified_commit and verified_commit != base_commit:
@@ -293,17 +329,79 @@ def committed_changed_paths(repo: Path, base_commit: str, verified_commit: str) 
     return sorted(path for path in changed if filesystem.is_file(repo / path))
 
 
-def _rename_aware_path(field: str) -> str:
-    """The post-rename path from a numstat path field (handles ``a => b`` and ``p/{a => b}/q``)."""
-    field = field.strip()
-    if " => " not in field:
-        return field.replace("\\", "/")
-    if "{" in field and "}" in field:
-        prefix, rest = field.split("{", 1)
-        inner, suffix = rest.split("}", 1)
-        new = inner.split(" => ", 1)[1]
-        return f"{prefix}{new}{suffix}".replace("\\", "/")
-    return field.split(" => ", 1)[1].replace("\\", "/")
+def _name_status_letters(repo: Path, rng: list[str]) -> dict[str, str]:
+    """Each changed path's status letter, from one NUL-delimited ``--name-status`` read.
+
+    ``-z`` is what makes the pairing unambiguous: a record is the status and then its path, and a
+    rename or copy status is followed by **two** path fields -- the source and the destination. The
+    line-oriented form cannot be split on tabs without also splitting a name that contains one, and
+    reading it as lines is how Git's quoting of such a name reached a caller as a different path.
+    The reported path is the destination, which is where the change lands. A record whose fields do
+    not fit its own status is a refusal rather than a path dropped from the inventory in silence.
+    """
+
+    records = _nul_records(_nul_git(repo, ["diff", "--name-status", "-z", "--find-renames", *rng]))
+    letters: dict[str, str] = {}
+    cursor = 0
+    while cursor < len(records):
+        letter = records[cursor][:1]
+        cursor += 1
+        if letter in {"R", "C"}:
+            if cursor + 1 >= len(records):
+                raise RuntimeError(
+                    "git reported a rename or copy without both of its paths, so no path's status "
+                    "could be paired with it"
+                )
+            letters[records[cursor + 1]] = letter
+            cursor += 2
+            continue
+        if cursor >= len(records):
+            raise RuntimeError(
+                "git reported a status without the path it belongs to, so the change inventory "
+                "would have silently omitted that path"
+            )
+        letters[records[cursor]] = letter
+        cursor += 1
+    return letters
+
+
+def _numstat_rows(repo: Path, rng: list[str]) -> list[tuple[str, int | None, int | None]]:
+    """``(path, insertions, deletions)`` per file, from one NUL-delimited ``--numstat`` read.
+
+    A record is ``insertions<TAB>deletions<TAB>path``; for a rename or a copy the path field is
+    **empty** and the source and the destination follow as two further records, so the pairing is
+    positional. That is why a name containing a tab needs no re-splitting here and no ``a => b``
+    reconstruction, and why the reported path is the destination. Binary files report ``-`` for
+    both counts and keep it as ``None`` rather than as a measured zero.
+    """
+
+    records = _nul_records(_nul_git(repo, ["diff", "--numstat", "-z", "--find-renames", *rng]))
+    rows: list[tuple[str, int | None, int | None]] = []
+    cursor = 0
+    while cursor < len(records):
+        fields = records[cursor].split("\t", 2)
+        cursor += 1
+        if len(fields) != 3:
+            raise RuntimeError(
+                f"git's numstat record {fields!r} is not insertions, deletions and one path"
+            )
+        insertions, deletions, path = fields
+        if not path:
+            if cursor + 1 >= len(records):
+                raise RuntimeError(
+                    "git reported a rename or copy without both of its paths, so its counts could "
+                    "not be paired with a path"
+                )
+            path = records[cursor + 1]
+            cursor += 2
+        rows.append(
+            (
+                path,
+                None if insertions == "-" else int(insertions),
+                None if deletions == "-" else int(deletions),
+            )
+        )
+    return rows
 
 
 def changed_files_with_counts(
@@ -316,33 +414,30 @@ def changed_files_with_counts(
     deletions (status ``D``) and reports per-file insertion/deletion counts (``None``
     for binary files, whose numstat shows ``-``); in working-tree mode untracked files
     are reported as additions (status ``A``). ``status`` is the git letter
-    (``A``/``M``/``D``/``R``/``C``). Paths are posix, sorted.
+    (``A``/``M``/``D``/``R``/``C``).
+
+    Both reads are NUL-delimited and nothing is rewritten afterwards, so ``path`` is the address
+    of the file it names: a name holding a tab, a newline or a backslash is reported as itself
+    rather than as a quoted or separator-substituted variant that resolves to nothing. Git's
+    ``core.quotePath`` quoting never reaches a caller here, because ``-z`` is precisely the
+    interface that turns it off. Records are sorted by path.
     """
     rng = [base] if head is None else [base, head]
-    status: dict[str, str] = {}
-    for line in require_git(repo, ["diff", "--name-status", "--find-renames", *rng]).splitlines():
-        if not line.strip():
-            continue
-        fields = line.split("\t")
-        status[fields[-1].replace("\\", "/")] = fields[0][:1]
-    out: list[dict[str, Any]] = []
-    for line in require_git(repo, ["diff", "--numstat", "--find-renames", *rng]).splitlines():
-        if not line.strip():
-            continue
-        ins, dels, raw_path = line.split("\t", 2)
-        path = _rename_aware_path(raw_path)
-        out.append(
-            {
-                "path": path,
-                "insertions": None if ins == "-" else int(ins),
-                "deletions": None if dels == "-" else int(dels),
-                "status": status.get(path, "M"),
-            }
-        )
+    letters = _name_status_letters(repo, rng)
+    out: list[dict[str, Any]] = [
+        {
+            "path": path,
+            "insertions": insertions,
+            "deletions": deletions,
+            "status": letters.get(path, "M"),
+        }
+        for path, insertions, deletions in _numstat_rows(repo, rng)
+    ]
     if head is None:
-        for raw in require_git(repo, ["ls-files", "--others", "--exclude-standard"]).splitlines():
-            rel = raw.strip().replace("\\", "/")
-            if rel and filesystem.is_file(repo / rel):
+        for rel in _nul_records(
+            _nul_git(repo, ["ls-files", "--others", "--exclude-standard", "-z"])
+        ):
+            if filesystem.is_file(repo / rel):
                 line_count = len((repo / rel).read_text(errors="replace").splitlines())
                 out.append({"path": rel, "insertions": line_count, "deletions": 0, "status": "A"})
     return sorted(out, key=lambda entry: str(entry["path"]))

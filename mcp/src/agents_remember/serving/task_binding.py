@@ -71,6 +71,14 @@ class TaskDocumentResolutionFailure(ValueError):
 #:   is that can 'call'."* A regular agent starts it by opening a session with this role and
 #:   no task document; its instructions are its compiled capsule rather than a dispatched
 #:   brief.
+#: * ``curator`` — **developer ruling 2026-09-24, taken when the blocker was put to them**:
+#:   *"add `curator` to the taskless seat roles."* A curator whose work is a repository's
+#:   knowledge foundation (``agents-remember knowledge-bootstrap``, the
+#:   ``c-14-knowledge-bootstrap`` procedure) has no enclosure and, on a greenfield repository,
+#:   no task document to bind — yet it still has instructions to receive, and before this
+#:   ruling no route delivered them. This is a **seat-policy change**, not a consequence of
+#:   that procedure: the curator on the ordinary enclosure route is still task-bound and still
+#:   arrives through a dispatched brief.
 #:
 #: Being taskless means **the structural altitude check does not run for these roles at all**,
 #: with or without a document. That is measured behaviour, not an accident of the condition
@@ -80,7 +88,7 @@ class TaskDocumentResolutionFailure(ValueError):
 #: ``task-binding-invalid`` — and then the altitude check is skipped for every member of this
 #: set, not only for ``terminal``. An unknown role is still refused, because it is outside the
 #: set and therefore takes the structural path.
-TASKLESS_SEAT_ROLES: frozenset[str] = frozenset({"chat", "terminal", "bootstrap"})
+TASKLESS_SEAT_ROLES: frozenset[str] = frozenset({"chat", "terminal", "bootstrap", "curator"})
 
 
 def resolve_task_binding(

@@ -695,6 +695,7 @@ consumers = [
   "mcp/tests/test_citation_index_resilience.py",
   "mcp/tests/test_citation_migrate_registration.py",
   "mcp/tests/test_curator_family_authoring.py",
+  "mcp/tests/test_curator_ingest_write_and_retention.py",
   "mcp/tests/test_clean_quality_executor.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
@@ -1280,6 +1281,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_candidate_workspace.py",
   "mcp/tests/test_curator_family_authoring.py",
+  "mcp/tests/test_curator_ingest_write_and_retention.py",
   "mcp/tests/test_knowledge_curator_ingest_list.py",
   "mcp/tests/test_knowledge_ingest_comparison_generation.py",
   "mcp/tests/test_knowledge_ingest_failure_windows.py",

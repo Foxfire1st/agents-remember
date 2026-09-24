@@ -39,23 +39,24 @@ corpus of onboarding is one of the sources available to it rather than a gate in
 
 **This procedure is the curator's work. Which session carries it is the product's decision, and the
 product decides by the task document.** A session is opened for a role, and the opener admits a role
-with **no** task document only for the taskless seats — `bootstrap` and `chat`, plus a plain
-`terminal` pane. Every other role, the curator's included, is refused until a task document is named:
+with **no** task document only for the taskless seats — `chat`, a plain `terminal` pane, `bootstrap`,
+and (since the developer's 2026-09-24 ruling) `curator`. Every other role is refused until a task
+document is named:
 
 ```text
 400  {"status": "task-binding-required", "detail": "named role scope is required"}
 ```
 
-There are therefore three real entries, and one thing that does not exist:
+There are therefore three real entries, and no longer a fourth that does not exist:
 
 - **A task exists** — open the curator on that task's document, through the ordinary launch route.
   That is the curator's own seat, and step 4's **leaf entry** is its writer: the foundation it builds
   is published onto the line that task's own readers resolve.
-- **No task exists, first hour** — the **bootstrap** seat carries this procedure. It is the one seat
-  the product admits without a task document *and* instructs about the repository's knowledge
-  foundation: it reads the state at the declared location and reports it (see the
-  `l-01-agent-lifecycles` bootstrap role and operation). It does **not** author the records — it
-  reaches the step and hands it to the curator.
+- **No task exists, first hour** — the **bootstrap** seat carries this procedure. It is the seat the
+  product admits without a task document *and* instructs about the repository's knowledge foundation:
+  it reads the state at the declared location and reports it (see the `l-01-agent-lifecycles`
+  bootstrap role and operation). It does **not** author the records — it reaches the step and hands
+  it to the curator.
 - **No task exists, the foundation is to be built now** — the taskless writer in step 4 is run by an
   instructed session that holds this procedure, from a workspace with **no enclosure in scope**: that
   writer refuses one (`enclosure_in_scope`) so a bootstrap can never publish onto a task's memory line.
@@ -64,11 +65,15 @@ There are therefore three real entries, and one thing that does not exist:
   That is exactly why the semantic ownership matters here — the reconciliation, the record actions, the
   family guarantees and the memberships are authored under the curator's rules, and a session that is
   not a curator seat follows them rather than inventing its own.
-- **A taskless *curator* seat does not exist.** A repository that must build its foundation before any
-  task exists is reached by the bootstrap seat plus this published procedure, not by a
-  curator-labelled session, and the run's retained record says which actor actually carried it.
-  Admitting the curator seat without a task document is a change to the seat policy, which this
-  procedure neither makes nor implies.
+- **A taskless *curator* seat exists, and this is the session that authors the foundation when no task
+  does.** The developer's **2026-09-24 ruling** admitted `curator` to the taskless seat roles, taken
+  when the missing route was put to them; before it, the only taskless carriers were the bootstrap seat
+  and this procedure held by an instructed session. So a repository that must build its foundation
+  before any task exists has two carriers: the bootstrap seat, which reads the state and hands the step
+  on, and a **curator-labelled session with no task document**, which holds the curator's own rules and
+  this procedure and can author. Which one actually carried a run is what the run's retained record
+  says — the ruling widened the seats that may open, and did not change what a run records about its
+  own actor.
 
 **Collection and search assistance may be delegated; the authored result may not.** A curator may
 spawn read-only sub-agents to read source at exact revisions, search providers, or summarize declared
@@ -284,8 +289,10 @@ never removed to tidy a run that has not published.
 ## Acceptance Criteria
 
 1. A new project reaches this procedure without any onboarding existing — through the taskless
-   bootstrap seat, whose own instructions name it, and through the shipped skill catalog, which any
-   instructed session reads — and a curator seat opened on a task document holds the same procedure.
+   bootstrap seat, whose own instructions name it, through a **taskless curator seat** (admitted by
+   the developer's 2026-09-24 ruling, and instructed by the same capsule route), and through the
+   shipped skill catalog, which any instructed session reads — and a curator seat opened on a task
+   document holds the same procedure.
 2. The state at the knowledge location is read before anything is authored, and `not-recorded`,
    `recorded` and `unusable` are reported as the three different facts they are — with a refused
    admission (`context-not-admitted`) reported as an admission failure rather than as any of the

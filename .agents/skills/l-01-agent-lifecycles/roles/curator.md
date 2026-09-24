@@ -43,12 +43,13 @@ leaf's delta — a new project entering ordinary setup, an existing project with
 knowledge database, or an explicitly requested bootstrap of an existing project — the inputs are the
 repository id the MCP authority settings declare, the resolved coordination context, the requested
 scope, the available sources and the current knowledge state. There is no brief, no change set and no
-enclosure contract to intake — and **this seat itself is opened on a task document**: a session opened
-for the curator with no task document is refused (`400 task-binding-required`, "named role scope is
-required"), which is why, on a repository with no task at all, the step is carried by the taskless
-bootstrap seat (it reads the state and hands it on) and by the taskless writer an instructed session
-holds. The procedure is the `c-14-knowledge-bootstrap` skill. Onboarding is optional input there and is
-never required to start.
+enclosure contract to intake. **This seat is admitted for it either way:** opened on a leaf's task
+document it takes the leaf pass, and opened with **no** task document it is the taskless carrier of
+this entry — `curator` joined the taskless seat roles by the developer's **2026-09-24 ruling**, taken
+when the missing route was put to them. On a repository with no task at all the step can also be
+carried by the taskless **bootstrap** seat (it reads the state and hands it on) and by the taskless
+writer an instructed session holds. The procedure is the `c-14-knowledge-bootstrap` skill. Onboarding
+is optional input there and is never required to start.
 
 **On the leaf pass**, every MCP call you make carries that contract path. Without it the tools resolve
 the *official* memory repo: your diagnostics would describe the wrong tree, and `route_index_refresh`
@@ -116,15 +117,16 @@ response — it must be this leaf's memory worktree — and preview any write wi
 `c-14-knowledge-bootstrap` skill, in its order: read the state at the declared knowledge location
 before authoring anything, inventory bounded sources for the requested scope, author through the
 curator's own writer in the shape `../templates/curator-handoff-list.md` owns, and read the result
-back. **Which writer depends on the scope this seat runs in**: on this leaf's task document — the only
-way this seat is opened — it is the leaf entry, `agents-remember knowledge-ingest --contract <this
-leaf's enclosure contract> … --publish --commit`, which publishes onto the line this task's own readers
-resolve; the taskless `agents-remember knowledge-bootstrap` entry belongs to a session with **no
-enclosure in scope**, and it refuses one (`enclosure_in_scope`) because a bootstrap must not publish
-onto a task's line. Neither route is fabricated: no leaf, worktree or enclosure is ever created to give
-either an argument list, and where the developer gives the commit word, planning remains the default
-until they do. A foundation run that examined only part of its scope is reported as partial, with the
-areas it did not reach named.
+back. **Which writer depends on the scope this seat runs in**: on a leaf's task document it is the leaf
+entry, `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> … --publish
+--commit`, which publishes onto the line this task's own readers resolve; with **no** task document —
+the taskless seat the developer's 2026-09-24 ruling admits — there is no enclosure to name, so it is
+the taskless `agents-remember knowledge-bootstrap` entry, which belongs to a session with **no
+enclosure in scope** and refuses one (`enclosure_in_scope`) because a bootstrap must not publish onto a
+task's line. Neither route is fabricated: no leaf, worktree or enclosure is ever created to give either
+an argument list, and where the developer gives the commit word, planning remains the default until
+they do. A foundation run that examined only part of its scope is reported as partial, with the areas
+it did not reach named.
 
 **Two judgments that are yours specifically.** Do not confuse **test-green with intent-green**: tests prove selected
 executable behaviour, never that ownership, non-goals, negative knowledge, or the separation between agent cognition

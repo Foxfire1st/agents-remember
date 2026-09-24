@@ -86,10 +86,12 @@ __all__ = [
 #
 # This mounted surface does NOT write. It is a read/render/projection surface: ``knowledge_read``,
 # ``knowledge_diff``, ``knowledge_integrity_check`` and ``knowledge_project`` all answer from a
-# dataset the caller names, and no handler here opens the write path. The knowledge write plane's
-# reachable production entry point is the ``agents-remember knowledge-ingest`` CLI subcommand,
-# which calls the admitted operation directly; a second write seam here would be the authority this
-# packet forbids the surface to add.
+# dataset the caller names, and no handler here opens the write path. The knowledge write plane has
+# ONE writer — the admitted batch operation ``knowledge_change``'s refusal names — and BOTH shipped
+# CLI entry points reach it: the ``agents-remember knowledge-ingest`` subcommand for a leaf
+# enclosure's ordinary route, and the ``agents-remember knowledge-bootstrap`` subcommand for a
+# repository with no enclosure in scope. A second write seam here would be the authority this packet
+# forbids the surface to add.
 #
 # The earlier spelling advertised two "admitted" kinds and then refused both anyway, which made the
 # tool's own description false and told the caller to supply an input its published signature cannot
@@ -104,9 +106,13 @@ DECLARED_CHANGE_KINDS: tuple[str, ...] = (
     "requirement_revision",
 )
 
-# The one file this surface can resolve a whole write from, named so a refusal is actionable rather
-# than a dead end. Kept as a constant because two detail strings and a test quote it.
+# The curator-list write plane's two shipped CLI entry points, named so a refusal is actionable
+# rather than a dead end. One writer sits behind both -- ``ingest_curator_list``, reached from
+# ``cli/knowledge_ingest.py`` and ``cli/knowledge_bootstrap.py`` -- so both are named wherever a
+# model is told where the write plane is reachable. Kept as constants because the refusal detail
+# and a test quote them.
 WRITE_ENTRY_POINT = "agents-remember knowledge-ingest"
+TASKLESS_WRITE_ENTRY_POINT = "agents-remember knowledge-bootstrap"
 
 # The two shapes a source-resolution half can take, and the bound on how long resolving one may
 # take: a Git call that hangs must not hold a mounted read open.
@@ -387,11 +393,13 @@ def knowledge_change_payload(request: ChangeToolRequest) -> dict[str, Any]:
     """Refuse one mount-side change request, through the response-model choke point.
 
     This surface records nothing. It has no admitted write operation for any kind, so every kind --
-    declared here or not -- is refused as ``registration_absent``, and the refusal names the
-    operation that owns the write: :func:`agents_remember.application.knowledge_curator_ingest.
-    ingest_curator_list`, reachable as the ``agents-remember knowledge-ingest`` subcommand, which
-    resolves a whole hand-off list against a leaf enclosure contract and commits it through the
-    admitted batch.
+    declared here or not -- is refused as ``registration_absent``, and the refusal names the writer
+    that can record: :func:`agents_remember.application.knowledge_curator_ingest.
+    ingest_curator_list`, the one batch operation that resolves a whole hand-off list and commits it
+    through the admitted batch. Two shipped CLI subcommands reach it -- ``agents-remember
+    knowledge-ingest`` for a leaf enclosure's ordinary route and ``agents-remember
+    knowledge-bootstrap`` for a repository with no enclosure in scope -- and both are named so a
+    caller is not pointed at half the route.
 
     The reason is deliberately the *same* for a declared kind and for one this surface has never
     heard of: the surface has nothing to add in either case, and two spellings of "this tool does
@@ -413,9 +421,10 @@ def _change_result(request: ChangeToolRequest) -> dict[str, Any]:
         "refusalCode": "registration_absent",
         "refusalDetail": (
             f"this mounted surface does not write, so no {recordKind!r} row was written and no "
-            "destination is missing: the knowledge write plane's reachable entry point is the "
-            f"{WRITE_ENTRY_POINT!r} subcommand, which commits a whole curator hand-off list "
-            "through the admitted batch. Call that, or read the result here with knowledge_read"
+            "destination is missing: the knowledge write plane has one writer, and both of its "
+            f"shipped CLI entry points reach it -- {WRITE_ENTRY_POINT!r} for a leaf enclosure's "
+            f"ordinary route and {TASKLESS_WRITE_ENTRY_POINT!r} for a repository with no enclosure "
+            "in scope. Call one of those, or read the result here with knowledge_read"
         ),
     }
 

@@ -1,7 +1,8 @@
-import { act, fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { dashboardStore } from "../../data/store";
+import { DocChangeSetBar } from "./changeSetBar";
 import { DetailPanel } from "./DetailPanel";
 import {
   enclosure,
@@ -499,5 +500,166 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
     seedTaskDocuments([doc]);
     const { queryAllByTestId } = render(<DetailPanel selectedId={`taskdoc:${leafPath}`} />);
     expect(queryAllByTestId("open-changeset")).toHaveLength(0);
+  });
+});
+
+// ── L32/D01: the counter read's refusal is carried, not swallowed ────────────────────────────────
+//
+// THE DEFECT. `ChangeSetButton` read its counters through `leafChangeset`/`masterChangeset`/
+// `taskChangeset` and its rejection handler took NO error parameter: it set the counters to null and
+// dropped the cause. A REFUSED read therefore rendered byte-identically to a read that had NOT
+// ANSWERED -- `⇄ committed` either way, naming neither the refusal's code nor its reason -- while
+// three lines below it in the same file the catalogue read carried "the reason, in the owner's own
+// words" and rendered it.
+//
+// WHAT THESE CASES DRIVE. The real `DocChangeSetBar` over the real change-set client
+// (`data/changeset.ts`); only the ROUTE is stubbed, so every answer below travels the production
+// decode and the production control. A MASTER bar is used because it is exactly one control over
+// exactly one read: pending, refused and answered are then three answers of the SAME question, and
+// nothing else on screen can answer for them.
+//
+// THE REFUSAL IS THE ROUTE'S OWN. The change-set family publishes a refusal's code and its reason in
+// the body of the non-2xx response, as `{status, detail}` -- and as `{status, path}` where the 404's
+// path message IS the reason (`serving/changeset.py::_master_json`). The sentence below is verbatim
+// from the refusal `serving/master_net_generation.py` raises when the net's declared base is not
+// recorded yet, so the case asserts the owner's own words rather than a string this test invented.
+const MASTER_NET = "260921_complete-code-and-intent-review";
+const MASTER_NET_REASON =
+  "master '260921_complete-code-and-intent-review' records no code base commit, so its net code " +
+  "range does not exist yet: the net comparison reads the declared base and selected result and " +
+  "substitutes no branch tip for either";
+const OTHER_MASTER = "260921_other-master";
+const MEASURED_COUNTERS = {
+  counters: {
+    code: { files: 3, insertions: 7, deletions: 2 },
+    memory: { files: 1, insertions: 0, deletions: 0 },
+  },
+};
+
+// One stubbed response in the shape the route answers with.
+const routeAnswer = (ok: boolean, status: number, statusText: string, body: unknown) =>
+  ({ ok, status, statusText, json: async () => body }) as unknown as Response;
+
+const masterBar = (master: string) => {
+  const onOpen = vi.fn();
+  const view = render(
+    <DocChangeSetBar kind="master" repo="agents-remember" master={master} onOpen={onOpen} />,
+  );
+  return { view, onOpen };
+};
+
+describe("the counter read's refusal (L32/D01)", () => {
+  it("renders a refused counter read's own code and reason, never as a read that has not answered", async () => {
+    seedProjection({});
+
+    // PENDING: the route does not answer.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+    const pending = masterBar(MASTER_NET);
+    const pendingText = (await pending.view.findByTestId("open-changeset")).textContent ?? "";
+    pending.view.unmount();
+
+    // REFUSED: the route's own 404 idiom, with the reason in the body of the response.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        routeAnswer(false, 404, "Not Found", { status: "not-found", path: MASTER_NET_REASON }),
+      ),
+    );
+    const refused = masterBar(MASTER_NET);
+    const refusedButton = await refused.view.findByTestId("open-changeset");
+    await act(async () => {});
+    const refusedText = refusedButton.textContent ?? "";
+
+    // THE DEFECT, FIRST: a refusal is not the absence of an answer. Before this case existed these
+    // two renderings were the same string -- `⇄ series`, with no code and no reason anywhere on
+    // screen -- so the reader could not tell a refused delta from one that had not loaded.
+    expect(refusedText).not.toBe(pendingText);
+
+    // The refusal's OWN code, and its reason in the owner's own words.
+    const state = refused.view.getByTestId("changeset-state");
+    expect(state.dataset.reviewState).toBe("not-found");
+    expect(state.dataset.reviewCode).toBe("not-found");
+    expect(state.textContent).toContain(MASTER_NET_REASON);
+
+    // The refusal is a reason and never a gate: the control still opens the change-set it names.
+    fireEvent.click(refusedButton);
+    expect(refused.onOpen).toHaveBeenCalledWith({ repo: "agents-remember", master: MASTER_NET });
+    refused.view.unmount();
+
+    // ANSWERED: the counters ARE the answer, so no state is printed at all -- and the refusal the
+    // previous read earned is gone rather than left standing over a delta that was measured.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => routeAnswer(true, 200, "OK", MEASURED_COUNTERS)),
+    );
+    const answered = masterBar(MASTER_NET);
+    const answeredButton = await answered.view.findByTestId("open-changeset");
+    await waitFor(() => expect(answeredButton.textContent).toContain("+7 −2"));
+    expect(answered.view.queryByTestId("changeset-state")).toBeNull();
+    expect(answeredButton.textContent).not.toContain(MASTER_NET_REASON);
+  });
+
+  it("keeps a measured empty answer apart from a refusal and from a read that has not answered", async () => {
+    seedProjection({});
+    // The answer the shared helper serves (and every other case in this file already drives): a
+    // measured delta with no changed file in either half. A measured zero is a MEASUREMENT.
+    stubCounters();
+    const { view } = masterBar(MASTER_NET);
+
+    const button = await view.findByTestId("open-changeset");
+    const state = await waitFor(() => {
+      const found = view.getByTestId("changeset-state");
+      expect(found.dataset.reviewState).toBe("known-empty");
+      return found;
+    });
+    expect(button.textContent).toContain("+0 −0");
+    expect(state.textContent).toContain("no changed file in either half");
+    // It names no refusal code: an empty delta is not a failure, and it is not a pending read.
+    expect(state.dataset.reviewCode).toBeUndefined();
+    expect(state.dataset.reviewState).not.toBe("loading");
+  });
+
+  it("does not let a superseded read's refusal land on the control that replaced it", async () => {
+    // The `live` guard is kept and is load-bearing: the first master's read is held open until AFTER
+    // the bar has moved to a second master and that master's answer has rendered. Removing
+    // `if (!live) return;` from the rejection handler makes the late refusal land on the control for
+    // the OTHER master, and this case then finds a refusal rendered over a measured delta.
+    seedProjection({});
+    let releaseFirst: (() => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const asked = new URLSearchParams(url.split("?", 2)[1] ?? "").get("master") ?? "";
+        if (asked === MASTER_NET) {
+          return await new Promise<Response>((resolve) => {
+            releaseFirst = () =>
+              resolve(
+                routeAnswer(false, 404, "Not Found", {
+                  status: "not-found",
+                  path: MASTER_NET_REASON,
+                }),
+              );
+          });
+        }
+        return routeAnswer(true, 200, "OK", MEASURED_COUNTERS);
+      }),
+    );
+
+    const { view, onOpen } = masterBar(MASTER_NET);
+    view.rerender(
+      <DocChangeSetBar kind="master" repo="agents-remember" master={OTHER_MASTER} onOpen={onOpen} />,
+    );
+    await waitFor(() => expect(view.getByTestId("open-changeset").textContent).toContain("+7 −2"));
+
+    // The superseded read's refusal arrives last. It must not win.
+    await act(async () => {
+      releaseFirst?.();
+      await Promise.resolve();
+    });
+    expect(view.queryByTestId("changeset-state")).toBeNull();
+    expect(view.getByTestId("open-changeset").textContent).not.toContain(MASTER_NET_REASON);
   });
 });

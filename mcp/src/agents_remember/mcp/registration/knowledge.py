@@ -108,7 +108,7 @@ def _register_knowledge_change(server: FastMCP) -> None:
 
     The tool is still mounted because its *name* is part of the published family -- a caller asking
     for it must get a typed refusal rather than "no such tool" -- but the handler now says exactly
-    what it does, which is refuse and point at the entry point that can write.
+    what it does, which is refuse and point at the writer that can record.
     """
 
     @server.tool()
@@ -118,13 +118,15 @@ def _register_knowledge_change(server: FastMCP) -> None:
         recordKind: str,
         request: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Refuse a mount-side change request and name the entry point that can write it. Do not use
-        this tool to record: it has no admitted write operation for any kind, so every kind is
-        refused with `registration_absent` and nothing is written. The knowledge write plane's
-        reachable entry point is the `agents-remember knowledge-ingest` subcommand, which commits a
-        whole curator hand-off list through the admitted batch and, on the curator's ordinary route,
-        publishes that candidate to the repository's one declared published dataset location and
-        reads the published identity back; read the committed result back with `knowledge_read`."""
+        """Refuse a mount-side change request and name the writer that can record. Do not use this
+        tool to record: it has no admitted write operation for any kind, so every kind is refused
+        with `registration_absent` and nothing is written. The knowledge write plane has one writer
+        -- the batch operation that commits a whole curator hand-off list -- and both shipped CLI
+        subcommands reach it: `agents-remember knowledge-ingest` for a leaf enclosure's ordinary
+        route, and `agents-remember knowledge-bootstrap` for a repository with no enclosure in
+        scope. `knowledge-ingest` additionally publishes that candidate to the repository's one
+        declared published dataset location and reads the published identity back; read the
+        committed result back with `knowledge_read`."""
         return knowledge_change_payload(
             ChangeToolRequest(
                 database_path=databasePath,

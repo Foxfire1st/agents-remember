@@ -367,9 +367,10 @@ def test_without_a_task_document_only_the_taskless_seat_roles_are_admitted() -> 
     """The gate, named by its refusal: taskless roles open, every other role refuses.
 
     Developer ruling 2026-09-16 admits ``bootstrap`` here: *"It is not a task related agent.
-    Can't be. It needs to be free agent. All what it needs is that can 'call'."* The
-    assertions name the observed outcome of both halves, so a later change either way fails
-    with the role it changed rather than with a count.
+    Can't be. It needs to be free agent. All what it needs is that can 'call'."* Developer ruling
+    2026-09-24 adds ``curator``: *"add `curator` to the taskless seat roles."* The assertions name
+    the observed outcome of both halves, so a later change either way fails with the role it changed
+    rather than with a count.
     """
 
     def refusal_for(seat_role: str):
@@ -382,12 +383,12 @@ def test_without_a_task_document_only_the_taskless_seat_roles_are_admitted() -> 
             ),
         ).refusal
 
-    # The free agent and the two pre-existing taskless roles are admitted.
-    for taskless in ("bootstrap", "chat", "terminal"):
+    # The two developer-ruled free agents and the two pre-existing taskless roles are admitted.
+    for taskless in ("bootstrap", "chat", "terminal", "curator"):
         assert refusal_for(taskless) is None, f"{taskless} must open without a task document"
 
     # Every task-bound role still refuses, with the same status as before this change.
-    for bound in ("worker", "architect", "agent", "manager", "curator", "reviewer"):
+    for bound in ("worker", "architect", "agent", "manager", "reviewer"):
         refusal = refusal_for(bound)
         assert refusal is not None, f"{bound} must still need a task document"
         assert refusal.status == "task-binding-required", f"{bound}: {refusal.status}"
@@ -401,10 +402,14 @@ def test_the_free_agent_set_is_named_and_readable_not_a_bare_literal() -> None:
     named set, not a literal that could drift away from it.
     """
 
-    assert frozenset({"chat", "terminal", "bootstrap"}) == TASKLESS_SEAT_ROLES, (
+    assert frozenset({"chat", "terminal", "bootstrap", "curator"}) == TASKLESS_SEAT_ROLES, (
         "the taskless set changed; if that is intended, change this case deliberately"
     )
     assert "bootstrap" in TASKLESS_SEAT_ROLES, "bootstrap is a free agent by developer ruling"
+    assert "curator" in TASKLESS_SEAT_ROLES, (
+        "curator is taskless by the developer's 2026-09-24 ruling, which is what makes the "
+        "knowledge-foundation procedure reachable on a repository with no task document"
+    )
     source = Path(task_binding_module_path()).read_text(encoding="utf-8")
     assert "not in TASKLESS_SEAT_ROLES" in source, (
         "the refusal must consult the named set, not a second literal"
@@ -557,17 +562,17 @@ def test_a_document_supplied_to_a_taskless_role_still_resolves_but_skips_the_alt
             ),
         ).refusal
 
-    # The three roles are spelled here rather than iterated from the set under test: a loop over
+    # The four roles are spelled here rather than iterated from the set under test: a loop over
     # TASKLESS_SEAT_ROLES can only show that the set's members behave alike, so it cannot see a
     # membership change. Membership is caught by the two cases above (`…only_the_taskless_seat_roles…`
     # and `…named_and_readable_not_a_bare_literal`); this line makes the loop's own expectation
     # independent of the constant it tests, so the two failure modes are separately attributable.
-    assert sorted(TASKLESS_SEAT_ROLES) == ["bootstrap", "chat", "terminal"], (
+    assert sorted(TASKLESS_SEAT_ROLES) == ["bootstrap", "chat", "curator", "terminal"], (
         "the taskless set changed; that is a policy change, and the two membership cases must be "
         "updated deliberately if it is intended"
     )
     # Taskless roles: the document resolves and admission is accepted, altitude check skipped.
-    for taskless in ("bootstrap", "chat", "terminal"):
+    for taskless in ("bootstrap", "chat", "curator", "terminal"):
         assert refusal_for(taskless) is None, f"{taskless} with a document must be admitted"
 
     # A role outside the set still takes the structural path and is refused on its altitude.

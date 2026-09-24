@@ -16,9 +16,11 @@ separately failable readings, and they are deliberately kept apart:
   the failure the requirement names, and it is mechanical to catch;
 * the **seats** the procedure names are admitted by the shipped opener — measured at the route, because
   the launch *compiler* accepts any declared role while the *opener* admits a session with no task
-  document only for the taskless seat roles. The procedure's own text states the gate, and this module
-  pins it by observation rather than by reading the policy constant;
-* the instructions that **are** delivered name the procedure: to the seat the opener admits taskless,
+  document only for the taskless seat roles. Those are ``chat``, ``terminal`` and ``bootstrap``, and —
+  by the developer's 2026-09-24 ruling, taken when the missing route was put to them — ``curator``.
+  The procedure's own text states the gate, and this module pins it by observation rather than by
+  reading the policy constant;
+* the instructions that **are** delivered name the procedure: to the seats the opener admits taskless,
   to the curator shape the compiler produces, and through the two served skills an ordinary setup
   follows.
 
@@ -34,15 +36,16 @@ WHAT DEFENDS WHAT
       through the shipped command line                     which fills each printed placeholder and
                                                            runs the real parser over the exact
                                                            subcommand and options
-    a seat-less session is admitted for the taskless      ``test_a_session_with_no_task_document...``,
-      roles and refused for the rest, by status            which drives the dashboard's own open route
-                                                           over the shipped real coordination world
-    the seat the opener admits taskless receives the      ``test_the_admitted_taskless_seat...``,
+    a seat-less session is admitted for the four          ``test_the_opener_admits_exactly...``,
+      taskless roles and refused for the rest, by          which drives the dashboard's own open route
+      status, and a taskless curator is INSTRUCTED         over the shipped real coordination world and
+                                                           reads each arm's delivery mode
+    the bootstrap seat's own instructions reach the       ``test_the_admitted_taskless_seat...``,
       procedure and the state vocabulary                   which opens that seat and reads its
                                                            compiled instructions
-    the curator SEAT is the one opened on a task          ``test_the_curator_seat_is_admitted...``,
-      document                                             which opens ``role=curator`` with the leaf
-                                                           document and reads the delivered mode
+    the curator SEAT opens on a task document AND         ``test_the_curator_seat_opens...``,
+      opens taskless with the free-agent reference         which opens ``role=curator`` both ways and
+                                                           reads the delivered mode
     the curator SHAPE's compiled instructions name it     ``test_the_compiled_curator_shape...``,
                                                            which compiles that shape through the launch
                                                            compiler and names only what it measured
@@ -59,8 +62,11 @@ WHAT THIS DOES NOT COVER (stated, not implied)
   host, not a property of this checkout: ``scripts/sync-skills.py --check`` owns the nine packaged
   copies (byte for byte, in ``mcp/tests/test_sync_scripts.py``), and an installed harness root is owned
   by whoever runs the install.
-- **Whether a taskless CURATOR seat may be opened.** It may not, and the seat case asserts the refusal
-  as the shipped product returns it; admitting that seat is a policy change this leaf does not make.
+- **Whether the seat policy itself is right.** A taskless CURATOR seat **is** admitted — ``curator``
+  joined the taskless seat roles by the developer's **2026-09-24 ruling**, recorded in
+  ``serving/task_binding.py``'s ``TASKLESS_SEAT_ROLES`` — and the seat case above asserts that
+  admission and the ``free-agent:curator`` capsule it receives, not a refusal. This module measures the
+  shipped opener; it does not decide that policy.
 - **The wording of the procedure.** These cases assert that the named surfaces are published, reached,
   admitted and parseable. They do not read the prose for meaning, and a wrong sentence in a live
   document is the curator's and the verifier's subject rather than this module's.
@@ -195,9 +201,9 @@ def free_agent_instructions(role: str) -> tuple[str, str]:
     """The instructions the launch COMPILER produces for a seat shape, and its own summary.
 
     This is the compiler's answer, not an admission. Whether a session of that shape may be opened at
-    all is the opener's decision, and `test_a_session_with_no_task_document_is_admitted_only_for_the_
-    taskless_seat_roles` measures that separately — the two are different surfaces and this module keeps
-    them apart on purpose.
+    all is the opener's decision, and
+    `test_the_opener_admits_exactly_the_taskless_seat_roles_and_instructs_each` measures that
+    separately — the two are different surfaces and this module keeps them apart on purpose.
 
     The world holds no task artifact of any kind: no settings beyond the two roots, no task document,
     no enclosure, no worktree, no memory repository. That absence is the point — the compiler's
@@ -260,47 +266,100 @@ def open_seat(
     return response.status_code, response.json()
 
 
-def test_a_session_with_no_task_document_is_admitted_only_for_the_taskless_seat_roles() -> None:
-    """The seat gate, by its observed status: the product decides which roles open without a document.
+def test_the_opener_admits_exactly_the_taskless_seat_roles_and_instructs_each() -> None:
+    """The seat gate by its observed status over the five arms the policy decides, plus the boundary.
 
     The requirement's whole new-project entry depends on which seat may be opened before a task
     exists, so this is measured at the real opener rather than inferred from what the launch compiler
     accepts — the compiler takes any declared role, and the opener is the surface that admits a
-    session. The admitted arms are the control: without them, a refusal here would prove nothing.
+    session. **The arms ARE the status table**: a policy change the constant's own pin cannot see (an
+    admission that opens the wrong seat, or opens one that is never instructed) fails here by name.
+    ``curator`` is taskless by the developer's 2026-09-24 ruling, taken when the missing route was put
+    to them; the fourth arm asserts the *delivery*, because a 200 without a capsule would satisfy the
+    constant and still leave a fresh curator with nothing to follow. The last arm is the boundary the
+    gate does not cover: a terminal-kind open is a plain pane whatever role it was asked for.
     """
 
+    arms: tuple[tuple[str, dict[str, object]], ...] = (
+        (
+            "bootstrap-no-document",
+            {"kind": "harness", "harness": "codex", "role": "bootstrap"},
+        ),
+        ("chat-no-document", {"kind": "harness", "harness": "codex", "role": "chat"}),
+        ("worker-no-document", {"kind": "harness", "harness": "codex", "role": "worker"}),
+        ("curator-no-document", {"kind": "harness", "harness": "codex", "role": "curator"}),
+        (
+            "curator-on-a-task-document",
+            {
+                "kind": "harness",
+                "harness": "codex",
+                "role": "curator",
+                "taskDocumentRef": LEAF_REF.model_dump(),
+            },
+        ),
+        ("curator-as-a-terminal", {"kind": "terminal", "role": "curator"}),
+    )
     with launch_world() as (root, config, host):
-        observed = {
-            role: open_seat(
-                root,
-                config,
-                host,
-                f"l27-{role}",
-                {"kind": "harness", "harness": "codex", "role": role},
-            )
-            for role in ("bootstrap", "chat", "worker", "curator")
-        }
+        observed = {arm: open_seat(root, config, host, f"l32-{arm}", body) for arm, body in arms}
 
-    for role in ("bootstrap", "chat"):
-        status, body = observed[role]
-        assert status == 200, (role, body)
+    def mode(arm: str) -> dict[str, object]:
+        return cast("dict[str, object]", observed[arm][1]["instructionMode"])
 
-    bootstrap_mode = cast("dict[str, object]", observed["bootstrap"][1]["instructionMode"])
-    assert bootstrap_mode["mode"] == "capsule", bootstrap_mode
-    assert bootstrap_mode["taskReference"] == "free-agent:bootstrap", bootstrap_mode
+    # Arm 1 — the first-hour free agent: admitted taskless, instructed by its own capsule.
+    status, body = observed["bootstrap-no-document"]
+    assert status == 200, (status, body)
+    assert mode("bootstrap-no-document")["mode"] == "capsule", mode("bootstrap-no-document")
+    assert mode("bootstrap-no-document")["taskReference"] == "free-agent:bootstrap", mode(
+        "bootstrap-no-document"
+    )
 
-    for role in ("worker", "curator"):
-        status, body = observed[role]
-        assert status == 400, (role, body)
-        assert body["status"] == "task-binding-required", (role, body)
+    # Arm 2 — a session that declared no role: admitted, and with no instructions to receive.
+    status, body = observed["chat-no-document"]
+    assert status == 200, (status, body)
+    assert mode("chat-no-document")["mode"] == "legacy", mode("chat-no-document")
+
+    # Arm 3 — a task-bound role with no document is still refused, by name.
+    status, body = observed["worker-no-document"]
+    assert status == 400, (status, body)
+    assert body["status"] == "task-binding-required", body
+
+    # Arm 4 — THE ADMISSION THE RULING MADE: taskless AND instructed.
+    status, body = observed["curator-no-document"]
+    assert status == 200, (status, body)
+    assert mode("curator-no-document")["mode"] == "capsule", mode("curator-no-document")
+    assert mode("curator-no-document")["role"] == "curator", mode("curator-no-document")
+    assert mode("curator-no-document")["taskReference"] == "free-agent:curator", mode(
+        "curator-no-document"
+    )
+
+    # Arm 5 — the same role ON a document still takes the dispatched route, so the ruling widened
+    # the seat rather than replacing it.
+    status, body = observed["curator-on-a-task-document"]
+    assert status == 200, (status, body)
+    assert mode("curator-on-a-task-document")["role"] == "curator", mode(
+        "curator-on-a-task-document"
+    )
+    assert (
+        mode("curator-on-a-task-document")["taskReference"]
+        != mode("curator-no-document")["taskReference"]
+    ), "a document-bound curator and a taskless one must not report the same task reference"
+
+    # Arm 6, the boundary: a terminal-kind open is a plain pane for every role, so the taskless
+    # curator seat is a HARNESS seat and this arm is not a second route to its instructions.
+    status, body = observed["curator-as-a-terminal"]
+    assert status == 200, (status, body)
+    assert mode("curator-as-a-terminal")["mode"] == "legacy", mode("curator-as-a-terminal")
 
 
 def test_the_admitted_taskless_seat_receives_the_foundation_step() -> None:
     """The bootstrap seat opens with no document, and its own instructions reach the foundation.
 
-    This is the one seat the product admits without a task document *and* instructs about the
-    repository's knowledge foundation, so it is the carrier that makes a greenfield repository reach
-    the step at all. The instructions below are the admitted session's own compiled capsule.
+    The bootstrap seat is the read-and-report carrier for a repository whose foundation is absent: it
+    is admitted with no task document, and its own compiled instructions name the procedure and the
+    knowledge states, so a greenfield repository reaches the step at all. It is not the only seat the
+    opener admits taskless and instructs — a **taskless curator** seat is admitted by the developer's
+    2026-09-24 ruling and receives the curator's capsule — which is why the six-arm case above, not
+    this one, owns the seat table. The instructions below are this seat's own compiled capsule.
     """
 
     instructions, summary = free_agent_instructions("bootstrap")
@@ -326,12 +385,16 @@ def test_the_admitted_taskless_seat_receives_the_foundation_step() -> None:
     assert mode["taskReference"] == "free-agent:bootstrap", mode
 
 
-def test_the_curator_seat_is_admitted_on_a_task_document() -> None:
-    """The curator's own seat is opened WITH a named role scope, and it receives the procedure.
+def test_the_curator_seat_opens_on_a_task_document_and_taskless() -> None:
+    """The curator's own seat opens WITH a named role scope, and it also opens with no document.
 
-    A session for the curator without a document is refused (`task-binding-required`); with the task
-    document it is admitted, which is the route the procedure's leaf entry states. Both arms are
-    asserted against the same opener so the difference is the document, not the world.
+    With the task document it is admitted on the dispatched-brief route the procedure's leaf entry
+    states. Without one it is admitted too — **the developer's 2026-09-24 ruling**, which is the arm
+    this case exists to keep honest: before it, this docstring read "a session for the curator without
+    a document is refused (``task-binding-required``)", which was true then and is false now. The five
+    arms and their delivery modes are asserted together in
+    ``test_the_opener_admits_exactly_the_taskless_seat_roles_and_instructs_each``; what this case adds
+    is the document-bound arm at its own surface, so the two routes are separately attributable.
     """
 
     with launch_world() as (root, config, host):
@@ -410,10 +473,11 @@ def test_the_compiled_curator_shape_names_the_procedure_it_would_receive() -> No
     """The curator SHAPE's compiled instructions name the procedure — the compiler, not an admission.
 
     This case is deliberately named for the compiler, because that is all it measures: the launch
-    compiler builds a free-agent capsule for any declared role, including a role the opener will not
-    admit without a task document. Whether a session of this shape may be opened is
-    ``test_a_session_with_no_task_document_is_admitted_only_for_the_taskless_seat_roles``'s subject,
-    and the procedure's own text states the same limit.
+    compiler builds a free-agent capsule for any declared role, whether or not the opener admits that
+    role without a task document. Which roles the opener *does* admit is
+    ``test_the_opener_admits_exactly_the_taskless_seat_roles_and_instructs_each``'s subject, and since
+    the developer's 2026-09-24 ruling ``curator`` is one of them — so this shape's instructions are
+    delivered to a taskless session as well as to a curator opened on a task document.
     """
 
     instructions, summary = free_agent_instructions("curator")

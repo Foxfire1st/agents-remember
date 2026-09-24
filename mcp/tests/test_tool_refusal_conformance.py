@@ -48,6 +48,7 @@ from typing import Any
 
 import anyio
 import pytest
+from agents_remember.mcp.tools.knowledge import TASKLESS_WRITE_ENTRY_POINT, WRITE_ENTRY_POINT
 from agents_remember.models.tools.public_roster import PUBLIC_TOOLS
 from agents_remember.models.tools.tool_registry import TOOL_RESPONSE_MODELS
 from pydantic import ValidationError
@@ -95,6 +96,13 @@ STATEFUL_REFUSALS: frozenset[str] = frozenset(
 # The state value the shape is spelled with. Named rather than inlined so the two readers of the
 # shape -- the partition below and the axis case -- cannot disagree about what they are reading.
 STATEFUL_REFUSAL_STATE = "refused"
+
+# The one stateful refusal whose own detail names WHERE the knowledge write plane is reachable.
+# Both shipped CLI entry points are required by name, because one writer sits behind both: a
+# caller told about only `knowledge-ingest` cannot reach the route that exists for a repository
+# with no enclosure in scope, and a sentence naming one of two is the incomplete-about-the-store
+# class rather than a stylistic slip (`D55`).
+WRITE_ROUTE_NAMING_SURFACES: frozenset[str] = frozenset({"knowledge_change"})
 
 
 def is_stateful_refusal(payload: dict[str, Any]) -> bool:
@@ -402,6 +410,31 @@ class FailurePathCensusTests:
         assert failures == [], "stateful refusals that do not name themselves:\n" + "\n".join(
             failures
         )
+
+    def test_the_write_plane_is_named_by_both_its_shipped_entry_points(self) -> None:
+        """One writer, two shipped CLI routes, and both named where a caller reads them.
+
+        Two surfaces are checked, because both are read at the moment of decision: the refusal
+        detail the call returns, and the tool *description* the model reads before it calls
+        anything. A description that names one route leaves the other undiscoverable, so the
+        check is by name on both, and it fails on either alone.
+        """
+
+        for tool in sorted(WRITE_ROUTE_NAMING_SURFACES):
+            detail = str(self.census[tool]["payload"].get("refusalDetail", ""))
+            for entry_point in (WRITE_ENTRY_POINT, TASKLESS_WRITE_ENTRY_POINT):
+                assert entry_point in detail, (
+                    f"{tool} does not name {entry_point!r} in its refusal detail, so a caller is "
+                    f"pointed at part of the write plane's route only: {detail}"
+                )
+        advertised = {tool.name: tool for tool in anyio.run(self.world.server.list_tools)}
+        for tool in sorted(WRITE_ROUTE_NAMING_SURFACES):
+            description = advertised[tool].description or ""
+            for entry_point in (WRITE_ENTRY_POINT, TASKLESS_WRITE_ENTRY_POINT):
+                assert entry_point in description, (
+                    f"the advertised description of {tool} does not name {entry_point!r}, so a "
+                    f"model reaching for the write plane cannot find that route: {description}"
+                )
 
     def test_the_t34_family_is_no_longer_a_bare_raiser(self) -> None:
         """The repair this leaf landed, asserted where it is observable: at the entry point.
