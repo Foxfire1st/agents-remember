@@ -31,7 +31,6 @@ import type {
   ReviewApplicabilitySummary,
   ReviewAssessmentDisplay,
   ReviewAuthoredEffect,
-  ReviewChangedFile,
   ReviewCollectionPage,
   ReviewContextRecord,
   ReviewDisplayedApplicability,
@@ -42,12 +41,10 @@ import type {
   ReviewPayload,
   ReviewSelectorKind,
   ReviewSignal,
-  ReviewSourceInventory,
   ReviewUnresolvedReference,
-  ReviewUnrepresentablePath,
 } from "../../data/review";
 import {
-  REVIEW_PAGED_COLLECTIONS,
+  REVIEW_WALKABLE_COLLECTIONS,
   carriedPage,
   continuationOf,
   intentOnlyRefusal,
@@ -57,8 +54,8 @@ import type { ReviewRefusal } from "../../data/review";
 import { KnowledgeStatements } from "./KnowledgeStatements";
 import { type ReviewPageRequest, targetKeyOf, useReviewReadCycle } from "./ReviewReadCycle";
 import { ReviewRefresh, generationOf } from "./ReviewRefresh";
-import { SourceContent } from "./SourceContent";
 import { type ReviewRead, ReviewOutcomeRegion, problemOf, shownPayload } from "./ReviewOutcome";
+import { ReviewWorkspace, useWorkspaceState } from "./ReviewWorkspace";
 
 export interface ReviewTarget {
   repo: string;
@@ -302,157 +299,21 @@ function KnowledgePane({ payload }: { payload: ReviewPayload }) {
   );
 }
 
-// One inventory entry. The path is printed exactly as the server published it -- a tab or a newline
-// inside a name is part of the address -- and the status and renderability are printed beside it,
-// because a path whose content cannot be rendered is still a change that must be listed.
-//
-// The entry is also the way into its own content (ICR-R03): opening it reads the file at the two
-// code trees the inventory published, and the generation ids travel with the request, so a row
-// opened after the branch moved still shows the generation the reader was looking at.
-function inventoryEntry(
-  entry: ReviewChangedFile,
-  repo: string,
-  master: string,
-  leaf: string,
-  generation: { before?: string; after?: string },
-  open: string | null,
-  onOpen: (path: string | null) => void,
-) {
-  const notes = [
-    entry.mode_change ? "mode changed" : null,
-    entry.content === "unknown" ? null : `content: ${entry.content}`,
-    entry.detail ?? null,
-  ].filter((note): note is string => note !== null);
-  const expandable = generation.before !== undefined && generation.after !== undefined;
-  const isOpen = open === entry.path;
-  return (
-    <li key={entry.path} data-testid="review-inventory-entry" data-status={entry.status}>
-      {expandable ? (
-        <button
-          type="button"
-          data-testid="review-inventory-open"
-          data-path={entry.path}
-          aria-expanded={isOpen}
-          onClick={() => onOpen(isOpen ? null : entry.path)}
-        >
-          {isOpen ? "▾ " : "▸ "}
-          {entry.path}
-        </button>
-      ) : (
-        <code>{entry.path}</code>
-      )}{" "}
-      · {entry.status}
-      {notes.length ? <span style={{ color: "muted" }}> · {notes.join(" · ")}</span> : null}
-      {isOpen && expandable ? (
-        <SourceContent
-          repo={repo}
-          master={master}
-          leaf={leaf}
-          entry={entry}
-          beforeCodeTreeId={generation.before as string}
-          afterCodeTreeId={generation.after as string}
-        />
-      ) : null}
-    </li>
-  );
-}
-
-// One changed path this surface cannot name as text, printed by its exact byte form. It is a change
-// like any other: it is listed, its status is shown, and the reason it has no name is stated rather
-// than left as a gap in a list that would otherwise look complete.
-//
-// It carries no expansion control, and says so: this vocabulary carries text, so the only spelling
-// that could address the row's content cannot be expressed in a request (ICR-R03's boundary). The row
-// is for identification -- a reader can act on the bytes beside it with Git directly -- and the pane
-// must not imply that clicking it would open anything.
-function byteNamedEntry(entry: ReviewUnrepresentablePath) {
-  return (
-    <li key={entry.path_bytes} data-testid="review-inventory-byte-path" data-status={entry.status}>
-      <code>{entry.path_bytes}</code> · {entry.status}
-      {entry.mode_change ? " · mode changed" : ""}
-      <div style={{ color: "muted" }}>{entry.detail}</div>
-      <div style={{ color: "muted" }} data-testid="review-byte-path-not-addressable">
-        this row's content is not openable through this surface: its name is carried as bytes for
-        identification, and no expansion request can name it.
-      </div>
-    </li>
-  );
-}
-
-// The complete source change inventory of the comparison's bound pair. It is rendered in all three
-// of its states and never as an empty list: a measured empty set says the two trees agree, an
-// unavailable measurement says nothing was observed and why, and a partial one says which entries
-// could not be classified or carried as names.
-//
-// Every entry is openable while the inventory named both of its code trees: those two ids are the
-// generation the content is read at, and an inventory that named no pair has nothing to open.
-function Inventory({
-  inventory,
-  repo,
-  master,
-  leaf,
-}: {
-  inventory: ReviewSourceInventory;
-  repo: string;
-  master: string;
-  leaf: string;
-}) {
-  const byByteForm = inventory.unrepresentable_paths ?? [];
-  const [open, setOpen] = useState<string | null>(null);
-  const generation = {
-    before: inventory.before_code_tree_id,
-    after: inventory.after_code_tree_id,
-  };
-  return (
-    <div data-testid="review-inventory" data-inventory-state={inventory.state}>
-      <p style={{ margin: "0.4rem 0" }}>
-        source change inventory ({inventory.state}
-        {inventory.partial ? ", partial" : ""}): {inventory.listed_total} listed path(s)
-        {byByteForm.length ? ` + ${byByteForm.length} by byte form` : ""} — {inventory.detail}
-      </p>
-      {inventory.entries.length ? (
-        <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }}>
-          {inventory.entries.map((entry) =>
-            inventoryEntry(entry, repo, master, leaf, generation, open, setOpen),
-          )}
-        </ul>
-      ) : null}
-      {byByteForm.length ? (
-        <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }}>
-          {byByteForm.map(byteNamedEntry)}
-        </ul>
-      ) : null}
-      <p style={{ color: "muted", margin: "0.2rem 0", fontSize: "0.8rem" }}>
-        reproduce: {inventory.command}
-        {inventory.before_code_tree_id && inventory.after_code_tree_id
-          ? ` · ${inventory.before_code_tree_id} → ${inventory.after_code_tree_id}`
-          : ""}
-      </p>
-    </div>
-  );
-}
-
-function SourcePane({
-  payload,
-  repo,
-  master,
-  leaf,
-}: {
-  payload: ReviewPayload;
-  repo: string;
-  master: string;
-  leaf: string;
-}) {
+function SourcePane({ payload }: { payload: ReviewPayload }) {
   const { source } = payload;
   return pane(
     "Source",
     <>
-      <Inventory
-        inventory={source.inventory}
-        repo={repo}
-        master={master}
-        leaf={leaf}
-      />
+      {/* The complete source change explorer is mounted once, by the workspace above: it is the
+          whole measured change set of the bound pair and it must not be duplicated here, where a
+          second copy would be a second answer to "which paths changed". This pane carries the
+          attribution side of the same records. */}
+      <p style={{ color: "muted", margin: "0.2rem 0" }} data-testid="review-source-explorer-pointer">
+        the complete source change explorer ({source.inventory.listed_total} measured listed path(s),
+        state {source.inventory.state}
+        {source.inventory.partial ? ", partial" : ""}) is the population section of the workspace
+        above; every listed path is openable there.
+      </p>
       <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-locations">
         {source.locations.map((location) => (
           <li key={`${location.claim_id}:${location.path}`} data-change-state={location.change_state}>
@@ -667,6 +528,17 @@ function PageRefusalBlock({
 // The collection picker: which bounded collection the next read is a page of. Choosing one is a new
 // question rather than a continuation, so it always starts at that collection's first page, and
 // "whole review" is the state every read had before paging existed.
+//
+// IT OFFERS ONLY THE COLLECTIONS THAT HAVE A FIRST PAGE (ICR-R31@v1 / ICR-R24@v3). The server's
+// collection union has three members, but `family_members` is not one walk: it is the set of
+// per-family roster walks a response composes, and naming it with no cursor earns the server's own
+// `comparison_page_unreadable` refusal rather than an arbitrary walk's first page. Offering it here
+// would therefore be offering a control that fetches a refusal for a question the reader did not
+// mean to ask. The family walk is reached from the family that published its cursor -- the
+// "continue the ... roster" control in the tree -- and this surface sends that cursor back with the
+// collection its owner minted it for. Nothing about the server contract is narrowed by this: the
+// client's `ReviewPagedCollection` still carries all three, and a response whose page is
+// `family_members` renders through the same bounds and continuation controls as any other.
 function PagePicker({
   selection,
   onSelect,
@@ -692,7 +564,7 @@ function PagePicker({
         }
       >
         <option value="">whole review</option>
-        {REVIEW_PAGED_COLLECTIONS.map((collection) => (
+        {REVIEW_WALKABLE_COLLECTIONS.map((collection) => (
           <option key={collection} value={collection} data-testid="review-page-option">
             {collection}
           </option>
@@ -827,9 +699,16 @@ function PageControls({
   );
 }
 
-// The three panes and the two controls above them, rendered together for one payload: the knowledge,
-// source and evidence panes read the same comparison, so they are mounted as one block rather than
-// assembled at the call site.
+// The accepted layout, then everything else.
+//
+// THE WORKSPACE IS THE READING PATH (ICR-R24@v3): scope/status header, the family tree, and the
+// unified central column -- guarantee and selected intent, then the linked expressions, then the
+// recorded evidence and authored assessment -- with the complete source change explorer beneath it.
+// The three panes that were this surface's whole composition (R03/R06/R14/R15/R16/R17/R23/R26) are
+// retained below it inside one disclosure: their content is unchanged and every control, refusal,
+// limitation and technical identity they carry is still on the page, reached deliberately instead of
+// being the first thing a reviewer has to read past. A disclosure is used rather than a tab bar
+// because collapsing it hides nothing from the DOM and nothing from the keyboard.
 function ReviewPanes({
   shown,
   selection,
@@ -837,6 +716,10 @@ function ReviewPanes({
   repo,
   master,
   leaf,
+  selectorKind,
+  selectorId,
+  history,
+  workspace,
 }: {
   shown: ReviewPayload | null;
   selection: ReviewPageRequest | undefined;
@@ -844,17 +727,39 @@ function ReviewPanes({
   repo: string;
   master: string;
   leaf: string;
+  selectorKind?: ReviewSelectorKind;
+  selectorId?: string;
+  history?: ReviewHistory;
+  // The reader's local workspace state, owned by the surface ABOVE this switch (fix round 5, V10):
+  // this function returns null while a page is loading, so anything owned below it would be lost.
+  workspace: ReturnType<typeof useWorkspaceState>;
 }) {
   if (shown === null) return null;
   return (
     <>
       <SubmissionBlock payload={shown} />
       <PageControls payload={shown} selection={selection} onSelect={onSelect} />
-      <div className={TAKEOVER} style={{ display: "grid", gap: "1rem" }}>
-        <KnowledgePane payload={shown} />
-        <SourcePane payload={shown} repo={repo} master={master} leaf={leaf} />
-        <EvidencePane payload={shown} />
-      </div>
+      <ReviewWorkspace
+        payload={shown}
+        repo={repo}
+        master={master}
+        leaf={leaf}
+        selectorKind={selectorKind}
+        selectorId={selectorId}
+        history={history}
+        onPageSelect={onSelect}
+        state={workspace}
+      />
+      <details data-testid="review-details" style={{ marginTop: "1rem" }}>
+        <summary style={{ cursor: "pointer", color: "muted" }}>
+          complete payload details — knowledge, attribution, evidence and refusal records
+        </summary>
+        <div className={TAKEOVER} style={{ display: "grid", gap: "1rem", marginTop: "0.6rem" }}>
+          <KnowledgePane payload={shown} />
+          <SourcePane payload={shown} />
+          <EvidencePane payload={shown} />
+        </div>
+      </details>
     </>
   );
 }
@@ -928,6 +833,12 @@ export function ReviewSurface({
   // question asked of the server, so it participates in the target key rather than being applied to
   // the response afterwards.
   const [selection, setSelection] = useState<ReviewPageRequest | undefined>(undefined);
+  // The reader's local workspace state -- family/member selection, filter, diff layout, full-file
+  // disclosure and the expanded path. It is owned HERE, above the pane switch, because `ReviewPanes`
+  // returns null while a page read is in flight: state owned below that switch is destroyed and
+  // re-initialised by every page request, which discarded the reader's display choices and made the
+  // centre's continuation control single-use (ICR-L24 fix round 5, V10).
+  const workspace = useWorkspaceState();
   // The read cycle: one question, one in-flight read, no superseded answer writing the panes, and the
   // reader's explicit refresh carrying the identity on screen (ICR-R17). It lives in its own module.
   const { read, retained, carried, refresh } = useReviewReadCycle({
@@ -989,6 +900,10 @@ export function ReviewSurface({
         repo={repo}
         master={master}
         leaf={leaf}
+        selectorKind={selectorKind}
+        selectorId={selectorId}
+        history={history}
+        workspace={workspace}
       />
     </div>
   );

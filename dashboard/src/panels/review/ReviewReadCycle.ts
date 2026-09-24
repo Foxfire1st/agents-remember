@@ -45,6 +45,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ReviewFailure,
   ReviewHistory,
+  ReviewPagedCollection,
   ReviewPayload,
   ReviewSelectorKind,
 } from "../../data/review";
@@ -53,8 +54,13 @@ import { type ReviewRead, readFrom } from "./ReviewOutcome";
 
 // The bounded collection this surface is paging and the cursor it continues (ICR-R10). It is part of
 // the question rather than a decoration on the answer, so it participates in the target key.
+//
+// The union is the server's own `ReviewPagedCollection` rather than a narrowed copy: a request naming
+// `family_members` must be representable, because that is how a family's truncated roster is
+// continued (with the cursor that family context published). Which collections the surface OFFERS
+// with no cursor is a separate decision, in `REVIEW_WALKABLE_COLLECTIONS`.
 export interface ReviewPageRequest {
-  of: "knowledge" | "records";
+  of: ReviewPagedCollection;
   continuation?: string | null;
   size?: number;
 }

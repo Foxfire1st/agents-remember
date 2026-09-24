@@ -18,6 +18,7 @@
 
 import { getReviewJson } from "./reviewTransport";
 import { qs } from "./files";
+import type { ReviewFamilyContext } from "./reviewFamily";
 
 export {
   ReviewTransportError,
@@ -29,15 +30,62 @@ export {
   unreadableAnswer,
 } from "./reviewTransport";
 export type { ReviewFailure, ReviewFailureToken, ReviewRefusalFacts } from "./reviewTransport";
+// The family half of this contract lives in its own mirror module (ICR-R31@v1) and is re-exported
+// here, so every consumer of the review payload imports one public entry.
+export {
+  FAMILY_CONTEXT_JOIN_KEY,
+  FAMILY_SIDES,
+  UNRESOLVED_SELECTION_STATES,
+  guaranteeComparison,
+  memberComparison,
+} from "./reviewFamily";
+export type {
+  FamilyMemberRow,
+  GuaranteeComparison,
+  MemberComparison,
+  ReviewFamilyContext,
+  ReviewFamilyContextEntry,
+  ReviewFamilyContextReferences,
+  ReviewFamilyContextState,
+  ReviewFamilyEntryState,
+  ReviewFamilyGuarantee,
+  ReviewFamilyMember,
+  ReviewFamilyMemberSource,
+  ReviewFamilyRevisionContext,
+  ReviewFamilyRosterPage,
+  ReviewFamilySideName,
+  ReviewFamilySideState,
+  ReviewReadCounts,
+  ReviewRevisionSelection,
+  ReviewRevisionSelectionState,
+} from "./reviewFamily";
 
 export type ReviewSideState = "present" | "absent" | "binary" | "unresolved";
 export type ReviewSelectorKind = "invariant" | "family";
-// The two bounded collections a review can be paged over (ICR-R10): the knowledge comparison's own
-// window, and the review-matrix records' window. They are named rather than inferred because their
-// cursors are different documents, and a cursor is only ever presented with the collection its owner
-// minted it for.
-export type ReviewPagedCollection = "knowledge" | "records";
-export const REVIEW_PAGED_COLLECTIONS: ReviewPagedCollection[] = ["knowledge", "records"];
+// The bounded collections a review can be paged over (ICR-R10, extended by ICR-R31@v1): the
+// knowledge comparison's own window, the review-matrix records' window, and the family rosters'
+// window. They are named rather than inferred because their cursors are different documents, and a
+// cursor is only ever presented with the collection its owner minted it for.
+//
+// `family_members` is a member of this union because the SERVER accepts it -- narrowing the union
+// would misdescribe the wire. It is deliberately NOT one of `REVIEW_WALKABLE_COLLECTIONS`: that
+// collection is not one walk but the set of per-family roster walks a response composed, so naming
+// it without a cursor addresses no single page and the server refuses it with
+// `comparison_page_unreadable` rather than serving an arbitrary walk's first page. A control that
+// offered "first page of family_members" would therefore be a control that fetches a refusal, and
+// the family walk is instead reached from each family's own roster page -- see
+// `REVIEW_WALKABLE_COLLECTIONS`.
+export type ReviewPagedCollection = "knowledge" | "records" | "family_members";
+export const REVIEW_PAGED_COLLECTIONS: ReviewPagedCollection[] = [
+  "knowledge",
+  "records",
+  "family_members",
+];
+// The collections a request may name with NO cursor, i.e. the ones whose first page exists. This is
+// the set the collection picker offers. `family_members` is excluded on the server's own terms (see
+// above) and its walk is continued from `ReviewFamilyRosterPage.continuation` on the family that
+// published it.
+export const REVIEW_WALKABLE_COLLECTIONS: ReviewPagedCollection[] = ["knowledge", "records"];
 
 export interface ReviewSideContent {
   state: ReviewSideState;
@@ -383,6 +431,15 @@ export interface ReviewPayload {
   knowledge: ReviewKnowledgePane;
   source: ReviewSourcePane;
   evidence: ReviewEvidencePane;
+  // The comparison-bound family context (ICR-R31@v1): which recorded families the selected subject
+  // belongs to on each snapshot, each selected family revision's own authored guarantee, and its
+  // complete recorded roster. The route composes one on every answer it returns -- including the
+  // task-context review, which states `no_subject_selected` -- so this key being absent means the
+  // body did not come from this route (a capture recorded before this field existed, a hand-written
+  // body). That is its own fact and the workspace renders it as itself: it is NOT a measured zero,
+  // and it is never shown as `no_family_recorded`, which asserts the recorded scope was read and
+  // held no family.
+  family_context?: ReviewFamilyContext;
   staleness: ReviewStaleness;
   submission: ReviewSubmission;
   // The one bounded collection this response rendered as a page of (ICR-R10). `null` -- or absent on

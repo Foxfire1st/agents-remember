@@ -43,7 +43,7 @@ import type {
 } from "../../data/review";
 import { reviewProblemFromCause, reviewSourceContent } from "../../data/review";
 import { ReviewProblemBlock } from "./ReviewOutcome";
-import { DiffPane } from "../changeset/DiffPane";
+import { DiffPane, type DiffMode } from "../changeset/DiffPane";
 import { FilePane } from "../file-viewer/FilePane";
 
 // The two states whose content is text a reader can be shown: a regular file's bytes, and a
@@ -82,7 +82,15 @@ function contentBlock(side: ReviewSourceSide, name: "before" | "after", language
   );
 }
 
-function Sides({ expansion }: { expansion: ReviewSourceExpansion }) {
+function Sides({
+  expansion,
+  mode,
+  collapse,
+}: {
+  expansion: ReviewSourceExpansion;
+  mode: DiffMode;
+  collapse: boolean;
+}) {
   const { before, after } = expansion;
   const lines = (
     <>
@@ -99,8 +107,8 @@ function Sides({ expansion }: { expansion: ReviewSourceExpansion }) {
             before={before.text ?? ""}
             after={after.text ?? ""}
             language={expansion.language}
-            mode="split"
-            collapse={false}
+            mode={mode}
+            collapse={collapse}
           />
         </div>
       </>
@@ -146,7 +154,15 @@ function refusalBlock(refusal: ReviewRefusal) {
   );
 }
 
-function Expansion({ expansion }: { expansion: ReviewSourceExpansion }) {
+function Expansion({
+  expansion,
+  mode,
+  collapse,
+}: {
+  expansion: ReviewSourceExpansion;
+  mode: DiffMode;
+  collapse: boolean;
+}) {
   return (
     <div data-testid="review-source-expansion" data-currentness={expansion.currentness}>
       <p style={mutedStyle} data-testid="review-source-currentness">
@@ -161,7 +177,7 @@ function Expansion({ expansion }: { expansion: ReviewSourceExpansion }) {
           path admitted by: {expansion.path_bound_detail}
         </p>
       ) : null}
-      <Sides expansion={expansion} />
+      <Sides expansion={expansion} mode={mode} collapse={collapse} />
       {boundedNote(expansion)}
       <p style={{ ...mutedStyle, whiteSpace: "pre-wrap" }} data-testid="review-source-command">
         reproduce: {expansion.command}
@@ -177,6 +193,8 @@ export function SourceContent({
   entry,
   beforeCodeTreeId,
   afterCodeTreeId,
+  mode = "split",
+  collapse = false,
 }: {
   repo: string;
   master: string;
@@ -184,6 +202,11 @@ export function SourceContent({
   entry: ReviewChangedFile;
   beforeCodeTreeId: string;
   afterCodeTreeId: string;
+  // The reader's diff layout and full-file preference, owned by the explorer above so that switching
+  // the layout cannot reset an expansion (ICR-R24@v3). Their defaults are the shipped behaviour: a
+  // split diff of the whole file.
+  mode?: DiffMode;
+  collapse?: boolean;
 }) {
   const [result, setResult] = useState<ReviewSourceContentResult | null>(null);
   // The transport-level failure (ICR-R16): this route answers a refusal it *admits* as its typed
@@ -236,6 +259,7 @@ export function SourceContent({
     );
   }
   if (result.state === "refused" && result.refusal) return refusalBlock(result.refusal);
-  if (result.expansion) return <Expansion expansion={result.expansion} />;
+  if (result.expansion)
+    return <Expansion expansion={result.expansion} mode={mode} collapse={collapse} />;
   return null;
 }

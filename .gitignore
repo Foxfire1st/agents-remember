@@ -45,3 +45,9 @@ mcp/tests/fixtures/sim-rich/
 /eve_runtime/.eve/
 /eve_runtime/.output/
 /eve_runtime/.vercel/
+
+# AR leaf evidence and tooling scratch — never a deliverable. The closeout derives its candidate
+# tree with `git add -A`, so anything unignored under temp/ is staged and committed with the code;
+# leaf reports, probes, captures, mutation logs and verdicts are evidence, not deliverables, and
+# six earlier leaf closeouts landed 52 of them before this rule existed.
+temp/
