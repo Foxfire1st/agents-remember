@@ -366,12 +366,24 @@ def cursor_refusal_detail(refusal_value: KnowledgeRefusal | None) -> str:
 def _roster_detail(
     side: FamilyRosterSide, family_revision_id: str, page: ReviewFamilyRosterPage, carried: int
 ) -> str:
-    """One sentence stating how much of the roster this page carried and how to reach the rest."""
+    """One sentence stating how much of the roster this page carried and how to reach the rest.
 
-    if page.complete:
+    The completed case splits in two, because ``complete`` is the WALK's flag and not the page's (ICR-L24
+    fix round 3, V9): a walk the read took in one page carried every recorded membership HERE, while a
+    walk whose final page is a continuation carried only that page's share -- saying "all carried here"
+    for the second would be false about the store, and the pages before it are what carried the rest.
+    """
+
+    if page.complete and page.state == "first_page":
         return (
             f"the {side.name} snapshot's recorded roster of family revision {family_revision_id} was "
             f"read whole: {page.members_total} recorded membership(s), all carried here"
+        )
+    if page.complete:
+        return (
+            f"the {side.name} snapshot's recorded roster of family revision {family_revision_id} holds "
+            f"{page.members_total} recorded membership(s); this page carried {carried} of them and "
+            f"completes the read walk, the pages before it carried the rest"
         )
     return (
         f"the {side.name} snapshot's recorded roster of family revision {family_revision_id} holds "

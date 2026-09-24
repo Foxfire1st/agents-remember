@@ -233,6 +233,15 @@ class ReviewFamilyRosterPage(KnowledgeModel):
     roster must never be presentable as a complete one. ``members_total`` is the owner's measured
     count of the family revision's recorded membership rows, which is the number a reader needs in
     order to see how much of the roster this page actually carried.
+
+    ``complete`` describes the WALK, not the page. It is ``True`` when the read enumerated the whole
+    selected scope, which for a multi-page walk happens on the FINAL page -- and that page carries
+    only its own share of the selection, not every page's. So a complete walk is the whole roster
+    exactly when it is also a single page (``state == "first_page"``); that is the only case in which
+    a page may be read as "the roster, whole", and the only case the context's validator holds to
+    ``len(members) == members_total``. Reading a complete final page as though it carried every
+    recorded membership compares a page-scoped list against a revision-wide count, and doing that
+    raised an unhandled ``ValidationError`` for an ordinary multi-page roster (ICR-L24 fix round 3).
     """
 
     scope: tuple[str, ...] = ()
@@ -273,9 +282,11 @@ class ReviewFamilyRevisionContext(KnowledgeModel):
 
     ``members`` is exactly the roster this page carried, and the two counts beside it keep that
     honest: ``members_total`` is the owner's measured roster size for the selected revision, and a
-    complete page carries all of it. A member whose revision content fell outside the page is still
-    listed -- the membership row and its exact member revision are the recorded fact -- with its own
-    stated state rather than a silently missing statement.
+    complete page is the whole roster only when it is also the walk's own first page
+    (``state == "first_page"``): a completed continued page carries only its own share of the
+    selection and says so, and the pages before it carried the rest. A member whose revision content
+    fell outside the page is still listed -- the membership row and its exact member revision are
+    the recorded fact -- with its own stated state rather than a silently missing statement.
 
     ``recorded_revision_ids`` is the family owner's own list of **every** revision of this family the
     snapshot records, which is a different population from the revisions a selection reached: a family
@@ -321,10 +332,21 @@ class ReviewFamilyRevisionContext(KnowledgeModel):
                 "beside it would be read as a measured empty roster"
             )
         if self.page is not None:
-            if self.page.complete and len(self.members) != self.members_total:
+            # A walk the read took in ONE page is the whole roster, so that page must carry every
+            # recorded membership: carrying fewer would present a truncated roster as the whole, which
+            # is what this guard exists to refuse. A walk whose FINAL page is a continuation carried
+            # only that page's share of the selection -- the pages before it carried the rest -- so
+            # comparing its carried rows against the revision-wide count would compare two different
+            # populations (a page against a revision) and refuse a page that is entirely truthful.
+            # That comparison raised a ValidationError for an ordinary multi-page roster and the route
+            # answered the reader's own continuation request with HTTP 500 (ICR-L24 fix round 3, V9;
+            # the defect is R31's, corrected here -- see the note in ``ReviewFamilyRosterPage``).
+            single_page_walk = self.page.complete and self.page.state == "first_page"
+            if single_page_walk and len(self.members) != self.members_total:
                 raise ValueError(
-                    "a complete roster page carries every recorded membership of the selected "
-                    "family revision; carrying fewer would present a truncated roster as the whole"
+                    "a roster the read took in one page carries every recorded membership of the "
+                    "selected family revision; carrying fewer would present a truncated roster as "
+                    "the whole"
                 )
             if len(self.members) > self.members_total:
                 raise ValueError(

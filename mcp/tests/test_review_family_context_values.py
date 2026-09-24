@@ -111,6 +111,58 @@ def test_a_recorded_side_may_not_name_a_revision_its_family_does_not_record() ->
         ReviewFamilyRevisionContext.model_validate(side)
 
 
+def test_a_complete_walk_that_is_one_page_must_carry_the_whole_roster() -> None:
+    """A walk the read took in one page IS the roster, so it may not carry fewer rows than it counts.
+
+    This is the guard's real subject, and the correction in ICR-L24's fix round 3 kept it exactly
+    here: a page that is complete AND the walk's first page is the whole recorded roster, so a page
+    carrying none of the rows it counts would present a truncated roster as the complete one.
+    """
+
+    side = _honest_context().entries[0].after.model_dump()
+    side["members"] = []
+    with pytest.raises(ValidationError):
+        ReviewFamilyRevisionContext.model_validate(side)
+
+
+def test_a_final_page_of_a_multi_page_walk_may_carry_only_its_own_share() -> None:
+    """A CONTINUED page that completes the walk carried that page's share, not every recorded row.
+
+    ``complete`` is the walk's flag: it becomes true on the final page, and that page carries only its
+    own part of the selection while the pages before it carried the rest. Requiring such a page to
+    carry every recorded membership compared a page-scoped list against a revision-wide count, and on
+    an ordinary multi-page roster it raised an unhandled ``ValidationError`` -- the route answered the
+    reader's own continuation request with HTTP 500 (ICR-L24 fix round 3, V9). Both directions are
+    pinned here: the continued page is accepted, and the SAME numbers on a first page are refused by
+    the case above.
+    """
+
+    context = _honest_context()
+    side = context.entries[0].after.model_dump()
+    page = dict(side["page"])
+    page["state"] = "continued"
+    page["continued_from"] = "the cursor this walk published"
+    side["page"] = page
+    side["members"] = []
+
+    built = ReviewFamilyRevisionContext.model_validate(side)
+    assert built.page is not None
+    assert built.page.complete is True
+    assert built.page.continuation is None
+    assert built.members == ()
+    assert built.members_total == 1
+
+    # The same carried rows on a walk's FIRST page are the truncation the guard refuses: this is what
+    # keeps the relaxation above from becoming a hole.
+    first = dict(side)
+    first_page = dict(page)
+    first_page.pop("continued_from")
+    first_page["state"] = "first_page"
+    first["page"] = first_page
+    with pytest.raises(ValidationError):
+        ReviewFamilyRevisionContext.model_validate(first)
+
+
 def _honest_context() -> ReviewFamilyContext:
     """One hand-built, internally consistent context used only as the base of a mutation.
 

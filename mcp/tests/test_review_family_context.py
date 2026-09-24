@@ -944,3 +944,190 @@ def _served(fixture: EndpointFixture) -> FastAPI:
         ),
     )
     return app
+
+
+# -- the walk the delivered continuation control drives, over the real route -----------------------
+
+
+def _author_extra_roster_rows(scenario: FamilyScenario, count: int) -> None:
+    """Author ``count`` further member revisions into the successor family revision's roster.
+
+    They are ordinary authored memberships through the shipped store operations: each is a new
+    invariant identity with one revision cited by one membership row, which is what makes a roster
+    need more than one page of the read walk.
+    """
+
+    diff = scenario.endpoints.diff
+    fixture = diff.before.fixture
+    store = open_knowledge_store(diff.after.database_path, diff.repository_id)
+    try:
+        for index in range(count):
+            invariant_id, revision_id = str(uuid4()), str(uuid4())
+            identity = store.create_invariant(
+                InvariantRequest(
+                    repository_id=diff.repository_id,
+                    invariant_id=invariant_id,
+                    display_label=f"walk-row-{index}",
+                    provenance=fixture.authorship,
+                )
+            )
+            assert identity.state == "created", identity.refusal
+            authored = store.create_revision(
+                RevisionRequest(
+                    repository_id=diff.repository_id,
+                    revision=RevisionDraft(
+                        revision_id=revision_id,
+                        invariant_id=invariant_id,
+                        display_version=MEMBER_SUCCESSOR_VERSION,
+                        statement=f"An obligation the roster walk places at row {index}.",
+                        applicability=APPLICABILITY,
+                        provenance=fixture.authorship,
+                    ),
+                )
+            )
+            assert authored.state == "created", authored.refusal
+            _author_membership(
+                store,
+                diff.repository_id,
+                scenario.successor_family_revision_id,
+                revision_id,
+                fixture,
+            )
+    finally:
+        store.close()
+    _place_datasets(diff, scenario.endpoints.contract)
+
+
+def _walk_the_route(scenario: FamilyScenario, side: str) -> list[dict]:
+    """Follow ONE side's roster walk exactly as the delivered continuation control does.
+
+    The first request names the subject and no page; each step after it presents the collection WITH
+    the cursor the previous page published, and no page bound -- which is the request the surface's
+    "continue the … roster walk" control builds. A page that is not this route's answer is reported as
+    the status it carried rather than raised, because a server exception is what this case exists to
+    catch: ``raise_server_exceptions=False`` is what makes an unhandled ``ValidationError`` visible as
+    the HTTP 500 the browser would receive instead of hiding it in a traceback.
+    """
+
+    base = {
+        "repo": scenario.endpoints.repository_id,
+        "master": scenario.endpoints.master,
+        "leaf": LEAF_ID,
+        "selectorKind": "invariant",
+        "selectorId": scenario.endpoints.diff.retry_invariant_id,
+    }
+    steps: list[dict] = []
+    continuation: str | None = None
+    with TestClient(_served(scenario.endpoints), raise_server_exceptions=False) as client:
+        while len(steps) < 20:
+            params = dict(base)
+            if continuation is not None:
+                params["pageOf"] = "family_members"
+                params["continuation"] = continuation
+            response = client.get(KNOWLEDGE_REVIEW_ROUTE, params=params)
+            assert response.status_code == 200, (
+                f"step {len(steps)} answered {response.status_code}: {response.text[:400]}"
+            )
+            body = response.json()
+            entries = {
+                entry["family_id"]: entry for entry in body["payload"]["family_context"]["entries"]
+            }
+            step = entries[scenario.family_id][side]
+            steps.append(step)
+            page = step["page"]
+            assert page is not None
+            if page["complete"] or page.get("continuation") is None:
+                return steps
+            continuation = page["continuation"]
+    raise AssertionError("the roster walk did not terminate inside 20 pages")
+
+
+def test_a_roster_that_fits_one_page_is_carried_whole_and_says_so(tmp_path: Path) -> None:
+    """The single-page boundary: one walk page IS the roster, and it carries every recorded row."""
+
+    scenario = build_family_scenario(tmp_path / "single-page-walk")
+    steps = _walk_the_route(scenario, "after")
+
+    assert len(steps) == 1, [step["page"]["state"] for step in steps]
+    page, members = steps[0]["page"], steps[0]["members"]
+    assert page["complete"] is True
+    assert page["state"] == "first_page"
+    assert page.get("continuation") is None
+    assert len(members) == steps[0]["members_total"] > 0
+    assert "all carried here" in steps[0]["detail"]
+
+
+def test_the_final_page_of_a_long_walk_may_carry_only_its_own_share(tmp_path: Path) -> None:
+    """The shape that used to answer HTTP 500: a walk whose last page carries part of the roster.
+
+    Seventy further memberships put seventy-two rows on the successor revision's roster, which the
+    read walk takes several pages to reach. Its FINAL page is complete -- the walk enumerated the
+    whole selection -- and carries only its own share of those rows, never all of them at once. That
+    is the page the guard used to refuse, because it compared the page's carried rows against the
+    revision-wide count; the route then answered the reader's own continuation request with an
+    unhandled HTTP 500 and the surface replaced the whole review with an unexplained failure.
+    """
+
+    scenario = build_family_scenario(tmp_path / "long-walk")
+    _author_extra_roster_rows(scenario, 70)
+    steps = _walk_the_route(scenario, "after")
+
+    assert len(steps) >= 3, [len(step["members"]) for step in steps]
+    final = steps[-1]
+    page = final["page"]
+    assert page["complete"] is True
+    assert page.get("continuation") is None
+    assert page["state"] == "continued"
+    # The page that carried only its own share of the roster, which is the state that used to raise.
+    assert 0 < len(final["members"]) < final["members_total"]
+    # Every earlier page is still a position in the walk, and no step above answered a failure.
+    for step in steps[:-1]:
+        assert step["page"]["complete"] is False
+        assert step["page"].get("continuation") is not None
+    # The pages together carried every recorded membership, which is what the continuation control
+    # promises a reader; and the completed page says the WALK finished rather than claiming to hold
+    # the whole roster itself.
+    assert sum(len(step["members"]) for step in steps) == final["members_total"]
+    assert "completes the read walk" in final["detail"]
+    assert "all carried here" not in final["detail"]
+
+
+def test_a_roster_walk_larger_than_one_page_terminates_with_a_page_and_no_failure(
+    tmp_path: Path,
+) -> None:
+    """The multi-page boundary: the walk the control drives reaches the rest instead of a 500.
+
+    Forty further memberships put forty-two rows on the successor family revision's roster, which is
+    more than one page of the read walk carries (the request the surface sends names no page size, so
+    the walk's own bound applies). Before this leaf's correction the guard in
+    ``ReviewFamilyRevisionContext`` compared the FINAL page's carried rows against the
+    revision-wide membership count, so the page that completes the walk raised a ``ValidationError``
+    and the route answered the reader's own continuation request with HTTP 500. Every step below is
+    asserted to be this route's answer, and the pages together are asserted to have carried every
+    recorded membership -- which is exactly the claim the surface's continuation control makes.
+    """
+
+    scenario = build_family_scenario(tmp_path / "multi-page-walk")
+    _author_extra_roster_rows(scenario, 40)
+    steps = _walk_the_route(scenario, "after")
+
+    assert len(steps) >= 2, "the roster must be past one page for this case to measure anything"
+    assert steps[0]["members_total"] >= 42
+    for index, step in enumerate(steps):
+        page = step["page"]
+        assert page is not None
+        assert len(step["members"]) <= step["members_total"]
+        if index == len(steps) - 1:
+            # The walk terminates: the final page is the whole selection and offers no cursor.
+            assert page["complete"] is True
+            assert page.get("continuation") is None
+            assert page["state"] == "continued"
+            # And it says what it is: a page that completes a multi-page walk did NOT carry every
+            # recorded row here, so the single-page sentence must not appear on it.
+            assert "all carried here" not in step["detail"]
+            assert "completes the read walk" in step["detail"]
+        else:
+            assert page["complete"] is False
+            assert page.get("continuation") is not None
+    carried = sum(len(step["members"]) for step in steps)
+    assert carried == steps[-1]["members_total"] > len(steps[0]["members"])
