@@ -1099,6 +1099,16 @@ say whether it has already run.
 baseline, not a later one. Whether it is removed before adoption is the developer's decision,
 and adoption excludes it either way.
 
+**Onboarding is not the repository's knowledge foundation, and this skill produces no knowledge
+records.** The foundation - the authored invariants, families, source realizations and external
+sources in the knowledge database - is a separate step owned by `c-14-knowledge-bootstrap` and carried
+by the curator. Onboarding is **one optional input** to it: the foundation needs no onboarding file to
+start, and this skill neither requires the foundation to exist first nor claims it as its own output.
+Name it in the handoff, with the state of the repository's knowledge location where that state is
+known (`not-recorded`; `recorded`, with the identity; or `unusable`, with its code and path), and say
+that it is the curator's step. An unrun or absent foundation is a **named fact of the handoff**, never
+an omission that the handoff's own "trusted coverage" reads as completeness.
+
 ---
 
 ## Guided Mode Defaults
@@ -1250,6 +1260,7 @@ The orchestrator remains thin throughout.
 | `c-05-create-or-update-onboarding-files`          | Owns final file-level onboarding semantics and routes structural slice maintenance back to the `c-03-repo-bootstrap` skill. The `c-03-repo-bootstrap` skill creates cards/waves and delegates file output rules to the `c-05-create-or-update-onboarding-files` skill. |
 | `c-04-retrieval-strategy-router`                  | Consumes bootstrapped overviews and file maps as the Intent substrate and can route to semantic/relationship providers first. |
 | `c-10-adopt-memory-baseline`                      | The next step on a newly scaffolded memory repo: commits this skill's output as the first attributed memory baseline and computes the ledger cache. It owns the drift check and the adoption procedure. |
+| `c-14-knowledge-bootstrap`                        | Owns the repository's **knowledge foundation** - the authored records in the knowledge database - as a step separate from onboarding. This skill's handoff names it; onboarding is optional input to it, and this skill neither produces it nor substitutes for it. |
 | `c-02-memory-quality-control`                     | Becomes relevant after bootstrap; touched files can be promoted from deferred to covered.                     |
 | `l-01-agent-lifecycles`                           | May trigger targeted bootstrap when an active job enters an uncovered area.                                   |
 | `confluence-search` / documentation search skills | Feed the docs evidence pass through approved sources from the input ledger.                                   |
@@ -1276,3 +1287,4 @@ This skill implementation is successful when:
 14. automated bootstrap ends at handoff and asks whether separate closeout should run
 15. a newly scaffolded memory repo's next step is named: `c-10-adopt-memory-baseline` commits the bootstrap output as the first attributed baseline and creates the ledger row that maps memory content to a code commit
 16. `bootstrap/` scaffolding is stated as transient and is never part of a memory commit
+17. the handoff names the repository's knowledge foundation as the curator's separate step (`c-14-knowledge-bootstrap`), reports the knowledge location's state where it is known, and neither requires onboarding before it nor presents onboarding as that foundation

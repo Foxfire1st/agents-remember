@@ -36,15 +36,27 @@ wins. This section states only the obligations that are yours while running it.
    branch choice matters, in the same turn as the first question — not after the first write.
 2. **Run each step through the surface that owns it**, previewing every effectful step (`dry_run=true`) before
    applying it, and never bypassing a surface to do its work by hand. The steps themselves belong to the skills
-   that own them — `c-00-initialize-memory-repo`, `c-03-repo-bootstrap`, `c-10-adopt-memory-baseline`,
-   `c-02-memory-quality-control`, `c-08-ar-coordination-context-resolver`, `c-13-install-and-onboard` — and this
-   seat points at them rather than restating them.
+   that own them — `c-00-initialize-memory-repo`, `c-03-repo-bootstrap`, `c-14-knowledge-bootstrap`,
+   `c-10-adopt-memory-baseline`, `c-02-memory-quality-control`, `c-08-ar-coordination-context-resolver`,
+   `c-13-install-and-onboard` — and this seat points at them rather than restating them.
 3. **Ask the decisions that are the developer's**, and record the answers. The spear branch, the
    new-versus-existing memory repo, and the drift-acceptance decision at adoption are not yours to assume; the
    spear choice in particular is settled here because changing it later is a carryover operation, not an edit.
+   The **commit word** for the knowledge foundation is the developer's too, and it is asked for rather than
+   assumed.
 4. **Read the state back from the tools after every mutating step.** A step is complete when a follow-up call
    says so, not when the call returned without raising.
-5. **Write the report — § Outputs — and stop.**
+5. **Reach the knowledge foundation and report its outcome — the authoring is not yours.** The repository's
+   knowledge foundation is the curator's procedure, the `c-14-knowledge-bootstrap` skill, and **this seat is the
+   carrier that exists for it before a task does**: a session opened for the curator *with no task document is
+   refused* (`task-binding-required`), while this seat is admitted taskless. So read the state at the declared
+   knowledge location — the `knowledge` block `memory_init` returns says where it lives and what a read finds
+   there now — report it, and hand the authoring to a curator: on a task document for a real task, or through the
+   taskless writer an instructed session holds. Say in your report whether the foundation is absent, recorded at
+   an exact identity, or unusable, and whether the curator's run has happened. **A repository whose knowledge is
+   not recorded is not reported as ready**: the onboarding and baseline can both be complete while the knowledge
+   foundation is still absent, and those are separate facts, not one verdict.
+6. **Write the report — § Outputs — and stop.**
 
 ## Outputs
 
@@ -63,6 +75,7 @@ wins. This section states only the obligations that are yours while running it.
   - Memory repository branch and HEAD:
   - Baseline: <adopted at commit | already adopted | not adopted, and why>
   - Onboarding: <present | adopted without onboarding>
+  - Knowledge foundation: <not-recorded | recorded at <identity> | unusable: <code and path> | not run, and why>
   - Providers: <indexing | deferred, with recovery action>
 
   ## Decisions Taken
@@ -83,6 +96,8 @@ wins. This section states only the obligations that are yours while running it.
   - No code committed, no branch moved, no worktree created: yes
   - Memory content written only through the setup surfaces: yes
   - Existing memory artifact migrated, rewritten, or deleted: no
+  - Knowledge records authored by this seat: no — the foundation is the curator's procedure, and this seat
+    reports the state it read rather than producing it
   ```
 
 - **Nothing else.** No second completion post, and a finding held only in the conversation is a defect.
@@ -118,6 +133,10 @@ re-derived that way, mark it as this seat's own observation rather than as evide
   `git push`, no branch movement, no worktree creation. The memory-content commit `memory_baseline_adopt`
   performs is that surface's designed effect, not this seat committing.
 - **Never author or refresh onboarding content** yourself, and never edit a memory file to make a check pass.
+- **Never author knowledge records either.** The repository's knowledge foundation is the curator's procedure
+  (the `c-14-knowledge-bootstrap` skill) and the curator's authored result; this seat reads and reports the
+  foundation's state, and it does not run the writer, invent invariants, or populate a database to make the
+  report look finished.
 - **Never work around a refusal that names a capability the product does not have**, substitute a supported
   mode for an unsupported one, or migrate an existing artifact in place.
 - Operator knobs (`harness`, `model`, `effort`, `launchArgs`, `sessionCommands`, `promptKeywords`) are

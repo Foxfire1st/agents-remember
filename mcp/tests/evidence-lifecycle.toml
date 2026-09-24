@@ -420,6 +420,7 @@ consumers = [
   "mcp/tests/test_curator_review_assessment_publication.py",
   "mcp/tests/test_direct_landing.py",
   "mcp/tests/test_integration_branch_authority.py",
+  "mcp/tests/test_knowledge_bootstrap_procedure.py",
   "mcp/tests/test_leaf_doc_master_link_binding.py",
   "mcp/tests/test_lifecycle_finalize.py",
   "mcp/tests/test_lifecycle_operations.py",
@@ -732,6 +733,7 @@ consumers = [
   "mcp/tests/test_install_runtime.py",
   "mcp/tests/test_integration_branch_authority.py",
   "mcp/tests/test_knowledge_bootstrap.py",
+  "mcp/tests/test_knowledge_bootstrap_procedure.py",
   "mcp/tests/test_knowledge_curator_ingest_list.py",
   "mcp/tests/test_knowledge_ingest_comparison_generation.py",
   "mcp/tests/test_knowledge_ingest_failure_windows.py",
@@ -1624,6 +1626,7 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_capsule_launch_wiring.py",
   "mcp/tests/test_codex_capsule_delivery.py",
+  "mcp/tests/test_knowledge_bootstrap_procedure.py",
 ]
 
 [[artifact]]

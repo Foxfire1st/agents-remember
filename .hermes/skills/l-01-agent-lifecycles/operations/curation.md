@@ -2,10 +2,12 @@
 
 **What it covers:** the leaf coherence pass — reconciling intended, current, and implemented meaning
 and writing the affected onboarding. One fresh seat per leaf, after builder code and (when
-requested) review evidence exist.
+requested) review evidence exist. It also carries the repository's **first or resumed knowledge
+foundation**, which is the same curator's authoring work with a different admission and scope.
 
 **When it is selected:** a leaf has builder output, the owning manager has compiled the curator
-brief, and memory surfaces are affected.
+brief, and memory surfaces are affected. Its second, bounded entry — a repository's first or resumed
+knowledge foundation, before any leaf exists — is stated under *The repository-foundation entry* below.
 
 ## Who carries it, and their job
 
@@ -17,6 +19,14 @@ brief, and memory surfaces are affected.
 These are two disjoint jobs: the curator reconciles and writes memory; the manager owns the
 transaction. The curator never runs the closeout preview, never repairs transaction conflicts, and
 never decides whether a leaf lands.
+
+The manager's half is a **leaf**-entry fact. On the repository-foundation entry there is no leaf, no
+manager and no brief — and a session opened for the curator with **no task document is refused**
+(`400 task-binding-required`, "named role scope is required"), because the roles the opener admits
+without a document are the taskless seats `bootstrap`, `chat` and `terminal`. So the foundation is
+reached the way the `c-14-knowledge-bootstrap` skill states: the taskless **bootstrap** seat carries
+the step and reads the state, a curator seat opened on a **task document** authors it, and the taskless
+writer is run by an instructed session whose admission is the writer's own (see below).
 
 ## Required inputs
 
@@ -116,13 +126,45 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    true only once that validation passes.
 8. **Repair, then republish.** After each repair, re-run the full operation before handoff.
 
+## The repository-foundation entry — the curator's work, before a leaf exists
+
+Curation's ordinary shape is a leaf's coherence pass. A repository's **first or resumed knowledge
+foundation** is the same *work* in its other entry, and it is selected when the scope is the
+repository's foundation rather than one leaf's delta: a new project entering ordinary setup, an
+existing project whose memory is Markdown only, or an explicitly requested bootstrap of an existing
+project. Its procedure is the `c-14-knowledge-bootstrap` skill.
+
+What stays identical is the ownership: the reconciliation and the authored knowledge — supported
+invariants and facets, justified family guarantees with exact memberships, applicability, essential
+conditions, exclusions, source realizations, external sources — belong to this seat either way, and
+there is still exactly one admitted writer and one declared published location. What changes is the
+**carrier**, the admission and the scope:
+
+| | Leaf coherence pass | Repository-foundation entry |
+| --- | --- | --- |
+| Carrier | this seat, opened on the leaf's task document | the taskless **bootstrap** seat for the read-and-report step, or an instructed session holding the procedure for a taskless run; a taskless *curator* seat does not exist |
+| Scope | this leaf's landed change set | the requested project scope |
+| Required inputs | the brief, the change set, `notes/`, the enclosure contract | the declared repository entry, the resolved context, the requested scope, the available sources, the current knowledge state |
+| Writer entry | `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> … --publish --commit` | `agents-remember knowledge-bootstrap --repo <repo_id> … --commit`, from a session with **no enclosure in scope** — the taskless writer refuses one (`enclosure_in_scope`) so a bootstrap can never publish onto a task's line |
+| Onboarding | written by this pass | optional input: the foundation neither requires onboarding to exist nor writes any |
+| Missing inputs | intake is rejected | there is no brief, no change set and no enclosure contract to intake; **and a session opened for the curator with no task document is refused** (`task-binding-required`), so that case is carried as the Carrier row states rather than repaired by naming a role |
+
+Neither entry substitutes for the other: `knowledge-ingest` needs an enclosure contract and is not the
+route for a repository that has no leaf, and no leaf, worktree, enclosure or task document is ever
+fabricated to give the foundation entry an argument list. **The commit word is the developer's on both
+entries.** Planning is the default: a run without that word writes no batch, no publication and no
+retained progress record. A foundation run that examined only part of its scope reports itself partial
+and names the areas it did not reach; it never claims the foundation complete for them.
+
 ## Authority gates
 
 - **Onboarding writes only.** The curator never writes code, never edits task docs, gates, lifecycle
   state, worktree contracts, or closeout state, never mutates task-doc status, and never performs
   closeout/integration/finalization.
 - **The knowledge batch and its publication keep their existing owners.** The curator *invokes*
-  `agents-remember knowledge-ingest`; it never writes the dataset itself, never edits SQLite, never
+  `agents-remember knowledge-ingest` on the leaf entry and the taskless
+  `agents-remember knowledge-bootstrap` on the repository-foundation entry; it never writes the
+  dataset itself, never edits SQLite, never
   selects a destination of its own, and never treats the mounted `knowledge_change` tool as a write
   route — it refuses every record kind and only names the real entry point. `--commit` stays the
   knowledge-batch write word: it is not a Git action and not an acceptance, and a zero exit is not
@@ -173,7 +215,10 @@ The curator's exit returns to the owning manager: the changed onboarding paths, 
 reconciliation, the exact scoped commands and results, and any failed, blocked, or not-run checks.
 It also carries the knowledge hand-off result: every entry's outcome from the ingest report
 (`committed` / `rulings` / `refused`, each refusal named) and the **published dataset identity** the
-run read back, which is the snapshot the next task's planner reads.
+run read back, which is the snapshot the next task's planner reads. On the repository-foundation
+entry the same facts come from the bootstrap report — each entry's outcome, the publication result,
+the identity an independent read of the declared location confirmed, and the remaining, unmeasured and
+carried work — together with the source areas the run examined and the areas it did not.
 The structured coherence record and its generated projection are the durable output — not the
 transcript and not a parallel hand-authored report. Write the record before ending the turn;
 terminal/finalizer evidence then attests only that this turn ended and wakes the manager, who

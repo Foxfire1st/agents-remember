@@ -43,8 +43,29 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "f3dd258c161eee057edee9bdb7b7a4874220c8a4201c04a516dc146c14526589"
+LIFECYCLE_CATALOG_SHA256 = "cbe71c9ad9b6d2851220069bc10d8e80b2eaca5b60bccda56a91758bce05bf7a"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Thirtieth deliberate re-pin (260921-ICR-L27, at base ``06ed70cf``, 2026-09-24) -- the delivered
+knowledge-bootstrap procedure's three consumer rows.** ``260921-ICR-L27`` (requirement ``ICR-R27@v1``)
+registers no artifact and no contract of its own: its seven cases live in the new ordinary unit module
+``mcp/tests/test_knowledge_bootstrap_procedure.py``, which drives the shipped skill catalog's own list
+and read entry points, the shipped umbrella command line's own parser, the launch compiler, and — for
+the seat gate — the dashboard's own open route over the world
+``mcp/tests/test_capsule_launch_wiring.py`` keeps real. The census derived the delta exactly, in two
+waves as the module grew: ``mcp/tests/fixtures/repository_profiles/node/package-lock.json`` reported
+``missing=['mcp/tests/test_knowledge_bootstrap_procedure.py'], unsupported=[]`` first, and the
+seat-level cases' import of the shipped launch world then added
+``mcp/tests/curator_coherence_test_support.py`` and
+``mcp/tests/fixtures/codex_app_server_model_page.json`` with the same one-path finding. All three rows
+gained that one path each, and the module's lane row was added to
+``mcp/tests/test-evidence-lanes.toml`` in the unit-regression lane beside its sibling. **Nothing was
+registered, no row was removed and no artifact's identity moved**, so the population stays at
+**sixteen contracts / sixty-six artifacts**, and the catalog is re-pinned from
+``88bd67ebed540594438b9256a752e59479ae29d095596f6c352a6f474ad3b42e`` (this leaf's round-1 value) to
+``cbe71c9ad9b6d2851220069bc10d8e80b2eaca5b60bccda56a91758bce05bf7a``, measured with
+``sha256sum mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact
+delta remains exactly empty.
 
 **Twenty-ninth deliberate re-pin (260921-ICR-L29, at base ``0d7910f9``, 2026-09-24) -- the taskless
 bootstrap case module's one consumer row.** ``260921-ICR-L29`` (requirement ``ICR-R29@v1``)

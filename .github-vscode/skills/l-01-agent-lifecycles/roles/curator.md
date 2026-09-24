@@ -37,10 +37,23 @@ rather than repairing it from memory:
   durable knowledge you author is published to and what the next task's planner reads, so name its exact
   identity in your handoff rather than describing it.
 
-**Every MCP call you make carries that contract path.** Without it the tools resolve the *official* memory repo: your
-diagnostics would describe the wrong tree, and `route_index_refresh` **writes**, so an unscoped call dirties a
-repository you do not own. Check `onboardingRoot` in every response — it must be this leaf's memory worktree — and
-preview any write with `dry_run=true`.
+**The repository-foundation entry is a second, bounded shape of this work, and it has its own
+carrier.** When the work is the repository's **first or resumed knowledge foundation** rather than one
+leaf's delta — a new project entering ordinary setup, an existing project with Markdown memory and no
+knowledge database, or an explicitly requested bootstrap of an existing project — the inputs are the
+repository id the MCP authority settings declare, the resolved coordination context, the requested
+scope, the available sources and the current knowledge state. There is no brief, no change set and no
+enclosure contract to intake — and **this seat itself is opened on a task document**: a session opened
+for the curator with no task document is refused (`400 task-binding-required`, "named role scope is
+required"), which is why, on a repository with no task at all, the step is carried by the taskless
+bootstrap seat (it reads the state and hands it on) and by the taskless writer an instructed session
+holds. The procedure is the `c-14-knowledge-bootstrap` skill. Onboarding is optional input there and is
+never required to start.
+
+**On the leaf pass**, every MCP call you make carries that contract path. Without it the tools resolve
+the *official* memory repo: your diagnostics would describe the wrong tree, and `route_index_refresh`
+**writes**, so an unscoped call dirties a repository you do not own. Check `onboardingRoot` in every
+response — it must be this leaf's memory worktree — and preview any write with `dry_run=true`.
 
 ## Process
 
@@ -99,6 +112,20 @@ preview any write with `dry_run=true`.
 7. **Write only what is yours**: file-level sidecars, affected route overviews, generated route indexes
    (`route_index_refresh`, scoped), and the repo entity catalog when a genuinely load-bearing entity changed.
 
+**The repository-foundation entry — the same reconciliation, without this leaf's delta.** Run the
+`c-14-knowledge-bootstrap` skill, in its order: read the state at the declared knowledge location
+before authoring anything, inventory bounded sources for the requested scope, author through the
+curator's own writer in the shape `../templates/curator-handoff-list.md` owns, and read the result
+back. **Which writer depends on the scope this seat runs in**: on this leaf's task document — the only
+way this seat is opened — it is the leaf entry, `agents-remember knowledge-ingest --contract <this
+leaf's enclosure contract> … --publish --commit`, which publishes onto the line this task's own readers
+resolve; the taskless `agents-remember knowledge-bootstrap` entry belongs to a session with **no
+enclosure in scope**, and it refuses one (`enclosure_in_scope`) because a bootstrap must not publish
+onto a task's line. Neither route is fabricated: no leaf, worktree or enclosure is ever created to give
+either an argument list, and where the developer gives the commit word, planning remains the default
+until they do. A foundation run that examined only part of its scope is reported as partial, with the
+areas it did not reach named.
+
 **Two judgments that are yours specifically.** Do not confuse **test-green with intent-green**: tests prove selected
 executable behaviour, never that ownership, non-goals, negative knowledge, or the separation between agent cognition
 and control-plane state stayed coherent. And never promote a historical oddity to a permanent invariant without
@@ -125,6 +152,11 @@ opportunity, alternative frame or forward-learning hypothesis is **not automatic
   the unchanged sibling members the run measured, and every entry the plane did not place — together with each
   plane's own state, and the external sources retained in the manifest with the origin references that name it.
   A plane this run did not record is reported as not recorded; a null count is never rounded to zero.
+- **On the repository-foundation entry**, the same report carries the foundation's own facts instead of a leaf's:
+  the state that was read before authoring, the source areas examined and not examined, each entry's outcome, the
+  publication result, the identity an independent read of the declared published location confirmed (or the state
+  that says nothing was published), and the remaining, unmeasured and carried work — with the areas a partial run
+  did not reach named as not reached.
 
 Write the record before ending your turn. Terminal/finalizer evidence then attests **only that this turn ended**,
 and wakes the manager, who validates it — it never attests that onboarding is correct. The **second**, separate duty
@@ -136,8 +168,11 @@ is yours: the evidence is the manager's to read, so never author a second model-
 - The **`c-05-create-or-update-onboarding-files`** workflow; **`route_index_refresh`** scoped to this leaf.
 - The **full `memory_quality_check`** operation, and **`curator_coherence`** when the checklist requires it.
 - The **ordinary knowledge authoring route**: `agents-remember knowledge-ingest` with this leaf's contract, the
-  hand-off list, the resolved baseline and `--publish --commit`. It is the write plane's reachable entry point; the
-  mounted `knowledge_change` tool refuses every kind and exists only to name this route.
+  hand-off list, the resolved baseline and `--publish --commit`; and the taskless `agents-remember
+  knowledge-bootstrap` entry the `c-14-knowledge-bootstrap` skill states, which belongs to a session with **no
+  enclosure in scope** — it refuses one (`enclosure_in_scope`) rather than publishing onto a task's line. Those
+  two are the write plane's reachable entry points; the mounted `knowledge_change` tool refuses every kind and
+  exists only to name the route.
 - **Shell checks**: `git diff --check` in the memory worktree, and any other check the brief names.
 - Sub-agents for **read/search/reference checks only**, one level deep; **the main session owns every durable write**.
 - **`message_parent`** to ask the owning seat one clarifying row when a side of the three-way comparison is missing or
@@ -148,8 +183,9 @@ is yours: the evidence is the manager's to read, so never author a second model-
 - **Never edit code**, task documents, gates, lifecycle state, worktree contracts or closeout state; never run a closeout
   or memory-carryover transaction from this seat.
 - **Never write the knowledge dataset yourself.** No hand-edited SQLite file, no second destination, no
-  `knowledge_change` (it refuses every record kind). `knowledge-ingest` is the only writer, its report is the only
-  result, and a destination you invented is a publication nothing will read.
+  `knowledge_change` (it refuses every record kind). The shipped batch writer that `knowledge-ingest` and
+  `knowledge-bootstrap` drive is the only writer, its report is the only result, and a destination you invented is a
+  publication nothing will read.
 - **Never invent a future code commit hash, advance a fingerprint onto an uncommitted tree, or add attestation prose to
   silence a finding.** The closeout records the real commits after your handoff; the ledger is a derived cache.
 - Never accept a subset result in place of the full operation, and never pass incomplete onboarding.

@@ -2,14 +2,16 @@
 
 **What it covers:** the new user's first hour, end to end, with the memory repository as its centre of
 gravity: what Agents Remember is for, the decisions only the developer can make, initializing the
-memory root, scaffolding the first onboarding, adopting the first attributed baseline, and verifying
-the result.
+memory root, scaffolding the first onboarding, reaching the repository's knowledge foundation,
+adopting the first attributed baseline, and verifying the result.
 
 **When it is selected:** a repository has no working memory root yet, or has one that does not resolve
 — no memory root, a memory root with no baseline, the removed repo-local layout, a coordination root
 that will not resolve, or providers configured but not indexing. Once a repository has an attributed
 baseline and a resolving context, its ordinary work belongs to the lifecycle roles; this operation is
-not a maintenance posture and re-entering it to "tidy" a working installation is out of scope.
+not a maintenance posture and re-entering it to "tidy" a working installation is out of scope. A
+repository that resolves but whose **knowledge foundation** is not recorded is reached by this
+operation's step 6 rather than by a re-entry.
 
 **How the carrier is started:** as a **free agent**, not a task seat. A regular session opens a
 session with `role=bootstrap` and **no task document**, and the role travels into the new session's
@@ -68,10 +70,27 @@ Each step names the surface that owns it. This operation **runs** that surface a
    `c-03-repo-bootstrap` skill. A thin root overview is enough to start; it is the artifact the first
    baseline will carry. (`docs/` and `system/` content is enough to adopt when the developer wants no
    onboarding yet.)
-6. **Adopt the first attributed baseline** through `memory_baseline_adopt`, with
+6. **Reach the repository's knowledge foundation.** The foundation — the authored records in the
+   knowledge database, as distinct from the Markdown onboarding and from the baseline — is the
+   curator's procedure, the `c-14-knowledge-bootstrap` skill. **This seat is the carrier that exists
+   for it before a task does**: a session opened for the curator with no task document is refused
+   (`400 task-binding-required`, "named role scope is required"), because the roles this operation's
+   own carrier belongs to — `bootstrap`, `chat`, `terminal` — are the only ones admitted without one.
+   So read the state first: the `knowledge` block `memory_init` returns says where the repository's
+   foundation lives and what a read of that location finds now — `not-recorded`, `recorded` at an
+   exact identity, `unusable`, or a refused admission with its own next action. Report which of those
+   it is, whether the curator's run has happened, and hand the authoring on: to a curator opened on a
+   **task document** for a real task, or to the taskless writer an instructed session holds — never to
+   this seat, which authors no records.
+   **The knowledge step is not conditional on this operation's other steps**: it needs a memory line
+   that resolves `HEAD`, not an onboarding corpus and not an adopted baseline, so a repository whose
+   knowledge begins before its onboarding is a supported order rather than a defect. Nothing about it
+   is fabricated to make the step run — no development leaf, worktree or enclosure is created to
+   satisfy an argument list, and no database is written by hand.
+7. **Adopt the first attributed baseline** through `memory_baseline_adopt`, with
    `memory_baseline_status` read before and after and the drift-acceptance decision put to the
    developer rather than assumed. Procedure: the `c-10-adopt-memory-baseline` skill.
-7. **Configure indexing, or say plainly that it is deferred.** Providers are accelerators: by-path
+8. **Configure indexing, or say plainly that it is deferred.** Providers are accelerators: by-path
    retrieval keeps working without them, and a deferred provider is a named recovery action rather
    than a failure.
 
@@ -84,11 +103,15 @@ operation exists to make legible; a seat that cannot name them is guessing.
 | --- | --- | --- |
 | No memory root | `memory_baseline_status` answers with memory that does not exist, or the resolver reports missing memory with the exact path it checked | Run step 4. Nothing downstream can succeed first. |
 | Unsupported topology | `memory-mode-unsupported` from the coordination resolver or a worktree entry point, naming the artifact and the supported set | A request for a mode the product no longer has is **refused by name, never substituted**. An existing repo-local `ar-memory/` root is **reported with its exact path and never migrated, rewritten, or deleted**; the route out is to re-point the repository at the external memory root and record `memory_mode: external` on its contracts. |
-| Dirty memory repo before adoption | `git status --porcelain` in the memory root, read before step 6 | Adoption commits the content it finds. Uncommitted work under `onboarding/`, `docs/`, or `system/` therefore becomes the baseline. Read the tree and get explicit agreement **before** adopting; do not read a clean drift report as a clean tree. |
+| Dirty memory repo before adoption | `git status --porcelain` in the memory root, read before step 7 | Adoption commits the content it finds. Uncommitted work under `onboarding/`, `docs/`, or `system/` therefore becomes the baseline. Read the tree and get explicit agreement **before** adopting; do not read a clean drift report as a clean tree. |
 | Missing providers | `provider_status`, `provider_diagnostics` | Docker, images, or the local model are not ready. Core memory setup continues; report the provider gap and its recovery action separately instead of blocking the first hour on it. |
 | Unresolvable coordination root | `server_info` reports no `coordinationRoot`, or `context_packet`/`resolve_context` refuse for the named repository | The coordinator runtime scaffold is missing or the repository is not configured. Run the `c-13-install-and-onboard` skill; if the scaffold itself is absent, `runtime_install` creates it. Do not hand-build a coordination root. |
-| Memory root is not a Git repository | Step 6's refusal naming the memory root | Re-run step 4 with Git initialization enabled; adoption needs a repository, not just directories. |
+| Memory root is not a Git repository | Step 7's refusal naming the memory root | Re-run step 4 with Git initialization enabled; adoption needs a repository, not just directories. |
 | Baseline already adopted | `memory_baseline_status` reports attributed memory | Setup is done. Adoption is valid only before attributed memory exists; treat the report as the ordinary-use transition and stop. |
+| Knowledge foundation not recorded | `memory_init`'s `knowledge` block reports `not-recorded`, or `agents-remember knowledge-bootstrap --repo <repo_id> --status` reports `destinationNow.state = not-recorded` | The repository has no published knowledge at the location the ordinary read route selects. This is step 6's real work, not a failure: onboarding and the baseline can both be complete while it is still true, and neither substitutes for it. |
+| Knowledge foundation already recorded | the same two surfaces report `recorded`, with the dataset's identity | Read it before extending it and never reinitialize it. A recorded foundation is extended or resumed through the same curator procedure; it is not replaced by a scaffold. |
+| Knowledge foundation unusable or bound elsewhere | `unusable`, with the shipped refusal code (`selected_input_unavailable` when there is no file to open, `snapshot_unavailable` when the bytes are not the expected dataset) | Report the exact state, path and code, and stop: the route is the developer's decision about the object standing there. **Never delete, overwrite or migrate it, and never report it as `not-recorded`.** |
+| Knowledge admission refused | `memory_init`'s `knowledge.state = context-not-admitted`, with its own `code`, `detail` and `nextAction` | An admission failure, not a knowledge state. Report the refusal's own route (`repository_not_allowed`, `coordination_root_unavailable`, `code_checkout_unavailable`, `code_checkout_is_not_a_git_checkout`, `code_revision_unavailable`, `memory_revision_unavailable`, `memory_layer_not_resolved`), and do not work around it by naming a path or a revision yourself. |
 
 ## How conformance is evidenced
 
@@ -117,11 +140,15 @@ reviewed requirement:
   authority by being the one who set the workspace up. Do not add a task altitude to make it look like
   the other roles: the developer ruled that it is not a task-related agent.
 - **It never commits code, never lands, never pushes, never runs closeout or integration.** The memory
-  content commit that step 6 performs is the setup surface's own designed effect, not this agent
+  content commit that step 7 performs is the setup surface's own designed effect, not this agent
   committing on the developer's behalf.
 - **It writes to the memory layer only through the setup surfaces and the `c-*` procedures that own
   them.** It does not author onboarding content itself, does not refresh existing onboarding, and does
   not edit a memory file to make a check pass.
+- **It does not author the knowledge foundation.** The knowledge records are the curator's authored
+  result, produced under the `c-14-knowledge-bootstrap` procedure that is the curator's; this agent
+  reads and reports that foundation's state, hands the authoring on, and never runs the knowledge
+  writer, invents invariants or populates a database so a report can say the repository is ready.
 - **It asks before anything irreversible.** Removing, migrating, re-pointing, or rewriting an existing
   memory artifact is never this agent's call to make quietly.
 - **It reports rather than repairs a removed layout.** A repo-local `ar-memory/` root is evidence, not
@@ -156,6 +183,7 @@ reviewed requirement:
 
 Bootstrap ends when the seat can state, from the surfaces alone: the resolved memory root and
 coordination root; which branch the memory is founded on; whether a baseline exists and at which
-commit; whether onboarding exists; whether providers are indexing or deferred; and every step that was
-skipped with its reason. It ends with a durable report, and it hands ordinary work to the lifecycle
-roles — the repository now has a context to resolve.
+commit; whether onboarding exists; **whether the knowledge foundation is recorded, and at which
+identity, or which named state says it is not**; whether providers are indexing or deferred; and every
+step that was skipped with its reason. It ends with a durable report, and it hands ordinary work to
+the lifecycle roles — the repository now has a context to resolve.

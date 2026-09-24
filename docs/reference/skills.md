@@ -44,7 +44,8 @@ package skill folder. The pre-commit and pre-push hooks run
 | `c-10-adopt-memory-baseline` | Adopt existing external-memory onboarding as an accepted Git memory baseline and refresh its computed ledger cache. |
 | `c-11-memory-carryover-from-branch` | Carry richer memory forward after matching code lands. |
 | `c-12-closeout` | Own closeout approval and the code → memory-content commit sequence; keep the computed ledger cache outside the Git transaction. |
-| `c-13-install-and-onboard` | Lead package-based first-run setup after the harness starter package and MCP server are wired: preflight checks, `runtime_install`, memory repo, onboarding bootstrap, and provider indexing. |
+| `c-13-install-and-onboard` | Lead package-based first-run setup after the harness starter package and MCP server are wired: preflight checks, `runtime_install`, memory repo, onboarding bootstrap, the knowledge foundation, and provider indexing. |
+| `c-14-knowledge-bootstrap` | Build or resume a repository's knowledge foundation through the existing curator: read the current knowledge state, inventory bounded sources, author invariants and families through the curator's own writer, publish through the taskless bootstrap, read the result back, and report coverage and unresolved work. |
 
 ## Installing Skills Into Harnesses
 
