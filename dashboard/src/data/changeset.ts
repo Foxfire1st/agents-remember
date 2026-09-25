@@ -31,11 +31,20 @@ export interface ChangeCounters {
   deletions: number;
 }
 // `taskChangeset` — one active enclosure's base->worktree code + memory change-set.
+//
+// `state`/`stateDetail` are the leaf view's own, and they are what keeps an UNRECORDED range apart
+// from a MEASURED EMPTY one (register B6). A `committed` read of a live leaf has no landed commit to
+// read yet; the server answers that state in the body rather than as a 404 -- a 404 for a state the
+// bar probes on every live leaf is a console error the accepted criterion counts. `stateDetail` is
+// the server's own sentence naming the missing endpoint and the action that produces it, and it is
+// carried to the reader verbatim rather than summarised here.
 export interface TaskChangeset {
   scope: string;
   code: ChangedFile[];
   memory: ChangedFile[];
   counters: { code: ChangeCounters; memory: ChangeCounters };
+  state?: "recorded" | "unrecorded";
+  stateDetail?: string;
 }
 // `fileDiff` — BEFORE (base) + AFTER (current) content for one file: feeds CodeMirror MergeView
 // a=before, b=after. `before` is null for an added file, `after` is null for a deleted one.

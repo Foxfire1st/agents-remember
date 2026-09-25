@@ -67,6 +67,15 @@ const mono = css({ fontFamily: "mono", fontSize: "0.78rem" });
 // The narrow-screen route to the selected review. It is a real button rather than a styled anchor
 // because there is no URL to change: it moves focus to the center column, which is what a reader on a
 // narrow screen needs after scrolling a long tree.
+//
+// IT SITS ABOVE THE TREE, AND THAT PLACEMENT IS THE WHOLE POINT (register B3, the accepted design's
+// finding P2-3). The accepted page puts this affordance "near the top" at `y≈307` so that a narrow
+// reader reaches the review WITHOUT first scrolling the family tree -- whose height is the reason the
+// affordance exists: the same finding records the rail at 2,298px pushing the review to y=2,821px, and
+// the fix "brings the review to the viewport top while keeping the full family/sibling tree intact".
+// It was previously rendered immediately before the centre column, i.e. BELOW the tree, which put it at
+// y=1183 in a 900px viewport -- visible only after the scroll it exists to avoid. The tree stays
+// exactly where it is: the fix is where this control is composed, not what the tree shows.
 const jump = css({
   justifySelf: "start",
   background: "transparent",
@@ -82,6 +91,20 @@ const jump = css({
   "@media (min-width: 60.01rem)": { display: "none" },
   _focusVisible: { outline: "1px solid var(--amber)", outlineOffset: "2px" },
 });
+
+// One instance of the narrow route, so the two call sites cannot drift in label, testid or handler.
+function NarrowJump({ center }: { center: React.RefObject<HTMLDivElement | null> }) {
+  return (
+    <button
+      type="button"
+      className={jump}
+      data-testid="review-jump-to-selection"
+      onClick={() => center.current?.focus()}
+    >
+      ↓ jump to the selected review
+    </button>
+  );
+}
 
 // The scope/status header: which task context is open, which subject of it, WHICH RECORD the panes
 // below are read from, the comparison's mode and exact endpoints, the measured changed-path count and
@@ -255,14 +278,6 @@ function SelectionColumn({
 }) {
   return (
     <>
-      <button
-        type="button"
-        className={jump}
-        data-testid="review-jump-to-selection"
-        onClick={() => center.current?.focus()}
-      >
-        ↓ jump to the selected review
-      </button>
       <CenterColumn
         payload={payload}
         selection={selection}
@@ -510,6 +525,8 @@ export function ReviewWorkspace({
         selectorId={selectorId}
         history={history}
       />
+      {/* Above the tree, on purpose: see `NarrowJump`. At >=60.01rem it renders nothing at all. */}
+      <NarrowJump center={center} />
       <FamilyColumn
         context={payload.family_context}
         selection={chosen}

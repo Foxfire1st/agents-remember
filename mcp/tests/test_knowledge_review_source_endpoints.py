@@ -60,7 +60,12 @@ from agents_remember.models.knowledge.review import (
     ReviewSurfaceRequest,
 )
 from agents_remember.models.knowledge.snapshot import CANDIDATE_RECEIPT_NAME
-from agents_remember.serving.changeset import ChangesetFileRef, leaf_changeset, leaf_file_diff
+from agents_remember.serving.changeset import (
+    ChangesetFileRef,
+    leaf_changeset,
+    leaf_file_diff,
+    register_changeset_routes,
+)
 from agents_remember.serving.review import register_review_routes
 from agents_remember.worktrees.modules import future_code_candidate as capture_owner
 from agents_remember.worktrees.modules.future_code_candidate import (
@@ -687,22 +692,46 @@ def test_a_committed_range_binds_the_recorded_commit_and_a_later_commit_does_not
     assert {entry["path"] for entry in working["code"]} == {UNCOMMITTED_PATH}
 
 
-def test_an_unrecorded_committed_endpoint_is_refused_rather_than_read_from_head(
+def test_an_unrecorded_committed_endpoint_is_answered_with_its_own_state_rather_than_read_from_head(
     endpoint_fixture: EndpointFixture,
 ) -> None:
-    """A live leaf with commits but no recorded endpoint has no committed range, and says so."""
+    """A live leaf with commits but no recorded endpoint has no committed range, and says so.
+
+    It says so IN THE BODY, not as a 404. An unrecorded endpoint is a state of the task's progress
+    rather than a missing resource, and the change-set bar probes this view as soon as a leaf
+    document is opened -- so a 404 here is a browser console error on the page whose accepted
+    criterion is zero console errors (register B6). What the case protects is unchanged and is the
+    reason the state is explicit rather than an empty list: ``HEAD`` is never substituted for the
+    missing endpoint, and the answer never reads as a range that was measured empty.
+    """
 
     fixture = endpoint_fixture
     head = _commit(fixture.worktree, "a commit nothing has recorded yet")
     assert fixture.contract.code_commit == ""
 
-    with pytest.raises(FileNotFoundError) as caught:
-        leaf_changeset(fixture.config, fixture.repository_id, fixture.master, LEAF_ID, "committed")
+    view = leaf_changeset(
+        fixture.config, fixture.repository_id, fixture.master, LEAF_ID, "committed"
+    )
 
-    message = str(caught.value)
-    assert "no committed code range yet" in message
-    assert "mode=working" in message
-    assert head not in message
+    assert view["state"] == "unrecorded"
+    detail = view["stateDetail"]
+    assert "no committed code range yet" in detail
+    assert "mode=working" in detail
+    # The unrecorded endpoint's own commit is not named, and it is not the range: one named endpoint
+    # is not a range, so no list may be published as one.
+    assert head not in detail
+    assert view["code"] == []
+    assert view["counters"] == {
+        "code": {"files": 0, "insertions": 0, "deletions": 0},
+        "memory": {"files": 0, "insertions": 0, "deletions": 0},
+    }
+    # A recorded range answers its own state, so "unrecorded" is a discriminator and not a constant.
+    fixture.recorded_range(head)
+    recorded = leaf_changeset(
+        fixture.config, fixture.repository_id, fixture.master, LEAF_ID, "committed"
+    )
+    assert recorded["state"] == "recorded"
+    assert recorded["stateDetail"] == ""
     # The working view keeps working and keeps its own name, so the uncommitted delta stays readable.
     assert (
         leaf_changeset(fixture.config, fixture.repository_id, fixture.master, LEAF_ID, "working")[
@@ -710,6 +739,57 @@ def test_an_unrecorded_committed_endpoint_is_refused_rather_than_read_from_head(
         ]
         == "working"
     )
+
+
+def test_the_route_answers_an_unrecorded_committed_view_without_a_status_error(
+    endpoint_fixture: EndpointFixture,
+) -> None:
+    """The HTTP layer publishes the unrecorded state as a 200, which is the whole of B6.
+
+    The pure function answering ``state="unrecorded"`` is not enough: the defect was that the ROUTE
+    turned it into a 404, and a 404 is what the browser logs as a console error on the page whose
+    accepted criterion is zero. So the status is asserted here, on the served route, together with
+    the two things that keep the answer honest -- the state discriminator survives serialization, and
+    the body still refuses to name ``HEAD`` as the range.
+    """
+
+    fixture = endpoint_fixture
+    _commit(fixture.worktree, "a commit nothing has recorded yet")
+    assert fixture.contract.code_commit == ""
+
+    served = FastAPI()
+    register_changeset_routes(served, fixture.config)
+    with TestClient(served, raise_server_exceptions=False) as client:
+        response = client.get(
+            "/api/changeset/task",
+            params={
+                "repo": fixture.repository_id,
+                "master": fixture.master,
+                "leaf": LEAF_ID,
+                "mode": "committed",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["state"] == "unrecorded"
+    assert "no committed code range yet" in body["stateDetail"]
+    assert body["code"] == []
+    assert body["counters"]["code"] == {"files": 0, "insertions": 0, "deletions": 0}
+    # An unknown leaf is still a named 404: the state is an answer for a leaf that exists, and it
+    # must not have been bought by turning every absent thing into a 200.
+    with TestClient(served, raise_server_exceptions=False) as client:
+        missing = client.get(
+            "/api/changeset/task",
+            params={
+                "repo": fixture.repository_id,
+                "master": fixture.master,
+                "leaf": "260921-ICR-NOPE",
+                "mode": "committed",
+            },
+        )
+    assert missing.status_code == 404, missing.text
+    assert missing.json()["status"] == "not-found"
 
 
 def test_an_unrecorded_memory_half_empties_only_itself_and_keeps_the_code_half(
@@ -721,8 +801,9 @@ def test_an_unrecorded_memory_half_empties_only_itself_and_keeps_the_code_half(
     nothing has written yet. The memory half must degrade to "nothing to show" with its counters at
     zero -- the degradation this side has always published for a leaf whose memory leg is not run --
     because the code half was resolved from its own recorded commit and a whole-view refusal would
-    throw that result away. The code side's own refusal stays exactly as it is (measured in the case
-    above), and nothing here is answered from the worktree's ``HEAD``.
+    throw that result away. The code side answers ``state="recorded"`` here (the unrecorded-endpoint
+    case above is its own, and the state is what tells the two apart), and nothing here is answered
+    from the worktree's ``HEAD``.
     """
 
     fixture = endpoint_fixture

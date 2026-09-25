@@ -383,8 +383,10 @@ def _load_leaf_contract(
     return None
 
 
-def _leaf_range(contract: WorktreeContract, *, memory: bool, mode: str) -> list[dict[str, Any]]:
-    """One side's (code or memory) change-set for a leaf view ``mode``.
+def _leaf_range(
+    contract: WorktreeContract, *, memory: bool, mode: str
+) -> tuple[list[dict[str, Any]], str]:
+    """One side's (code or memory) change-set for a leaf view ``mode``, plus its named absence.
 
     ``committed`` = the contract's **recorded** range (``base_commit`` -> the landed commit), which
     is the leaf's LANDED delta and is what ``mode=committed`` publishes. A still-live leaf whose
@@ -398,11 +400,20 @@ def _leaf_range(contract: WorktreeContract, *, memory: bool, mode: str) -> list[
     The two sides resolve **independently**, so one side's unrecorded endpoint never discards the
     other side's answer: a memory half nothing has recorded yet degrades to nothing to show -- the
     same degradation this side has always published for a leaf that does not run memory at all --
-    while the code half, resolved from its own recorded commit, is still published. The code half
-    keeps the named refusal, because there the endpoint *is* the view: answering it with nothing
-    would claim the leaf landed nothing. Every other absence (a recorded commit this repository does
-    not hold) stays a refusal on both sides, since reporting it as an empty range would publish a
-    measurement the caller never made.
+    while the code half, resolved from its own recorded commit, is still published.
+
+    **The second return value is the named absence, and the code half carries it rather than
+    refusing.** The code endpoint *is* the view, so answering it with an empty list alone would claim
+    the leaf landed nothing -- but an unrecorded endpoint is a state of the task's progress, not a
+    missing resource, and a ``404`` for a state every live leaf passes through is a browser console
+    error on the page whose accepted criterion is zero console errors (register B6).
+    :func:`leaf_changeset` therefore publishes it as the body's own explicit ``state``/
+    ``stateDetail``: a measurement is never claimed, and a resource that exists is never refused.
+    Every other absence (a recorded commit this repository does not hold) stays a refusal on both
+    sides, since reporting it as an empty range would publish a measurement the caller never made.
+
+    Only the code side carries a detail: a memory side's unrecorded endpoint is the
+    nothing-to-show this view has always published for a leaf that does not run memory at all.
     """
     if memory:
         worktree, repository = contract.memory_worktree, contract.memory_repo_path
@@ -413,18 +424,19 @@ def _leaf_range(contract: WorktreeContract, *, memory: bool, mode: str) -> list[
         # memory degradation. The code-side liveness that makes ``working`` meaningful is enforced once
         # in leaf_changeset, so a missing memory worktree never fails the whole view.
         if worktree is None or not worktree.exists():
-            return []
-        return changed_files_with_counts(worktree, head_commit(worktree, "HEAD"), None)
+            return [], ""
+        return changed_files_with_counts(worktree, head_commit(worktree, "HEAD"), None), ""
     if repository is None:
-        return []
+        return [], ""
     try:
         recorded = recorded_committed_range(contract, memory=memory)
     except RecordedEndpointAbsent as absent:
-        if not memory or absent.kind != NOT_RECORDED:
+        if absent.kind != NOT_RECORDED:
             raise
-        return []
-    return changed_files_with_counts(
-        recorded.repository, recorded.base_commit, recorded.head_commit
+        return [], ("" if memory else str(absent))
+    return (
+        changed_files_with_counts(recorded.repository, recorded.base_commit, recorded.head_commit),
+        "",
     )
 
 
@@ -447,9 +459,14 @@ def leaf_changeset(
 
     Returns the same shape as :func:`task_changeset` (so the L4 viewer renders it unchanged): the
     code + memory changed-file lists with counts, code files tagged ``hasSidecar``. ``committed``
-    reads the contract's recorded commits and works with no live worktree (a completed leaf); a leaf
-    whose landed commit is not recorded yet is refused by name instead. ``working`` requires a live
-    worktree (404 otherwise).
+    reads the contract's recorded commits and works with no live worktree (a completed leaf). A leaf
+    whose landed commit is not recorded yet is **answered, not refused**: the body carries
+    ``state="unrecorded"`` and ``stateDetail`` naming the missing endpoint and the action that
+    produces it, because that is a state of the task's progress rather than a missing resource, and
+    the change-set bar probes this view on every live leaf. Its counters stay a measured zero of the
+    range that *is* known, and the explicit state is what keeps that zero from being read as "the
+    leaf landed nothing". ``working`` requires a live worktree (404 otherwise), and an unknown leaf
+    is still a 404 by name.
     """
     contract = _load_leaf_contract(config, repo_id, master, leaf)
     if contract is None:
@@ -458,8 +475,8 @@ def leaf_changeset(
         contract.code_worktree is not None and contract.code_worktree.exists()
     ):
         raise FileNotFoundError("no live worktree for the working change-set")
-    code = _leaf_range(contract, memory=False, mode=mode)
-    memory = _leaf_range(contract, memory=True, mode=mode)
+    code, code_absent = _leaf_range(contract, memory=False, mode=mode)
+    memory, _ = _leaf_range(contract, memory=True, mode=mode)
     onboarding_root = _leaf_onboarding_root(contract, mode)
     for entry in code:
         entry["hasSidecar"] = (
@@ -469,6 +486,8 @@ def leaf_changeset(
     return {
         "scope": contract.leaf_id,
         "mode": mode,
+        "state": "unrecorded" if code_absent else "recorded",
+        "stateDetail": code_absent,
         "code": code,
         "memory": memory,
         "counters": {"code": _sum(code), "memory": _sum(memory)},

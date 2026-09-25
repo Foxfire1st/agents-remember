@@ -57,6 +57,16 @@ const muted = css({ color: "muted", fontSize: "0.8rem", margin: "0.2rem 0" });
 
 const rows = css({ margin: "0.2rem 0", paddingLeft: "1.1rem" });
 
+// The path is a `mono` string with no spaces in it, so it has a very large MIN-CONTENT width. Without
+// a break opportunity the button takes that width, and every grid item above it refuses to shrink
+// (`min-width: auto`), so the whole column grows past its track: measured on the mounted product at
+// 320px, one `review-inventory-open` button was 556px wide inside a 294px column and its right 262px
+// was cut off by the app shell's `overflow-x: hidden` -- with no panning ancestor, so the rest of the
+// path was neither visible nor reachable. Register B7 states the criterion this broke: "long
+// guarantees and long paths remain readable and wrapped; controls are unclipped". `overflow-wrap:
+// anywhere` gives the path the break opportunity it needs (and, unlike `break-word`, it also lowers
+// the element's min-content width, which is what lets the column shrink instead of overflow);
+// `max-width: 100%` states that the button never claims more than its container.
 const rowButton = css({
   background: "transparent",
   border: "none",
@@ -65,6 +75,8 @@ const rowButton = css({
   font: "inherit",
   padding: "0",
   textAlign: "left",
+  maxWidth: "100%",
+  overflowWrap: "anywhere",
   _focusVisible: { outline: "1px solid var(--amber)", outlineOffset: "2px" },
 });
 

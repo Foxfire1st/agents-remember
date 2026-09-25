@@ -75,8 +75,22 @@ export interface ReviewTarget {
 
 const TAKEOVER = "changeset-viewer";
 
+// One pane of the complete-payload disclosure. Two declarations here are load-bearing, not cosmetic
+// (ICR-L25 round 3, register B7; measured at 320px on the mounted product):
+//
+//   * `minWidth: 0` — the pane is a GRID ITEM of the disclosure below, so its automatic minimum size
+//     is content-based unless it is told otherwise, and it then overflows its own column instead of
+//     the column constraining it.
+//   * `overflowWrap: "anywhere"` — what actually lowers that minimum. The identities this surface
+//     prints are single unbreakable tokens (a 64-character comparison reference measured 539px, a
+//     repository path 565px), and the inherited `break-word` does NOT reduce min-content, so one such
+//     token set the pane to 565px inside a 294px column at 320px. `anywhere` breaks only where the
+//     line cannot otherwise fit, so prose is unaffected.
 const pane = (title: string, children: React.ReactNode) => (
-  <section style={{ marginBottom: "1.25rem" }} data-pane={title}>
+  <section
+    style={{ marginBottom: "1.25rem", minWidth: 0, overflowWrap: "anywhere" }}
+    data-pane={title}
+  >
     <h3 style={{ margin: "0 0 0.4rem" }}>{title}</h3>
     {children}
   </section>
@@ -754,7 +768,18 @@ function ReviewPanes({
         <summary style={{ cursor: "pointer", color: "muted" }}>
           complete payload details — knowledge, attribution, evidence and refusal records
         </summary>
-        <div className={TAKEOVER} style={{ display: "grid", gap: "1rem", marginTop: "0.6rem" }}>
+        {/* `minmax(0, 1fr)`, not the implicit `auto`: the column is the reader's column, and a track
+            that is allowed to shrink below its items' min-content is what lets the panes' own
+            `min-width: 0` take effect (ICR-L25 round 3, B7). */}
+        <div
+          className={TAKEOVER}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr)",
+            gap: "1rem",
+            marginTop: "0.6rem",
+          }}
+        >
           <KnowledgePane payload={shown} />
           <SourcePane payload={shown} />
           <EvidencePane payload={shown} />
@@ -796,12 +821,27 @@ function ReviewHeader({
 }) {
   return (
     <>
-      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.75rem" }}>
+      {/* `wrap` + the subject's own `min-width: 0`: at 320px this row is the only thing left past the
+          viewport edge, and it is one unbreakable line of identities beside two controls. Wrapping
+          moves the whole refresh control to the next line instead of pushing it 4px past the edge
+          (ICR-L25 round 3, B7 — measured: the row alone overflowed a 294px column). */}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "0.5rem",
+          alignItems: "center",
+          marginBottom: "0.75rem",
+        }}
+      >
         <button type="button" onClick={onBack} data-testid="review-back">
           ← back
         </button>
         <strong>Intent review</strong>
-        <span style={{ color: "muted" }} data-testid="review-subject">
+        <span
+          style={{ color: "muted", minWidth: 0, overflowWrap: "anywhere" }}
+          data-testid="review-subject"
+        >
           {repo} · {master} · {leaf} · {subjectLabel(selectorKind, selectorId, instead)}
         </span>
         {refresh}
@@ -867,6 +907,16 @@ export function ReviewSurface({
       data-comparison={shown?.comparison?.reference}
       data-review-target={`${repo}/${master}/${leaf}`}
       data-review-history={history ?? "live"}
+      // THE REVIEWER'S OWN VERTICAL AFFORDANCE (ICR-L25 round 3, register B7 / finding F2). The
+      // cockpit's `MAIN` is deliberately `overflow: hidden` — "the viewport does not scroll, its panel
+      // scrolls on its own" (`cockpit/Cockpit.tsx`) — and that decision is the shell's, shared with
+      // every other view. This panel had supplied no scrollport of its own, so at 320px it rendered
+      // 7620px of content into a 706px viewport that clipped it: every element in the document
+      // measured `overflow-y` visible or hidden, the window was exactly viewport-height, three wheel
+      // trials moved nothing, and a long guarantee was reachable only by the browser's programmatic
+      // focus scroll. `height: 100%` + `minHeight: 0` fills the shell's row instead of growing past
+      // it, and `overflowY: auto` is the scrollport a reader can actually move.
+      style={{ height: "100%", minHeight: 0, minWidth: 0, overflowY: "auto" }}
     >
       <ReviewHeader
         repo={repo}

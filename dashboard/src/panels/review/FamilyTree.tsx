@@ -83,6 +83,20 @@ const statements = css({ margin: "0.1rem 0", paddingLeft: "1.1rem", listStyle: "
 // The tree's one selectable control. Selection is the established amber treatment: the current node
 // carries the amber wash, and the keyboard focus ring is the same amber, so which node is current and
 // which has focus are both visible without either being inferred from the other.
+//
+// THE WASH IS MIXED IN `oklab`, THROUGH THE TOKEN (register B1). These two used to be raw
+// `oklch(0.82 0.16 75 / …)` literals -- the channels of `--amber` copied by hand, mixed by hand. That
+// is the one place in the review surface that did not use AR's own language, which every other
+// selection wash in this dashboard states as `color-mix(in oklab, var(--amber) N%, transparent)`
+// (`panels/changeset/ChangeSetViewer.tsx:120-121`, `panels/file-viewer/FileTree.tsx:34`,
+// `panels/file-viewer/FileViewer.tsx:108`), and `styles/tokens.css:20` states the contract it broke:
+// "no raw color literals here: every color is a token var". The accepted design's own finding P2-1 is
+// why the interpolation space matters at all: an `oklch` mix interpolates the HUE, which is how the
+// selected row came out `oklch(0.324 0.048 215)` -- visibly teal -- before the fix. Mixing in `oklab`
+// keeps the wash the amber it is named for, and taking the colour from `var(--amber)` keeps it amber
+// when the token moves.
+const AMBER_WASH = (percent: number) => `color-mix(in oklab, var(--amber) ${percent}%, transparent)`;
+
 const node = css({
   display: "block",
   width: "100%",
@@ -98,11 +112,11 @@ const node = css({
   textAlign: "left",
   borderRadius: "2px",
   _focusVisible: { outline: "1px solid var(--amber)", outlineOffset: "1px" },
-  _hover: { background: "oklch(0.82 0.16 75 / 0.08)" },
+  _hover: { background: AMBER_WASH(8) },
 });
 
 const current = css({
-  background: "oklch(0.82 0.16 75 / 0.16)",
+  background: AMBER_WASH(16),
   borderLeftColor: "amber",
 });
 

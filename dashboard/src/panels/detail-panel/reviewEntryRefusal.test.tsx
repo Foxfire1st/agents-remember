@@ -18,7 +18,7 @@
 // read and an empty list were indistinguishable and neither was ever shown -- the reader saw an entry
 // with no reason, or (before that) no entry at all. Every case below fails against that hook.
 
-import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { dashboardStore } from "../../data/store";
@@ -530,5 +530,101 @@ describe("the entry's pre-click freshness marker (ICR-R17 / L17-F4)", () => {
       expect(view.getByTestId("review-catalogue-refresh").dataset.catalogueStale).toBe("false"),
     );
     expect(view.queryByTestId("review-catalogue-stale")).toBeNull();
+  });
+});
+
+// B6 — the committed probe of a leaf whose landed commit nothing has recorded yet.
+//
+// WHAT THIS CATCHES. The bar renders the `committed` control for every leaf, and a live leaf has no
+// recorded range yet. The route used to answer that state with a 404, which the browser logs as a
+// console error -- and B6's criterion is zero console errors on the page. The route now answers it in
+// the body; these cases hold the control to the distinction the answer exists to make: an unrecorded
+// range is not a range measured empty, and it is not a refusal either.
+const UNRECORDED_DETAIL =
+  "the contract records no code landed commit for leaf 260921-ICR-L16, so this leaf has no committed " +
+  "code range yet: the committed view reads the two recorded commits and substitutes no HEAD, branch " +
+  "or working tree for either. Read the uncommitted view (mode=working) while the task is live, or " +
+  "reopen this view after closeout records the range";
+const UNRECORDED_BODY = { ...COUNTERS, scope: LEAF, mode: "committed", state: "unrecorded", stateDetail: UNRECORDED_DETAIL };
+
+const committedButton = (view: ReturnType<typeof mount>["view"]) =>
+  view
+    .getAllByTestId("open-changeset")
+    .find((button) => (button.textContent ?? "").includes("committed"));
+
+describe("the committed counter read of a leaf whose range nothing has recorded (B6)", () => {
+  it("shows the unrecorded state with the route's own sentence, and never prints its zero as a total", async () => {
+    liveLeaf();
+    const fetchFn = vi.fn(async (url: string) => {
+      if (url.includes("/api/changeset/task") && url.includes("mode=committed")) {
+        return { ok: true, status: 200, json: async () => UNRECORDED_BODY } as unknown as Response;
+      }
+      return { ok: true, status: 200, json: async () => COUNTERS } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchFn);
+
+    const { view } = mount();
+    const button = await waitFor(() => {
+      const found = committedButton(view);
+      expect(found).toBeDefined();
+      return found as HTMLElement;
+    });
+
+    // Scoped to the committed control: a live leaf's bar carries three of these controls, and only
+    // this one's read is the unrecorded range.
+    const state = await waitFor(() => {
+      const found = within(button).getByTestId("changeset-state");
+      expect(found.dataset.reviewState).toBe("unrecorded");
+      return found;
+    });
+
+    // The route's own sentence reaches the reader, including the two alternatives it names.
+    expect(state.textContent).toContain("no committed code range yet");
+    expect(state.textContent).toContain("mode=working");
+    // The distinction the state exists to carry: unrecorded is NOT a measured empty range.
+    expect(state.dataset.reviewState).not.toBe("known-empty");
+    expect(state.dataset.reviewCode).toBeUndefined();
+    // And the zero of nothing is not presented as a measurement: no `+0 −0` beside the control.
+    expect(button.textContent).not.toContain("+0 −0");
+    // No request was answered with a failing status, which is the whole of B6: nothing here is a
+    // console error, because nothing here is a 404.
+    expect(fetchFn.mock.results.length).toBeGreaterThan(0);
+    for (const call of fetchFn.mock.calls) {
+      expect(String(call[0])).not.toContain("mode=committed&mode=");
+    }
+  });
+
+  it("keeps an unrecorded range apart from a measured empty one and from a refusal", async () => {
+    liveLeaf();
+    // A measured empty range: the answer every other case in this file serves.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/api/changeset/task") && url.includes("mode=committed")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ ...COUNTERS, state: "recorded", stateDetail: "" }),
+          } as unknown as Response;
+        }
+        return { ok: true, status: 200, json: async () => COUNTERS } as unknown as Response;
+      }),
+    );
+
+    const { view } = mount();
+    const button = await waitFor(() => {
+      const found = committedButton(view);
+      expect(found).toBeDefined();
+      return found as HTMLElement;
+    });
+    const empty = await waitFor(() => {
+      const found = within(button).getByTestId("changeset-state");
+      expect(found.dataset.reviewState).toBe("known-empty");
+      return found;
+    });
+    expect(empty.textContent).toContain("no changed file in either half");
+    // The measured-empty rendering is the one that prints the zero, so the two states cannot be the
+    // same screen: a recorded-and-empty range says so, an unrecorded one names what is missing.
+    await waitFor(() => expect(button.textContent).toContain("+0 −0"));
   });
 });

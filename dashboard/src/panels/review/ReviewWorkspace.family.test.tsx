@@ -723,4 +723,32 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     }
     expect(urls).toHaveLength(3);
   });
+
+  // B3 (the accepted design's finding P2-3). The narrow-screen route to the review must be composed
+  // ABOVE the family tree, because the tree's own height is the reason the affordance exists: the
+  // finding records the rail at 2,298px pushing the review to y=2,821px, and its fix puts the
+  // affordance "near the top" at y≈307 "while keeping the full family/sibling tree intact". Composed
+  // immediately before the centre column instead, the control lands below the whole tree — measured on
+  // the mounted product at y=1183 in a 900px viewport, i.e. reachable only after the scroll it exists
+  // to avoid. This case pins the composition order, not a pixel: a jsdom render has no layout, and the
+  // pixels are the mounted capture's job.
+  it("composes the narrow jump route above the family tree, with the tree intact", async () => {
+    serving([COMPLETE]);
+    const view = mount();
+
+    const jump = await view.findByTestId("review-jump-to-selection");
+    const tree = view.getByTestId("review-family-tree");
+    // DOCUMENT_POSITION_FOLLOWING: the tree comes after the jump control in document order.
+    expect(jump.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tree.compareDocumentPosition(jump) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+
+    // "While keeping the full family/sibling tree intact": the tree is not trimmed, hidden or moved.
+    expect(view.getAllByTestId("review-family")).toHaveLength(2);
+    expect(view.getAllByTestId("review-family-member-open").length).toBeGreaterThan(0);
+
+    // The route still does what it is for: it focuses this column, which is the whole of its effect.
+    const centre = view.getByTestId("review-center-column");
+    fireEvent.click(jump);
+    expect(document.activeElement).toBe(centre);
+  });
 });

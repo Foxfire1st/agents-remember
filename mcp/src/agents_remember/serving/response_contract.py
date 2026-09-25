@@ -841,9 +841,23 @@ class TaskChangeSet(WireResponse):
 
 
 class LeafChangeSet(TaskChangeSet):
-    """The same shape for a leaf view, which additionally names the mode it was resolved in."""
+    """The same shape for a leaf view, which additionally names the mode it was resolved in.
+
+    ``state`` says whether that mode's own endpoints are recorded. ``recorded`` is the ordinary
+    answer: the range's two commits both exist and the lists are that range.
+
+    ``unrecorded`` is a ``committed`` view of a leaf whose landed commit nothing has recorded yet --
+    the state every live leaf is in before its closeout, and one the change-set bar probes as soon
+    as a leaf document is opened. It is answered rather than refused because the resource exists and
+    only its second endpoint does not, and because a ``404`` for it is a browser console error on a
+    page whose accepted criterion is zero (register B6). ``stateDetail`` names the missing endpoint
+    and the action that produces it, so the answer is explicit: the counters beside it are a measured
+    zero **of nothing**, and no reader may take them for "the leaf landed nothing".
+    """
 
     mode: Literal["committed", "working"]
+    state: Literal["recorded", "unrecorded"] = "recorded"
+    state_detail: str = ""
 
 
 class LeafSummary(WireResponse):

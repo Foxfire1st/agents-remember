@@ -527,18 +527,36 @@ function EvidenceBlock({
   );
 }
 
-// The centre before any family or member is selected. It says what the column is for and states that
-// the explorer below is not filtered by the selection -- the one thing a reader must know before
-// choosing, because the family navigation is an attribution lens rather than an exclusion filter.
+// The centre before the reader has chosen a family or a member. It says what the column is for and
+// states that the explorer below is not filtered by the selection -- the one thing a reader must know
+// before choosing, because the family navigation is an attribution lens rather than an exclusion
+// filter.
+//
+// ITS FIRST SENTENCE NAMES THE PLANE, AND THAT IS A FIX (register B3). It used to read "No family or
+// member is selected", full stop -- while the scope header eight lines above can read "recorded: 1 of 1
+// recorded family context(s) composed", the tree can print "this review selected <revision>" twice, and
+// a roster line can read "2 membership row(s) and this page carried 2 of them -- the page is the whole
+// selection". Every one of those "selected"s is the SERVER's own word for which family revision it read
+// and which roster page it carried; none of them is a choice this column can render. So the sentence
+// was true about this column's own state and misleading about the screen: a reader comparing it with
+// the tree reads a contradiction that is really a collision of two vocabularies.
+//
+// The measured discriminator is this component's own `data-selection-kind` on its parent: it is
+// `none` here, and no tree row carries `aria-current` -- verified on the mounted product, so this is a
+// statement about state the pane holds and not a claim about what the reader sees. The replacement says
+// which selection is missing (this column's) and points at the affordance that makes one, and invents
+// nothing about the composition the header reports.
 function UnselectedCenter() {
   return (
     <section className={shell} data-testid="review-center-unselected">
       <h2 className={sectionLabel}>Central review</h2>
       <p className={muted}>
-        No family or member is selected. The complete source change explorer below is the whole
-        measured review population and is not filtered by this selection: choose a family guarantee or
-        one of its member statements above to read the intent, its linked expressions and its recorded
-        evidence in this column.
+        No family or member has been chosen in this column yet. The composition above is unaffected by
+        that: the header reports which family contexts this review composed, and the tree reports the
+        family revision and roster page the server selected for each of them — neither is a choice made
+        here. The complete source change explorer below is the whole measured review population and is
+        not filtered by any choice made here: choose a family guarantee or one of its member statements
+        above to read the intent, its linked expressions and its recorded evidence in this column.
       </p>
     </section>
   );
