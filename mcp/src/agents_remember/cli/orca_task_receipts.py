@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -162,6 +163,99 @@ def _taskless_session_directory(config: McpRuntimeConfig, role: str) -> Path:
         / role
         / "sessions"
     )
+
+
+def _message_binding_projection_reference(
+    config: McpRuntimeConfig,
+    request_id: uuid.UUID,
+    binding: dict[str, Any],
+) -> dict[str, str]:
+    body = _message_binding_projection_bytes(binding)
+    path = _message_binding_projection_path(config, request_id)
+    return {
+        "path": path.as_posix(),
+        "sha256": hashlib.sha256(body).hexdigest(),
+    }
+
+
+def _write_message_binding_projection(
+    config: McpRuntimeConfig,
+    request_id: uuid.UUID,
+    binding: dict[str, Any],
+    expected_reference: dict[str, str],
+) -> dict[str, str]:
+    """Create or reuse the exact immutable binding file for one AR request ID."""
+    reference = _message_binding_projection_reference(config, request_id, binding)
+    if reference != expected_reference:
+        raise ValueError("The message-binding projection reference does not match its content.")
+    path = Path(reference["path"])
+    body = _message_binding_projection_bytes(binding)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if _existing_message_binding_projection_matches(path, body):
+        return reference
+
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(body)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(temporary, path, follow_symlinks=False)
+        except FileExistsError:
+            if not _existing_message_binding_projection_matches(path, body):
+                raise ValueError(
+                    "This request ID already has a different immutable message-binding projection."
+                ) from None
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+    return reference
+
+
+def _verify_message_binding_projection(
+    config: McpRuntimeConfig,
+    request_id: uuid.UUID,
+    binding: dict[str, Any],
+    expected_reference: dict[str, str],
+) -> None:
+    reference = _message_binding_projection_reference(config, request_id, binding)
+    if reference != expected_reference:
+        raise ValueError("This request ID is already bound to different message content.")
+    if not _existing_message_binding_projection_matches(
+        Path(reference["path"]), _message_binding_projection_bytes(binding)
+    ):
+        raise ValueError("The saved native message-binding projection is missing.")
+
+
+def _message_binding_projection_path(config: McpRuntimeConfig, request_id: uuid.UUID) -> Path:
+    return (
+        config.coordination_root
+        / "notes"
+        / "reports"
+        / "orca-native-executions"
+        / "message-bindings"
+        / f"{request_id}.json"
+    ).resolve(strict=False)
+
+
+def _message_binding_projection_bytes(binding: dict[str, Any]) -> bytes:
+    return (
+        json.dumps(binding, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+
+
+def _existing_message_binding_projection_matches(path: Path, expected: bytes) -> bool:
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return False
+    if not stat.S_ISREG(mode):
+        raise ValueError("The message-binding projection path is not a regular file.")
+    if path.read_bytes() != expected:
+        raise ValueError(
+            "This request ID already has a different immutable message-binding projection."
+        )
+    return True
 
 
 def _migrate_taskless_legacy_receipt(config: McpRuntimeConfig, selection: OrcaSelection) -> None:

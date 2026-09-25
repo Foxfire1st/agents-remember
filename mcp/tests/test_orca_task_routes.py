@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import stat
 import unittest
 import uuid
 from pathlib import Path
@@ -65,6 +67,165 @@ class TaskReportAccessTests(unittest.TestCase):
             access.mkdir()
             with self.assertRaisesRegex(ValueError, "non-link"):
                 _bind_task_report_access(workspace, task_reports)
+
+
+class MessageBindingProjectionTests(unittest.TestCase):
+    def test_projection_reuses_identical_request_content_and_refuses_replacement(self) -> None:
+        with TemporaryDirectory() as temporary:
+            config = _runtime_config(Path(temporary))
+            request_id = uuid.uuid4()
+            binding = {
+                "requestId": str(request_id),
+                "role": "worker",
+                "operation": "implementation",
+                "selection": {"taskDocumentRef": {"repository": "repo", "path": "task/leaf.json"}},
+                "taskDocumentDigest": "task-digest",
+                "taskReportPath": "/coordination/task/notes/reports/worker.md",
+                "capsuleDigest": "capsule-digest",
+            }
+            reference = orca_task_receipts._message_binding_projection_reference(
+                config, request_id, binding
+            )
+            written = orca_task_receipts._write_message_binding_projection(
+                config, request_id, binding, reference
+            )
+            path = Path(reference["path"])
+            exact_bytes = path.read_bytes()
+
+            self.assertEqual(written, reference)
+            self.assertEqual(json.loads(exact_bytes), binding)
+            self.assertEqual(hashlib.sha256(exact_bytes).hexdigest(), reference["sha256"])
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(
+                orca_task_receipts._write_message_binding_projection(
+                    config, request_id, binding, reference
+                ),
+                reference,
+            )
+            self.assertEqual(path.read_bytes(), exact_bytes)
+            orca_task_receipts._verify_message_binding_projection(
+                config, request_id, binding, reference
+            )
+
+            changed_binding = {**binding, "taskReportPath": "/other/request.md"}
+            changed_reference = orca_task_receipts._message_binding_projection_reference(
+                config, request_id, changed_binding
+            )
+            with self.assertRaisesRegex(ValueError, "different immutable message-binding"):
+                orca_task_receipts._write_message_binding_projection(
+                    config, request_id, changed_binding, changed_reference
+                )
+            with self.assertRaisesRegex(ValueError, "different message content"):
+                orca_task_receipts._verify_message_binding_projection(
+                    config, request_id, changed_binding, reference
+                )
+            self.assertEqual(path.read_bytes(), exact_bytes)
+
+    def test_launch_receipt_references_projection_before_native_launch(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = _runtime_config(root)
+            request_id = uuid.uuid4()
+            request = OrcaDispatchRequest(role="architect", requestId=request_id)
+            context = OrcaRoleContext(
+                role="architect", sprint=None, master=None, task=None, effective_task=None
+            )
+            selection = selection_binding(request)
+            binding = {
+                "requestId": str(request_id),
+                "role": "architect",
+                "operation": "planning",
+                "selection": selection,
+                "taskDocumentDigest": "task-document-digest",
+                "taskReportPath": (root / "report.md").as_posix(),
+                "capsuleDigest": "capsule-digest",
+            }
+            reference = orca_task_receipts._message_binding_projection_reference(
+                config, request_id, binding
+            )
+            prepared = {
+                "prompt": "prepared prompt",
+                "capsuleOperation": "planning",
+                "capsuleDigest": "capsule-digest",
+                "taskDocumentDigest": "task-document-digest",
+                "taskReportPath": (root / "report.md").as_posix(),
+                "canonicalTaskReportPath": (root / "report.md").as_posix(),
+                "messageBindingProjection": {
+                    "requestId": str(request_id),
+                    "binding": binding,
+                    **reference,
+                },
+            }
+            receipt_path = orca_task_receipts._receipt_path(config, request, request_id)
+            workspace = {"id": "projects-id", "selector": "id:projects-id", "path": root.as_posix()}
+
+            def execute(path: Path, receipt: dict[str, object]) -> JSONResponse:
+                projection_path = Path(reference["path"])
+                self.assertEqual(json.loads(projection_path.read_text(encoding="utf-8")), binding)
+                self.assertEqual(
+                    receipt["messageBindingProjection"],
+                    reference,
+                )
+                stored_receipt = orca_task_receipts._read_receipt(path)
+                assert stored_receipt is not None
+                self.assertEqual(stored_receipt["messageBindingProjection"], reference)
+                return JSONResponse({"status": "running"})
+
+            def dispatch() -> JSONResponse:
+                with (
+                    patch.object(orca_task_routes, "_require_pairing"),
+                    patch.object(
+                        orca_task_routes, "resolve_orca_role_context", return_value=context
+                    ),
+                    patch.object(
+                        orca_task_routes, "_request_digest", return_value="request-digest"
+                    ),
+                    patch.object(orca_task_routes, "_migrate_taskless_legacy_receipt"),
+                    patch.object(orca_task_routes, "_reconcile_prior_execution", return_value=None),
+                    patch.object(orca_task_routes, "_resolve_workspace", return_value=workspace),
+                    patch.object(
+                        orca_task_routes,
+                        "_role_defaults",
+                        return_value=(
+                            {"agent": "codex", "model": None, "effort": None},
+                            ("codex",),
+                        ),
+                    ),
+                    patch.object(
+                        orca_task_routes,
+                        "_resolve_agent_selection",
+                        return_value=(
+                            "codex",
+                            {"model": "gpt-5.6-luna"},
+                            ("--model", "gpt-5.6-luna"),
+                        ),
+                    ),
+                    patch.object(
+                        orca_task_routes, "_prepare_projects_mcp_scope", return_value=None
+                    ),
+                    patch.object(orca_task_routes, "_compile_handover", return_value=prepared),
+                    patch.object(orca_task_routes, "_receipt_path", return_value=receipt_path),
+                    patch.object(orca_task_routes, "_execute_prepared_launch", side_effect=execute),
+                ):
+                    return orca_task_routes._orca_dispatch_endpoint(config, request)
+
+            response = dispatch()
+
+            self.assertEqual(response.status_code, 200)
+            exact_bytes = Path(reference["path"]).read_bytes()
+            changed_binding = {**binding, "taskReportPath": "/other/request.md"}
+            changed_reference = orca_task_receipts._message_binding_projection_reference(
+                config, request_id, changed_binding
+            )
+            prepared["messageBindingProjection"] = {
+                "requestId": str(request_id),
+                "binding": changed_binding,
+                **changed_reference,
+            }
+            with self.assertRaises(HTTPException) as raised:
+                dispatch()
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertEqual(Path(reference["path"]).read_bytes(), exact_bytes)
 
 
 class OrcaCatalogCacheTests(unittest.TestCase):

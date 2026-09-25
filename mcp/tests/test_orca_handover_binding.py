@@ -33,6 +33,7 @@ from agents_remember.cli.orca_task_preparation import (
     _role_report_path,
     role_start_operation,
 )
+from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
 from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.primitives import checkout_coordination
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
@@ -225,6 +226,64 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                     assert context.task is not None
                     canonical_report = Path(prepared["canonicalTaskReportPath"])
                     documents = handover["documents"]
+                    self.assertEqual(handover["requestId"], str(request_id))
+                    self.assertEqual(handover["taskDocumentDigest"], prepared["taskDocumentDigest"])
+                    self.assertEqual(handover["taskDocumentDigest"], digest(documents))
+                    message_binding = handover["nativeOrca"]["messageBinding"]
+                    self.assertEqual(
+                        message_binding["payloadType"],
+                        "The compact AR binding is a canonical JSON object; each native verb uses its own documented string field.",
+                    )
+                    self.assertEqual(
+                        message_binding["arBinding"],
+                        {
+                            "requestId": str(request_id),
+                            "role": role,
+                            "operation": role_start_operation(role),
+                            "selection": handover["selection"],
+                            "taskDocumentDigest": digest(documents),
+                            "taskReportPath": prepared["canonicalTaskReportPath"],
+                            "capsuleDigest": handover["capsule"]["semanticDigest"],
+                        },
+                    )
+                    projection_reference = _message_binding_projection_reference(
+                        scoped_config, request_id, message_binding["arBinding"]
+                    )
+                    self.assertEqual(message_binding["projection"], projection_reference)
+                    self.assertTrue(Path(message_binding["projection"]["path"]).is_absolute())
+                    self.assertEqual(
+                        prepared["messageBindingProjection"],
+                        {
+                            "requestId": str(request_id),
+                            "binding": message_binding["arBinding"],
+                            **projection_reference,
+                        },
+                    )
+                    for native_id in ("runId", "taskId", "dispatchId"):
+                        self.assertNotIn(native_id, message_binding["arBinding"])
+                    self.assertIn("only when", message_binding["nativeIdsRule"])
+                    message_semantics = handover["nativeOrca"]["messageSemantics"]
+                    self.assertIn("queued, not read", message_semantics)
+                    self.assertIn("--retry-request <original-request-uuid>", message_semantics)
+                    self.assertIn("messageBinding.projection.path", message_semantics)
+                    self.assertIn("JSON text for `--payload`", message_semantics)
+                    self.assertIn("neither ask nor reply", message_semantics)
+                    self.assertIn("only inside an active supervised Dispatch", message_semantics)
+                    self.assertIn("manual session without a Dispatch", message_semantics)
+                    self.assertIn("`--type question`", message_semantics)
+                    self.assertIn(
+                        "explicit `run:<id>` or `dispatch:<id>` recipient", message_semantics
+                    )
+                    self.assertIn("Do not invent a Dispatch or sender identity", message_semantics)
+                    self.assertIn("mutually exclusive", message_semantics)
+                    self.assertIn("Save native `--json` stdout byte-for-byte", message_semantics)
+                    self.assertIn("structurally compare it", message_semantics)
+                    self.assertIn("that sender's expected binding", message_semantics)
+                    self.assertIn("mark it unverified", message_semantics)
+                    self.assertIn("string spec passed to Orca `task-create`", message_semantics)
+                    self.assertIn("run:<id>", message_semantics)
+                    self.assertIn("recipient workspace", message_semantics)
+                    self.assertIn("workspace/project listing", message_semantics)
                     self.assertEqual(binding["repositoryId"], repo_id)
                     self.assertEqual(
                         canonical_report.name,
@@ -356,6 +415,38 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
         self.assertEqual(prepared["capsuleOperation"], "planning")
         self.assertEqual(handover["operation"], "planning")
         self.assertEqual(handover["selection"]["role"], "architect")
+        self.assertEqual(handover["requestId"], str(request_id))
+        self.assertEqual(handover["taskDocumentDigest"], prepared["taskDocumentDigest"])
+        self.assertEqual(handover["taskDocumentDigest"], digest([]))
+        self.assertEqual(
+            handover["nativeOrca"]["messageBinding"]["arBinding"],
+            {
+                "requestId": str(request_id),
+                "role": "architect",
+                "operation": "planning",
+                "selection": handover["selection"],
+                "taskDocumentDigest": digest([]),
+                "taskReportPath": prepared["canonicalTaskReportPath"],
+                "capsuleDigest": prepared["capsuleDigest"],
+            },
+        )
+        projection_reference = _message_binding_projection_reference(
+            config, request_id, handover["nativeOrca"]["messageBinding"]["arBinding"]
+        )
+        self.assertEqual(
+            handover["nativeOrca"]["messageBinding"]["projection"], projection_reference
+        )
+        self.assertTrue(
+            Path(handover["nativeOrca"]["messageBinding"]["projection"]["path"]).is_absolute()
+        )
+        self.assertEqual(
+            prepared["messageBindingProjection"],
+            {
+                "requestId": str(request_id),
+                "binding": handover["nativeOrca"]["messageBinding"]["arBinding"],
+                **projection_reference,
+            },
+        )
         self.assertIsNone(handover["selection"]["sprintDocumentRef"])
         self.assertIsNone(handover["selection"]["masterDocumentRef"])
         self.assertIsNone(handover["selection"]["taskDocumentRef"])
@@ -375,7 +466,7 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
         self.assertEqual(source["semanticDigest"], prepared["capsuleDigest"])
         self.assertFalse(source["ambientRoleFilesSelected"])
         self.assertIn("do not load them as a second role", handover["ownerHandover"])
-        self.assertIn("preserve native system/developer instructions", prepared["prompt"])
+        self.assertIn("Preserve native system/developer instructions", prepared["prompt"])
         self.assertIsNone(handover["nativeMcpScope"])
         self.assertTrue(prepared["taskReportPath"].endswith(f"/{request_id}.md"))
         self.assertEqual(ROLE_START_OPERATIONS["architect"], "planning")

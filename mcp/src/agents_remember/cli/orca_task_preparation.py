@@ -39,6 +39,7 @@ from agents_remember.cli.orca_scoped_mcp import (
     prepare_codex_projects_mcp,
     prepare_codex_scoped_mcp,
 )
+from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import (
@@ -498,14 +499,31 @@ def _compile_handover(
             ),
         }
     report_path = _role_report_path(context, workspace, request_id=request_id)
+    if request_id is None:
+        raise ValueError("An Orca message binding requires its durable requestId.")
+    task_document_digest = _digest(task_reads)
+    ar_binding = {
+        "requestId": str(request_id),
+        "role": context.role,
+        "operation": operation,
+        "selection": selection_binding(context),
+        "taskDocumentDigest": task_document_digest,
+        "taskReportPath": Path(report_path).resolve(strict=False).as_posix(),
+        "capsuleDigest": capsule.codex_delivery.semantic_digest,
+    }
+    message_binding_projection = _message_binding_projection_reference(
+        config, request_id, ar_binding
+    )
     handover = {
         "schema": "ar-orca-role-handover/v1",
+        "requestId": str(request_id),
         "role": context.role,
         "operation": operation,
         "assignment": _role_assignment(context, report_path),
         "orcaAgent": agent_id,
         "selection": selection_binding(context),
         "documents": task_reads,
+        "taskDocumentDigest": task_document_digest,
         "workspace": workspace,
         "repositoryContext": repository_context,
         "taskReportPath": report_path,
@@ -540,9 +558,45 @@ def _compile_handover(
                 "orca skills get orchestration",
             ],
             "messageSemantics": (
-                "Native send enqueues; use check to read; reply addresses the read message. Follow the installed skill for acknowledgement. "
-                "Only an active Dispatch worker may emit worker_done; a plain manual session does not."
+                "For a cross-workspace message, address the exact native recipient supplied by the active Orca preamble. "
+                "If absent, use the assignment's explicitly named recipient workspace; resolve its exact native workspace selector "
+                "through Orca's native workspace/project listing, then use `orca terminal list --worktree <exact-selector>` and "
+                "`orca orchestration run-list`/`run-show` there. Never infer a parent from directory ancestry or choose a "
+                "first/latest/ancestral session. If no recipient workspace is named, ask the active native user. "
+                "Prefer `run:<id>` or `dispatch:<id>`; a bare terminal handle is non-durable and may carry a native warning. "
+                "If discovery is ambiguous, ask the active native user before sending. Load the immutable JSON at "
+                "messageBinding.projection.path, verify its raw-byte SHA-256 against messageBinding.projection.sha256, "
+                "parse it, and structurally compare it to this handover's messageBinding.arBinding. For an incoming peer binding, "
+                "compare it structurally only to that sender's expected binding in the active native Task/Dispatch spec or an "
+                "explicitly selected peer record; never compare it to this session's own binding. If no peer binding is established, "
+                "mark it unverified and keep communication usable without claiming equality. Do not compare by visual inspection or "
+                "retype opaque values. For ordinary "
+                "`send`, serialize it as JSON text for `--payload`; this flag is mutually exclusive with "
+                "typed lifecycle payload flags. Use native `ask` for coordinator questions only inside an active supervised "
+                "Dispatch; ask has only a question string, so include the serialized binding in `--question` and resume the same "
+                "question by its message ID after timeout. In a manual session without a Dispatch, use ordinary native `send` "
+                "with `--type question`, an explicit `run:<id>` or `dispatch:<id>` recipient, the question in its string body, "
+                "and the serialized binding in `--payload`; then use native check to read the reply and reply to that exact message. "
+                "Do not invent a Dispatch or sender identity. `reply` has only a body string, so include the serialized binding "
+                "in `--body` when needed; neither ask nor reply accepts a custom payload flag. In a supervised native Run, put "
+                "the explicit assignment and projection path/digest "
+                "in the string spec passed to Orca `task-create`; then follow the injected Task/Dispatch preamble and typed flags "
+                "for heartbeat/worker_done, never attach "
+                "a raw `--payload` to those structured lifecycle sends. Include native Run/Task/Dispatch IDs only when Orca "
+                "supplied or confirmed them, omitting absent IDs. A send receipt/message ID means queued, not read: use native "
+                "check, reply to the exact message/thread, and acknowledge only after processing. On uncertain send outcome, retry "
+                "the same native request with identical arguments and payload using Orca's `--retry-request <original-request-uuid>`; "
+                "do not create a fresh request or claim delivery/read until native evidence confirms it. Surface stale, ambiguous, "
+                "or unavailable recipients as such. Save native `--json` stdout byte-for-byte from the command directly to the "
+                "supplied evidence path; a model-authored summary is a report, never a native receipt. Only an active Dispatch "
+                "worker may emit worker_done; a plain manual session does not."
             ),
+            "messageBinding": {
+                "payloadType": "The compact AR binding is a canonical JSON object; each native verb uses its own documented string field.",
+                "arBinding": ar_binding,
+                "projection": message_binding_projection,
+                "nativeIdsRule": "Add native Run/Task/Dispatch IDs only when the active Orca preamble or an exact native read supplies their values; omit absent IDs.",
+            },
         },
         "ownerHandover": (
             "This exact compiled role and operation plus this handover are the manual native role brief "
@@ -572,7 +626,12 @@ def _compile_handover(
         "prompt": prompt,
         "capsuleOperation": operation,
         "capsuleDigest": capsule.codex_delivery.semantic_digest,
-        "taskDocumentDigest": _digest(task_reads),
+        "taskDocumentDigest": task_document_digest,
+        "messageBindingProjection": {
+            "requestId": str(request_id),
+            "binding": ar_binding,
+            **message_binding_projection,
+        },
         "taskReportPath": report_path,
         "canonicalTaskReportPath": Path(report_path).resolve(strict=False).as_posix(),
         **(

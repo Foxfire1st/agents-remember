@@ -11,6 +11,7 @@ import shlex
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -66,6 +67,8 @@ from agents_remember.cli.orca_task_receipts import (
     _receipt_path,
     _request_digest,
     _taskless_execution_receipts,
+    _verify_message_binding_projection,
+    _write_message_binding_projection,
     _write_receipt,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -187,6 +190,61 @@ def _orca_result_endpoint(config: McpRuntimeConfig, request: OrcaResultRequest) 
         _DISPATCH_LOCK.release()
 
 
+def _prepared_message_binding_projection(
+    prepared: dict[str, Any], request_id: uuid.UUID
+) -> tuple[dict[str, Any], dict[str, str]]:
+    projection = prepared.get("messageBindingProjection")
+    if not isinstance(projection, dict) or projection.get("requestId") != str(request_id):
+        raise ValueError("The prepared native message binding has no matching request identity.")
+    binding = projection.get("binding")
+    path = projection.get("path")
+    sha256 = projection.get("sha256")
+    if (
+        not isinstance(binding, dict)
+        or not isinstance(path, str)
+        or not path
+        or not isinstance(sha256, str)
+        or not sha256
+    ):
+        raise ValueError("The prepared native message binding is incomplete.")
+    return binding, {"path": path, "sha256": sha256}
+
+
+def _verify_prior_message_binding_projection(
+    config: McpRuntimeConfig,
+    receipt: dict[str, Any] | None,
+    request: OrcaDispatchRequest,
+    binding: dict[str, Any],
+    reference: dict[str, str],
+) -> None:
+    if not receipt or receipt.get("requestId") != str(request.request_id):
+        return
+    if "messageBindingProjection" not in receipt:
+        return
+    prior_reference = receipt.get("messageBindingProjection")
+    if not isinstance(prior_reference, dict) or prior_reference != reference:
+        raise ValueError("This request ID is already bound to different native message data.")
+    _verify_message_binding_projection(config, request.request_id, binding, reference)
+
+
+def _reserve_message_binding_projection(
+    config: McpRuntimeConfig,
+    path: Path,
+    request: OrcaDispatchRequest,
+    request_digest: str,
+    prepared: dict[str, Any],
+) -> tuple[dict[str, str], JSONResponse | None]:
+    binding, reference = _prepared_message_binding_projection(prepared, request.request_id)
+    _verify_prior_message_binding_projection(
+        config, _read_receipt(path), request, binding, reference
+    )
+    prior = _reconcile_prior_execution(path, request, request_digest)
+    if prior is not None:
+        return reference, prior
+    _write_message_binding_projection(config, request.request_id, binding, reference)
+    return reference, None
+
+
 def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> JSONResponse:
     _require_pairing()
     context = resolve_orca_role_context(config, request)
@@ -231,11 +289,11 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
             status_code=413,
             detail="The canonical AR role handover exceeds Orca's launch prompt limit.",
         )
-    if request.role not in TASKLESS_ROLES:
-        prior = _reconcile_prior_execution(path, request, request_digest)
-        if prior is not None:
-            return prior
-
+    projection_reference, prior = _reserve_message_binding_projection(
+        config, path, request, request_digest, prepared
+    )
+    if prior is not None:
+        return prior
     operation_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex}"
     launch_request: dict[str, Any] = {
         "operationId": operation_id,
@@ -270,6 +328,7 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
         "capsuleDigest": prepared["capsuleDigest"],
         "capsuleOperation": prepared["capsuleOperation"],
         "taskDocumentDigest": prepared["taskDocumentDigest"],
+        "messageBindingProjection": projection_reference,
         "report": {
             "path": prepared["taskReportPath"],
             "canonicalPath": prepared["canonicalTaskReportPath"],
