@@ -331,9 +331,7 @@ def test_a_structured_field_value_is_rendered_as_its_own_text_and_never_as_an_ab
     """
 
     payload = review(pair, InvariantIdentitySeed(invariant_id=pair.shared_invariant_id))
-    row = next(
-        row for row in payload.knowledge.field_changes if row.field == "provenance"
-    )
+    row = next(row for row in payload.knowledge.field_changes if row.field == "provenance")
 
     assert row.before_value is not None and row.after_value is not None
     assert row.before_value != row.after_value

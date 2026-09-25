@@ -485,7 +485,10 @@ def test_a_generation_that_recorded_no_intent_half_states_that_absence_as_its_ow
     )
     assert entries.state == "refused" and entries.refusal is not None
     assert entries.refusal.code == "candidate_dataset_absent"
-    assert "the record states that no such knowledge content was ever recorded" in entries.refusal.detail
+    assert (
+        "the record states that no such knowledge content was ever recorded"
+        in entries.refusal.detail
+    )
     assert "before:not-selected, after:not-selected" in entries.refusal.detail
     assert "does not resolve now" not in entries.refusal.detail
 
@@ -493,9 +496,10 @@ def test_a_generation_that_recorded_no_intent_half_states_that_absence_as_its_ow
     assert subject_status == 404, subject
     subject_refusal = _body(subject)["refusal"]
     assert subject_refusal["code"] == "candidate_dataset_absent"
-    assert "the record states that no such knowledge content was ever recorded" in subject_refusal[
-        "detail"
-    ]
+    assert (
+        "the record states that no such knowledge content was ever recorded"
+        in subject_refusal["detail"]
+    )
     assert "does not resolve now" not in subject_refusal["detail"]
 
 
