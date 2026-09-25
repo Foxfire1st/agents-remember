@@ -43,6 +43,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from agents_remember.application.knowledge_baseline_generation import (
+    read_baseline_generation,
+)
 from agents_remember.errors import FutureCodeCandidateError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.candidate_receipt import read_candidate_receipt
@@ -345,32 +348,46 @@ def missing_dataset_half(resolved: ReviewCandidateResolution) -> tuple[str, Path
     return None
 
 
-def review_namespace(requested: str, candidate_database: Path) -> str:
-    """The namespace to read the candidate's datasets under, from its receipt when it has one.
+def review_namespace(requested: str, database: Path) -> str:
+    """The namespace to read one dataset under, from the record standing beside it.
 
     The namespace and the requested repository are not the same string: a request names a
-    *repository* ("agents-remember"), while a candidate the write plane admitted is bound to a
-    *namespace* id derived from it, and a side opened under the requested spelling refuses against
-    the dataset's own binding. So the candidate's own **receipt** is the authority -- the admission
-    that created it wrote the receipt beside the working database and sealed it -- and a review of an
-    admitted candidate reads the namespace that candidate actually holds.
+    *repository* ("agents-remember"), while a dataset the write plane admitted is bound to a
+    *namespace* id derived from it, and a side opened under the requested spelling refuses against the
+    dataset's own binding. So the dataset's own **record** is the authority -- whatever the write
+    plane wrote beside these bytes when it placed them -- and a review of an admitted pair reads the
+    namespace the pair actually holds.
 
-    A candidate with **no** receipt beside its database is a dataset this surface was handed directly
-    rather than one an admission produced (a fixture, a comparison a caller assembled from two
-    named files). For that shape the requested repository *is* the available identity and is read as
-    it always was, because the alternative -- refusing every caller-assembled pair -- would break the
-    comparison contract for inputs that were never candidates.
+    **Two records answer, because the two halves of a comparison are placed by two different acts.**
+    A *candidate* half is placed by an admission, which seals ``candidate-receipt.json`` beside it.
+    A *before* half is placed either by the first-generation owner, which leaves the admission's own
+    receipt beside the empty dataset it creates, or by a run handed a published ``--baseline``, which
+    writes ``baseline-generation.json`` -- and that record names the namespace the captured bytes
+    belong to. Consulting only the receipt was wrong for the second case in a way that could not
+    surface while nothing called the freeze: the before half of every continuity run is a selected
+    baseline, it never carries a receipt, and the fallback below would then stand the *requested*
+    repository in for a dataset bound to a namespace id, which the storage owner refuses. One rule --
+    the record beside the bytes -- read from whichever record the half's own placement wrote.
 
-    A receipt that **exists but cannot be read** is a different fact and is refused: something wrote
-    a receipt here and it does not say which namespace this dataset belongs to, so standing in the
+    A dataset with **neither** record beside it is one this surface was handed directly rather than
+    one the write plane placed (a fixture, a comparison a caller assembled from two named files). For
+    that shape the requested repository *is* the available identity and is read as it always was,
+    because the alternative -- refusing every caller-assembled pair -- would break the comparison
+    contract for inputs that were never placed by a run.
+
+    A record that **exists but cannot be read** is a different fact and is refused: something wrote a
+    record here and it does not say which namespace this dataset belongs to, so standing in the
     caller's word for the dataset's own record is exactly how a review comes to read a namespace
     nothing admitted.
     """
 
-    receipt_path = candidate_database.parent / CANDIDATE_RECEIPT_NAME
-    if not receipt_path.exists():
-        return requested
-    return read_candidate_receipt(receipt_path).repository_id
+    receipt_path = database.parent / CANDIDATE_RECEIPT_NAME
+    if receipt_path.exists():
+        return read_candidate_receipt(receipt_path).repository_id
+    generation = read_baseline_generation(database.parent)
+    if generation is not None:
+        return generation.repository_id
+    return requested
 
 
 # The next action one unreadable candidate record earns. It is stated once because the whole point of

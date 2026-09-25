@@ -37,13 +37,16 @@ from agents_remember.application.knowledge_baseline_generation import (
     generation_identity,
     read_baseline_generation,
 )
+from agents_remember.application.knowledge_composition import open_read_only_store
 from agents_remember.application.knowledge_curator_ingest import (
     IngestPublication,
     IngestSelection,
     ingest_curator_list,
 )
+from agents_remember.application.review_candidate_resolution import review_namespace
 from agents_remember.memory.knowledge.logical import dataset_identity
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
+from agents_remember.worktrees.worktree_contract import load_contract
 from test_knowledge_curator_ingest_list import (
     AUTHORIZATION,
     CODE_FILE,
@@ -321,3 +324,47 @@ def test_a_deliberate_rebase_begins_a_recorded_generation_with_explicit_lineage(
         parent_generation_id=original.generation_id,
     ), "the generation id is not the one this record's own facts derive"
     assert record.generation_id in rebased["reviewBaseline"], rebased["reviewBaseline"]
+
+
+def test_the_placed_baseline_is_opened_under_its_own_recorded_namespace(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The half a ``--baseline`` run placed is opened under the namespace its own record names.
+
+    The operation this protects is the second half of the same user journey the rest of this module
+    measures: a run opens a leaf's comparison by placing the dataset it forked from, and the leaf's
+    review is then *recorded*. Recording retains each half by copying it through the storage owner,
+    and the storage owner refuses a dataset opened under a namespace it is not bound to -- so the
+    namespace has to come from the half's own record.
+
+    The defect this case seals: the namespace was read from ``candidate-receipt.json`` alone. A
+    *candidate* half has one, because an admission wrote it. A before half placed from a named
+    ``--baseline`` never does -- a published dataset is not an admitted candidate -- so the read fell
+    back to the *requested repository name* while the bytes are bound to a namespace id, and every
+    generation for a leaf on the ordinary continuity route was refused with
+    ``candidate_dataset_absent`` ("the candidate database is not bound to repository namespace
+    agents-remember"). The first-generation path hid it: the empty before half it creates is built by
+    the candidate-creation owner, which leaves a receipt beside it.
+    """
+
+    _private, _fork, contract, _candidate, before_half, _opened = _opened_comparison(
+        tmp_path, "namespace", "NS", CODE_SYMBOL, capsys
+    )
+    repo_name = load_contract(contract).repo_name
+    record = read_baseline_generation(before_half.parent)
+    assert record is not None, "the run placed no baseline generation to be read"
+
+    assert record.repository_id != repo_name, (
+        "this case is only meaningful where the requested repository and the dataset's own "
+        "namespace differ, which is what an admitted dataset is "
+        f"({record.repository_id} vs {repo_name})"
+    )
+    assert review_namespace(repo_name, before_half) == (record.repository_id), (
+        "the before half's own generation record is the authority for its namespace; reading the "
+        "requested repository name here is how a placed baseline came to be unopenable"
+    )
+    store = open_read_only_store(before_half, record.repository_id)
+    try:
+        assert store.snapshot_identity().repository_id == record.repository_id
+    finally:
+        store.close()

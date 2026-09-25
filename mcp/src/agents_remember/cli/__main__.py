@@ -2,9 +2,10 @@
 
 The single front door for the package's CLI tools. It carries ``dashboard``, the memory
 maintenance and migration commands, the knowledge write plane's ingest and its **taskless**
-``knowledge-bootstrap`` entry, and the existing ``context_packet`` adapter as subparsers. The MCP server keeps its own ``agents-remember-mcp``
-console script -- harness configs launch the server by that exact name, so it is never folded in
-here.
+``knowledge-bootstrap`` entry, the review plane's ``review-record-comparison`` entry, and the
+existing ``context_packet`` adapter as subparsers. The MCP server keeps its own
+``agents-remember-mcp`` console script -- harness configs launch the server by that exact name, so
+it is never folded in here.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from agents_remember.cli import (
     knowledge_ingest,
     memory_backfill,
     memory_citations,
+    review_comparison_record,
 )
 
 
@@ -56,6 +58,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     knowledge_bootstrap.add_arguments(bootstrap)
     bootstrap.set_defaults(func=knowledge_bootstrap.run)
+    record = sub.add_parser(
+        "review-record-comparison",
+        help=(
+            "Record one leaf's review comparison as a durable generation; the Intent Reviewer's "
+            "comparison producer."
+        ),
+    )
+    review_comparison_record.add_arguments(record)
+    record.set_defaults(func=review_comparison_record.run)
     return parser
 
 
