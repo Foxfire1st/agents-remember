@@ -50,6 +50,7 @@ from agents_remember.cli.orca_task_preparation import (
     _compile_handover,
     _launcher_catalog,
     _prepare_leaf_mcp_scope,
+    _prepare_projects_mcp_scope,
     _resolve_agent_selection,
     _resolve_workspace,
     _role_defaults,
@@ -208,7 +209,7 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
     native_mcp_scope = (
         _prepare_leaf_mcp_scope(config, context, workspace, agent_id)
         if context.role in LEAF_ROLES
-        else None
+        else _prepare_projects_mcp_scope(config, context, workspace, agent_id)
     )
     if native_mcp_scope is not None:
         agent_arg_tokens = (*agent_arg_tokens, *native_mcp_scope.launch_args)
@@ -259,6 +260,7 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
                 "requestId": str(request.request_id),
                 "taskDocumentDigest": prepared["taskDocumentDigest"],
                 "capsuleDigest": prepared["capsuleDigest"],
+                "capsuleOperation": prepared["capsuleOperation"],
                 "workspace": workspace,
                 "agent": agent_id,
                 "sessionOptions": session_options,
@@ -266,6 +268,7 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
             }
         ),
         "capsuleDigest": prepared["capsuleDigest"],
+        "capsuleOperation": prepared["capsuleOperation"],
         "taskDocumentDigest": prepared["taskDocumentDigest"],
         "report": {
             "path": prepared["taskReportPath"],

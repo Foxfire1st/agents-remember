@@ -34,16 +34,41 @@ from agents_remember.cli.orca_runtime import (
 from agents_remember.cli.orca_runtime import (
     runtime_call as _runtime_call,
 )
-from agents_remember.cli.orca_scoped_mcp import ScopedNativeMcp, prepare_codex_scoped_mcp
+from agents_remember.cli.orca_scoped_mcp import (
+    ScopedNativeMcp,
+    prepare_codex_projects_mcp,
+    prepare_codex_scoped_mcp,
+)
 from agents_remember.kernel.agentic_settings import load_agentic_settings
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.orca_launcher import OrcaAgentOverride, OrcaLauncherOptionsRequest
+from agents_remember.models.orca_launcher import (
+    OrcaAgentOverride,
+    OrcaLauncherOptionsRequest,
+    OrcaRole,
+)
+from agents_remember.models.role_capsules.vocabulary import CapsuleOperation
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
 
 _ORCA_CATALOG_CACHE: dict[tuple[str, str, str | None], dict[str, Any]] = {}
 _ORCA_CATALOG_ORIGINS: dict[tuple[str, str], str] = {}
+
+ROLE_START_OPERATIONS: dict[OrcaRole, CapsuleOperation] = {
+    "architect": "planning",
+    "system-specialist": "orientation",
+    "orchestrator": "coordination",
+    "manager": "coordination",
+    "worker": "implementation",
+    "reviewer": "review",
+    "curator": "curation",
+}
+
+
+def role_start_operation(role: OrcaRole) -> CapsuleOperation:
+    """Select the one existing operation appropriate to a manually selected role."""
+
+    return ROLE_START_OPERATIONS[role]
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,6 +261,22 @@ def _prepare_leaf_mcp_scope(
     )
 
 
+def _prepare_projects_mcp_scope(
+    config: McpRuntimeConfig,
+    context: OrcaRoleContext,
+    workspace: dict[str, str],
+    agent_id: str,
+) -> ScopedNativeMcp | None:
+    if agent_id != "codex":
+        return None
+    repository_id = context.effective_task.ref.repository if context.effective_task else None
+    return prepare_codex_projects_mcp(
+        config,
+        workspace_root=Path(workspace["path"]),
+        repository_id=repository_id,
+    )
+
+
 def _verify_leaf_revival_scope(
     config: McpRuntimeConfig,
     context: OrcaRoleContext,
@@ -270,8 +311,12 @@ def _verify_leaf_revival_scope(
 def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> dict[str, str]:
     if context.role not in LEAF_ROLES:
         return _ensure_orca_workspace(config.workspace_root)
-    assert context.task is not None
-    contract_path, status = _ensure_leaf_enclosure(config, context.task)
+    assert context.task is not None and context.sprint is not None
+    contract_path, status = _ensure_leaf_enclosure(
+        config,
+        context.task,
+        parent_task=context.sprint.path.parent.name,
+    )
     group = _require_directory(status, "worktree_group")
     code = _require_directory(status, "code_worktree")
     memory = _require_directory(status, "memory_worktree")
@@ -308,7 +353,10 @@ def _bind_task_report_access(workspace: Path, task_reports: Path) -> Path:
 
 
 def _ensure_leaf_enclosure(
-    config: McpRuntimeConfig, leaf: ResolvedTaskDocument
+    config: McpRuntimeConfig,
+    leaf: ResolvedTaskDocument,
+    *,
+    parent_task: str,
 ) -> tuple[Path, dict[str, Any]]:
     if leaf.document.kind != "subTask":
         raise ValueError("Only a canonical leaf can open a leaf enclosure.")
@@ -341,6 +389,7 @@ def _ensure_leaf_enclosure(
                     f"{hashlib.sha256(leaf.ref.key.encode('utf-8')).hexdigest()[:10]}"
                 ),
                 leaf_id=leaf.document.id,
+                parent_task=parent_task,
             ),
             execution=StartExecution(skip_provider_setup=True),
         )
@@ -410,6 +459,7 @@ def _compile_handover(
     agent_id = request.agent_id
     native_mcp_scope = request.native_mcp_scope
     request_id = request.request_id
+    operation = role_start_operation(context.role)
     task_ref = context.effective_task.ref if context.effective_task else None
     capsule_request = LaunchCapsuleRequest(
         role=context.role,
@@ -420,7 +470,7 @@ def _compile_handover(
             and Path(workspace["path"]).resolve() == config.workspace_root.resolve()
         ),
     )
-    capsule = compile_launch_capsule(config, capsule_request)
+    capsule = compile_launch_capsule(config, capsule_request, operation=operation)
     if capsule.is_refusal:
         raise ValueError(capsule.explain())
     if capsule.codex_delivery is None:
@@ -451,6 +501,7 @@ def _compile_handover(
     handover = {
         "schema": "ar-orca-role-handover/v1",
         "role": context.role,
+        "operation": operation,
         "assignment": _role_assignment(context, report_path),
         "orcaAgent": agent_id,
         "selection": selection_binding(context),
@@ -463,13 +514,44 @@ def _compile_handover(
         "nativeMcpScope": native_mcp_scope.verification if native_mcp_scope else None,
         "capsule": {
             "role": capsule.role,
+            "operation": capsule.codex_delivery.binding.operation,
             "semanticDigest": capsule.codex_delivery.semantic_digest,
             "binding": capsule.codex_delivery.binding.as_report(),
         },
+        "nativeOrca": {
+            "entryMode": "manual-dashboard-role-start",
+            "instructionSource": {
+                "kind": "compiled-role-operation-capsule",
+                "role": capsule.codex_delivery.binding.role,
+                "operation": capsule.codex_delivery.binding.operation,
+                "semanticDigest": capsule.codex_delivery.semantic_digest,
+                "ambientRoleFilesSelected": False,
+            },
+            "ownerRelation": (
+                "The active native user conversation owns decisions for this manual launch. The selected AR "
+                "sprint/master/leaf is work scope, not a native Orca parent or Run identity. If the live Orca "
+                "preamble supplies an active Run or Dispatch, follow those exact native references."
+            ),
+            "identitySource": (
+                "Orca supplies sender identity in ORCA_TERMINAL_HANDLE and ORCA_PANE_KEY; never infer an AR session identity."
+            ),
+            "guidesOnDemand": [
+                "orca skills get orca-cli",
+                "orca skills get orchestration",
+            ],
+            "messageSemantics": (
+                "Native send enqueues; use check to read; reply addresses the read message. Follow the installed skill for acknowledgement. "
+                "Only an active Dispatch worker may emit worker_done; a plain manual session does not."
+            ),
+        },
         "ownerHandover": (
-            "AR owns task requirements, review and curation decisions, task lifecycle, and paired Git "
-            "acceptance. This native Orca session performs only the assignment above. Use the capsule's "
-            "canonical role instructions and write scope. Resolve each task document by calling task_doc "
+            "This exact compiled role and operation plus this handover are the manual native role brief "
+            "for this request. Older ambient AR lifecycle/router/role files and coordination-level "
+            "role-routing prose were not selected by this launcher; do not load them as a second role, "
+            "operation, hierarchy, parent, or transport. "
+            "Keep higher-priority native instructions and applicable repository coding, tool, and safety "
+            "rules. AR owns task requirements, review and curation decisions, task lifecycle, and paired "
+            "Git acceptance. This native Orca session performs only the assignment above. Resolve each task document by calling task_doc "
             "with the row's taskDocReadArgs exactly, then read its canonical JSON at the returned "
             "docPath before acting. Do not add .json to the slug. Each contentDigest records the "
             "document snapshot used for this launch. Never claim AR review, curation, lifecycle, or "
@@ -477,12 +559,18 @@ def _compile_handover(
         ),
     }
     prompt = (
-        capsule.codex_delivery.trusted_instructions
+        "EXPERIMENTAL MANUAL AR ROLE BRIEF: the launcher explicitly selected the role and operation "
+        "identified below. The following compiled capsule and canonical handover are the complete AR "
+        "role/operation instructions and assignment for this session. Do not reopen ambient AR role, "
+        "lifecycle, or coordination-level role-routing text to infer a different assignment. Preserve native system/developer instructions, "
+        "approvals, sandbox policy, and repository-specific coding/tool rules.\n\n"
+        + capsule.codex_delivery.trusted_instructions
         + "\n\nAR owner assignment and canonical task handover:\n"
         + json.dumps(handover, ensure_ascii=False, separators=(",", ":"))
     )
     return {
         "prompt": prompt,
+        "capsuleOperation": operation,
         "capsuleDigest": capsule.codex_delivery.semantic_digest,
         "taskDocumentDigest": _digest(task_reads),
         "taskReportPath": report_path,
@@ -562,32 +650,41 @@ def _role_report_path(
     *,
     request_id: uuid.UUID | None = None,
 ) -> str:
-    if context.role not in LEAF_ROLES:
-        report_root = Path(workspace["path"]) / ".agents-remember" / "reports"
-        report_root.mkdir(parents=True, exist_ok=True)
-    if context.role in LEAF_ROLES:
-        task_id = context.task.document.id if context.task else "task"
-        return (
-            Path(workspace["taskReportAccessRoot"])
-            / "orca-native"
-            / f"{task_id}-{context.role}-report.md"
-        ).as_posix()
     if context.role in TASKLESS_ROLES:
         if request_id is None:
             raise ValueError("A taskless Orca report requires its durable requestId.")
-        report = (
-            Path(workspace["path"])
-            / ".agents-remember"
-            / "reports"
-            / "orca-native"
-            / context.role
-            / f"{request_id}.md"
+        report_root = (
+            Path(workspace["path"]) / ".agents-remember" / "reports" / "orca-native" / context.role
         )
-        report.parent.mkdir(parents=True, exist_ok=True)
-        return report.as_posix()
-    return (
-        Path(workspace["path"]) / ".agents-remember" / "reports" / f"{context.role}.md"
-    ).as_posix()
+        report_name = f"{request_id}.md"
+    else:
+        selected = context.effective_task
+        if selected is None:
+            raise ValueError("A task-bound Orca report requires its canonical task document.")
+        if request_id is None:
+            raise ValueError("A task-bound Orca report requires its durable requestId.")
+
+        report_root = (selected.path.parent / "notes" / "reports").resolve(strict=False)
+        if context.role in LEAF_ROLES:
+            if context.task is None:
+                raise ValueError("A leaf Orca report requires its canonical task document.")
+            access_path = workspace.get("taskReportAccessRoot")
+            if not isinstance(access_path, str) or not access_path:
+                raise ValueError(
+                    "The selected leaf workspace has no canonical task-report access path."
+                )
+            report_root = Path(access_path)
+            if report_root.resolve(strict=False) != (
+                selected.path.parent / "notes" / "reports"
+            ).resolve(strict=False):
+                raise ValueError(
+                    "The leaf task-report access path does not resolve to its canonical reports."
+                )
+        report_root = report_root / "orca-native"
+        report_name = f"{selected.document.id}-{context.role}-{request_id}.md"
+    report = report_root / report_name
+    report.parent.mkdir(parents=True, exist_ok=True)
+    return report.as_posix()
 
 
 def _require_directory(payload: dict[str, Any], key: str) -> Path:

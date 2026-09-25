@@ -22,10 +22,11 @@ from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from agents_remember.application.task_scoped_mcp import (
+    PROJECTS_MCP_PROFILE_SCHEMA,
     TASK_SCOPED_MCP_PROFILE_SCHEMA,
-    task_scoped_mcp_config_from_profile,
+    mcp_config_from_scope_profile,
 )
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.kernel.sidecar_pairing import sidecar_body
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
@@ -35,12 +36,12 @@ _PROFILE_SCHEMA = TASK_SCOPED_MCP_PROFILE_SCHEMA
 
 @dataclass(frozen=True)
 class ScopedNativeMcp:
-    """The admitted task config, private profile, and per-launch Codex CLI overrides."""
+    """The admitted MCP config and per-launch Codex CLI override."""
 
     config: McpRuntimeConfig
-    profile_path: Path
+    profile_path: Path | None
     launch_args: tuple[str, ...]
-    context_packet: dict[str, Any]
+    context_packet: dict[str, Any] | None
     verification: dict[str, Any]
 
 
@@ -111,10 +112,10 @@ def prepare_codex_scoped_mcp(
         "codeRoot": code_root.as_posix(),
         "memoryRoot": memory_root.as_posix(),
     }
-    scoped_config = task_scoped_mcp_config_from_profile(config, profile)
+    scoped_config = mcp_config_from_scope_profile(config, profile)
     _write_private_profile(profile_path, profile, config.coordination_root)
 
-    entry = _codex_mcp_entry(config, profile_path, workspace_root)
+    entry = _codex_mcp_entry(config, workspace_root, profile_path=profile_path)
     launch_args = _codex_config_override_args(entry)
     codex_profile = _read_codex_mcp_entry(workspace_root, entry, launch_args)
     context_packet, read_proof = _probe_scoped_mcp(codex_profile, profile, code_root, memory_root)
@@ -131,6 +132,77 @@ def prepare_codex_scoped_mcp(
         "memoryRoot": memory_root.as_posix(),
         "contextPacketVerified": True,
         "readArFiles": read_proof,
+    }
+    return ScopedNativeMcp(
+        config=scoped_config,
+        profile_path=profile_path,
+        launch_args=launch_args,
+        context_packet=context_packet,
+        verification=verification,
+    )
+
+
+def prepare_codex_projects_mcp(
+    config: McpRuntimeConfig,
+    *,
+    workspace_root: Path,
+    repository_id: str | None,
+) -> ScopedNativeMcp:
+    """Bind a Codex Projects role to this AR config through the existing per-launch override.
+
+    Unlike a leaf, a Projects role has no enclosure profile. Taskless roles verify the effective
+    MCP entry and initialized tool surface without selecting a repository; task-bound roles also
+    read context for their canonical repository.
+    """
+
+    workspace_root = workspace_root.resolve()
+    if workspace_root != config.workspace_root.resolve():
+        raise ValueError("The Projects MCP scope must use the configured Projects workspace.")
+    profile_root = _private_binding_root(config)
+    scope_identity = {
+        "schema": PROJECTS_MCP_PROFILE_SCHEMA,
+        "baseConfigPath": config.config_path.resolve().as_posix(),
+        "workspaceRoot": workspace_root.as_posix(),
+        "repositoryId": repository_id,
+    }
+    scope_digest = hashlib.sha256(
+        json.dumps(scope_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:24]
+    profile_path = profile_root / f"projects-{scope_digest}.json"
+    _write_private_profile(profile_path, scope_identity, config.coordination_root)
+    scoped_config = mcp_config_from_scope_profile(config, scope_identity)
+    entry = _codex_mcp_entry(scoped_config, workspace_root, profile_path=profile_path)
+    launch_args = _codex_config_override_args(entry)
+    _read_codex_mcp_entry(workspace_root, entry, launch_args)
+    context_packet, server_identity, read_proof = _probe_projects_mcp(
+        entry, scoped_config, repository_id
+    )
+    git_identity = (
+        _assert_projects_context_packet_roots(context_packet, scoped_config, repository_id)
+        if repository_id is not None
+        else None
+    )
+    scoped_repository = scoped_config.repositories.get(repository_id) if repository_id else None
+    verification = {
+        "serverName": _MCP_SERVER_NAME,
+        "registration": "per-launch-codex-config-override",
+        "scopeKind": "configured-projects",
+        "profilePath": profile_path.as_posix(),
+        "cliOverrideVerified": True,
+        "initializedMcpVerified": True,
+        "workspaceRoot": workspace_root.as_posix(),
+        "selectedRepository": repository_id,
+        "codeRoot": scoped_repository.path.resolve().as_posix() if scoped_repository else None,
+        "memoryRoot": (
+            scoped_repository.memory_root.resolve().as_posix()
+            if scoped_repository and scoped_repository.memory_root
+            else None
+        ),
+        "gitIdentity": git_identity,
+        "server": server_identity,
+        "readArFiles": read_proof,
+        "repositoryContextVerified": repository_id is not None,
+        "noRepositorySelected": repository_id is None,
     }
     return ScopedNativeMcp(
         config=scoped_config,
@@ -219,8 +291,9 @@ def _existing_profile_matches(path: Path, profile: dict[str, Any]) -> bool:
 
 def _codex_mcp_entry(
     config: McpRuntimeConfig,
-    profile_path: Path,
     workspace_root: Path,
+    *,
+    profile_path: Path | None = None,
 ) -> dict[str, Any]:
     package = importlib.util.find_spec("agents_remember")
     if package is None or package.origin is None:
@@ -228,16 +301,12 @@ def _codex_mcp_entry(
             "The active AR package location cannot be resolved for the native MCP profile."
         )
     package_root = Path(package.origin).resolve().parent.parent
+    args = ["-m", "agents_remember.mcp", "--config", config.config_path.resolve().as_posix()]
+    if profile_path is not None:
+        args.extend(["--scope-profile", profile_path.resolve().as_posix()])
     return {
         "command": sys.executable,
-        "args": [
-            "-m",
-            "agents_remember.mcp",
-            "--config",
-            config.config_path.resolve().as_posix(),
-            "--scope-profile",
-            profile_path.resolve().as_posix(),
-        ],
+        "args": args,
         "env": {"PYTHONPATH": package_root.as_posix()},
         "cwd": workspace_root.as_posix(),
     }
@@ -257,7 +326,7 @@ def _codex_config_override_args(entry: dict[str, Any]) -> tuple[str, ...]:
         or not isinstance(cwd, str)
     ):
         raise ValueError(
-            "The leaf-scoped AR MCP entry cannot be represented as a Codex config override."
+            "The selected AR MCP entry cannot be represented as a Codex config override."
         )
     args_toml = ", ".join(_toml_basic_string(value) for value in args)
     env_toml = ", ".join(
@@ -290,7 +359,7 @@ def _read_codex_mcp_entry(
     codex_cli = shutil.which("codex")
     if not codex_cli:
         raise ValueError(
-            "The native Codex CLI is unavailable; the task-scoped MCP profile was not verified."
+            "The native Codex CLI is unavailable; the per-launch AR MCP override was not verified."
         )
     process: subprocess.Popen[bytes] | None = None
     try:
@@ -372,7 +441,7 @@ def _select_codex_mcp_entry(
         effective_servers.get(_MCP_SERVER_NAME) if isinstance(effective_servers, dict) else None
     )
     if _codex_transport_fields(effective_entry) != expected:
-        raise ValueError("Codex did not select the exact per-launch leaf-scoped AR MCP override.")
+        raise ValueError("Codex did not select the exact per-launch AR MCP override.")
     return expected
 
 
@@ -396,6 +465,21 @@ def _probe_scoped_mcp(
         cwd=entry["cwd"],
     )
     context, files = asyncio.run(_call_scoped_mcp(params, profile, source_rel, sidecar_rel))
+    return context, _assert_read_ar_files_roots(
+        files,
+        RepositoryScope(profile["taskDocumentRef"]["repository"], code_root, memory_root),
+        source_rel,
+        sidecar_rel,
+    )
+
+
+def _assert_read_ar_files_roots(
+    files: dict[str, Any],
+    repository: RepositoryScope,
+    source_rel: str,
+    sidecar_rel: str | None,
+) -> dict[str, Any]:
+    repository_id = repository.repo_id
     file_rows = files.get("files", [])
     if not isinstance(file_rows, list) or len(file_rows) < 1:
         raise ValueError("The scoped MCP read_ar_files call returned no file result.")
@@ -405,36 +489,210 @@ def _probe_scoped_mcp(
     )
     if not isinstance(source_row, dict) or not isinstance(source_row.get("source"), str):
         raise ValueError(
-            "The scoped MCP read_ar_files call did not return source from the selected code root."
+            f"The scoped MCP read_ar_files call did not return source for {repository_id!r}."
         )
-    expected_source = (code_root / source_rel).read_text(encoding="utf-8")
+    expected_source = (repository.path / source_rel).read_text(encoding="utf-8")
     if source_row["source"] != expected_source:
-        raise ValueError(
-            "The scoped MCP read_ar_files result differs from the admitted code worktree."
-        )
+        raise ValueError("The scoped MCP read_ar_files result differs from its admitted code root.")
     onboarding_status = source_row.get("status")
     expected_onboarding = (
-        sidecar_body(memory_root / "onboarding", source_rel) if sidecar_rel is not None else None
+        sidecar_body(repository.memory_root / "onboarding", source_rel)
+        if sidecar_rel is not None and repository.memory_root is not None
+        else None
     )
     observed_onboarding = source_row.get("onboarding")
     if onboarding_status == "found" and (
         not isinstance(expected_onboarding, str) or observed_onboarding != expected_onboarding
     ):
-        raise ValueError(
-            "The scoped MCP onboarding body differs from the selected memory worktree."
-        )
-    return context, {
+        raise ValueError("The scoped MCP onboarding body differs from its admitted memory root.")
+    return {
+        "repositoryId": repository_id,
         "sourcePath": source_rel,
-        "sourceMatchesCodeWorktree": True,
+        "sourceMatchesCodeRoot": True,
         "onboardingPath": source_rel if sidecar_rel else None,
         "onboardingStatus": onboarding_status,
         "memorySidecarPresent": bool(sidecar_rel and expected_onboarding),
-        "onboardingMatchesMemoryWorktree": bool(
+        "onboardingMatchesMemoryRoot": bool(
             sidecar_rel
             and onboarding_status == "found"
             and expected_onboarding == observed_onboarding
         ),
     }
+
+
+def _probe_projects_mcp(
+    entry: dict[str, Any],
+    config: McpRuntimeConfig,
+    repository_id: str | None,
+) -> tuple[dict[str, Any] | None, dict[str, str], dict[str, Any] | None]:
+    params = StdioServerParameters(
+        command=entry["command"],
+        args=entry["args"],
+        env={**os.environ, **entry["env"]},
+        cwd=entry["cwd"],
+    )
+    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as server_log:
+        try:
+
+            async def inspect() -> tuple[
+                dict[str, Any] | None,
+                dict[str, str],
+                dict[str, Any] | None,
+            ]:
+                async with (
+                    stdio_client(params, errlog=server_log) as (read_stream, write_stream),
+                    ClientSession(read_stream, write_stream) as session,
+                ):
+                    await session.initialize()
+                    info_result = await session.call_tool("server_info", {})
+                    info = _unpack_tool_payload(info_result)
+                    tools = info.get("tools")
+                    if not isinstance(tools, list) or not {
+                        "context_packet",
+                        "task_doc",
+                    } <= set(tools):
+                        raise ValueError(
+                            "The selected AR MCP registration lacks required role tools."
+                        )
+                    serving_build = info.get("servingBuild")
+                    package_root = (
+                        serving_build.get("packageRoot")
+                        if isinstance(serving_build, dict)
+                        else None
+                    )
+                    source_digest = (
+                        serving_build.get("sourceDigest")
+                        if isinstance(serving_build, dict)
+                        else None
+                    )
+                    expected_package_root = (
+                        Path(entry["env"]["PYTHONPATH"]) / "agents_remember"
+                    ).resolve()
+                    expected_info = {
+                        "configPath": config.config_path.resolve().as_posix(),
+                        "coordinationRoot": config.coordination_root.resolve().as_posix(),
+                        "workspaceRoot": config.workspace_root.resolve().as_posix(),
+                    }
+                    if any(info.get(key) != value for key, value in expected_info.items()):
+                        raise ValueError(
+                            "The initialized AR MCP server reports another config or workspace."
+                        )
+                    allowed_repositories = info.get("allowedRepoIds")
+                    if not isinstance(allowed_repositories, list) or set(
+                        allowed_repositories
+                    ) != set(config.allowed_repo_ids):
+                        raise ValueError(
+                            "The initialized AR MCP server did not select the Projects repository scope."
+                        )
+                    version = info.get("version")
+                    if (
+                        package_root != expected_package_root.as_posix()
+                        or not isinstance(source_digest, str)
+                        or not isinstance(version, str)
+                    ):
+                        raise ValueError(
+                            "The initialized AR MCP server source identity is not the active package."
+                        )
+                    if repository_id is None:
+                        return (
+                            None,
+                            {
+                                "version": version,
+                                **expected_info,
+                                "packageRoot": str(package_root),
+                                "sourceDigest": source_digest,
+                            },
+                            None,
+                        )
+                    repository = config.repositories[repository_id]
+                    source_rel, sidecar_rel = _mcp_probe_paths(
+                        repository.path, repository.memory_root
+                    )
+                    result = await session.call_tool(
+                        "context_packet",
+                        {"repo_id": repository_id, "include_providers": False},
+                    )
+                    files_result = await session.call_tool(
+                        "read_ar_files",
+                        {
+                            "repo_id": repository_id,
+                            "files": [
+                                {
+                                    "path": source_rel,
+                                    "source": "full",
+                                    "onboarding": sidecar_rel is not None,
+                                }
+                            ],
+                        },
+                    )
+                    read_proof = _assert_read_ar_files_roots(
+                        _unpack_tool_payload(files_result),
+                        repository,
+                        source_rel,
+                        sidecar_rel,
+                    )
+                    return (
+                        _unpack_tool_payload(result),
+                        {
+                            "version": version,
+                            **expected_info,
+                            "packageRoot": str(package_root),
+                            "sourceDigest": source_digest,
+                        },
+                        read_proof,
+                    )
+
+            return asyncio.run(inspect())
+        except Exception as error:
+            server_log.flush()
+            server_log.seek(0)
+            log_tail = server_log.read()[-600:].strip()
+            detail = log_tail or str(error)
+            raise ValueError(
+                f"The Projects AR MCP startup/read failed ({type(error).__name__}): {detail[:800]}"
+            ) from error
+
+
+def _assert_projects_context_packet_roots(
+    context: dict[str, Any] | None,
+    config: McpRuntimeConfig,
+    repository_id: str,
+) -> dict[str, str]:
+    repository = config.repositories.get(repository_id)
+    if repository is None or context is None:
+        raise ValueError("The selected task repository is not admitted by the active AR config.")
+    repo_packet = context.get("repo", {})
+    paths_packet = context.get("paths", {})
+    observed = {
+        "repository": repo_packet.get("root"),
+        "coordinationRoot": paths_packet.get("coordinationRoot"),
+        "memoryRoot": paths_packet.get("memoryRoot"),
+    }
+    expected = {
+        "repository": repository.path.resolve().as_posix(),
+        "coordinationRoot": config.coordination_root.resolve().as_posix(),
+        "memoryRoot": repository.memory_root.resolve().as_posix()
+        if repository.memory_root
+        else None,
+    }
+    if observed != expected:
+        raise ValueError(
+            "The initialized AR context_packet did not return the exact configured project code and memory roots."
+        )
+    git_identity = {
+        key: repo_packet.get(key)
+        for key in ("state", "branch", "head")
+        if isinstance(repo_packet.get(key), str)
+    }
+    if git_identity.get("state") not in {"available", "detached"} or not git_identity.get("head"):
+        raise ValueError("The selected Projects repository has no verified Git context identity.")
+    worktree = context.get("worktree", {})
+    if (
+        worktree.get("state") != "inactive"
+        or _wire_path(worktree, "contract_path", "contractPath") is not None
+    ):
+        raise ValueError("The Projects AR context retained a task-enclosure binding.")
+    return git_identity
 
 
 async def _call_scoped_mcp(
@@ -506,26 +764,11 @@ def _unpack_tool_payload(result: Any) -> dict[str, Any]:
     raise ValueError("The scoped AR MCP tool returned no JSON payload.")
 
 
-def _mcp_probe_paths(code_root: Path, memory_root: Path) -> tuple[str, str | None]:
-    onboarding_root = memory_root / "onboarding"
-    for sidecar in sorted(onboarding_root.rglob("*.md")) if onboarding_root.is_dir() else ():
-        try:
-            sidecar_rel = sidecar.relative_to(onboarding_root).as_posix()
-        except ValueError:
-            continue
-        source_rel = sidecar_rel[:-3]
-        if (
-            any(part.startswith(".") for part in Path(source_rel).parts)
-            or Path(source_rel).name == "overview"
-        ):
-            continue
-        source = (code_root / source_rel).resolve(strict=False)
-        if (
-            source.is_file()
-            and source.is_relative_to(code_root)
-            and sidecar_body(onboarding_root, source_rel)
-        ):
-            return source_rel, sidecar_rel
+def _mcp_probe_paths(code_root: Path, memory_root: Path | None) -> tuple[str, str | None]:
+    if memory_root is not None:
+        paired = _paired_onboarding_probe_path(code_root, memory_root / "onboarding")
+        if paired is not None:
+            return paired
     for root, _dirs, files in os.walk(code_root):
         _dirs[:] = [name for name in _dirs if name != ".git" and not name.startswith(".")]
         for name in sorted(files):
@@ -535,6 +778,29 @@ def _mcp_probe_paths(code_root: Path, memory_root: Path) -> tuple[str, str | Non
             if source.suffix.lower() in {".md", ".json", ".py", ".ts", ".tsx", ".js"}:
                 return source.relative_to(code_root).as_posix(), None
     raise ValueError("No bounded text source is available to verify the selected code worktree.")
+
+
+def _paired_onboarding_probe_path(code_root: Path, onboarding_root: Path) -> tuple[str, str] | None:
+    if not onboarding_root.is_dir():
+        return None
+    for sidecar in sorted(onboarding_root.rglob("*.md")):
+        try:
+            sidecar_rel = sidecar.relative_to(onboarding_root).as_posix()
+        except ValueError:
+            continue
+        source_rel = sidecar_rel[:-3]
+        if any(part.startswith(".") for part in Path(source_rel).parts):
+            continue
+        if Path(source_rel).name == "overview":
+            continue
+        source = (code_root / source_rel).resolve(strict=False)
+        if (
+            source.is_file()
+            and source.is_relative_to(code_root)
+            and sidecar_body(onboarding_root, source_rel)
+        ):
+            return source_rel, sidecar_rel
+    return None
 
 
 def _assert_context_packet_roots(
@@ -571,4 +837,4 @@ def _wire_path(payload: dict[str, Any], snake: str, camel: str) -> Any:
     return payload.get(snake, payload.get(camel))
 
 
-__all__ = ["ScopedNativeMcp", "prepare_codex_scoped_mcp"]
+__all__ = ["ScopedNativeMcp", "prepare_codex_projects_mcp", "prepare_codex_scoped_mcp"]

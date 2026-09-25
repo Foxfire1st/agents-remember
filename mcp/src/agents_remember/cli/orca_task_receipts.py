@@ -395,6 +395,7 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
             "warning",
             "result",
             "prompt",
+            "capsuleOperation",
             "nativeMcpScope",
             "resumeResult",
             "canRevive",

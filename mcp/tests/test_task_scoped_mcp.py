@@ -11,10 +11,12 @@ from agents_remember.application.lifecycle.configured_contract_admission import 
     ConfiguredContractAccepted,
 )
 from agents_remember.application.task_scoped_mcp import (
+    PROJECTS_MCP_PROFILE_SCHEMA,
     TASK_SCOPED_MCP_PROFILE_SCHEMA,
     TaskScopedMcpBinding,
+    mcp_config_from_scope_profile,
+    projects_mcp_config,
     task_scoped_mcp_config,
-    task_scoped_mcp_config_from_profile,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
 from agents_remember.models.task_document_ref import TaskDocumentRef
@@ -124,9 +126,57 @@ class TaskScopedMcpConfigTests(unittest.TestCase):
                     "codeRoot": code.as_posix(),
                     "memoryRoot": memory.as_posix(),
                 }
-                loaded = task_scoped_mcp_config_from_profile(base, profile)
+                loaded = mcp_config_from_scope_profile(base, profile)
                 self.assertEqual(loaded.repositories["repo"].path, code)
                 self.assertEqual(loaded.repositories["repo"].memory_root, memory)
+
+    def test_projects_scope_clears_only_contract_pins_and_keeps_configured_pairs(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config_path = root / "settings" / "mcp.json"
+            base = McpRuntimeConfig(
+                config_path=config_path,
+                coordination_root=root / "coordination",
+                workspace_root=root / "projects",
+                transcript_root=root / "coordination" / "logs" / "mcp",
+                repositories={
+                    "repo-one": RepositoryScope(
+                        "repo-one",
+                        root / "code-one",
+                        memory_root=root / "memory-one",
+                        contract_path=root / "task-one" / "series-contract.md",
+                    ),
+                    "repo-two": RepositoryScope(
+                        "repo-two",
+                        root / "code-two",
+                        memory_root=root / "memory-two",
+                        contract_path=root / "task-two" / "series-contract.md",
+                    ),
+                },
+            )
+
+            taskless = projects_mcp_config(base, None)
+            bound = projects_mcp_config(base, "repo-two")
+            profile = {
+                "schema": PROJECTS_MCP_PROFILE_SCHEMA,
+                "baseConfigPath": config_path.as_posix(),
+                "workspaceRoot": base.workspace_root.as_posix(),
+                "repositoryId": "repo-two",
+            }
+            loaded = mcp_config_from_scope_profile(base, profile)
+
+            self.assertEqual(taskless.allowed_repo_ids, ("repo-one", "repo-two"))
+            self.assertTrue(
+                all(repo.contract_path is None for repo in taskless.repositories.values())
+            )
+            self.assertEqual(set(bound.repositories), {"repo-two"})
+            self.assertEqual(bound.repositories["repo-two"].path, root / "code-two")
+            self.assertEqual(bound.repositories["repo-two"].memory_root, root / "memory-two")
+            self.assertIsNone(bound.repositories["repo-two"].contract_path)
+            self.assertEqual(loaded.repositories, bound.repositories)
+            self.assertEqual(loaded.config_path, base.config_path)
+            self.assertEqual(loaded.coordination_root, base.coordination_root)
+            self.assertEqual(loaded.workspace_root, base.workspace_root)
 
 
 if __name__ == "__main__":

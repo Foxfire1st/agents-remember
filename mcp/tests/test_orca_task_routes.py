@@ -10,6 +10,7 @@ from typing import cast
 from unittest.mock import patch
 
 from agents_remember.application.orca_task_context import OrcaRoleContext, selection_binding
+from agents_remember.application.skill_resources.provider import shipped_composition_corpus
 from agents_remember.cli import (
     orca_runtime,
     orca_task_liveness,
@@ -17,9 +18,13 @@ from agents_remember.cli import (
     orca_task_receipts,
     orca_task_routes,
 )
-from agents_remember.cli.orca_task_preparation import _bind_task_report_access
+from agents_remember.cli.orca_task_preparation import (
+    ROLE_START_OPERATIONS,
+    _bind_task_report_access,
+)
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import OrcaDispatchRequest, OrcaLauncherOptionsRequest
+from agents_remember.models.role_capsules.manifest import parse_composition_manifest
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
@@ -164,6 +169,62 @@ class OrcaCatalogCacheTests(unittest.TestCase):
 
 
 class OrcaNativeResultTests(unittest.TestCase):
+    def test_manual_role_operations_are_admitted_by_the_shipped_manifest(self) -> None:
+        with shipped_composition_corpus() as (root, manifest):
+            parsed = parse_composition_manifest((root / manifest).read_bytes())
+
+        self.assertEqual(
+            set(ROLE_START_OPERATIONS),
+            {
+                "architect",
+                "system-specialist",
+                "orchestrator",
+                "manager",
+                "worker",
+                "reviewer",
+                "curator",
+            },
+        )
+        expected_altitudes = {
+            "architect": "sprint",
+            "system-specialist": "sprint",
+            "orchestrator": "sprint",
+            "manager": "master",
+            "worker": "leaf",
+            "reviewer": "leaf | master | sprint, by seam",
+            "curator": "leaf",
+        }
+        self.assertEqual(
+            {role: parsed.roles[role].altitude for role in ROLE_START_OPERATIONS},
+            expected_altitudes,
+        )
+        self.assertTrue(
+            {
+                "worktree_start",
+                "worktree_status",
+                "worktree_sync",
+                "worktree_closeout_apply",
+                "worktree_closeout_preview",
+            }
+            <= set(parsed.roles["architect"].tools)
+        )
+        for role, operation in ROLE_START_OPERATIONS.items():
+            with self.subTest(role=role, operation=operation):
+                self.assertIn(operation, parsed.roles[role].operations)
+                self.assertIn(role, parsed.operations[operation].applies_to_roles)
+
+    def test_public_execution_retains_the_selected_capsule_operation(self) -> None:
+        public = orca_task_receipts._public_execution(
+            {
+                "requestId": str(uuid.uuid4()),
+                "role": "worker",
+                "status": "starting",
+                "capsuleOperation": "implementation",
+            }
+        )
+
+        self.assertEqual(public["capsuleOperation"], "implementation")
+
     def test_prompt_limit_matches_linux_single_argument_capacity(self) -> None:
         self.assertEqual(orca_runtime.MAX_PROMPT_BYTES, 131071)
 

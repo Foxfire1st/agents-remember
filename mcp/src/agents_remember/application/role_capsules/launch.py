@@ -59,6 +59,7 @@ from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.git_facts import read_git_facts
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.role_capsules.manifest import parse_composition_manifest
+from agents_remember.models.role_capsules.selection import narrow_operation
 from agents_remember.models.role_capsules.types import (
     CapsuleAdmittedFacts,
     CapsuleBinding,
@@ -67,7 +68,7 @@ from agents_remember.models.role_capsules.types import (
     CapsuleRoleSeat,
     compute_content_digest,
 )
-from agents_remember.models.role_capsules.vocabulary import CAPSULE_ROLES
+from agents_remember.models.role_capsules.vocabulary import CAPSULE_ROLES, CapsuleOperation
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.serving.capsule_delivery import capsule_delivery_from
 from agents_remember.serving.launch_capsule import (
@@ -122,6 +123,7 @@ class AdmittedTaskSeat:
     """
 
     role: str
+    operation: CapsuleOperation
     reference: TaskDocumentRef
     selector: EnclosureSelector
     contract_path: Path
@@ -305,7 +307,10 @@ def _contains(parent: Path, child: Path) -> bool:
 
 
 def compile_launch_capsule(
-    config: McpRuntimeConfig, request: LaunchCapsuleRequest
+    config: McpRuntimeConfig,
+    request: LaunchCapsuleRequest,
+    *,
+    operation: str | None = None,
 ) -> LaunchCapsule:
     """Compile the capsule one launch will supply, or refuse it by name.
 
@@ -323,13 +328,20 @@ def compile_launch_capsule(
                 f"({', '.join(CAPSULE_ROLES)}), so no capsule can be compiled for it"
             ),
         )
+    try:
+        selected_operation = narrow_operation(LAUNCH_OPERATION if operation is None else operation)
+    except CapsuleCompilationError as error:
+        return refused_launch_capsule(role, error.status, error.render())
     if request.task_document_ref is None:
-        return _compile_free_agent(config, request, role)
-    return _compile_admitted_task(config, request, role)
+        return _compile_free_agent(config, request, role, selected_operation)
+    return _compile_admitted_task(config, request, role, selected_operation)
 
 
 def _compile_admitted_task(
-    config: McpRuntimeConfig, request: LaunchCapsuleRequest, role: str
+    config: McpRuntimeConfig,
+    request: LaunchCapsuleRequest,
+    role: str,
+    operation: CapsuleOperation,
 ) -> LaunchCapsule:
     """The task-attached path: the launch's own admitted document, compiled and carried."""
 
@@ -340,7 +352,7 @@ def _compile_admitted_task(
         resolved = topology.resolve(ref)
     except TaskDocumentRefError as error:
         return refused_launch_capsule(role, "task-binding-unresolved", str(error))
-    admission = _admit_task_document(config, request, role, resolved)
+    admission = _admit_task_document(config, request, role, operation, resolved)
     if isinstance(admission, LaunchCapsule):
         return admission
     if (request.harness or "").strip() == "eve":
@@ -350,7 +362,7 @@ def _compile_admitted_task(
         CapsuleCompileRequest(
             enclosure=admission.selector,
             task_path=ref.path,
-            operation=LAUNCH_OPERATION,
+            operation=operation,
             role=role,
         ),
     )
@@ -365,6 +377,7 @@ def _admit_task_document(
     config: McpRuntimeConfig,
     request: LaunchCapsuleRequest,
     role: str,
+    operation: CapsuleOperation,
     resolved: ResolvedTaskDocument,
 ) -> AdmittedTaskSeat | LaunchCapsule:
     document = resolved.document
@@ -381,7 +394,7 @@ def _admit_task_document(
     leaf_id = document.id if document.kind == "subTask" else None
     contract_path = _enclosure_contract(config, document.repo, resolved.ref.path, leaf_id)
     if contract_path is None:
-        return _compile_without_task_enclosure(config, request, role, resolved)
+        return _compile_without_task_enclosure(config, request, role, operation, resolved)
     try:
         contract = load_contract(contract_path)
     except (ContractError, OSError) as error:
@@ -401,6 +414,7 @@ def _admit_task_document(
         )
     return AdmittedTaskSeat(
         role=role,
+        operation=operation,
         reference=resolved.ref,
         selector=EnclosureSelector(contract_path=contract_path),
         contract_path=contract_path,
@@ -413,10 +427,11 @@ def _compile_without_task_enclosure(
     config: McpRuntimeConfig,
     request: LaunchCapsuleRequest,
     role: str,
+    operation: CapsuleOperation,
     resolved: ResolvedTaskDocument,
 ) -> LaunchCapsule:
     if request.allow_project_task_binding:
-        return _compile_project_task(config, request, role, resolved)
+        return _compile_project_task(config, request, role, operation, resolved)
     ref = resolved.ref
     return refused_launch_capsule(
         role,
@@ -434,6 +449,7 @@ def _compile_project_task(
     config: McpRuntimeConfig,
     request: LaunchCapsuleRequest,
     role: str,
+    operation: CapsuleOperation,
     resolved: ResolvedTaskDocument,
 ) -> LaunchCapsule:
     """Compile the existing role capsule for a real sprint/master opened at Projects scope.
@@ -478,7 +494,7 @@ def _compile_project_task(
         task_document_digest=compute_content_digest(task_json),
     )
     binding = CapsuleBinding(
-        operation=LAUNCH_OPERATION,  # type: ignore[arg-type]
+        operation=operation,
         admitted=admission.admitted_facts(tool_policy=admitted_tool_policy(config)),
     )
     with shipped_composition_corpus() as (root, manifest):
@@ -488,7 +504,7 @@ def _compile_project_task(
                 root,
                 manifest,
                 manifest_bytes,
-                CapsuleSeatAddress(role=role, operation=LAUNCH_OPERATION),
+                CapsuleSeatAddress(role=role, operation=operation),
             )
         except CapsuleCompilationError as error:
             return refused_launch_capsule(role, error.status, error.render())
@@ -517,7 +533,7 @@ def _compile_eve_task(config: McpRuntimeConfig, seat: AdmittedTaskSeat) -> Launc
                 enclosure=seat.selector,
                 task_path=seat.reference.path,
                 role=seat.role,
-                operation=LAUNCH_OPERATION,
+                operation=seat.operation,
                 carrier_directory=_carrier_directory(config, seat.role, seat.reference.path),
                 code_repository_root=seat.repository_root,
                 report_root=report_root,
@@ -548,7 +564,10 @@ def _compile_eve_task(config: McpRuntimeConfig, seat: AdmittedTaskSeat) -> Launc
 
 
 def _compile_free_agent(
-    config: McpRuntimeConfig, request: LaunchCapsuleRequest, role: str
+    config: McpRuntimeConfig,
+    request: LaunchCapsuleRequest,
+    role: str,
+    operation: CapsuleOperation,
 ) -> LaunchCapsule:
     """The free-agent path: a seat with no task document still receives its compiled capsule."""
 
@@ -563,10 +582,15 @@ def _compile_free_agent(
                 "producer (L7)"
             ),
         )
-    admission = free_agent_seat_admission(config, role=role, workspace_root=request.workspace_root)
+    admission = free_agent_seat_admission(
+        config,
+        role=role,
+        operation=operation,
+        workspace_root=request.workspace_root,
+    )
     policy = admitted_tool_policy(config)
     binding = CapsuleBinding(
-        operation=LAUNCH_OPERATION,  # type: ignore[arg-type]
+        operation=operation,
         admitted=admission.admitted_facts(tool_policy=policy),
     )
     with shipped_composition_corpus() as (root, manifest):
@@ -576,7 +600,7 @@ def _compile_free_agent(
                 root,
                 manifest,
                 manifest_bytes,
-                CapsuleSeatAddress(role=role, operation=LAUNCH_OPERATION),
+                CapsuleSeatAddress(role=role, operation=operation),
             )
         except CapsuleCompilationError as error:
             return refused_launch_capsule(role, error.status, error.render())

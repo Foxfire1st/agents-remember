@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -9,7 +10,7 @@ from typing import cast
 from unittest.mock import patch
 
 from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
-from agents_remember.application.orca_task_context import resolve_orca_role_context
+from agents_remember.application.orca_task_context import OrcaRoleContext, resolve_orca_role_context
 from agents_remember.application.skill_resources import CapsuleCompileRequest, compile_task_capsule
 from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocCall,
@@ -22,16 +23,25 @@ from agents_remember.application.worktree_services import build_default_worktree
 from agents_remember.cli.orca_runtime import MAX_PROMPT_BYTES, digest
 from agents_remember.cli.orca_scoped_mcp import ScopedNativeMcp
 from agents_remember.cli.orca_task_preparation import (
+    ROLE_START_OPERATIONS,
     OrcaHandoverRequest,
     _bind_task_report_access,
     _compile_handover,
+    _ensure_leaf_enclosure,
+    _prepare_projects_mcp_scope,
+    _resolve_workspace,
+    _role_report_path,
+    role_start_operation,
 )
 from agents_remember.kernel.coordination_context.models import EnclosureSelector
 from agents_remember.kernel.primitives import checkout_coordination
-from agents_remember.kernel.primitives.runtime_config import load_config
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, load_config
 from agents_remember.models.orca_launcher import OrcaSelection
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.tasks import TaskDocument, write_task_doc
+from agents_remember.tasks.document import TaskEnclosureRef
+from agents_remember.tasks.document_refs import ResolvedTaskDocument
+from agents_remember.tasks.task_paths import leaf_enclosure_path
 from agents_remember.worktrees.services import bind_worktree_services, reset_worktree_services
 from test_worktree_support import open_external_contract_fixture
 
@@ -195,6 +205,7 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                             taskDocumentRef=task_ref,
                         ),
                     )
+                    request_id = uuid.uuid4()
                     prepared = _compile_handover(
                         OrcaHandoverRequest(
                             config=scoped_config,
@@ -202,6 +213,7 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                             workspace=workspace,
                             agent_id="codex",
                             native_mcp_scope=native_scope,
+                            request_id=request_id,
                         )
                     )
                     handover = json.loads(
@@ -210,9 +222,17 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                         )[1]
                     )
                     binding = handover["capsule"]["binding"]
+                    assert context.task is not None
                     canonical_report = Path(prepared["canonicalTaskReportPath"])
                     documents = handover["documents"]
                     self.assertEqual(binding["repositoryId"], repo_id)
+                    self.assertEqual(
+                        canonical_report.name,
+                        f"{context.task.document.id}-{role}-{request_id}.md",
+                    )
+                    self.assertEqual(prepared["capsuleOperation"], role_start_operation(role))
+                    self.assertEqual(handover["operation"], role_start_operation(role))
+                    self.assertEqual(binding["operation"], role_start_operation(role))
                     self.assertEqual(binding["taskPath"], task_ref.key)
                     self.assertEqual(binding["role"], role)
                     self.assertEqual(
@@ -230,6 +250,14 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                     )
                     self.assertEqual(
                         handover["workspace"]["contractPath"], contract.contract_path.as_posix()
+                    )
+                    self.assertEqual(
+                        handover["nativeOrca"]["guidesOnDemand"],
+                        ["orca skills get orca-cli", "orca skills get orchestration"],
+                    )
+                    self.assertIn("ORCA_TERMINAL_HANDLE", handover["nativeOrca"]["identitySource"])
+                    self.assertIn(
+                        "Only an active Dispatch worker", handover["nativeOrca"]["messageSemantics"]
                     )
                     self.assertTrue(canonical_report.is_relative_to(task_reports.resolve()))
                     self.assertLess(
@@ -276,7 +304,7 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                         CapsuleCompileRequest(
                             enclosure=EnclosureSelector(contract_path=contract.contract_path),
                             task_path=task_ref.path,
-                            operation="orientation",
+                            operation=role_start_operation(role),
                             role=role,
                         ),
                     )
@@ -286,3 +314,364 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                     self.assertEqual(admitted.repository_id, repo_id)
                     self.assertEqual(admitted.work_branch, contract.code_work_branch)
                     self.assertEqual(prepared["capsuleDigest"], outcome.result.semantic_digest)
+
+    def test_taskless_architect_handover_uses_planning_without_inventing_task_or_repository(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = McpRuntimeConfig(
+                config_path=root / "settings" / "ar.json",
+                coordination_root=root / "coordination",
+                workspace_root=root / "projects",
+                transcript_root=root / "coordination" / "logs" / "mcp",
+            )
+            workspace_root = config.workspace_root
+            workspace_root.mkdir(parents=True)
+            request_id = uuid.uuid4()
+            context = resolve_orca_role_context(
+                config,
+                OrcaSelection(role="architect"),
+            )
+
+            prepared = _compile_handover(
+                OrcaHandoverRequest(
+                    config=config,
+                    context=context,
+                    workspace={
+                        "id": "projects-fixture",
+                        "selector": "id:projects-fixture",
+                        "path": workspace_root.as_posix(),
+                    },
+                    agent_id="codex",
+                    request_id=request_id,
+                )
+            )
+            handover = json.loads(
+                prepared["prompt"].rsplit(
+                    "\n\nAR owner assignment and canonical task handover:\n", 1
+                )[1]
+            )
+
+        self.assertEqual(prepared["capsuleOperation"], "planning")
+        self.assertEqual(handover["operation"], "planning")
+        self.assertEqual(handover["selection"]["role"], "architect")
+        self.assertIsNone(handover["selection"]["sprintDocumentRef"])
+        self.assertIsNone(handover["selection"]["masterDocumentRef"])
+        self.assertIsNone(handover["selection"]["taskDocumentRef"])
+        self.assertEqual(handover["documents"], [])
+        self.assertIsNone(handover["repositoryContext"]["selectedRepository"])
+        self.assertEqual(
+            handover["capsule"]["binding"]["taskPath"],
+            "free-agent:architect",
+        )
+        self.assertEqual(handover["capsule"]["binding"]["role"], "architect")
+        self.assertEqual(handover["capsule"]["binding"]["operation"], "planning")
+        self.assertTrue(prepared["prompt"].startswith("EXPERIMENTAL MANUAL AR ROLE BRIEF:"))
+        source = handover["nativeOrca"]["instructionSource"]
+        self.assertEqual(source["kind"], "compiled-role-operation-capsule")
+        self.assertEqual(source["role"], "architect")
+        self.assertEqual(source["operation"], "planning")
+        self.assertEqual(source["semanticDigest"], prepared["capsuleDigest"])
+        self.assertFalse(source["ambientRoleFilesSelected"])
+        self.assertIn("do not load them as a second role", handover["ownerHandover"])
+        self.assertIn("preserve native system/developer instructions", prepared["prompt"])
+        self.assertIsNone(handover["nativeMcpScope"])
+        self.assertTrue(prepared["taskReportPath"].endswith(f"/{request_id}.md"))
+        self.assertEqual(ROLE_START_OPERATIONS["architect"], "planning")
+
+
+class ProjectsMcpScopeSelectionTests(unittest.TestCase):
+    def test_taskless_role_does_not_infer_a_repo_and_bound_role_uses_its_selected_repo(
+        self,
+    ) -> None:
+        config = cast(
+            McpRuntimeConfig,
+            SimpleNamespace(config_path=Path("/private/ar.json")),
+        )
+        workspace = {"path": "/home/firefox/projects"}
+        taskless = OrcaRoleContext(
+            role="architect", sprint=None, master=None, task=None, effective_task=None
+        )
+        selected = SimpleNamespace(ref=SimpleNamespace(repository="agents-remember"))
+        manager = OrcaRoleContext(
+            role="manager", sprint=None, master=selected, task=None, effective_task=selected
+        )
+        with patch(
+            "agents_remember.cli.orca_task_preparation.prepare_codex_projects_mcp",
+            return_value=object(),
+        ) as prepare:
+            taskless_scope = _prepare_projects_mcp_scope(config, taskless, workspace, "codex")
+            manager_scope = _prepare_projects_mcp_scope(config, manager, workspace, "codex")
+            unsupported = _prepare_projects_mcp_scope(config, taskless, workspace, "claude")
+
+        self.assertIsNotNone(taskless_scope)
+        self.assertIsNotNone(manager_scope)
+        self.assertIsNone(unsupported)
+        self.assertEqual(
+            [call.kwargs["repository_id"] for call in prepare.call_args_list],
+            [None, "agents-remember"],
+        )
+        self.assertEqual(
+            [call.kwargs["workspace_root"] for call in prepare.call_args_list],
+            [Path("/home/firefox/projects"), Path("/home/firefox/projects")],
+        )
+
+
+class LeafEnclosureSprintBindingTests(unittest.TestCase):
+    def test_missing_leaf_enclosure_passes_selected_sprint_to_worktree_owner(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            task_root = root / "coordination" / "tasks" / "agents-remember" / "master"
+            task_root.mkdir(parents=True)
+            leaf_path = task_root / "01_leaf.json"
+            leaf = ResolvedTaskDocument(
+                ref=TaskDocumentRef(repository="agents-remember", path="master/01_leaf.json"),
+                path=leaf_path,
+                document=TaskDocument.model_validate(
+                    {
+                        "id": "01_LEAF",
+                        "slug": "01_leaf",
+                        "title": "Leaf enclosure binding",
+                        "kind": "subTask",
+                        "status": "inProgress",
+                        "repo": "agents-remember",
+                        "createdAt": "2026-09-25T10:00:00+00:00",
+                        "master": "task.json",
+                    }
+                ),
+            )
+            sprint = ResolvedTaskDocument(
+                ref=TaskDocumentRef(
+                    repository="agents-remember",
+                    path="260713_improved-agentic-system/task.json",
+                ),
+                path=root
+                / "coordination"
+                / "tasks"
+                / "agents-remember"
+                / "260713_improved-agentic-system"
+                / "task.json",
+                document=TaskDocument.model_validate(
+                    {
+                        "id": "IAS",
+                        "slug": "260713_improved-agentic-system",
+                        "title": "IAS",
+                        "kind": "master",
+                        "repo": "agents-remember",
+                        "createdAt": "2026-09-25T09:00:00+00:00",
+                        "orchestrates": ["master"],
+                    }
+                ),
+            )
+            master = ResolvedTaskDocument(
+                ref=TaskDocumentRef(repository="agents-remember", path="master/task.json"),
+                path=task_root / "task.json",
+                document=TaskDocument.model_validate(
+                    {
+                        "id": "MASTER",
+                        "slug": "master",
+                        "title": "Master",
+                        "kind": "master",
+                        "repo": "agents-remember",
+                        "createdAt": "2026-09-25T09:30:00+00:00",
+                    }
+                ),
+            )
+            config = McpRuntimeConfig(
+                config_path=root / "settings" / "ar.json",
+                coordination_root=root / "coordination",
+                workspace_root=root / "projects",
+                transcript_root=root / "coordination" / "logs",
+            )
+            group = root / "enclosure"
+            code = group / "code"
+            memory = group / "memory"
+            for path in (group, code, memory):
+                path.mkdir(parents=True)
+            status = {
+                "ok": True,
+                "worktree_group": group.as_posix(),
+                "code_worktree": code.as_posix(),
+                "memory_worktree": memory.as_posix(),
+            }
+            statuses = iter(({"ok": False}, status))
+
+            def ensure_workspace(path: Path) -> dict[str, str]:
+                path.mkdir(parents=True, exist_ok=True)
+                return {"id": "projects", "selector": "id:projects", "path": path.as_posix()}
+
+            context = OrcaRoleContext(
+                role="worker", sprint=sprint, master=master, task=leaf, effective_task=leaf
+            )
+            with (
+                patch(
+                    "agents_remember.cli.orca_task_preparation.worktree_status_tool",
+                    side_effect=lambda *_args: next(statuses),
+                ),
+                patch(
+                    "agents_remember.cli.orca_task_preparation.worktree_start_tool",
+                    return_value={"ok": True},
+                ) as start,
+                patch(
+                    "agents_remember.cli.orca_task_preparation._ensure_orca_workspace",
+                    side_effect=ensure_workspace,
+                ),
+            ):
+                _resolve_workspace(config, context)
+
+            identity = start.call_args.args[1]
+            self.assertEqual(identity.repo_id, "agents-remember")
+            self.assertEqual(identity.task_name, "master")
+            self.assertEqual(identity.leaf_id, "01_LEAF")
+            self.assertEqual(identity.parent_task, "260713_improved-agentic-system")
+
+            existing_path = leaf_enclosure_path(task_root, leaf.document.id)
+            existing_leaf = ResolvedTaskDocument(
+                ref=leaf.ref,
+                path=leaf.path,
+                document=leaf.document.model_copy(
+                    update={
+                        "enclosures": [
+                            TaskEnclosureRef(
+                                leafId=leaf.document.id,
+                                enclosurePath=existing_path.as_posix(),
+                            )
+                        ]
+                    }
+                ),
+            )
+            with (
+                patch(
+                    "agents_remember.cli.orca_task_preparation.worktree_status_tool",
+                    return_value=status,
+                ),
+                patch(
+                    "agents_remember.cli.orca_task_preparation.worktree_start_tool"
+                ) as reuse_start,
+            ):
+                contract_path, reused_status = _ensure_leaf_enclosure(
+                    config, existing_leaf, parent_task="260713_improved-agentic-system"
+                )
+            self.assertEqual(contract_path, existing_path.resolve())
+            self.assertIs(reused_status, status)
+            reuse_start.assert_not_called()
+
+
+class OrcaReportPathIsolationTests(unittest.TestCase):
+    @staticmethod
+    def _resolved_document(
+        root: Path, *, task_path: str, document_id: str, kind: str
+    ) -> ResolvedTaskDocument:
+        path = root / task_path
+        document = TaskDocument.model_validate(
+            {
+                "id": document_id,
+                "slug": path.parent.name,
+                "title": document_id,
+                "kind": kind,
+                "repo": "agents-remember",
+                "createdAt": "2026-09-25T10:00:00+00:00",
+                **(
+                    {"status": "inProgress", "master": "master/task.json"}
+                    if kind == "subTask"
+                    else {}
+                ),
+            }
+        )
+        return ResolvedTaskDocument(
+            ref=TaskDocumentRef(repository="agents-remember", path=task_path),
+            path=path,
+            document=document,
+        )
+
+    def test_manager_reports_are_master_local_and_request_unique(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = {"path": (root / "Projects").as_posix()}
+            masters = [
+                self._resolved_document(
+                    root,
+                    task_path=f"series/{name}/task.json",
+                    document_id=name.upper(),
+                    kind="master",
+                )
+                for name in ("master-one", "master-two")
+            ]
+            sprint = self._resolved_document(
+                root, task_path="series/sprint/task.json", document_id="SPRINT", kind="master"
+            )
+            manager_reports: list[Path] = []
+            for master in masters:
+                context = OrcaRoleContext(
+                    role="manager",
+                    sprint=sprint,
+                    master=master,
+                    task=None,
+                    effective_task=master,
+                )
+                request_id = uuid.uuid4()
+                report = Path(_role_report_path(context, workspace, request_id=request_id))
+                self.assertTrue(
+                    report.resolve(strict=False).is_relative_to(
+                        (master.path.parent / "notes" / "reports").resolve()
+                    )
+                )
+                self.assertEqual(report.name, f"{master.document.id}-manager-{request_id}.md")
+                report.write_text(f"original {master.document.id}\n", encoding="utf-8")
+                manager_reports.append(report)
+
+            retry_context = OrcaRoleContext(
+                role="manager",
+                sprint=sprint,
+                master=masters[0],
+                task=None,
+                effective_task=masters[0],
+            )
+            retry_report = Path(
+                _role_report_path(retry_context, workspace, request_id=uuid.uuid4())
+            )
+            retry_report.write_text("new request\n", encoding="utf-8")
+            self.assertNotEqual(manager_reports[0], manager_reports[1])
+            self.assertNotEqual(manager_reports[0], retry_report)
+            self.assertEqual(
+                manager_reports[0].read_text(encoding="utf-8"), "original MASTER-ONE\n"
+            )
+
+    def test_leaf_reports_are_task_local_and_each_request_gets_its_own_file(self) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sprint = self._resolved_document(
+                root, task_path="series/sprint/task.json", document_id="SPRINT", kind="master"
+            )
+            master = self._resolved_document(
+                root, task_path="series/master/task.json", document_id="MASTER", kind="master"
+            )
+            leaf = self._resolved_document(
+                root, task_path="series/leaf/leaf.json", document_id="LEAF-ONE", kind="subTask"
+            )
+            reports = leaf.path.parent / "notes" / "reports"
+            reports.mkdir(parents=True)
+            workspace_root = root / "leaf-workspace"
+            workspace_root.mkdir()
+            report_access = _bind_task_report_access(workspace_root, reports)
+            workspace = {
+                "path": workspace_root.as_posix(),
+                "taskReportRoot": reports.resolve().as_posix(),
+                "taskReportAccessRoot": report_access.as_posix(),
+            }
+            context = OrcaRoleContext(
+                role="worker",
+                sprint=sprint,
+                master=master,
+                task=leaf,
+                effective_task=leaf,
+            )
+            first = Path(_role_report_path(context, workspace, request_id=uuid.uuid4()))
+            second = Path(_role_report_path(context, workspace, request_id=uuid.uuid4()))
+            first.write_text("original leaf report\n", encoding="utf-8")
+            second.write_text("second attempt\n", encoding="utf-8")
+            self.assertNotEqual(first, second)
+            self.assertTrue(first.resolve().is_relative_to(reports.resolve()))
+            self.assertTrue(second.resolve().is_relative_to(reports.resolve()))
+            self.assertEqual(first.read_text(encoding="utf-8"), "original leaf report\n")

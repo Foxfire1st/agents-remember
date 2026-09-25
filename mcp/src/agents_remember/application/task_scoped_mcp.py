@@ -1,7 +1,8 @@
-"""Build the one MCP runtime config bound to an admitted leaf enclosure.
+"""Build the one MCP runtime config bound to an admitted AR execution scope.
 
 The profile is loaded once at MCP process startup. Every registered tool then closes over the
-same config, so reads and writes share the selected task's code, memory, and contract roots.
+same config, so reads and writes share either the selected task enclosure or the configured
+Projects repository roots.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocume
 from agents_remember.tasks.task_paths import leaf_enclosure_path
 
 TASK_SCOPED_MCP_PROFILE_SCHEMA = "ar-task-scoped-mcp-profile/v1"
+PROJECTS_MCP_PROFILE_SCHEMA = "ar-projects-mcp-profile/v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +58,29 @@ def task_scoped_mcp_config(
         workspace_root=admitted_workspace,
         repositories={binding.task_document_ref.repository: scoped_repository},
     )
+
+
+def projects_mcp_config(config: McpRuntimeConfig, repository_id: str | None) -> McpRuntimeConfig:
+    """Remove any inherited leaf-contract pin while retaining configured project roots.
+
+    Projects sessions use the registered code and memory roots. A taskless session keeps the
+    configured registry but selects no repository; a sprint/master session is narrowed to its
+    already-resolved canonical repository.
+    """
+
+    if repository_id is None:
+        repositories = {
+            key: replace(repository, contract_path=None)
+            for key, repository in config.repositories.items()
+        }
+    else:
+        repository = config.repositories.get(repository_id)
+        if repository is None:
+            raise ValueError(
+                "The selected Projects task repository is not admitted by MCP settings."
+            )
+        repositories = {repository_id: replace(repository, contract_path=None)}
+    return replace(config, repositories=repositories)
 
 
 def _admit_task_scope(
@@ -127,20 +152,28 @@ def _admitted_leaf_roots(
     return admitted_workspace, admitted_code, admitted_memory
 
 
-def task_scoped_mcp_config_from_profile(
+def mcp_config_from_scope_profile(
     config: McpRuntimeConfig,
     profile: dict[str, Any],
 ) -> McpRuntimeConfig:
-    """Load the typed scope represented by one private, startup-only profile payload."""
+    """Load the typed task or Projects scope represented by a private startup profile."""
 
-    if profile.get("schema") != TASK_SCOPED_MCP_PROFILE_SCHEMA:
-        raise ValueError("The native MCP scope profile has an unsupported schema.")
     base_config_path = profile.get("baseConfigPath")
     if (
         not isinstance(base_config_path, str)
         or Path(base_config_path).resolve(strict=False) != config.config_path.resolve()
     ):
         raise ValueError("The native MCP scope profile names a different authority settings file.")
+    if profile.get("schema") == PROJECTS_MCP_PROFILE_SCHEMA:
+        workspace_root = _required_profile_path(profile, "workspaceRoot")
+        if workspace_root.resolve(strict=False) != config.workspace_root.resolve():
+            raise ValueError("The Projects MCP profile names a different workspace root.")
+        repository_id = profile.get("repositoryId")
+        if repository_id is not None and not isinstance(repository_id, str):
+            raise ValueError("The Projects MCP profile has an invalid repository identity.")
+        return projects_mcp_config(config, repository_id)
+    if profile.get("schema") != TASK_SCOPED_MCP_PROFILE_SCHEMA:
+        raise ValueError("The native MCP scope profile has an unsupported schema.")
     task_document_ref = profile.get("taskDocumentRef")
     if not isinstance(task_document_ref, dict):
         raise ValueError("The native MCP scope profile has no canonical task document reference.")
@@ -173,8 +206,10 @@ def _optional_profile_path(profile: dict[str, Any], key: str) -> Path | None:
 
 
 __all__ = [
+    "PROJECTS_MCP_PROFILE_SCHEMA",
     "TASK_SCOPED_MCP_PROFILE_SCHEMA",
     "TaskScopedMcpBinding",
+    "mcp_config_from_scope_profile",
+    "projects_mcp_config",
     "task_scoped_mcp_config",
-    "task_scoped_mcp_config_from_profile",
 ]
