@@ -766,7 +766,7 @@ describe("Operations drill survives a view switch (DetailPanel mount preservatio
 });
 
 describe("canonical Chats route: full-bleed keep-alive cockpit (S5)", () => {
-  it("defaults to Operations, exposes no Sessions route, and keeps one Chats cockpit mounted", () => {
+  it("defaults to Orca in Chats, switches to AR Sessions, and keeps one Chats cockpit mounted", () => {
     seed("engine-fleet");
     const { container, getByRole, queryByRole } = render(<CockpitShell />);
 
@@ -777,22 +777,36 @@ describe("canonical Chats route: full-bleed keep-alive cockpit (S5)", () => {
     // only one product route and one mounted PTY owner.
     const chats = container.querySelector('[data-testid="sessions-view"]');
     expect(chats).not.toBeNull();
-    const layer = chats?.parentElement as HTMLElement;
-    expect(layer.style.display).toBe("none");
-    expect(layer.getAttribute("aria-hidden")).toBe("true");
+    const arPanel = chats?.parentElement as HTMLElement;
+    const chatsLayer = arPanel.parentElement as HTMLElement;
+    expect(chatsLayer.style.display).toBe("none");
+    expect(chatsLayer.getAttribute("aria-hidden")).toBe("true");
 
     fireEvent.click(getByRole("radio", { name: "Chats" }));
     expect(container.querySelector(".shell__body")?.getAttribute("data-fullbleed")).toBe("true");
     // The left rail stays mounted, hidden (keep-alive), while Chats goes full-bleed.
     expect((container.querySelector(".rail--left") as HTMLElement).style.display).toBe("none");
     expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
-    expect(layer.style.display).toBe("flex");
-    expect(layer.getAttribute("aria-hidden")).toBe("false");
+
+    const orcaTab = getByRole("tab", { name: "Orca" });
+    const arSessionsTab = getByRole("tab", { name: "AR Sessions" });
+    expect(orcaTab.getAttribute("aria-selected")).toBe("true");
+    expect(arSessionsTab.getAttribute("aria-selected")).toBe("false");
+    expect(chatsLayer.style.display).toBe("flex");
+    expect(chatsLayer.getAttribute("aria-hidden")).toBe("false");
+    expect(arPanel.style.display).toBe("none");
+    expect(arPanel.getAttribute("aria-hidden")).toBe("true");
+
+    fireEvent.click(arSessionsTab);
+    expect(orcaTab.getAttribute("aria-selected")).toBe("false");
+    expect(arSessionsTab.getAttribute("aria-selected")).toBe("true");
+    expect(arPanel.style.display).toBe("flex");
+    expect(arPanel.getAttribute("aria-hidden")).toBe("false");
 
     fireEvent.click(getByRole("radio", { name: "Operations" }));
     expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
-    expect(layer.style.display).toBe("none");
-    expect(layer.getAttribute("aria-hidden")).toBe("true");
+    expect(chatsLayer.style.display).toBe("none");
+    expect(chatsLayer.getAttribute("aria-hidden")).toBe("true");
   });
 });
 

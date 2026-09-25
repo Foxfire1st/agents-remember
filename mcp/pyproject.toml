@@ -89,4 +89,5 @@ where = ["src"]
 agents_remember = [
   "package_data/**/*",
   "package_data/benchmarks/.gitignore",
+  "cli/*.mjs",
 ]

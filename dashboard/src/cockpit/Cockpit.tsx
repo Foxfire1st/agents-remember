@@ -10,6 +10,7 @@ import {
 import { motion } from "motion/react";
 
 import { css, cva, cx } from "../../styled-system/css";
+import { ChatsModePanels } from "./OrcaChats";
 import {
   preferLiveSession,
   startCatalogPollDriver,
@@ -47,13 +48,13 @@ import { LifecycleList } from "../panels/lifecycle-list/LifecycleList";
 import { MemoryMirror } from "../panels/MemoryMirror";
 import { RailChat } from "../panels/RailChat";
 import { usePersistedFlag, usePersistedNumber } from "../panels/file-viewer/usePersistedFlag";
-import { SessionsView } from "../panels/session-cockpit/sessions-view/SessionsView";
 import { Topology } from "../panels/Topology";
-import type { EngineProcessNode, TaskDocNode } from "../types/projection";
+import type { EngineProcessNode, SeriesNode, TaskDocNode } from "../types/projection";
 
 // A stable empty array so the `analytics?.taskDocuments ?? …` selector never returns a fresh reference
 // (which would churn the zustand snapshot and re-render every tick).
 const EMPTY_TASK_DOCS: TaskDocNode[] = [];
+const EMPTY_SERIES: SeriesNode[] = [];
 const EMPTY_ENGINE_PROCESSES: EngineProcessNode[] = [];
 
 // The cockpit shell: persistent command chrome that never hides the alarms —
@@ -403,6 +404,7 @@ interface CockpitShellState {
   viewedLeafKey: string | undefined;
   viewedTask: ViewedTaskContext | undefined;
   taskDocuments: TaskDocNode[];
+  taskSeries: SeriesNode[];
   engineProcesses: EngineProcessNode[];
   contextMaster: string | undefined;
   fullBleed: boolean;
@@ -441,6 +443,7 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
   const [viewedTask, setViewedTask] = useState<ViewedTaskContext | undefined>(undefined);
   const viewedLeafKey = viewedTask?.leafKey;
   const taskDocuments = useDashboard((s) => s.analytics?.taskDocuments ?? EMPTY_TASK_DOCS);
+  const taskSeries = useDashboard((s) => s.analytics?.series ?? EMPTY_SERIES);
   const engineProcesses = useDashboard((s) => s.analytics?.engineProcesses ?? EMPTY_ENGINE_PROCESSES);
   const contextMaster = useDashboard((s) =>
     masterFolderForSelection(selectedId, s.lifecycles, s.analytics),
@@ -466,6 +469,7 @@ function useCockpitShellState(initialView: CockpitView): CockpitShellState {
     viewedLeafKey,
     viewedTask,
     taskDocuments,
+    taskSeries,
     engineProcesses,
     contextMaster,
     fullBleed,
@@ -740,6 +744,7 @@ function MainLayers({
   viewedLeafKey,
   selectedLifecycleId,
   taskDocuments,
+  taskSeries,
   contextMaster,
   onOpen,
   onOpenChangeSet,
@@ -752,6 +757,7 @@ function MainLayers({
   viewedLeafKey: string | undefined;
   selectedLifecycleId: string | undefined;
   taskDocuments: TaskDocNode[];
+  taskSeries: SeriesNode[];
   contextMaster: string | undefined;
   onOpen: (id: string) => void;
   onOpenChangeSet: (target: ChangeSetTarget) => void;
@@ -789,17 +795,14 @@ function MainLayers({
       <ViewLayer visible={view === "files"} className={filesLayer}>
         <FileViewer active={view === "files"} />
       </ViewLayer>
-      {/* The sole product-facing Chats cockpit is never unmounted — only hidden — so its PTY
-          buffers, WebSockets, focus, drafts, and inspector state survive a view switch. The
-          display:none hiding DESTROYS the timeline's DOM scroll offset, so `active` also
-          reports the takeover cover: the timeline restores its remembered per-session scroll
-          position on every re-show. */}
+      {/* Both chat modes stay mounted across dashboard view switches. */}
       <ViewLayer visible={view === "chats"} className={chatsLayer}>
-        <SessionsView
+        <ChatsModePanels
           active={view === "chats" && !takeover}
           selectedLifecycleId={selectedLifecycleId}
           selectedLeafKey={viewedLeafKey}
           taskDocuments={taskDocuments}
+          series={taskSeries}
           contextMaster={contextMaster}
         />
       </ViewLayer>
@@ -848,6 +851,7 @@ function RailedBody({
         viewedLeafKey={state.viewedLeafKey}
         selectedLifecycleId={state.selectedLifecycleId}
         taskDocuments={state.taskDocuments}
+        taskSeries={state.taskSeries}
         contextMaster={state.contextMaster}
         onOpen={actions.open}
         onOpenChangeSet={actions.openChangeSet}

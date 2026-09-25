@@ -246,8 +246,8 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     // collection has its own memo gate, so these controller renders do not rebuild it while hidden.
     expect(counts.attentionQueue).toBe(5);
     expect(counts.lifecycleList).toBe(5);
-    // `active` flipped exactly twice: entering Chats and leaving it.
-    expect(counts.sessionsView).toBe(3);
+    // AR Sessions stays mounted but dormant while Orca is the selected chat mode.
+    expect(counts.sessionsView).toBe(1);
   });
 
   it("keeps the visibility/aria contract and DOM identity across switches (keep-alive intact)", () => {
@@ -258,13 +258,17 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     const room = container.querySelector('[data-testid="engine-room"]') as HTMLElement;
     const roomLayer = room.parentElement as HTMLElement;
     const chats = container.querySelector('[data-testid="sessions-view"]') as HTMLElement;
-    const chatsLayerEl = chats.parentElement as HTMLElement;
+    const arPanel = chats.parentElement as HTMLElement;
+    const chatsLayerEl = arPanel.parentElement as HTMLElement;
+    const orcaPanel = container.querySelector("#chats-panel-orca") as HTMLElement;
 
     // Railed Operations: rails shown, keep-alive layers hidden via display + aria-hidden.
     expect(railLeft.style.display).toBe("flex");
     expect(roomLayer.style.display).toBe("none");
     expect(roomLayer.getAttribute("aria-hidden")).toBe("true");
     expect(chatsLayerEl.style.display).toBe("none");
+    expect(arPanel.style.display).toBe("none");
+    expect(orcaPanel.style.display).toBe("flex");
 
     fireEvent.click(getByRole("radio", { name: "Engine Room" }));
     expect(railLeft.style.display).toBe("none");
@@ -276,7 +280,14 @@ describe("persistent layers skip the setView reconcile (260721 tab-switch CPU)",
     fireEvent.click(getByRole("radio", { name: "Chats" }));
     expect(chatsLayerEl.style.display).toBe("flex");
     expect(chatsLayerEl.getAttribute("aria-hidden")).toBe("false");
+    expect(orcaPanel.style.display).toBe("flex");
+    expect(arPanel.style.display).toBe("none");
     expect(roomLayer.style.display).toBe("none");
+
+    fireEvent.click(getByRole("tab", { name: "AR Sessions" }));
+    expect(arPanel.style.display).toBe("flex");
+    expect(orcaPanel.style.display).toBe("none");
+    expect(container.querySelector('[data-testid="sessions-view"]')).toBe(chats);
 
     fireEvent.click(getByRole("radio", { name: "Operations" }));
     // Same DOM nodes throughout — hidden-not-unmounted survived the memo change.

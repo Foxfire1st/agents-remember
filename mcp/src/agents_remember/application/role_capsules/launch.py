@@ -15,8 +15,9 @@ routed source set built by the same manifest rule
 **What a task-attached seat's admission is.** The task document the launch already holds is resolved
 by the task layer, and the enclosure that admits it is resolved through the control plane's own
 worktree-contract reader — a leaf document by its leaf id, any other document by its task's own
-series contract. The repository root comes from the MCP configuration's registered repository for
-the repository the document itself declares; nothing is taken from the caller's string.
+series contract. The contract supplies the canonical repository root; the registered MCP entry
+proves that the document's repository is authorized, while its scoped worktree path remains the
+code root for MCP tool access.
 
 **What a free agent's admission is, and the one convention this module had to define.** A free agent
 (a role, no task document — ``bootstrap`` is admitted to that class by ``TASKLESS_SEAT_ROLES``) has
@@ -76,7 +77,11 @@ from agents_remember.serving.launch_capsule import (
     LaunchCapsuleRequest,
     refused_launch_capsule,
 )
-from agents_remember.tasks.document_refs import TaskDocumentRefError, TaskDocumentTopology
+from agents_remember.tasks.document_refs import (
+    ResolvedTaskDocument,
+    TaskDocumentRefError,
+    TaskDocumentTopology,
+)
 from agents_remember.worktrees.modules.contract_reader import WorktreeContractReader
 from agents_remember.worktrees.worktree_contract import ContractError, load_contract
 
@@ -110,8 +115,10 @@ class AdmittedTaskSeat:
     """One task-attached seat, resolved once from the launch's own admitted document.
 
     The five facts every carrier needs — the role, the document reference, the enclosure selector,
-    the repository root and the document's own repository name — are resolved together, because
-    resolving them apart is how two carriers end up binding to two different enclosures.
+    the contract-declared canonical repository root and the document's own repository name — are
+    resolved together, because resolving them apart is how two carriers end up binding to different
+    repositories or enclosures. The configured repository path can be a scoped leaf worktree and is
+    not the repository identity.
     """
 
     role: str
@@ -189,6 +196,33 @@ class FreeAgentSeatAdmission:
         return CapsuleAdmittedFacts(
             task_reference=self.task_reference,
             task_document_digest=self.digest(),
+            seat=CapsuleRoleSeat(role=self.role, altitude=self.altitude),  # type: ignore[arg-type]
+            repository_id=self.repository_id,
+            work_branch=self.work_branch,
+            tool_policy=tool_policy,  # type: ignore[arg-type]
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectTaskSeatAdmission:
+    """A real sprint/master task admitted at the configured Projects workspace."""
+
+    role: str
+    reference: TaskDocumentRef
+    altitude: str
+    repository_id: str
+    work_branch: str
+    task_document_digest: CapsuleDigest
+
+    def __post_init__(self) -> None:
+        for name in ("role", "altitude", "repository_id", "work_branch"):
+            if not getattr(self, name).strip():
+                raise ValueError(f"a project-task admission requires a non-blank {name}")
+
+    def admitted_facts(self, *, tool_policy: object) -> CapsuleAdmittedFacts:
+        return CapsuleAdmittedFacts(
+            task_reference=self.reference.key,
+            task_document_digest=self.task_document_digest,
             seat=CapsuleRoleSeat(role=self.role, altitude=self.altitude),  # type: ignore[arg-type]
             repository_id=self.repository_id,
             work_branch=self.work_branch,
@@ -306,50 +340,18 @@ def _compile_admitted_task(
         resolved = topology.resolve(ref)
     except TaskDocumentRefError as error:
         return refused_launch_capsule(role, "task-binding-unresolved", str(error))
-    document = resolved.document
-    repository_root = _registered_repository_root(config, document.repo)
-    if repository_root is None:
-        return refused_launch_capsule(
-            role,
-            "repository-not-registered",
-            (
-                f"the admitted task document {ref.key} declares repository {document.repo!r}, which "
-                "this server's configuration does not register; the capsule's admitted repository "
-                "and work branch cannot be resolved"
-            ),
-        )
-    leaf_id = document.id if document.kind == "subTask" else None
-    contract_path = _enclosure_contract(config, document.repo, ref.path, leaf_id)
-    if contract_path is None:
-        return refused_launch_capsule(
-            role,
-            "enclosure-not-found",
-            (
-                f"the admitted task document {ref.key} has no worktree enclosure under "
-                f"{_task_root_of(ref.path)!r}; the capsule's admitted work branch cannot be resolved. "
-                "Run worktree_start for this leaf (or admit the task's own series contract) and "
-                "dispatch again"
-            ),
-        )
-    selector = EnclosureSelector(contract_path=contract_path)
-    seat = AdmittedTaskSeat(
-        role=role,
-        reference=ref,
-        selector=selector,
-        contract_path=contract_path,
-        repository_root=repository_root,
-        document_repository=document.repo,
-    )
+    admission = _admit_task_document(config, request, role, resolved)
+    if isinstance(admission, LaunchCapsule):
+        return admission
     if (request.harness or "").strip() == "eve":
-        return _compile_eve_task(config, seat)
+        return _compile_eve_task(config, admission)
     outcome = compile_task_capsule(
         config,
         CapsuleCompileRequest(
-            enclosure=selector,
+            enclosure=admission.selector,
             task_path=ref.path,
             operation=LAUNCH_OPERATION,
             role=role,
-            code_repository_root=repository_root,
         ),
     )
     if not outcome.ok:
@@ -357,6 +359,147 @@ def _compile_admitted_task(
     result = outcome.result
     assert result is not None  # outcome.ok
     return _capsule_launch(role, result)
+
+
+def _admit_task_document(
+    config: McpRuntimeConfig,
+    request: LaunchCapsuleRequest,
+    role: str,
+    resolved: ResolvedTaskDocument,
+) -> AdmittedTaskSeat | LaunchCapsule:
+    document = resolved.document
+    if _registered_repository_root(config, document.repo) is None:
+        return refused_launch_capsule(
+            role,
+            "repository-not-registered",
+            (
+                f"the admitted task document {resolved.ref.key} declares repository {document.repo!r}, "
+                "which this server's configuration does not register; the capsule's admitted "
+                "repository and work branch cannot be resolved"
+            ),
+        )
+    leaf_id = document.id if document.kind == "subTask" else None
+    contract_path = _enclosure_contract(config, document.repo, resolved.ref.path, leaf_id)
+    if contract_path is None:
+        return _compile_without_task_enclosure(config, request, role, resolved)
+    try:
+        contract = load_contract(contract_path)
+    except (ContractError, OSError) as error:
+        return refused_launch_capsule(
+            role,
+            "enclosure-contract-unavailable",
+            f"the admitted enclosure contract could not be read: {error}",
+        )
+    if contract.repo_name != document.repo:
+        return refused_launch_capsule(
+            role,
+            "enclosure-repository-mismatch",
+            (
+                f"task document repository {document.repo!r} does not match the admitted "
+                f"contract repository {contract.repo_name!r}"
+            ),
+        )
+    return AdmittedTaskSeat(
+        role=role,
+        reference=resolved.ref,
+        selector=EnclosureSelector(contract_path=contract_path),
+        contract_path=contract_path,
+        repository_root=contract.code_repo_path,
+        document_repository=document.repo,
+    )
+
+
+def _compile_without_task_enclosure(
+    config: McpRuntimeConfig,
+    request: LaunchCapsuleRequest,
+    role: str,
+    resolved: ResolvedTaskDocument,
+) -> LaunchCapsule:
+    if request.allow_project_task_binding:
+        return _compile_project_task(config, request, role, resolved)
+    ref = resolved.ref
+    return refused_launch_capsule(
+        role,
+        "enclosure-not-found",
+        (
+            f"the admitted task document {ref.key} has no worktree enclosure under "
+            f"{_task_root_of(ref.path)!r}; the capsule's admitted work branch cannot be resolved. "
+            "Run worktree_start for this leaf (or admit the task's own series contract) and "
+            "dispatch again"
+        ),
+    )
+
+
+def _compile_project_task(
+    config: McpRuntimeConfig,
+    request: LaunchCapsuleRequest,
+    role: str,
+    resolved: ResolvedTaskDocument,
+) -> LaunchCapsule:
+    """Compile the existing role capsule for a real sprint/master opened at Projects scope.
+
+    The task document remains the seat identity and supplies the admitted content digest. Projects
+    is the execution workspace, so no task branch or enclosure is invented for this admission.
+    """
+    expected_altitude = {"orchestrator": "sprint", "manager": "master"}.get(role)
+    if (
+        expected_altitude is None
+        or request.workspace_root.resolve() != config.workspace_root.resolve()
+        or resolved.document.kind != "master"
+    ):
+        return refused_launch_capsule(
+            role,
+            "project-task-binding-invalid",
+            "Projects-scope task binding is limited to canonical orchestrator/sprint and manager/master launches.",
+        )
+    try:
+        altitude = TaskDocumentTopology(config.coordination_root).validate_role(resolved.ref, role)
+    except TaskDocumentRefError as error:
+        return refused_launch_capsule(role, error.status, str(error))
+    if altitude != expected_altitude:
+        return refused_launch_capsule(
+            role,
+            "project-task-altitude-invalid",
+            f"role {role!r} requires {expected_altitude} altitude, got {altitude!r}",
+        )
+    task_json = json.dumps(
+        resolved.document.model_dump(mode="json", by_alias=True, exclude_none=True),
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    _, work_branch = workspace_identity(config, request.workspace_root)
+    admission = ProjectTaskSeatAdmission(
+        role=role,
+        reference=resolved.ref,
+        altitude=altitude,
+        repository_id=resolved.ref.repository,
+        work_branch=work_branch,
+        task_document_digest=compute_content_digest(task_json),
+    )
+    binding = CapsuleBinding(
+        operation=LAUNCH_OPERATION,  # type: ignore[arg-type]
+        admitted=admission.admitted_facts(tool_policy=admitted_tool_policy(config)),
+    )
+    with shipped_composition_corpus() as (root, manifest):
+        manifest_bytes = (root / manifest).read_bytes()
+        try:
+            routed = routed_admission_for(
+                root,
+                manifest,
+                manifest_bytes,
+                CapsuleSeatAddress(role=role, operation=LAUNCH_OPERATION),
+            )
+        except CapsuleCompilationError as error:
+            return refused_launch_capsule(role, error.status, error.render())
+        outcome = compile_admitted_capsule(binding, routed)
+    if outcome.result is None:
+        return refused_launch_capsule(
+            role,
+            getattr(outcome.error, "status", "capsule-compilation-refused"),
+            outcome.render_explanation(),
+        )
+    return _capsule_launch(role, outcome.result)
 
 
 def _compile_eve_task(config: McpRuntimeConfig, seat: AdmittedTaskSeat) -> LaunchCapsule:

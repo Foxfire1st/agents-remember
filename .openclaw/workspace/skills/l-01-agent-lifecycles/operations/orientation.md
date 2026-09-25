@@ -26,16 +26,25 @@ authored once in `../core/lifecycle-frame.md`.
 ## Required inputs
 
 - The dispatch brief — which for a spawned seat **is** its session start. A workspace session-start
-  notice is not addressed to a spawned seat.
+  notice is not addressed to a spawned seat. For the explicitly project-scoped manual architect or
+  system-specialist launch, the opening developer message and launcher handover are its session start; no
+  task document or pinned brief is expected.
 - The canonical task document(s) the brief names, and the leaf/master/sprint documents one rung up
-  that the seat must not mutate.
-- The exact applicable requirement revisions by stable ID + version, with their canonical packets.
+  that the seat must not mutate, when the launch is task-bound.
+- The exact applicable requirement revisions by stable ID + version, with their canonical packets, when
+  the launch is task-bound.
 - For a worker: the code worktree (the only write area besides its report) and the memory worktree
   as read-only context.
 - The resolved memory layer's `system/tools.md`, `system/coding-guidelines.md`, and
   `system/git-workflow.md` where the seat's work touches code, commits, or checks.
 
 ## Normal workflow
+
+The project-scoped manual architect and system-specialist entry does not invent a task to satisfy this
+workflow. Use the developer's stated goal and the launcher-supplied workspace/report scope. The shared
+Projects workspace is an execution location, not a repository selection: the architect asks for the target
+repository when it is missing and waits before repository-specific trust-packet or task-corpus work. The
+system-specialist asks for the missing provider degradation or desired investigation scope.
 
 1. **Run the takeover checklist first** when the developer declared this chat the seat for a named
    task: converge on the canonical `(task document, role)` seat before any analysis, profile check,
