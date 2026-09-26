@@ -12,9 +12,6 @@ from agents_remember.cli.orca_runtime import (
     OrcaRuntimeFailure,
 )
 from agents_remember.cli.orca_runtime import (
-    configured_pairing_code as _configured_pairing_code,
-)
-from agents_remember.cli.orca_runtime import (
     runtime_call as _runtime_call,
 )
 from agents_remember.cli.orca_task_receipts import (
@@ -55,11 +52,6 @@ def _reconcile_prior_execution(
 
 def _refresh_execution(path: Path, receipt: dict[str, Any]) -> dict[str, Any]:
     if receipt.get("status") in {"completed", "failed", "stopped", "rejected"}:
-        return _public_execution(receipt)
-    if not _configured_pairing_code():
-        receipt["detail"] = (
-            "The saved Orca reference is intact; configure the dashboard process pairing to refresh this live session."
-        )
         return _public_execution(receipt)
     reference = receipt.get("execution")
     if not isinstance(reference, dict):

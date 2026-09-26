@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import unittest
 import uuid
@@ -182,9 +183,11 @@ class MessageBindingProjectionTests(unittest.TestCase):
                     ),
                     patch.object(orca_task_routes, "_migrate_taskless_legacy_receipt"),
                     patch.object(orca_task_routes, "_reconcile_prior_execution", return_value=None),
-                    patch.object(orca_task_routes, "_resolve_workspace", return_value=workspace),
                     patch.object(
-                        orca_task_routes,
+                        orca_task_preparation, "_resolve_workspace", return_value=workspace
+                    ),
+                    patch.object(
+                        orca_task_preparation,
                         "_role_defaults",
                         return_value=(
                             {"agent": "codex", "model": None, "effort": None},
@@ -192,7 +195,7 @@ class MessageBindingProjectionTests(unittest.TestCase):
                         ),
                     ),
                     patch.object(
-                        orca_task_routes,
+                        orca_task_preparation,
                         "_resolve_agent_selection",
                         return_value=(
                             "codex",
@@ -201,9 +204,9 @@ class MessageBindingProjectionTests(unittest.TestCase):
                         ),
                     ),
                     patch.object(
-                        orca_task_routes, "_prepare_projects_mcp_scope", return_value=None
+                        orca_task_preparation, "_prepare_projects_mcp_scope", return_value=None
                     ),
-                    patch.object(orca_task_routes, "_compile_handover", return_value=prepared),
+                    patch.object(orca_task_preparation, "_compile_handover", return_value=prepared),
                     patch.object(orca_task_routes, "_receipt_path", return_value=receipt_path),
                     patch.object(orca_task_routes, "_execute_prepared_launch", side_effect=execute),
                 ):
@@ -454,7 +457,7 @@ class OrcaNativeResultTests(unittest.TestCase):
             self.assertEqual(public["status"], "running")
             self.assertTrue(public["report"]["available"])
 
-    def test_terminal_gone_is_stopped_and_disconnected_cached_status_stays_unknown(self) -> None:
+    def test_saved_terminal_refresh_uses_native_auth_and_keeps_disconnect_unknown(self) -> None:
         with TemporaryDirectory() as temporary:
             path = Path(temporary) / "receipt.json"
             receipt = {
@@ -465,7 +468,7 @@ class OrcaNativeResultTests(unittest.TestCase):
                 "execution": {"kind": "terminal", "handle": "term_saved", "worktreeId": "projects"},
             }
             with (
-                patch.object(orca_task_liveness, "_configured_pairing_code", return_value="paired"),
+                patch.dict(os.environ, {"ORCA_PAIRING_CODE": ""}),
                 patch.object(
                     orca_task_liveness,
                     "_runtime_call",
@@ -475,6 +478,7 @@ class OrcaNativeResultTests(unittest.TestCase):
                                 "handle": "term_saved",
                                 "connected": False,
                                 "writable": False,
+                                "exitCause": {"kind": "operator_close"},
                             }
                         },
                         orca_runtime.OrcaRuntimeFailure("terminal_gone", "gone"),
@@ -488,9 +492,10 @@ class OrcaNativeResultTests(unittest.TestCase):
                 [call.args[0] for call in runtime_call.call_args_list],
                 ["terminal-show", "terminal-status"],
             )
+            self.assertEqual(stopped["requestId"], receipt["requestId"])
 
             with (
-                patch.object(orca_task_liveness, "_configured_pairing_code", return_value="paired"),
+                patch.dict(os.environ, {"ORCA_PAIRING_CODE": ""}),
                 patch.object(
                     orca_task_liveness,
                     "_runtime_call",
@@ -525,11 +530,15 @@ class OrcaLeafScopeGateTests(unittest.TestCase):
             patch.object(orca_task_routes, "_request_digest", return_value="digest"),
             patch.object(orca_task_routes, "_receipt_path", return_value=Path("receipt.json")),
             patch.object(
-                orca_task_routes, "_resolve_workspace", return_value={"selector": "id:leaf"}
+                orca_task_preparation,
+                "_resolve_workspace",
+                return_value={"selector": "id:leaf"},
             ),
-            patch.object(orca_task_routes, "_role_defaults", return_value=({}, ())),
+            patch.object(orca_task_preparation, "_role_defaults", return_value=({}, ())),
             patch.object(
-                orca_task_routes, "_resolve_agent_selection", return_value=("claude", {}, None)
+                orca_task_preparation,
+                "_resolve_agent_selection",
+                return_value=("claude", {}, None),
             ),
             patch.object(orca_task_preparation, "_runtime_call") as runtime_call,
         ):

@@ -27,6 +27,7 @@ from .gates import register_gate_tools
 from .knowledge import register_knowledge_tools
 from .lifecycle import register_lifecycle_tools
 from .memory import register_memory_tools
+from .orca_roles import register_orca_role_tools
 from .orchestration import register_orchestration_tools
 from .providers import register_provider_tools
 from .sessions import register_session_tools
@@ -49,6 +50,7 @@ TOOL_REGISTRARS: tuple[ToolRegistrar, ...] = (
     register_gate_tools,
     register_orchestration_tools,
     register_capsule_and_skill_tools,
+    register_orca_role_tools,
     register_knowledge_tools,
 )
 

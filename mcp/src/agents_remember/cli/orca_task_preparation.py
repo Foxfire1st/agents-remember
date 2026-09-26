@@ -7,7 +7,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
 from agents_remember.application.orca_task_context import (
@@ -80,6 +80,70 @@ class OrcaHandoverRequest:
     agent_id: str
     native_mcp_scope: ScopedNativeMcp | None = None
     request_id: uuid.UUID | None = None
+    entry_mode: Literal["manual-dashboard-role-start", "native-orca-task"] = (
+        "manual-dashboard-role-start"
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedOrcaRoleHandover:
+    """The validated inputs shared by the dashboard launcher and native role preparation."""
+
+    context: OrcaRoleContext
+    workspace: dict[str, str]
+    agent_id: str
+    session_options: dict[str, str]
+    agent_arg_tokens: tuple[str, ...]
+    native_mcp_scope: ScopedNativeMcp | None
+    handover: dict[str, Any]
+    request_id: uuid.UUID
+
+
+def prepare_orca_role_handover(
+    config: McpRuntimeConfig,
+    context: OrcaRoleContext,
+    *,
+    agent_override: OrcaAgentOverride | None,
+    request_id: uuid.UUID,
+    entry_mode: Literal["manual-dashboard-role-start", "native-orca-task"] = (
+        "manual-dashboard-role-start"
+    ),
+) -> PreparedOrcaRoleHandover:
+    """Prepare the existing canonical role handover and exact native launch inputs."""
+
+    workspace = _resolve_workspace(config, context)
+    defaults, harness_order = _role_defaults(config, context)
+    agent_id, session_options, agent_arg_tokens = _resolve_agent_selection(
+        workspace["selector"], defaults, harness_order, agent_override
+    )
+    native_mcp_scope = (
+        _prepare_leaf_mcp_scope(config, context, workspace, agent_id)
+        if context.role in LEAF_ROLES
+        else _prepare_projects_mcp_scope(config, context, workspace, agent_id)
+    )
+    if native_mcp_scope is not None:
+        agent_arg_tokens = (*agent_arg_tokens, *native_mcp_scope.launch_args)
+    handover = _compile_handover(
+        OrcaHandoverRequest(
+            config=native_mcp_scope.config if native_mcp_scope else config,
+            context=context,
+            workspace=workspace,
+            agent_id=agent_id,
+            native_mcp_scope=native_mcp_scope,
+            request_id=request_id,
+            entry_mode=entry_mode,
+        )
+    )
+    return PreparedOrcaRoleHandover(
+        context=context,
+        workspace=workspace,
+        agent_id=agent_id,
+        session_options=session_options,
+        agent_arg_tokens=agent_arg_tokens,
+        native_mcp_scope=native_mcp_scope,
+        handover=handover,
+        request_id=request_id,
+    )
 
 
 def _launcher_catalog(
@@ -537,7 +601,7 @@ def _compile_handover(
             "binding": capsule.codex_delivery.binding.as_report(),
         },
         "nativeOrca": {
-            "entryMode": "manual-dashboard-role-start",
+            "entryMode": request.entry_mode,
             "instructionSource": {
                 "kind": "compiled-role-operation-capsule",
                 "role": capsule.codex_delivery.binding.role,
@@ -545,11 +609,7 @@ def _compile_handover(
                 "semanticDigest": capsule.codex_delivery.semantic_digest,
                 "ambientRoleFilesSelected": False,
             },
-            "ownerRelation": (
-                "The active native user conversation owns decisions for this manual launch. The selected AR "
-                "sprint/master/leaf is work scope, not a native Orca parent or Run identity. If the live Orca "
-                "preamble supplies an active Run or Dispatch, follow those exact native references."
-            ),
+            "ownerRelation": _native_owner_relation(request.entry_mode),
             "identitySource": (
                 "Orca supplies sender identity in ORCA_TERMINAL_HANDLE and ORCA_PANE_KEY; never infer an AR session identity."
             ),
@@ -599,8 +659,8 @@ def _compile_handover(
             },
         },
         "ownerHandover": (
-            "This exact compiled role and operation plus this handover are the manual native role brief "
-            "for this request. Older ambient AR lifecycle/router/role files and coordination-level "
+            _native_owner_handover(request.entry_mode)
+            + " Older ambient AR lifecycle/router/role files and coordination-level "
             "role-routing prose were not selected by this launcher; do not load them as a second role, "
             "operation, hierarchy, parent, or transport. "
             "Keep higher-priority native instructions and applicable repository coding, tool, and safety "
@@ -612,9 +672,16 @@ def _compile_handover(
             "Git acceptance from native session completion."
         ),
     }
+    brief_header = (
+        "PREPARED NATIVE AR ROLE BRIEF: this native session starts idle. After Orca injects its exact "
+        "Task and Dispatch preamble, load and verify the prepared handover artifact named by the native "
+        "Task spec and follow its compiled role/operation prompt. "
+        if request.entry_mode == "native-orca-task"
+        else "EXPERIMENTAL MANUAL AR ROLE BRIEF: the launcher explicitly selected the role and operation "
+        "identified below. "
+    )
     prompt = (
-        "EXPERIMENTAL MANUAL AR ROLE BRIEF: the launcher explicitly selected the role and operation "
-        "identified below. The following compiled capsule and canonical handover are the complete AR "
+        brief_header + "The following compiled capsule and canonical handover are the complete AR "
         "role/operation instructions and assignment for this session. Do not reopen ambient AR role, "
         "lifecycle, or coordination-level role-routing text to infer a different assignment. Preserve native system/developer instructions, "
         "approvals, sandbox policy, and repository-specific coding/tool rules.\n\n"
@@ -624,6 +691,7 @@ def _compile_handover(
     )
     return {
         "prompt": prompt,
+        "handover": handover,
         "capsuleOperation": operation,
         "capsuleDigest": capsule.codex_delivery.semantic_digest,
         "taskDocumentDigest": task_document_digest,
@@ -640,6 +708,34 @@ def _compile_handover(
             else {}
         ),
     }
+
+
+def _native_owner_relation(
+    entry_mode: Literal["manual-dashboard-role-start", "native-orca-task"],
+) -> str:
+    if entry_mode == "native-orca-task":
+        return (
+            "The active Orca Task and Dispatch own this execution. The selected AR sprint/master/leaf "
+            "remains semantic work scope, not a native Run/Task identity. Use only exact native identity "
+            "injected or returned by Orca."
+        )
+    return (
+        "The active native user conversation owns decisions for this manual launch. The selected AR "
+        "sprint/master/leaf is work scope, not a native Orca parent or Run identity. If the live Orca "
+        "preamble supplies an active Run or Dispatch, follow those exact native references."
+    )
+
+
+def _native_owner_handover(
+    entry_mode: Literal["manual-dashboard-role-start", "native-orca-task"],
+) -> str:
+    if entry_mode == "native-orca-task":
+        return (
+            "This exact compiled role and operation plus this handover are the native role instructions "
+            "for the assignment. This terminal starts idle; do not begin until Orca injects its native "
+            "Task and Dispatch."
+        )
+    return "This exact compiled role and operation plus this handover are the manual native role brief for this request."
 
 
 def _read_task_doc(config: McpRuntimeConfig, resolved: ResolvedTaskDocument) -> dict[str, Any]:

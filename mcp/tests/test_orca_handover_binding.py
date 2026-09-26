@@ -20,6 +20,7 @@ from agents_remember.application.task_docs.task_doc_tools import (
 )
 from agents_remember.application.task_scoped_mcp import TaskScopedMcpBinding, task_scoped_mcp_config
 from agents_remember.application.worktree_services import build_default_worktree_services
+from agents_remember.cli import orca_task_preparation
 from agents_remember.cli.orca_runtime import MAX_PROMPT_BYTES, digest
 from agents_remember.cli.orca_scoped_mcp import ScopedNativeMcp
 from agents_remember.cli.orca_task_preparation import (
@@ -31,6 +32,7 @@ from agents_remember.cli.orca_task_preparation import (
     _prepare_projects_mcp_scope,
     _resolve_workspace,
     _role_report_path,
+    prepare_orca_role_handover,
     role_start_operation,
 )
 from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
@@ -392,25 +394,60 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                 config,
                 OrcaSelection(role="architect"),
             )
+            workspace = {
+                "id": "projects-fixture",
+                "selector": "id:projects-fixture",
+                "path": workspace_root.as_posix(),
+            }
+            defaults = {"agent": "codex", "model": None, "effort": None}
+            session_options = {"model": "gpt-6-sol"}
+            agent_arg_tokens = ("--model", "gpt-6-sol")
 
-            prepared = _compile_handover(
-                OrcaHandoverRequest(
-                    config=config,
-                    context=context,
-                    workspace={
-                        "id": "projects-fixture",
-                        "selector": "id:projects-fixture",
-                        "path": workspace_root.as_posix(),
-                    },
-                    agent_id="codex",
+            with (
+                patch.object(
+                    orca_task_preparation, "_resolve_workspace", return_value=workspace
+                ) as resolve_workspace,
+                patch.object(
+                    orca_task_preparation,
+                    "_role_defaults",
+                    return_value=(defaults, ("codex",)),
+                ),
+                patch.object(
+                    orca_task_preparation,
+                    "_resolve_agent_selection",
+                    return_value=("codex", session_options, agent_arg_tokens),
+                ) as resolve_agent,
+                patch.object(
+                    orca_task_preparation, "_prepare_projects_mcp_scope", return_value=None
+                ) as prepare_mcp_scope,
+            ):
+                role_handover = prepare_orca_role_handover(
+                    config,
+                    context,
+                    agent_override=None,
                     request_id=request_id,
                 )
-            )
+            prepared = role_handover.handover
             handover = json.loads(
                 prepared["prompt"].rsplit(
                     "\n\nAR owner assignment and canonical task handover:\n", 1
                 )[1]
             )
+
+        self.assertEqual(
+            (
+                role_handover.context,
+                role_handover.workspace,
+                role_handover.agent_id,
+                role_handover.session_options,
+                role_handover.agent_arg_tokens,
+                role_handover.native_mcp_scope,
+            ),
+            (context, workspace, "codex", session_options, agent_arg_tokens, None),
+        )
+        resolve_workspace.assert_called_once_with(config, context)
+        resolve_agent.assert_called_once_with(workspace["selector"], defaults, ("codex",), None)
+        prepare_mcp_scope.assert_called_once_with(config, context, workspace, "codex")
 
         self.assertEqual(prepared["capsuleOperation"], "planning")
         self.assertEqual(handover["operation"], "planning")

@@ -36,6 +36,9 @@ from agents_remember.memory_quality.style.citations.exclusion_register import (
     validate_caller_excludes,
 )
 from agents_remember.memory_quality.style.citations.resolution import Trees
+from agents_remember.worktrees.integration.configured_contract_authority import (
+    require_configured_contract_repositories,
+)
 from agents_remember.worktrees.integration.integration_branch_authority import (
     require_ordinary_worktree,
 )
@@ -102,7 +105,11 @@ def drift_check_tool(
     }
 
 
-def _refuse_official_memory(repo: RepositoryScope, scope: MemoryScope) -> None:
+def _refuse_official_memory(
+    config: McpRuntimeConfig,
+    repo: RepositoryScope,
+    scope: MemoryScope,
+) -> None:
     """The write guard: a citation rewrite happens in a LEAF or it does not happen.
 
     ``contract_path`` is mandatory rather than optional here, which is the whole guard --
@@ -116,7 +123,18 @@ def _refuse_official_memory(repo: RepositoryScope, scope: MemoryScope) -> None:
     citation fix rewrites ranges across thousands of rows, with no closeout reviewing the
     result. It refuses; it never falls back.
     """
-    official = repo.memory_root.resolve() if repo.memory_root is not None else None
+    # A task-scoped MCP config replaces ``repo.memory_root`` with the admitted leaf worktree.
+    # Resolve the official root from the original settings only after the existing contract
+    # authority owner has checked both repository lineage and the candidate worktree identity.
+    configured = (
+        require_configured_contract_repositories(
+            scope.contract,
+            config.config_path.as_posix(),
+        )
+        if scope.contract is not None
+        else repo
+    )
+    official = configured.memory_root.resolve() if configured.memory_root is not None else None
     target = scope.onboarding_root.resolve()
     if official is not None and (official == target or official in target.parents):
         raise AuthorityError(
@@ -137,7 +155,7 @@ def _leaf_memory_writer_scope(
     path = require_within_coordination(config, contract_path, "contract_path")
     contract = load_contract(path)
     scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
-    _refuse_official_memory(require_repo(config, repo_id), scope)
+    _refuse_official_memory(config, require_repo(config, repo_id), scope)
     require_ordinary_worktree(contract, operation=operation)
     return scope
 

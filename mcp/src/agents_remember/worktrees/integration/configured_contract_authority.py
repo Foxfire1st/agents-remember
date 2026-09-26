@@ -96,8 +96,12 @@ def require_configured_contract_repositories(
     config_path: str,
     *,
     require_candidate_identity: bool = True,
-) -> None:
-    """Bind a task contract to repository identities selected by MCP authority."""
+) -> RepositoryScope:
+    """Bind a task contract to repository identities selected by MCP authority.
+
+    Return the same configured repository whose identity was checked so callers that need
+    the authoritative roots do not perform a second, potentially inconsistent settings read.
+    """
 
     configured, code_identity = _require_configured_repository_authority(
         contract,
@@ -108,7 +112,7 @@ def require_configured_contract_repositories(
         if candidate_code_identity != code_identity:
             raise ConfiguredContractAuthorityError(side="code", name="candidate")
     if contract.memory_mode != "external":
-        return
+        return configured
     memory_identity = _require_external_memory_repository_authority(
         contract,
         configured,
@@ -123,6 +127,7 @@ def require_configured_contract_repositories(
         )
     ):
         raise ConfiguredContractAuthorityError(side="memory", name="candidate")
+    return configured
 
 
 def require_configured_terminal_contract_repositories(

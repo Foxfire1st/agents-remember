@@ -58,6 +58,7 @@ from agents_remember.models.operator_inbox import (
     OperatorInboxPostResponse,
     OperatorInboxSupersedeResponse,
 )
+from agents_remember.models.orca_launcher import OrcaRolePrepareResponse
 from agents_remember.models.orchestration import OrchestrationNudgeManagerResponse
 from agents_remember.models.providers import (
     CGCCalleesResponse,
@@ -243,6 +244,7 @@ TOOL_RESPONSE_MODELS: dict[str, type[ResponseEnvelope]] = {
     "message_parent": MessageParentResponse,
     "message_child": MessageChildResponse,
     "role_capsule_compile": RoleCapsuleResponse,
+    "orca_role_prepare": OrcaRolePrepareResponse,
     "skill_catalog_list": SkillCatalogListResponse,
     "skill_catalog_read": SkillCatalogReadResponse,
     "knowledge_read": KnowledgeReadResponse,

@@ -163,6 +163,7 @@
         "gate_list",
         "knowledge_diff",
         "knowledge_read",
+        "orca_role_prepare",
         "read_ar_files",
         "task_doc",
         "worktree_closeout_apply",

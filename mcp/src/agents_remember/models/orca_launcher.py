@@ -7,6 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agents_remember.models.base import StrictResponseModel, ToolResponse
 from agents_remember.models.task_document_ref import TaskDocumentRef
 
 OrcaRole = Literal[
@@ -50,3 +51,47 @@ class OrcaDispatchRequest(OrcaSelection):
 
 class OrcaResultRequest(OrcaSelection):
     request_id: uuid.UUID | None = Field(default=None, alias="requestId")
+
+
+class OrcaRoleHandoverReference(StrictResponseModel):
+    path: str
+    sha256: str
+
+
+class OrcaNativeSessionIdentity(StrictResponseModel):
+    handle: str | None = None
+    sessionId: str | None = None
+    worktreeId: str | None = None
+
+
+class OrcaNativeWorkerStart(StrictResponseModel):
+    operation: Literal["orca orchestration worker-start"] = "orca orchestration worker-start"
+    workspaceSelector: str
+    terminalHandle: str
+    spec: str
+
+
+class OrcaNativeNextAction(StrictResponseModel):
+    runCreateOperation: Literal["orca orchestration run-create"] = "orca orchestration run-create"
+    runObjective: str
+    workerStart: OrcaNativeWorkerStart
+
+
+class OrcaRolePrepareResponse(ToolResponse):
+    """An idle native session and the compact inputs to its native Orca task start."""
+
+    operation: Literal["orca_role_prepare"] = "orca_role_prepare"
+    status: Literal["idle-session-ready", "unknown", "rejected"]
+    detail: str
+    requestId: str
+    role: Literal["worker", "reviewer", "curator"]
+    taskReference: str
+    taskDocumentDigest: str
+    capsuleDigest: str
+    candidateClass: Literal["working-tree-diff"] = "working-tree-diff"
+    baselineSourcePath: str
+    handover: OrcaRoleHandoverReference
+    taskReportPath: str
+    nativeIdentity: OrcaNativeSessionIdentity = Field(default_factory=OrcaNativeSessionIdentity)
+    nativeNextAction: OrcaNativeNextAction | None = None
+    workStarted: Literal[False] = False

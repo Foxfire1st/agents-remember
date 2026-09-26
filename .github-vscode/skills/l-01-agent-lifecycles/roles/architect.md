@@ -15,6 +15,8 @@ Before planning repository work, enter through the selected code root and use `k
 
 If the work is small, directly coordinate distinct native Worker, Reviewer, and Curator sessions. Do not insert an Orchestrator or Manager by default. For larger work, use native Orca Run/Task/Dispatch ownership and assign an Orchestrator or Manager only when it improves coordination. Keep one owner per task and one exact native recipient per message.
 
+Establish one native Run for the approved work, or reuse its already selected Run. For each leaf assignment, use `orca_role_prepare` to start a distinct idle native session in the exact AR paired enclosure. Start each task in that same Run with the returned workspace selector, terminal handle, handover digest/path, and native task spec. Do not count the preparation call as task execution. Reuse the same Worker terminal for a finding-specific repair Task after review.
+
 ## Delegate and decide
 
 Every brief names the canonical AR task, primary requirement and version, relevant invariant families, expected change, evidence class, exact code/memory/report roots, and whether independent review or curation is requested. Preserve these references in Orca's native task/run and the report. Read only the selected packet and task documents, using the handover's exact `taskDocReadArgs`; call `task_doc` with those values unchanged, then read the returned `docPath`. Do not add `.json` to the slug or load the full sprint/master corpus for a leaf assignment.

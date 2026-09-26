@@ -63,6 +63,7 @@ from .operator_inbox import (
     operator_inbox_post_payload,
     operator_inbox_supersede_payload,
 )
+from .orca_handover import orca_role_prepare_payload
 from .orchestration import orchestration_nudge_manager_payload
 from .providers import (
     cgc_callees_payload,
@@ -164,6 +165,7 @@ __all__ = [
     "operator_inbox_poll_payload",
     "operator_inbox_post_payload",
     "operator_inbox_supersede_payload",
+    "orca_role_prepare_payload",
     "orchestration_nudge_manager_payload",
     "ping_payload",
     "provider_diagnostics_payload",

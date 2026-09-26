@@ -304,10 +304,15 @@ def _codex_mcp_entry(
     args = ["-m", "agents_remember.mcp", "--config", config.config_path.resolve().as_posix()]
     if profile_path is not None:
         args.extend(["--scope-profile", profile_path.resolve().as_posix()])
+    env = {"PYTHONPATH": package_root.as_posix()}
+    for name in ("AR_ORCA_RUNTIME_ROOT", "ORCA_USER_DATA_PATH"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            env[name] = value
     return {
         "command": sys.executable,
         "args": args,
-        "env": {"PYTHONPATH": package_root.as_posix()},
+        "env": env,
         "cwd": workspace_root.as_posix(),
     }
 

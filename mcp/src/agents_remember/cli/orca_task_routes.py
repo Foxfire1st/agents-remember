@@ -7,10 +7,12 @@ they never update AR task, review, curation, or Git state.
 
 from __future__ import annotations
 
+import json
 import shlex
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +22,14 @@ from fastapi.responses import JSONResponse
 from agents_remember.application.orca_task_context import (
     LEAF_ROLES,
     TASKLESS_ROLES,
+    OrcaRoleContext,
     resolve_orca_role_context,
     selection_binding,
+)
+from agents_remember.cli.orca_handover_artifacts import (
+    build_role_handover_artifact,
+    read_role_handover_artifact,
+    write_role_handover_artifact,
 )
 from agents_remember.cli.orca_runtime import (
     MAX_PROMPT_BYTES,
@@ -47,15 +55,10 @@ from agents_remember.cli.orca_task_liveness import (
     _refresh_execution,
 )
 from agents_remember.cli.orca_task_preparation import (
-    OrcaHandoverRequest,
-    _compile_handover,
+    PreparedOrcaRoleHandover,
     _launcher_catalog,
-    _prepare_leaf_mcp_scope,
-    _prepare_projects_mcp_scope,
-    _resolve_agent_selection,
-    _resolve_workspace,
-    _role_defaults,
     _verify_leaf_revival_scope,
+    prepare_orca_role_handover,
 )
 from agents_remember.cli.orca_task_receipts import (
     _execute_prepared_launch,
@@ -80,6 +83,32 @@ from agents_remember.models.orca_launcher import (
 from agents_remember.tasks.document_refs import TaskDocumentRefError
 
 _DISPATCH_LOCK = threading.Lock()
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedRoleStart:
+    request: OrcaDispatchRequest
+    context: OrcaRoleContext
+    binding: dict[str, Any]
+    request_digest: str
+    receipt_path: Path
+    role_handover: PreparedOrcaRoleHandover
+    message_binding_projection: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class NativeRoleSessionPreparation:
+    execution: dict[str, Any]
+    request_id: uuid.UUID
+    handover_reference: dict[str, str]
+    handover_artifact: dict[str, Any]
+
+
+def _json_response_payload(response: JSONResponse) -> Any:
+    body = response.body
+    if isinstance(body, memoryview):
+        body = body.tobytes()
+    return json.loads(body)
 
 
 def register_orca_task_routes(app: FastAPI, config: McpRuntimeConfig) -> None:
@@ -259,30 +288,13 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
         prior = _reconcile_prior_execution(path, request, request_digest)
         if prior is not None:
             return prior
-    workspace = _resolve_workspace(config, context)
-    defaults, harness_order = _role_defaults(config, context)
-    agent_id, session_options, agent_arg_tokens = _resolve_agent_selection(
-        workspace["selector"], defaults, harness_order, request.agent_override
+    role_handover = prepare_orca_role_handover(
+        config,
+        context,
+        agent_override=request.agent_override,
+        request_id=request.request_id,
     )
-    native_mcp_scope = (
-        _prepare_leaf_mcp_scope(config, context, workspace, agent_id)
-        if context.role in LEAF_ROLES
-        else _prepare_projects_mcp_scope(config, context, workspace, agent_id)
-    )
-    if native_mcp_scope is not None:
-        agent_arg_tokens = (*agent_arg_tokens, *native_mcp_scope.launch_args)
-    agent_args = shlex.join(agent_arg_tokens) if agent_arg_tokens else None
-    handover_config = native_mcp_scope.config if native_mcp_scope else config
-    prepared = _compile_handover(
-        OrcaHandoverRequest(
-            config=handover_config,
-            context=context,
-            workspace=workspace,
-            agent_id=agent_id,
-            native_mcp_scope=native_mcp_scope,
-            request_id=request.request_id,
-        )
-    )
+    prepared = role_handover.handover
     prompt = prepared["prompt"]
     if len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
         raise HTTPException(
@@ -294,14 +306,140 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
     )
     if prior is not None:
         return prior
+    start = _PreparedRoleStart(
+        request=request,
+        context=context,
+        binding=binding,
+        request_digest=request_digest,
+        receipt_path=path,
+        role_handover=role_handover,
+        message_binding_projection=projection_reference,
+    )
+    return _launch_prepared_role_session(start, prompt=prompt)
+
+
+def prepare_idle_native_role_session(
+    config: McpRuntimeConfig, request: OrcaDispatchRequest
+) -> NativeRoleSessionPreparation:
+    """Start an idle native leaf session and persist its complete AR role handover."""
+
+    if request.role not in LEAF_ROLES:
+        raise ValueError(
+            "Native task preparation is available only for Worker, Reviewer, and Curator roles."
+        )
+    _acquire_dispatch_lock()
+    try:
+        context = resolve_orca_role_context(config, request)
+        binding = selection_binding(context)
+        path = _receipt_path(config, request)
+        role_handover = prepare_orca_role_handover(
+            config,
+            context,
+            agent_override=request.agent_override,
+            request_id=request.request_id,
+            entry_mode="native-orca-task",
+        )
+        prepared = role_handover.handover
+        prompt = prepared["prompt"]
+        if len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="The canonical AR role handover exceeds Orca's launch prompt limit.",
+            )
+        request_digest = _digest(
+            {
+                "selection": binding,
+                "agentOverride": (
+                    request.agent_override.model_dump(mode="json", by_alias=True, exclude_none=True)
+                    if request.agent_override
+                    else None
+                ),
+                "taskDocumentDigest": prepared["taskDocumentDigest"],
+                "capsuleDigest": prepared["capsuleDigest"],
+                "capsuleOperation": prepared["capsuleOperation"],
+                "workspace": role_handover.workspace,
+                "agent": role_handover.agent_id,
+                "sessionOptions": role_handover.session_options,
+                "nativeMcpScope": prepared.get("nativeMcpScope"),
+            }
+        )
+        message_binding_projection, prior = _reserve_message_binding_projection(
+            config, path, request, request_digest, prepared
+        )
+        if prior is not None:
+            receipt = _read_receipt(path)
+            reference = receipt.get("handoverProjection") if receipt else None
+            if (
+                receipt is None
+                or receipt.get("nativeSessionPurpose") != "idle-native-task"
+                or not isinstance(reference, dict)
+                or not isinstance(reference.get("path"), str)
+                or not isinstance(reference.get("sha256"), str)
+            ):
+                raise ValueError(
+                    "An existing role session has no prepared native handover; use its native Orca identity without attaching a new task."
+                )
+            report = receipt.get("report")
+            report_path = report.get("path") if isinstance(report, dict) else None
+            if not isinstance(report_path, str):
+                raise ValueError(
+                    "The existing native role session has no canonical task report path."
+                )
+            artifact = read_role_handover_artifact(report_path, reference)
+            return NativeRoleSessionPreparation(
+                execution=_json_response_payload(prior),
+                request_id=uuid.UUID(str(receipt["requestId"])),
+                handover_reference=reference,
+                handover_artifact=artifact,
+            )
+        artifact = build_role_handover_artifact(role_handover)
+        handover_reference = write_role_handover_artifact(prepared["taskReportPath"], artifact)
+        start = _PreparedRoleStart(
+            request=request,
+            context=context,
+            binding=binding,
+            request_digest=request_digest,
+            receipt_path=path,
+            role_handover=role_handover,
+            message_binding_projection=message_binding_projection,
+        )
+        response = _launch_prepared_role_session(
+            start,
+            prompt=None,
+            handover_projection=handover_reference,
+        )
+        return NativeRoleSessionPreparation(
+            execution=_json_response_payload(response),
+            request_id=request.request_id,
+            handover_reference=handover_reference,
+            handover_artifact=artifact,
+        )
+    finally:
+        _DISPATCH_LOCK.release()
+
+
+def _launch_prepared_role_session(
+    start: _PreparedRoleStart,
+    *,
+    prompt: str | None,
+    handover_projection: dict[str, str] | None = None,
+) -> JSONResponse:
+    request = start.request
+    role_handover = start.role_handover
+    workspace = role_handover.workspace
+    agent_id = role_handover.agent_id
+    session_options = role_handover.session_options
+    agent_args = shlex.join(role_handover.agent_arg_tokens)
+    prepared = role_handover.handover
     operation_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex}"
     launch_request: dict[str, Any] = {
         "operationId": operation_id,
         "agent": agent_id,
         "target": {"kind": "existing", "worktree": workspace["selector"]},
-        "prompt": {"text": prompt, "delivery": "submit"},
         "launchSource": "agents-remember-role-launcher",
     }
+    if prompt is not None:
+        launch_request["prompt"] = {"text": prompt, "delivery": "submit"}
     if session_options:
         launch_request["sessionOptions"] = session_options
     if agent_args:
@@ -310,11 +448,11 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
         "schema": "ar-orca-native-execution/v1",
         "requestId": str(request.request_id),
         "role": request.role,
-        "selection": binding,
-        "requestDigest": request_digest,
+        "selection": start.binding,
+        "requestDigest": start.request_digest,
         "bindingDigest": _digest(
             {
-                "requestDigest": request_digest,
+                "requestDigest": start.request_digest,
                 "requestId": str(request.request_id),
                 "taskDocumentDigest": prepared["taskDocumentDigest"],
                 "capsuleDigest": prepared["capsuleDigest"],
@@ -328,7 +466,7 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
         "capsuleDigest": prepared["capsuleDigest"],
         "capsuleOperation": prepared["capsuleOperation"],
         "taskDocumentDigest": prepared["taskDocumentDigest"],
-        "messageBindingProjection": projection_reference,
+        "messageBindingProjection": start.message_binding_projection,
         "report": {
             "path": prepared["taskReportPath"],
             "canonicalPath": prepared["canonicalTaskReportPath"],
@@ -338,6 +476,8 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
             if isinstance(prepared.get("nativeMcpScope"), dict)
             else {}
         ),
+        **({"handoverProjection": handover_projection} if handover_projection else {}),
+        **({"nativeSessionPurpose": "idle-native-task"} if prompt is None else {}),
         "operationId": operation_id,
         "status": "starting",
         "createdAt": _now_iso(),
@@ -350,10 +490,14 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
         ),
         "execution": {},
         "replayRequest": launch_request,
-        "detail": "Orca is starting the native AR role session.",
+        "detail": (
+            "Orca is starting an idle native role session; no native Task or Dispatch has started."
+            if prompt is None
+            else "Orca is starting the native AR role session."
+        ),
     }
-    _write_receipt(path, receipt)
-    return _execute_prepared_launch(path, receipt)
+    _write_receipt(start.receipt_path, receipt)
+    return _execute_prepared_launch(start.receipt_path, receipt)
 
 
 def _revive_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> JSONResponse:
