@@ -27,6 +27,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewPayload, ReviewResult } from "../../data/review";
 import { ReviewSurface } from "./ReviewSurface";
 
+// Comparison-focused cases isolate the catalogue. The normal catalogue-to-review journey is
+// exercised through both real readers in ReviewSurface.navigation.test.tsx.
+vi.mock("../../data/useReviewCatalogue", () => ({
+  useReviewCatalogue: () => ({
+    loading: false, entries: [], empty: true, stale: false, facts: "test", refresh: () => undefined,
+  }),
+}));
+
 const REPO = "agents-remember";
 const MASTER = "260921_complete-code-and-intent-review";
 const LEAF = "260921-ICR-L25";

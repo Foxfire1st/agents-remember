@@ -26,7 +26,7 @@
 // rendered as two muted lines and no statement text at all. Every `absent`/`present` case below fails
 // against that implementation, because the statement text is only in the DOM when it is drawn.
 
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -173,16 +173,17 @@ function serve(result: ReviewResult) {
   return fetchFn;
 }
 
-function reviewed(knowledgeOver: Partial<ReviewKnowledgePane>, payloadOver: Partial<ReviewPayload> = {}) {
+async function reviewed(knowledgeOver: Partial<ReviewKnowledgePane>, payloadOver: Partial<ReviewPayload> = {}) {
   serve({
     state: "review",
     operation: "review_intent",
     repository_id: REPO,
     payload: payload({ ...payloadOver, knowledge: knowledge(knowledgeOver) }),
   });
-  return render(
+  const mounted = render(
     <ReviewSurface repo={REPO} master={MASTER} leaf={LEAF} onBack={vi.fn()} />,
   );
+  return within(await mounted.findByTestId("review-details"));
 }
 
 afterEach(() => {
@@ -192,7 +193,7 @@ afterEach(() => {
 
 describe("the knowledge pane over a one-sided statement", () => {
   it("draws an added invariant's full after statement beside an absent-before label", async () => {
-    const view = reviewed({
+    const view = await reviewed({
       invariant_ids: ["1620b0ad-97f0-4623-ae63-ea15e28157bc"],
       before_statement: absent(ABSENT_BEFORE),
       after_statement: present(ADDED_STATEMENT),
@@ -212,7 +213,7 @@ describe("the knowledge pane over a one-sided statement", () => {
   });
 
   it("draws a removed invariant's full before statement beside an absent-after label", async () => {
-    const view = reviewed({
+    const view = await reviewed({
       before_statement: present(REMOVED_STATEMENT),
       after_statement: absent(ABSENT_AFTER),
       before_conditions: ["the batch is admitted for this namespace."],
@@ -228,7 +229,7 @@ describe("the knowledge pane over a one-sided statement", () => {
   });
 
   it("keeps both statements when both sides recorded one, and names no side", async () => {
-    const view = reviewed({
+    const view = await reviewed({
       before_statement: present(SHARED_STATEMENT),
       after_statement: present(SHARED_STATEMENT),
     });
@@ -241,7 +242,7 @@ describe("the knowledge pane over a one-sided statement", () => {
   });
 
   it("keeps the available text and claims no diff when the other side is unreadable", async () => {
-    const view = reviewed({
+    const view = await reviewed({
       before_statement: present(ADDED_STATEMENT),
       after_statement: unresolved(UNRESOLVED_AFTER),
     });
@@ -263,7 +264,7 @@ describe("the knowledge pane over a one-sided statement", () => {
     ["unresolved", unresolved(UNRESOLVED_AFTER)],
     ["binary", binary(BINARY_AFTER)],
   ])("renders a %s side as that state and never as another one", async (state, side) => {
-    const view = reviewed({ before_statement: side, after_statement: absent(ABSENT_AFTER) });
+    const view = await reviewed({ before_statement: side, after_statement: absent(ABSENT_AFTER) });
 
     const before = await view.findByTestId("review-before-state");
     expect(before.dataset.sideState).toBe(state);
@@ -274,7 +275,7 @@ describe("the knowledge pane over a one-sided statement", () => {
   });
 
   it("draws no diff and both named states when no subject was compared", async () => {
-    const view = reviewed({
+    const view = await reviewed({
       before_statement: unresolved("no knowledge operand was compared"),
       after_statement: unresolved("no knowledge operand was compared"),
       selection_state: "task_context",
@@ -289,7 +290,7 @@ describe("the knowledge pane over a one-sided statement", () => {
   });
 
   it("names an absent field value and a recorded empty one without printing either as blank", async () => {
-    const view = reviewed({
+    const view = await reviewed({
       before_statement: present(SHARED_STATEMENT),
       after_statement: present(SHARED_STATEMENT),
       field_changes: [

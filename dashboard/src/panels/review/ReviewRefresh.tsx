@@ -30,14 +30,14 @@
 // (see `ReviewReadCycle`), so the notice can never announce a candidate publication for a question
 // the reader had merely switched to.
 
-import type { ReviewPayload } from "../../data/review";
-import type { ReviewRead } from "./ReviewOutcome";
+import type { ReviewPayload } from '../../data/review';
+import type { ReviewRead } from './ReviewOutcome';
 
 // Whether the comparison on screen is still the one the candidate publishes. `undefined` is the
 // state of a surface that has not been re-read since it was opened: nothing has been compared
 // against the displayed identity yet, and claiming either state would assert a measurement nobody
 // made. `superseded` carries the comparison that is there now, so the sentence can name both sides.
-export type ReviewGenerationState = "current" | "superseded";
+export type ReviewGenerationState = 'current' | 'superseded';
 
 export interface ReviewGeneration {
   state: ReviewGenerationState;
@@ -55,12 +55,12 @@ export function ReviewRefresh({
   generation: ReviewGeneration | null;
 }) {
   return (
-    <span style={{ display: "inline-flex", gap: "0.5rem", alignItems: "center" }}>
+    <span style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
       <button
         type="button"
         onClick={onRefresh}
         data-testid="review-refresh"
-        data-review-busy={busy ? "true" : "false"}
+        data-review-busy={busy ? 'true' : 'false'}
         aria-busy={busy}
         title="re-read this comparison against the candidate as it is now"
       >
@@ -68,15 +68,19 @@ export function ReviewRefresh({
       </button>
       {generation === null ? null : (
         <span
-          style={{ color: "muted" }}
+          style={{ color: 'var(--muted)' }}
           data-testid="review-generation-notice"
           data-generation-state={generation.state}
           data-previous-binding={generation.previousBindingDigest}
-          data-current-binding={generation.currentBindingDigest ?? ""}
+          data-current-binding={generation.currentBindingDigest ?? ''}
         >
-          {generation.state === "superseded"
-            ? `the candidate's comparison moved (was ${generation.previousBindingDigest}, is now ${generation.currentBindingDigest}) — the panes below have been replaced whole with the current one`
-            : `the comparison below is still the candidate's current one (${generation.previousBindingDigest})`}
+          {generation.state === 'superseded' ? 'Comparison updated' : 'Comparison current'}
+          <details>
+            <summary>Generation details</summary>
+            {generation.state === 'superseded'
+              ? `the candidate's comparison moved (was ${generation.previousBindingDigest}, is now ${generation.currentBindingDigest}) — the panes below have been replaced whole with the current one`
+              : `the comparison below is still the candidate's current one (${generation.previousBindingDigest})`}
+          </details>
         </span>
       )}
     </span>
@@ -105,12 +109,12 @@ export function generationOf(
   carried: string | null,
   shown: ReviewPayload | null,
 ): ReviewGeneration | null {
-  if (read.phase !== "reviewed") return null;
+  if (read.phase !== 'reviewed') return null;
   if (carried === null || shown === null) return null;
   const current = shown.comparison?.binding_digest;
   if (current === undefined) return null;
   return {
-    state: current === carried ? "current" : "superseded",
+    state: current === carried ? 'current' : 'superseded',
     previousBindingDigest: carried,
     currentBindingDigest: current,
   };

@@ -1,0 +1,368 @@
+{
+  "state": "review",
+  "operation": "read_knowledge_review",
+  "repository_id": "a0679bf2-9db1-4562-aae3-3f50cf5632c9",
+  "payload": {
+    "surface_version": "knowledge-review-surface/1",
+    "candidate": {
+      "repository_id": "a0679bf2-9db1-4562-aae3-3f50cf5632c9",
+      "master": "260921_complete-code-and-intent-review",
+      "leaf_id": "260921-icr-l7",
+      "task_ref": "260921_complete-code-and-intent-review"
+    },
+    "comparison": {
+      "reference": "deaf5b3cae17bca2847c0e556c4743d52690da0e31d81cc724280ae6c36cb9b5",
+      "policy_version": "recorded-two-snapshot-union/v1",
+      "binding_digest": "deaf5b3cae17bca2847c0e556c4743d52690da0e31d81cc724280ae6c36cb9b5",
+      "selector_digest": "f0f7ff24abc7b98c93f7e88cbdd13ce1ab2f91e670d7c46569f1cf1bdc7cb49a",
+      "before_snapshot_digest": "b133f5ff3e635db6b70e2425c23a77c1c390b1acad601f753969201a84ac587d",
+      "after_snapshot_digest": "063079b8a7eb7f5fddee9da500d8b2882de1949507064f30a04918ce7f137455",
+      "before_code_tree_id": "22c8e29fdb847bbc73ba702e111026243967a8f9",
+      "after_code_tree_id": "759e802cafb27468928c1d0243e6a9aea329eca0",
+      "knowledge_compared": true
+    },
+    "knowledge": {
+      "invariant_ids": [
+        "3693d0c9-57c3-41c5-9229-3571596bc878"
+      ],
+      "family_ids": [],
+      "before_statement": {
+        "state": "present",
+        "text": "The first statement governs the initial write.",
+        "language": "text",
+        "detail": "the before snapshot's recorded statement for this revision"
+      },
+      "after_statement": {
+        "state": "present",
+        "text": "The third statement records the refusal explicitly.",
+        "language": "text",
+        "detail": "the after snapshot's recorded statement for this revision"
+      },
+      "before_conditions": [
+        "The candidate write is admitted."
+      ],
+      "after_conditions": [
+        "The candidate write is admitted."
+      ],
+      "revision_groups": [
+        {
+          "side": "before",
+          "record_id": "3693d0c9-57c3-41c5-9229-3571596bc878",
+          "selected_revision_count": 1
+        },
+        {
+          "side": "after",
+          "record_id": "3693d0c9-57c3-41c5-9229-3571596bc878",
+          "selected_revision_count": 3
+        }
+      ],
+      "revision_selection": {
+        "record_kind": "invariant",
+        "record_id": "3693d0c9-57c3-41c5-9229-3571596bc878",
+        "state": "compared",
+        "before_revision_id": "5c00d2f9-25fa-4916-b48b-bd898db1130e",
+        "after_revision_id": "164d1623-d0fe-42d3-b3d8-5f05d8bd605c",
+        "before_heads": [
+          "5c00d2f9-25fa-4916-b48b-bd898db1130e"
+        ],
+        "after_heads": [
+          "164d1623-d0fe-42d3-b3d8-5f05d8bd605c"
+        ],
+        "before_retained": [
+          "5c00d2f9-25fa-4916-b48b-bd898db1130e"
+        ],
+        "after_retained": [
+          "164d1623-d0fe-42d3-b3d8-5f05d8bd605c",
+          "4e963453-f702-496e-9c51-350921f1f118",
+          "5c00d2f9-25fa-4916-b48b-bd898db1130e"
+        ],
+        "statement": "the invariant 3693d0c9-57c3-41c5-9229-3571596bc878 comparison uses the before head 5c00d2f9-25fa-4916-b48b-bd898db1130e and the after head 164d1623-d0fe-42d3-b3d8-5f05d8bd605c, each the unique retained revision with no recorded successor in its snapshot's selected population; 2 other retained revision(s) remain selectable history"
+      },
+      "field_changes": [],
+      "authored_effects": [],
+      "signals": [],
+      "assessment": null,
+      "assessments": [],
+      "context": [],
+      "applicability": [
+        {
+          "records": "assessments",
+          "supplied": 0,
+          "direct": 0,
+          "historical": 0,
+          "context": 0,
+          "candidate": 0,
+          "unresolved": 0,
+          "unrelated": 0,
+          "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments"
+        },
+        {
+          "records": "detection_signals",
+          "supplied": 0,
+          "direct": 0,
+          "historical": 0,
+          "context": 0,
+          "candidate": 0,
+          "unresolved": 0,
+          "unrelated": 0,
+          "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments"
+        },
+        {
+          "records": "authored_effects",
+          "supplied": 0,
+          "direct": 0,
+          "historical": 0,
+          "context": 0,
+          "candidate": 0,
+          "unresolved": 0,
+          "unrelated": 0,
+          "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel"
+        }
+      ],
+      "unresolved": [],
+      "selection_state": "subject_selected",
+      "selection_detail": null
+    },
+    "source": {
+      "inventory": {
+        "state": "unavailable",
+        "entries": [],
+        "listed_total": 0,
+        "detail": "the two requested code trees could not be compared (22c8e29fdb847bbc73ba702e111026243967a8f9 in /tmp/icr-single-head-evidence-chxmuhag/before-code against 759e802cafb27468928c1d0243e6a9aea329eca0 in /tmp/icr-single-head-evidence-chxmuhag/after-code), so no change set was observed and none is reported; no working tree or HEAD was substituted",
+        "partial": false,
+        "command": "git -C /tmp/icr-single-head-evidence-chxmuhag/after-code diff --raw -z --no-renames 22c8e29fdb847bbc73ba702e111026243967a8f9 759e802cafb27468928c1d0243e6a9aea329eca0",
+        "before_code_tree_id": "22c8e29fdb847bbc73ba702e111026243967a8f9",
+        "after_code_tree_id": "759e802cafb27468928c1d0243e6a9aea329eca0",
+        "unrepresentable_paths": []
+      },
+      "locations": [],
+      "relationships": [
+        {
+          "relationship_kind": "governing_route",
+          "record_kind": "invariant",
+          "record_id": "3693d0c9-57c3-41c5-9229-3571596bc878",
+          "transition": "unchanged",
+          "before": [
+            {
+              "side": "before",
+              "state": "ungoverned",
+              "item_coverage": "selected_both",
+              "relationship_id": null,
+              "path": null,
+              "role": null,
+              "rationale": null,
+              "resolution": null,
+              "resolution_detail": null,
+              "recorded_source_identity": null,
+              "observed_source_identity": null,
+              "change_state": null,
+              "reached_via": [],
+              "record_kind": "invariant",
+              "record_id": "3693d0c9-57c3-41c5-9229-3571596bc878",
+              "revision_id": null,
+              "member_revision_id": null,
+              "route_id": null,
+              "route_path": null,
+              "detail": "the before snapshot records invariant 3693d0c9-57c3-41c5-9229-3571596bc878 with no governing route; an ungoverned identity is not placed in the repository root and no route is inferred from the paths its claims name"
+            }
+          ],
+          "after": {
+            "side": "after",
+            "state": "ungoverned",
+            "item_coverage": "selected_both",
+            "relationship_id": null,
+            "path": null,
+            "role": null,
+            "rationale": null,
+            "resolution": null,
+            "resolution_detail": null,
+            "recorded_source_identity": null,
+            "observed_source_identity": null,
+            "change_state": null,
+            "reached_via": [],
+            "record_kind": "invariant",
+            "record_id": "3693d0c9-57c3-41c5-9229-3571596bc878",
+            "revision_id": null,
+            "member_revision_id": null,
+            "route_id": null,
+            "route_path": null,
+            "detail": "the after snapshot records invariant 3693d0c9-57c3-41c5-9229-3571596bc878 with no governing route; an ungoverned identity is not placed in the repository root and no route is inferred from the paths its claims name"
+          },
+          "pairing_basis": "same_governed_identity",
+          "lineage": [],
+          "gaps": [],
+          "rename_inference": null,
+          "statement": "the invariant 3693d0c9-57c3-41c5-9229-3571596bc878 is associated with the same governing route on both snapshots (no governing route)"
+        }
+      ],
+      "remaining": [
+        {
+          "name": "locations_remaining",
+          "value": 0,
+          "reason": null
+        },
+        {
+          "name": "changed_paths_outside_selection",
+          "value": null,
+          "reason": "the source change population was not measured, so no count of changes outside the selected subject exists (the source observation this partition is the denominator of was not made. The source observation beside this value says: the two requested code trees could not be compared (22c8e29fdb847bbc73ba702e111026243967a8f9 in /tmp/icr-single-head-evidence-chxmuhag/before-code against 759e802cafb27468928c1d0243e6a9aea329eca0 in /tmp/icr-single-head-evidence-chxmuhag/after-code), so no change set was observed and none is reported; no working tree or HEAD was substituted. No total is reported and none is reported as zero: an unmeasured change population has no denominator, so no path can be called attributed, confirmed unregistered or of undetermined attribution)"
+        },
+        {
+          "name": "unattributed_changed_paths",
+          "value": null,
+          "reason": "the source change population was not measured, so no path is reported as confirmed to carry no registered attribution (the source observation this partition is the denominator of was not made. The source observation beside this value says: the two requested code trees could not be compared (22c8e29fdb847bbc73ba702e111026243967a8f9 in /tmp/icr-single-head-evidence-chxmuhag/before-code against 759e802cafb27468928c1d0243e6a9aea329eca0 in /tmp/icr-single-head-evidence-chxmuhag/after-code), so no change set was observed and none is reported; no working tree or HEAD was substituted. No total is reported and none is reported as zero: an unmeasured change population has no denominator, so no path can be called attributed, confirmed unregistered or of undetermined attribution)"
+        },
+        {
+          "name": "unknown_attribution_changed_paths",
+          "value": null,
+          "reason": "the source change population was not measured, so no path is reported as of undetermined attribution (the source observation this partition is the denominator of was not made. The source observation beside this value says: the two requested code trees could not be compared (22c8e29fdb847bbc73ba702e111026243967a8f9 in /tmp/icr-single-head-evidence-chxmuhag/before-code against 759e802cafb27468928c1d0243e6a9aea329eca0 in /tmp/icr-single-head-evidence-chxmuhag/after-code), so no change set was observed and none is reported; no working tree or HEAD was substituted. No total is reported and none is reported as zero: an unmeasured change population has no denominator, so no path can be called attributed, confirmed unregistered or of undetermined attribution)"
+        },
+        {
+          "name": "records_present_outside_selection",
+          "value": 2,
+          "reason": null
+        },
+        {
+          "name": "references_unresolved",
+          "value": 0,
+          "reason": null
+        }
+      ],
+      "expansion_reference": "diff_knowledge_scope:full-selected-candidate-source-diff",
+      "expansion_command": "git diff --raw -z --no-renames 22c8e29fdb847bbc73ba702e111026243967a8f9 759e802cafb27468928c1d0243e6a9aea329eca0",
+      "unattributed_changed_paths": [],
+      "attributed_changed_paths": [],
+      "unknown_attribution_changed_paths": [],
+      "attribution": {
+        "state": "unavailable",
+        "granularity": "changed_path",
+        "changed_total": null,
+        "attributed_total": null,
+        "confirmed_unregistered_total": null,
+        "unknown_attribution_total": null,
+        "complete": null,
+        "subject_scope_complete": null,
+        "sides": [],
+        "paths": [],
+        "detail": "the source observation this partition is the denominator of was not made. The source observation beside this value says: the two requested code trees could not be compared (22c8e29fdb847bbc73ba702e111026243967a8f9 in /tmp/icr-single-head-evidence-chxmuhag/before-code against 759e802cafb27468928c1d0243e6a9aea329eca0 in /tmp/icr-single-head-evidence-chxmuhag/after-code), so no change set was observed and none is reported; no working tree or HEAD was substituted. No total is reported and none is reported as zero: an unmeasured change population has no denominator, so no path can be called attributed, confirmed unregistered or of undetermined attribution"
+      },
+      "unresolved": [
+        {
+          "field": "attribution",
+          "recorded_reference": "164d1623-d0fe-42d3-b3d8-5f05d8bd605c",
+          "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion"
+        },
+        {
+          "field": "attribution",
+          "recorded_reference": "4e963453-f702-496e-9c51-350921f1f118",
+          "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion"
+        }
+      ]
+    },
+    "evidence": {
+      "evidence_state": "none_recorded",
+      "assessment_state": "unassessed",
+      "evidence_links": [],
+      "observations": [],
+      "assessments": [],
+      "source_inspection_available": true,
+      "channels": [
+        {
+          "records": "authored_effects",
+          "state": "none_recorded",
+          "owner": "knowledge_views.read_knowledge_view:review_matrix",
+          "record_count": 0,
+          "detail": "the owner of authored_effects answered for this candidate and holds none of this class; this is a measured absence, not an authority this composition failed to read",
+          "unreadable": [],
+          "next_action": null
+        }
+      ],
+      "context": [],
+      "applicability": [
+        {
+          "records": "assessments",
+          "supplied": 0,
+          "direct": 0,
+          "historical": 0,
+          "context": 0,
+          "candidate": 0,
+          "unresolved": 0,
+          "unrelated": 0,
+          "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments"
+        },
+        {
+          "records": "verification_observations",
+          "supplied": 0,
+          "direct": 0,
+          "historical": 0,
+          "context": 0,
+          "candidate": 0,
+          "unresolved": 0,
+          "unrelated": 0,
+          "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments"
+        },
+        {
+          "records": "evidence_claims",
+          "supplied": 0,
+          "direct": 0,
+          "historical": 0,
+          "context": 0,
+          "candidate": 0,
+          "unresolved": 0,
+          "unrelated": 0,
+          "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel"
+        }
+      ],
+      "unresolved": []
+    },
+    "family_context": {
+      "state": "no_family_recorded",
+      "detail": "the recorded scope was read on both snapshots and holds no family membership for the selected invariant, so no family context exists for it; this is a measured zero and not an unread, unavailable or filtered scope",
+      "entries": [],
+      "families_total": 0,
+      "families_returned": 0,
+      "families_remaining": 0,
+      "membership_rows_total": 0,
+      "unique_member_revision_total": 0,
+      "references": {
+        "relationship_union": "source.relationships",
+        "source_inventory": "source.inventory",
+        "evidence_links": "evidence.evidence_links",
+        "observations": "evidence.observations",
+        "assessments": "evidence.assessments",
+        "applicability": "knowledge.applicability",
+        "join_key": "invariant_revision_id",
+        "detail": "each of these collections is published by its own owner in this payload and keeps its own state; this context references them by identity and draws no conclusion from any of them"
+      },
+      "limitations": []
+    },
+    "staleness": {
+      "state": "current",
+      "statement": "the displayed comparison is the candidate's current comparison",
+      "previous_comparison_ref": null,
+      "moved": []
+    },
+    "submission": {
+      "state": "unavailable",
+      "reason": "this increment mounts no serving route that publishes an assessment, so the surface displays only and does not grow a private write path to compensate",
+      "next_action": "publish an assessment through the existing curator authority's publication action, which supplies the author, the role and the authority provenance",
+      "proposed_dispositions": [
+        "concern_found",
+        "no_concern_found",
+        "unresolved"
+      ],
+      "none_is_approval": true
+    },
+    "sync_movement": null,
+    "external_git_movement": null,
+    "page": null,
+    "page_refusal": null,
+    "limitations": [
+      "limitation:records_present_outside_the_selection",
+      "limitation:unknown_attribution_changed_paths",
+      "limitation:no_semantic_assessment_performed",
+      "omitted:present_outside_the_declared_selection:2",
+      "limitation:source_inventory_unavailable"
+    ]
+  },
+  "refusal": null
+}

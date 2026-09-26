@@ -3,7 +3,7 @@
 // live candidate while the enclosure is live, and the leaf's own recorded comparison once it is
 // closed, ICR-R12). Counters come from the changeset data layer; liveness is read from the dashboard
 // store, and it selects WHICH record the review entry is addressed to rather than whether it exists.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from 'react';
 
 import {
   type ChangeCounters,
@@ -12,36 +12,25 @@ import {
   leafChangeset,
   masterChangeset,
   taskChangeset,
-} from "../../data/changeset";
-import {
-  type ReviewEntry,
-  type ReviewEntryListResult,
-  type ReviewFailure,
-  intentReviewEntries,
-  reviewProblemFromCause,
-  reviewProblemFromRefusal,
-  unreadableAnswer,
-} from "../../data/review";
-import { useDashboard } from "../../data/store";
-import type { Analytics } from "../../types/projection";
-import type { ChangeSetTarget } from "../changeset/ChangeSetViewer";
-import {
-  changeSetBar,
-  changeSetBtn,
-  changeSetCounts,
-} from "./styles";
+} from '../../data/changeset';
+import { type ReviewEntry, type ReviewFailure, reviewProblemFromCause } from '../../data/review';
+import { type ReviewCatalogueRead, useReviewCatalogue } from '../../data/useReviewCatalogue';
+import { useDashboard } from '../../data/store';
+import type { Analytics } from '../../types/projection';
+import type { ChangeSetTarget } from '../changeset/ChangeSetViewer';
+import { changeSetBar, changeSetBtn, changeSetCounts } from './styles';
 
 // The net's leaf attribution as one phrase: how many leaves the master carries and how many of them
 // have landed, or nothing at all when the read was not a master's (or predates the breakdown) -- an
 // absent answer is not rendered as a zero.
-function leafAttribution(leaves: MasterChangeset["leaves"] | null): string | null {
+function leafAttribution(leaves: MasterChangeset['leaves'] | null): string | null {
   if (!leaves || leaves.length === 0) return null;
-  const committed = leaves.filter((leaf) => leaf.state === "committed").length;
+  const committed = leaves.filter((leaf) => leaf.state === 'committed').length;
   const working = leaves.length - committed;
   return [
     `${leaves.length} leaf/leaves`,
     working > 0 ? `${committed} committed · ${working} working` : `${committed} committed`,
-  ].join(" · ");
+  ].join(' · ');
 }
 
 // The net bar's total, or nothing when the range is unrecorded: `+0 −0` would present a zero of
@@ -85,7 +74,7 @@ export function ChangeSetButton({
   const [unrecorded, setUnrecorded] = useState<string | null>(null);
   // The net's own leaves, when this read is a master's: how many the master carries and how many of
   // them have landed, which is what makes the total beside it attributable at a glance.
-  const [leaves, setLeaves] = useState<MasterChangeset["leaves"] | null>(null);
+  const [leaves, setLeaves] = useState<MasterChangeset['leaves'] | null>(null);
   // WHAT THE READ SAID WHEN IT DID NOT ANSWER (L32/D01). The route publishes a refusal's own code
   // and its reason in the body of its non-2xx response, and the rejection below used to take no error
   // parameter at all: the refusal was in hand and discarded, so a REFUSED read rendered
@@ -101,21 +90,21 @@ export function ChangeSetButton({
     setProblem(null);
     setUnrecorded(null);
     const req = target.leaf
-      ? leafChangeset(target.repo, target.master ?? "", target.leaf, target.mode ?? "committed")
+      ? leafChangeset(target.repo, target.master ?? '', target.leaf, target.mode ?? 'committed')
       : target.master
         ? // The master read asks for its per-leaf attribution (R33.2) -- the route answers one row
           // per leaf, and this control is where the reviewer sees that the net total IS those leaves
           // summed rather than a single number with no owner.
           masterChangeset(target.repo, target.master, { includeLeaves: true })
-        : taskChangeset(target.repo, target.scope ?? "");
+        : taskChangeset(target.repo, target.scope ?? '');
     void req.then(
       (d) => {
         if (!live) return;
         setCounters(d.counters);
-        setUnrecorded("state" in d && d.state === "unrecorded" ? (d.stateDetail ?? "") : null);
-        setLeaves("leaves" in d ? (d.leaves ?? []) : null);
+        setUnrecorded('state' in d && d.state === 'unrecorded' ? (d.stateDetail ?? '') : null);
+        setLeaves('leaves' in d ? (d.leaves ?? []) : null);
         setGeneration(
-          "generation" in d && d.generation
+          'generation' in d && d.generation
             ? {
                 codeBase: d.generation.codeBase,
                 codeTip: d.generation.codeTip,
@@ -210,8 +199,8 @@ function ChangeSetReadState({
         data-review-code={problem.code}
       >
         this change-set could not be read ({problem.code}): {problem.detail}
-        {problem.offendingInput ? ` — offending input: ${problem.offendingInput}` : ""}
-        {problem.nextAction ? ` — next: ${problem.nextAction}` : ""}
+        {problem.offendingInput ? ` — offending input: ${problem.offendingInput}` : ''}
+        {problem.nextAction ? ` — next: ${problem.nextAction}` : ''}
       </span>
     );
   }
@@ -224,7 +213,7 @@ function ChangeSetReadState({
       >
         nothing has recorded this change-set&apos;s endpoint yet — this range is unrecorded, not
         measured empty.
-        {unrecorded ? ` ${unrecorded}` : ""}
+        {unrecorded ? ` ${unrecorded}` : ''}
       </span>
     );
   }
@@ -248,27 +237,6 @@ function ChangeSetReadState({
 // What the catalogue read answered, as the task view needs it: every subject the pair offers with
 // the labelled totals, and -- when the read did not answer with a subject list -- the reason, in
 // the owner's own words.
-interface ReviewCatalogueRead {
-  loading: boolean;
-  entries?: ReviewEntry[];
-  totalSubjects?: number;
-  invariantTotal?: number;
-  familyTotal?: number;
-  // The read answered `entries` with none: a known-empty answer about the pair's recorded subjects,
-  // which is a fact about the datasets and not a failure. Zero subjects is a valid catalogue beside
-  // the source inventory, and the entry below still opens that inventory.
-  empty?: boolean;
-  // The read refused (a typed refusal, a transport-level failure, or an answer this client does not
-  // admit). It is carried rather than swallowed: the entry must be able to say why it cannot refine.
-  problem?: ReviewFailure;
-  // The workspace facts this answer was read from, and whether those facts have since moved
-  // (ICR-R17). `stale` is not a failure and not a claim that the candidate changed: it says the
-  // workspace projection was republished after this answer, so the catalogue beside the entry may no
-  // longer be the candidate's -- which is what the explicit refresh re-reads.
-  facts: string;
-  stale: boolean;
-}
-
 // One workspace fact the entry's catalogue depends on, as a value that changes when the fact does.
 //
 // WHY THE ENTRY NEEDS THIS AT ALL (ICR-R17, the packet's defect). The catalogue read used to depend on
@@ -289,7 +257,7 @@ interface ReviewCatalogueRead {
 // a measurement nobody made. The review surface is where a generation is actually compared against
 // the identity a read carried (see `ReviewRefresh`).
 function reviewDependencyFacts(analytics: Analytics | null): string {
-  return analytics === null ? "no-projection" : JSON.stringify(analytics);
+  return analytics === null ? 'no-projection' : JSON.stringify(analytics);
 }
 
 // The entry's explicit refresh control. It is always offered -- the reader's own way to ask again,
@@ -306,13 +274,11 @@ function ReviewCatalogueRefresh({ stale, onRefresh }: { stale: boolean; onRefres
       type="button"
       onClick={onRefresh}
       data-testid="review-catalogue-refresh"
-      data-catalogue-stale={stale ? "true" : "false"}
+      data-catalogue-stale={stale ? 'true' : 'false'}
       title="re-read this pair's recorded subjects from the candidate as it is now"
     >
       ⟳ refresh subjects
-      {stale ? (
-        <span data-testid="review-catalogue-stale"> · workspace facts changed</span>
-      ) : null}
+      {stale ? <span data-testid="review-catalogue-stale"> · workspace facts changed</span> : null}
     </button>
   );
 }
@@ -342,94 +308,6 @@ function ReviewCatalogueRefresh({ stale, onRefresh }: { stale: boolean; onRefres
 // than a branch inside the hook so the hook stays one read cycle: what "this body means" and "when to
 // ask" are different questions, and a body this client does not admit is answered as the failure it
 // is rather than read as a catalogue.
-function catalogueAnswer(result: ReviewEntryListResult, facts: string): ReviewCatalogueRead {
-  if (result.state === "entries") {
-    const entries = result.entries ?? [];
-    // The totals are the server's own; a body that predates them falls back to the page it carried,
-    // so a short catalogue still reads as the whole answer it is.
-    const totalSubjects =
-      typeof result.total_subjects === "number" ? result.total_subjects : entries.length;
-    const invariantTotal =
-      typeof result.invariant_total === "number"
-        ? result.invariant_total
-        : entries.filter((entry) => entry.selector_kind === "invariant").length;
-    const familyTotal =
-      typeof result.family_total === "number"
-        ? result.family_total
-        : entries.filter((entry) => entry.selector_kind === "family").length;
-    return {
-      loading: false,
-      entries,
-      totalSubjects,
-      invariantTotal,
-      familyTotal,
-      empty: entries.length === 0,
-      facts,
-      stale: false,
-    };
-  }
-  if (result.state === "refused") {
-    return {
-      loading: false,
-      problem: result.refusal
-        ? reviewProblemFromRefusal(result.refusal)
-        : unreadableAnswer("refused"),
-      facts,
-      stale: false,
-    };
-  }
-  return { loading: false, problem: unreadableAnswer(result.state), facts, stale: false };
-}
-
-function useReviewCatalogue(
-  repo: string,
-  master: string,
-  leaf: string | undefined,
-  facts: string,
-): ReviewCatalogueRead & { refresh: () => void } {
-  const [read, setRead] = useState<ReviewCatalogueRead>({ loading: false, facts, stale: false });
-  const [nonce, setNonce] = useState(0);
-  const reads = useRef(0);
-  const factsRef = useRef(facts);
-  factsRef.current = facts;
-  // Whether the list on screen was read from facts the workspace has since moved past. It is derived
-  // from the facts recorded WITH THE LAST ANSWER, not from the live value: that is what makes it a
-  // statement about the list beside it ("this was read before the projection moved") rather than a
-  // guess about a read that has not happened. Deliberately NOT gated on `loading` -- gating it there
-  // is what made the mark appear and vanish inside one flush, so a reader was never told at all.
-  const stale = read.facts !== facts;
-  useEffect(() => {
-    let mounted = true;
-    // The facts in force when the read starts, taken from the ref so the answer is filed under the
-    // question it actually answered even if the projection moves again while it is in flight.
-    const askedFor = factsRef.current;
-    const seq = ++reads.current;
-    const live = () => mounted && reads.current === seq;
-    setRead((previous) => ({ ...previous, loading: true, stale: false }));
-    if (!leaf) {
-      setRead({ loading: false, facts: askedFor, stale: false });
-      return () => void (mounted = false);
-    }
-    void intentReviewEntries(repo, master, leaf).then(
-      (result) => {
-        if (live()) setRead(catalogueAnswer(result, askedFor));
-      },
-      (cause: unknown) => {
-        if (live()) setRead({ loading: false, problem: reviewProblemFromCause(cause), facts: askedFor, stale: false });
-      },
-    );
-    return () => {
-      mounted = false;
-    };
-  }, [repo, master, leaf, facts, nonce]);
-  const refresh = () => {
-    // The reader's own re-read. The effect above is what asks; this only says "ask again", so there
-    // is one read path and a click cannot become a second way of composing the request.
-    setNonce((value) => value + 1);
-  };
-  return { ...read, stale, refresh };
-}
-
 // The entry read's own state, printed beside the entry rather than hidden. It never gates the entry:
 // the button beside it is offered for the leaf whatever this read answered -- for a live candidate and
 // for a closed leaf's recorded comparison alike -- so a refusal here is a stated reason and not a
@@ -438,11 +316,7 @@ function useReviewCatalogue(
 function ReviewEntryState({ read }: { read: ReviewCatalogueRead }) {
   if (read.loading) {
     return (
-      <span
-        style={{ color: "muted" }}
-        data-testid="review-entry-state"
-        data-review-state="loading"
-      >
+      <span style={{ color: 'muted' }} data-testid="review-entry-state" data-review-state="loading">
         reading this candidate&apos;s recorded subjects…
       </span>
     );
@@ -450,7 +324,7 @@ function ReviewEntryState({ read }: { read: ReviewCatalogueRead }) {
   if (read.empty) {
     return (
       <span
-        style={{ color: "muted" }}
+        style={{ color: 'muted' }}
         data-testid="review-entry-state"
         data-review-state="known-empty"
       >
@@ -462,15 +336,15 @@ function ReviewEntryState({ read }: { read: ReviewCatalogueRead }) {
   if (!read.problem) return null;
   return (
     <span
-      style={{ color: "muted" }}
+      style={{ color: 'muted' }}
       data-testid="review-entry-state"
       data-review-state={read.problem.token}
       data-review-code={read.problem.code}
     >
-      this candidate&apos;s recorded subjects could not be read ({read.problem.code}):{" "}
+      this candidate&apos;s recorded subjects could not be read ({read.problem.code}):{' '}
       {read.problem.detail}
-      {read.problem.offendingInput ? ` — offending input: ${read.problem.offendingInput}` : ""}
-      {read.problem.nextAction ? ` — next: ${read.problem.nextAction}` : ""}
+      {read.problem.offendingInput ? ` — offending input: ${read.problem.offendingInput}` : ''}
+      {read.problem.nextAction ? ` — next: ${read.problem.nextAction}` : ''}
     </span>
   );
 }
@@ -478,10 +352,10 @@ function ReviewEntryState({ read }: { read: ReviewCatalogueRead }) {
 // One catalogue row's presence, in the reader's own words. A retired subject is still a subject:
 // it is listed and selectable, marked for what it is rather than dropped to imply a smaller
 // complete population.
-function presenceMarker(presence: ReviewEntry["presence"] | undefined): string {
-  if (presence === "before_only") return "retired · before-only";
-  if (presence === "after_only") return "new · after-only";
-  return "";
+function presenceMarker(presence: ReviewEntry['presence'] | undefined): string {
+  if (presence === 'before_only') return 'retired · before-only';
+  if (presence === 'after_only') return 'new · after-only';
+  return '';
 }
 
 // The labelled subject catalogue beside the entry: every recorded subject is selectable here, with
@@ -501,7 +375,7 @@ function ReviewCataloguePicker({
   if (!entries.length) return null;
   const effective = entries.find((entry) => entry.selector_id === selectedId) ?? entries[0];
   return (
-    <span style={{ display: "inline-flex", gap: "0.4rem", alignItems: "center" }}>
+    <span style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
       <select
         data-testid="review-subject-picker"
         aria-label="reviewed subject"
@@ -516,19 +390,19 @@ function ReviewCataloguePicker({
               value={entry.selector_id}
               data-testid="review-subject-option"
               data-selector-kind={entry.selector_kind}
-              data-presence={entry.presence ?? ""}
+              data-presence={entry.presence ?? ''}
             >
               {entry.selector_kind} · {entry.label}
-              {marker ? ` · ${marker}` : ""}
+              {marker ? ` · ${marker}` : ''}
             </option>
           );
         })}
       </select>
-      <span style={{ color: "muted" }} data-testid="review-catalogue-totals">
+      <span style={{ color: 'muted' }} data-testid="review-catalogue-totals">
         {read.totalSubjects ?? entries.length} subject(s)
         {read.invariantTotal !== undefined && read.familyTotal !== undefined
           ? ` · ${read.invariantTotal} invariant(s) · ${read.familyTotal} family/families`
-          : ""}
+          : ''}
       </span>
     </span>
   );
@@ -592,7 +466,7 @@ function LeafEntries({
     <>
       {live ? (
         <ChangeSetButton
-          target={{ repo, master, leaf, mode: "working" }}
+          target={{ repo, master, leaf, mode: 'working' }}
           label="working"
           onOpen={onOpen}
         />
@@ -612,7 +486,7 @@ function LeafEntries({
             ...(live ? {} : { historical: true }),
           },
         }}
-        label={live ? "Intent review" : "Intent review (recorded)"}
+        label={live ? 'Intent review' : 'Intent review (recorded)'}
         onOpen={onOpen}
       />
       <ReviewCataloguePicker read={catalogue} selectedId={selectedId} onSelect={setSelectedId} />
@@ -636,7 +510,7 @@ export function DocChangeSetBar({
   leaf,
   onOpen,
 }: {
-  kind: "master" | "leaf";
+  kind: 'master' | 'leaf';
   repo: string;
   master: string;
   leaf?: string;
@@ -653,7 +527,7 @@ export function DocChangeSetBar({
   const facts = reviewDependencyFacts(analytics);
   const live = leaf ? leafIsLive(enclosures, activeWorktreeGroups, repo, leaf) : false;
   if (!onOpen || !repo || !master) return null;
-  if (kind === "master") {
+  if (kind === 'master') {
     return (
       <div className={changeSetBar}>
         <ChangeSetButton target={{ repo, master }} label="series" onOpen={onOpen} />
@@ -664,7 +538,7 @@ export function DocChangeSetBar({
   return (
     <div className={changeSetBar}>
       <ChangeSetButton
-        target={{ repo, master, leaf, mode: "committed" }}
+        target={{ repo, master, leaf, mode: 'committed' }}
         label="committed"
         onOpen={onOpen}
       />
@@ -693,7 +567,7 @@ function leafIsLive(
     (e) =>
       e.repoName === repo &&
       e.leafId.toLowerCase() === leaf.toLowerCase() &&
-      activeWorktreeGroups.includes(e.worktreeGroup.split("/").filter(Boolean).pop() ?? ""),
+      activeWorktreeGroups.includes(e.worktreeGroup.split('/').filter(Boolean).pop() ?? ''),
   );
 }
 

@@ -186,6 +186,11 @@ External-memory closeout order is:
 1. Confirm the worker's targeted-check report and the curator's complete onboarding
    handoff when those roles are present. Record failed or not-run checks as
    reported; do not reinterpret a subset as full green.
+   Carry the curator's `review-record-comparison` result from
+   `../l-01-agent-lifecycles/operations/curation.md` § Record the task comparison, including
+   code-only work recorded with `--unchanged-knowledge`. A missing/refused record is an explicit
+   evidence gap, never proof of absent knowledge. This is handoff context: closeout neither invokes
+   the producer nor adds a gate, and never replaces an existing frozen generation with today's data.
 2. Preview the exact enabled code and memory-content commit legs with
    their messages, source refs, destination refs, and current conflict/ref
    facts. Preview performs no quality, test, memory, certification, or review

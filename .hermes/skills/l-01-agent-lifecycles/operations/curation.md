@@ -14,7 +14,7 @@ knowledge foundation, before any leaf exists — is stated under *The repository
 | Role | Its job in this operation |
 | --- | --- |
 | curator | performs the three-way reconciliation and writes the affected onboarding |
-| manager | compiles the curator brief from the landed change set + task doc + notes and consumes the curator's paths and scoped-check report |
+| manager | compiles the curator brief from the captured pre-closeout change set + task doc + notes and consumes the curator's paths and scoped-check report |
 
 These are two disjoint jobs: the curator reconciles and writes memory; the manager owns the
 transaction. The curator never runs the closeout preview, never repairs transaction conflicts, and
@@ -33,7 +33,7 @@ run by an instructed session whose admission is the writer's own (see below).
 
 The brief **feeds** all three inputs; none is inferred from transcript memory:
 
-1. **The landed change set** — code diff over the leaf's base-to-head range with counters and paths,
+1. **The captured change set** — code diff from the leaf's base to its actual pre-closeout candidate with counters and paths,
    pulled by the manager from the leaf contract's recorded range, not a guess.
 2. **The leaf task doc** — including the approved requirement corpus ruling and every exact stable-ID
    + version canonical packet the brief names.
@@ -127,6 +127,41 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    true only once that validation passes.
 8. **Repair, then republish.** After each repair, re-run the full operation before handoff.
 
+## Record the task comparison
+
+After the final code and knowledge read-back, while the leaf is still live, run the installed
+producer with the MCP authority settings and this leaf's enclosure contract:
+
+```text
+agents-remember review-record-comparison --config <MCP authority settings> --contract <leaf enclosure contract> --json
+```
+
+Use the non-editable installed package, just as for `knowledge-ingest`; unpublished checkout code
+must not write to the live coordination root. The command delegates to the existing comparison
+freeze owner. Read the report's `state`, generation identity and refusal, not just the exit status.
+Read whether the producer wrote or reused a record and carry its exact generation identity;
+prior immutable generations remain available when a successor is recorded.
+An optional `--evidence <owner>:<task-relative path>` cites an existing owner-produced artifact.
+It neither authors an assessment nor turns passing tests into an intent verdict.
+
+For a code-only task whose knowledge is unchanged, add **`--unchanged-knowledge`**. This explicit
+selection checks the exact recorded memory base, the task's declared published knowledge and every
+existing task knowledge half. All must hold the same namespace and logical dataset. Missing or changed
+knowledge, including unpublished changes in an existing candidate, refuses this claim with the exact
+reason; reconcile and publish through ordinary curation instead. Do not ingest a fabricated invariant
+or an empty hand-off batch to manufacture a comparison. The option retains the verified unchanged
+knowledge beside the live source candidate without authoring or publishing any knowledge rows.
+It prepares the normal live before/candidate halves through their existing owners, keeping the
+original baseline, so the default reviewer catalogue and family view work before closeout.
+
+Carry the result into the curator handoff and normal closeout context. Repeat the operation after a
+later code or knowledge change before handing over that candidate. A refusal remains a reported
+evidence gap; this step adds no transaction gate and closeout does not launch it automatically.
+
+For every authored invariant, the hand-off template's curator-owned `scope` must carry applicability,
+conditions and exclusions before ingest. Workflow or provenance text is never semantic scope;
+missing or malformed scope is a named `unfilled_curation_scope` per-entry refusal.
+
 ## The repository-foundation entry — the curator's work, before a leaf exists
 
 Curation's ordinary shape is a leaf's coherence pass. A repository's **first or resumed knowledge
@@ -144,7 +179,7 @@ there is still exactly one admitted writer and one declared published location. 
 | | Leaf coherence pass | Repository-foundation entry |
 | --- | --- | --- |
 | Carrier | this seat, opened on the leaf's task document | a **taskless curator seat** (developer ruling 2026-09-24) which authors under this role's own rules, or the taskless **bootstrap** seat for the read-and-report step |
-| Scope | this leaf's landed change set | the requested project scope |
+| Scope | this leaf's captured pre-closeout change set | the requested project scope |
 | Required inputs | the brief, the change set, `notes/`, the enclosure contract | the declared repository entry, the resolved context, the requested scope, the available sources, the current knowledge state |
 | Writer entry | `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> … --publish --commit` | `agents-remember knowledge-bootstrap --repo <repo_id> … --commit`, from a session with **no enclosure in scope** — the taskless writer refuses one (`enclosure_in_scope`) so a bootstrap can never publish onto a task's line |
 | Onboarding | written by this pass | optional input: the foundation neither requires onboarding to exist nor writes any |

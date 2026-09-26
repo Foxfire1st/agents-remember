@@ -1,0 +1,699 @@
+{
+  "state": "review",
+  "operation": "read_knowledge_review",
+  "repository_id": "fc6fcdbf-9932-4499-9901-1c69502fcf0b",
+  "payload": {
+    "surface_version": "knowledge-review-surface/1",
+    "candidate": {
+      "repository_id": "fc6fcdbf-9932-4499-9901-1c69502fcf0b",
+      "master": "260921_complete-code-and-intent-review",
+      "leaf_id": "260921-icr-l7",
+      "task_ref": "260921_complete-code-and-intent-review"
+    },
+    "comparison": {
+      "reference": "07c9282cd0a120be2466790d63aad1f6306bcd2ff4393171ec0c8043308ae42e",
+      "policy_version": "recorded-two-snapshot-union/v1",
+      "binding_digest": "07c9282cd0a120be2466790d63aad1f6306bcd2ff4393171ec0c8043308ae42e",
+      "selector_digest": "5d8b2efedaeab9534004fbf5b6b0fc271c487947251375c08b727e4ae6683ccd",
+      "before_snapshot_digest": "f9f90b42b24da1937e2c95d0f97e93f064c78ad95ac15e7a50aff2f183c0652a",
+      "after_snapshot_digest": "a1150aa3a16984588d0f678410d2cda87cde7e8ce8dbe33c1d9fa4be35ddb91c",
+      "before_code_tree_id": "22c8e29fdb847bbc73ba702e111026243967a8f9",
+      "after_code_tree_id": "759e802cafb27468928c1d0243e6a9aea329eca0",
+      "knowledge_compared": true
+    },
+    "knowledge": {
+      "invariant_ids": [
+        "39688a70-6979-449b-80a8-f9ed4b0ddfb8"
+      ],
+      "family_ids": [
+        "c47a089a-78d5-403e-bdbe-54edebf54bfc"
+      ],
+      "before_statement": {
+        "state": "present",
+        "text": "The first statement governs the initial write.",
+        "language": "text",
+        "detail": "the before snapshot's recorded statement for this revision"
+      },
+      "after_statement": {
+        "state": "present",
+        "text": "The third statement records the refusal explicitly.",
+        "language": "text",
+        "detail": "the after snapshot's recorded statement for this revision"
+      },
+      "before_conditions": [
+        "The candidate write is admitted."
+      ],
+      "after_conditions": [
+        "The candidate write is admitted."
+      ],
+      "revision_groups": [
+        {
+          "side": "before",
+          "record_id": "39688a70-6979-449b-80a8-f9ed4b0ddfb8",
+          "selected_revision_count": 1
+        },
+        {
+          "side": "before",
+          "record_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+          "selected_revision_count": 1
+        },
+        {
+          "side": "after",
+          "record_id": "39688a70-6979-449b-80a8-f9ed4b0ddfb8",
+          "selected_revision_count": 3
+        },
+        {
+          "side": "after",
+          "record_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+          "selected_revision_count": 2
+        }
+      ],
+      "revision_selection": {
+        "record_kind": "invariant",
+        "record_id": "39688a70-6979-449b-80a8-f9ed4b0ddfb8",
+        "state": "compared",
+        "before_revision_id": "7212ef9d-d53d-43e2-b2f3-d7890597bc4f",
+        "after_revision_id": "4f774896-c1ba-44af-8486-77282e9134d0",
+        "before_heads": [
+          "7212ef9d-d53d-43e2-b2f3-d7890597bc4f"
+        ],
+        "after_heads": [
+          "4f774896-c1ba-44af-8486-77282e9134d0"
+        ],
+        "before_retained": [
+          "7212ef9d-d53d-43e2-b2f3-d7890597bc4f"
+        ],
+        "after_retained": [
+          "4f774896-c1ba-44af-8486-77282e9134d0",
+          "7212ef9d-d53d-43e2-b2f3-d7890597bc4f",
+          "f859dfb7-d609-4ba2-bc7a-1b4c1026eb39"
+        ],
+        "statement": "the invariant 39688a70-6979-449b-80a8-f9ed4b0ddfb8 comparison uses the before head 7212ef9d-d53d-43e2-b2f3-d7890597bc4f and the after head 4f774896-c1ba-44af-8486-77282e9134d0, each the unique retained revision with no recorded successor in its snapshot's selected population; 2 other retained revision(s) remain selectable history"
+      },
+      "field_changes": [],
+      "authored_effects": [],
+      "signals": [],
+      "assessment": null,
+      "assessments": [],
+      "context": [],
+      "applicability": [
+        {
+          "records": "assessments",
+          "supplied": 0,
+          "direct": 0,
+          "historical": 0,
+          "context": 0,
+          "candidate": 0,
+          "unresolved": 0,
+          "unrelated": 0,
+          "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments"
+        },
+        {
+          "records": "detection_signals",
+          "supplied": 0,
+          "direct": 0,
+          "historical": 0,
+          "context": 0,
+          "candidate": 0,
+          "unresolved": 0,
+          "unrelated": 0,
+          "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments"
+        },
+        {
+          "records": "authored_effects",
+          "supplied": 0,
+          "direct": 0,
+          "historical": 0,
+          "context": 0,
+          "candidate": 0,
+          "unresolved": 0,
+          "unrelated": 0,
+          "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel"
+        }
+      ],
+      "unresolved": [],
+      "selection_state": "subject_selected",
+      "selection_detail": null
+    },
+    "source": {
+      "inventory": {
+        "state": "unavailable",
+        "entries": [],
+        "listed_total": 0,
+        "detail": "the two requested code trees could not be compared (22c8e29fdb847bbc73ba702e111026243967a8f9 in /tmp/icr-single-head-family-evidence-dsdzvxj6/before-code against 759e802cafb27468928c1d0243e6a9aea329eca0 in /tmp/icr-single-head-family-evidence-dsdzvxj6/after-code), so no change set was observed and none is reported; no working tree or HEAD was substituted",
+        "partial": false,
+        "command": "git -C /tmp/icr-single-head-family-evidence-dsdzvxj6/after-code diff --raw -z --no-renames 22c8e29fdb847bbc73ba702e111026243967a8f9 759e802cafb27468928c1d0243e6a9aea329eca0",
+        "before_code_tree_id": "22c8e29fdb847bbc73ba702e111026243967a8f9",
+        "after_code_tree_id": "759e802cafb27468928c1d0243e6a9aea329eca0",
+        "unrepresentable_paths": []
+      },
+      "locations": [],
+      "relationships": [
+        {
+          "relationship_kind": "membership",
+          "record_kind": "family",
+          "record_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+          "transition": "added",
+          "before": [],
+          "after": {
+            "side": "after",
+            "state": "recorded",
+            "item_coverage": "absent_from_snapshot",
+            "relationship_id": "0630fe41-d6c4-47ba-b26e-b349bf1a56af",
+            "path": null,
+            "role": null,
+            "rationale": null,
+            "resolution": null,
+            "resolution_detail": null,
+            "recorded_source_identity": null,
+            "observed_source_identity": null,
+            "change_state": null,
+            "reached_via": [
+              "member_of_selected_family:d3e131b4-8c32-4788-8f7d-c09d5ea4ef85"
+            ],
+            "record_kind": "family",
+            "record_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+            "revision_id": "d3e131b4-8c32-4788-8f7d-c09d5ea4ef85",
+            "member_revision_id": "4f774896-c1ba-44af-8486-77282e9134d0",
+            "route_id": null,
+            "route_path": null,
+            "detail": "the after snapshot records family c47a089a-78d5-403e-bdbe-54edebf54bfc through relationship 0630fe41-d6c4-47ba-b26e-b349bf1a56af at None"
+          },
+          "pairing_basis": null,
+          "lineage": [],
+          "gaps": [
+            {
+              "side": "after",
+              "field": "predecessor",
+              "code": "predecessor_records_no_relationship",
+              "detail": "the candidate's revision d3e131b4-8c32-4788-8f7d-c09d5ea4ef85 records 0202069a-4ad9-4c54-8bde-5c31617f109a as an authored predecessor, and the before union holds no relationship for it, so this association's earlier recorded side is outside the selected union rather than absent from the snapshot"
+            }
+          ],
+          "rename_inference": null,
+          "statement": "the candidate records membership 0630fe41-d6c4-47ba-b26e-b349bf1a56af at no readable address (revision d3e131b4-8c32-4788-8f7d-c09d5ea4ef85) under family c47a089a-78d5-403e-bdbe-54edebf54bfc and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted"
+        },
+        {
+          "relationship_kind": "membership",
+          "record_kind": "family",
+          "record_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+          "transition": "unchanged",
+          "before": [
+            {
+              "side": "before",
+              "state": "recorded",
+              "item_coverage": "selected_both",
+              "relationship_id": "2703c252-dcd7-4dcc-9485-b924f78e822e",
+              "path": null,
+              "role": null,
+              "rationale": null,
+              "resolution": null,
+              "resolution_detail": null,
+              "recorded_source_identity": null,
+              "observed_source_identity": null,
+              "change_state": null,
+              "reached_via": [
+                "member_of_selected_family:0202069a-4ad9-4c54-8bde-5c31617f109a",
+                "member_of_selected_family:0202069a-4ad9-4c54-8bde-5c31617f109a"
+              ],
+              "record_kind": "family",
+              "record_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+              "revision_id": "0202069a-4ad9-4c54-8bde-5c31617f109a",
+              "member_revision_id": "7212ef9d-d53d-43e2-b2f3-d7890597bc4f",
+              "route_id": null,
+              "route_path": null,
+              "detail": "the before snapshot records family c47a089a-78d5-403e-bdbe-54edebf54bfc through relationship 2703c252-dcd7-4dcc-9485-b924f78e822e at None"
+            }
+          ],
+          "after": {
+            "side": "after",
+            "state": "recorded",
+            "item_coverage": "selected_both",
+            "relationship_id": "2703c252-dcd7-4dcc-9485-b924f78e822e",
+            "path": null,
+            "role": null,
+            "rationale": null,
+            "resolution": null,
+            "resolution_detail": null,
+            "recorded_source_identity": null,
+            "observed_source_identity": null,
+            "change_state": null,
+            "reached_via": [
+              "member_of_selected_family:0202069a-4ad9-4c54-8bde-5c31617f109a",
+              "member_of_selected_family:0202069a-4ad9-4c54-8bde-5c31617f109a"
+            ],
+            "record_kind": "family",
+            "record_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+            "revision_id": "0202069a-4ad9-4c54-8bde-5c31617f109a",
+            "member_revision_id": "7212ef9d-d53d-43e2-b2f3-d7890597bc4f",
+            "route_id": null,
+            "route_path": null,
+            "detail": "the after snapshot records family c47a089a-78d5-403e-bdbe-54edebf54bfc through relationship 2703c252-dcd7-4dcc-9485-b924f78e822e at None"
+          },
+          "pairing_basis": "same_recorded_relationship",
+          "lineage": [],
+          "gaps": [],
+          "rename_inference": null,
+          "statement": "the baseline records membership 2703c252-dcd7-4dcc-9485-b924f78e822e at no readable address (revision 0202069a-4ad9-4c54-8bde-5c31617f109a) and the candidate records membership 2703c252-dcd7-4dcc-9485-b924f78e822e at no readable address (revision 0202069a-4ad9-4c54-8bde-5c31617f109a) under family c47a089a-78d5-403e-bdbe-54edebf54bfc; the association is displayed as unchanged paired by the same recorded relationship 2703c252-dcd7-4dcc-9485-b924f78e822e, which both snapshots record, which is a recorded relation and not a resemblance between the two addresses"
+        },
+        {
+          "relationship_kind": "governing_route",
+          "record_kind": "invariant",
+          "record_id": "39688a70-6979-449b-80a8-f9ed4b0ddfb8",
+          "transition": "unchanged",
+          "before": [
+            {
+              "side": "before",
+              "state": "ungoverned",
+              "item_coverage": "selected_both",
+              "relationship_id": null,
+              "path": null,
+              "role": null,
+              "rationale": null,
+              "resolution": null,
+              "resolution_detail": null,
+              "recorded_source_identity": null,
+              "observed_source_identity": null,
+              "change_state": null,
+              "reached_via": [],
+              "record_kind": "invariant",
+              "record_id": "39688a70-6979-449b-80a8-f9ed4b0ddfb8",
+              "revision_id": null,
+              "member_revision_id": null,
+              "route_id": null,
+              "route_path": null,
+              "detail": "the before snapshot records invariant 39688a70-6979-449b-80a8-f9ed4b0ddfb8 with no governing route; an ungoverned identity is not placed in the repository root and no route is inferred from the paths its claims name"
+            }
+          ],
+          "after": {
+            "side": "after",
+            "state": "ungoverned",
+            "item_coverage": "selected_both",
+            "relationship_id": null,
+            "path": null,
+            "role": null,
+            "rationale": null,
+            "resolution": null,
+            "resolution_detail": null,
+            "recorded_source_identity": null,
+            "observed_source_identity": null,
+            "change_state": null,
+            "reached_via": [],
+            "record_kind": "invariant",
+            "record_id": "39688a70-6979-449b-80a8-f9ed4b0ddfb8",
+            "revision_id": null,
+            "member_revision_id": null,
+            "route_id": null,
+            "route_path": null,
+            "detail": "the after snapshot records invariant 39688a70-6979-449b-80a8-f9ed4b0ddfb8 with no governing route; an ungoverned identity is not placed in the repository root and no route is inferred from the paths its claims name"
+          },
+          "pairing_basis": "same_governed_identity",
+          "lineage": [],
+          "gaps": [],
+          "rename_inference": null,
+          "statement": "the invariant 39688a70-6979-449b-80a8-f9ed4b0ddfb8 is associated with the same governing route on both snapshots (no governing route)"
+        }
+      ],
+      "remaining": [
+        {
+          "name": "locations_remaining",
+          "value": 0,
+          "reason": null
+        },
+        {
+          "name": "changed_paths_outside_selection",
+          "value": null,
+          "reason": "the source change population was not measured, so no count of changes outside the selected subject exists (the source observation this partition is the denominator of was not made. The source observation beside this value says: the two requested code trees could not be compared (22c8e29fdb847bbc73ba702e111026243967a8f9 in /tmp/icr-single-head-family-evidence-dsdzvxj6/before-code against 759e802cafb27468928c1d0243e6a9aea329eca0 in /tmp/icr-single-head-family-evidence-dsdzvxj6/after-code), so no change set was observed and none is reported; no working tree or HEAD was substituted. No total is reported and none is reported as zero: an unmeasured change population has no denominator, so no path can be called attributed, confirmed unregistered or of undetermined attribution)"
+        },
+        {
+          "name": "unattributed_changed_paths",
+          "value": null,
+          "reason": "the source change population was not measured, so no path is reported as confirmed to carry no registered attribution (the source observation this partition is the denominator of was not made. The source observation beside this value says: the two requested code trees could not be compared (22c8e29fdb847bbc73ba702e111026243967a8f9 in /tmp/icr-single-head-family-evidence-dsdzvxj6/before-code against 759e802cafb27468928c1d0243e6a9aea329eca0 in /tmp/icr-single-head-family-evidence-dsdzvxj6/after-code), so no change set was observed and none is reported; no working tree or HEAD was substituted. No total is reported and none is reported as zero: an unmeasured change population has no denominator, so no path can be called attributed, confirmed unregistered or of undetermined attribution)"
+        },
+        {
+          "name": "unknown_attribution_changed_paths",
+          "value": null,
+          "reason": "the source change population was not measured, so no path is reported as of undetermined attribution (the source observation this partition is the denominator of was not made. The source observation beside this value says: the two requested code trees could not be compared (22c8e29fdb847bbc73ba702e111026243967a8f9 in /tmp/icr-single-head-family-evidence-dsdzvxj6/before-code against 759e802cafb27468928c1d0243e6a9aea329eca0 in /tmp/icr-single-head-family-evidence-dsdzvxj6/after-code), so no change set was observed and none is reported; no working tree or HEAD was substituted. No total is reported and none is reported as zero: an unmeasured change population has no denominator, so no path can be called attributed, confirmed unregistered or of undetermined attribution)"
+        },
+        {
+          "name": "records_present_outside_selection",
+          "value": 3,
+          "reason": null
+        },
+        {
+          "name": "references_unresolved",
+          "value": 0,
+          "reason": null
+        }
+      ],
+      "expansion_reference": "diff_knowledge_scope:full-selected-candidate-source-diff",
+      "expansion_command": "git diff --raw -z --no-renames 22c8e29fdb847bbc73ba702e111026243967a8f9 759e802cafb27468928c1d0243e6a9aea329eca0",
+      "unattributed_changed_paths": [],
+      "attributed_changed_paths": [],
+      "unknown_attribution_changed_paths": [],
+      "attribution": {
+        "state": "unavailable",
+        "granularity": "changed_path",
+        "changed_total": null,
+        "attributed_total": null,
+        "confirmed_unregistered_total": null,
+        "unknown_attribution_total": null,
+        "complete": null,
+        "subject_scope_complete": null,
+        "sides": [],
+        "paths": [],
+        "detail": "the source observation this partition is the denominator of was not made. The source observation beside this value says: the two requested code trees could not be compared (22c8e29fdb847bbc73ba702e111026243967a8f9 in /tmp/icr-single-head-family-evidence-dsdzvxj6/before-code against 759e802cafb27468928c1d0243e6a9aea329eca0 in /tmp/icr-single-head-family-evidence-dsdzvxj6/after-code), so no change set was observed and none is reported; no working tree or HEAD was substituted. No total is reported and none is reported as zero: an unmeasured change population has no denominator, so no path can be called attributed, confirmed unregistered or of undetermined attribution"
+      },
+      "unresolved": [
+        {
+          "field": "attribution",
+          "recorded_reference": "4f774896-c1ba-44af-8486-77282e9134d0",
+          "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion"
+        },
+        {
+          "field": "attribution",
+          "recorded_reference": "f859dfb7-d609-4ba2-bc7a-1b4c1026eb39",
+          "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion"
+        },
+        {
+          "field": "attribution",
+          "recorded_reference": "d3e131b4-8c32-4788-8f7d-c09d5ea4ef85",
+          "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion"
+        }
+      ]
+    },
+    "evidence": {
+      "evidence_state": "none_recorded",
+      "assessment_state": "unassessed",
+      "evidence_links": [],
+      "observations": [],
+      "assessments": [],
+      "source_inspection_available": true,
+      "channels": [
+        {
+          "records": "authored_effects",
+          "state": "none_recorded",
+          "owner": "knowledge_views.read_knowledge_view:review_matrix",
+          "record_count": 0,
+          "detail": "the owner of authored_effects answered for this candidate and holds none of this class; this is a measured absence, not an authority this composition failed to read",
+          "unreadable": [],
+          "next_action": null
+        }
+      ],
+      "context": [],
+      "applicability": [
+        {
+          "records": "assessments",
+          "supplied": 0,
+          "direct": 0,
+          "historical": 0,
+          "context": 0,
+          "candidate": 0,
+          "unresolved": 0,
+          "unrelated": 0,
+          "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments"
+        },
+        {
+          "records": "verification_observations",
+          "supplied": 0,
+          "direct": 0,
+          "historical": 0,
+          "context": 0,
+          "candidate": 0,
+          "unresolved": 0,
+          "unrelated": 0,
+          "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments"
+        },
+        {
+          "records": "evidence_claims",
+          "supplied": 0,
+          "direct": 0,
+          "historical": 0,
+          "context": 0,
+          "candidate": 0,
+          "unresolved": 0,
+          "unrelated": 0,
+          "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel"
+        }
+      ],
+      "unresolved": []
+    },
+    "family_context": {
+      "state": "recorded",
+      "detail": "every recorded family the two snapshots place this selection in is composed: 1 family context(s), each with its selected before/after family revision, that revision's own authored guarantee and its recorded member roster",
+      "entries": [
+        {
+          "family_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+          "display_label": "single-head-write-family",
+          "label_side": "after",
+          "selection": {
+            "record_kind": "family",
+            "record_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+            "state": "compared",
+            "before_revision_id": "0202069a-4ad9-4c54-8bde-5c31617f109a",
+            "after_revision_id": "d3e131b4-8c32-4788-8f7d-c09d5ea4ef85",
+            "before_heads": [
+              "0202069a-4ad9-4c54-8bde-5c31617f109a"
+            ],
+            "after_heads": [
+              "d3e131b4-8c32-4788-8f7d-c09d5ea4ef85"
+            ],
+            "before_retained": [
+              "0202069a-4ad9-4c54-8bde-5c31617f109a"
+            ],
+            "after_retained": [
+              "0202069a-4ad9-4c54-8bde-5c31617f109a",
+              "d3e131b4-8c32-4788-8f7d-c09d5ea4ef85"
+            ],
+            "statement": "the family c47a089a-78d5-403e-bdbe-54edebf54bfc is read at the before family revision 0202069a-4ad9-4c54-8bde-5c31617f109a and the after family revision d3e131b4-8c32-4788-8f7d-c09d5ea4ef85, each the family revision its own snapshot records a membership of the selected subject in; the two snapshots record 1 before and 2 after revision(s) of this family, and 0 other recorded revision(s) of this family remain selectable history"
+          },
+          "before": {
+            "side": "before",
+            "family_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+            "state": "recorded",
+            "family_revision_id": "0202069a-4ad9-4c54-8bde-5c31617f109a",
+            "recorded_revision_ids": [
+              "0202069a-4ad9-4c54-8bde-5c31617f109a"
+            ],
+            "guarantee": {
+              "family_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+              "revision_id": "0202069a-4ad9-4c54-8bde-5c31617f109a",
+              "display_version": "v1",
+              "joint_guarantee": "The admitted write follows its recorded revision while retaining the earlier authored history.",
+              "state_at_origin": "proposed",
+              "acceptance_ref": null,
+              "provenance": {
+                "actor_ref": "agent:icr-r07",
+                "authorization_ref": "ICR-R07@v1 worker evidence",
+                "operation_id": "1a30a2fd-9247-4a74-8fc2-6c191a2ab11c",
+                "recorded_at": "2026-09-26T20:25:09.944795+00:00",
+                "origin_refs": [
+                  "requirement:ICR-R07@v1"
+                ]
+              },
+              "payload_digest": "dc427d49e714d54634a8ba4b50807cc58281c3a50aca6debf6cd01b030c2eed0"
+            },
+            "members": [
+              {
+                "member_id": "2703c252-dcd7-4dcc-9485-b924f78e822e",
+                "invariant_revision_id": "7212ef9d-d53d-43e2-b2f3-d7890597bc4f",
+                "invariant_id": "39688a70-6979-449b-80a8-f9ed4b0ddfb8",
+                "display_label": "chain-invariant",
+                "display_version": "v1",
+                "state": "recorded",
+                "statement": "The first statement governs the initial write.",
+                "applicability": "Every admitted candidate write.",
+                "essential_conditions": [
+                  "The candidate write is admitted."
+                ],
+                "exclusions": [
+                  "Historical rows are not rewritten."
+                ],
+                "lifecycle": "proposed",
+                "provenance": {
+                  "actor_ref": "agent:icr-r07",
+                  "authorization_ref": "ICR-R07@v1 worker evidence",
+                  "operation_id": "6fa7ca3e-2131-417b-8098-6632802ee855",
+                  "origin_refs": [
+                    "requirement:ICR-R07@v1"
+                  ],
+                  "recorded_at": "2026-09-26T20:25:09.674016+00:00"
+                },
+                "payload_digest": "f5f95a44ba865e7ccc9798ea33259f55747540cd5dc28c378ab0d9afbbbba2ce",
+                "other_family_revision_ids": [],
+                "sources": [],
+                "movement_reference": "2703c252-dcd7-4dcc-9485-b924f78e822e",
+                "detail": "the before snapshot records membership 2703c252-dcd7-4dcc-9485-b924f78e822e placing the exact invariant revision 7212ef9d-d53d-43e2-b2f3-d7890597bc4f in family revision 0202069a-4ad9-4c54-8bde-5c31617f109a and its recorded revision content"
+              }
+            ],
+            "members_total": 1,
+            "page": {
+              "scope": [
+                "side=before",
+                "family_revision_id=0202069a-4ad9-4c54-8bde-5c31617f109a",
+                "policy_version=recorded-family-frontier/v1",
+                "page_size=64"
+              ],
+              "state": "first_page",
+              "counts": {
+                "invariant_revisions_total": 1,
+                "family_revisions_total": 1,
+                "memberships_total": 1,
+                "realization_claims_total": 0,
+                "advertised_expansions_total": 0,
+                "primary_items_total": 3,
+                "primary_items_returned": 3,
+                "primary_items_remaining": 0,
+                "distinct_source_locations_total": 0,
+                "distinct_source_paths_total": 0,
+                "unresolved_anchor_total": 0
+              },
+              "complete": true,
+              "members_total": 1,
+              "continuation": null,
+              "continued_from": null
+            },
+            "detail": "the before snapshot's recorded roster of family revision 0202069a-4ad9-4c54-8bde-5c31617f109a was read whole: 1 recorded membership(s), all carried here"
+          },
+          "after": {
+            "side": "after",
+            "family_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+            "state": "recorded",
+            "family_revision_id": "d3e131b4-8c32-4788-8f7d-c09d5ea4ef85",
+            "recorded_revision_ids": [
+              "0202069a-4ad9-4c54-8bde-5c31617f109a",
+              "d3e131b4-8c32-4788-8f7d-c09d5ea4ef85"
+            ],
+            "guarantee": {
+              "family_id": "c47a089a-78d5-403e-bdbe-54edebf54bfc",
+              "revision_id": "d3e131b4-8c32-4788-8f7d-c09d5ea4ef85",
+              "display_version": "v2",
+              "joint_guarantee": "The admitted write follows its recorded revision while retaining the earlier authored history.",
+              "state_at_origin": "proposed",
+              "acceptance_ref": null,
+              "provenance": {
+                "actor_ref": "agent:icr-r07",
+                "authorization_ref": "ICR-R07@v1 worker evidence",
+                "operation_id": "1a30a2fd-9247-4a74-8fc2-6c191a2ab11c",
+                "recorded_at": "2026-09-26T20:25:09.944795+00:00",
+                "origin_refs": [
+                  "requirement:ICR-R07@v1"
+                ]
+              },
+              "payload_digest": "9628819c3932abee64ab4b0b0e326d8d062b8540e0ae24e41969b74fa14930c1"
+            },
+            "members": [
+              {
+                "member_id": "0630fe41-d6c4-47ba-b26e-b349bf1a56af",
+                "invariant_revision_id": "4f774896-c1ba-44af-8486-77282e9134d0",
+                "invariant_id": "39688a70-6979-449b-80a8-f9ed4b0ddfb8",
+                "display_label": "chain-invariant",
+                "display_version": "v1",
+                "state": "recorded",
+                "statement": "The third statement records the refusal explicitly.",
+                "applicability": "Every admitted candidate write.",
+                "essential_conditions": [
+                  "The candidate write is admitted."
+                ],
+                "exclusions": [
+                  "Historical rows are not rewritten."
+                ],
+                "lifecycle": "proposed",
+                "provenance": {
+                  "actor_ref": "agent:icr-r07",
+                  "authorization_ref": "ICR-R07@v1 worker evidence",
+                  "operation_id": "6fa7ca3e-2131-417b-8098-6632802ee855",
+                  "origin_refs": [
+                    "requirement:ICR-R07@v1"
+                  ],
+                  "recorded_at": "2026-09-26T20:25:09.674016+00:00"
+                },
+                "payload_digest": "4911cd6f259b9d1985827e682c20489d37cb70119ab3a877f3f47d69a0cab96f",
+                "other_family_revision_ids": [],
+                "sources": [],
+                "movement_reference": "0630fe41-d6c4-47ba-b26e-b349bf1a56af",
+                "detail": "the after snapshot records membership 0630fe41-d6c4-47ba-b26e-b349bf1a56af placing the exact invariant revision 4f774896-c1ba-44af-8486-77282e9134d0 in family revision d3e131b4-8c32-4788-8f7d-c09d5ea4ef85 and its recorded revision content"
+              }
+            ],
+            "members_total": 1,
+            "page": {
+              "scope": [
+                "side=after",
+                "family_revision_id=d3e131b4-8c32-4788-8f7d-c09d5ea4ef85",
+                "policy_version=recorded-family-frontier/v1",
+                "page_size=64"
+              ],
+              "state": "first_page",
+              "counts": {
+                "invariant_revisions_total": 1,
+                "family_revisions_total": 1,
+                "memberships_total": 1,
+                "realization_claims_total": 0,
+                "advertised_expansions_total": 0,
+                "primary_items_total": 3,
+                "primary_items_returned": 3,
+                "primary_items_remaining": 0,
+                "distinct_source_locations_total": 0,
+                "distinct_source_paths_total": 0,
+                "unresolved_anchor_total": 0
+              },
+              "complete": true,
+              "members_total": 1,
+              "continuation": null,
+              "continued_from": null
+            },
+            "detail": "the after snapshot's recorded roster of family revision d3e131b4-8c32-4788-8f7d-c09d5ea4ef85 was read whole: 1 recorded membership(s), all carried here"
+          },
+          "candidates": [],
+          "state": "recorded",
+          "detail": "the family c47a089a-78d5-403e-bdbe-54edebf54bfc is read at the before family revision 0202069a-4ad9-4c54-8bde-5c31617f109a and the after family revision d3e131b4-8c32-4788-8f7d-c09d5ea4ef85, each the family revision its own snapshot records a membership of the selected subject in; the two snapshots record 1 before and 2 after revision(s) of this family, and 0 other recorded revision(s) of this family remain selectable history; before: the before snapshot's recorded roster of family revision 0202069a-4ad9-4c54-8bde-5c31617f109a was read whole: 1 recorded membership(s), all carried here; after: the after snapshot's recorded roster of family revision d3e131b4-8c32-4788-8f7d-c09d5ea4ef85 was read whole: 1 recorded membership(s), all carried here"
+        }
+      ],
+      "families_total": 1,
+      "families_returned": 1,
+      "families_remaining": 0,
+      "membership_rows_total": 2,
+      "unique_member_revision_total": 2,
+      "references": {
+        "relationship_union": "source.relationships",
+        "source_inventory": "source.inventory",
+        "evidence_links": "evidence.evidence_links",
+        "observations": "evidence.observations",
+        "assessments": "evidence.assessments",
+        "applicability": "knowledge.applicability",
+        "join_key": "invariant_revision_id",
+        "detail": "each of these collections is published by its own owner in this payload and keeps its own state; this context references them by identity and draws no conclusion from any of them"
+      },
+      "limitations": []
+    },
+    "staleness": {
+      "state": "current",
+      "statement": "the displayed comparison is the candidate's current comparison",
+      "previous_comparison_ref": null,
+      "moved": []
+    },
+    "submission": {
+      "state": "unavailable",
+      "reason": "this increment mounts no serving route that publishes an assessment, so the surface displays only and does not grow a private write path to compensate",
+      "next_action": "publish an assessment through the existing curator authority's publication action, which supplies the author, the role and the authority provenance",
+      "proposed_dispositions": [
+        "concern_found",
+        "no_concern_found",
+        "unresolved"
+      ],
+      "none_is_approval": true
+    },
+    "sync_movement": null,
+    "external_git_movement": null,
+    "page": null,
+    "page_refusal": null,
+    "limitations": [
+      "limitation:records_present_outside_the_selection",
+      "limitation:unknown_attribution_changed_paths",
+      "limitation:no_semantic_assessment_performed",
+      "omitted:present_outside_the_declared_selection:2",
+      "omitted:present_outside_the_declared_selection:1",
+      "limitation:source_inventory_unavailable"
+    ]
+  },
+  "refusal": null
+}

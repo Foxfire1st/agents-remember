@@ -91,6 +91,30 @@ list.
 
 ## Rule 1 — co-resolution: name where the thing lives, not where you looked
 
+### Curator-authored semantic scope
+
+Before an entry becomes a durable invariant, the curator adds `scope` alongside the producer's
+unchanged fields. It carries the invariant revision's existing semantic fields:
+
+```json
+"scope": {
+  "applicability": "Retry attempts admitted by the shared deadline budget.",
+  "conditions": ["The caller supplies its remaining deadline."],
+  "exclusions": ["Interactive retries outside this budget."]
+}
+```
+
+All three keys are required; `[]` means the curator examined that field and found no clauses.
+Missing or malformed scope is `unfilled_curation_scope`, reported per entry before its knowledge
+write, including in a dry run. The producer does not guess these fields. Applicability describes
+where the obligation holds; conditions and exclusions describe its real boundaries. Ingest workflow,
+disposition and evidence provenance are not substitutes for semantic scope.
+
+The ordinary ingest carries these fields into the existing invariant revision and its retry digest.
+Changing scope under an already-minted entry key is changed content, not an exact retry: author an
+explicit successor with the stored invariant and predecessor revision identities. Historical records
+are never rewritten or silently migrated; an old list without authored scope remains unfilled curation.
+
 **A `target` entry is a path *and* the construct inside it, produced by one resolution act.** Resolve
 the place once, in the same act that identifies the construct, and emit both together: a `symbol`
 locator when the invariant is a named construct, a `line_range` when it is an extent, `file` only when
@@ -222,14 +246,14 @@ by the commit it was measured at:
   field: a verdict imported from another document is an input the curator must be able to see, and an
   unaudited verdict has already cost a master one sealed review finding.
 
-## The curator's two authored keys beside the thirteen fields
+## The curator's three authored keys beside the thirteen fields
 
 The thirteen fields above are the producer's contract and they do not change: nine producer fields and
-four curator fields, at revision 1. Two further keys belong to the **curator** — a producer emits
-neither — and they are how a grounded foundation records what the curator *examined*, rather than only
-what the producer found. Both are optional on any entry, and an entry that carries neither is reported
-as **unexamined**, which is deliberately not the same fact as one the curator examined and recorded an
-outcome for.
+four curator fields, at revision 1. Three further keys belong to the **curator** — a producer emits
+none of them. `scope` is required before durable invariant authoring and has the semantic shape stated
+above. `family` and `external_sources` record what the curator examined beyond the producer's finding.
+These two remain optional: omission is **unexamined**, which differs from examining and recording an
+explicit outcome. Optional family/source coverage never makes semantic scope optional.
 
 **`family` — the justified joint obligation and this entry's exact memberships.** A family exists only
 where the curator declared one; nothing here infers a family from a path, a directory, a route, a label

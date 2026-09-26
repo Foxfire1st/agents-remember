@@ -18,7 +18,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ReviewFamilyMember, ReviewFamilyMemberSource } from "../../data/review";
-import { familyExpressionExcerpts, type FamilyMembershipRow } from "./FamilyReviewCenter";
+import { familyExpressionExcerpts, type FamilyMembershipRow } from "./familyExpressions";
 
 let claimCounter = 0;
 

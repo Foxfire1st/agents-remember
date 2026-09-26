@@ -13,7 +13,7 @@ onboarding only. **Your brief is your session start; the structured coherence re
 Your brief **feeds** these; you **reject intake** when an applicable packet is missing, unapproved or version-mismatched
 rather than repairing it from memory:
 
-- the **landed change set** over this leaf's base-to-head range, with its counters and paths;
+- the **captured change set** from this leaf's base to its actual pre-closeout candidate, with counters and paths;
 - the **leaf task document**, its approved requirement corpus ruling, and every exact stable-ID + version packet the
   brief names — the accepted requirement revision and the durable developer ruling are separate and neither
   substitutes for the other;
@@ -25,10 +25,10 @@ rather than repairing it from memory:
   `evidence` and `authority`; **`resolution`, `validated_at`, `record_action` and `supersedes` are yours** and are
   `null` until you fill them. Never re-derive a producer field — a `disposition` is carried, not re-judged at intake —
   and never leave a curator field to a later seat. The boundary is fixed by that template, and this leaf does not
-  renegotiate it. **Two further keys are also yours to author — `family` and `external_sources` — and the same
-  template states their shape.** The producer writes neither, an entry carrying neither is reported as unexamined
-  rather than as family-free or source-free, and nothing in either key may be inferred from a path, a route, a label
-  or a shared anchor;
+  renegotiate it. **Three further keys are yours to author — `scope`, `family` and `external_sources` — and the
+  same template states their shape.** The producer writes none of them. `scope` is required before an entry becomes
+  a durable invariant. `family` and `external_sources` remain optional: omission is unexamined, never family-free
+  or source-free. Nothing in those two keys may be inferred from a path, route, label or shared anchor;
 - the **existing onboarding contracts and entity records** for the affected routes — read them before replacing their
   account of current intent;
 - the code and memory worktree paths, and the **enclosure contract path** that scopes your tools;
@@ -68,7 +68,9 @@ response — it must be this leaf's memory worktree — and preview any write wi
    is. Never overview-dump, never task-log-dump. An item with no file, route or entity home goes to the Operational
    Notes target as a last resort, never as the default drop point for something merely inconvenient to place.
 3. **Author and publish the durable knowledge through the real writer.** The reconciliation's requirement-shaped items are
-   knowledge, not prose: hand them to the shipped ingest with the invocation the ordinary route carries —
+   knowledge, not prose. First author each entry's `scope` with the real applicability, conditions and exclusions
+   in the hand-off template's shape; missing scope is unfinished curation and ingest refuses that entry. Then hand
+   the entries to the shipped ingest with the invocation the ordinary route carries —
    `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the JSON hand-off list>
    --authorization-ref <the authorization this run is admitted under> --baseline <the published dataset this task
    forked from> --publish --commit --json`. `--publish` is the repository's **one declared published dataset
@@ -81,6 +83,12 @@ response — it must be this leaf's memory worktree — and preview any write wi
    batch replays and the publication reports `no_change` — while the *same entry id with changed content* is refused
    by design; a correction is a successor entry that names the stored `invariant_id` and its
    `predecessor_revision_ids`, which is the explicit revision update and not a rewrite in place.
+   A live leaf's ingest captures the actual uncommitted source through the existing future-code owner, preserving
+   the real Git index. It rechecks that source before writes and publication. An existing candidate progresses only
+   against its exact predecessor receipt and dataset under its existing lock, within the same namespace, lane,
+   task and memory scope; rows, allocated IDs, original before-half and frozen history remain unchanged by that
+   admission step. A moved, corrupt or foreign predecessor is a named refusal. Normal strict-open remains strict;
+   never commit source first or manually edit a receipt to work around a curation refusal.
 4. **Examine family coverage and author it, then read the two planes back.** For every scoped obligation, decide
    whether the evidence and the project's intent justify a **joint obligation** with others: where they do, author
    the family identity, its **own** guarantee text and the exact memberships that place exact invariant revisions in
@@ -112,6 +120,10 @@ response — it must be this leaf's memory worktree — and preview any write wi
    never add attestation prose to silence a finding.
 7. **Write only what is yours**: file-level sidecars, affected route overviews, generated route indexes
    (`route_index_refresh`, scoped), and the repo entity catalog when a genuinely load-bearing entity changed.
+8. **Record the review before handoff** through the existing producer: follow
+   `../operations/curation.md` § Record the task comparison. This includes code-only work with unchanged knowledge;
+   it creates no invariant just to obtain a review. Carry the producer's published generation identity or exact
+   refusal in the handoff. The result is review evidence, never a new closeout gate or an intent verdict.
 
 **The repository-foundation entry — the same reconciliation, without this leaf's delta.** Run the
 `c-14-knowledge-bootstrap` skill, in its order: read the state at the declared knowledge location
@@ -175,6 +187,8 @@ is yours: the evidence is the manager's to read, so never author a second model-
   enclosure in scope** — it refuses one (`enclosure_in_scope`) rather than publishing onto a task's line. Those
   two are the write plane's reachable entry points; the mounted `knowledge_change` tool refuses every kind and
   exists only to name the route.
+- **The existing review-record producer**, scoped to this leaf's contract, as described in
+  `../operations/curation.md` § Record the task comparison; it retains the comparison and authors no knowledge.
 - **Shell checks**: `git diff --check` in the memory worktree, and any other check the brief names.
 - Sub-agents for **read/search/reference checks only**, one level deep; **the main session owns every durable write**.
 - **`message_parent`** to ask the owning seat one clarifying row when a side of the three-way comparison is missing or

@@ -43,18 +43,12 @@ repository's obligation became a different record at each baseline while two dif
 that shared a base commit were handed the same record identity. Note that the *resolution* tree and
 the *identity* anchor are two different commits on purpose: see the next paragraph.
 
-**A producer may cite the code its own line is producing.** The objective commits into the admitted
-draft-candidate, and a draft is unlanded work by definition, so the tree a target is resolved against
-is the admitted code **line** -- the branch tip the root stands on -- rather than the
-``code_base_commit`` the admission recorded when the enclosure was cut or the bootstrap observed the
-line. Binding the resolver to the
-branch base made the producer's own deliverable a non-member of the tree it was resolved against: a file
-the leaf added was refused as *gone*, and a file the leaf modified made the resolver raise before any
-report existed. The two trees are kept apart where they must be: the resolution tree is the leaf's
-line (so the leaf's new and changed files resolve, and the recorded ``source_identity`` is the blob id
-in **that** tree), while a derived identity is anchored to neither tree -- it is keyed on the
-repository's own namespace, so identity does not move when the line advances by one commit *or* when
-the next task runs at a different baseline. Every report names both trees it used.
+**A producer may cite the code its leaf is producing before closeout.** A leaf uses the shared
+future-code capture: staged, unstaged and eligible new files in one exact tree without changing the
+real index. Its complete source identity is rechecked before writes and publication. Existing task
+knowledge can progress to that code binding only through the predecessor-checked candidate owner;
+knowledge rows, allocations and the original baseline remain intact. Taskless bootstrap keeps its
+admitted committed revision. Every report names the actual tree its citations used.
 
 **No failure is an exception.** Every unreadable identity, unresolvable path or unverifiable locator
 arrives in :class:`IngestReport` as a typed refusal whose reason names the actual failure. The
@@ -102,6 +96,10 @@ from uuid import UUID, uuid4, uuid5
 
 import apsw
 
+from agents_remember.application.curator_candidate_source import (
+    CuratorSourceTrees,
+    capture_curator_code,
+)
 from agents_remember.application.curator_family_authoring import (
     FamilyAssignment,
     no_family_condition,
@@ -124,6 +122,7 @@ from agents_remember.application.curator_ingest_planes import (
     plane_coverage,
     read_curator_planes,
 )
+from agents_remember.application.curator_scope import CuratorScope, read_curator_scope
 from agents_remember.application.curator_source_manifest import (
     SourceCoverage,
     write_source_manifest,
@@ -156,6 +155,12 @@ from agents_remember.kernel.canonical_json import canonical_json_bytes, decoded_
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge import routes
 from agents_remember.memory.knowledge.anchors import read_anchor
+from agents_remember.memory.knowledge.candidate_progression import (
+    CandidateCodeProgression,
+    plan_candidate_code,
+    progress_candidate_code,
+    read_candidate_predecessor,
+)
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.read_anchors import observe_anchor
 from agents_remember.memory.knowledge.records import (
@@ -366,10 +371,8 @@ _LANGUAGES = {
     ".sql": "sql",
 }
 
-# The revision and the one authored field every ingested entry is filed under. The hand-off list
-# carries neither, so the ingest states what it authored rather than leaving a reader to infer it.
+# Display version labels do not replace the revision's stable identity.
 _INGESTED_VERSION = "v1"
-_APPLICABILITY = "Every curator entry ingested from the orchestrator's hand-off list."
 
 # How a blank per-target refusal reads in the report. A target that committed carries no refusal,
 # and the empty string would look like one.
@@ -565,6 +568,7 @@ class _Plan:
     revision_id: str
     targets: tuple[_TargetPlan, ...]
     ruling: bool
+    scope: CuratorScope | None = None
     declares_invariant: bool = True
     predecessors: tuple[str, ...] = ()
     allocation: _Allocation | None = None
@@ -773,23 +777,6 @@ def _target_identities(
 
 
 @dataclass(frozen=True)
-class _TreeIds:
-    """The tree object ids this run resolves against, and the base its identities are anchored to.
-
-    ``code`` and ``memory`` are the **resolution** trees: the code one is the leaf's own line (the
-    work branch tip its worktree stands on), because a leaf must be able to cite the code it is
-    producing. ``base`` is the enclosure's recorded code base commit, which is what the derived
-    identities are anchored to -- identity is a fact about which leaf this is, not about how far the
-    leaf has committed since its enclosure was cut.
-    """
-
-    code: str
-    memory: str
-    base: str
-    code_source: str
-
-
-@dataclass(frozen=True)
 class _Paths:
     """The two local inputs the operation names: the admission's source document, and the candidate.
 
@@ -848,6 +835,7 @@ class _EntryFields:
     named_invariant_id: str | None = None
     role: RealizationRole | None = None
     role_rationale: str = ""
+    scope: CuratorScope | str = "scope has not been authored"
 
     @classmethod
     def read(cls, raw: Mapping[str, Any]) -> _EntryFields:
@@ -883,6 +871,7 @@ class _EntryFields:
             named_invariant_id=named,
             role=cast("RealizationRole", stated) if stated in get_args(RealizationRole) else None,
             role_rationale=str(raw.get("realization_rationale") or ""),
+            scope=read_curator_scope(raw.get("scope")),
         )
 
 
@@ -1030,7 +1019,7 @@ class _ReportTarget:
     resolution: CandidateResolution
     repository: RepositoryIdentity
     read: _Read
-    trees: _TreeIds
+    trees: CuratorSourceTrees
     coordination_top_level: frozenset[str]
     planes: CuratorPlanes
     scope: str
@@ -1071,7 +1060,7 @@ class _Source:
     admission: KnowledgeWriteAdmission
     code_root: Path
     memory_root: Path
-    tree_ids: _TreeIds
+    tree_ids: CuratorSourceTrees
     coordination_top_level: frozenset[str]
     repository: RepositoryIdentity
     anchors: tuple[Path, ...] = ()
@@ -1175,6 +1164,7 @@ def ingest_curator_list(
         ),
     )
     resolution = _resolution(write_admission, source.tree_ids)
+    progression = _code_progression(paths.candidate, source.tree_ids)
     raw = _read_entries(entries)
     planes = read_curator_planes(
         raw, paths.candidate, _retry_scope(source.admission), fork_point=_fork_point(baseline)
@@ -1188,18 +1178,27 @@ def ingest_curator_list(
         planned=tuple(plan for plan in plans if not plan.ruling),
         resolved_before_refusal=resolved_before_refusal,
     )
+    target = _ReportTarget(
+        paths,
+        resolution,
+        repository,
+        read,
+        source.tree_ids,
+        source.coordination_top_level,
+        planes,
+        _retry_scope(write_admission),
+    )
+    denied = source.tree_ids.currentness_refusal()
+    if denied is None and progression is not None:
+        denied = plan_candidate_code(
+            admitted_candidate_destination(paths.candidate, repository, resolution),
+            progression.predecessor,
+        ).refusal
+    if denied is not None:
+        return _refused_ingest(target, denied)
     if dry_run:
         return _report(
-            _ReportTarget(
-                paths,
-                resolution,
-                repository,
-                read,
-                source.tree_ids,
-                source.coordination_top_level,
-                planes,
-                _retry_scope(write_admission),
-            ),
+            target,
             _projected(read.planned),
             committed=_projected_outcomes(read.planned),
             dry_run=True,
@@ -1210,27 +1209,11 @@ def ingest_curator_list(
         origin_refs=planes.refs,
     )
     candidate_admission = _admitted_candidate(
-        paths.candidate, repository, resolution, baseline=baseline
+        paths.candidate, repository, resolution, baseline=baseline, progression=progression
     )
     if candidate_admission.state == "refused" or candidate_admission.result.identity is None:
-        # The destination itself refused, so nothing was planned and nothing was written -- and the
-        # planned entries are folded into ``refused`` rather than silently dropped. The report says
-        # an entry appears in EXACTLY ONE of committed/rulings/refused, and that promise is what a
-        # caller counts on to know every entry it handed over was accounted for; the admission leg
-        # was the one refusal path that returned the read unchanged and left its entries in no list.
-        return _report(
-            _ReportTarget(
-                paths,
-                resolution,
-                repository,
-                _with_refused(read, _admission_refused(read.planned, candidate_admission.result)),
-                source.tree_ids,
-                source.coordination_top_level,
-                planes,
-                _retry_scope(write_admission),
-            ),
-            _Run(batch_state="not_attempted", refusal=candidate_admission.refusal),
-        )
+        assert candidate_admission.refusal is not None
+        return _refused_ingest(target, candidate_admission.refusal)
     admitted = admitted_candidate_destination(paths.candidate, repository, resolution)
     destination = candidate_write_destination(admitted, authorship)
     # ... and only a candidate that already HOLDS a plan's revision makes that plan a replay, which
@@ -1238,26 +1221,45 @@ def ingest_curator_list(
     # batch that ran after it was written committed. It is asked BEFORE anything is recorded, because
     # what is recorded depends on it.
     read = _with_replays(read, admitted.database_path)
+    denied = source.tree_ids.currentness_refusal()
+    if denied is not None:
+        return _refused_ingest(target.with_read(read), denied)
     planes = _record_what_the_batch_will_write(destination, paths, read, planes, allocations)
     report = _run(
-        _ReportTarget(
-            paths,
-            resolution,
-            repository,
-            read,
-            source.tree_ids,
-            source.coordination_top_level,
-            planes,
-            _retry_scope(write_admission),
-        ),
+        replace(target, read=read, planes=planes),
         destination,
     )
     # Publication runs last and only over a candidate this run actually committed into: an entry in
     # ``committed`` is the run's own statement that the batch landed, so a refused or un-attempted
     # batch is never published and the caller is never handed a dataset change it did not make.
-    if selection.publication is None or not report.committed:
+    return _publish_ingest_report(report, admitted, selection.publication, source.tree_ids)
+
+
+def _refused_ingest(target: _ReportTarget, denied: KnowledgeRefusal) -> IngestReport:
+    outcome = CandidateResult(state="refused", refusal=denied)
+    return _report(
+        target.with_read(
+            _with_refused(target.read, _admission_refused(target.read.planned, outcome))
+        ),
+        _Run(batch_state="not_attempted", refusal=denied),
+    )
+
+
+def _publish_ingest_report(
+    report: IngestReport,
+    admitted: AdmittedCandidateDestination,
+    publication: IngestPublication | None,
+    trees: CuratorSourceTrees,
+) -> IngestReport:
+    if publication is None or not report.committed:
         return report
-    return replace(report, publication=_publish_candidate(admitted, selection.publication))
+    denied = trees.currentness_refusal()
+    published = (
+        SnapshotPublicationResult(state="refused", refusal=denied)
+        if denied is not None
+        else _publish_candidate(admitted, publication)
+    )
+    return replace(report, publication=published)
 
 
 def _with_unwritable_family_outcomes(read: _Read, database: Path) -> _Read:
@@ -1554,13 +1556,14 @@ def _admitted_candidate(
     resolution: CandidateResolution,
     *,
     baseline: Path | None = None,
+    progression: CandidateCodeProgression | None = None,
 ) -> _Admission:
     """Resume the candidate this admission names, or create it -- forking the selected baseline.
 
-    An existing destination is a resume attempt, never permission to initialize over it, so the
-    product's own open answers first and the operation acts on that answer. A directory the open
-    refused and that does exist is this operation's refusal too: the bytes there are unpublished
-    authored work, and only an explicitly authorized reconciliation may touch them.
+    An existing destination is never initialized over. Without an explicit predecessor-bound
+    progression, normal strict open answers unchanged. A leaf run carrying that progression asks
+    the candidate owner to validate and advance only the code binding; a refusal is never retried
+    as a reset or a clone, and unpublished authored work remains in place.
 
     When the directory is absent the candidate is **forked from the selected baseline** rather than
     initialized empty. That distinction is the whole of the continuity defect: an empty candidate
@@ -1588,7 +1591,11 @@ def _admitted_candidate(
             return _Admission("refused", CandidateResult(state="refused", refusal=read))
         selected = read
     if candidate.exists():
-        opened = open_knowledge_candidate(destination)
+        opened = (
+            open_knowledge_candidate(destination)
+            if progression is None
+            else progress_candidate_code(destination, progression)
+        )
         return _Admission(opened.state, opened)
     if selected is None:
         created = create_knowledge_candidate(destination)
@@ -1661,27 +1668,10 @@ def _repository_namespace(database_path: Path | None) -> RepositoryIdentity | No
 def _repository_identity(
     admission: KnowledgeWriteAdmission | WorktreeContract, baseline: Path | None = None
 ) -> RepositoryIdentity:
-    """The namespace this repository's candidates are created under, read then derived.
+    """Keep a stored namespace across task baselines; derive one only for a first publication.
 
-    ``RepositoryIdentity`` is supplied on creation and read from the database afterwards, so the
-    order here is the product's own: **read the stored value first, derive only when there is none
-    to read.** A repository that already holds knowledge keeps the namespace that knowledge lives
-    under, whatever baseline the next task starts from.
-
-    This used to derive from ``_enclosure(admission)``, which is the admitted code base commit.
-    That made the namespace a function of the baseline, so one repository ingested at a
-    later baseline was handed a *different* namespace, its candidate held only the new entry, and
-    every revision recorded at the earlier baseline was stranded under a namespace nothing would
-    look in again -- while two different repositories that shared a base commit were handed the
-    *same* namespace. ``models/knowledge/repository.py`` states the rule this violated: a namespace
-    "is not a filesystem root, a branch name or a repository display name: those all change while
-    the knowledge they scope does not".
-
-    The derivation that remains is the cold-start fallback, and it is keyed on ``authority_home``
-    rather than on the baseline. It is stable for one repository across baselines, which is what
-    the finding needs; it deliberately claims nothing about telling two repositories apart, because
-    no admission can supply that distinction -- the stored namespace is what does, and the first run
-    that publishes one makes it authoritative from then on.
+    The cold-start derivation uses the admitted authority home, not the task's changing base.
+    Once a dataset exists its stored namespace is authoritative, even on another code line.
     """
 
     admitted = as_write_admission(admission)
@@ -1694,7 +1684,39 @@ def _repository_identity(
     )
 
 
-def _resolution(admission: KnowledgeWriteAdmission, tree_ids: _TreeIds) -> CandidateResolution:
+def prepare_curator_candidate(
+    contract: WorktreeContract, candidate_directory: Path, baseline: Path
+) -> CandidateResult:
+    """Prepare unchanged task knowledge through the same admission and clone used by ingest."""
+
+    admission = as_write_admission(contract)
+    code_root, memory_root = _roots(admission)
+    trees = _tree_ids(admission, code_root, memory_root)
+    denied = trees.currentness_refusal()
+    if denied is not None:
+        return CandidateResult(state="refused", refusal=denied)
+    return _admitted_candidate(
+        candidate_directory,
+        _repository_identity(admission, baseline),
+        _resolution(admission, trees),
+        baseline=baseline,
+        progression=_code_progression(candidate_directory, trees),
+    ).result
+
+
+def _code_progression(
+    candidate: Path, trees: CuratorSourceTrees
+) -> CandidateCodeProgression | None:
+    if trees.capture is None or not candidate.exists():
+        return None
+    return CandidateCodeProgression(
+        read_candidate_predecessor(candidate), trees.currentness_refusal
+    )
+
+
+def _resolution(
+    admission: KnowledgeWriteAdmission, tree_ids: CuratorSourceTrees
+) -> CandidateResolution:
     """The candidate inputs, read from the admission's exact recorded revisions rather than asserted."""
 
     scope = _enclosure(admission)
@@ -1733,27 +1755,22 @@ def _roots(admission: KnowledgeWriteAdmission) -> tuple[Path, Path]:
     return admission.code_worktree, admission.memory_worktree
 
 
-def _tree_ids(admission: KnowledgeWriteAdmission, code_root: Path, memory_root: Path) -> _TreeIds:
-    """The tree each side is read through: the code line, and the admitted memory revision.
+def _tree_ids(
+    admission: KnowledgeWriteAdmission, code_root: Path, memory_root: Path
+) -> CuratorSourceTrees:
+    """Capture live leaf code; keep bootstrap and memory on their admitted revision behavior."""
 
-    The code side is the **line tip the admitted code root stands on**, not the recorded base
-    commit, because the operation runs on a code line that is producing knowledge: a leaf's own new
-    module and its own edits exist in the line and not in the tree the enclosure was cut from, and a
-    bootstrap observes the line it read. Reading the base tree made both of those unanswerable -- the
-    added file was reported *gone* and the modified file raised before a report existed.
-
-    The memory side stays the admission's exact memory base commit: the memory root is read at the
-    tree the admission recorded, and a memory citation is a claim about the memory line's content
-    rather than about unlanded local edits.
-
-    A code root with no readable line falls back to the admitted base commit rather than refusing the
-    run: the base is the one tree the admission guarantees, and a run that has to fall back says so
-    in the report's ``code_tree_source`` instead of silently resolving against a tree the caller did
-    not expect.
-    """
-
+    if not admission.is_bootstrap:
+        capture = capture_curator_code(admission)
+        return CuratorSourceTrees(
+            code=capture.identity.codeCandidateTree,
+            memory=_tree_of(memory_root, admission.memory_base_commit, admission.source_ref),
+            base=admission.code_base_commit,
+            code_source="future-code-candidate",
+            capture=capture,
+        )
     code_line, code_source = _code_line(code_root, admission)
-    return _TreeIds(
+    return CuratorSourceTrees(
         code=_tree_of(code_root, code_line, admission.source_ref),
         memory=_tree_of(memory_root, admission.memory_base_commit, admission.source_ref),
         base=admission.code_base_commit,
@@ -1868,6 +1885,7 @@ def _content_digest(fields: _EntryFields, targets: Sequence[_TargetPlan]) -> str
             "predecessors": list(fields.predecessors),
             "role": fields.role,
             "roleRationale": fields.role_rationale,
+            "scope": fields.scope.payload() if isinstance(fields.scope, CuratorScope) else None,
             "targets": [
                 {
                     "path": one.completed_path,
@@ -2144,6 +2162,7 @@ def _plan_entry(
     allocation, planned, refusal = _resolve_creation(source, fields, allocations, targets)
     if refusal is not None:
         return None, refusal
+    assert isinstance(fields.scope, CuratorScope)  # creation refuses unfilled semantic scope
     assert allocation is not None  # pragma: no cover - a creation and its refusal are exclusive
     allocation, refusal = _require_minted_content(allocation, fields, planned)
     if refusal is not None:
@@ -2179,6 +2198,7 @@ def _plan_entry(
             revision_id=allocation.revision_id,
             targets=planned,
             ruling=False,
+            scope=fields.scope,
             declares_invariant=fields.declares_invariant,
             predecessors=fields.predecessors,
             allocation=allocation,
@@ -2220,6 +2240,8 @@ def _resolve_creation(
     because each anchor identity is keyed on the creation that authored it.
     """
 
+    if isinstance(fields.scope, str):
+        return None, (), _Refusal("unfilled_curation_scope", fields.scope)
     allocation, refusal = _creation(source, fields, allocations)
     if refusal is not None:
         return None, (), _Refusal(refusal.code, refusal.reason)
@@ -2579,8 +2601,8 @@ def _plan_target_inner(
 def _complete_target(written: str, source: _Source) -> _Resolved | _Refusal:
     """Complete one path through the product's own resolver, in the three recorded steps.
 
-    The steps are exactly three and nothing else: ``<code_root>/<path>`` through the branch tip the
-    code worktree stands on, then ``<memory_root>/onboarding/<path>``, then ``<memory_root>/<path>``.
+    The steps are exactly three: ``<code_root>/<path>`` through the captured source tree,
+    then ``<memory_root>/onboarding/<path>``, then ``<memory_root>/<path>``.
     Membership is the tree's answer and the working bytes are verified against it, and the answering
     root travels out with the path so the identity is read from that same root's tree -- a memory
     path's blob lives in the memory tree, and reading it out of the code tree is how a resolved path
@@ -2626,13 +2648,8 @@ def _member(
     not belong to the tree the resolution names is exactly the disagreement this step exists to
     catch.
 
-    The identity itself is then read from the **working bytes** and compared with the blob the tree
-    records at that path. The two agreeing is the case a real run is always in -- a clean checkout
-    on a committed line -- and the two disagreeing is a fact the report must carry rather than a
-    condition the code assumes away: it means the bytes that will be cited are not the bytes the
-    resolution tree holds, which is what an uncommitted edit to a cited file looks like. Reporting it
-    as a mismatch keeps the recorded identity a measurement of the file rather than a restatement of
-    the tree's own answer.
+    The working bytes must still match the captured tree's blob. A later edit is reported as a
+    mismatch, so a source movement cannot silently retarget the authored citation.
     """
 
     members = _members(tree)
@@ -2650,8 +2667,8 @@ def _member(
             _CODE_BLOB_MISMATCH,
             f"the working bytes at {relative!r} hash to {identity.blob}, and the tree this run "
             f"resolved against records {identity.recorded} there, so the file holds an identity the "
-            "resolution tree does not; commit the change so the citation names the bytes it was "
-            "resolved against",
+            "resolution tree does not; re-read the changed source and rerun curation against "
+            "a fresh exact capture",
         )
     return _Resolved(step=step, path=relative, blob=identity.recorded, root=root, tree_id=tree_id)
 
@@ -3404,40 +3421,25 @@ def _unattached(plans: tuple[_Plan, ...], detail: str) -> dict[str, tuple[RouteO
 def _curator_entry(plan: _Plan) -> CuratorEntry:
     """One plan as the write module's entry: the invariant, its revision, its citations, its family."""
 
+    assert plan.scope is not None  # rulings never enter the knowledge batch
+    conditions = plan.scope.conditions
+    if plan.family is not None and plan.family.no_family_basis is not None:
+        conditions += (no_family_condition(plan.family.no_family_basis),)
     return CuratorEntry(
         invariant_id=plan.invariant_id,
         display_label=plan.entry_id,
         revision_id=plan.revision_id,
         display_version=_INGESTED_VERSION,
         statement=plan.statement,
-        applicability=_APPLICABILITY,
-        conditions=_conditions(plan),
+        applicability=plan.scope.applicability,
+        conditions=conditions,
+        exclusions=plan.scope.exclusions,
         predecessors=plan.predecessors,
         declares_invariant=plan.declares_invariant,
         citations=tuple(target.citation() for target in plan.targets),
         family=plan.family,
         replayed=plan.replayed,
     )
-
-
-def _conditions(plan: _Plan) -> tuple[str, ...]:
-    """The entry's own provenance, carried into the revision rather than left in the report.
-
-    The family plane contributes one condition exactly when the curator recorded a *deliberate*
-    no-family outcome: that outcome has no row of its own to live in, so the revision's recorded
-    conditions are where it is retained, and a reader of the dataset can then tell an obligation
-    examined and found family-free from one never examined at all.
-    """
-
-    conditions = [f"Hand-off kind: {plan.kind}.", f"Producer's disposition: {plan.disposition}."]
-    if plan.disposition_source is not None:
-        conditions.append(f"Disposition source: {plan.disposition_source}")
-    if plan.evidence:
-        conditions.append(f"Evidence: {plan.evidence}")
-    basis = None if plan.family is None else plan.family.no_family_basis
-    if basis is not None:
-        conditions.append(no_family_condition(basis))
-    return tuple(conditions)
 
 
 def _commit(

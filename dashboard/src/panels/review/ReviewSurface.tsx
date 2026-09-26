@@ -1,31 +1,10 @@
-// The Intent Reviewer surface: three panes over one comparison, and every state that is not a review.
-//
-// The surface is display-only. It renders records other owners store, carries every attribution it
-// was given, and produces no conclusion of its own: there is no summary, no severity, no score and
-// no control that writes anything. The two renderers it reuses are fed by other owners: `DiffPane`
-// for the statements the comparison published -- both operands when both sides recorded one, and the
-// available operand beside the named absence when one side did not (R06 -- `KnowledgeStatements` owns
-// that rule) -- and the Source pane's own entry expansion (R03 -- `SourceContent` owns reading one
-// listed entry's content at the two bound code trees the inventory published).
-//
-// THE READ'S OUTCOMES (ICR-R16). This route answers with its typed result and maps a refusal onto a
-// 400/404/503 status with the refusal in the body, so the surface must read the *body* whatever the
-// status (data/reviewTransport.ts owns that decode). Its read therefore has four phases, and each is
-// rendered as itself: `loading` while the request is in flight, `reviewed` (with the known-empty note
-// when the answer measured nothing), `refused` for the owner's typed refusal, and `failed` for a
-// transport-level failure (an unwired adapter, an unadmitted input, no HTTP response at all). Every
-// non-review phase goes through `ReviewOutcome.tsx`, which carries the server's own code, reason,
-// offending input and next action -- so an actionable refusal is visible instead of "404 Not Found".
-//
-// A failed read never erases the last coherent comparison this surface read: the retained payload is
-// still shown, labelled as the last generation read, and no empty review is ever claimed for it. A
-// retained comparison is stored and shown with the question it was read for (`targetKeyOf`), so a
-// payload is never rendered under a header it was not read for. The only control offered beside a
-// refusal is the same task's source change inventory, asked as its own question (the task-context
-// route needs no knowledge dataset); the client names no dataset either way, and the refusal's
-// reason, offending input and next action stay on screen while that inventory is shown.
-
-import { useState } from "react";
+import { useState } from 'react';
+import { css } from '../../../styled-system/css';
+import {
+  useReviewNavigation,
+  type ReviewNavigationState,
+  type ReviewSubject,
+} from './ReviewNavigation';
 
 import type {
   ReviewApplicabilitySummary,
@@ -42,76 +21,85 @@ import type {
   ReviewSelectorKind,
   ReviewSignal,
   ReviewUnresolvedReference,
-} from "../../data/review";
+} from '../../data/review';
 import {
   REVIEW_WALKABLE_COLLECTIONS,
   carriedPage,
   continuationOf,
   intentOnlyRefusal,
   pageBounds,
-} from "../../data/review";
-import type { ReviewRefusal } from "../../data/review";
-import { KnowledgeStatements } from "./KnowledgeStatements";
-import { type ReviewPageRequest, targetKeyOf, useReviewReadCycle } from "./ReviewReadCycle";
-import { ReviewRefresh, generationOf } from "./ReviewRefresh";
-import { type ReviewRead, ReviewOutcomeRegion, problemOf, shownPayload } from "./ReviewOutcome";
-import { ReviewWorkspace, useWorkspaceState } from "./ReviewWorkspace";
+} from '../../data/review';
+import type { ReviewRefusal } from '../../data/review';
+import type { FamilySelection } from './FamilyTree';
+import { KnowledgeStatements } from './KnowledgeStatements';
+import { type ReviewPageRequest, targetKeyOf, useReviewReadCycle } from './ReviewReadCycle';
+import { ReviewRefresh, generationOf } from './ReviewRefresh';
+import { type ReviewRead, ReviewOutcomeRegion, problemOf, shownPayload } from './ReviewOutcome';
+import { ReviewWorkspace, useWorkspaceState } from './ReviewWorkspace';
 
 export interface ReviewTarget {
   repo: string;
   master: string;
   leaf: string;
-  // The reviewed subject, when the entry carried one. Absent, this is the TASK-CONTEXT review: the
-  // surface asks the server for the task's own comparison and renders the complete source change
-  // inventory, which is what a task with no recorded invariant -- or no datasets yet -- still has.
   selectorKind?: ReviewSelectorKind;
   selectorId?: string;
-  // Which record this read is addressed to (ICR-R12): absent is the live candidate, and "recorded"
-  // is the comparison the leaf's own durable generation bound -- the answer a closed leaf's entry
-  // opens. It is part of the question, so it participates in the target key rather than being
-  // applied to a response read for another record.
   history?: ReviewHistory;
 }
 
-const TAKEOVER = "changeset-viewer";
+const reviewShell = css({
+  background: 'bg',
+  color: 'ink',
+  fontFamily: 'mono',
+  fontSize: '0.83rem',
+  lineHeight: '1.65',
+  padding: '1.2rem',
+  overflowWrap: 'anywhere',
+  '@media (max-width: 40rem)': { padding: '0.7rem' },
+  '& summary': { cursor: 'pointer', color: 'muted', fontSize: '0.75rem', padding: '0.3rem 0' },
+  '& details[open] > summary': { color: 'cyan' },
+  '& button:not([data-tree-node]):not([data-path]), & select, & input': {
+    background: 'bgPanel',
+    color: 'ink',
+    border: '1px solid var(--grid)',
+    borderRadius: '2px',
+    font: 'inherit',
+    fontSize: '0.75rem',
+    padding: '0.4rem 0.6rem',
+    cursor: 'pointer',
+    maxWidth: '100%',
+  },
+  '& button:focus-visible, & select:focus-visible, & input:focus-visible, & summary:focus-visible':
+    {
+      outline: '2px solid var(--amber)',
+      outlineOffset: '2px',
+    },
+  '& button:hover': { color: 'amber' },
+  '& [data-testid=review-center-column]': { outlineOffset: '3px' },
+});
 
-// One pane of the complete-payload disclosure. Two declarations here are load-bearing, not cosmetic
-// (ICR-L25 round 3, register B7; measured at 320px on the mounted product):
-//
-//   * `minWidth: 0` — the pane is a GRID ITEM of the disclosure below, so its automatic minimum size
-//     is content-based unless it is told otherwise, and it then overflows its own column instead of
-//     the column constraining it.
-//   * `overflowWrap: "anywhere"` — what actually lowers that minimum. The identities this surface
-//     prints are single unbreakable tokens (a 64-character comparison reference measured 539px, a
-//     repository path 565px), and the inherited `break-word` does NOT reduce min-content, so one such
-//     token set the pane to 565px inside a 294px column at 320px. `anywhere` breaks only where the
-//     line cannot otherwise fit, so prose is unaffected.
+const TAKEOVER = 'changeset-viewer';
+
 const pane = (title: string, children: React.ReactNode) => (
   <section
-    style={{ marginBottom: "1.25rem", minWidth: 0, overflowWrap: "anywhere" }}
+    style={{ marginBottom: '1.25rem', minWidth: 0, overflowWrap: 'anywhere' }}
     data-pane={title}
   >
-    <h3 style={{ margin: "0 0 0.4rem" }}>{title}</h3>
+    <h3 style={{ margin: '0 0 0.4rem' }}>{title}</h3>
     {children}
   </section>
 );
 
 const muted = (text: string, testid?: string) => (
-  <p style={{ color: "muted", margin: "0.2rem 0" }} data-testid={testid}>
+  <p style={{ color: 'var(--muted)', margin: '0.2rem 0' }} data-testid={testid}>
     {text}
   </p>
 );
 
 const attribution = (author?: string, inputs: string[] = []) =>
   author === undefined
-    ? `author: unresolved reference${inputs.length ? ` · inputs: ${inputs.join(", ")}` : ""}`
-    : `author: ${author}${inputs.length ? ` · inputs: ${inputs.join(", ")}` : ""}`;
+    ? `author: unresolved reference${inputs.length ? ` · inputs: ${inputs.join(', ')}` : ''}`
+    : `author: ${author}${inputs.length ? ` · inputs: ${inputs.join(', ')}` : ''}`;
 
-// Why one displayed record may appear beside the selected subject (ICR-R26), printed with the true
-// subject its own recorded binding names. A record whose binding could not be resolved says so with
-// the references it carries; a record of a previous generation says so and never reads as the
-// displayed generation's result. A server that sends no label prints nothing extra, which is how a
-// payload from before this requirement still renders.
 const applicabilityNote = (entry: { applicability?: ReviewDisplayedApplicability }) => {
   const label = entry.applicability;
   if (label === undefined) {
@@ -120,29 +108,27 @@ const applicabilityNote = (entry: { applicability?: ReviewDisplayedApplicability
   const subject =
     label.subject_kind !== undefined && label.subject_id !== undefined
       ? ` (${label.subject_kind} ${label.subject_id})`
-      : "";
+      : '';
   return (
-    <div style={{ color: "muted" }} data-applicability={label.state}>
+    <div style={{ color: 'var(--muted)' }} data-applicability={label.state}>
       applicability: {label.state}
       {subject} · {label.detail}
     </div>
   );
 };
 
-// The records of *other* subjects this selection reaches through an explicit recorded relationship,
-// with the relationship that reached each one and no judgment content: a sibling's finding belongs
-// to the sibling's own review, and showing it here is the cross-subject contamination ICR-R26
-// exists to prevent. The count of every supplied collection travels beside them, so a reader can
-// see that filtering is arithmetic rather than erasure.
 const contextList = (records?: ReviewContextRecord[]) =>
   records?.length ? (
-    <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-context">
+    <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }} data-testid="review-context">
       {records.map((entry) => (
-        <li key={`${entry.records}:${entry.record_id}`} data-context-of={`${entry.subject_kind}:${entry.subject_id}`}>
-          context {entry.records} {entry.record_id} · {entry.label} · of {entry.subject_kind}{" "}
+        <li
+          key={`${entry.records}:${entry.record_id}`}
+          data-context-of={`${entry.subject_kind}:${entry.subject_id}`}
+        >
+          context {entry.records} {entry.record_id} · {entry.label} · of {entry.subject_kind}{' '}
           {entry.subject_id} · via {entry.relationship}
-          <div style={{ color: "muted" }}>
-            {attribution(entry.author_ref)} · references: {entry.references.join(", ")}
+          <div style={{ color: 'var(--muted)' }}>
+            {attribution(entry.author_ref)} · references: {entry.references.join(', ')}
           </div>
         </li>
       ))}
@@ -151,10 +137,10 @@ const contextList = (records?: ReviewContextRecord[]) =>
 
 const applicabilityCounts = (summaries?: ReviewApplicabilitySummary[]) =>
   summaries?.length ? (
-    <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-applicability">
+    <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }} data-testid="review-applicability">
       {summaries.map((row) => (
         <li key={row.records}>
-          supplied {row.records}: {row.supplied} · direct {row.direct} · historical {row.historical}{" "}
+          supplied {row.records}: {row.supplied} · direct {row.direct} · historical {row.historical}{' '}
           · context {row.context} · candidate {row.candidate} · unresolved {row.unresolved} · not
           displayed {row.unrelated} — {row.detail}
         </li>
@@ -164,32 +150,34 @@ const applicabilityCounts = (summaries?: ReviewApplicabilitySummary[]) =>
 
 const unresolvedList = (entries: ReviewUnresolvedReference[]) =>
   entries.length ? (
-    <ul style={{ margin: "0.2rem 0 0.6rem", paddingLeft: "1.1rem" }} data-testid="review-unresolved">
+    <ul
+      style={{ margin: '0.2rem 0 0.6rem', paddingLeft: '1.1rem' }}
+      data-testid="review-unresolved"
+    >
       {entries.map((entry, index) => (
         <li key={`${entry.field}:${entry.recorded_reference ?? index}`}>
           unresolved {entry.field}
-          {entry.recorded_reference ? ` (${entry.recorded_reference})` : ""}: {entry.detail}
+          {entry.recorded_reference ? ` (${entry.recorded_reference})` : ''}: {entry.detail}
         </li>
       ))}
     </ul>
   ) : null;
 
-// One mechanical field transition, and the three different facts its two values can be. A value the
-// server did not send is the recorded fact that the field was absent on that side; a value that IS
-// there and is empty is a recorded empty list, which is not the same fact and is not printed as a
-// blank either. `(absent)` and `(recorded empty)` are the two words, so no row is ever silently
-// blank and no reader has to decide which of the two a gap meant.
 const fieldValue = (value?: string) =>
-  value === undefined ? "(absent)" : value === "" ? "(recorded empty)" : value;
+  value === undefined ? '(absent)' : value === '' ? '(recorded empty)' : value;
 
 function assessmentBlock(entry: ReviewAssessmentDisplay) {
   return (
-    <li key={entry.assessment_id} data-testid="review-assessment" data-binding={entry.binding_state}>
+    <li
+      key={entry.assessment_id}
+      data-testid="review-assessment"
+      data-binding={entry.binding_state}
+    >
       <strong>{entry.disposition}</strong> · {entry.finding}
-      <div style={{ color: "muted" }}>{entry.rationale}</div>
-      <div style={{ color: "muted" }}>
+      <div style={{ color: 'var(--muted)' }}>{entry.rationale}</div>
+      <div style={{ color: 'var(--muted)' }}>
         {attribution(entry.author_ref, entry.examined_inputs)} · binding: {entry.binding_state}
-        {entry.role_ref ? ` · role: ${entry.role_ref}` : ""}
+        {entry.role_ref ? ` · role: ${entry.role_ref}` : ''}
       </div>
       {applicabilityNote(entry)}
     </li>
@@ -200,9 +188,9 @@ function authoredEffect(effect: ReviewAuthoredEffect) {
   return (
     <li key={`${effect.record_kind}:${effect.record_id}`} data-testid="review-authored-effect">
       <strong>{effect.record_kind}</strong>
-      {effect.label ? ` · ${effect.label}` : ""} · {effect.record_id}
+      {effect.label ? ` · ${effect.label}` : ''} · {effect.record_id}
       {effect.rationale ? <div>{effect.rationale}</div> : null}
-      <div style={{ color: "muted" }}>
+      <div style={{ color: 'var(--muted)' }}>
         {attribution(effect.author_ref, effect.examined_inputs)}
       </div>
       {applicabilityNote(effect)}
@@ -215,15 +203,15 @@ function signalBlock(signal: ReviewSignal) {
   return (
     <li key={signal.signal_id} data-testid="review-signal">
       <strong>{signal.condition}</strong> · input set: {signal.input_set} · {signal.signal_id}
-      <div style={{ color: "muted" }}>
+      <div style={{ color: 'var(--muted)' }}>
         extractor: {signal.extractor_version} · policy: {signal.policy_version}
       </div>
       {signal.relationship_paths.length ? (
-        <div style={{ color: "muted" }}>paths: {signal.relationship_paths.join(", ")}</div>
+        <div style={{ color: 'var(--muted)' }}>paths: {signal.relationship_paths.join(', ')}</div>
       ) : null}
       {signal.scope_limitations.length ? (
-        <div style={{ color: "muted" }}>
-          scope limitations: {signal.scope_limitations.join(", ")}
+        <div style={{ color: 'var(--muted)' }}>
+          scope limitations: {signal.scope_limitations.join(', ')}
         </div>
       ) : null}
       {applicabilityNote(signal)}
@@ -231,26 +219,23 @@ function signalBlock(signal: ReviewSignal) {
   );
 }
 
-// The mechanical half of pane 1, extracted so the pane's own body reads as a composition: the
-// essential conditions each side recorded, how many retained revisions the selection reached on each
-// side, and every field transition the comparison itself reported.
 function KnowledgeFacts({ knowledge }: { knowledge: ReviewKnowledgePane }) {
   const conditions = knowledge.before_conditions.length || knowledge.after_conditions.length;
   return (
     <>
       {conditions ? (
-        <div style={{ color: "muted" }} data-testid="review-conditions">
-          before conditions: {knowledge.before_conditions.join("; ") || "none recorded"} · after
-          conditions: {knowledge.after_conditions.join("; ") || "none recorded"}
+        <div style={{ color: 'var(--muted)' }} data-testid="review-conditions">
+          before conditions: {knowledge.before_conditions.join('; ') || 'none recorded'} · after
+          conditions: {knowledge.after_conditions.join('; ') || 'none recorded'}
         </div>
       ) : null}
-      <p style={{ margin: "0.4rem 0" }} data-testid="review-revision-groups">
-        retained revisions —{" "}
+      <p style={{ margin: '0.4rem 0' }} data-testid="review-revision-groups">
+        retained revisions —{' '}
         {knowledge.revision_groups
           .map((group) => `${group.side}:${group.record_id}=${group.selected_revision_count}`)
-          .join(" · ") || "none selected"}
+          .join(' · ') || 'none selected'}
       </p>
-      <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-field-changes">
+      <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }} data-testid="review-field-changes">
         {knowledge.field_changes.map((change) => (
           <li key={`${change.item_id}:${change.field}`}>
             {change.field}: {fieldValue(change.before_value)} → {fieldValue(change.after_value)}
@@ -261,26 +246,24 @@ function KnowledgeFacts({ knowledge }: { knowledge: ReviewKnowledgePane }) {
   );
 }
 
-// The two record collections the pane shows *beside* the mechanical diff, each in its own list and
-// under its own heading: an authored effect is never rendered in the shape of a detection fact.
 function AuthoredRecords({ knowledge }: { knowledge: ReviewKnowledgePane }) {
   return (
     <>
-      <h4 style={{ margin: "0.6rem 0 0.2rem" }}>Authored effects and preservation claims</h4>
+      <h4 style={{ margin: '0.6rem 0 0.2rem' }}>Authored effects and preservation claims</h4>
       {knowledge.authored_effects.length ? (
-        <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }}>
+        <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }}>
           {knowledge.authored_effects.map(authoredEffect)}
         </ul>
       ) : (
-        muted("No authored effect, preservation claim or unresolved question is recorded here.")
+        muted('No authored effect, preservation claim or unresolved question is recorded here.')
       )}
-      <h4 style={{ margin: "0.6rem 0 0.2rem" }}>Detection signals (facts, not findings)</h4>
+      <h4 style={{ margin: '0.6rem 0 0.2rem' }}>Detection signals (facts, not findings)</h4>
       {knowledge.signals.length ? (
-        <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }}>
+        <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }}>
           {knowledge.signals.map(signalBlock)}
         </ul>
       ) : (
-        muted("No detection signal was supplied to this rendering.")
+        muted('No detection signal was supplied to this rendering.')
       )}
     </>
   );
@@ -289,22 +272,22 @@ function AuthoredRecords({ knowledge }: { knowledge: ReviewKnowledgePane }) {
 function KnowledgePane({ payload }: { payload: ReviewPayload }) {
   const { knowledge } = payload;
   return pane(
-    "Knowledge",
+    'Knowledge',
     <>
-      <div style={{ color: "muted" }} data-testid="review-selection">
+      <div style={{ color: 'var(--muted)' }} data-testid="review-selection">
         {payload.comparison
           ? `comparison: ${payload.comparison.reference} · policy ${payload.comparison.policy_version}`
-          : `no knowledge comparison was made · ${knowledge.selection_detail ?? "no subject selected"}`}
+          : `no knowledge comparison was made · ${knowledge.selection_detail ?? 'no subject selected'}`}
       </div>
       <KnowledgeStatements before={knowledge.before_statement} after={knowledge.after_statement} />
       <KnowledgeFacts knowledge={knowledge} />
       <AuthoredRecords knowledge={knowledge} />
       {knowledge.assessments.length ? (
-        <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }}>
+        <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }}>
           {knowledge.assessments.map(assessmentBlock)}
         </ul>
       ) : (
-        muted("UNASSESSED — no assessment is recorded against this subject.", "review-unassessed")
+        muted('UNASSESSED — no assessment is recorded against this subject.', 'review-unassessed')
       )}
       {contextList(knowledge.context)}
       {applicabilityCounts(knowledge.applicability)}
@@ -316,49 +299,54 @@ function KnowledgePane({ payload }: { payload: ReviewPayload }) {
 function SourcePane({ payload }: { payload: ReviewPayload }) {
   const { source } = payload;
   return pane(
-    "Source",
+    'Source',
     <>
-      {/* The complete source change explorer is mounted once, by the workspace above: it is the
-          whole measured change set of the bound pair and it must not be duplicated here, where a
-          second copy would be a second answer to "which paths changed". This pane carries the
-          attribution side of the same records. */}
-      <p style={{ color: "muted", margin: "0.2rem 0" }} data-testid="review-source-explorer-pointer">
-        the complete source change explorer ({source.inventory.listed_total} measured listed path(s),
-        state {source.inventory.state}
-        {source.inventory.partial ? ", partial" : ""}) is the population section of the workspace
+      <p
+        style={{ color: 'var(--muted)', margin: '0.2rem 0' }}
+        data-testid="review-source-explorer-pointer"
+      >
+        the complete source change explorer ({source.inventory.listed_total} measured listed
+        path(s), state {source.inventory.state}
+        {source.inventory.partial ? ', partial' : ''}) is the population section of the workspace
         above; every listed path is openable there.
       </p>
-      <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-locations">
+      <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }} data-testid="review-locations">
         {source.locations.map((location) => (
-          <li key={`${location.claim_id}:${location.path}`} data-change-state={location.change_state}>
-            {location.path} · role: {location.role ?? "unclassified (no role recorded)"}
-            {location.before_only ? " · before-only" : ""} · {location.change_state} ·{" "}
+          <li
+            key={`${location.claim_id}:${location.path}`}
+            data-change-state={location.change_state}
+          >
+            {location.path} · role: {location.role ?? 'unclassified (no role recorded)'}
+            {location.before_only ? ' · before-only' : ''} · {location.change_state} ·{' '}
             {location.resolution}
-            {location.rationale ? <div style={{ color: "muted" }}>{location.rationale}</div> : null}
+            {location.rationale ? (
+              <div style={{ color: 'var(--muted)' }}>{location.rationale}</div>
+            ) : null}
           </li>
         ))}
       </ul>
-      <p style={{ margin: "0.4rem 0" }} data-testid="review-remaining">
+      <p style={{ margin: '0.4rem 0' }} data-testid="review-remaining">
         {source.remaining
           .map((count) =>
             count.value === undefined
-              ? `${count.name}: not measured (${count.reason ?? "no reason recorded"})`
+              ? `${count.name}: not measured (${count.reason ?? 'no reason recorded'})`
               : `${count.name}: ${count.value}`,
           )
-          .join(" · ")}
+          .join(' · ')}
       </p>
       {source.unattributed_changed_paths.length ? (
-        <p style={{ margin: "0.2rem 0" }} data-testid="review-unattributed">
-          changed paths with no registered attribution: {source.unattributed_changed_paths.join(", ")}
+        <p style={{ margin: '0.2rem 0' }} data-testid="review-unattributed">
+          changed paths with no registered attribution:{' '}
+          {source.unattributed_changed_paths.join(', ')}
         </p>
       ) : null}
       {source.expansion_reference ? (
-        <p style={{ color: "muted", margin: "0.2rem 0" }} data-testid="review-expansion">
+        <p style={{ color: 'var(--muted)', margin: '0.2rem 0' }} data-testid="review-expansion">
           full selected-candidate diff: {source.expansion_reference}
-          {source.expansion_command ? ` — ${source.expansion_command}` : ""}
+          {source.expansion_command ? ` — ${source.expansion_command}` : ''}
         </p>
       ) : (
-        muted("The comparison published no source expansion for this selection.")
+        muted('The comparison published no source expansion for this selection.')
       )}
       {unresolvedList(source.unresolved)}
     </>,
@@ -368,32 +356,35 @@ function SourcePane({ payload }: { payload: ReviewPayload }) {
 function EvidencePane({ payload }: { payload: ReviewPayload }) {
   const { evidence } = payload;
   return pane(
-    "Evidence and assessment",
+    'Evidence and assessment',
     <>
-      {evidence.evidence_state === "recorded" ? (
+      {evidence.evidence_state === 'recorded' ? (
         <>
-          <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-evidence">
+          <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }} data-testid="review-evidence">
             {evidence.evidence_links.map((link) => (
               <li key={link.claim_id}>
                 evidence claim {link.claim_id}
                 {link.assessment_refs.length
-                  ? ` · assessments: ${link.assessment_refs.join(", ")}`
-                  : ""}
+                  ? ` · assessments: ${link.assessment_refs.join(', ')}`
+                  : ''}
                 {applicabilityNote(link)}
                 {unresolvedList(link.unresolved)}
               </li>
             ))}
           </ul>
-          <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-observations">
+          <ul
+            style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }}
+            data-testid="review-observations"
+          >
             {evidence.observations.map((observation) => (
               <li key={observation.observation_id}>
                 observation {observation.observation_id} · result: {observation.execution_result}
-                <div style={{ color: "muted" }}>
-                  candidate: {observation.tested_candidate ?? "not recorded"} · command:{" "}
-                  {observation.command_identity ?? "not recorded"} · artifact:{" "}
-                  {observation.result_artifact_ref ?? "not recorded"} (
-                  {observation.result_artifact_digest ?? "no digest"}) · environment:{" "}
-                  {observation.environment_identity ?? "not recorded"}
+                <div style={{ color: 'var(--muted)' }}>
+                  candidate: {observation.tested_candidate ?? 'not recorded'} · command:{' '}
+                  {observation.command_identity ?? 'not recorded'} · artifact:{' '}
+                  {observation.result_artifact_ref ?? 'not recorded'} (
+                  {observation.result_artifact_digest ?? 'no digest'}) · environment:{' '}
+                  {observation.environment_identity ?? 'not recorded'}
                 </div>
                 {applicabilityNote(observation)}
               </li>
@@ -401,17 +392,17 @@ function EvidencePane({ payload }: { payload: ReviewPayload }) {
           </ul>
         </>
       ) : (
-        muted("No recorded evidence links", "review-no-evidence")
+        muted('No recorded evidence links', 'review-no-evidence')
       )}
       {evidence.source_inspection_available
-        ? muted("Source-based inspection remains available in the Source pane.")
+        ? muted('Source-based inspection remains available in the Source pane.')
         : null}
       {evidence.assessments.length ? (
-        <ul style={{ margin: "0.2rem 0", paddingLeft: "1.1rem" }} data-testid="review-assessments">
+        <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }} data-testid="review-assessments">
           {evidence.assessments.map(assessmentBlock)}
         </ul>
       ) : (
-        muted("UNASSESSED — no assessment is recorded against this subject.", "review-unassessed")
+        muted('UNASSESSED — no assessment is recorded against this subject.', 'review-unassessed')
       )}
       {contextList(evidence.context)}
       {applicabilityCounts(evidence.applicability)}
@@ -423,84 +414,57 @@ function EvidencePane({ payload }: { payload: ReviewPayload }) {
 function SubmissionBlock({ payload }: { payload: ReviewPayload }) {
   const { submission, staleness } = payload;
   return (
-    <section style={{ marginBottom: "1.25rem" }} data-testid="review-submission">
-      {staleness.state === "stale" ? (
-        <p style={{ margin: "0.2rem 0" }} data-testid="review-stale">
+    <section style={{ marginBottom: '1.25rem' }} data-testid="review-submission">
+      {staleness.state === 'stale' ? (
+        <p style={{ margin: '0.2rem 0' }} data-testid="review-stale">
           {staleness.statement} — previous input: {staleness.previous_comparison_ref}
         </p>
       ) : null}
-      {/* The boundary could not compare every declared identity (ICR-R23@v1). No previous input is
-          named, because nothing was observed to move; what is rendered is the boundary's own
-          sentence, so a switched checkout or an unreadable generation can never read as an ordinary
-          current review on the one line this block mounts. */}
-      {staleness.state === "not-measured" ? (
-        <p style={{ margin: "0.2rem 0" }} data-testid="review-staleness-unmeasured">
+      {staleness.state === 'not-measured' ? (
+        <p style={{ margin: '0.2rem 0' }} data-testid="review-staleness-unmeasured">
           {staleness.statement}
         </p>
       ) : null}
-      <p style={{ color: "muted", margin: "0.2rem 0" }} data-submission-state={submission.state}>
-        assessment submission: {submission.state === "disabled_stale" ? "DISABLED" : "not offered"} —{" "}
-        {submission.reason}
+      <p
+        style={{ color: 'var(--muted)', margin: '0.2rem 0' }}
+        data-submission-state={submission.state}
+      >
+        assessment submission: {submission.state === 'disabled_stale' ? 'DISABLED' : 'not offered'}{' '}
+        — {submission.reason}
       </p>
-      <p style={{ color: "muted", margin: "0.2rem 0" }}>next: {submission.next_action}</p>
-      <p style={{ color: "muted", margin: "0.2rem 0" }}>
-        dispositions the existing authority accepts: {submission.proposed_dispositions.join(", ")} —
+      <p style={{ color: 'var(--muted)', margin: '0.2rem 0' }}>next: {submission.next_action}</p>
+      <p style={{ color: 'var(--muted)', margin: '0.2rem 0' }}>
+        dispositions the existing authority accepts: {submission.proposed_dispositions.join(', ')} —
         none is publication approval.
       </p>
     </section>
   );
 }
 
-// The surface's read phases and the rendering of every phase that is not panes live in
-// `ReviewOutcome.tsx` (one owner for the outcome states). What stays here is how a target and a read
-// phase become the controls' wiring.
-
 function subjectLabel(
   selectorKind: ReviewSelectorKind | undefined,
   selectorId: string | undefined,
   instead: ReviewFailure | null,
 ): string {
-  if (instead !== null) return "whole task (no subject selected)";
+  if (instead !== null) return 'whole task (no subject selected)';
   if (selectorKind && selectorId) return `${selectorKind} ${selectorId}`;
-  return "whole task (no subject selected)";
+  return 'whole task (no subject selected)';
 }
 
-// The retry control belongs to the state that has no owner-published recovery route: a read that
-// never reached the server. A typed refusal keeps its own next action instead. It re-asks the same
-// question the reader asked, which is exactly what the refresh control does -- one read path, so a
-// retry can never become a second way of composing a review.
 const retryFor = (read: ReviewRead, reread: () => void) =>
-  read.phase === "failed" ? reread : undefined;
+  read.phase === 'failed' ? reread : undefined;
 
-// The source-inventory offer belongs to a refusal that answers for the intent half alone, when the
-// reader has not already taken it.
 function insteadFor(
   read: ReviewRead,
   problem: ReviewFailure | null,
   instead: ReviewFailure | null,
   offer: (problem: ReviewFailure) => void,
 ): (() => void) | undefined {
-  if (read.phase !== "refused" || problem === null || instead !== null) return undefined;
+  if (read.phase !== 'refused' || problem === null || instead !== null) return undefined;
   if (!intentOnlyRefusal(problem.code)) return undefined;
   return () => offer(problem);
 }
 
-// The page control (ICR-R10): the active collection, the bounds and scope of the page on screen, and
-// the one action that reaches the rest of it.
-//
-// "next page" is rendered exactly when the response published a remainder *and* the owner's cursor
-// for it, and it sends that cursor back unchanged. A body that reported rows remaining without a
-// cursor therefore offers no control rather than a button that would fetch nothing -- the
-// non-conformance this packet names ("remaining=100 but no way to inspect them") is unrepresentable
-// in the rendering, not merely discouraged. A page whose cursor was reset states the refusal and
-// offers the first page of the comparison that is there now, so a moved generation is a stated
-// action rather than a dead end.
-// The refusal a *requested* page earned when the owner could not serve it (ICR-R10). A page value
-// carries the owner's own counts and a refused read has none, so the server states the refusal
-// instead -- and this renders it in full, with the code, the offending cursor and the owner's two
-// identities, plus the one action that reaches the collection: its first page. Rendering "no page"
-// here instead was a false sentence ("nothing remains to reach") over a request the reader had
-// explicitly made, which is the shape this packet exists to remove.
 function PageRefusalBlock({
   refusal,
   collection,
@@ -512,20 +476,26 @@ function PageRefusalBlock({
 }) {
   return (
     <section data-testid="review-page-refusal" data-page-refusal-code={refusal.code}>
-      <p style={{ margin: "0.3rem 0" }}>
+      <p style={{ margin: '0.3rem 0' }}>
         {collection} could not be served as a page — {refusal.code}: {refusal.detail}
       </p>
       {refusal.expected !== undefined ? (
-        <p style={{ margin: "0.2rem 0", color: "muted" }} data-testid="review-page-refusal-expected">
+        <p
+          style={{ margin: '0.2rem 0', color: 'var(--muted)' }}
+          data-testid="review-page-refusal-expected"
+        >
           expected: {refusal.expected}
         </p>
       ) : null}
       {refusal.observed !== undefined ? (
-        <p style={{ margin: "0.2rem 0", color: "muted" }} data-testid="review-page-refusal-observed">
+        <p
+          style={{ margin: '0.2rem 0', color: 'var(--muted)' }}
+          data-testid="review-page-refusal-observed"
+        >
           observed: {refusal.observed}
         </p>
       ) : null}
-      <p style={{ margin: "0.2rem 0" }} data-testid="review-page-refusal-action">
+      <p style={{ margin: '0.2rem 0' }} data-testid="review-page-refusal-action">
         {refusal.next_action}
       </p>
       <button
@@ -539,20 +509,6 @@ function PageRefusalBlock({
   );
 }
 
-// The collection picker: which bounded collection the next read is a page of. Choosing one is a new
-// question rather than a continuation, so it always starts at that collection's first page, and
-// "whole review" is the state every read had before paging existed.
-//
-// IT OFFERS ONLY THE COLLECTIONS THAT HAVE A FIRST PAGE (ICR-R31@v1 / ICR-R24@v3). The server's
-// collection union has three members, but `family_members` is not one walk: it is the set of
-// per-family roster walks a response composes, and naming it with no cursor earns the server's own
-// `comparison_page_unreadable` refusal rather than an arbitrary walk's first page. Offering it here
-// would therefore be offering a control that fetches a refusal for a question the reader did not
-// mean to ask. The family walk is reached from the family that published its cursor -- the
-// "continue the ... roster" control in the tree -- and this surface sends that cursor back with the
-// collection its owner minted it for. Nothing about the server contract is narrowed by this: the
-// client's `ReviewPagedCollection` still carries all three, and a response whose page is
-// `family_members` renders through the same bounds and continuation controls as any other.
 function PagePicker({
   selection,
   onSelect,
@@ -561,17 +517,17 @@ function PagePicker({
   onSelect: (page: ReviewPageRequest | undefined) => void;
 }) {
   return (
-    <span style={{ display: "inline-flex", gap: "0.4rem", alignItems: "center" }}>
-      <label style={{ color: "muted" }} htmlFor="review-page-collection">
+    <span style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
+      <label style={{ color: 'var(--muted)' }} htmlFor="review-page-collection">
         page over
       </label>
       <select
         id="review-page-collection"
         data-testid="review-page-collection"
-        value={selection?.of ?? ""}
+        value={selection?.of ?? ''}
         onChange={(event) =>
           onSelect(
-            event.target.value === ""
+            event.target.value === ''
               ? undefined
               : { of: event.target.value as ReviewPagedCollection },
           )
@@ -588,9 +544,6 @@ function PagePicker({
   );
 }
 
-// The two reachable actions beside the bounds: advance with the cursor the server published, or
-// restart this collection at its first page. Neither is offered unless it can do what it says --
-// "next page" needs a published cursor, and "first page" needs a collection already being paged.
 function PageActions({
   next,
   page,
@@ -628,26 +581,15 @@ function PageActions({
   );
 }
 
-// The refusal a requested page earned, when there is one: a page was asked for, the response carried
-// no page, and the payload states why. It is one value so the three render branches below cannot
-// disagree about whether a refusal is on screen.
 function refusedPageOf(
   payload: ReviewPayload,
   selection: ReviewPageRequest | undefined,
 ): { refusal: ReviewRefusal; collection: ReviewPagedCollection } | null {
-  // `carriedPage` collapses the two spellings of "no page": the server omits the key (its serializer
-  // excludes None) while a hand-written body may send `null`. Comparing against `null` alone skipped
-  // this whole branch for every real refused page, which is how the round-1 false sentence survived
-  // its own case -- that case handed the component a `page: null` the route never sends.
   if (selection === undefined || carriedPage(payload) !== null) return null;
   const refusal = payload.page_refusal;
-  return refusal === undefined || refusal === null
-    ? null
-    : { refusal, collection: selection.of };
+  return refusal === undefined || refusal === null ? null : { refusal, collection: selection.of };
 }
 
-// What the control says about the answer's shape: the page's own bounds, or -- when a page was asked
-// for and refused -- nothing at all, because the bounds sentence describes a page and there is none.
 function PageBoundsLine({
   payload,
   page,
@@ -660,13 +602,13 @@ function PageBoundsLine({
   if (refused) return null;
   if (page) {
     return (
-      <p style={{ margin: "0.3rem 0" }} data-testid="review-page-bounds">
+      <p style={{ margin: '0.3rem 0' }} data-testid="review-page-bounds">
         {pageBounds(payload)}
       </p>
     );
   }
   return (
-    <p style={{ margin: "0.3rem 0" }} data-testid="review-page-bounds">
+    <p style={{ margin: '0.3rem 0' }} data-testid="review-page-bounds">
       whole review — no bounded collection was paged, so there is no remainder to reach
     </p>
   );
@@ -688,11 +630,11 @@ function PageControls({
   return (
     <section
       data-testid="review-page-controls"
-      data-page-collection={page?.collection ?? ""}
-      data-page-requested={selection?.of ?? ""}
-      data-page-refused={refused === null ? "false" : "true"}
+      data-page-collection={page?.collection ?? ''}
+      data-page-requested={selection?.of ?? ''}
+      data-page-refused={refused === null ? 'false' : 'true'}
     >
-      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
         <PagePicker selection={selection} onSelect={onSelect} />
         <PageActions next={next} page={page} selection={selection} onSelect={onSelect} />
       </div>
@@ -705,7 +647,7 @@ function PageControls({
       )}
       <PageBoundsLine payload={payload} page={page} refused={refused !== null} />
       {reset ? (
-        <p style={{ margin: "0.3rem 0" }} data-testid="review-page-reset">
+        <p style={{ margin: '0.3rem 0' }} data-testid="review-page-reset">
           {reset.code}: {reset.detail} — {reset.next_action}
         </p>
       ) : null}
@@ -713,16 +655,6 @@ function PageControls({
   );
 }
 
-// The accepted layout, then everything else.
-//
-// THE WORKSPACE IS THE READING PATH (ICR-R24@v3): scope/status header, the family tree, and the
-// unified central column -- guarantee and selected intent, then the linked expressions, then the
-// recorded evidence and authored assessment -- with the complete source change explorer beneath it.
-// The three panes that were this surface's whole composition (R03/R06/R14/R15/R16/R17/R23/R26) are
-// retained below it inside one disclosure: their content is unchanged and every control, refusal,
-// limitation and technical identity they carry is still on the page, reached deliberately instead of
-// being the first thing a reviewer has to read past. A disclosure is used rather than a tab bar
-// because collapsing it hides nothing from the DOM and nothing from the keyboard.
 function ReviewPanes({
   shown,
   selection,
@@ -734,6 +666,7 @@ function ReviewPanes({
   selectorId,
   history,
   workspace,
+  navigation,
 }: {
   shown: ReviewPayload | null;
   selection: ReviewPageRequest | undefined;
@@ -744,15 +677,12 @@ function ReviewPanes({
   selectorKind?: ReviewSelectorKind;
   selectorId?: string;
   history?: ReviewHistory;
-  // The reader's local workspace state, owned by the surface ABOVE this switch (fix round 5, V10):
-  // this function returns null while a page is loading, so anything owned below it would be lost.
   workspace: ReturnType<typeof useWorkspaceState>;
+  navigation: ReviewNavigationState;
 }) {
   if (shown === null) return null;
   return (
     <>
-      <SubmissionBlock payload={shown} />
-      <PageControls payload={shown} selection={selection} onSelect={onSelect} />
       <ReviewWorkspace
         payload={shown}
         repo={repo}
@@ -763,23 +693,23 @@ function ReviewPanes({
         history={history}
         onPageSelect={onSelect}
         state={workspace}
+        navigation={navigation}
       />
-      <details data-testid="review-details" style={{ marginTop: "1rem" }}>
-        <summary style={{ cursor: "pointer", color: "muted" }}>
-          complete payload details — knowledge, attribution, evidence and refusal records
+      <details data-testid="review-details" style={{ marginTop: '1rem' }}>
+        <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>
+          Technical details · records, paging and submission contract
         </summary>
-        {/* `minmax(0, 1fr)`, not the implicit `auto`: the column is the reader's column, and a track
-            that is allowed to shrink below its items' min-content is what lets the panes' own
-            `min-width: 0` take effect (ICR-L25 round 3, B7). */}
         <div
           className={TAKEOVER}
           style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr)",
-            gap: "1rem",
-            marginTop: "0.6rem",
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr)',
+            gap: '1rem',
+            marginTop: '0.6rem',
           }}
         >
+          <SubmissionBlock payload={shown} />
+          <PageControls payload={shown} selection={selection} onSelect={onSelect} />
           <KnowledgePane payload={shown} />
           <SourcePane payload={shown} />
           <EvidencePane payload={shown} />
@@ -789,11 +719,6 @@ function ReviewPanes({
   );
 }
 
-// The surface's header: which task context is open, which subject of it, and WHICH RECORD the panes
-// below are read from (ICR-R12). It is one component rather than markup inside the surface because
-// the record statement is a claim about everything under it: a reader looking at a comparison has to
-// be able to see, without opening a pane, whether it is the live candidate's or the one the leaf's
-// own durable generation bound.
 function ReviewHeader({
   repo,
   master,
@@ -812,75 +737,73 @@ function ReviewHeader({
   selectorId?: string;
   instead: ReviewFailure | null;
   history?: ReviewHistory;
-  // The surface's explicit refresh control and its generation notice (ICR-R17). It sits in the
-  // header because it belongs to the question the header names -- which subject of which task, read
-  // from which record -- and because the notice it carries describes the comparison the panes below
-  // are showing.
   refresh?: React.ReactNode;
   onBack: () => void;
 }) {
   return (
     <>
-      {/* `wrap` + the subject's own `min-width: 0`: at 320px this row is the only thing left past the
-          viewport edge, and it is one unbreakable line of identities beside two controls. Wrapping
-          moves the whole refresh control to the next line instead of pushing it 4px past the edge
-          (ICR-L25 round 3, B7 — measured: the row alone overflowed a 294px column). */}
       <div
         style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "0.5rem",
-          alignItems: "center",
-          marginBottom: "0.75rem",
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '0.5rem',
+          alignItems: 'center',
+          marginBottom: '0.75rem',
         }}
       >
         <button type="button" onClick={onBack} data-testid="review-back">
           ← back
         </button>
-        <strong>Intent review</strong>
+        <strong>Intent review · {leaf}</strong>
         <span
-          style={{ color: "muted", minWidth: 0, overflowWrap: "anywhere" }}
+          style={{ color: 'var(--muted)', minWidth: 0, overflowWrap: 'anywhere' }}
           data-testid="review-subject"
         >
-          {repo} · {master} · {leaf} · {subjectLabel(selectorKind, selectorId, instead)}
+          <details>
+            <summary>Task and subject identifiers</summary>
+            {repo} · {master} · {leaf} · {subjectLabel(selectorKind, selectorId, instead)}
+          </details>
         </span>
         {refresh}
       </div>
-      {history === "recorded" ? (
-        <p style={{ color: "muted", margin: "0 0 0.75rem" }} data-testid="review-history">
-          recorded comparison — this leaf&apos;s durable generation, re-read from its own record: the
-          panes below are the comparison it bound, not whatever the repository holds now.
-        </p>
+      {history === 'recorded' ? (
+        <span data-testid="review-history" className={css({ color: 'muted', fontSize: '0.75rem' })}>
+          Historical task comparison
+        </span>
       ) : null}
     </>
   );
 }
 
-export function ReviewSurface({
+function useSurface({
   repo,
   master,
   leaf,
-  selectorKind,
-  selectorId,
+  selectorKind: initialKind,
+  selectorId: initialId,
   history,
   onBack,
 }: ReviewTarget & { onBack: () => void }) {
-  // The refusal the reader answered by asking for the task's own source inventory instead. It is a
-  // second, explicitly asked question -- never an automatic substitution -- so the refusal stays on
-  // screen while its answer is shown.
+  const navigation = useReviewNavigation({
+    repo,
+    master,
+    leaf,
+    selectorKind: initialKind,
+    selectorId: initialId,
+    history,
+  });
+  const selectorKind = navigation.subject?.kind;
+  const selectorId = navigation.subject?.id;
   const [instead, setInstead] = useState<ReviewFailure | null>(null);
-  // Which bounded collection this surface is paging and at which cursor (ICR-R10). It is part of the
-  // question asked of the server, so it participates in the target key rather than being applied to
-  // the response afterwards.
   const [selection, setSelection] = useState<ReviewPageRequest | undefined>(undefined);
-  // The reader's local workspace state -- family/member selection, filter, diff layout, full-file
-  // disclosure and the expanded path. It is owned HERE, above the pane switch, because `ReviewPanes`
-  // returns null while a page read is in flight: state owned below that switch is destroyed and
-  // re-initialised by every page request, which discarded the reader's display choices and made the
-  // centre's continuation control single-use (ICR-L24 fix round 5, V10).
   const workspace = useWorkspaceState();
-  // The read cycle: one question, one in-flight read, no superseded answer writing the panes, and the
-  // reader's explicit refresh carrying the identity on screen (ICR-R17). It lives in its own module.
+  const selectSubject = (subject: ReviewSubject | undefined, context?: FamilySelection) => {
+    workspace.focusSelection.current = true;
+    navigation.onSelect(subject);
+    setInstead(null);
+    setSelection(undefined);
+    workspace.setChosen(context ?? null);
+  };
   const { read, retained, carried, refresh } = useReviewReadCycle({
     repo,
     master,
@@ -891,32 +814,76 @@ export function ReviewSurface({
     instead,
     selection,
   });
-  const targetKey = targetKeyOf(repo, master, leaf, instead, selectorKind, selectorId, selection, history);
+  const targetKey = targetKeyOf(
+    repo,
+    master,
+    leaf,
+    instead,
+    selectorKind,
+    selectorId,
+    selection,
+    history,
+  );
 
-  // The retained generation is used only when it was read for the question on screen now; the check
-  // is belt-and-braces beside the reset in the effect, because a payload under a header it was not
-  // read for is exactly the mismatch this surface must not be able to produce.
   const coherent = retained !== null && retained.key === targetKey ? retained.payload : null;
   const shown = shownPayload(read, coherent);
   const problem = problemOf(read);
 
+  return {
+    repo,
+    master,
+    leaf,
+    selectorKind,
+    selectorId,
+    history,
+    onBack,
+    navigation,
+    selectSubject,
+    instead,
+    setInstead,
+    selection,
+    setSelection,
+    workspace,
+    read,
+    carried,
+    refresh,
+    coherent,
+    shown,
+    problem,
+  };
+}
+
+export function ReviewSurface(props: ReviewTarget & { onBack: () => void }) {
+  const {
+    repo,
+    master,
+    leaf,
+    selectorKind,
+    selectorId,
+    history,
+    onBack,
+    navigation,
+    selectSubject,
+    instead,
+    setInstead,
+    selection,
+    setSelection,
+    workspace,
+    read,
+    carried,
+    refresh,
+    coherent,
+    shown,
+    problem,
+  } = useSurface(props);
   return (
     <div
-      className="screen"
+      className={reviewShell}
       data-testid="review-surface"
       data-comparison={shown?.comparison?.reference}
       data-review-target={`${repo}/${master}/${leaf}`}
-      data-review-history={history ?? "live"}
-      // THE REVIEWER'S OWN VERTICAL AFFORDANCE (ICR-L25 round 3, register B7 / finding F2). The
-      // cockpit's `MAIN` is deliberately `overflow: hidden` — "the viewport does not scroll, its panel
-      // scrolls on its own" (`cockpit/Cockpit.tsx`) — and that decision is the shell's, shared with
-      // every other view. This panel had supplied no scrollport of its own, so at 320px it rendered
-      // 7620px of content into a 706px viewport that clipped it: every element in the document
-      // measured `overflow-y` visible or hidden, the window was exactly viewport-height, three wheel
-      // trials moved nothing, and a long guarantee was reachable only by the browser's programmatic
-      // focus scroll. `height: 100%` + `minHeight: 0` fills the shell's row instead of growing past
-      // it, and `overflowY: auto` is the scrollport a reader can actually move.
-      style={{ height: "100%", minHeight: 0, minWidth: 0, overflowY: "auto" }}
+      data-review-history={history ?? 'live'}
+      style={{ height: '100%', minHeight: 0, minWidth: 0, overflowY: 'auto' }}
     >
       <ReviewHeader
         repo={repo}
@@ -930,7 +897,7 @@ export function ReviewSurface({
         refresh={
           <ReviewRefresh
             onRefresh={refresh}
-            busy={read.phase === "loading"}
+            busy={read.phase === 'loading'}
             generation={generationOf(read, carried, shown)}
           />
         }
@@ -939,7 +906,7 @@ export function ReviewSurface({
         read={read}
         instead={instead}
         shown={shown}
-        lastCoherent={read.phase === "failed" ? coherent : null}
+        lastCoherent={read.phase === 'failed' ? coherent : null}
         onRetry={retryFor(read, refresh)}
         onOpenTaskContext={insteadFor(read, problem, instead, setInstead)}
       />
@@ -954,6 +921,7 @@ export function ReviewSurface({
         selectorId={selectorId}
         history={history}
         workspace={workspace}
+        navigation={{ ...navigation, onSelect: selectSubject }}
       />
     </div>
   );

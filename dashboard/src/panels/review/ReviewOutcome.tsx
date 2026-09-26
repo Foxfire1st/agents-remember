@@ -24,36 +24,34 @@
 // source change inventory, offered only for a refusal that answers for the *intent* half alone and
 // only as a separate question the reader asks -- the client still names no dataset.
 
-import type { ReviewFailure, ReviewPayload, ReviewResult } from "../../data/review";
-import {
-  intentOnlyRefusal,
-  reviewProblemFromRefusal,
-  unreadableAnswer,
-} from "../../data/review";
+import type { ReviewFailure, ReviewPayload, ReviewResult } from '../../data/review';
+import { intentOnlyRefusal, reviewProblemFromRefusal, unreadableAnswer } from '../../data/review';
 
-const mutedStyle = { color: "muted", margin: "0.2rem 0" } as const;
+const mutedStyle = { color: 'var(--muted)', margin: '0.2rem 0' } as const;
 
 // The read's four phases, in the one module that renders the three that are not panes.
 export type ReviewRead =
-  | { phase: "loading" }
-  | { phase: "reviewed"; payload: ReviewPayload }
-  | { phase: "refused"; problem: ReviewFailure }
-  | { phase: "failed"; problem: ReviewFailure };
+  | { phase: 'loading' }
+  | { phase: 'reviewed'; payload: ReviewPayload }
+  | { phase: 'refused'; problem: ReviewFailure }
+  | { phase: 'failed'; problem: ReviewFailure };
 
 // One typed result as the phase it is. A refusal is a phase and never a degraded success: a result
 // whose `state` this client does not admit is a failure, so an unrecognized body can never be read as
 // a review of an empty candidate.
 export function readFrom(result: ReviewResult): ReviewRead {
-  if (result.state === "review" && result.payload) {
-    return { phase: "reviewed", payload: result.payload };
+  if (result.state === 'review' && result.payload) {
+    return { phase: 'reviewed', payload: result.payload };
   }
-  if (result.state === "refused") {
+  if (result.state === 'refused') {
     return {
-      phase: "refused",
-      problem: result.refusal ? reviewProblemFromRefusal(result.refusal) : unreadableAnswer("refused"),
+      phase: 'refused',
+      problem: result.refusal
+        ? reviewProblemFromRefusal(result.refusal)
+        : unreadableAnswer('refused'),
     };
   }
-  return { phase: "failed", problem: unreadableAnswer(result.state) };
+  return { phase: 'failed', problem: unreadableAnswer(result.state) };
 }
 
 // The payload the panes should render: the answer, or -- for a read that never answered -- the last
@@ -64,13 +62,13 @@ export function shownPayload(
   read: ReviewRead,
   lastCoherent: ReviewPayload | null,
 ): ReviewPayload | null {
-  if (read.phase === "reviewed") return read.payload;
-  if (read.phase === "failed") return lastCoherent;
+  if (read.phase === 'reviewed') return read.payload;
+  if (read.phase === 'failed') return lastCoherent;
   return null;
 }
 
 export const problemOf = (read: ReviewRead): ReviewFailure | null =>
-  read.phase === "refused" || read.phase === "failed" ? read.problem : null;
+  read.phase === 'refused' || read.phase === 'failed' ? read.problem : null;
 
 // The read is in flight. It is a state of its own rather than a blank surface: a reader must be able
 // to tell "nothing has answered yet" from "the answer was empty" and from every refusal below.
@@ -87,7 +85,7 @@ export function ReviewLoading() {
 // evidence or assessment, is not this state and does not reach here.
 export function knownEmpty(payload: ReviewPayload): boolean {
   return (
-    payload.source.inventory.state === "measured" &&
+    payload.source.inventory.state === 'measured' &&
     payload.source.inventory.listed_total === 0 &&
     payload.comparison === undefined &&
     payload.evidence.evidence_links.length === 0 &&
@@ -97,7 +95,11 @@ export function knownEmpty(payload: ReviewPayload): boolean {
 
 export function KnownEmptyNote() {
   return (
-    <p style={{ margin: "0.2rem 0" }} data-testid="review-known-empty" data-review-state="known-empty">
+    <p
+      style={{ margin: '0.2rem 0' }}
+      data-testid="review-known-empty"
+      data-review-state="known-empty"
+    >
       known empty: the review answered — the bound pair differs at no path, no knowledge subject was
       compared, and no evidence or assessment is recorded. This is a measured empty result, not an
       unavailable one.
@@ -113,56 +115,60 @@ export function KnownEmptyNote() {
 export function ReviewProblemBlock({
   problem,
   origin,
-  subject = "the review",
+  subject = 'the review',
   onRetry,
   onOpenTaskContext,
 }: {
   problem: ReviewFailure;
-  origin: "refusal" | "failure";
+  origin: 'refusal' | 'failure';
   subject?: string;
   onRetry?: () => void;
   onOpenTaskContext?: () => void;
 }) {
   return (
     <div
-      data-testid={origin === "refusal" ? "review-refusal" : "review-failure"}
+      data-testid={origin === 'refusal' ? 'review-refusal' : 'review-failure'}
       data-review-state={problem.token}
       data-review-code={problem.code}
     >
-      <p style={{ margin: "0.2rem 0" }}>
-        {subject} could not be opened ({problem.code}): {problem.detail}
+      <p style={{ margin: '0.2rem 0' }}>
+        {subject} unavailable · {problem.code}
       </p>
-      {problem.offendingInput ? (
-        <p style={mutedStyle} data-testid="review-offending-input">
-          offending input: {problem.offendingInput}
+      <details>
+        <summary>Reason and recovery</summary>
+        <p style={{ margin: '0.2rem 0' }}>
+          {subject} could not be opened ({problem.code}): {problem.detail}
         </p>
-      ) : (
-        <p style={mutedStyle} data-testid="review-no-offending-input">
-          the server named no offending input for this failure.
-        </p>
-      )}
-      {problem.nextAction ? (
-        <p style={mutedStyle} data-testid="review-next-action">
-          next: {problem.nextAction}
-        </p>
-      ) : (
-        <p style={mutedStyle} data-testid="review-no-next-action">
-          the server published no next action for this failure.
-        </p>
-      )}
-      {problem.token === "network" && onRetry ? (
-        <p style={{ margin: "0.2rem 0" }}>
+        {problem.offendingInput ? (
+          <p style={mutedStyle} data-testid="review-offending-input">
+            offending input: {problem.offendingInput}
+          </p>
+        ) : (
+          <p style={mutedStyle} data-testid="review-no-offending-input">
+            the server named no offending input for this failure.
+          </p>
+        )}
+        {problem.nextAction ? (
+          <p style={mutedStyle} data-testid="review-next-action">
+            next: {problem.nextAction}
+          </p>
+        ) : (
+          <p style={mutedStyle} data-testid="review-no-next-action">
+            the server published no next action for this failure.
+          </p>
+        )}
+      </details>
+      {problem.token === 'network' && onRetry ? (
+        <p style={{ margin: '0.2rem 0' }}>
           <button type="button" data-testid="review-retry" onClick={onRetry}>
             retry the review read
           </button>
         </p>
       ) : null}
       {onOpenTaskContext && intentOnlyRefusal(problem.code) ? (
-        <p style={{ margin: "0.2rem 0" }} data-testid="review-source-instead-offer">
-          this task's source change inventory is measured from its two recorded Git trees and needs
-          no knowledge dataset, so it can still be read on its own:{" "}
+        <p style={{ margin: '0.2rem 0' }} data-testid="review-source-instead-offer">
           <button type="button" data-testid="review-source-instead" onClick={onOpenTaskContext}>
-            open this task&apos;s source change inventory (no subject)
+            Review source changes
           </button>
         </p>
       ) : null}
@@ -176,11 +182,14 @@ export function ReviewProblemBlock({
 // for the review.
 export function TaskContextInsteadNote({ problem }: { problem: ReviewFailure }) {
   return (
-    <p style={{ margin: "0.2rem 0" }} data-testid="review-source-instead-note">
+    <p style={{ margin: '0.2rem 0' }} data-testid="review-source-instead-note">
       the subject review refused ({problem.code}): {problem.detail}
-      {problem.offendingInput ? ` · offending input: ${problem.offendingInput}` : ""} — shown below is
-      this task&apos;s complete source change inventory, asked as its own question with no subject.
-      {problem.nextAction ? ` the subject review's own next action still stands: ${problem.nextAction}` : ""}
+      {problem.offendingInput ? ` · offending input: ${problem.offendingInput}` : ''} — shown below
+      is this task&apos;s complete source change inventory, asked as its own question with no
+      subject.
+      {problem.nextAction
+        ? ` the subject review's own next action still stands: ${problem.nextAction}`
+        : ''}
     </p>
   );
 }
@@ -192,13 +201,13 @@ export function TaskContextInsteadNote({ problem }: { problem: ReviewFailure }) 
 export function RetainedGenerationNote({ payload }: { payload: ReviewPayload }) {
   const measuredNothing = knownEmpty(payload);
   return (
-    <p style={{ margin: "0.2rem 0" }} data-testid="review-retained-generation">
+    <p style={{ margin: '0.2rem 0' }} data-testid="review-retained-generation">
       the comparison below is the last one this surface read
-      {payload.comparison ? ` (${payload.comparison.reference})` : ""} — the failed read did not
+      {payload.comparison ? ` (${payload.comparison.reference})` : ''} — the failed read did not
       replace it
       {measuredNothing
-        ? "; that read measured no change, and this surface makes no claim for the read that failed."
-        : " and no empty review is claimed for it."}
+        ? '; that read measured no change, and this surface makes no claim for the read that failed.'
+        : ' and no empty review is claimed for it.'}
     </p>
   );
 }
@@ -234,16 +243,16 @@ export function ReviewOutcomeRegion({
   const retainedIsReal = lastCoherent !== null && !knownEmpty(lastCoherent);
   return (
     <>
-      {read.phase === "loading" ? <ReviewLoading /> : null}
+      {read.phase === 'loading' ? <ReviewLoading /> : null}
       {problem ? (
         <ReviewProblemBlock
-          origin={read.phase === "refused" ? "refusal" : "failure"}
+          origin={read.phase === 'refused' ? 'refusal' : 'failure'}
           problem={problem}
           onRetry={onRetry}
           onOpenTaskContext={onOpenTaskContext}
         />
       ) : null}
-      {instead && read.phase === "reviewed" ? <TaskContextInsteadNote problem={instead} /> : null}
+      {instead && read.phase === 'reviewed' ? <TaskContextInsteadNote problem={instead} /> : null}
       {measuredNothing ? <KnownEmptyNote /> : null}
       {retainedIsReal ? <RetainedGenerationNote payload={lastCoherent} /> : null}
     </>

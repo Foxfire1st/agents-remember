@@ -117,6 +117,7 @@ __all__ = [
     "ComparisonGenerationFreeze",
     "ComparisonGenerationRequest",
     "freeze_comparison_generation",
+    "freeze_resolved_review",
     "freeze_review_comparison",
 ]
 
@@ -248,6 +249,16 @@ def freeze_review_comparison(
     )
     if isinstance(resolved, ReviewRefusal):
         return _refused(resolved)
+    return freeze_resolved_review(resolved, request, options)
+
+
+def freeze_resolved_review(
+    resolved: ReviewCandidateResolution,
+    request: ReviewSurfaceRequest,
+    options: ComparisonFreezeOptions = EMPTY_FREEZE_OPTIONS,
+) -> ComparisonGenerationFreeze:
+    """Compose an explicitly resolved pair and publish through the single generation owner."""
+
     composed = compose_review(resolved, request, options.records)
     if composed.state != "review" or composed.payload is None:
         return _refused(

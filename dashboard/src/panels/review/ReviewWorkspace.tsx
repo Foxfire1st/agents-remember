@@ -1,415 +1,186 @@
-// The family-centered review workspace: scope header, family tree, unified central reading path.
-//
-// WHAT THIS OWNS. The three things the accepted layout treats as one composition: which family or
-// member is selected, the reader's display preferences (diff layout, full-file disclosure, and which
-// listed path is expanded), and the narrow-screen route from the tree to the selected review. The
-// payload's own panes stay in `ReviewSurface`, which mounts this workspace inside the read cycle it
-// already owns: one read, one question, one outcome region, one page control.
-//
-// WHY THE PREFERENCES LIVE HERE AND NOT IN THE COMPONENTS BELOW. ICR-R24@v3 requires the reader's
-// full-file disclosure and current selection to survive a diff-layout switch and a change of
-// selection. State owned by the tree, by the center or by the explorer would be reset by exactly the
-// interaction the requirement is about, so it is lifted to the one component whose lifetime spans
-// them. The preferences are display facts only: they change no request and no stored value.
-//
-// FOCUS. Selecting a linked expression opens the entry in the explorer and the reader can close it
-// from there; closing returns focus to the control that opened it. The tree is one roving-focus group
-// with arrow-key traversal and exposes the current node, so a keyboard reader can always tell which
-// selection is current and which node has focus.
-
-import { useRef, useState } from "react";
-
-import { css } from "../../../styled-system/css";
-import type {
-  ReviewFamilyContext,
-  ReviewFamilySideName,
-  ReviewPayload,
-  ReviewSelectorKind,
-} from "../../data/review";
-import { carriedPage } from "../../data/review";
-import type { ReviewPageRequest } from "./ReviewReadCycle";
-import { FamilyReviewCenter } from "./FamilyReviewCenter";
-import { FamilyTree, type FamilySelection } from "./FamilyTree";
-import type { DiffLayout } from "./SourceExplorer";
+// The accepted reading path: family context in the rail, intent and expressions in the center.
+// Display state lives above read-cycle unmounts, so paging never resets a reader's choices.
+import { useEffect, useRef, useState } from 'react';
+import { css } from '../../../styled-system/css';
+import type { ReviewFamilyContext, ReviewPayload, ReviewSelectorKind } from '../../data/review';
+import { selectedRevision } from './SubjectReview';
+import { carriedPage } from '../../data/review';
+import type { ReviewPageRequest } from './ReviewReadCycle';
+import { FamilyReviewCenter } from './FamilyReviewCenter';
+import { FamilyTree, type FamilySelection } from './FamilyTree';
+import { ReviewNavigation, type ReviewNavigationState } from './ReviewNavigation';
+import { SourceExplorer, type DiffLayout } from './SourceExplorer';
 
 const workspace = css({
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 22rem) minmax(0, 1fr)",
-  gap: "0.75rem",
-  alignItems: "start",
-  "@media (max-width: 60rem)": { gridTemplateColumns: "minmax(0, 1fr)" },
+  display: 'grid',
+  gridTemplateColumns: 'minmax(17rem, 24rem) minmax(0, 1fr)',
+  gap: '1rem',
+  alignItems: 'start',
+  '@media (max-width: 60rem)': { gridTemplateColumns: 'minmax(0, 1fr)' },
 });
-
-const fullWidth = css({ gridColumn: "1 / -1" });
-
 const shell = css({
-  background: "bgPanel",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "grid",
-  borderRadius: "3px",
-  padding: "0.6rem 0.7rem",
-  minWidth: "0",
+  background: 'bgPanel',
+  border: '1px solid var(--grid)',
+  borderRadius: '3px',
+  padding: '1rem',
+  minWidth: 0,
 });
-
+const muted = css({ color: 'muted', fontSize: '0.75rem', margin: '0.35rem 0' });
 const title = css({
-  color: "cyan",
-  fontSize: "0.78rem",
-  letterSpacing: "0.12em",
-  textTransform: "uppercase",
-  margin: "0 0 0.2rem",
+  color: 'cyan',
+  fontSize: '0.75rem',
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  margin: '0 0 0.6rem',
 });
-
-const muted = css({ color: "muted", fontSize: "0.78rem", margin: "0.15rem 0" });
-
-const mono = css({ fontFamily: "mono", fontSize: "0.78rem" });
-
-// The narrow-screen route to the selected review. It is a real button rather than a styled anchor
-// because there is no URL to change: it moves focus to the center column, which is what a reader on a
-// narrow screen needs after scrolling a long tree.
-//
-// IT SITS ABOVE THE TREE, AND THAT PLACEMENT IS THE WHOLE POINT (register B3, the accepted design's
-// finding P2-3). The accepted page puts this affordance "near the top" at `y≈307` so that a narrow
-// reader reaches the review WITHOUT first scrolling the family tree -- whose height is the reason the
-// affordance exists: the same finding records the rail at 2,298px pushing the review to y=2,821px, and
-// the fix "brings the review to the viewport top while keeping the full family/sibling tree intact".
-// It was previously rendered immediately before the centre column, i.e. BELOW the tree, which put it at
-// y=1183 in a 900px viewport -- visible only after the scroll it exists to avoid. The tree stays
-// exactly where it is: the fix is where this control is composed, not what the tree shows.
 const jump = css({
-  justifySelf: "start",
-  background: "transparent",
-  borderWidth: "1px",
-  borderStyle: "solid",
-  borderColor: "amber",
-  borderRadius: "2px",
-  color: "amber",
-  cursor: "pointer",
-  font: "inherit",
-  fontSize: "0.78rem",
-  padding: "0.15rem 0.4rem",
-  "@media (min-width: 60.01rem)": { display: "none" },
-  _focusVisible: { outline: "1px solid var(--amber)", outlineOffset: "2px" },
+  gridColumn: '1 / -1',
+  justifySelf: 'start',
+  '@media (min-width: 60.01rem)': { display: 'none' },
 });
 
-// One instance of the narrow route, so the two call sites cannot drift in label, testid or handler.
-function NarrowJump({ center }: { center: React.RefObject<HTMLDivElement | null> }) {
-  return (
-    <button
-      type="button"
-      className={jump}
-      data-testid="review-jump-to-selection"
-      onClick={() => center.current?.focus()}
-    >
-      ↓ jump to the selected review
-    </button>
-  );
-}
-
-// The scope/status header: which task context is open, which subject of it, WHICH RECORD the panes
-// below are read from, the comparison's mode and exact endpoints, the measured changed-path count and
-// the review state. Technical identities are printed because they are what a reader quotes to
-// reproduce the read; nothing here summarises what the panes conclude, because they conclude nothing.
 function ScopeHeader({
   payload,
   repo,
   master,
   leaf,
-  selectorKind,
-  selectorId,
   history,
 }: {
   payload: ReviewPayload;
   repo: string;
   master: string;
   leaf: string;
-  selectorKind?: ReviewSelectorKind;
-  selectorId?: string;
-  history?: "recorded";
+  history?: 'recorded';
 }) {
   const inventory = payload.source.inventory;
-  const context = payload.family_context;
+  const comparison = payload.comparison;
+  const recordLabel = recordLabelOf(payload, history);
   return (
-    <header className={`${shell} ${fullWidth}`} data-testid="review-scope-header">
-      <h2 className={title}>Complete code and intent review</h2>
-      <p className={muted} data-testid="review-scope-task">
-        task {repo} · master {master} · leaf {leaf} · subject{" "}
-        {selectorKind && selectorId
-          ? `${selectorKind} ${selectorId}`
-          : "whole task (no subject selected)"}
-      </p>
+    <header
+      className={css({
+        gridColumn: '1 / -1',
+        borderBottom: '1px solid var(--grid)',
+        paddingBottom: '0.75rem',
+        minWidth: 0,
+      })}
+      data-testid="review-scope-header"
+    >
       <p className={muted} data-testid="review-scope-record">
-        record: {history === "recorded" ? "the leaf's recorded comparison" : "the live candidate"} ·
-        source inventory: {inventory.state}
-        {inventory.partial ? " (partial)" : ""} · changed paths listed: {inventory.listed_total}
+        {recordLabel}·{' '}
+        {inventory.state === 'unavailable'
+          ? 'Source inventory unavailable'
+          : `${inventory.listed_total} changed files${inventory.partial ? ' · partial inventory' : ''}`}{' '}
+        · Read-only
       </p>
-      {payload.comparison ? (
-        <p className={muted} data-testid="review-scope-comparison">
-          comparison {payload.comparison.reference} · policy {payload.comparison.policy_version} ·
-          before {payload.comparison.before_code_tree_id ?? "not recorded"} → after{" "}
-          {payload.comparison.after_code_tree_id ?? "not recorded"}
+      {payload.staleness.state !== 'current' ? (
+        <p className={muted} data-testid="review-currentness-status">
+          {payload.staleness.state === 'stale'
+            ? 'Comparison has changed · refresh before relying on this view.'
+            : 'Currentness not measured · inspect the comparison details.'}
         </p>
-      ) : (
-        <p className={muted} data-testid="review-scope-comparison">
-          no knowledge comparison was made for this read; the complete source change inventory below
-          is the review population.
+      ) : null}
+      <details>
+        <summary>Comparison details</summary>
+        <p className={muted}>
+          {repo} · {master} · <span data-testid="review-scope-task">{leaf}</span>
         </p>
-      )}
-      <p className={muted} data-testid="review-scope-families">
-        {context === undefined
-          ? "this body carries no family context, so no family reading may be made from it — that is not a measured zero."
-          : `${context.state}: ${context.families_returned} of ${context.families_total} recorded family context(s) composed.`}
-      </p>
+        <p className={muted} data-testid="review-scope-comparison">
+          {comparison
+            ? `Comparison ${comparison.reference} · policy ${comparison.policy_version}`
+            : 'No knowledge comparison was made for this read.'}
+        </p>
+        <p className={muted}>
+          Before {inventory.before_code_tree_id ?? 'not recorded'} → after{' '}
+          {inventory.after_code_tree_id ?? 'not recorded'}
+        </p>
+        <p className={muted} data-testid="review-scope-families">
+          {payload.family_context
+            ? `${payload.family_context.families_returned} of ${payload.family_context.families_total} family contexts read · ${payload.family_context.state}`
+            : 'Family context was not supplied.'}
+        </p>
+      </details>
     </header>
   );
 }
 
-// Which roster walk the displayed page belongs to. A `family_members` page is a position in ONE
-// family revision's walk, and the page's own scope names it; this line prints that scope so a reader
-// never has to guess which family the cursor continues.
-function RosterWalkNotice({ payload }: { payload: ReviewPayload }) {
-  const page = carriedPage(payload);
-  if (page === null || page.collection !== "family_members") return null;
+function FamilyNotComposed({
+  context,
+  selectable,
+}: {
+  context?: ReviewFamilyContext;
+  selectable: boolean;
+}) {
+  const state = context?.state ?? 'absent';
+  const knownEmpty = state === 'no_family_recorded';
+  const canChoose = state === 'no_subject_selected' && selectable;
+  const label = knownEmpty
+    ? 'No recorded family'
+    : canChoose
+      ? 'Choose a recorded subject'
+      : 'Attribution unknown';
+  const description = emptyFamilyDescription(state, canChoose);
   return (
-    <p className={`${muted} ${fullWidth}`} data-testid="review-roster-walk">
-      this response is a page of one family revision&apos;s roster walk —{" "}
-      {page.scope.join(" · ") || "the page published no scope"} ·{" "}
-      {page.continued_from
-        ? "continued from the cursor this walk published"
-        : "the walk's first page"}
-      .
-    </p>
-  );
-}
-
-// The body's own statement when it composed no family tree. The three states are rendered apart,
-// because they are different facts: a body that carries no family context at all is neither a measured
-// zero nor an unavailable read, and the source explorer below is unaffected by all three.
-function FamilyNotComposed({ context }: { context: ReviewFamilyContext | undefined }) {
-  return (
-    <section
-      className={shell}
-      data-testid="review-family-tree"
-      data-family-state={context?.state ?? "absent"}
-    >
-      <h2 className={title}>Family tree</h2>
-      <p
-        data-testid="review-family-context"
-        data-context-state={context?.state ?? "absent"}
-        className={muted}
-      >
-        {context === undefined
-          ? "this body carries no family context. No recorded family scope was read into it, so nothing here is shown as a family population — this is not a measured zero and not an unavailable read, and the complete source explorer below is unaffected."
-          : `${context.state}: ${context.detail}`}
+    <section className={shell} data-testid="review-family-tree" data-family-state={state}>
+      <h2 className={title}>{label}</h2>
+      <p className={muted} data-testid="review-family-context" data-context-state={state}>
+        {description}
       </p>
-      {context !== undefined && context.limitations.length ? (
-        <p className={muted} data-testid="review-family-limitation">
-          {context.limitations.length} recorded limitation(s): {context.limitations.join(" · ")}
-        </p>
+      {context ? (
+        <details>
+          <summary>Context details</summary>
+          <p>{context.detail}</p>
+          {context.limitations.map((item) => (
+            <p key={item} data-testid="review-family-limitation">
+              {item}
+            </p>
+          ))}
+        </details>
       ) : null}
     </section>
   );
 }
 
-// The tree column: the interactive family tree when this body composed one, and the body's own state
-// when it did not.
-function composed(context: ReviewFamilyContext | undefined): boolean {
-  return context !== undefined && (context.state === "recorded" || context.state === "partial");
-}
-
-function FamilyColumn({
-  context,
-  selection,
-  onSelect,
-  onRosterNext,
-  query,
-  onQuery,
-}: {
-  context: ReviewFamilyContext | undefined;
-  selection: FamilySelection | null;
-  onSelect: (selection: FamilySelection) => void;
-  onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
-  query: string;
-  onQuery: (next: string) => void;
-}) {
-  if (!composed(context)) return <FamilyNotComposed context={context} />;
-  return (
-    <FamilyTree
-      context={context as ReviewFamilyContext}
-      selection={selection}
-      onSelect={onSelect}
-      onRosterNext={onRosterNext}
-      query={query}
-      onQuery={onQuery}
-    />
-  );
-}
-
-// The narrow-screen route and the centre column it leads to. The route is a real button rather than a
-// styled anchor because there is no URL to change: it moves focus to the column below, which is what a
-// reader on a narrow screen needs after scrolling a long tree. On a wide layout the column is already
-// beside the tree and the control is hidden by the stylesheet.
-function SelectionColumn({
-  payload,
-  selection,
-  onSelectMember,
-  layout,
-  onLayout,
-  fullFile,
-  onFullFile,
-  openPath,
-  onOpenPath,
-  onOpenFromCenter,
-  onRosterNext,
-  center,
-}: {
-  payload: ReviewPayload;
-  selection: FamilySelection | null;
-  onSelectMember: (selection: FamilySelection) => void;
-  layout: DiffLayout;
-  onLayout: (next: DiffLayout) => void;
-  fullFile: boolean;
-  onFullFile: (next: boolean) => void;
-  openPath: string | null;
-  onOpenPath: (path: string | null) => void;
-  onOpenFromCenter: (path: string) => void;
-  onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
-  center: React.RefObject<HTMLDivElement | null>;
-}) {
-  return (
-    <>
-      <CenterColumn
-        payload={payload}
-        selection={selection}
-        layout={layout}
-        onLayout={onLayout}
-        fullFile={fullFile}
-        onFullFile={onFullFile}
-        openPath={openPath}
-        onOpenPath={onOpenPath}
-        onOpenFromCenter={onOpenFromCenter}
-        onOpenMember={(familyId, memberRevisionId) =>
-          onSelectMember({ familyId, memberRevisionId })
-        }
-        onRosterNext={onRosterNext}
-        center={center}
-      />
-    </>
-  );
-}
-
-// The centre column and its own display controls. It is one component so the workspace below reads as
-// the composition it is: scope, tree, narrow-screen route, centre.
-function CenterColumn({
-  payload,
-  selection,
-  layout,
-  onLayout,
-  fullFile,
-  onFullFile,
-  openPath,
-  onOpenPath,
-  onOpenFromCenter,
-  onOpenMember,
-  onRosterNext,
-  center,
-}: {
-  payload: ReviewPayload;
-  selection: FamilySelection | null;
-  layout: DiffLayout;
-  onLayout: (next: DiffLayout) => void;
-  fullFile: boolean;
-  onFullFile: (next: boolean) => void;
-  openPath: string | null;
-  onOpenPath: (path: string | null) => void;
-  onOpenFromCenter: (path: string) => void;
-  onOpenMember: (familyId: string, memberRevisionId: string) => void;
-  onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
-  center: React.RefObject<HTMLDivElement | null>;
-}) {
-  return (
-    <div ref={center} tabIndex={-1} data-testid="review-center-column">
-      <FamilyReviewCenter
-        payload={payload}
-        selection={selection}
-        layout={layout}
-        onLayout={onLayout}
-        fullFile={fullFile}
-        onFullFile={onFullFile}
-        onOpenMember={onOpenMember}
-        onRosterNext={onRosterNext}
-        openPath={openPath}
-        onOpenPath={onOpenPath}
-        onOpenFromCenter={onOpenFromCenter}
-      />
-      <DisplayControls
-        layout={layout}
-        onLayout={onLayout}
-        fullFile={fullFile}
-        onFullFile={onFullFile}
-      />
-      <p className={muted} data-testid="review-display-state">
-        display: {layout} diff · {fullFile ? "full file" : "changed regions only"}
-        {openPath ? (
-          <>
-            {" "}
-            · expanded: <code className={mono}>{openPath}</code>
-          </>
-        ) : (
-          " · no entry expanded"
-        )}
-      </p>
-    </div>
-  );
-}
-
-// One workspace's local state: which family or member is selected, the reader's filter, the three
-// display preferences, and the focus memory that closing an expansion restores.
-//
-// IT IS EXPORTED, AND ITS OWNER IS THE SURFACE RATHER THAN THIS COMPONENT (ICR-L24 fix round 5, V10).
-// A page request changes the read's question, so the payload is null while it is in flight and the
-// panes -- this whole subtree included -- unmount and mount again. State owned here would therefore be
-// destroyed and re-initialised by every page read, which is what the round-4 verification measured:
-// the selection fell back to `none`, the filter to `""`, the diff layout to `split` and full-file to
-// `true`, and the centre's own continuation control became single-use because its selection was gone
-// by the time the page arrived. The surface holds this state and passes it down, so a page read cannot
-// reach it.
 export interface WorkspaceState {
   chosen: FamilySelection | null;
-  setChosen: (selection: FamilySelection) => void;
+  setChosen: (selection: FamilySelection | null) => void;
   query: string;
   setQuery: (next: string) => void;
   layout: DiffLayout;
   setLayout: (next: DiffLayout) => void;
   fullFile: boolean;
   setFullFile: (next: boolean) => void;
-  openPath: string | null;
+  openPath: string | null | undefined;
   openFromCenter: (path: string) => void;
   closePath: (path: string | null) => void;
   center: React.RefObject<HTMLDivElement | null>;
+  focusSelection: React.RefObject<boolean>;
 }
 
 export function useWorkspaceState(): WorkspaceState {
   const [chosen, setChosen] = useState<FamilySelection | null>(null);
-  const [query, setQuery] = useState("");
-  const [layout, setLayout] = useState<DiffLayout>("split");
-  const [fullFile, setFullFile] = useState(true);
-  const [openPath, setOpenPath] = useState<string | null>(null);
-  // The control that opened the current expansion, so closing it can put focus back where the reader
-  // was rather than at the top of the document.
+  const [query, setQuery] = useState('');
+  const [layout, setLayout] = useState<DiffLayout>('split');
+  const [fullFile, setFullFile] = useState(false);
+  const [openPath, setOpenPath] = useState<string | null>();
   const opener = useRef<HTMLElement | null>(null);
   const center = useRef<HTMLDivElement>(null);
+  const focusSelection = useRef(false);
   const openFromCenter = (path: string) => {
     opener.current = document.activeElement as HTMLElement | null;
     setOpenPath(path);
   };
   const closePath = (path: string | null) => {
+    if (path !== null) opener.current = document.activeElement as HTMLElement | null;
     setOpenPath(path);
     if (path === null) opener.current?.focus();
   };
+  const choose = (selection: FamilySelection | null) => {
+    setChosen(selection);
+    if (selection) revealCenter(center);
+  };
   return {
     chosen,
-    setChosen,
+    setChosen: choose,
     query,
     setQuery,
     layout,
@@ -420,53 +191,18 @@ export function useWorkspaceState(): WorkspaceState {
     openFromCenter,
     closePath,
     center,
+    focusSelection,
   };
 }
 
-// The header band: which task context this is, which record it was read from, and -- when the
-// response is a page of a roster walk -- which family revision's walk it is a position in.
-function WorkspaceHeader({
-  payload,
-  repo,
-  master,
-  leaf,
-  selectorKind,
-  selectorId,
-  history,
-}: {
-  payload: ReviewPayload;
-  repo: string;
-  master: string;
-  leaf: string;
-  selectorKind?: ReviewSelectorKind;
-  selectorId?: string;
-  history?: "recorded";
-}) {
-  return (
-    <>
-      <ScopeHeader
-        payload={payload}
-        repo={repo}
-        master={master}
-        leaf={leaf}
-        selectorKind={selectorKind}
-        selectorId={selectorId}
-        history={history}
-      />
-      <RosterWalkNotice payload={payload} />
-    </>
-  );
-}
-
-// One roster-walk handler for the whole workspace: the tree's control and the centre's control are the
-// same component over the same value, so they cannot ask different questions. The family and side are
-// the page's own scope rather than the request's -- a roster cursor names the one walk it continues --
-// which is why only the continuation travels.
-function rosterWalk(
-  onPageSelect: (page: ReviewPageRequest | undefined) => void,
-): (familyId: string, side: ReviewFamilySideName, continuation: string) => void {
-  return (_familyId, _side, continuation) =>
-    onPageSelect({ of: "family_members", continuation });
+function selectedContext(
+  payload: ReviewPayload,
+  chosen: FamilySelection | null,
+  selectorId?: string,
+): FamilySelection | null {
+  const entries = payload.family_context?.entries ?? [];
+  if (chosen && entries.some((entry) => entry.family_id === chosen.familyId)) return chosen;
+  return initialContext(payload, entries, selectorId);
 }
 
 export function ReviewWorkspace({
@@ -474,11 +210,11 @@ export function ReviewWorkspace({
   repo,
   master,
   leaf,
-  selectorKind,
   selectorId,
   history,
   onPageSelect,
   state,
+  navigation,
 }: {
   payload: ReviewPayload;
   repo: string;
@@ -486,107 +222,290 @@ export function ReviewWorkspace({
   leaf: string;
   selectorKind?: ReviewSelectorKind;
   selectorId?: string;
-  history?: "recorded";
-  // The surface's one page control. A family roster continuation is a page request like any other, so
-  // it goes through the read cycle the surface already owns rather than a second reader.
+  history?: 'recorded';
   onPageSelect: (page: ReviewPageRequest | undefined) => void;
-  // The reader's local state, owned by the surface: a page read unmounts this subtree (V10).
   state: WorkspaceState;
+  navigation?: ReviewNavigationState;
 }) {
-  const walkRoster = rosterWalk(onPageSelect);
-  const {
-    chosen,
-    setChosen,
-    query,
-    setQuery,
-    layout,
-    setLayout,
-    fullFile,
-    setFullFile,
-    openPath,
-    openFromCenter,
-    closePath,
-    center,
-  } = state;
-
+  useSelectionFocus(payload, state);
+  const chosen = selectedContext(payload, state.chosen, selectorId);
+  const choose = (selection: FamilySelection) =>
+    chooseSubject(payload, selection, state, navigation);
+  const rosterNext = (_family: string, _side: string, continuation: string) =>
+    onPageSelect({ of: 'family_members', continuation });
   return (
     <div
       className={workspace}
       data-testid="review-workspace"
-      data-diff-layout={layout}
-      data-full-file={fullFile ? "true" : "false"}
+      data-diff-layout={state.layout}
+      data-full-file={String(state.fullFile)}
     >
-      <WorkspaceHeader
+      <ScopeHeader payload={payload} repo={repo} master={master} leaf={leaf} history={history} />
+      <button
+        type="button"
+        className={jump}
+        data-testid="review-jump-to-selection"
+        onClick={() => jumpToReview(state.center)}
+      >
+        ↓ Jump to selected review
+      </button>
+      <WorkspaceRail
         payload={payload}
         repo={repo}
         master={master}
         leaf={leaf}
-        selectorKind={selectorKind}
-        selectorId={selectorId}
-        history={history}
+        state={state}
+        navigation={navigation}
+        chosen={chosen}
+        rosterNext={rosterNext}
+        onSelect={choose}
       />
-      {/* Above the tree, on purpose: see `NarrowJump`. At >=60.01rem it renders nothing at all. */}
-      <NarrowJump center={center} />
-      <FamilyColumn
-        context={payload.family_context}
-        selection={chosen}
-        onSelect={setChosen}
-        onRosterNext={walkRoster}
-        query={query}
-        onQuery={setQuery}
-      />
-      <SelectionColumn
-        payload={payload}
-        selection={chosen}
-        onSelectMember={setChosen}
-        onRosterNext={walkRoster}
-        layout={layout}
-        onLayout={setLayout}
-        fullFile={fullFile}
-        onFullFile={setFullFile}
-        openPath={openPath}
-        onOpenPath={closePath}
-        onOpenFromCenter={openFromCenter}
-        center={center}
-      />
+      <div
+        ref={state.center}
+        tabIndex={-1}
+        data-testid="review-center-column"
+        className={css({ minWidth: 0 })}
+      >
+        <FamilyReviewCenter
+          payload={payload}
+          subject={navigation?.subject}
+          selection={chosen}
+          layout={state.layout}
+          onLayout={state.setLayout}
+          fullFile={state.fullFile}
+          onFullFile={state.setFullFile}
+          openPath={state.openPath}
+          onOpenPath={state.closePath}
+          onOpenFromCenter={state.openFromCenter}
+          onOpenMember={(familyId, memberRevisionId) => choose({ familyId, memberRevisionId })}
+          onRosterNext={rosterNext}
+        />
+        <RosterPageNote payload={payload} />
+      </div>
     </div>
   );
 }
 
-// The same two display values, reachable from the centre column as well as from the explorer's own
-// bar: a reader looking at a diff should not have to scroll to the explorer to change how it is
-// drawn. Both controls write the one pair of values this component owns.
-function DisplayControls({
-  layout,
-  onLayout,
-  fullFile,
-  onFullFile,
+const rail = css({
+  display: 'grid',
+  gap: '0.75rem',
+  minWidth: 0,
+  alignContent: 'start',
+  position: 'sticky',
+  top: 0,
+  maxHeight: 'calc(100dvh - 12rem)',
+  overflowY: 'auto',
+  scrollbarGutter: 'stable',
+  '@media (max-width: 60rem)': {
+    position: 'static',
+    maxHeight: 'none',
+    overflowY: 'visible',
+  },
+});
+
+function WorkspaceRail({
+  payload,
+  repo,
+  master,
+  leaf,
+  state,
+  navigation,
+  chosen,
+  rosterNext,
+  onSelect,
 }: {
-  layout: DiffLayout;
-  onLayout: (next: DiffLayout) => void;
-  fullFile: boolean;
-  onFullFile: (next: boolean) => void;
+  payload: ReviewPayload;
+  repo: string;
+  master: string;
+  leaf: string;
+  state: WorkspaceState;
+  navigation?: ReviewNavigationState;
+  onSelect: (selection: FamilySelection) => void;
+  chosen: FamilySelection | null;
+  rosterNext: (family: string, side: string, continuation: string) => void;
 }) {
+  const context = payload.family_context;
   return (
-    <p className={muted} data-testid="review-center-display-controls">
-      <label htmlFor="review-center-diff-layout">diff layout </label>
-      <select
-        id="review-center-diff-layout"
-        data-testid="review-center-diff-layout"
-        value={layout}
-        onChange={(event) => onLayout(event.target.value === "inline" ? "inline" : "split")}
-      >
-        <option value="split">split</option>
-        <option value="inline">inline</option>
-      </select>{" "}
-      <button
-        type="button"
-        data-testid="review-center-full-file"
-        aria-pressed={fullFile}
-        onClick={() => onFullFile(!fullFile)}
-      >
-        {fullFile ? "showing full file" : "showing changed regions"}
-      </button>
-    </p>
+    <aside className={rail}>
+      <div className={shell}>
+        <h2 className={title}>Families & invariants</h2>
+        {navigation ? (
+          <ReviewNavigation
+            {...navigation}
+            loadedFamilyIds={context?.entries.map((entry) => entry.family_id)}
+          >
+            <FamilyRailContext
+              payload={payload}
+              state={state}
+              chosen={chosen}
+              onSelect={onSelect}
+              rosterNext={rosterNext}
+              selectable={Boolean(navigation.catalogue.entries?.length)}
+            />
+          </ReviewNavigation>
+        ) : (
+          <FamilyRailContext
+            payload={payload}
+            state={state}
+            chosen={chosen}
+            onSelect={onSelect}
+            rosterNext={rosterNext}
+            selectable={false}
+          />
+        )}
+      </div>
+      <SourceExplorer
+        inventory={payload.source.inventory}
+        attribution={sourceAttribution(payload)}
+        repo={repo}
+        master={master}
+        leaf={leaf}
+        layout={state.layout}
+        onLayout={state.setLayout}
+        fullFile={state.fullFile}
+        onFullFile={state.setFullFile}
+        open={state.openPath ?? null}
+        onOpen={(path) => {
+          state.closePath(path);
+          if (path !== null) revealCenter(state.center);
+        }}
+        showContent={false}
+      />
+    </aside>
   );
+}
+
+function recordLabelOf(payload: ReviewPayload, history?: 'recorded'): string {
+  if (payload.limitations.includes('history:reconstructed-recorded-endpoints'))
+    return 'Reconstructed from recorded endpoints';
+  return history === 'recorded' ? 'Recorded task comparison' : 'Live task comparison';
+}
+
+function FamilyRailContext({
+  payload,
+  state,
+  chosen,
+  rosterNext,
+  selectable,
+  onSelect,
+}: {
+  payload: ReviewPayload;
+  state: WorkspaceState;
+  chosen: FamilySelection | null;
+  rosterNext: (family: string, side: string, continuation: string) => void;
+  selectable: boolean;
+  onSelect: (selection: FamilySelection) => void;
+}) {
+  const context = payload.family_context;
+  return context && (context.state === 'recorded' || context.state === 'partial') ? (
+    <FamilyTree
+      context={context}
+      selection={chosen}
+      onSelect={onSelect}
+      onRosterNext={rosterNext}
+      query={state.query}
+      onQuery={state.setQuery}
+      embedded
+    />
+  ) : (
+    <FamilyNotComposed context={context} selectable={selectable} />
+  );
+}
+
+function RosterPageNote({ payload }: { payload: ReviewPayload }) {
+  const page = carriedPage(payload);
+  if (page?.collection !== 'family_members') return null;
+  return (
+    <details>
+      <summary>Roster page details</summary>
+      <p className={muted} data-testid="review-roster-walk">
+        Roster page · {page.scope.join(' · ')}
+      </p>
+    </details>
+  );
+}
+
+function emptyFamilyDescription(state: string, canChoose: boolean): string {
+  if (state === 'no_family_recorded')
+    return 'The selected invariant has no recorded family membership.';
+  if (state === 'absent')
+    return 'No family context was supplied for this comparison. Attribution is unknown.';
+  if (state === 'no_subject_selected')
+    return canChoose
+      ? 'Open a recorded family or invariant above. All source changes remain available below.'
+      : 'No recorded intent is selected. Source review remains available.';
+  return 'Family context could not be read for this comparison. Source review remains available.';
+}
+
+function useSelectionFocus(payload: ReviewPayload, state: WorkspaceState): void {
+  const { center, focusSelection } = state;
+  useEffect(() => {
+    if (!focusSelection.current) return;
+    const workspace = center.current?.closest('[data-testid="review-workspace"]');
+    const selected = workspace?.querySelector<HTMLElement>('[data-tree-node][aria-current="true"]');
+    (selected ?? center.current)?.focus();
+    focusSelection.current = false;
+  }, [payload, center, focusSelection]);
+}
+
+// The rail owns its scroll; selecting there restores the common reading position without stealing focus.
+function revealCenter(center: React.RefObject<HTMLDivElement | null>): void {
+  const surface = center.current?.closest<HTMLElement>('[data-testid="review-surface"]');
+  if (surface) surface.scrollTop = 0;
+}
+
+function sourceAttribution(payload: ReviewPayload): Record<string, string> {
+  const mapped = new Set(payload.source.attributed_changed_paths);
+  const unmapped = new Set(payload.source.unattributed_changed_paths);
+  return Object.fromEntries(
+    payload.source.inventory.entries.map((entry) => [
+      entry.path,
+      mapped.has(entry.path)
+        ? 'Mapped'
+        : unmapped.has(entry.path)
+          ? 'Unmapped'
+          : 'Attribution unknown',
+    ]),
+  );
+}
+
+function chooseSubject(
+  payload: ReviewPayload,
+  selection: FamilySelection,
+  state: WorkspaceState,
+  navigation?: ReviewNavigationState,
+): void {
+  const family = payload.family_context?.entries.find(
+    (entry) => entry.family_id === selection.familyId,
+  );
+  if (!family) {
+    state.setChosen(selection);
+    return;
+  }
+  const member = [...family.before.members, ...family.after.members].find(
+    (row) => row.invariant_revision_id === selection.memberRevisionId,
+  );
+  if (selection.memberRevisionId === undefined) {
+    navigation?.onSelect({ kind: 'family', id: selection.familyId }, selection);
+  } else if (member?.invariant_id) {
+    navigation?.onSelect({ kind: 'invariant', id: member.invariant_id }, selection);
+  }
+  state.setChosen(selection);
+}
+
+function jumpToReview(center: React.RefObject<HTMLDivElement | null>): void {
+  center.current?.focus({ preventScroll: true });
+  center.current?.scrollIntoView({ block: 'start' });
+}
+
+function initialContext(
+  payload: ReviewPayload,
+  entries: NonNullable<ReviewPayload['family_context']>['entries'],
+  selectorId?: string,
+): FamilySelection | null {
+  const family = entries.find((entry) => entry.family_id === selectorId) ?? entries[0];
+  if (!family) return null;
+  const selected = selectedRevision(payload.knowledge, { kind: 'invariant', id: selectorId ?? '' });
+  const revision = selected?.after_revision_id ?? selected?.before_revision_id;
+  return { familyId: family.family_id, memberRevisionId: revision };
 }

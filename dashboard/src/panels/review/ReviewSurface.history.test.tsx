@@ -16,6 +16,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewResult } from "../../data/review";
 import { ReviewSurface } from "./ReviewSurface";
 
+// Comparison-focused cases isolate the catalogue. The normal catalogue-to-review journey is
+// exercised through both real readers in ReviewSurface.navigation.test.tsx.
+vi.mock("../../data/useReviewCatalogue", () => ({
+  useReviewCatalogue: () => ({
+    loading: false, entries: [], empty: true, stale: false, facts: "test", refresh: () => undefined,
+  }),
+}));
+
 const REPO = "agents-remember";
 const MASTER = "260921_complete-code-and-intent-review";
 const LEAF = "260921-ICR-L12";
@@ -94,7 +102,7 @@ describe("ReviewSurface historical target (ICR-R12)", () => {
     expect(requestUrl(fetchFn)).toContain("history=recorded");
     expect(requestUrl(fetchFn)).toContain(`selectorId=${SUBJECT}`);
     const provenance = await view.findByTestId("review-history");
-    expect(provenance.textContent).toContain("recorded comparison");
+    expect(provenance.textContent).toContain("Historical task comparison");
     expect(view.getByTestId("review-surface").dataset.reviewHistory).toBe("recorded");
     // The refusal the recorded read earned still reaches the reader with its action, so a leaf that
     // recorded nothing is a stated state rather than a missing entry.

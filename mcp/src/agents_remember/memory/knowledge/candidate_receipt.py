@@ -23,6 +23,7 @@ from agents_remember.memory.knowledge.refusals import (
     KnowledgeStorageError,
     candidate_binding_changed_refusal,
 )
+from agents_remember.models.knowledge.candidate import CandidateResolution
 from agents_remember.models.knowledge.context import KnowledgeSchemaIdentity
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.result import KnowledgeRefusal
@@ -96,6 +97,21 @@ def build_receipt_for_candidate(
         repository_id=destination.repository.repository_id,
         schema_version=schema.schema_name,
         schema_fingerprint=schema.fingerprint,
+    )
+
+
+def resolution_from_receipt(receipt: CandidateReceipt) -> CandidateResolution:
+    """Read the admission a sealed receipt records, without deriving replacement inputs."""
+
+    return CandidateResolution(
+        lane=receipt.lane,
+        code_tree_id=receipt.code.tree_id,
+        memory_tree_id=receipt.memory.tree_id,
+        snapshot_ref=receipt.snapshot_ref,
+        candidate_ref=receipt.candidate_ref,
+        code_commit_id=receipt.code.commit_id,
+        memory_commit_id=receipt.memory.commit_id,
+        task_ref=receipt.task_ref,
     )
 
 

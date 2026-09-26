@@ -216,6 +216,11 @@ def entry(
     return {
         "id": entry_id,
         "statement": f"The obligation {entry_id} records.",
+        "scope": {
+            "applicability": "Calls to the cited constructs in this repository's pkg module.",
+            "conditions": [],
+            "exclusions": [],
+        },
         "kind": "clause",
         "target": targets,
         "found_at": [],

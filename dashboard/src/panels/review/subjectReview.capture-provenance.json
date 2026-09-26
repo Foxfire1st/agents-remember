@@ -1,0 +1,42 @@
+{
+  "captured_source_tree": "f023200696ff374108c1a72f1de0bea985c94111",
+  "producer_notes": "ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reviewer-repair-2026-09-26",
+  "fixtures": [
+    {
+      "file": "subjectReview.family.captured.json",
+      "sha256": "0da8b7fa3282bb96dfd89dfde7961f1af3ddb526294e31f4933952f06b33b310",
+      "owner_response": "data-reviewer-full-assessed-family-response.json",
+      "provenance": "data-reviewer-full-payload-recapture.json",
+      "provenance_sha256": "626784c6ffc698834a8c22a8db9291697968b60fe8ad5d0d84113f863fb5e908"
+    },
+    {
+      "file": "subjectReview.invariant.captured.json",
+      "sha256": "e238b232d321ba65833f0bae4a2cdbaacbe80404fe28b9a2d5b49b536f5a06aa",
+      "owner_response": "data-reviewer-full-assessed-invariant-response.json",
+      "provenance": "data-reviewer-full-payload-recapture.json",
+      "provenance_sha256": "626784c6ffc698834a8c22a8db9291697968b60fe8ad5d0d84113f863fb5e908"
+    },
+    {
+      "file": "subjectReview.successorFamily.captured.json",
+      "sha256": "217b51f05f723da57fc935959d04d5753efef94be954c39c8d7da4c85f2096b3",
+      "owner_response": "data-reviewer-full-single-head-family-context-family-response.json",
+      "provenance": "data-reviewer-single-head-family-provenance.json",
+      "provenance_sha256": "0a28a1b1e499bc44e0e26416ff322502924f725cf29b27e42de29916b3780492"
+    },
+    {
+      "file": "subjectReview.successorInvariant.captured.json",
+      "sha256": "c0b39ebc94805b10d7193acf01c557d5137bd6c858559c3a41d2d3840e7466c1",
+      "owner_response": "data-reviewer-full-single-head-family-context-invariant-response.json",
+      "provenance": "data-reviewer-single-head-family-provenance.json",
+      "provenance_sha256": "0a28a1b1e499bc44e0e26416ff322502924f725cf29b27e42de29916b3780492"
+    },
+    {
+      "file": "subjectReview.noFamily.captured.json",
+      "sha256": "d3192500b87f5eb36e16e6ce08a5eb6f91426d97111d738cb29b32fbef8ea3ec",
+      "owner_response": "data-reviewer-full-single-head-invariant-response.json",
+      "provenance": "data-reviewer-single-head-provenance.json",
+      "provenance_sha256": "fc4ac94491ef4ce48bcdb057f52d712816a49742f26950704fe9941c161c90a5"
+    }
+  ],
+  "scope": "Exact application-owner responses from disposable repositories. These are test evidence, not product knowledge or mounted acceptance. The assessed invariant intentionally has ambiguous heads. The successor family and invariant responses have a genuinely unique authored pair."
+}

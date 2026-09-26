@@ -25,17 +25,18 @@
 // that is not present carries no text at all (the model refuses one that does), so nothing in this
 // module can turn a missing operand into an empty document.
 
-import type { ReviewSideContent } from "../../data/review";
-import { DiffPane } from "../changeset/DiffPane";
-import { FilePane } from "../file-viewer/FilePane";
+import type { ReviewSideContent } from '../../data/review';
+import { DiffPane, type DiffMode } from '../changeset/DiffPane';
+import { FilePane } from '../file-viewer/FilePane';
 
 // The one unavailable-content pair: the side holds no renderable text and says why. It is not a
 // known absence, and the difference is the whole point of rendering it on its own line.
-const unavailable = (state: ReviewSideContent["state"]) => state === "binary" || state === "unresolved";
+const unavailable = (state: ReviewSideContent['state']) =>
+  state === 'binary' || state === 'unresolved';
 
-const sideLine = (side: ReviewSideContent, name: "before" | "after") => (
+const sideLine = (side: ReviewSideContent, name: 'before' | 'after') => (
   <p
-    style={{ color: "muted", margin: "0.2rem 0" }}
+    style={{ color: 'muted', margin: '0.2rem 0' }}
     data-testid={`review-${name}-state`}
     data-side-state={side.state}
   >
@@ -47,13 +48,13 @@ const sideLine = (side: ReviewSideContent, name: "before" | "after") => (
 // the before side's declared language exactly as this pane passed it before the one-sided paths
 // existed. (The paths below, which this leaf adds, take the language of the side whose text they
 // actually draw -- there is no pre-existing choice to preserve there.)
-function bothPresent(before: ReviewSideContent, after: ReviewSideContent) {
+function bothPresent(before: ReviewSideContent, after: ReviewSideContent, mode: DiffMode) {
   return (
     <DiffPane
-      before={before.text ?? ""}
-      after={after.text ?? ""}
+      before={before.text ?? ''}
+      after={after.text ?? ''}
       language={before.language}
-      mode="split"
+      mode={mode}
       collapse={false}
     />
   );
@@ -63,14 +64,14 @@ function bothPresent(before: ReviewSideContent, after: ReviewSideContent) {
 // caller renders `sideLine` for both sides beside this, so "empty because nothing was recorded" is
 // said in words and is not something the reader infers from the diff's blank half. The language is
 // the drawn operand's own, because that operand is the only text in the pane.
-function oneSidedDiff(before: ReviewSideContent, after: ReviewSideContent) {
-  const present = before.state === "present" ? before : after;
+function oneSidedDiff(before: ReviewSideContent, after: ReviewSideContent, mode: DiffMode) {
+  const present = before.state === 'present' ? before : after;
   return (
     <DiffPane
-      before={before.state === "present" ? (before.text ?? "") : ""}
-      after={after.state === "present" ? (after.text ?? "") : ""}
+      before={before.state === 'present' ? (before.text ?? '') : ''}
+      after={after.state === 'present' ? (after.text ?? '') : ''}
       language={present.language}
-      mode="split"
+      mode={mode}
       collapse={false}
     />
   );
@@ -78,14 +79,14 @@ function oneSidedDiff(before: ReviewSideContent, after: ReviewSideContent) {
 
 // The available operand with an unreadable opposite: drawn as content, not as a diff.
 function availableContent(before: ReviewSideContent, after: ReviewSideContent) {
-  const present = before.state === "present" ? before : after;
+  const present = before.state === 'present' ? before : after;
   return (
     <>
-      <p style={{ color: "muted", margin: "0.2rem 0" }} data-testid="review-no-diff-claimed">
+      <p style={{ color: 'muted', margin: '0.2rem 0' }} data-testid="review-no-diff-claimed">
         no diff is drawn: the other side is not a known-empty operand, so an addition or a removal
         cannot be claimed from it.
       </p>
-      <FilePane content={present.text ?? ""} language={present.language} />
+      <FilePane content={present.text ?? ''} language={present.language} />
     </>
   );
 }
@@ -93,26 +94,28 @@ function availableContent(before: ReviewSideContent, after: ReviewSideContent) {
 export function KnowledgeStatements({
   before,
   after,
+  mode = 'split',
 }: {
+  mode?: DiffMode;
   before: ReviewSideContent;
   after: ReviewSideContent;
 }) {
-  const present = [before.state, after.state].filter((state) => state === "present").length;
-  if (present === 2) return bothPresent(before, after);
+  const present = [before.state, after.state].filter((state) => state === 'present').length;
+  if (present === 2) return bothPresent(before, after, mode);
   const lines = (
     <>
-      {sideLine(before, "before")}
-      {sideLine(after, "after")}
+      {sideLine(before, 'before')}
+      {sideLine(after, 'after')}
     </>
   );
   if (present === 0) return lines;
-  const other = before.state === "present" ? after : before;
+  const other = before.state === 'present' ? after : before;
   return (
     <>
       {lines}
       {unavailable(other.state)
         ? availableContent(before, after)
-        : oneSidedDiff(before, after)}
+        : oneSidedDiff(before, after, mode)}
     </>
   );
 }

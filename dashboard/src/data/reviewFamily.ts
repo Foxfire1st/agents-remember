@@ -129,8 +129,8 @@ export interface ReviewFamilyRevisionContext {
   detail: string;
 }
 
-// ICR-R07@v1's own revision-selection value, as the family entry carries it. Mirrored here rather
-// than in `review.ts` because the family context is its only consumer on this surface.
+// The owner's revision-selection value is shared by family context and the primary invariant
+// statement pane. Both consume the recorded pair or explicit non-pair; neither selects a head.
 export type ReviewRevisionSelectionState =
   | "compared"
   | "ambiguous"

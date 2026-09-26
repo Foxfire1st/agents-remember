@@ -57,14 +57,16 @@ from agents_remember.application.knowledge_snapshot import (
     create_knowledge_candidate,
 )
 from agents_remember.kernel.atomic_write import atomic_replace
-from agents_remember.memory.knowledge.candidate_receipt import read_candidate_receipt
+from agents_remember.memory.knowledge.candidate_receipt import (
+    read_candidate_receipt,
+    resolution_from_receipt,
+)
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import bound_repository, dataset_identity
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.candidate import CandidateResolution, SnapshotIdentity
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.snapshot import (
-    CandidateReceipt,
     candidate_database_path,
     candidate_receipt_path,
 )
@@ -182,7 +184,7 @@ def _candidate_admission(
             f"not-established: the candidate's receipt names namespace {receipt.repository_id} "
             f"while its dataset is bound to {repository.repository_id}"
         )
-    return repository, _resolution_from_receipt(receipt)
+    return repository, resolution_from_receipt(receipt)
 
 
 def _recorded_namespace(database: Path) -> RepositoryIdentity | None:
@@ -198,26 +200,6 @@ def _recorded_namespace(database: Path) -> RepositoryIdentity | None:
         return None
     finally:
         connection.close()
-
-
-def _resolution_from_receipt(receipt: CandidateReceipt) -> CandidateResolution:
-    """The exact inputs the candidate's receipt records, as the resolution a new half is built under.
-
-    The receipt and the resolution hold the same facts under two names because one is the *record*
-    of an admission and the other is its *input*; reading one back into the other is what lets a
-    second admitted destination be built from the first one's own account of itself.
-    """
-
-    return CandidateResolution(
-        lane=receipt.lane,
-        code_tree_id=receipt.code.tree_id,
-        memory_tree_id=receipt.memory.tree_id,
-        snapshot_ref=receipt.snapshot_ref,
-        candidate_ref=receipt.candidate_ref,
-        code_commit_id=receipt.code.commit_id,
-        memory_commit_id=receipt.memory.commit_id,
-        task_ref=receipt.task_ref,
-    )
 
 
 def _expose_first_generation(

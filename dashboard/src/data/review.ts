@@ -18,7 +18,7 @@
 
 import { getReviewJson } from "./reviewTransport";
 import { qs } from "./files";
-import type { ReviewFamilyContext } from "./reviewFamily";
+import type { ReviewFamilyContext, ReviewRevisionSelection } from "./reviewFamily";
 
 export {
   ReviewTransportError,
@@ -222,6 +222,7 @@ export interface ReviewKnowledgePane {
   before_conditions: string[];
   after_conditions: string[];
   revision_groups: ReviewRevisionGroup[];
+  revision_selection?: ReviewRevisionSelection | null;
   field_changes: ReviewFieldChange[];
   authored_effects: ReviewAuthoredEffect[];
   signals: ReviewSignal[];
@@ -389,6 +390,14 @@ export interface ReviewObservation {
   limitations: string[];
 }
 
+export interface ReviewRecordChannel {
+  records: string;
+  state: "recorded" | "none_recorded" | "unavailable" | "not_measured" | "not_selected";
+  detail: string;
+  unreadable: string[];
+  next_action?: string | null;
+}
+
 export interface ReviewEvidencePane {
   evidence_state: "recorded" | "none_recorded";
   assessment_state: "assessed" | "unassessed";
@@ -396,6 +405,7 @@ export interface ReviewEvidencePane {
   observations: ReviewObservation[];
   assessments: ReviewAssessmentDisplay[];
   source_inspection_available: boolean;
+  channels?: ReviewRecordChannel[];
   context?: ReviewContextRecord[];
   applicability?: ReviewApplicabilitySummary[];
   unresolved: ReviewUnresolvedReference[];

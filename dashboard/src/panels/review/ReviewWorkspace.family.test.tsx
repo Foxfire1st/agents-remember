@@ -36,6 +36,14 @@ import { REVIEW_PAGED_COLLECTIONS, REVIEW_WALKABLE_COLLECTIONS } from "../../dat
 import { RECORDS_PAGE_REFUSAL_RESPONSE } from "./recordsPageRefusal.captured";
 import { ReviewSurface } from "./ReviewSurface";
 
+// Comparison-focused cases isolate the catalogue. The normal catalogue-to-review journey is
+// exercised through both real readers in ReviewSurface.navigation.test.tsx.
+vi.mock("../../data/useReviewCatalogue", () => ({
+  useReviewCatalogue: () => ({
+    loading: false, entries: [], empty: true, stale: false, facts: "test", refresh: () => undefined,
+  }),
+}));
+
 const REPO = "agents-remember";
 const MASTER = "260921_complete-code-and-intent-review";
 const LEAF = "260921-ICR-L24";
@@ -108,7 +116,9 @@ interface Serving {
 
 // One `fetch` for the whole surface, routed the way the browser routes: the review reads answer with
 // the queue of real bodies in order, and the source-content read answers with the typed refusal above.
+let initialFamily: string | undefined;
 function serving(queue: unknown[]): Serving {
+  try { initialFamily = firstFamilyId(queue[0]); } catch { initialFamily = undefined; }
   const urls: string[] = [];
   let index = 0;
   vi.stubGlobal(
@@ -136,8 +146,8 @@ function mount(history?: "recorded", familyId?: string) {
       repo={REPO}
       master={MASTER}
       leaf={LEAF}
-      selectorKind={familyId === undefined ? "invariant" : "family"}
-      selectorId={familyId ?? "473ba88c-c793-4ba7-981f-79d20a681029"}
+      selectorKind={familyId ?? initialFamily ? "family" : undefined}
+      selectorId={familyId ?? initialFamily}
       history={history}
       onBack={vi.fn()}
     />,
@@ -201,13 +211,13 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     // case reads which is which from the rendered blocks rather than from a capture's row order, so a
     // re-captured body cannot silently re-point it at the wrong family.
     const shapes: string[] = [];
-    for (const opener of openers) {
-      fireEvent.click(opener);
-      await view.findByTestId("review-center-family");
+    for (const familyId of openers.map(node => node.dataset.family)) {
+      fireEvent.click(view.getAllByTestId("review-family-open").find(node => node.dataset.family === familyId)!);
+      await waitFor(() => expect(view.getByTestId("review-center-family").dataset.family).toBe(familyId));
       if (view.queryByTestId("review-center-guarantee-unchanged") !== null) {
         expect(
           view.getByTestId("review-center-guarantee-unchanged").textContent,
-        ).toContain("selected the same family revision");
+        ).toContain("Guarantee unchanged · same recorded revision");
         expect(view.queryByTestId("review-center-guarantee-changed")).toBeNull();
         shapes.push("unchanged");
         continue;
@@ -235,7 +245,7 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
 
     // The member's review retains its family: the guarantee the statement is about is on screen above
     // it, not behind a tab or an inspector.
-    expect(view.getByTestId("review-center-member-family").textContent).toContain("in family");
+    expect(view.getByTestId("review-center-member-family").textContent).toContain("Member review");
     expect(
       view.queryByTestId("review-center-guarantee-changed") ??
         view.queryByTestId("review-center-guarantee-unchanged") ??
@@ -250,7 +260,7 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     expect(byFact("guarantee")).toContain("guarantee:");
     expect(byFact("statement")).toContain("member statement:");
     expect(byFact("membership")).toContain("recorded realization claim(s)");
-    expect(byFact("source")).toContain("location record(s) name this member revision");
+    expect(byFact("source")).toContain("location record(s) name this member's retained revisions");
     expect(byFact("assessment")).toContain("No member, membership or guarantee change creates one");
     expect(view.getByTestId("review-center-evidence")).toBeTruthy();
   });
@@ -261,7 +271,7 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     const before = await view.findByTestId("review-source-explorer");
     const listedBefore = view.getByTestId("review-inventory").textContent ?? "";
     expect(view.getByTestId("review-population-scope").textContent).toContain(
-      "it never removes one from this list",
+      "Complete source population, including unattributed changes",
     );
     expect(before.dataset.inventoryState).toBe("measured");
 
@@ -313,7 +323,7 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     // And the continued response renders as the page it is: the workspace names which family
     // revision's walk the cursor continues, from the page's own scope.
     const walk = await view.findByTestId("review-roster-walk");
-    expect(walk.textContent).toContain("one family revision's roster walk");
+    expect(walk.textContent).toContain("Roster page");
     expect(walk.textContent).toContain("side=after");
     const bounds = view.getByTestId("review-page-bounds");
     expect(bounds.textContent).toContain("family_members");
@@ -330,12 +340,12 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     expect(tree.dataset.familyState).toBe("absent");
     const context = view.getByTestId("review-family-context");
     expect(context.dataset.contextState).toBe("absent");
-    expect(context.textContent).toContain("this body carries no family context");
-    expect(context.textContent).toContain("not a measured zero");
+    expect(context.textContent).toContain("No family context was supplied");
+    expect(context.textContent).toContain("Attribution is unknown");
     expect(view.queryByTestId("review-family-list")).toBeNull();
     // The scope header states the same fact, and the complete source explorer is unaffected by it.
     expect(view.getByTestId("review-scope-families").textContent).toContain(
-      "no family reading may be made from it",
+      "Family context was not supplied",
     );
     expect(view.getByTestId("review-source-explorer")).toBeTruthy();
   });
@@ -354,7 +364,7 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
 
     // The layout preference belongs to the workspace, not to the explorer or the entry: switching it
     // cannot collapse what the reader had open.
-    fireEvent.change(view.getByTestId("review-diff-layout"), { target: { value: "inline" } });
+    fireEvent.change(view.getByTestId("review-center-diff-layout"), { target: { value: "inline" } });
     await waitFor(() =>
       expect(view.getByTestId("review-workspace").dataset.diffLayout).toBe("inline"),
     );
@@ -364,9 +374,9 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     // And the full-file preference is one value shared by the explorer's bar and the centre column.
     fireEvent.click(view.getByTestId("review-center-full-file"));
     await waitFor(() =>
-      expect(view.getByTestId("review-workspace").dataset.fullFile).toBe("false"),
+      expect(view.getByTestId("review-workspace").dataset.fullFile).toBe("true"),
     );
-    expect(view.getByTestId("review-full-file").getAttribute("aria-pressed")).toBe("false");
+    expect(view.getByTestId("review-center-full-file").getAttribute("aria-pressed")).toBe("true");
   });
 
   it("marks the current selection and traverses the tree by keyboard", async () => {
@@ -400,13 +410,13 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     await view.findByTestId("review-family-tree");
 
     const scope = view.getByTestId("review-family-filter-scope");
-    expect(scope.textContent).toContain("2 family context(s) and");
+    expect(scope.textContent).toContain("2 families");
     fireEvent.change(view.getByTestId("review-family-filter"), {
       target: { value: "retry-budget-family" },
     });
     await waitFor(() =>
       expect(view.getByTestId("review-family-filter-scope").textContent).toContain(
-        "This is a filter on this display only",
+        "Matching families retain all siblings",
       ),
     );
     expect(view.getAllByTestId("review-family")).toHaveLength(1);
@@ -506,16 +516,16 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     // them -- and the block must say so with both revision identities.
     fireEvent.click(openers[1]);
     const identical = await view.findByTestId("review-center-guarantee-identical-text");
-    expect(identical.textContent).toContain("different family revisions");
-    expect(identical.textContent).toContain("A revision was authored between them; the text is what did not move.");
+    expect(identical.textContent).toContain("two recorded revisions");
+    expect(identical.textContent).toContain("Guarantee wording unchanged");
     expect(view.queryByTestId("review-center-guarantee-unchanged")).toBeNull();
     expect(identical.textContent).not.toContain("so the guarantee is unchanged");
 
     // Family 1 selected the SAME revision on both snapshots, which is the only shape allowed to say
     // the guarantee is unchanged.
-    fireEvent.click(openers[0]);
+    fireEvent.click(view.getAllByTestId("review-family-open")[0]);
     const unchanged = await view.findByTestId("review-center-guarantee-unchanged");
-    expect(unchanged.textContent).toContain("selected the same family revision");
+    expect(unchanged.textContent).toContain("Guarantee unchanged · same recorded revision");
     expect(view.queryByTestId("review-center-guarantee-identical-text")).toBeNull();
   });
 
@@ -528,7 +538,7 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     // that records it. Selecting it must say the content was not on the page; the one-sided wrapper
     // beside it would instead present a comparison that was never made.
     const notCarried = view.getByTestId("review-family-member-state");
-    const row = notCarried.parentElement;
+    const row = notCarried.closest("li");
     expect(row).not.toBeNull();
     fireEvent.click(within(row as HTMLElement).getByTestId("review-family-member-open"));
 
@@ -538,80 +548,36 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     expect(view.queryByTestId("review-center-member-unchanged")).toBeNull();
     expect(view.queryByTestId("review-center-member-changed")).toBeNull();
   });
-  it("says a listed-but-uncarried row about the page, never that the snapshot records no row", async () => {
+  it("does not turn an uncarried roster operand into an absent statement", async () => {
     const { urls } = serving([CONTINUED]);
     const view = mount();
-    await view.findByTestId("review-family-tree");
-
-    // Shape B: BOTH sides list the same member revision, and one side's row is `content_not_on_page` --
-    // the membership row IS recorded and only its content fell outside this page. Which row that is, is
-    // read from the DOM (a row recorded on both snapshots), and the centre is asked in turn, so the case
-    // cannot be re-pointed by a re-captured body.
-    const rows = view
-      .getAllByTestId("review-family-member")
-      .filter((node) => node.dataset.sides === "before+after");
-    expect(rows.length).toBeGreaterThan(0);
-    const said: string[] = [];
-    for (const row of rows) {
-      fireEvent.click(within(row).getByTestId("review-family-member-open"));
-      await waitFor(() => expect(view.getByTestId("review-center")).toBeTruthy());
-      const note = view.queryByTestId("review-center-member-one-sided-note");
-      if (note === null) continue;
-      said.push(note.textContent ?? "");
-      if (!(note.textContent ?? "").includes("listed this revision's membership row")) continue;
-
-      // The sentence is about the PAGE, and it names the side whose content IS on this page.
-      expect(note.textContent).toContain("but did not carry its revision content");
-      expect(note.textContent).toContain("side's content is below");
-      expect(note.textContent).not.toContain("records no member row");
-      expect(note.textContent).not.toContain("one-sided recorded statement");
-      // Shape B is not the `not_on_page` shape: one side's content is on this page and is shown.
-      expect(view.queryByTestId("review-center-member-not-on-page")).toBeNull();
-      expect(view.getByTestId("review-center-member-one-sided")).toBeTruthy();
-      expect(urls.length).toBe(1);
-
-      // And the centre's own continuation control reaches the rest of that bounded walk, from the
-      // cursor this page published -- the journey the false sentence used to sit at the end of.
-      const control = view.getAllByTestId("review-center-roster-next")[0];
-      const published = control.dataset.continuation ?? "";
-      expect(published).not.toBe("");
-      fireEvent.click(control);
-      await waitFor(() => expect(urls.length).toBeGreaterThan(1));
-      expect(urls[1]).toContain("pageOf=family_members");
-      expect(decodeURIComponent(urls[1])).toContain(published);
-      return;
-    }
-    throw new Error(
-      `no both-sides member row produced the listed-but-uncarried sentence; the centre said: ${JSON.stringify(said)}`,
-    );
+    const tree = await view.findByTestId("review-family-tree");
+    const row = within(tree).getAllByTestId("review-family-member").find(node => node.dataset.sides === "before+after")!;
+    const revision = within(row).getByTestId("review-family-member-open").dataset.revision!;
+    fireEvent.click(within(row).getByTestId("review-family-member-open"));
+    await waitFor(() => expect(urls.some(url => url.includes("selectorKind=invariant"))).toBe(true));
+    await view.findByTestId("review-center-member-ambiguous");
+    expect(view.queryByTestId("review-center-member-one-sided")).toBeNull();
+    expect(view.getByTestId("review-family-tree").querySelector(`[data-revision="${revision}"]`)).not.toBeNull();
+    const control = view.getAllByTestId("review-center-roster-next")[0];
+    const published = control.dataset.continuation!;
+    fireEvent.click(control);
+    await waitFor(() => expect(urls.some(url => url.includes("pageOf=family_members"))).toBe(true));
+    expect(decodeURIComponent(urls.at(-1)!)).toContain(published);
   });
 
-  it("says a bounded page's missing row about the page, never that the snapshot records none", async () => {
-    serving([CONTINUED]);
+  it("retains a bounded before-only membership without claiming that the invariant was removed", async () => {
+    const { urls } = serving([CONTINUED]);
     const view = mount();
-    await view.findByTestId("review-family-tree");
-
-    // A row listed on ONE side only, whose content that side DID carry, while the other side's roster
-    // is a position in a bounded walk. The other snapshot may well record such a row; this page simply
-    // did not reach one, and only the bounded sentence is true here.
-    const rows = view
-      .getAllByTestId("review-family-member")
-      .filter((node) => node.dataset.sides !== "before+after");
-    expect(rows.length).toBeGreaterThan(0);
-    const said: string[] = [];
-    for (const row of rows) {
-      fireEvent.click(within(row).getByTestId("review-family-member-open"));
-      await waitFor(() => expect(view.getByTestId("review-center")).toBeTruthy());
-      const note = view.queryByTestId("review-center-member-one-sided-note");
-      if (note === null) continue;
-      said.push(note.textContent ?? "");
-      if (!(note.textContent ?? "").includes("is a position in a bounded walk")) continue;
-      expect(note.textContent).toContain("this page did not carry a");
-      expect(note.textContent).toContain("the continuation beside it reaches the rows this page did not carry");
-      expect(note.textContent).not.toContain("records no member row");
-      return;
-    }
-    throw new Error(`no bounded missing-row sentence was rendered; the centre said: ${JSON.stringify(said)}`);
+    const tree = await view.findByTestId("review-family-tree");
+    const row = within(tree).getAllByTestId("review-family-member").find(node => node.dataset.sides === "before")!;
+    const revision = within(row).getByTestId("review-family-member-open").dataset.revision!;
+    fireEvent.click(within(row).getByTestId("review-family-member-open"));
+    await waitFor(() => expect(urls.some(url => url.includes("selectorKind=invariant"))).toBe(true));
+    await view.findByTestId("review-center-member");
+    expect(view.queryByTestId("review-center-member-one-sided")).toBeNull();
+    expect(view.getByTestId("review-family-tree").querySelector(`[data-revision="${revision}"]`)?.closest("li")?.dataset.sides).toBe("before");
+    expect(view.getAllByTestId("review-center-roster-next").length).toBeGreaterThan(0);
   });
 
   it("prints one empty-roster sentence in both columns, not two that happen to agree", async () => {
@@ -675,15 +641,15 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     await view.findByTestId("review-family-tree");
 
     // The reader sets all four pieces of local state: a selected family, a filter, an inline diff
-    // layout and "changed regions only". A page read unmounts the workspace subtree -- the payload is
+    // layout and "full file". A page read unmounts the workspace subtree -- the payload is
     // null while the answer is in flight -- so state owned below that switch would be discarded on
     // every page, which is what the round-4 verification measured (fix round 5, V10).
     fireEvent.click((await view.findAllByTestId("review-family-open"))[0]);
     await view.findByTestId("review-center-family");
     fireEvent.change(view.getByTestId("review-family-filter"), { target: { value: "anchor" } });
-    fireEvent.change(view.getByTestId("review-diff-layout"), { target: { value: "inline" } });
+    fireEvent.change(view.getByTestId("review-center-diff-layout"), { target: { value: "inline" } });
     fireEvent.click(view.getByTestId("review-center-full-file"));
-    await waitFor(() => expect(view.getByTestId("review-workspace").dataset.fullFile).toBe("false"));
+    await waitFor(() => expect(view.getByTestId("review-workspace").dataset.fullFile).toBe("true"));
     expect(view.getByTestId("review-workspace").dataset.diffLayout).toBe("inline");
 
     const state = () => ({
@@ -698,7 +664,7 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
       centreControls: 2,
       filter: "anchor",
       layout: "inline",
-      fullFile: "false",
+      fullFile: "true",
     });
 
     // TWO page requests, each issued by the CENTRE's own continuation control -- the control that was
@@ -718,7 +684,7 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
         centreControls: 2,
         filter: "anchor",
         layout: "inline",
-        fullFile: "false",
+        fullFile: "true",
       });
     }
     expect(urls).toHaveLength(3);

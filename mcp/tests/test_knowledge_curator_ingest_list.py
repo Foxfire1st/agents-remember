@@ -350,11 +350,16 @@ def entry(
     disposition: str = "satisfied",
     targets: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """One hand-off entry in revision 1's shape, with the curator-side fields null."""
+    """One hand-off entry with explicit curator scope for the controlled source slice."""
 
     return {
         "id": entry_id,
         "statement": f"The obligation {entry_id} records.",
+        "scope": {
+            "applicability": "Calls to the cited constructs in the fixture's pkg module.",
+            "conditions": [],
+            "exclusions": [],
+        },
         "kind": kind,
         "target": targets if targets is not None else [],
         "found_at": [],
@@ -878,7 +883,7 @@ def test_a_symbol_locator_resolves_a_qualified_name_and_refuses_an_invented_pref
     assert refused["E-invented-prefix"].refusal.startswith("symbol_not_a_definition")
 
 
-def test_the_recorded_blob_identity_is_measured_and_a_working_edit_is_a_typed_refusal(
+def test_the_recorded_blob_identity_follows_the_captured_working_edit(
     tmp_path: Path,
 ) -> None:
     """The identity is read from the file and checked against the tree, so a mismatch is reportable.
@@ -927,10 +932,10 @@ def test_the_recorded_blob_identity_is_measured_and_a_working_edit_is_a_typed_re
     assert exact.counts.anchors_observed_exact == 1
     assert exact.committed[0].targets[0].source_identity == committed_blob
 
-    # An uncommitted edit to the cited file: the working bytes are no longer the bytes the line
-    # holds, so there is no committed identity to record and the run says which failure that is.
+    # An uncommitted edit belongs to its own exact captured tree, not the earlier committed blob.
     original = (code_root / CODE_FILE).read_text(encoding="utf-8")
-    (code_root / CODE_FILE).write_text(original + "\n\nedited after the line\n", encoding="utf-8")
+    (code_root / CODE_FILE).write_text(original + "\n\n# edited after the line\n", encoding="utf-8")
+    working_blob = _git(code_root, ["hash-object", "--no-filters", CODE_FILE])
     try:
         edited = ingest_curator_list(
             contract,
@@ -944,10 +949,10 @@ def test_the_recorded_blob_identity_is_measured_and_a_working_edit_is_a_typed_re
     finally:
         (code_root / CODE_FILE).write_text(original, encoding="utf-8")
 
-    assert edited.committed == ()
-    assert [one.entry_id for one in edited.refused] == ["E-exact"]
-    assert edited.refused[0].refusal.startswith("recorded_blob_mismatch")
-    assert edited.counts.records_written == 0
+    assert edited.refused == ()
+    assert [one.entry_id for one in edited.committed] == ["E-exact"]
+    assert edited.committed[0].targets[0].source_identity == working_blob != committed_blob
+    assert _git(code_root, ["rev-parse", f"{edited.code_tree_id}:{CODE_FILE}"]) == working_blob
 
 
 # --------------------------------------------------------------------------------------------
@@ -1476,7 +1481,7 @@ def test_the_report_names_the_candidate_its_receipt_the_lane_and_the_exact_input
     # A commit is not a tree, and the two facts are reported side by side: the tree the citations
     # were read from is the line's, and the recorded base commit is the one the enclosure named.
     assert report.code_base_commit == pair.code_commit
-    assert report.code_tree_source.startswith("work-line:")
+    assert report.code_tree_source == "future-code-candidate"
     assert receipt["memory"]["tree_id"] == report.memory_tree_id == pair.memory_tree_id
     assert receipt["repository_id"] == report.repository_id
     # The report's description of its own identity rule has to be the rule the code follows. It

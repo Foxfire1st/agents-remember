@@ -140,6 +140,9 @@ the knowledge vocabulary before authoring anything.
 The reconciliation is the substance of the run, and it is the curator's:
 
 - supported **invariants and facets**, with their applicability, essential conditions and exclusions;
+  author the invariant's `scope` object with `applicability`, `conditions` and `exclusions` before
+  ingest. Empty clause lists mean examined and none; missing scope remains `unfilled_curation_scope`,
+  never an inferred workflow sentence;
 - **families**: where the evidence justifies a joint obligation, the family's own guarantee text and
   the exact memberships that place exact invariant revisions in it; where it does not, the deliberate
   `no_family` outcome **with its basis**. An obligation that was not examined is left with neither key
@@ -159,7 +162,7 @@ The writer is the existing admitted knowledge batch writer, reached by the shipp
 taskless entry is:
 
 ```text
-agents-remember knowledge-bootstrap --repo <repo_id> --list <hand-off list>
+agents-remember knowledge-bootstrap --config <active MCP authority settings> --repo <repo_id> --list <hand-off list>
     --authorization-ref <ref> --commit
 ```
 
@@ -167,6 +170,11 @@ agents-remember knowledge-bootstrap --repo <repo_id> --list <hand-off list>
   candidate is planned, the destination is read and **nothing is written**: no batch, no publication
   and no retained progress record. Run it that way first and put its report in front of the
   developer.
+- **Name the active MCP authority settings explicitly with `--config`.** Use the same absolute
+  settings path that configured this repository's serving MCP. Default CLI discovery may find
+  another harness's settings and therefore another repository registry. Use that explicit path
+  for `--status`, planning, `--commit` and cleanup; verify the report's `configPath` and repository
+  before proceeding. Do not change global discovery or invent an enclosure to repair a wrong selection.
 - **`--commit` is the developer's commit word**, and it is the whole of the write act. The curator
   does not give itself that word.
 - **`--authorization-ref` is the authorization this run is admitted under, and it is also the actor
@@ -230,7 +238,7 @@ committed nothing, or an exit status of zero is not a populated foundation.
 ### 7. Clean up through the bounded owner, when there is anything to clean
 
 ```text
-agents-remember knowledge-bootstrap --repo <repo_id> --discard-staging
+agents-remember knowledge-bootstrap --config <active MCP authority settings> --repo <repo_id> --discard-staging
 ```
 
 The staging root is removed **only when the declared location provably holds the very dataset the

@@ -2,7 +2,7 @@
 
     agents-remember review-record-comparison --config <mcp authority settings>
         --contract <leaf enclosure contract> [--evidence <owner>:<task-relative path>]
-        [--historical-absence before|after] [--json]
+        [--historical-absence before|after] [--unchanged-knowledge] [--json]
 
 **Why this command exists.** The Intent Reviewer reads a *per-leaf comparison generation*: a closed
 leaf's review reopens from ``history:recorded-comparison`` and falls back to a bare
@@ -28,13 +28,11 @@ undeclared CLI loaded from a source *checkout* is refused at the primary checkou
 disposable coordination root in a linked worktree (:mod:`agents_remember.kernel.primitives.
 checkout_coordination`) -- so the live authority is named explicitly rather than inferred.
 
-**What this command does NOT do.** It authors no knowledge, places no dataset and establishes no
-before half. A comparison is *between* two operands, and those operands are the write plane's own
-artifacts: ``knowledge-ingest`` authors the candidate half and places the dataset the leaf forks from,
-and the shipped first-generation owner establishes an identified empty before half for a repository
-whose knowledge begins at this leaf. This command records the comparison those owners made; a leaf
-whose halves are absent is refused by the freeze's own named state rather than by a second rule
-invented here.
+**The knowledge selection is explicit.** Ordinarily this command records the write plane's own
+before and candidate halves. ``--unchanged-knowledge`` prepares a code-only task's pair through the
+same candidate and original-baseline owners after proving its published dataset and any existing
+task halves agree with the exact recorded memory base. An unpublished change refuses that claim.
+It authors no knowledge and publishes no dataset; the default never silently selects this mode.
 
 PLANNING IS NOT OFFERED, AND THAT IS DELIBERATE. A freeze either publishes or refuses, and it is
 already idempotent: an exact retry of the same comparison converges on the published record instead of
@@ -63,6 +61,7 @@ from agents_remember.application.review_comparison_generation import (
     read_generation_refs,
     read_manifest,
 )
+from agents_remember.application.review_unchanged_knowledge import freeze_unchanged_knowledge_review
 from agents_remember.kernel.primitives.runtime_config import ConfigError, load_config
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.models.knowledge.review import ReviewSurfaceRequest
@@ -131,6 +130,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "present is refused: 'nothing was recorded' and 'here are the bytes' cannot both be true.",
     )
     parser.add_argument(
+        "--unchanged-knowledge",
+        action="store_true",
+        help="Record a code-only task using its exact recorded memory base and unchanged published "
+        "knowledge. Refuses missing, changed or unpublished task knowledge; authors no knowledge rows.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="as_json",
@@ -163,7 +168,10 @@ def run(args: argparse.Namespace) -> int:
             f"the comparison was not recorded: the authority settings could not be read ({error})"
         )
         return EXIT_REFUSED
-    freeze = freeze_review_comparison(config, request, options)
+    producer = (
+        freeze_unchanged_knowledge_review if args.unchanged_knowledge else freeze_review_comparison
+    )
+    freeze = producer(config, request, options)
     payload = report_payload(freeze)
     if args.as_json:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -225,6 +233,8 @@ def _invocation(args: argparse.Namespace) -> tuple[WorktreeContract, ComparisonF
         )
     if not str(args.config).strip():
         return "--config must not be blank: the freeze reads the coordination authority it names"
+    if args.unchanged_knowledge and args.historical_absence:
+        return "--unchanged-knowledge cannot be combined with --historical-absence"
     try:
         contract = load_contract(Path(args.contract))
     except (ContractError, ValueError, OSError) as error:

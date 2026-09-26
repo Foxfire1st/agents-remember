@@ -1,45 +1,14 @@
-"""The review of a *committed or closed* leaf, reopened from the records the task kept.
+"""Reopen a closed leaf from its frozen comparison or its exact recorded Git endpoints.
 
-The live review resolves a candidate from a leaf's enclosure because it has to: the candidate of a
-task still being written is a tree that exists in no commit, derived from a working tree that is
-about to change. A leaf whose worktree cleanup has removed that enclosure has no such candidate --
-and it does not need one, because the comparison it *did* make was published as a durable generation
-(:mod:`agents_remember.application.review_comparison_generation`) and its task recorded the commits
-it landed. This module owns resolving a review from exactly those records:
+A frozen generation keeps authority over its source, knowledge and assessment identities even
+when one channel no longer resolves. Only a leaf with no generation uses its recorded source and
+memory commit ranges. Knowledge reconstructed from those Git blobs is labelled as reconstructed,
+never as a previously frozen review or an authored assessment. Missing endpoints remain explicit;
+neither today's dataset nor another task's generation is substituted.
 
-* **A published generation is the authority for the comparison it froze.**
-  :func:`~agents_remember.application.review_comparison_reopen.reopen_comparison_generation` -- the
-  owner R11 landed for this -- measures every channel the record binds against the world it names,
-  and this module turns that measurement into the same
-  :class:`~agents_remember.application.review_candidate_resolution.ReviewCandidateResolution` the
-  live path produces, so **one composition renders both**. The two knowledge halves are the
-  generation's own retained snapshots, the two code objects are the ones the manifest bound, and the
-  root they are read in is the repository the manifest recorded.
-* **A leaf with no generation still has its recorded source range.** The enclosure contract records
-  the base the leaf forked from and the commit its closeout or integration landed; that pair is read
-  through the shipped committed-range owner
-  (:func:`~agents_remember.serving.changeset_endpoints.recorded_committed_range`), and the review
-  exposes the code that range contains. It states -- explicitly and as a *typed absence* -- that no
-  intent generation was recorded for the leaf, which is a different fact from content that could not
-  be read.
-* **The record stays the authority, and nothing falls back to today.** A generation whose objects or
-  snapshots no longer resolve is reported channel by channel with R11's own states; the surface
-  substitutes neither the current branch tip, nor today's knowledge, nor an empty statement. A leaf
-  that recorded no generation is *not* answered with its worktree either -- there is none -- but with
-  the source range its own contract recorded.
-
-**Where the resolution is read from, and why the roots are the repository's.** Both code objects of a
-comparison are bound in the repository that holds them, and both are read there -- on this path and
-on the live one. A linked worktree shares its repository's object store, so the live review reads the
-same two objects whether it names the disposable checkout or the repository; naming the repository is
-what makes a comparison written while the leaf was live resolve *byte for byte* after the checkout is
-gone, instead of publishing an inventory whose reproduction command names a directory that no longer
-exists. Cleaning up a worktree therefore removes nothing a review reads.
-
-**What this module does not do.** It writes nothing, freezes nothing, retains nothing and releases
-nothing: retaining and reopening a generation stay R11's owners, the source-change inventory stays
-R02's, the frozen record bundle stays R14's, and a refusal's next action belongs to whichever owner
-can perform it. It resolves and it reports which record it resolved from.
+The repository object store, not a disposable checkout, holds the source endpoints. Knowledge
+materialization is request-owned and reclaimed after the composed reads release their resolution.
+This reader creates no durable comparison, knowledge record, assessment, or Git ref.
 """
 
 from __future__ import annotations
@@ -70,6 +39,10 @@ from agents_remember.application.review_comparison_reopen import (
     ComparisonReopen,
     reopen_comparison_generation,
 )
+from agents_remember.application.review_recorded_knowledge import (
+    RecordedKnowledge,
+    read_recorded_knowledge,
+)
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.knowledge.review import ReviewRefusal
@@ -89,6 +62,7 @@ __all__ = [
     "HISTORY_COMPARISON_PREFIX",
     "HISTORY_INTENT_PREFIX",
     "HISTORY_RECORDED_COMPARISON",
+    "HISTORY_RECORDED_ENDPOINTS",
     "HISTORY_RECORDED_SOURCE_RANGE",
     "HISTORY_SOURCE_PREFIX",
     "ClosedLeafReview",
@@ -102,6 +76,7 @@ __all__ = [
 # which one it answered with and a second spelling of either would be a second vocabulary.
 HISTORY_RECORDED_COMPARISON = "history:recorded-comparison"
 HISTORY_RECORDED_SOURCE_RANGE = "history:recorded-source-range"
+HISTORY_RECORDED_ENDPOINTS = "history:reconstructed-recorded-endpoints"
 
 # The declared-limit vocabulary. Every fact this module establishes is published at the top level of
 # the response, because a limit a reader has to open a pane to discover is a limit the response did
@@ -154,6 +129,7 @@ class ClosedLeafReview:
     code_base: str
     code_candidate: str
     detail: str
+    recorded_knowledge: RecordedKnowledge | None = None
 
     @property
     def manifest(self) -> ComparisonGenerationManifest | None:
@@ -176,6 +152,8 @@ class ClosedLeafReview:
     def intent(self, side: KnowledgeSide) -> ComparisonKnowledgeChannel | None:
         """One knowledge half's measured channel, or ``None`` when no generation recorded one."""
 
+        if self.recorded_knowledge is not None:
+            return self.recorded_knowledge.channel(side)
         for channel in self.reopened.knowledge:
             if channel.side == side:
                 return channel
@@ -337,14 +315,7 @@ def _retained_namespace(manifest: ComparisonGenerationManifest, contract: Worktr
 def _recorded_range_resolution(
     contract: WorktreeContract, reopened: ComparisonReopen
 ) -> ReviewCandidateResolution | ReviewRefusal:
-    """Resolve a leaf that recorded no comparison generation from its recorded source range.
-
-    This is the packet's boundary example -- an old leaf with no intent generation still opens its
-    recorded source range -- and it is a *different* answer from a refused one: the code the leaf
-    landed is exposed, and the intent it never recorded is stated as the typed absence it is. The
-    range is the shipped committed-range owner's (``recorded_committed_range``), so the two recorded
-    commits are selected by one implementation rather than two.
-    """
+    """Read the exact recorded source and memory endpoints when no frozen generation exists."""
 
     try:
         recorded = recorded_committed_range(contract, memory=False)
@@ -353,11 +324,12 @@ def _recorded_range_resolution(
     candidate_tree = _tree_of(recorded)
     if isinstance(candidate_tree, ReviewRefusal):
         return candidate_tree
+    knowledge = read_recorded_knowledge(contract)
     return ReviewCandidateResolution(
-        repository_id=contract.repo_name,
+        repository_id=knowledge.namespace(contract.repo_name),
         leaf_id=contract.leaf_id,
-        baseline_database=_disposable_half(contract, "before"),
-        candidate_database=_disposable_half(contract, "after"),
+        baseline_database=knowledge.database("before"),
+        candidate_database=knowledge.database("after"),
         baseline_code_root=recorded.repository,
         candidate_code_root=recorded.repository,
         baseline_code_tree_id=recorded.base_commit,
@@ -369,10 +341,12 @@ def _recorded_range_resolution(
             reopened=reopened,
             code_base=recorded.base_commit,
             code_candidate=candidate_tree,
+            recorded_knowledge=knowledge,
             detail=(
                 f"{CLOSED_LEAF_REVIEW_SENTENCE}. This leaf published no comparison generation, so "
                 f"the review exposes its recorded source range: {recorded.base_commit} to "
-                f"{recorded.head_commit} as tree {candidate_tree}."
+                f"{recorded.head_commit} as tree {candidate_tree}. "
+                + " ".join(knowledge.channel(side).detail for side in _SIDES)
             ),
         ),
     )
@@ -470,11 +444,18 @@ def closed_leaf_limitations(resolved: ReviewCandidateResolution) -> tuple[str, .
         else HISTORY_RECORDED_SOURCE_RANGE
     )
     tokens = [recorded]
+    if review.recorded_knowledge is not None and any(
+        review.recorded_knowledge.channel(side).identity is not None for side in _SIDES
+    ):
+        tokens.append(HISTORY_RECORDED_ENDPOINTS)
     manifest = review.manifest
     if manifest is not None:
         tokens.append(f"{HISTORY_COMPARISON_PREFIX}{manifest.generation_id}")
     for side in _SIDES:
-        tokens.append(f"{HISTORY_INTENT_PREFIX}{side}:{_intent_state(review.intent(side))}")
+        state = _intent_state(review.intent(side))
+        if state == "retained" and review.recorded_knowledge is not None:
+            state = "reconstructed"
+        tokens.append(f"{HISTORY_INTENT_PREFIX}{side}:{state}")
     source = review.reopened.source
     if source is not None and source.state != "available":
         tokens.append(f"{HISTORY_SOURCE_PREFIX}{source.state}")
@@ -528,15 +509,18 @@ def closed_leaf_dataset_refusal(resolved: ReviewCandidateResolution) -> ReviewRe
         return refusal(
             "candidate_dataset_absent",
             (
-                f"leaf {review.leaf_id} records no comparison generation, so no knowledge operand "
-                "exists for a subject to be listed from: the absence is recorded history -- the leaf "
-                "predates the record -- rather than content that could not be read, and the surface "
-                "substitutes neither today's knowledge nor an empty list for it"
+                f"leaf {review.leaf_id} records no comparison generation and its exact recorded "
+                "memory endpoints cannot supply both knowledge operands: "
+                + "; ".join(
+                    f"{side}: {channel.detail}"
+                    for side, _ in reasons
+                    if (channel := review.intent(side)) is not None
+                )
             ),
             next_action=(
-                "open the task context of this review, which lists the leaf's complete recorded "
-                "source change inventory; a subject catalogue exists for a leaf that recorded a "
-                "comparison generation"
+                "open the complete recorded source change inventory; restore an unreadable exact "
+                "memory endpoint if available. An endpoint that never contained knowledge has no "
+                "historical knowledge to restore; today's dataset is not substituted"
             ),
             offending_input="knowledge",
         )
@@ -623,6 +607,14 @@ def _intent_sentence(review: ClosedLeafReview) -> str:
     """
 
     if review.manifest is None:
+        if review.recorded_knowledge is not None:
+            return (
+                "no intent generation was ever recorded for this leaf; its knowledge is read from "
+                "the exact recorded memory endpoints, separately from a frozen review: "
+                + "; ".join(review.recorded_knowledge.channel(side).detail for side in _SIDES)
+                + ". No subject selected means no knowledge comparison; the Source pane carries "
+                "the complete recorded source range independently of knowledge availability"
+            )
         return (
             "no intent generation was ever recorded for this leaf, so no knowledge operand exists to "
             "compare: that is a recorded absence in the repository's history rather than content "

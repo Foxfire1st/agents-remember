@@ -28,6 +28,14 @@ import type { ReviewFailure, ReviewPayload, ReviewResult } from "../../data/revi
 import { type ReviewRead, ReviewOutcomeRegion } from "./ReviewOutcome";
 import { ReviewSurface } from "./ReviewSurface";
 
+// Comparison-focused cases isolate the catalogue. The normal catalogue-to-review journey is
+// exercised through both real readers in ReviewSurface.navigation.test.tsx.
+vi.mock("../../data/useReviewCatalogue", () => ({
+  useReviewCatalogue: () => ({
+    loading: false, entries: [], empty: true, stale: false, facts: "test", refresh: () => undefined,
+  }),
+}));
+
 const REPO = "agents-remember";
 const MASTER = "260921_complete-code-and-intent-review";
 const LEAF = "260921-ICR-L16";
@@ -303,7 +311,7 @@ describe("the review surface's read states", () => {
     expect(note.textContent).toContain("offending input: knowledge-candidate.sqlite");
     const inventory = view.getByTestId("review-inventory");
     expect(inventory.dataset.inventoryState).toBe("measured");
-    expect(inventory.textContent).toContain("6 listed path(s)");
+    expect(inventory.textContent).toContain("6 changed files");
     const rows = view.getAllByTestId("review-inventory-entry").map((row) => row.textContent ?? "");
     expect(rows.some((row) => row.includes("src/retry_interval.py") && row.includes("added"))).toBe(true);
     expect(rows.some((row) => row.includes("src/synchronization.py") && row.includes("deleted"))).toBe(
@@ -318,7 +326,7 @@ describe("the review surface's read states", () => {
 
     const note = await view.findByTestId("review-known-empty");
     expect(note.dataset.reviewState).toBe("known-empty");
-    expect(view.getByTestId("review-inventory").textContent).toContain("0 listed path(s)");
+    expect(view.getByTestId("review-inventory").textContent).toContain("0 changed files");
     expect(view.queryByTestId("review-refusal")).toBeNull();
     expect(view.queryByTestId("review-failure")).toBeNull();
   });
@@ -370,7 +378,7 @@ describe("the review surface's read states", () => {
 
     await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(view.queryByTestId("review-failure")).toBeNull());
-    expect(view.getByTestId("review-inventory").textContent).toContain("6 listed path(s)");
+    expect(view.getByTestId("review-inventory").textContent).toContain("6 changed files");
     expect(view.queryByTestId("review-known-empty")).toBeNull();
   });
 
@@ -425,7 +433,7 @@ describe("the review surface's read states", () => {
 
     const view = mountSubject();
     await waitFor(() =>
-      expect(view.getByTestId("review-inventory").textContent).toContain("6 listed path(s)"),
+      expect(view.getByTestId("review-inventory").textContent).toContain("6 changed files"),
     );
 
     view.rerender(
