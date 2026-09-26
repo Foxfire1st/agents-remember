@@ -732,6 +732,176 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
   // the mounted product at y=1183 in a 900px viewport, i.e. reachable only after the scroll it exists
   // to avoid. This case pins the composition order, not a pixel: a jsdom render has no layout, and the
   // pixels are the mounted capture's job.
+  it("renders the family's changed expression excerpts, deduplicated, over the captured family", async () => {
+    // A4's third half: "Whole-family selection presents the full guarantee, all members including the
+    // unchanged sibling, and deduplicated changed expression excerpts" (RENDER-CHECKLIST.md:46). The
+    // body is the real captured one and the expectation is computed from that body here rather than
+    // typed, so a re-captured body moves the expectation with it. What it pins is that the rendered
+    // count is the DISTINCT set of excerpts, never the number of rows that named them.
+    const expected = familyExpressionArithmetic(WALK_FINAL);
+    expect(expected.rows).toBeGreaterThan(expected.distinct);
+    expect(expected.divergent.length).toBeGreaterThan(0);
+
+    serving([WALK_FINAL]);
+    const view = mount();
+    const openers = await view.findAllByTestId("review-family-open");
+    const opener = openers.find((node) => node.dataset.family === expected.familyId);
+    expect(opener, `the tree did not render the family ${expected.familyId} the body records`).toBeTruthy();
+    fireEvent.click(opener as HTMLElement);
+    await view.findByTestId("review-center-family");
+
+    // The collection is present in the family view at all -- the defect this case exists for was that
+    // the centre went family state -> guarantee -> roster -> source explorer with no expressions.
+    const section = view.getByTestId("review-center-family-expressions");
+    const rows = within(section).getAllByTestId("review-center-family-expression");
+    expect(rows).toHaveLength(expected.distinct);
+    expect(rows.length).not.toBe(expected.rows);
+
+    // Every row's collapse count is the body's own group size, and the counts add up to the row total
+    // the verdict states -- so the rendered number is the deduplicated set and not a member-row count.
+    const collapsedPerRow = rows.map((row) => Number(row.dataset.collapsedRows)).sort((left, right) => left - right);
+    expect(collapsedPerRow).toEqual([...expected.groupSizes].sort((left, right) => left - right));
+    expect(collapsedPerRow.reduce((total, value) => total + value, 0)).toBe(expected.rows);
+    expect(Math.max(...collapsedPerRow)).toBeGreaterThan(1);
+
+    // A row whose two sides read one address differently names BOTH readings, which is the fact a
+    // first-wins reading of the member rows would have hidden (the captured body records exactly this
+    // for `src/batch.py`: resolved before, mismatched after). The expectation is the body's own
+    // per-side reading, so the assertion is about the divergence, not about the word "before".
+    expect(expected.divergent.length).toBeGreaterThan(0);
+    for (const divergent of expected.divergent) {
+      const row = rows.find((candidate) => candidate.dataset.path === divergent.path);
+      expect(row, `no rendered excerpt names ${divergent.path}`).toBeTruthy();
+      const resolution = row?.querySelector("[data-testid=review-center-family-expression-resolution]")?.textContent ?? "";
+      const sides = (row?.dataset.sides ?? "").split(",").filter(Boolean);
+      expect(sides.sort()).toEqual([...divergent.sides].sort());
+      for (const reading of divergent.readings) {
+        expect(resolution, `${divergent.path} does not print the ${reading.side} reading`).toContain(
+          `${reading.side} ${reading.resolutions.join(" and ")}`,
+        );
+      }
+    }
+
+    // EVERY rendered row names exactly the sides the body resolves that excerpt on -- the page's own
+    // sentence about both sides, checked row by row against the body rather than read from the page.
+    for (const row of rows) {
+      const group = expected.groups.find((candidate) => candidate.key === row.dataset.dedupKey);
+      expect(group, `the rendered row ${row.dataset.dedupKey} is not an excerpt of the captured body`).toBeTruthy();
+      expect((row.dataset.sides ?? "").split(",").filter(Boolean).sort()).toEqual([...(group?.sides ?? [])].sort());
+    }
+
+    // The verdict states both counts, so a reader can see the collapse without adding rows up.
+    const verdict = view.getByTestId("review-center-family-expressions-verdict").textContent ?? "";
+    expect(verdict).toContain(`${expected.rows} changed expression row(s)`);
+    expect(verdict).toContain(`collapse to ${expected.distinct} distinct excerpt(s)`);
+    expect(verdict).toContain("not the comparison's own measured change set");
+    // The member roster A4's first half requires is untouched by the collection.
+    expect(view.getByTestId("review-center-member-counts").textContent).toContain(
+      "recorded membership row(s) measured by the read",
+    );
+    expect(view.getAllByTestId("review-center-open-member").length).toBeGreaterThan(1);
+  });
+
+  // The arithmetic this case's expectation is read from, computed from the captured body alone. A
+  // changed expression is a realization claim whose recorded address did not resolve to the recorded
+  // bytes ON THE SIDE THAT CARRIED IT; the excerpt's identity is its address together with the RECORDED
+  // identity the claim names. The observed identity is deliberately NOT part of the identity: it is what
+  // one side's read found at the address, so a divergent address has one observed value per side, and
+  // folding it into the key splits that address into two excerpts that can never be paired -- the defect
+  // this case exists for. Written here rather than imported from the component so the assertion is
+  // checked against the BODY and not against the implementation it tests, and every step narrows at
+  // runtime, the way `firstFamilyId` does, because a captured body is `unknown` on purpose.
+  function familyExpressionArithmetic(body: unknown): {
+    familyId: string;
+    rows: number;
+    distinct: number;
+    groupSizes: number[];
+    groups: { key: string; path: string; sides: string[] }[];
+    divergent: { path: string; sides: string[]; readings: { side: string; resolutions: string[] }[] }[];
+  } {
+    const record = (value: unknown, what: string): Record<string, unknown> => {
+      if (typeof value !== "object" || value === null) throw new Error(`${what} is not an object`);
+      return value as Record<string, unknown>;
+    };
+    const payload = record(record(body, "the captured body").payload, "the captured payload");
+    const context = record(payload.family_context, "the captured family context");
+    if (!Array.isArray(context.entries)) throw new Error("the captured family context carries no entries");
+    const resolved = new Set(["exact_recorded_blob"]);
+    const unmeasured = new Set(["recorded_object_unavailable", "not_requested"]);
+    let best: {
+      familyId: string;
+      rows: number;
+      distinct: number;
+      groupSizes: number[];
+      groups: { key: string; path: string; sides: string[] }[];
+      divergent: { path: string; sides: string[]; readings: { side: string; resolutions: string[] }[] }[];
+    } | null = null;
+    for (const rawEntry of context.entries) {
+      const entry = record(rawEntry, "a family entry");
+      const familyId = entry.family_id;
+      if (typeof familyId !== "string") throw new Error("a family entry carries no identity");
+      const groups = new Map<string, number>();
+      // Every side whose read resolved an address, with the resolutions it gave -- the per-side fact.
+      const readings = new Map<string, Map<string, Set<string>>>();
+      let rows = 0;
+      for (const side of ["before", "after"]) {
+        const sideRecord = record(entry[side], `the ${side} side`);
+        if (!Array.isArray(sideRecord.members)) throw new Error(`the ${side} side carries no members`);
+        for (const rawMember of sideRecord.members) {
+          const member = record(rawMember, "a member");
+          if (!Array.isArray(member.sources)) continue;
+          for (const rawSource of member.sources) {
+            const source = record(rawSource, "a realization claim");
+            const resolution = typeof source.resolution === "string" ? source.resolution : "";
+            if (typeof source.path !== "string" || resolution === "") continue;
+            const key = `${source.path}\u0000${String(source.recorded_source_identity ?? "")}`;
+            if (!readings.has(key)) readings.set(key, new Map());
+            const perSide = readings.get(key);
+            if (!perSide?.has(side)) perSide?.set(side, new Set());
+            perSide?.get(side)?.add(resolution);
+            if (resolved.has(resolution) || unmeasured.has(resolution)) continue;
+            rows += 1;
+            groups.set(key, (groups.get(key) ?? 0) + 1);
+          }
+        }
+      }
+      if (rows === 0) continue;
+      // An excerpt of this family, with the sides the body resolves it on -- what the page's own
+      // sentence about both sides must be true of, row by row.
+      const groupList = [...groups.keys()].map((key) => ({
+        key,
+        path: key.split("\u0000")[0],
+        sides: [...(readings.get(key)?.keys() ?? [])].sort(),
+      }));
+      // A DIVERGENT address is one whose sides did not read it the same way. This is the predicate that
+      // matters: "seen on more than one side" is not divergence, because a side can carry an address
+      // and resolve it identically, and the shipped case must bite on the reading that differs.
+      const divergent = [...groups.keys()]
+        .filter((key) => {
+          const distinct = new Set([...(readings.get(key)?.values() ?? [])].map((set) => [...set].sort().join("+")));
+          return distinct.size > 1;
+        })
+        .map((key) => ({
+          path: key.split("\u0000")[0],
+          sides: [...(readings.get(key)?.keys() ?? [])].sort(),
+          readings: [...(readings.get(key)?.entries() ?? [])]
+            .map(([side, set]) => ({ side, resolutions: [...set].sort() }))
+            .sort((left, right) => left.side.localeCompare(right.side)),
+        }));
+      const candidate = {
+        familyId,
+        rows,
+        distinct: groups.size,
+        groupSizes: [...groups.values()],
+        groups: groupList,
+        divergent,
+      };
+      if (best === null || candidate.rows > best.rows) best = candidate;
+    }
+    if (best === null) throw new Error("the captured body records no changed expression in any family");
+    return best;
+  }
+
   it("composes the narrow jump route above the family tree, with the tree intact", async () => {
     serving([COMPLETE]);
     const view = mount();
