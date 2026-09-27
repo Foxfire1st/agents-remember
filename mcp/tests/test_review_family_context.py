@@ -1087,7 +1087,10 @@ def test_the_final_page_of_a_long_walk_may_carry_only_its_own_share(tmp_path: Pa
     # The pages together carried every recorded membership, which is what the continuation control
     # promises a reader; and the completed page says the WALK finished rather than claiming to hold
     # the whole roster itself.
-    assert sum(len(step["members"]) for step in steps) == final["members_total"]
+    assert (
+        len({member["member_id"] for step in steps for member in step["members"]})
+        == final["members_total"]
+    )
     assert "completes the read walk" in final["detail"]
     assert "all carried here" not in final["detail"]
 
@@ -1129,5 +1132,6 @@ def test_a_roster_walk_larger_than_one_page_terminates_with_a_page_and_no_failur
         else:
             assert page["complete"] is False
             assert page.get("continuation") is not None
-    carried = sum(len(step["members"]) for step in steps)
-    assert carried == steps[-1]["members_total"] > len(steps[0]["members"])
+    carried = len({member["member_id"] for step in steps for member in step["members"]})
+    assert carried == steps[-1]["members_total"]
+    assert steps[0]["page"]["counts"]["primary_items_remaining"] > 0

@@ -39,6 +39,7 @@ export function ReviewExpressions({
   payload,
   members,
   subject,
+  linksIncomplete,
   layout,
   onLayout,
   fullFile,
@@ -49,6 +50,7 @@ export function ReviewExpressions({
   payload: ReviewPayload;
   members?: ReviewFamilyMember[];
   subject?: ReviewSubject;
+  linksIncomplete?: boolean;
   layout: DiffLayout;
   onLayout: (next: DiffLayout) => void;
   fullFile: boolean;
@@ -71,11 +73,14 @@ export function ReviewExpressions({
         {openPath ? `expanded: ${openPath} · ` : ''}
         {members === undefined
           ? 'All changed files are available in the source explorer.'
-          : `${linked.length} linked changed files. The complete source inventory remains in the rail.`}
+          : `${linked.length} linked changed files loaded. The complete source inventory remains in the rail.`}
+        {linksIncomplete
+          ? ' Source links are not yet fully loaded; continue the roster walk below.'
+          : ''}
       </p>
       {!entries.length ? (
         <p className={muted}>
-          No linked changed file is recorded for this selection. Use the source explorer to inspect
+          No linked changed file has loaded for this selection. Use the source explorer to inspect
           the complete change.
         </p>
       ) : null}

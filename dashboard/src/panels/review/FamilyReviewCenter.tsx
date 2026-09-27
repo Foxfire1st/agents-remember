@@ -217,7 +217,8 @@ function RealizationClaims({ member }: { member: ReviewFamilyMember }) {
   if (!member.sources.length) {
     return (
       <p className={muted} data-testid="review-center-expressions">
-        no realization claim is recorded for this member revision in this payload.
+        No realization claim has loaded for this member revision. Any roster continuation below
+        reaches source links that are not yet loaded.
       </p>
     );
   }
@@ -268,7 +269,7 @@ function AttributedPaths({
   if (!mine.length) {
     return (
       <p className={muted} data-testid="review-center-attribution">
-        No source location is attributed to this member revision.
+        The primary comparison page returned no source location for this member revision.
       </p>
     );
   }
@@ -336,9 +337,9 @@ function familyExpressionVerdict(collection: FamilyExpressionCollection): string
   const sides = collection.bySide.map((entry) => `${entry.side} ${entry.rows}`).join(' + ');
   if (rows === 0) {
     return (
-      `no carried membership row of this family recorded a changed expression: all ${collection.resolved} ` +
-      `addressed realization claim(s) carried here resolved to their recorded bytes. A member whose ` +
-      'expressions did not change is still presented above, and selecting one shows its unchanged expressions.'
+      `No changed expression excerpt is present in the loaded claim scope. ${collection.resolved} ` +
+      `loaded realization claim(s) resolved to their recorded bytes; ${collection.unmeasured} ` +
+      'loaded claim(s) remain unmeasured. These loaded facts do not establish that unreturned expressions are unchanged.'
     );
   }
   const collapse =
@@ -355,7 +356,7 @@ function familyExpressionVerdict(collection: FamilyExpressionCollection): string
       ? `every one of the ${membershipRows} carried membership row(s) recorded at least one changed expression.`
       : `${collection.membershipRowsWithChanged} of the ${membershipRows} carried membership row(s) recorded a ` +
         `changed expression and ${collection.membershipRowsWithoutChanged} recorded none; the roster above keeps ` +
-        'all of them, and a member with none shows its unchanged expressions when it is selected.';
+        'all of them. A member with no loaded changed expression may still have unreturned claims.';
   const notion =
     "Changed here is the read's own resolution of the address each claim names, on the side that resolved " +
     "it: the recorded bytes were not the bytes at that address in that side's tree — the stale state " +
@@ -369,7 +370,7 @@ function familyExpressionVerdict(collection: FamilyExpressionCollection): string
     'says where its address stands in that set.';
   const unmeasured =
     collection.unmeasured === 0
-      ? 'no claim was left unmeasured.'
+      ? 'no loaded claim was left unmeasured.'
       : `${collection.unmeasured} claim(s) this read did not measure (recorded_object_unavailable, not_requested) ` +
         'are counted apart and are not called changed.';
   return `${collapse} ${membership} ${notion} ${unmeasured}`;
@@ -452,11 +453,13 @@ function listedOrPlainPath(path: string, onOpenPath: (path: string) => void, lis
 }
 
 function FamilyExpressionExcerpts({
+  entry,
   membership,
   listed,
   listedPartial,
   onOpenPath,
 }: {
+  entry: ReviewFamilyContextEntry;
   membership: FamilyMembershipRow[];
   listed: Set<string>;
   listedPartial: boolean;
@@ -466,6 +469,11 @@ function FamilyExpressionExcerpts({
   return (
     <div className={card} data-testid="review-center-family-expressions">
       <h3 className={sectionLabel}>Changed expression excerpts in this family</h3>
+      <p className={muted} data-testid="review-center-family-expressions-scope">
+        {membersComplete(entry)
+          ? 'The selected family roster is fully loaded; the facts below describe its loaded claims.'
+          : 'Source links are not yet fully loaded or their scope is unavailable. Only loaded claim facts are described; use any roster continuation above to reach the rest.'}
+      </p>
       <p className={muted} data-testid="review-center-family-expressions-verdict">
         {familyExpressionVerdict(collection)}
       </p>
@@ -483,16 +491,22 @@ function FamilyExpressionExcerpts({
         </ul>
       ) : (
         <p className={muted} data-testid="review-center-family-expressions-none">
-          this family&apos;s carried membership rows recorded no changed expression, so no excerpt
-          is listed here. Nothing is missing from the collection: it is empty because every
-          addressed claim this read measured resolved to its recorded bytes.
+          No changed expression excerpt is present among the loaded claims. This does not establish
+          that unavailable or unreturned expressions are unchanged.
         </p>
       )}
     </div>
   );
 }
 function membersComplete(entry: ReviewFamilyContextEntry): boolean {
-  return FAMILY_SIDES.every((side) => entry[side].page === undefined || entry[side].page.complete);
+  return FAMILY_SIDES.map((side) => entry[side]).every(
+    (side) =>
+      side.state === 'not_recorded' ||
+      (side.state === 'recorded' &&
+        side.page?.complete &&
+        side.members.length === side.members_total &&
+        side.members.every((member) => member.state === 'recorded')),
+  );
 }
 
 function memberContextHeading(entry: ReviewFamilyContextEntry): string {
@@ -510,7 +524,7 @@ function memberContextCounts(entry: ReviewFamilyContextEntry, carriedCarried: nu
     return `no snapshot records a family revision for this family: ${entry.detail}`;
   const measured = recorded.reduce((total, side) => total + side.members_total, 0);
   const perSide = recorded.map((side) => `${side.side} ${side.members_total}`).join(' + ');
-  const head = `${measured} recorded membership row(s) measured by the read across ${recorded.length} recorded side(s) (${perSide}); this page carried ${carriedCarried} member row(s) of them`;
+  const head = `${measured} recorded membership row(s) measured by the read across ${recorded.length} recorded side(s) (${perSide}); loaded context contains ${carriedCarried} member row(s) of them`;
   return membersComplete(entry)
     ? head
     : `${head} · the continuations beside the bounded rosters reach the rest`;
@@ -541,7 +555,7 @@ function FamilyMemberContext({
           {memberContextCounts(entry, distinct.length)}
         </p>
         <p className={muted} data-testid="review-center-member-distinct">
-          {distinct.length} distinct member revision(s) among the membership rows this page carried
+          {distinct.length} distinct member revision(s) among the loaded membership contexts
         </p>
         {FAMILY_SIDES.map((side) => (
           <Fragment key={side}>
@@ -631,6 +645,7 @@ function FamilyCenter({
       <details>
         <summary>Realization resolution details</summary>
         <FamilyExpressionExcerpts
+          entry={entry}
           membership={carriedMembership(entry)}
           listed={listed}
           listedPartial={listedPartial}
@@ -815,7 +830,11 @@ export function FamilyReviewCenter({
   onOpenPath,
   onOpenFromCenter,
 }: FamilyReviewCenterProps) {
-  const { entry, member, members, listed } = centerSelection(payload, selection, subject);
+  const { entry, member, members, listed, linksIncomplete } = centerSelection(
+    payload,
+    selection,
+    subject,
+  );
   const addressedSubject = member && !member.invariant_id ? undefined : subject;
   const invariant = addressedSubject?.kind === 'invariant';
   const expressions = (
@@ -823,6 +842,7 @@ export function FamilyReviewCenter({
       payload={payload}
       members={members}
       subject={addressedSubject}
+      linksIncomplete={linksIncomplete}
       layout={layout}
       onLayout={onLayout}
       fullFile={fullFile}
@@ -898,7 +918,8 @@ function centerSelection(
           ? all
           : undefined;
   const listed = new Set(payload.source.inventory.entries.map((row) => row.path));
-  return { entry, member, members, listed };
+  const linksIncomplete = entry ? !membersComplete(entry) : false;
+  return { entry, member, members, listed, linksIncomplete };
 }
 
 function FamilyEvidence({

@@ -40,17 +40,19 @@
 // outcome region state the failure beside it, which is the packet's "a failed refresh retains the
 // labeled old generation with its error".
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
+  ReviewFamilyMember,
+  ReviewFamilyRevisionContext,
   ReviewFailure,
   ReviewHistory,
   ReviewPagedCollection,
   ReviewPayload,
   ReviewSelectorKind,
-} from "../../data/review";
-import { intentReview, reviewProblemFromCause } from "../../data/review";
-import { type ReviewRead, readFrom } from "./ReviewOutcome";
+} from '../../data/review';
+import { intentReview, reviewProblemFromCause, reviewProblemFromRefusal } from '../../data/review';
+import { type ReviewRead, readFrom } from './ReviewOutcome';
 
 // The bounded collection this surface is paging and the cursor it continues (ICR-R10). It is part of
 // the question rather than a decoration on the answer, so it participates in the target key.
@@ -78,14 +80,14 @@ export function targetKeyOf(
   page?: ReviewPageRequest,
   history?: ReviewHistory,
 ): string {
-  const question = instead !== null ? "task-context" : `${selectorKind ?? ""}:${selectorId ?? ""}`;
+  const question = instead !== null ? 'task-context' : `${selectorKind ?? ''}:${selectorId ?? ''}`;
   // The page is part of the question, not a decoration on it: page 3 of one collection is a different
   // answer from page 1 of it, and a retained page must never be rendered under another page's header.
   const position =
     page === undefined
-      ? "whole"
-      : `${page.of}:${page.continuation === undefined || page.continuation === null ? "first" : page.continuation}`;
-  return `${repo}/${master}/${leaf}/${history ?? "live"}/${question}/${position}`;
+      ? 'whole'
+      : `${page.of}:${page.continuation === undefined || page.continuation === null ? 'first' : page.continuation}`;
+  return `${repo}/${master}/${leaf}/${history ?? 'live'}/${question}/${position}`;
 }
 
 // One read of one question, handed to a callback only when it is the answer's turn to be applied. The
@@ -102,7 +104,7 @@ function askReview(
     history?: ReviewHistory;
     previous: string | null;
   },
-  apply: (answered: ReviewRead, payload: ReviewPayload | undefined) => void,
+  apply: (answered: ReviewRead) => void,
 ): void {
   void (async () => {
     try {
@@ -112,14 +114,14 @@ function askReview(
         question.leaf,
         question.selectorKind,
         question.selectorId,
-        "",
+        '',
         question.selection,
         question.history,
         question.previous ?? undefined,
       );
-      apply(readFrom(result), result.state === "review" ? result.payload : undefined);
+      apply(readFrom(result));
     } catch (cause) {
-      apply({ phase: "failed", problem: reviewProblemFromCause(cause) }, undefined);
+      apply({ phase: 'failed', problem: reviewProblemFromCause(cause) });
     }
   })();
 }
@@ -131,13 +133,11 @@ function startRead(
   reads: { current: number },
   context: {
     targetKey: string;
+    questionKey: string;
+    retainedRef: { current: RetainedReview | null };
     carriedRef: { current: CarriedBinding | null };
     setRead: (read: ReviewRead) => void;
-    setRetained: (
-      update: (previous: { key: string; payload: ReviewPayload } | null) =>
-        | { key: string; payload: ReviewPayload }
-        | null,
-    ) => void;
+    setRetained: (update: (previous: RetainedReview | null) => RetainedReview | null) => void;
     request: {
       repo: string;
       master: string;
@@ -153,12 +153,6 @@ function startRead(
   const askedFor = context.targetKey;
   const seq = ++reads.current;
   const current = () => !superseded && reads.current === seq;
-  context.setRead({ phase: "loading" });
-  // A comparison read for another target is dropped the moment this question is asked: it belongs to
-  // the header it was read for, and one read's answer is never rendered under another's.
-  context.setRetained((previousRetained) =>
-    previousRetained !== null && previousRetained.key !== askedFor ? null : previousRetained,
-  );
   // THE IDENTITY BELONGS TO ONE READ (L17-F1). It is sent only when this read is the one the refresh
   // asked to replace that display with: the same question key AND the read number `refresh` captured.
   // Every other read -- another subject, another leaf, the same subject read from the leaf's record,
@@ -169,13 +163,218 @@ function startRead(
     carried !== null && carried.key === askedFor && carried.readNumber === seq
       ? carried.digest
       : null;
-  askReview({ ...context.request, previous }, (answered, payload) => {
+  const shown = context.retainedRef.current;
+  const cursor =
+    context.request.selection?.of === 'family_members'
+      ? context.request.selection.continuation
+      : undefined;
+  const continuing = continuedReview(shown, context.questionKey, cursor, previous);
+  // Keep the coherent reading path mounted while a continuation is checked. Every other question
+  // and ordinary refresh retains the existing replacement and newest-answer rules.
+  context.setRead(
+    continuing ? { phase: 'reviewed', payload: continuing.payload } : { phase: 'loading' },
+  );
+  context.setRetained((retained) =>
+    continuing ? { ...continuing, key: askedFor } : retained?.key === askedFor ? retained : null,
+  );
+  askReview({ ...context.request, previous }, (answered) => {
     if (!current()) return;
-    context.setRead(answered);
-    if (payload !== undefined) context.setRetained(() => ({ key: askedFor, payload }));
+    const admitted = familyContinuationRead(answered, continuing, cursor);
+    context.setRead(admitted);
+    if (admitted.phase === 'reviewed')
+      context.setRetained(() => ({
+        key: askedFor,
+        questionKey: context.questionKey,
+        payload: admitted.payload,
+      }));
   });
   return () => {
     superseded = true;
+  };
+}
+
+interface RetainedReview {
+  key: string;
+  questionKey: string;
+  payload: ReviewPayload;
+}
+
+function continuedReview(
+  shown: RetainedReview | null,
+  questionKey: string,
+  cursor: string | null | undefined,
+  refreshBinding: string | null,
+): RetainedReview | null {
+  if (refreshBinding !== null || !cursor || shown?.questionKey !== questionKey) return null;
+  return shown;
+}
+
+function familyContinuationRead(
+  answered: ReviewRead,
+  continuing: RetainedReview | null,
+  cursor: string | null | undefined,
+): ReviewRead {
+  if (!continuing || !cursor || answered.phase !== 'reviewed') return answered;
+  const payload = mergeFamilyContinuation(continuing.payload, answered.payload, cursor);
+  if (payload) return { phase: 'reviewed', payload };
+  // A rejected page is a failed read, never a replacement for the admitted accumulated context.
+  return {
+    phase: 'failed',
+    problem: reviewProblemFromRefusal(
+      answered.payload.page_refusal ?? {
+        code: 'comparison_page_unreadable',
+        detail:
+          'The response failed the displayed family continuation checks for comparison, subject, cursor or immutable content. The last coherent review remains displayed.',
+        offending_input: cursor,
+        next_action: 'Open the whole review to start a new family walk before continuing.',
+      },
+    ),
+  };
+}
+
+function mergeMember(
+  previous: ReviewFamilyMember | undefined,
+  next: ReviewFamilyMember,
+): ReviewFamilyMember | null {
+  if (!previous) return next;
+  if (
+    previous.invariant_revision_id !== next.invariant_revision_id ||
+    (previous.state === 'recorded' &&
+      next.state === 'recorded' &&
+      previous.payload_digest !== next.payload_digest)
+  )
+    return null;
+  const sources = new Map(previous.sources.map((source) => [source.claim_id, source]));
+  for (const source of next.sources) {
+    const known = sources.get(source.claim_id);
+    if (known && JSON.stringify(known) !== JSON.stringify(source)) return null;
+    sources.set(source.claim_id, source);
+  }
+  // Sparse later claims never erase the exact content already delivered for this membership.
+  return { ...(previous.state === 'recorded' ? previous : next), sources: [...sources.values()] };
+}
+
+function mergeFamilySide(
+  previous: ReviewFamilyRevisionContext,
+  next: ReviewFamilyRevisionContext,
+  cursor: string,
+): ReviewFamilyRevisionContext | null {
+  if (!sameFamilyWalk(previous, next)) return null;
+  // Other walks are resent at page one by the server; they cannot reset an already advanced walk.
+  if (next.page?.state !== 'continued') return previous;
+  if (next.page.continued_from !== cursor) return null;
+  if (previous.page?.continuation !== cursor) {
+    return JSON.stringify(previous.page) === JSON.stringify(next.page) ? previous : null;
+  }
+  const members = new Map(previous.members.map((member) => [member.member_id, member]));
+  for (const member of next.members) {
+    const merged = mergeMember(members.get(member.member_id), member);
+    if (!merged) return null;
+    members.set(member.member_id, merged);
+  }
+  return {
+    ...next,
+    members: [...members.values()],
+    detail: `Loaded ${members.size} exact member context(s) of ${next.members_total} recorded memberships across this roster walk.`,
+  };
+}
+
+function sameFamilyWalk(
+  previous: ReviewFamilyRevisionContext,
+  next: ReviewFamilyRevisionContext,
+): boolean {
+  return [
+    [previous.family_id, next.family_id],
+    [previous.side, next.side],
+    [previous.state, next.state],
+    [previous.family_revision_id, next.family_revision_id],
+    [previous.guarantee?.payload_digest, next.guarantee?.payload_digest],
+    [JSON.stringify(previous.page?.scope), JSON.stringify(next.page?.scope)],
+  ].every(([known, supplied]) => known === supplied);
+}
+
+function admittedFamilyContinuation(
+  previous: ReviewPayload,
+  next: ReviewPayload,
+  cursor: string,
+): boolean {
+  const page = next.page;
+  if (
+    !previous.comparison ||
+    !next.comparison ||
+    !previous.family_context ||
+    !next.family_context ||
+    !page
+  )
+    return false;
+  return [
+    page.collection === 'family_members',
+    page.state === 'continued',
+    page.continued_from === cursor,
+    !next.page_refusal,
+    next.staleness.state !== 'stale',
+    JSON.stringify(previous.comparison) === JSON.stringify(next.comparison),
+    JSON.stringify(previous.candidate) === JSON.stringify(next.candidate),
+    JSON.stringify(previous.knowledge.revision_selection) ===
+      JSON.stringify(next.knowledge.revision_selection),
+    previous.family_context.entries.length === next.family_context.entries.length,
+  ].every(Boolean);
+}
+
+// This is presentation of one admitted walk, not another dataset or selection authority. The
+// latest response still owns the primary statements, source inventory, evidence and assessments.
+function mergeFamilyContinuation(
+  previous: ReviewPayload,
+  next: ReviewPayload,
+  cursor: string,
+): ReviewPayload | null {
+  if (!admittedFamilyContinuation(previous, next, cursor)) return null;
+  const families = previous.family_context!;
+  const incoming = next.family_context!;
+  const byFamily = new Map(families.entries.map((entry) => [entry.family_id, entry]));
+  const entries = [];
+  let continued = 0;
+  for (const entry of incoming.entries) {
+    const known = byFamily.get(entry.family_id);
+    if (!known || JSON.stringify(known.selection) !== JSON.stringify(entry.selection)) return null;
+    const before = mergeFamilySide(known.before, entry.before, cursor);
+    const after = mergeFamilySide(known.after, entry.after, cursor);
+    if (!before || !after) return null;
+    continued += [entry.before, entry.after].filter(
+      (side) => side.page?.continued_from === cursor,
+    ).length;
+    const complete = [before, after].every(
+      (side) =>
+        side.state === 'not_recorded' ||
+        (side.page?.complete &&
+          side.members.length === side.members_total &&
+          side.members.every((member) => member.state === 'recorded')),
+    );
+    entries.push({
+      ...entry,
+      before,
+      after,
+      state: complete ? ('recorded' as const) : entry.state,
+      detail: `${entry.selection.statement}; before: ${before.detail}; after: ${after.detail}`,
+    });
+  }
+  if (continued !== 1) return null;
+  return {
+    ...next,
+    family_context: {
+      ...incoming,
+      entries,
+      state: entries.every((entry) => entry.state === 'recorded') ? 'recorded' : incoming.state,
+      unique_member_revision_total: new Set(
+        entries.flatMap((entry) =>
+          [entry.before, entry.after].flatMap((side) =>
+            side.members.map((member) => member.invariant_revision_id),
+          ),
+        ),
+      ).size,
+      detail:
+        'Loaded family context retains the exact members and source claims from these bounded roster walks.',
+    },
   };
 }
 
@@ -195,7 +394,7 @@ export interface ReviewReadCycle {
   // The last comparison this surface really read, with the key it was read for. A read that fails
   // without an answer must not erase it: it stays on screen, labelled, and the failure is stated
   // beside it -- but only while the surface is still asking that same question.
-  retained: { key: string; payload: ReviewPayload } | null;
+  retained: RetainedReview | null;
   // The identity a read carried FOR THE QUESTION ON SCREEN NOW, or `null` when no read of this
   // question has carried one. It is what the generation notice describes: nothing has been compared
   // against a displayed identity until a read answers for one, and an identity captured under another
@@ -204,6 +403,17 @@ export interface ReviewReadCycle {
   // The reader's own request that the displayed comparison be re-read against the candidate as it is
   // now: the same question, carrying the identity of what is on screen.
   refresh: () => void;
+}
+
+interface ReviewReadQuestion {
+  repo: string;
+  master: string;
+  leaf: string;
+  selectorKind?: ReviewSelectorKind;
+  selectorId?: string;
+  history?: ReviewHistory;
+  instead: ReviewFailure | null;
+  selection: ReviewPageRequest | undefined;
 }
 
 export function useReviewReadCycle({
@@ -215,18 +425,9 @@ export function useReviewReadCycle({
   history,
   instead,
   selection,
-}: {
-  repo: string;
-  master: string;
-  leaf: string;
-  selectorKind?: ReviewSelectorKind;
-  selectorId?: string;
-  history?: ReviewHistory;
-  instead: ReviewFailure | null;
-  selection: ReviewPageRequest | undefined;
-}): ReviewReadCycle {
-  const [read, setRead] = useState<ReviewRead>({ phase: "loading" });
-  const [retained, setRetained] = useState<{ key: string; payload: ReviewPayload } | null>(null);
+}: ReviewReadQuestion): ReviewReadCycle {
+  const [read, setRead] = useState<ReviewRead>({ phase: 'loading' });
+  const [retained, setRetained] = useState<RetainedReview | null>(null);
   // The displayed comparison's identity, WITH the question it was displayed under and the read asked
   // to replace it (L17-F1): an identity alone is what let a digest be carried into a read that never
   // replaced the display it names.
@@ -237,9 +438,36 @@ export function useReviewReadCycle({
   // ones it really reads and no lint suppression is needed to say so. The two `instead`-selected
   // fields are part of the question: a refusal answered by the task's own source inventory asks no
   // subject, so the request names none.
-  const targetKey = targetKeyOf(repo, master, leaf, instead, selectorKind, selectorId, selection, history);
+  const targetKey = targetKeyOf(
+    repo,
+    master,
+    leaf,
+    instead,
+    selectorKind,
+    selectorId,
+    selection,
+    history,
+  );
+  const questionKey = targetKeyOf(
+    repo,
+    master,
+    leaf,
+    instead,
+    selectorKind,
+    selectorId,
+    undefined,
+    history,
+  );
   const asked = useMemo(
-    () => ({ repo, master, leaf, selectorKind: instead ? undefined : selectorKind, selectorId: instead ? undefined : selectorId, selection, history }),
+    () => ({
+      repo,
+      master,
+      leaf,
+      selectorKind: instead ? undefined : selectorKind,
+      selectorId: instead ? undefined : selectorId,
+      selection,
+      history,
+    }),
     [repo, master, leaf, selectorKind, selectorId, instead, selection, history],
   );
   // Every read the surface starts takes the next number, and only the newest one may write the read
@@ -254,8 +482,16 @@ export function useReviewReadCycle({
 
   // One read, for the question that is on screen when it starts.
   useEffect(() => {
-    return startRead(reads, { targetKey, carriedRef, setRead, setRetained, request: asked });
-  }, [targetKey, refreshNonce, asked]);
+    return startRead(reads, {
+      targetKey,
+      questionKey,
+      retainedRef,
+      carriedRef,
+      setRead,
+      setRetained,
+      request: asked,
+    });
+  }, [targetKey, questionKey, refreshNonce, asked]);
 
   const refresh = useCallback(() => {
     const shown = retainedRef.current;

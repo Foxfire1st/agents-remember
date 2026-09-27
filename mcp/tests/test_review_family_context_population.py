@@ -32,7 +32,7 @@ from uuid import uuid4
 
 import pytest
 from agents_remember.application.knowledge_review import read_knowledge_review
-from agents_remember.memory.knowledge import families, memberships
+from agents_remember.memory.knowledge import families, memberships, realizations
 from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
 from agents_remember.models.knowledge.read import FamilyIdentitySeed
@@ -41,14 +41,17 @@ from agents_remember.models.knowledge.result import (
     FamilyRevisionRequest,
     RemoveFamilyMemberRequest,
 )
+from agents_remember.serving.review import KNOWLEDGE_REVIEW_ROUTE
+from fastapi.testclient import TestClient
 from read_scope_test_support import BASE_LABEL
-from test_knowledge_review_source_endpoints import _place_datasets
+from test_knowledge_review_source_endpoints import LEAF_ID, _place_datasets
 from test_review_family_context import (
     LEFT_GUARANTEE,
     RIGHT_GUARANTEE,
     FamilyScenario,
     _author_family_successor,
     _review_of_unfamiliar_invariant,
+    _served,
     build_family_scenario,
     entry_for,
     family_request,
@@ -341,3 +344,118 @@ def test_the_measured_zero_and_the_absent_family_stay_distinct(tmp_path: Path) -
     assert result.refusal.code == "comparison_refused"
     assert result.refusal.offending_input == "family"
     assert "selector_absent" in result.refusal.detail
+
+
+def recorded_population(scenario: FamilyScenario, side: str) -> tuple[set, set]:
+    """Expected exact identities come from the authorship owners, independently of projection."""
+
+    diff = scenario.endpoints.diff
+    database = diff.before.database_path if side == "before" else diff.after.database_path
+    revision_id = (
+        scenario.parent_family_revision_id
+        if side == "before"
+        else scenario.successor_family_revision_id
+    )
+    store = open_knowledge_store(database, diff.repository_id)
+    try:
+        rows = memberships.list_members(store, revision_id).members
+        return (
+            {(row.member_id, row.invariant_revision_id) for row in rows},
+            {
+                (claim.claim_id, claim.invariant_revision_id)
+                for row in rows
+                for claim in realizations.list_claims_for_invariant_revision(
+                    store, row.invariant_revision_id
+                ).claims
+            },
+        )
+    finally:
+        store.close()
+
+
+def walk_responses(scenario: FamilyScenario, side: str, page_size: int) -> list[dict]:
+    """Follow only published cursors for one side, with a fixed bounded request."""
+
+    params = {
+        "repo": scenario.endpoints.repository_id,
+        "master": scenario.endpoints.master,
+        "leaf": LEAF_ID,
+        "selectorKind": "invariant",
+        "selectorId": scenario.endpoints.diff.retry_invariant_id,
+        "pageSize": page_size,
+    }
+    bodies = []
+    with TestClient(_served(scenario.endpoints)) as client:
+        for _ in range(32):
+            response = client.get(KNOWLEDGE_REVIEW_ROUTE, params=params)
+            assert response.status_code == 200, response.text
+            body = response.json()
+            bodies.append(body)
+            page = family_side(body, scenario.family_id, side)["page"]
+            if page["complete"]:
+                return bodies
+            params.update(pageOf="family_members", continuation=page["continuation"])
+    raise AssertionError("the bounded family walk failed to finish")
+
+
+def family_side(body: dict, family_id: str, side: str) -> dict:
+    return next(
+        entry[side]
+        for entry in body["payload"]["family_context"]["entries"]
+        if entry["family_id"] == family_id
+    )
+
+
+@pytest.mark.parametrize("page_size", [1, 2])
+def test_content_and_claim_only_pages_preserve_the_authored_population(
+    tmp_path: Path, page_size: int
+) -> None:
+    scenario = build_family_scenario(tmp_path / "sparse-pages")
+    for side in ("before", "after"):
+        expected_members, expected_claims = recorded_population(scenario, side)
+        responses = walk_responses(scenario, side, page_size)
+        pages = [family_side(body, scenario.family_id, side) for body in responses]
+        assert len(pages) > 1
+        # The first page contains invariant content, before the separately ordered membership rows.
+        assert pages[0]["members"]
+        assert all(member["state"] == "recorded" for member in pages[0]["members"])
+        assert all(not member["sources"] for member in pages[0]["members"])
+        # Claim-only pages must transport their sparse updates. Advertised expansions can follow
+        # them on a final empty page; those too must preserve the walk's complete population.
+        assert any(
+            page["members"]
+            and all(
+                member["state"] == "content_not_on_page" and member["sources"]
+                for member in page["members"]
+            )
+            for page in pages
+        )
+        assert {
+            (member["member_id"], member["invariant_revision_id"])
+            for page in pages
+            for member in page["members"]
+        } == expected_members
+        assert {
+            (source["claim_id"], source["invariant_revision_id"])
+            for page in pages
+            for member in page["members"]
+            for source in member["sources"]
+        } == expected_claims
+        assert {
+            member["invariant_revision_id"]
+            for page in pages
+            for member in page["members"]
+            if member["state"] == "recorded"
+        } == {revision_id for _, revision_id in expected_members}
+        first = responses[0]["payload"]
+        last_returned = 0
+        for body, page in zip(responses, pages, strict=True):
+            payload = body["payload"]
+            assert payload["source"]["inventory"] == first["source"]["inventory"]
+            assert payload["knowledge"] == first["knowledge"]
+            assert payload["evidence"] == first["evidence"]
+            assert payload["comparison"] == first["comparison"]
+            count = page["page"]["counts"]["primary_items_returned"]
+            assert 0 < count - last_returned <= page_size
+            last_returned = count
+        assert pages[-1]["page"]["counts"]["primary_items_remaining"] == 0

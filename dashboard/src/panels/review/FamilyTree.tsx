@@ -195,10 +195,10 @@ export function RosterLine({
       data-testid={testid}
       data-roster-complete={page.complete ? 'true' : 'false'}
     >
-      {side.side} roster ({page.state}): this page carried {counts.primary_items_returned} of{' '}
+      {side.side} roster ({page.state}): the read has returned {counts.primary_items_returned} of{' '}
       {counts.primary_items_total} item(s) of this family revision&apos;s recorded selection,{' '}
       {counts.primary_items_remaining} remaining. The selected family revision records{' '}
-      {side.members_total} membership row(s) and this page carried {side.members.length} of them
+      {side.members_total} membership row(s); loaded context contains {side.members.length} of them
       {completionNote(page)}
       {counts.unresolved_anchor_total
         ? ` · ${counts.unresolved_anchor_total} unresolved anchor(s) in this selection`
@@ -212,7 +212,7 @@ function completionNote(page: ReviewFamilyRosterPage): string {
   if (!page.complete) return '';
   return page.state === 'first_page'
     ? ' — the page is the whole selection'
-    : ' — this page completes the walk; the pages before it carried the rows this one did not';
+    : ' — this page completes the walk; loaded context can retain earlier pages';
 }
 
 function carriedOf(side: ReviewFamilyRevisionContext): string {

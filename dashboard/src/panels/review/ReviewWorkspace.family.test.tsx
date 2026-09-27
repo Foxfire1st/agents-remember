@@ -283,7 +283,7 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     expect(view.getByTestId("review-source-explorer")).toBeTruthy();
   });
 
-  it("walks a family roster only from the cursor that family's own page published", async () => {
+  it("sends the family's published cursor and refuses a response from another walk", async () => {
     const { urls } = serving([TRUNCATED, CONTINUED]);
     const view = mount();
 
@@ -306,7 +306,7 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     const roster = view.getAllByTestId("review-family-roster")[0];
     expect(roster.dataset.rosterComplete).toBe("false");
     expect(roster.textContent).toContain("item(s) of this family revision's recorded selection");
-    expect(roster.textContent).toContain("membership row(s) and this page carried");
+    expect(roster.textContent).toContain("membership row(s); loaded context contains");
 
     const nexts = await view.findAllByTestId("review-family-roster-next");
     expect(nexts.length).toBeGreaterThan(0);
@@ -320,13 +320,12 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     // The value sent is the value the family context's own roster page published, unchanged.
     expect(decodeURIComponent(continuationRequest)).toContain(published);
 
-    // And the continued response renders as the page it is: the workspace names which family
-    // revision's walk the cursor continues, from the page's own scope.
-    const walk = await view.findByTestId("review-roster-walk");
-    expect(walk.textContent).toContain("Roster page");
-    expect(walk.textContent).toContain("side=after");
-    const bounds = view.getByTestId("review-page-bounds");
-    expect(bounds.textContent).toContain("family_members");
+    // This older capture continues the after-side cursor and carries a different primary revision
+    // selection. The clicked before cursor cannot admit it as a successful replacement.
+    const failure = await view.findByTestId("review-failure");
+    expect(failure.dataset.reviewCode).toBe("comparison_page_unreadable");
+    expect(view.getByTestId("review-retained-generation")).toBeTruthy();
+    expect(view.queryByTestId("review-roster-walk")).toBeNull();
   });
 
   it("renders a body that carries no family context as that fact, never as a measured zero", async () => {
@@ -456,7 +455,7 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
 
     // The owner's own two measures are still printed above it, so the two clauses cannot disagree.
     const roster = view.getAllByTestId("review-family-roster")[0];
-    expect(roster.textContent).toContain("records 2 membership row(s) and this page carried 0 of them");
+    expect(roster.textContent).toContain("records 2 membership row(s); loaded context contains 0 of them");
   });
 
   it("still says the measured zero when the read really measured zero memberships", async () => {
@@ -484,14 +483,14 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     );
     const counts = view.getByTestId("review-center-member-counts").textContent ?? "";
     expect(counts).toContain("4 recorded membership row(s) measured by the read across 2 recorded side(s) (before 2 + after 2)");
-    expect(counts).toContain("this page carried 0 member row(s) of them");
+    expect(counts).toContain("loaded context contains 0 member row(s) of them");
     expect(counts).toContain("the continuations beside the bounded rosters reach the rest");
     expect(view.getByTestId("review-center-member-distinct").textContent).toContain(
-      "among the membership rows this page carried",
+      "among the loaded membership contexts",
     );
     // The per-side owner lines and the walk control are the tree's own components, mounted here too.
     for (const line of view.getAllByTestId("review-center-roster")) {
-      expect(line.textContent).toContain("membership row(s) and this page carried");
+      expect(line.textContent).toContain("membership row(s); loaded context contains");
     }
     // The centre's own control must WORK, not merely exist: it is clicked here and the request it
     // issues is asserted, because a control mounted without its handler renders identically and
@@ -619,9 +618,9 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     );
     expect(lastPage).toHaveLength(1);
     expect(lastPage[0].textContent).toContain(
-      "the pages before it carried the rows this one did not",
+      "loaded context can retain earlier pages",
     );
-    expect(lastPage[0].textContent).toContain("this page carried 11 of them");
+    expect(lastPage[0].textContent).toContain("loaded context contains 11 of them");
     expect(lastPage[0].textContent).not.toContain("the page is the whole selection");
 
     // The rosters the read really did take in one page still say so, and never claim to be a step in

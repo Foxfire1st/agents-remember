@@ -38,6 +38,7 @@ from agents_remember.memory.knowledge.store import (
     open_existing_knowledge_store,
 )
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
+from agents_remember.models.knowledge.graph import FamilyMember
 from agents_remember.models.knowledge.read import (
     MAX_PAGE_ITEMS,
     MAX_PAGE_UTF8_BYTES,
@@ -382,12 +383,14 @@ def _roster_detail(
     if page.complete:
         return (
             f"the {side.name} snapshot's recorded roster of family revision {family_revision_id} holds "
-            f"{page.members_total} recorded membership(s); this page carried {carried} of them and "
+            f"{page.members_total} recorded membership(s); this page supplies {carried} member "
+            "context update(s) and "
             f"completes the read walk, the pages before it carried the rest"
         )
     return (
         f"the {side.name} snapshot's recorded roster of family revision {family_revision_id} holds "
-        f"{page.members_total} recorded membership(s) and this page carried {carried}: the remainder "
+        f"{page.members_total} recorded membership(s) and this page supplies {carried} member "
+        "context update(s): the remainder "
         f"is {page.counts.primary_items_remaining} of the read walk's "
         f"{page.counts.primary_items_total} item(s) and is reached with the continuation beside it"
     )
@@ -436,11 +439,11 @@ def _members(
     family_revision_id: str,
     movements: Sequence[ReviewRelationshipMovement],
 ) -> tuple[ReviewFamilyMember, ...]:
-    """The membership rows this page carried, each with its exact member revision's own content.
+    """Project the exact member revisions represented by this bounded page.
 
-    A membership row is the recorded fact and is always carried; the member revision's statement is
-    carried when the same page selected that revision, and is otherwise stated as
-    ``content_not_on_page`` rather than filled in from a second read of a different selection.
+    Content and claims can occur on different pages from their membership. Resolve only those
+    represented revision IDs through the exact membership owner; never fetch the whole roster or
+    fill in content the page did not select.
     """
 
     page: KnowledgeReadPage | None = result.page
@@ -460,11 +463,21 @@ def _members(
         movements=_movement_identities(movements),
         family_revision_id=family_revision_id,
     )
-    return tuple(
-        _member(side, item, lookups)
-        for item in page.items
-        if item.kind == "family_membership" and item.member_id is not None
+    revision_ids = (
+        content.keys()
+        | claims.keys()
+        | {
+            str(item.invariant_revision_id)
+            for item in page.items
+            if item.kind == "family_membership" and item.invariant_revision_id is not None
+        }
     )
+    assert side.store is not None
+    recorded = (
+        memberships.find_membership_by_pair(side.store, family_revision_id, revision_id)
+        for revision_id in sorted(revision_ids)
+    )
+    return tuple(_member(side, member, lookups) for member in recorded if member is not None)
 
 
 @dataclass(frozen=True)
@@ -482,7 +495,9 @@ class _RosterLookups:
     family_revision_id: str
 
 
-def _member(side: FamilyRosterSide, item: ReadItem, lookups: _RosterLookups) -> ReviewFamilyMember:
+def _member(
+    side: FamilyRosterSide, item: FamilyMember, lookups: _RosterLookups
+) -> ReviewFamilyMember:
     """One membership row as a member context, with its exact revision and its source references."""
 
     member_id = str(item.member_id)
@@ -570,7 +585,7 @@ def _source(claim: ReadItem) -> ReviewFamilyMemberSource:
 
 
 def _member_detail(
-    side: FamilyRosterSide, item: ReadItem, revision: ReadItem | None, others: tuple[str, ...]
+    side: FamilyRosterSide, item: FamilyMember, revision: ReadItem | None, others: tuple[str, ...]
 ) -> str:
     """One sentence stating which facts of this membership row this read established."""
 
