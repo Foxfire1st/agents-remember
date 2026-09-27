@@ -91,7 +91,11 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    membership change **prompts a fresh look at the affected recorded guarantee**: author a successor revision
    (a new key naming the stored `family_id` and the revision it supersedes) only where that is justified, preserve
    the earlier revision and its memberships exactly as recorded, and never let an implementation change rewrite
-   member intent or family meaning by itself. For every external source the pass inspected, declare it under
+   member intent or family meaning by itself. When a successor adds new obligations, author its exact unchanged
+   sibling set with `declares.retain_memberships` as documented in `../templates/curator-handoff-list.md`.
+   Read the stored membership IDs first; each selects an exact predecessor-family/invariant revision pair.
+   No roster is inherited automatically and no unchanged invariant needs a new revision. Verify the report's
+   `retainedFromMemberId` references and the published exact roster. For every external source the pass inspected, declare it under
    `external_sources` with its document identity, its version or retrieval time, the digest of what was inspected
    when one was taken, and the location read: the run retains it in a bounded manifest and binds the authored
    records' origin references to that manifest, so a document is never misrepresented as a repository path with a

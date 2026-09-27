@@ -315,6 +315,7 @@ class GuaranteePlan:
     declares_identity: bool
     declares_revision: bool
     declared_by: str
+    retained_memberships: tuple[MembershipPlan, ...] = ()
 
     @property
     def examined(self) -> bool:
@@ -407,6 +408,10 @@ def _plan_declaration(
     family_id = held.family_id if held is not None else declaration.family_id or str(uuid4())
     family_revision_id = held.family_revision_id if held is not None else str(uuid4())
     refusal = _reusefamily_refusal(declaration, family_id, held is not None, stored)
+    retained, retention_refusal = _retained_memberships(
+        declaration, family_id, family_revision_id, stored
+    )
+    refusal = refusal or retention_refusal
     if refusal is not None:
         return None, refusal
     recorded = None if stored is None else stored.recorded_guarantee(family_revision_id)
@@ -424,6 +429,7 @@ def _plan_declaration(
             declares_identity=stored is None or family_id not in stored.families,
             declares_revision=recorded is None,
             declared_by=declaration.declared_by,
+            retained_memberships=retained,
         ),
         None,
     )
@@ -469,15 +475,20 @@ def _reusefamily_refusal(
 def _declaration_digest(declaration: FamilyGuarantee) -> str:
     """The content one allocated pair stands for: the authored guarantee, never the local key."""
 
-    return sha256_digest(
-        {
-            "familyId": declaration.family_id,
-            "label": declaration.display_label,
-            "version": declaration.display_version,
-            "guarantee": declaration.joint_guarantee,
-            "predecessors": list(declaration.predecessor_revision_ids),
-        }
-    )
+    content: dict[str, object] = {
+        "familyId": declaration.family_id,
+        "label": declaration.display_label,
+        "version": declaration.display_version,
+        "guarantee": declaration.joint_guarantee,
+        "predecessors": list(declaration.predecessor_revision_ids),
+    }
+    # No retention means no new content, including for an existing operation's exact retry.
+    if declaration.retain_memberships:
+        content["retainedMemberships"] = [
+            {"memberId": item.member_id, "basis": item.basis}
+            for item in sorted(declaration.retain_memberships, key=lambda item: item.member_id)
+        ]
+    return sha256_digest(content)
 
 
 @dataclass(frozen=True)
@@ -491,6 +502,7 @@ class MembershipPlan:
     member_id: str
     basis: str
     stored: bool
+    retained_from_member_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -580,19 +592,76 @@ def plan_entry_family(
     retirements, refusal = _retirement_plans(entry_id, assignment.retirements, stored)
     if refusal is not None:
         return None, refusal
+    authored = tuple(one for one in declarations.declarations if one.declared_by == entry_id)
+    retained = tuple(one for declaration in authored for one in declaration.retained_memberships)
+    if {one.member_id for one in memberships} & {one.member_id for one in retained}:
+        return None, family_refusal(
+            entry_id,
+            "family_retention_duplicate",
+            "a retained sibling repeats the entry's own membership endpoint",
+        )
+    memberships.extend(retained)
     return (
         CuratorFamilyAuthoring(
             entry_id=entry_id,
             invariant_revision_id=revision_id,
             keys=tuple(keys),
-            declarations=tuple(
-                one for one in declarations.declarations if one.declared_by == entry_id
-            ),
+            declarations=authored,
             memberships=tuple(memberships),
             retirements=retirements,
         ),
         None,
     )
+
+
+def _retained_memberships(
+    declaration: FamilyGuarantee,
+    family_id: str,
+    revision_id: str,
+    stored: StoredFamilyFacts | None,
+) -> tuple[tuple[MembershipPlan, ...], EntryFamilyRefusal | None]:
+    """Validate exact predecessor memberships; never select or copy an implicit roster."""
+
+    plans: list[MembershipPlan] = []
+    endpoints: set[str] = set()
+    for reference in declaration.retain_memberships:
+        previous = None if stored is None else stored.endpoints_of(reference.member_id)
+        if previous is None or stored is None:
+            return (), family_refusal(
+                declaration.declared_by,
+                "family_retention_not_stored",
+                f"membership {reference.member_id} is not recorded in the selected dataset",
+            )
+        predecessor, invariant_revision = previous
+        if (
+            predecessor not in declaration.predecessor_revision_ids
+            or stored.family_of.get(predecessor) != family_id
+        ):
+            return (), family_refusal(
+                declaration.declared_by,
+                "family_retention_predecessor_mismatch",
+                f"membership {reference.member_id} is not in a declared predecessor of family {family_id}",
+            )
+        if invariant_revision in endpoints:
+            return (), family_refusal(
+                declaration.declared_by,
+                "family_retention_duplicate",
+                f"retained memberships resolve to the same new-family/invariant endpoint {invariant_revision}",
+            )
+        endpoints.add(invariant_revision)
+        plans.append(
+            MembershipPlan(
+                entry_id=declaration.declared_by,
+                key=declaration.key,
+                family_revision_id=revision_id,
+                invariant_revision_id=invariant_revision,
+                member_id=str(uuid5(_MEMBERSHIP_NAMESPACE, f"{revision_id}:{invariant_revision}")),
+                basis=reference.basis,
+                stored=stored.recorded_membership(revision_id, invariant_revision) is not None,
+                retained_from_member_id=reference.member_id,
+            )
+        )
+    return tuple(plans), None
 
 
 def _membership_endpoints(

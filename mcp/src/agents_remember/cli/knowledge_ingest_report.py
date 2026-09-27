@@ -164,6 +164,7 @@ def _family_block(coverage: FamilyCoverage) -> dict[str, Any]:
                 "memberId": one.member_id,
                 "state": one.state,
                 "basis": one.basis,
+                "retainedFromMemberId": one.retained_from_member_id,
             }
             for one in coverage.memberships
         ],
@@ -250,6 +251,7 @@ def _family_line(coverage: FamilyCoverage) -> str:
         f"{sum(1 for one in coverage.memberships if one.state == 'added')} added, "
         f"{sum(1 for one in coverage.memberships if one.state == 'reused')} reused, "
         f"{sum(1 for one in coverage.memberships if one.state == 'retired')} retired, "
+        f"{sum(1 for one in coverage.memberships if one.retained_from_member_id is not None)} exact sibling revisions retained, "
         f"{len(coverage.no_family)} deliberate no-family, "
         f"{len(coverage.unexamined)} not examined"
     )

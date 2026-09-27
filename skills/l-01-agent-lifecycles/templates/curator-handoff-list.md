@@ -290,9 +290,58 @@ or a shared anchor, because that inference is the bulk import this shape exists 
   an already-allocated key is refused: one key names one declaration operation.
 - **A retirement names a stored membership identity** the run can read, so a removal is never authored
   against a row nobody read. `memberships` may be absent when `retire` is present.
-- A membership always cites *this entry's own* exact revision; the family revision and the invariant
-  revision are separate recorded endpoints, and an older membership keeps citing the revision it was
-  authored against.
+- An ordinary membership cites *this entry's own* exact revision. A successor declaration can also
+  retain exact stored sibling revisions through `retain_memberships`, as below. The family and
+  invariant revisions remain separate endpoints; an older membership is never rewritten.
+
+### Retain exact siblings when adding new obligations to a family successor
+
+Read the existing family revision through `knowledge_read` with `view="family"` and the exact
+`familyRevisionId`, following its continuation when needed. A `family_member` row's
+`subject.record_id` is the membership ID; its statement names the exact invariant revision. Select
+the retention set deliberately. Do not infer it from all predecessor members, a latest head, labels,
+or another task's allocation journal, and do not revise an unchanged invariant just to add its edge.
+
+For example, the entry for a genuinely new paging obligation can declare the successor and keep two
+unchanged siblings. This is the entry's `family` portion; the ordinary producer fields and
+curator-authored `scope` still apply. Replace the labelled placeholders with IDs read from the store:
+
+```json
+"family": {
+  "state": "member",
+  "memberships": [{
+    "family": "review-guarantee-v2",
+    "basis": "The new paging obligation supports the existing review guarantee.",
+    "declares": {
+      "family_id": "<existing family UUID>",
+      "label": "Coherent review",
+      "version": "v2",
+      "guarantee": "Selected intent and complete recorded family context remain reachable together.",
+      "predecessor_revision_ids": ["<exact predecessor family revision UUID>"],
+      "retain_memberships": [
+        {"member_id": "<stored membership UUID for sibling A>", "basis": "Its unchanged statement still supports the guarantee."},
+        {"member_id": "<stored membership UUID for sibling B>", "basis": "Its existing scope and statement remain necessary here."}
+      ]
+    }
+  }]
+}
+```
+
+Each reference must exist in the selected dataset and belong to this family's explicitly declared
+predecessor revisions. A malformed, absent, foreign or mismatched reference refuses; repeated IDs
+and different old memberships resolving to the same new-family/invariant endpoint also refuse.
+Omission or `[]` retains none. Nothing is copied implicitly. Changing a nonempty set or its authored
+bases under an allocated declaration key is a content conflict; author a new successor declaration.
+
+The writer adds new membership edges to the new family revision. It does not rewrite the retained
+invariant's identity, revision, statement, scope or provenance, nor the old family or its memberships.
+Retaining and retiring the same source membership in one handoff refuses, including across separate
+entries; the historical membership must remain. In the report, membership
+`state="added"` means a new **edge**; `retainedFromMemberId` names the exact old membership whose
+invariant revision was kept. `unchangedSiblingMembers` includes those unchanged revisions after
+publication, while uncommitted coverage remains explicitly projected. Read the published family
+back and check its exact roster. This syntax extends a declaration carried by a genuine authored
+obligation; it does not introduce a separate family-only authoring operation.
 
 **`external_sources` — the bounded manifest, and the origin reference that names it.** An external
 document is not a repository path with a Git blob, so it never becomes a source anchor: the run records

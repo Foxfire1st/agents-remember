@@ -98,7 +98,11 @@ response — it must be this leaf's memory worktree — and preview any write wi
    unexamined is never reported as family-free. A member or membership change **prompts a fresh look at the affected
    recorded guarantee**: author a successor revision (a new key naming the stored `family_id` and the revision it
    supersedes) only where that is justified, keep the earlier revision and its memberships exactly as recorded, and
-   never let an implementation change rewrite member intent or family meaning by itself. For every **external
+   never let an implementation change rewrite member intent or family meaning by itself. When adding new obligations
+   to a successor, explicitly name unchanged siblings in the declaration's `retain_memberships` list using the
+   stored membership IDs and authored bases from `../templates/curator-handoff-list.md`. Those references keep exact
+   stored invariant revisions while adding new edges; do not manufacture invariant successors or assume the roster
+   is inherited. Read `retainedFromMemberId` and the published exact member set back. For every **external
    source** you inspected, declare it with its document identity, its version or retrieval time, the digest of what
    you inspected when you took one, and the location you read; the run retains it in a bounded manifest and binds the
    authored records' origin references to it, so no document is ever misrepresented as a repository path with a Git

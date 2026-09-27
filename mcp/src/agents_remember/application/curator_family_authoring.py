@@ -53,6 +53,7 @@ __all__ = [
     "EntryFamilyRefusal",
     "FamilyAssignment",
     "FamilyGuarantee",
+    "FamilyMemberRetention",
     "FamilyMembership",
     "FamilyPlaneRead",
     "FamilyRetirement",
@@ -94,6 +95,14 @@ class EntryFamilyRefusal:
 
 
 @dataclass(frozen=True)
+class FamilyMemberRetention:
+    """One exact stored membership whose invariant revision the successor keeps."""
+
+    member_id: str
+    basis: str
+
+
+@dataclass(frozen=True)
 class FamilyGuarantee:
     """One declared family guarantee, under the entry that authored it.
 
@@ -110,6 +119,7 @@ class FamilyGuarantee:
     joint_guarantee: str
     predecessor_revision_ids: tuple[str, ...] = ()
     family_id: str | None = None
+    retain_memberships: tuple[FamilyMemberRetention, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -199,11 +209,44 @@ def read_family_plane(entries: Sequence[Mapping[str, Any]]) -> FamilyPlaneRead:
             assignments[entry_id] = assignment
     declarations, declared_refusals = _declared_keys(assignments)
     refusals.update(declared_refusals)
+    # Refused entries contribute neither retirement nor retention effects to the next check.
+    assignments = {key: value for key, value in assignments.items() if key not in refusals}
+    declarations = {
+        key: value for key, value in declarations.items() if value.declared_by not in refusals
+    }
+    conflicts = _retention_conflicts(assignments, declarations)
+    refusals.update(conflicts)
     return FamilyPlaneRead(
         assignments={key: value for key, value in assignments.items() if key not in refusals},
-        declarations=declarations,
+        declarations={
+            key: value for key, value in declarations.items() if value.declared_by not in conflicts
+        },
         refusals=refusals,
     )
+
+
+def _retention_conflicts(
+    assignments: Mapping[str, FamilyAssignment], declarations: Mapping[str, FamilyGuarantee]
+) -> dict[str, EntryFamilyRefusal]:
+    """A retained historical membership cannot also be retired by this handoff."""
+
+    retiring: dict[str, set[str]] = {}
+    for entry_id, assignment in assignments.items():
+        for retirement in assignment.retirements:
+            retiring.setdefault(retirement.member_id, set()).add(entry_id)
+    retaining: dict[str, set[str]] = {}
+    for declaration in declarations.values():
+        for reference in declaration.retain_memberships:
+            retaining.setdefault(reference.member_id, set()).add(declaration.declared_by)
+    refused: dict[str, EntryFamilyRefusal] = {}
+    for member_id in sorted(retaining.keys() & retiring.keys()):
+        for entry_id in retaining[member_id] | retiring[member_id]:
+            refused[entry_id] = family_refusal(
+                entry_id,
+                "family_retention_retirement_conflict",
+                f"membership {member_id} is both retained and retired; keep the original historical membership when retaining its revision",
+            )
+    return refused
 
 
 def _read_assignment(
@@ -395,6 +438,10 @@ def _read_declaration(
             "family_id must be the UUID of a family identity the repository already holds",
         )
     predecessors, refusal = _predecessors(entry_id, raw.get("predecessor_revision_ids"))
+    retained, retention_refusal = _read_retained_memberships(
+        entry_id, raw.get("retain_memberships")
+    )
+    refusal = refusal or retention_refusal
     if refusal is not None:
         return None, refusal
     return (
@@ -406,9 +453,47 @@ def _read_declaration(
             joint_guarantee=guarantee[:PROSE_MAX_LENGTH],
             predecessor_revision_ids=predecessors,
             family_id=family_id,
+            retain_memberships=retained,
         ),
         None,
     )
+
+
+def _read_retained_memberships(
+    entry_id: str, raw: object
+) -> tuple[tuple[FamilyMemberRetention, ...], EntryFamilyRefusal | None]:
+    if raw is None:
+        return (), None
+    if not isinstance(raw, list):
+        return (), family_refusal(
+            entry_id, "family_retention_malformed", "retain_memberships must be a list"
+        )
+    retained: list[FamilyMemberRetention] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, Mapping) or set(item) != {"member_id", "basis"}:
+            return (), family_refusal(
+                entry_id,
+                "family_retention_malformed",
+                "each retained membership must name exactly member_id and basis",
+            )
+        member_id = _uuid_text(item["member_id"])
+        basis = _authored_text(item["basis"])
+        if member_id is None or basis is None:
+            return (), family_refusal(
+                entry_id,
+                "family_retention_malformed",
+                "retention requires a stored membership UUID and a nonblank authored basis",
+            )
+        if member_id in seen:
+            return (), family_refusal(
+                entry_id,
+                "family_retention_duplicate",
+                f"stored membership {member_id} is retained more than once",
+            )
+        seen.add(member_id)
+        retained.append(FamilyMemberRetention(member_id, basis))
+    return tuple(retained), None
 
 
 def _predecessors(entry_id: str, raw: object) -> tuple[tuple[str, ...], EntryFamilyRefusal | None]:

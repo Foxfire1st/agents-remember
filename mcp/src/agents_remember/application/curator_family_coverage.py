@@ -64,6 +64,7 @@ class MembershipOutcome:
     member_id: str
     state: str
     basis: str
+    retained_from_member_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -187,7 +188,9 @@ def _guarantee_outcomes(
             1
             for entry in placed
             for one in authoring[entry].memberships
-            if one.family_revision_id == family_revision_id and not one.stored
+            if one.family_revision_id == family_revision_id
+            and not one.stored
+            and one.retained_from_member_id is None
         )
         members_now = None if after is None else after.members_of(family_revision_id)
         plan = planned.get(family_revision_id)
@@ -272,6 +275,7 @@ def _membership_outcome(plan: MembershipPlan) -> MembershipOutcome:
         member_id=plan.member_id,
         state="reused" if plan.stored else "added",
         basis=plan.basis,
+        retained_from_member_id=plan.retained_from_member_id,
     )
 
 
