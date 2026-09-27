@@ -7,7 +7,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from agents_remember.models.base import ToolResponse
 from agents_remember.models.closeout.source import EvidenceFact
@@ -23,6 +31,7 @@ from agents_remember.models.lifecycles.evidence_dependencies import (
 )
 from agents_remember.models.lifecycles.memory_candidate import MemoryCandidatePairIdentity
 from agents_remember.models.lifecycles.review_assessment import (
+    AssessmentEvidenceByte,
     ReviewAssessment,
     ReviewAssessmentRevision,
 )
@@ -193,6 +202,25 @@ class CuratorCoherenceRecordedJudgment(CuratorCoherenceJudgment):
     """Published judgment with the lifecycle-captured evidence digest."""
 
     evidenceSha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
+    evidenceArtifact: AssessmentEvidenceByte | None = None
+
+    @model_serializer(mode="wrap")
+    def _canonical_custody(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Old recorded judgments retain their encoding; custody is stamped only by publication."""
+
+        result = handler(self)
+        if self.evidenceArtifact is None:
+            result.pop("evidenceArtifact", None)
+        return result
+
+    @model_validator(mode="after")
+    def _custody_keeps_the_authored_bytes(self) -> Self:
+        if (
+            self.evidenceArtifact is not None
+            and self.evidenceArtifact.sha256 != self.evidenceSha256
+        ):
+            raise ValueError("retained judgment evidence must hold the originally recorded bytes")
+        return self
 
 
 class CuratorCoherenceRecord(_StrictModel):
@@ -558,17 +586,38 @@ class CuratorCoherenceResponse(ToolResponse):
 
 
 @dataclass(frozen=True)
-class ValidatedCuratorCoherence:
-    """One validated coherence authority.
+class CuratorCoherencePaths:
+    canonical: Path
+    generations: Path
+    snapshots: Path
+    attestations: Path
 
-    Shelved with its model, not with the plane that first consumed it: the
-    record, its paths and its evidence are model facts, and both the memory
-    quality certification lane and the closeout lane read them.
-    """
+    def generation_record(self, digest: str) -> Path:
+        return self.generations / digest / "record.json"
 
-    authority: CuratorCoherenceAuthority
+    def generation_report(self, digest: str) -> Path:
+        return self.generations / digest / "report.md"
+
+    def attestation_copy(self, digest: str) -> Path:
+        return self.attestations / f"{digest}.json"
+
+    def judgment_evidence(self, digest: str) -> Path:
+        return self.generations.parent / "judgment-evidence" / digest
+
+
+@dataclass(frozen=True)
+class ValidatedCuratorCoherenceGeneration:
+    """An integrity-checked immutable generation, independent of the live authority pointer."""
+
     record: CuratorCoherenceRecord
     record_path: Path
     report_path: Path
     record_digest: str
     evidence: list[EvidenceFact]
+
+
+@dataclass(frozen=True)
+class ValidatedCuratorCoherence(ValidatedCuratorCoherenceGeneration):
+    """The immutable generation selected by one validated live authority pointer."""
+
+    authority: CuratorCoherenceAuthority

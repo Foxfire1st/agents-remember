@@ -84,11 +84,16 @@ from agents_remember.application.review_comparison_retention import (
     retain_comparison_source,
     retain_knowledge_sides,
 )
+from agents_remember.application.review_curator_records import (
+    RESERVED_CURATOR_OWNERS,
+    require_curator_record_inputs,
+)
+from agents_remember.application.review_evidence_records import review_records_for_resolution
 from agents_remember.application.review_record_rendering import (
     EMPTY_REVIEW_RECORDS,
     ReviewRecordInputs,
 )
-from agents_remember.errors import CodeObjectRetentionError
+from agents_remember.errors import CodeObjectRetentionError, CuratorCoherenceError
 from agents_remember.kernel.atomic_write import atomic_replace, atomic_write_bytes
 from agents_remember.kernel.canonical_json import canonical_json_bytes, sha256_digest
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -148,16 +153,16 @@ class ComparisonEvidenceInput:
 class ComparisonFreezeOptions:
     """What a caller may contribute to a freeze beyond the review's own composition.
 
-    One value rather than four optional arguments, because these four travel together: they are the
-    things the *caller* knows and the composition does not -- which record collections it supplied,
-    which owner-produced artifacts it wants cited, which halves it has established carry no recorded
-    generation, and which generation this one supersedes.
+    An omitted record contribution asks R14 for the actual owners' inputs at this resolved pair.
+    Explicit inputs, generic evidence, typed historical absence and publication lineage retain
+    their existing meanings. Only explicit recovery may retain its named parent's source capture.
     """
 
-    records: ReviewRecordInputs = EMPTY_REVIEW_RECORDS
+    records: ReviewRecordInputs | None = None
     evidence: tuple[ComparisonEvidenceInput, ...] = ()
     historical_absence: tuple[str, ...] = ()
     parent: ComparisonGenerationRef | None = None
+    retain_parent_inputs: bool = False
 
 
 # The empty contribution, as one value: a default built per call would rebuild the tuple it holds.
@@ -183,6 +188,7 @@ class ComparisonGenerationRequest:
     evidence: tuple[ComparisonEvidenceInput, ...] = ()
     historical_absence: tuple[str, ...] = ()
     parent: ComparisonGenerationRef | None = None
+    retain_parent_inputs: bool = False
 
 
 @dataclass(frozen=True)
@@ -259,7 +265,29 @@ def freeze_resolved_review(
 ) -> ComparisonGenerationFreeze:
     """Compose an explicitly resolved pair and publish through the single generation owner."""
 
-    composed = compose_review(resolved, request, options.records)
+    records = (
+        options.records if options.records is not None else review_records_for_resolution(resolved)
+    )
+    unavailable = next(
+        (
+            channel
+            for channel in records.channels
+            if channel.records == "assessments"
+            and channel.state == "unavailable"
+            and channel.unreadable
+        ),
+        None,
+    )
+    if unavailable is not None:
+        return _refused(
+            refusal(
+                _REFUSED,
+                unavailable.detail,
+                next_action=unavailable.next_action or "restore the expected curator artifacts",
+                offending_input="assessments",
+            )
+        )
+    composed = compose_review(resolved, request, records)
     if composed.state != "review" or composed.payload is None:
         return _refused(
             composed.refusal
@@ -279,10 +307,11 @@ def freeze_resolved_review(
             inventory=payload.source.inventory,
             comparison=payload.comparison,
             selector=request.selector,
-            records=options.records,
+            records=records,
             evidence=options.evidence,
             historical_absence=options.historical_absence,
             parent=options.parent,
+            retain_parent_inputs=options.retain_parent_inputs,
         )
     )
 
@@ -302,7 +331,12 @@ def freeze_comparison_generation(
     contract = resolved.contract
     if contract is None or resolved.baseline_code_root is None:
         return _refused(_no_task_root_refusal())
-    outcome = retain_comparison_source(resolved)
+    input_issue = _record_input_refusal(request)
+    if input_issue is not None:
+        return _refused(input_issue)
+    outcome = retain_comparison_source(
+        resolved, retained_from=request.parent if request.retain_parent_inputs else None
+    )
     if isinstance(outcome, ReviewRefusal):
         return _refused(outcome)
     staged = _stage(contract.task_root, contract.leaf_id)
@@ -318,6 +352,40 @@ def freeze_comparison_generation(
         # the stage is this call's own temporary output and the pin, if this call made one, is not
         # published anywhere. Without this, a hard failure would leave both behind.
         return _reclaim(staged, _storage_refusal(error))
+
+
+def _record_input_refusal(request: ComparisonGenerationRequest) -> ReviewRefusal | None:
+    """Validate immutable owner inputs before any retention writes."""
+
+    if any(item.owner in RESERVED_CURATOR_OWNERS for item in request.evidence):
+        return refusal(
+            _REFUSED,
+            "reserved curator owner pins cannot be supplied as generic evidence",
+            offending_input="evidence",
+            next_action="Restore the exact retained parent and owner artifacts, then retry the explicitly selected operation; current inputs are not substitutes.",
+        )
+    try:
+        require_curator_record_inputs(
+            request.resolution,
+            request.records.assessments,
+            request.records.artifacts,
+            request.records.channels,
+        )
+    except (CuratorCoherenceError, ValueError, OSError) as error:
+        return refusal(
+            _REFUSED,
+            f"curator inputs could not be retained: {error}",
+            offending_input="assessments",
+            next_action="Restore the exact retained parent and owner artifacts, then retry the explicitly selected operation; current inputs are not substitutes.",
+        )
+    if request.retain_parent_inputs and request.parent is None:
+        return refusal(
+            _REFUSED,
+            "retained inputs require an exact parent generation",
+            offending_input="parent",
+            next_action="Restore the exact retained parent and owner artifacts, then retry the explicitly selected operation; current inputs are not substitutes.",
+        )
+    return None
 
 
 def _no_task_root_refusal() -> ReviewRefusal:
@@ -545,6 +613,9 @@ def _record_binding(records: ReviewRecordInputs) -> ComparisonRecordBinding:
     note = ", with a currentness measurement" if measured else ""
     return ComparisonRecordBinding(
         state="supplied" if supplied else "not-supplied",
+        assessment_channel=next(
+            (channel for channel in records.channels if channel.records == "assessments"), None
+        ),
         assessments=counts[0],
         signals=counts[1],
         observations=counts[2],
@@ -552,8 +623,8 @@ def _record_binding(records: ReviewRecordInputs) -> ComparisonRecordBinding:
         collection_digest=digest,
         detail=(
             f"the composition supplied {counts[0]} assessments, {counts[1]} signals and "
-            f"{counts[2]} observations{note}; whether an owner published none or could not be "
-            "read is R14's fact, and this record asserts neither"
+            f"{counts[2]} observations{note}; assessment availability is captured separately only "
+            "when its owner supplied a channel"
         ),
     )
 
@@ -563,7 +634,36 @@ def _evidence_references(
 ) -> tuple[ComparisonArtifactReference, ...]:
     """Read and digest every cited artifact, refusing one that does not resolve inside the task root."""
 
-    return tuple(_evidence_reference(evidence, task_root) for evidence in request.evidence)
+    references = [_evidence_reference(evidence, task_root) for evidence in request.evidence]
+    inherited: tuple[ComparisonArtifactReference, ...] = ()
+    if request.retain_parent_inputs:
+        assert request.parent is not None
+        parent = read_manifest(request.parent.directory / COMPARISON_MANIFEST_NAME)
+        if parent.manifest_digest() != request.parent.manifest_digest:
+            raise _FreezeRefused(
+                refusal(
+                    _REFUSED,
+                    "the retained parent moved before evidence binding",
+                    offending_input="parent",
+                    next_action="Restore the exact retained parent and owner artifacts, then retry the explicitly selected operation; current inputs are not substitutes.",
+                )
+            )
+        inherited = parent.evidence
+    for expected in (*inherited, *request.records.artifacts):
+        observed = _evidence_reference(
+            ComparisonEvidenceInput(expected.owner, expected.relative_path), task_root
+        )
+        if observed != expected:
+            raise _FreezeRefused(
+                refusal(
+                    _REFUSED,
+                    f"curator artifact moved before comparison publication: {expected.relative_path}",
+                    offending_input="assessments",
+                    next_action="Restore the exact retained parent and owner artifacts, then retry the explicitly selected operation; current inputs are not substitutes.",
+                )
+            )
+        references.append(expected)
+    return tuple(dict.fromkeys(references))
 
 
 def _evidence_reference(

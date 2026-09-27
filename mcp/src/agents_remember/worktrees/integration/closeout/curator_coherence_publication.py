@@ -54,12 +54,14 @@ from .curator_coherence import (
     curator_coherence_paths,
     current_curator_coherence_predecessor,
     load_curator_coherence_authority,
+    load_curator_coherence_generation,
     observe_curator_coherence_source,
     require_current_curator_coherence,
 )
 from .curator_coherence_judgments import (
     exact_curator_judgments,
     require_recorded_judgments_current,
+    retain_judgment_evidence,
 )
 from .curator_coherence_render import render_curator_coherence
 
@@ -187,6 +189,7 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
             observed={"predecessorAuthorityDigest": predecessor},
             next_action="prepare",
         )
+    judgments = retain_judgment_evidence(contract, judgments)
     record, report = _record(
         contract,
         request,
@@ -233,6 +236,7 @@ def _publish(contract: WorktreeContract, request: CuratorCoherenceRequest) -> di
         )
     _require_observation_unchanged(observation, observe_curator_coherence_source(current_contract))
     require_recorded_judgments_current(current_contract, judgments)
+    load_curator_coherence_generation(current_contract, record_digest)
     authority = CuratorCoherenceAuthority(
         leafId=current_contract.leaf_id,
         contractPath=current_contract.contract_path.as_posix(),

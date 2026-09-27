@@ -23,10 +23,11 @@ statement that goes with it. It answers three questions and invents none:
   them against the candidate captured now. Selecting which of the two is being viewed is the
   resolution's own explicit choice (``history == "recorded"``, ICR-R12) and is never a fallback here.
 * :func:`currentness_channel` states that measurement's availability on the ``assessment_currentness``
-  channel. The three states a resolved candidate can earn are ``recorded`` (a measurement was made and
+  channel. A captured collection can earn ``recorded`` (a measurement was made and
   bindings were compared against it), ``none_recorded`` (the authority answered and holds no
   assessment, so there was no binding to measure) and ``unavailable`` (the authority could not be
-  read, so nothing was measurable).
+  read, so nothing was measurable). Historical inputs that never captured the collection remain
+  ``not_measured``; they are not an observed empty authority.
 
 **What this module does not do.** It does not re-run the curator-coherence observation: the pair
 identity, the registered topology fingerprint, the task-intent digest and the memory candidate tree
@@ -140,11 +141,9 @@ def currentness_channel(
       against, and the declared identities it holds no value for named as ``unreadable`` so a partial
       measurement is stated rather than absorbed.
 
-    ``not_measured`` is deliberately not among them: the composing read always measures a resolved
-    candidate (:func:`comparison_currentness_measurement`), so a bundle nobody measured never reaches
-    this function -- a bundle with no measurement carries no channels at all -- and rendering one here
-    as ``recorded`` would state a comparison that never happened. That contract is asserted rather
-    than guessed at, in the shipped style of an operation's own precondition.
+    An uncaptured historical assessment channel is instead ``not_measured``. The comparison's source
+    identities may be measurable, but no captured assessment binding was supplied to compare with
+    them; this is distinct from an owner that measured zero assessments.
 
     The count is the number of *bindings the measurement was compared against*, not a count of
     currency: an assessment whose declaration this comparison cannot cover is reported
@@ -152,6 +151,14 @@ def currentness_channel(
     rather than how many matched.
     """
 
+    if collection.state == "not_selected":
+        return ReviewRecordChannel(
+            records="assessment_currentness",
+            state="not_measured",
+            owner=CURRENTNESS_OWNER,
+            detail=collection.detail,
+            next_action=collection.next_action,
+        )
     if collection.state == "unavailable":
         return _unavailable(collection.detail, (), next_action=collection.next_action)
     if measurement.state == "unavailable":

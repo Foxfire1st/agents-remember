@@ -147,6 +147,11 @@ Read whether the producer wrote or reused a record and carry its exact generatio
 prior immutable generations remain available when a successor is recorded.
 An optional `--evidence <owner>:<task-relative path>` cites an existing owner-produced artifact.
 It neither authors an assessment nor turns passing tests into an intent verdict.
+If this curation authors review assessments, finish their existing curator publication and live
+validation before recording the comparison. The producer collects the same owner inputs as the
+normal reviewer and binds the exact immutable curator generation and retained evidence automatically.
+Reserved curator pins cannot be supplied with generic `--evidence`. Read the actual record counts
+and availability: measured-empty is different from an older generation that captured no assessments.
 
 For a code-only task whose knowledge is unchanged, add **`--unchanged-knowledge`**. This explicit
 selection checks the exact recorded memory base, the task's declared published knowledge and every
@@ -159,8 +164,21 @@ It prepares the normal live before/candidate halves through their existing owner
 original baseline, so the default reviewer catalogue and family view work before closeout.
 
 Carry the result into the curator handoff and normal closeout context. Repeat the operation after a
-later code or knowledge change before handing over that candidate. A refusal remains a reported
+later code, knowledge or authored-assessment change before handing over that candidate. A refusal remains a reported
 evidence gap; this step adds no transaction gate and closeout does not launch it automatically.
+
+When the assigned task explicitly recovers an older uncaptured assessment collection and identifies
+its original immutable curator record, use the same producer's paired recovery controls:
+
+```text
+agents-remember review-record-comparison --config <MCP authority settings> --contract <original leaf contract> --recover-generation <exact parent generation UUID> --curator-record-digest <original curator record SHA-256> --json
+```
+
+This creates a successor of the named retained task-context comparison. It requires that original
+source/knowledge pair and curator record to validate; it accepts neither live-pair preparation nor
+historical-absence options. Preserve the original generations and judgments, including concerns.
+Do not select today's pointer, recreate deleted quality files, scrape arbitrary receipts, or reauthor
+old assessments to make recovery succeed. Missing or corrupt retained inputs remain a named refusal.
 
 For every authored invariant, the hand-off template's curator-owned `scope` must carry applicability,
 conditions and exclusions before ingest. Workflow or provenance text is never semantic scope;

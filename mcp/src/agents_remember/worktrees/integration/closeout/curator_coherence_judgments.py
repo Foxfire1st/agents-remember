@@ -6,14 +6,18 @@ import hashlib
 from pathlib import Path
 
 from agents_remember.errors import CuratorCoherenceError
+from agents_remember.kernel.atomic_write import atomic_write_bytes
+from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceJudgment,
     CuratorCoherenceRecordedJudgment,
     CuratorSourceCandidate,
 )
+from agents_remember.models.lifecycles.review_assessment import AssessmentEvidenceByte
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-from .curator_coherence import resolve_curator_evidence_ref
+from .curator_assessment_evidence import AssessmentEvidenceBlockedError, read_retained_evidence_byte
+from .curator_coherence_paths import curator_coherence_paths, resolve_curator_evidence_ref
 
 
 def exact_curator_judgments(
@@ -54,6 +58,75 @@ def exact_curator_judgments(
     ]
 
 
+def retain_judgment_evidence(
+    contract: WorktreeContract, judgments: list[CuratorCoherenceRecordedJudgment]
+) -> list[CuratorCoherenceRecordedJudgment]:
+    """The publication owner retains admitted bytes without changing the authored citation."""
+
+    retained = []
+    for judgment in judgments:
+        source = resolve_curator_evidence_ref(contract, judgment.evidenceRef)
+        payload = source.read_bytes()
+        digest = hashlib.sha256(payload).hexdigest()
+        if digest != judgment.evidenceSha256:
+            raise CuratorCoherenceError(
+                "curator-coherence-evidence-raced", "judgment bytes moved before durable custody"
+            )
+        destination = curator_coherence_paths(contract).judgment_evidence(digest)
+        if destination.exists():
+            if destination.read_bytes() != payload:
+                raise CuratorCoherenceError(
+                    "curator-coherence-content-address-collision",
+                    "the retained judgment address holds different bytes",
+                )
+        else:
+            atomic_write_bytes(destination, payload)
+        artifact = AssessmentEvidenceByte(
+            path=destination.resolve().relative_to(contract.task_root.resolve()).as_posix(),
+            sha256=digest,
+            size=len(payload),
+        )
+        stamped = judgment.model_copy(update={"evidenceArtifact": artifact})
+        read_judgment_evidence(contract, stamped)
+        retained.append(stamped)
+    return retained
+
+
+def read_judgment_evidence(
+    contract: WorktreeContract, judgment: CuratorCoherenceRecordedJudgment
+) -> EvidenceFact:
+    """Use owner-stamped custody, or an old explicit durable task citation; never current code/memory."""
+
+    artifact = judgment.evidenceArtifact
+    if artifact is None:
+        if not judgment.evidenceRef.startswith("task:"):
+            raise CuratorCoherenceError(
+                "curator-coherence-judgment-not-retained",
+                "this historical code/memory judgment has no retained evidence artifact",
+            )
+        path = resolve_curator_evidence_ref(contract, judgment.evidenceRef)
+        observed = _evidence_digest(path, judgment.evidenceRef)
+        if observed != judgment.evidenceSha256:
+            raise CuratorCoherenceError(
+                "curator-coherence-evidence-stale",
+                f"judgment evidence bytes changed: {judgment.evidenceRef}",
+            )
+        return EvidenceFact(path=path.as_posix(), sha256=observed)
+    expected = curator_coherence_paths(contract).judgment_evidence(judgment.evidenceSha256)
+    if (
+        artifact.path != expected.relative_to(contract.task_root).as_posix()
+        or artifact.sha256 != judgment.evidenceSha256
+    ):
+        raise CuratorCoherenceError(
+            "curator-coherence-judgment-artifact-invalid",
+            "judgment custody does not name this owner's exact recorded evidence bytes",
+        )
+    try:
+        return read_retained_evidence_byte(contract, artifact)
+    except AssessmentEvidenceBlockedError as error:
+        raise CuratorCoherenceError(error.status, error.detail) from error
+
+
 def require_recorded_judgments_current(
     contract: WorktreeContract,
     judgments: list[CuratorCoherenceRecordedJudgment],
@@ -86,4 +159,9 @@ def _evidence_digest(path: Path, reference: str) -> str:
         ) from exc
 
 
-__all__ = ["exact_curator_judgments", "require_recorded_judgments_current"]
+__all__ = [
+    "exact_curator_judgments",
+    "read_judgment_evidence",
+    "require_recorded_judgments_current",
+    "retain_judgment_evidence",
+]

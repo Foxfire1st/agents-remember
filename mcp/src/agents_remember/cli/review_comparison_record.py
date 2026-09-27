@@ -4,6 +4,10 @@
         --contract <leaf enclosure contract> [--evidence <owner>:<task-relative path>]
         [--historical-absence before|after] [--unchanged-knowledge] [--json]
 
+    Explicit original-record recovery instead pairs --recover-generation <generation UUID> with
+    --curator-record-digest <original curator SHA-256>. It creates a successor from that retained
+    task-context pair; it never captures today's source or rewrites the named parent.
+
 **Why this command exists.** The Intent Reviewer reads a *per-leaf comparison generation*: a closed
 leaf's review reopens from ``history:recorded-comparison`` and falls back to a bare
 ``history:recorded-source-range`` when the leaf published none. The owner that produces a generation
@@ -45,9 +49,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from agents_remember.application.review_comparison_freeze import (
     ComparisonEvidenceInput,
@@ -61,6 +67,8 @@ from agents_remember.application.review_comparison_generation import (
     read_generation_refs,
     read_manifest,
 )
+from agents_remember.application.review_comparison_recovery import recover_review_comparison
+from agents_remember.application.review_curator_records import RESERVED_CURATOR_OWNERS
 from agents_remember.application.review_unchanged_knowledge import freeze_unchanged_knowledge_review
 from agents_remember.kernel.primitives.runtime_config import ConfigError, load_config
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
@@ -136,6 +144,14 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         "knowledge. Refuses missing, changed or unpublished task knowledge; authors no knowledge rows.",
     )
     parser.add_argument(
+        "--recover-generation",
+        help="Explicitly create a successor from this exact retained task-context generation; requires --curator-record-digest.",
+    )
+    parser.add_argument(
+        "--curator-record-digest",
+        help="Exact original immutable curator SHA-256 for explicit recovery; never resolved from the current pointer.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="as_json",
@@ -151,8 +167,8 @@ def run(args: argparse.Namespace) -> int:
         print(invocation)
         return EXIT_REFUSED
     contract, options = invocation
-    standing = _standing_generation(contract)
-    if standing is not None:
+    standing = None if args.recover_generation is not None else _standing_generation(contract)
+    if standing is not None and args.recover_generation is None:
         options = replace(options, parent=standing)
     request = ReviewSurfaceRequest(
         repository_id=contract.repo_name,
@@ -171,7 +187,13 @@ def run(args: argparse.Namespace) -> int:
     producer = (
         freeze_unchanged_knowledge_review if args.unchanged_knowledge else freeze_review_comparison
     )
-    freeze = producer(config, request, options)
+    freeze = (
+        recover_review_comparison(
+            config, contract, args.recover_generation, args.curator_record_digest, options
+        )
+        if args.recover_generation is not None
+        else producer(config, request, options)
+    )
     payload = report_payload(freeze)
     if args.as_json:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -233,8 +255,11 @@ def _invocation(args: argparse.Namespace) -> tuple[WorktreeContract, ComparisonF
         )
     if not str(args.config).strip():
         return "--config must not be blank: the freeze reads the coordination authority it names"
+    recovery_issue = _recovery_arguments(args)
     if args.unchanged_knowledge and args.historical_absence:
-        return "--unchanged-knowledge cannot be combined with --historical-absence"
+        recovery_issue = "--unchanged-knowledge cannot be combined with --historical-absence"
+    if recovery_issue is not None:
+        return recovery_issue
     try:
         contract = load_contract(Path(args.contract))
     except (ContractError, ValueError, OSError) as error:
@@ -248,6 +273,22 @@ def _invocation(args: argparse.Namespace) -> tuple[WorktreeContract, ComparisonF
         evidence=evidence,
         historical_absence=tuple(dict.fromkeys(args.historical_absence)),
     )
+
+
+def _recovery_arguments(args: argparse.Namespace) -> str | None:
+    if bool(args.recover_generation) != bool(args.curator_record_digest):
+        return "--recover-generation and --curator-record-digest must be supplied together"
+    if args.recover_generation is None:
+        return None
+    if args.unchanged_knowledge or args.historical_absence:
+        return "recovery cannot be combined with unchanged knowledge or historical absence"
+    try:
+        UUID(args.recover_generation)
+    except ValueError:
+        return "--recover-generation must name an exact generation UUID"
+    if re.fullmatch(r"[0-9a-f]{64}", args.curator_record_digest) is None:
+        return "--curator-record-digest must be an exact lowercase SHA-256"
+    return None
 
 
 def _evidence_inputs(raw: list[str]) -> tuple[ComparisonEvidenceInput, ...] | str:
@@ -266,6 +307,8 @@ def _evidence_inputs(raw: list[str]) -> tuple[ComparisonEvidenceInput, ...] | st
                 f"--evidence {entry!r} is not an <owner>:<task-relative path> citation: an owner and "
                 "a path are both required"
             )
+        if owner.strip() in RESERVED_CURATOR_OWNERS:
+            return "reserved curator owner pins are produced by the validated owner and cannot be supplied with --evidence"
         if Path(relative).is_absolute() or ".." in Path(relative).parts:
             return (
                 f"--evidence {entry!r} names a path outside the task root; a citation is recorded "

@@ -67,6 +67,10 @@ from agents_remember.application.review_candidate_resolution import (
     resolve_review_candidate,
     review_namespace,
 )
+from agents_remember.application.review_curator_records import (
+    records_from_curator_generation,
+    review_curator_records,
+)
 from agents_remember.application.review_record_rendering import (
     ReviewClaimRecord,
     ReviewRecordInputs,
@@ -103,18 +107,13 @@ from agents_remember.models.knowledge.review import (
     ReviewSurfaceRequest,
 )
 from agents_remember.models.knowledge.view import ReviewMatrixRow
-from agents_remember.models.lifecycles.review_assessment import ReviewAssessment
-from agents_remember.worktrees.integration.closeout.curator_coherence import (
-    CuratorCoherenceError,
-    curator_coherence_paths,
-    load_curator_coherence_authority,
-)
 
 __all__ = [
     "AUTHORED_EFFECT_KINDS",
     "EVIDENCE_CLAIM_KINDS",
     "MatrixSelection",
     "review_records_for",
+    "review_records_for_resolution",
     "with_selection_channels",
     "without_selected_matrix",
 ]
@@ -135,7 +134,7 @@ AUTHORED_EFFECT_KINDS: frozenset[str] = frozenset(
 EVIDENCE_CLAIM_KINDS: frozenset[str] = frozenset({"evidence_claim"})
 
 _COLLECTION_OWNERS: Mapping[ReviewRecordClassName, str] = {
-    "assessments": "curator_coherence.load_curator_coherence_authority",
+    "assessments": "curator_coherence.load_curator_coherence_generation",
     "detection_signals": "detection.read_detection_run",
     "verification_observations": "knowledge_evidence.read_evidence_scope",
     "authored_effects": "knowledge_views.read_knowledge_view:review_matrix",
@@ -193,10 +192,12 @@ def review_records_for(
         return ReviewRecordInputs(channels=_unresolved_channels(resolved))
     if resolved.contract is None:  # pragma: no cover - a resolved candidate always names a contract
         return ReviewRecordInputs(channels=_unresolved_channels(None))
-    return _resolved_records(resolved)
+    return review_records_for_resolution(resolved)
 
 
-def _resolved_records(resolved: ReviewCandidateResolution) -> ReviewRecordInputs:
+def review_records_for_resolution(
+    resolved: ReviewCandidateResolution, *, curator_record_digest: str | None = None
+) -> ReviewRecordInputs:
     """Every collection one resolved candidate's owners can answer for, with its own availability.
 
     The dependency-currentness measurement is produced here, from the comparison this resolution
@@ -207,13 +208,19 @@ def _resolved_records(resolved: ReviewCandidateResolution) -> ReviewRecordInputs
     so a historical assessment is never silently measured against today's branch.
     """
 
-    assessments, assessment_channel = _assessments(resolved)
+    curator = (
+        review_curator_records(resolved)
+        if curator_record_digest is None
+        else records_from_curator_generation(resolved, curator_record_digest)
+    )
+    assessments, assessment_channel = curator.assessments, curator.channel
     signals, signal_channel = _detection_signals(resolved)
     observations, observation_channel = _observations(resolved)
     claims, claim_channel = _evidence_claims(resolved)
     measurement = comparison_currentness_measurement(resolved)
     return ReviewRecordInputs(
         assessments=assessments,
+        artifacts=curator.artifacts,
         currentness=measurement,
         signals=signals,
         observations=observations,
@@ -314,50 +321,6 @@ def _selection_channel(
         )
     supplied = tuple(row for row in rows if row.subject.record_kind in kinds)
     return _answered(records, len(supplied), selection=selection)
-
-
-def _assessments(
-    resolved: ReviewCandidateResolution,
-) -> tuple[tuple[ReviewAssessment, ...], ReviewRecordChannel]:
-    """The published assessment collection, or the state its authority's answer earned.
-
-    Three facts are separated here, and the F09 defect was the collapse of two of them: an authority
-    that has never been published (``none_recorded`` -- this candidate has no published assessment),
-    an authority whose bytes are there and cannot be read (``unavailable`` with its own refusal as
-    provenance), and a published authority holding assessments (``recorded``).
-    """
-
-    contract = resolved.contract
-    assert contract is not None
-    try:
-        paths = curator_coherence_paths(contract)
-    except CuratorCoherenceError as error:
-        return (), _unavailable(
-            "assessments",
-            _provenance("the curator authority could not be located", error.status, error.detail),
-            next_action=error.next_action,
-        )
-    if not paths.canonical.is_file():
-        return (), _absent(
-            "assessments",
-            "no curator assessment authority has been published for this candidate "
-            f"({paths.canonical.name} is absent), so this candidate records no assessment; that is "
-            "an absence the owner answered, not an authority this composition could not read",
-        )
-    try:
-        validated = load_curator_coherence_authority(contract)
-    except (CuratorCoherenceError, OSError, ValueError) as error:
-        return (), _unavailable(
-            "assessments",
-            _provenance("the published curator authority could not be read", None, str(error)),
-            next_action=(
-                "repair or republish the candidate's curator-coherence authority through the curator "
-                "publication owner, then reopen the review"
-            ),
-            unreadable=(paths.canonical.name,),
-        )
-    stored = tuple(validated.record.assessments)
-    return stored, _answered("assessments", len(stored))
 
 
 def _detection_signals(

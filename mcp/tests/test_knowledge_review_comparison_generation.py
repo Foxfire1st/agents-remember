@@ -453,9 +453,11 @@ def test_the_manifest_binds_the_owners_identities_versions_and_its_own_fields(
     assert manifest.scope.changed_path_count == live["inventory_total"]
     assert manifest.scope.inventory_state == "measured"
     assert manifest.scope.inventory_partial is False
-    assert manifest.records.state == "not-supplied"
-    assert manifest.records.record_total == 0
-    assert manifest.records.current_measured is False
+    # The producer now collects R14 inputs; disabled curator authority remains unavailable.
+    assert manifest.records.state == "supplied" and manifest.records.record_total == 0
+    assert manifest.records.current_measured is True
+    assert manifest.records.assessment_channel is not None
+    assert manifest.records.assessment_channel.state == "unavailable"
     assert {stamp.owner: stamp.version for stamp in manifest.policies} == {
         "comparison-policy": live["policy_version"],
         "review-surface": "knowledge-review-surface/1",

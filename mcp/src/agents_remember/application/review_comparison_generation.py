@@ -48,7 +48,13 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID, uuid5
 
-from pydantic import Field, ValidationError, model_validator
+from pydantic import (
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+    model_validator,
+)
 
 from agents_remember.application.knowledge_before_half import NOT_RECORDED
 from agents_remember.kernel.atomic_write import atomic_write_bytes
@@ -67,6 +73,7 @@ from agents_remember.models.knowledge.base import (
     KnowledgeModel,
 )
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
+from agents_remember.models.knowledge.review_records import ReviewRecordChannel
 from agents_remember.worktrees.modules.code_object_retention import (
     CUSTODY_RETAINED,
     CodeObjectCustody,
@@ -315,9 +322,9 @@ class ComparisonRecordBinding(KnowledgeModel):
 
     This is a binding of *inputs*, not a claim about the world: ``supplied`` means the composition
     handed these collections over, and ``not-supplied`` means it handed none while this record was
-    written. Telling "the authority published no records" apart from "the loader could not read the
-    authority" is R14's obligation and is deliberately not asserted here -- a manifest that guessed
-    which of the two it saw would be inventing an availability fact.
+    written. The optional assessment channel carries R14's actual availability answer separately
+    from these counts. Its absence means that availability was not captured, not that no assessment
+    ever existed; it contributes no field to the canonical encoding of older sealed manifests.
     """
 
     state: Literal["supplied", "not-supplied"]
@@ -327,6 +334,28 @@ class ComparisonRecordBinding(KnowledgeModel):
     current_measured: bool
     collection_digest: str = Field(pattern=SHA256_PATTERN)
     detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    assessment_channel: ReviewRecordChannel | None = None
+
+    @model_serializer(mode="wrap")
+    def _canonical_availability(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """An uncaptured channel adds no field to the existing immutable manifest encoding."""
+
+        result = handler(self)
+        if self.assessment_channel is None:
+            result.pop("assessment_channel", None)
+        return result
+
+    @model_validator(mode="after")
+    def _assessment_availability_matches_collection(self) -> ComparisonRecordBinding:
+        channel = self.assessment_channel
+        if channel is not None and (
+            channel.records != "assessments"
+            or (channel.record_count is not None and channel.record_count != self.assessments)
+        ):
+            raise ValueError(
+                "recorded assessment availability must describe the bound assessment collection"
+            )
+        return self
 
     @property
     def record_total(self) -> int:

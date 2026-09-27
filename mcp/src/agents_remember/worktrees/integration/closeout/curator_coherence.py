@@ -20,10 +20,12 @@ from agents_remember.errors import (
 from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorCoherenceAuthority,
+    CuratorCoherencePaths,
     CuratorCoherenceRecord,
     CuratorQualityAttestation,
     CuratorSourceCandidate,
     ValidatedCuratorCoherence,
+    ValidatedCuratorCoherenceGeneration,
     require_memory_quality_attestation_dependencies,
 )
 from agents_remember.models.lifecycles.evidence_dependencies import (
@@ -73,36 +75,16 @@ from agents_remember.worktrees.queue.closeout_projection_members import (
 from agents_remember.worktrees.queue.closeout_queue_graph import graph_context
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-from .curator_coherence_render import render_curator_coherence
+from .curator_coherence_judgments import require_recorded_judgments_current
+from .curator_coherence_paths import (
+    curator_coherence_paths,
+    require_leaf_external_memory,
+    resolve_curator_evidence_ref,
+)
+from .curator_coherence_records import read_curator_coherence_generation
 
 QUALITY_REPORT_NAME = "curator-memory-quality.md"
 QUALITY_ATTESTATION_NAME = "curator-memory-quality.json"
-
-
-@dataclass(frozen=True)
-class CuratorCoherencePaths:
-    canonical: Path
-    generations: Path
-    snapshots: Path
-    attestations: Path
-
-    def generation_record(self, digest: str) -> Path:
-        return self.generations / digest / "record.json"
-
-    def generation_report(self, digest: str) -> Path:
-        return self.generations / digest / "report.md"
-
-    def attestation_copy(self, digest: str) -> Path:
-        """The durable copy of the memory-quality attestation a publication bound.
-
-        Content-addressed by the attestation's own digest and living in the task tree beside the
-        record, because the enclosure path the record binds is reclaimed by
-        ``lifecycle_finalize_task``: without this copy an authority's ``attestationSha256`` commits
-        to bytes no longer recoverable anywhere in the workspace, and nothing can re-derive from the
-        bound attestation why the record's source-candidate list is what it is.
-        """
-
-        return self.attestations / f"{digest}.json"
 
 
 @dataclass(frozen=True)
@@ -160,24 +142,12 @@ def curator_coherence_no_impact(
     )
 
 
-def curator_coherence_paths(contract: WorktreeContract) -> CuratorCoherencePaths:
-    _require_leaf_external_memory(contract)
-    reports = contract.task_root / "notes" / "reports"
-    history = reports / "curator-coherence" / contract.leaf_id
-    return CuratorCoherencePaths(
-        canonical=reports / f"{contract.leaf_id}-curator-coherence.json",
-        generations=history / "generations",
-        snapshots=history / "attempts",
-        attestations=history / "attestations",
-    )
-
-
 def observe_curator_coherence_source(
     contract: WorktreeContract,
 ) -> CuratorCoherenceObservation:
     """Capture every identity a publication must freeze and later re-prove."""
 
-    _require_leaf_external_memory(contract)
+    require_leaf_external_memory(contract)
     try:
         pair_identity = resolve_memory_candidate_pair(
             contract,
@@ -285,58 +255,30 @@ def load_curator_coherence_authority(
             observed={"recordPath": authority.recordPath, "reportPath": authority.reportPath},
             next_action="publish",
         )
-    try:
-        record_bytes = record_path.read_bytes()
-        report_bytes = report_path.read_bytes()
-        record = CuratorCoherenceRecord.model_validate_json(record_bytes)
-    except (OSError, ValidationError) as exc:
-        raise CuratorCoherenceError(
-            "curator-coherence-generation-unreadable",
-            "the authority's content-addressed generation is absent or invalid",
-            next_action="publish",
-        ) from exc
-    record_digest = _digest(record_bytes)
-    report_digest = _digest(report_bytes)
-    if record_digest != authority.currentRecordDigest:
-        raise CuratorCoherenceError(
-            "curator-coherence-record-digest-mismatch",
-            "canonical record bytes do not match the authority digest",
-            expected={"recordDigest": authority.currentRecordDigest},
-            observed={"recordDigest": record_digest},
-            next_action="publish",
-        )
-    expected_projection = render_curator_coherence(record).encode("utf-8")
-    if (
-        report_digest,
-        record.reportSha256,
-        authority.reportSha256,
-        report_bytes,
-    ) != (
-        authority.reportSha256,
-        authority.reportSha256,
-        authority.reportSha256,
-        expected_projection,
-    ):
+    generation = load_curator_coherence_generation(contract, authority.currentRecordDigest)
+    if generation.record.reportSha256 != authority.reportSha256:
         raise CuratorCoherenceError(
             "curator-coherence-projection-digest-mismatch",
-            "generated Markdown does not match the structured record and authority digest",
+            "the live authority names a different generated projection digest",
             next_action="publish",
         )
-    _require_record_identity(contract, record)
-    _require_evidence_refs(contract, record)
     return ValidatedCuratorCoherence(
         authority=authority,
-        record=record,
-        record_path=record_path,
-        report_path=report_path,
-        record_digest=record_digest,
-        evidence=[
-            _fact(contract.worktree_group / "reports" / QUALITY_REPORT_NAME),
-            _fact(contract.worktree_group / "reports" / QUALITY_ATTESTATION_NAME),
-            _fact(paths.canonical),
-            _fact(record_path),
-            _fact(report_path),
-        ],
+        record=generation.record,
+        record_path=generation.record_path,
+        report_path=generation.report_path,
+        record_digest=generation.record_digest,
+        evidence=[_fact(paths.canonical), *generation.evidence],
+    )
+
+
+def load_curator_coherence_generation(
+    contract: WorktreeContract, record_digest: str
+) -> ValidatedCuratorCoherenceGeneration:
+    """Read an exact immutable generation without consulting the live pointer or live readiness."""
+
+    return read_curator_coherence_generation(
+        contract, curator_coherence_paths(contract), record_digest
     )
 
 
@@ -362,6 +304,7 @@ def require_current_curator_coherence(
             next_action=exc.next_action or "publish",
         ) from exc
     _require_current_dependencies(record)
+    require_recorded_judgments_current(contract, record.judgments)
     observed = {
         "pairIdentity": observation.pair_identity.model_dump(mode="json"),
         "codeCandidateTree": observation.code_candidate_tree,
@@ -675,21 +618,6 @@ def all_assessment_subject_ids(validated: ValidatedCuratorCoherence) -> tuple[st
     )
 
 
-def _require_leaf_external_memory(contract: WorktreeContract) -> None:
-    if contract.kind != "leaf" or contract.memory_mode != "external":
-        raise CuratorCoherenceError(
-            "curator-coherence-not-applicable",
-            "curator coherence requires one external-memory leaf enclosure",
-            next_action="status",
-        )
-    if contract.memory_worktree is None:
-        raise CuratorCoherenceError(
-            "curator-coherence-memory-worktree-missing",
-            "the external-memory leaf has no memory worktree",
-            next_action="worktree_status",
-        )
-
-
 def _require_authority_identity(
     contract: WorktreeContract, authority: CuratorCoherenceAuthority
 ) -> None:
@@ -702,66 +630,6 @@ def _require_authority_identity(
             "the stable authority belongs to a different leaf or contract",
             next_action="developer-decision",
         )
-
-
-def _require_record_identity(contract: WorktreeContract, record: CuratorCoherenceRecord) -> None:
-    if (record.leafId, record.contractPath) != (
-        contract.leaf_id,
-        contract.contract_path.as_posix(),
-    ):
-        raise CuratorCoherenceError(
-            "curator-coherence-record-identity-mismatch",
-            "the selected record belongs to a different leaf or contract",
-            next_action="developer-decision",
-        )
-
-
-def _require_evidence_refs(contract: WorktreeContract, record: CuratorCoherenceRecord) -> None:
-    for judgment in record.judgments:
-        evidence = resolve_curator_evidence_ref(contract, judgment.evidenceRef)
-        observed = _digest(evidence.read_bytes())
-        if observed != judgment.evidenceSha256:
-            raise CuratorCoherenceError(
-                "curator-coherence-evidence-stale",
-                f"judgment evidence bytes changed: {judgment.evidenceRef}",
-                expected={"evidenceSha256": judgment.evidenceSha256},
-                observed={"evidenceSha256": observed},
-                next_action="publish",
-            )
-
-
-def resolve_curator_evidence_ref(contract: WorktreeContract, reference: str) -> Path:
-    """Resolve one explicit evidence namespace without implicit path fallback."""
-
-    namespace, separator, relative_text = reference.partition(":")
-    roots = {
-        "code": contract.code_worktree,
-        "memory": contract.memory_worktree,
-        "task": contract.task_root,
-    }
-    root = roots.get(namespace)
-    relative = Path(relative_text)
-    if (
-        not separator
-        or root is None
-        or not relative_text
-        or relative.is_absolute()
-        or relative == Path(".")
-    ):
-        raise CuratorCoherenceError(
-            "curator-coherence-evidence-invalid",
-            "judgment evidence must use one explicit code:, memory:, or task: file reference",
-            next_action="publish",
-        )
-    resolved_root = root.resolve()
-    resolved = (resolved_root / relative).resolve(strict=False)
-    if not resolved.is_relative_to(resolved_root) or not resolved.is_file():
-        raise CuratorCoherenceError(
-            "curator-coherence-evidence-invalid",
-            f"judgment evidence must identify one existing scoped file: {reference}",
-            next_action="publish",
-        )
-    return resolved
 
 
 def _task_relative(contract: WorktreeContract, path: Path) -> str:
@@ -794,6 +662,7 @@ __all__ = [
     "curator_coherence_paths",
     "current_curator_coherence_predecessor",
     "load_curator_coherence_authority",
+    "load_curator_coherence_generation",
     "observe_curator_coherence_source",
     "require_current_curator_coherence",
     "resolve_curator_evidence_ref",

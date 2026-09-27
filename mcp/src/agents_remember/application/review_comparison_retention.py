@@ -41,12 +41,15 @@ from agents_remember.application.review_candidate_resolution import (
 )
 from agents_remember.application.review_comparison_generation import (
     COMPARISON_KNOWLEDGE_DIRECTORY,
+    COMPARISON_MANIFEST_NAME,
     COMPARISON_SNAPSHOT_NAME,
     KNOWLEDGE_NOT_SELECTED,
+    ComparisonGenerationRef,
     ComparisonKnowledgeBinding,
     ComparisonSnapshotArtifact,
     ComparisonSourceBinding,
     KnowledgeSide,
+    read_manifest,
 )
 from agents_remember.application.review_comparison_reclamation import (
     CODE_OBJECT_DELETION_OWNER,
@@ -130,6 +133,8 @@ class ComparisonSourceRetention:
 
 def retain_comparison_source(
     resolved: ReviewCandidateResolution,
+    *,
+    retained_from: ComparisonGenerationRef | None = None,
 ) -> ComparisonSourceRetention | ReviewRefusal:
     """Bind both code objects, retaining the tree explicitly while durable history has not taken it.
 
@@ -142,7 +147,7 @@ def retain_comparison_source(
     reader could reopen.
     """
 
-    unresolved = _unresolved_capture(resolved)
+    unresolved = _unresolved_capture(resolved, retained_from)
     if isinstance(unresolved, ReviewRefusal):
         return unresolved
     if not object_readable(unresolved.repository, unresolved.baseline) or not object_readable(
@@ -165,7 +170,9 @@ def retain_comparison_source(
     return _pinned_outcome(resolved, unresolved)
 
 
-def _unresolved_capture(resolved: ReviewCandidateResolution) -> _Capture | ReviewRefusal:
+def _unresolved_capture(
+    resolved: ReviewCandidateResolution, retained_from: ComparisonGenerationRef | None
+) -> _Capture | ReviewRefusal:
     """The captured pair and its custody names, or the refusal for a resolution that carries none.
 
     A comparison with no enclosure contract has no protected branch to measure custody against, and
@@ -174,6 +181,10 @@ def _unresolved_capture(resolved: ReviewCandidateResolution) -> _Capture | Revie
     """
 
     capture = resolved.candidate_identity
+    if retained_from is not None:
+        capture = _retained_capture(resolved, retained_from)
+        if isinstance(capture, ReviewRefusal):
+            return capture
     repository = resolved.baseline_code_root
     baseline = resolved.baseline_code_tree_id
     candidate = resolved.candidate_code_tree_id
@@ -207,6 +218,61 @@ def _unresolved_capture(resolved: ReviewCandidateResolution) -> _Capture | Revie
         identity=capture,
         names=custody_names(contract),
     )
+
+
+def _retained_capture(
+    resolved: ReviewCandidateResolution, retained_from: ComparisonGenerationRef
+) -> FutureCodeCandidateIdentity | ReviewRefusal:
+    """Revalidate custody of an explicitly selected historical capture; never make it live."""
+
+    closed = resolved.closed_leaf
+    if closed is None or closed.manifest is None or closed.reopened.generation != retained_from:
+        return refusal(
+            _UNRESOLVED,
+            "retained source inputs do not name this exact recorded parent",
+            offending_input="parent",
+            next_action="Restore the exact retained parent and owner artifacts, then retry the explicitly selected operation; current inputs are not substitutes.",
+        )
+    try:
+        manifest = read_manifest(retained_from.directory / COMPARISON_MANIFEST_NAME)
+    except KnowledgeStorageError as error:
+        return refusal(
+            _UNRESOLVED,
+            str(error),
+            offending_input="parent",
+            next_action="Restore the exact retained parent and owner artifacts, then retry the explicitly selected operation; current inputs are not substitutes.",
+        )
+    if manifest.manifest_digest() != retained_from.manifest_digest or manifest != closed.manifest:
+        return refusal(
+            _UNRESOLVED,
+            "the recorded parent moved before source retention",
+            offending_input="parent",
+            next_action="Restore the exact retained parent and owner artifacts, then retry the explicitly selected operation; current inputs are not substitutes.",
+        )
+    source = closed.reopened.source
+    if (
+        source is None
+        or source.state != "available"
+        or (
+            resolved.baseline_code_tree_id,
+            resolved.candidate_code_tree_id,
+            str(resolved.baseline_code_root),
+            str(resolved.candidate_code_root),
+        )
+        != (
+            manifest.source.baseline_code_tree_id,
+            manifest.source.candidate_code_tree_id,
+            manifest.source.code_repository_root,
+            manifest.source.code_repository_root,
+        )
+    ):
+        return refusal(
+            _UNRESOLVED,
+            "the retained source endpoints are unavailable or mismatched",
+            offending_input="source",
+            next_action="Restore the exact retained parent and owner artifacts, then retry the explicitly selected operation; current inputs are not substitutes.",
+        )
+    return manifest.source.candidate_capture
 
 
 def custody_names(contract) -> CustodyNames:
@@ -351,6 +417,18 @@ def _side_binding(
 
     declared_absent = side in request.historical_absence
     if not database.is_file():
+        closed = request.resolution.closed_leaf
+        if closed is not None and closed.manifest is not None:
+            expected = next(
+                binding for binding in closed.manifest.knowledge if binding.side == side
+            )
+            if expected.state == "retained":
+                return refusal(
+                    _ABSENT,
+                    f"the expected retained {side} snapshot disappeared before capture",
+                    offending_input=side,
+                    next_action="Restore the exact parent snapshot; expected history cannot become an absent or unselected input.",
+                )
         return _absent_side(side, database, declared_absent)
     if declared_absent:
         return _contradicted_absence(side, database)
@@ -421,6 +499,18 @@ def _freeze_side(
         # requires the namespace it was opened under to be the same one. Asking here turns that
         # precondition into a refusal naming both ids instead of a storage error raised mid-copy.
         identity = store.snapshot_identity()
+        closed = resolved.closed_leaf
+        if closed is not None and closed.manifest is not None:
+            original = next(
+                binding for binding in closed.manifest.knowledge if binding.side == side
+            )
+            if original.state != "retained" or identity != original.identity:
+                return refusal(
+                    _UNRESOLVED,
+                    f"the retained {side} knowledge endpoint moved before capture",
+                    offending_input=side,
+                    next_action="Restore the exact retained parent and owner artifacts, then retry the explicitly selected operation; current inputs are not substitutes.",
+                )
         if identity.repository_id != namespace:
             return _namespace_refusal(side, database, namespace, identity)
         prepared = freeze_closed_snapshot(store, identity, stage_path)

@@ -80,6 +80,8 @@ unit-regression = [
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_review_recorded_knowledge.py",
   "mcp/tests/test_review_unchanged_knowledge.py",
+  "mcp/tests/test_review_assessment_history.py",
+  "mcp/tests/test_review_assessment_history_repairs.py",
   "mcp/tests/test_curator_scope.py",
   "mcp/tests/test_curator_candidate_progression.py",
   "mcp/tests/test_hosted_interactions.py",

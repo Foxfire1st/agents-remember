@@ -161,7 +161,12 @@ class ClosedLeafReview:
 
 
 def resolve_committed_leaf_review(
-    config: McpRuntimeConfig, repository_id: str, master: str, leaf_id: str
+    config: McpRuntimeConfig,
+    repository_id: str,
+    master: str,
+    leaf_id: str,
+    *,
+    generation_id: str | None = None,
 ) -> ReviewCandidateResolution | ReviewRefusal:
     """Resolve one committed or closed leaf's review from its durable records, or refuse by name.
 
@@ -183,12 +188,16 @@ def resolve_committed_leaf_review(
             ),
             offending_input=f"{master}/{leaf_id}",
         )
-    reopened = reopen_comparison_generation(config, repository_id, master, leaf_id)
+    reopened = reopen_comparison_generation(
+        config, repository_id, master, leaf_id, generation_id=generation_id
+    )
     if reopened.state in {"ambiguous", "manifest-unreadable"}:
         # A record that is there and cannot be read is refused in the reopen's own words: nothing
         # about it is claimed, and no other record is resolved in its place.
         return _reopen_refusal(contract, reopened)
     if reopened.manifest is None:
+        if generation_id is not None:
+            return _reopen_refusal(contract, reopened)
         return _recorded_range_resolution(contract, reopened)
     return _generation_resolution(contract, reopened, reopened.manifest)
 

@@ -24,6 +24,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from agents_remember.application.review_comparison_generation import ComparisonArtifactReference
 from agents_remember.models.knowledge.detection import DetectionSignalPayload
 from agents_remember.models.knowledge.evidence import VerificationObservationPayload
 from agents_remember.models.knowledge.review import (
@@ -126,6 +127,9 @@ class ReviewRecordInputs:
     over the identities the measurement covers, and a binding the measurement does not cover is
     reported ``not-measured`` rather than current or stale (``ICR-R15@v1``). ``None`` is a bundle
     nobody measured, and it is a state of its own.
+
+    ``artifacts`` carries validated immutable owner references for comparison retention. It holds no
+    duplicate assessment content; the typed curator generation remains that content's owner.
     """
 
     assessments: tuple[ReviewAssessment, ...] = ()
@@ -134,6 +138,7 @@ class ReviewRecordInputs:
     observations: tuple[VerificationObservationPayload, ...] = ()
     claims: tuple[ReviewClaimRecord, ...] = ()
     channels: tuple[ReviewRecordChannel, ...] = ()
+    artifacts: tuple[ComparisonArtifactReference, ...] = ()
 
 
 # Which supplied collections each pane displays as its own, in the order the pane lists them. The

@@ -50,13 +50,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes
+from agents_remember.models.closeout.source import EvidenceFact
 from agents_remember.models.lifecycles.review_assessment import (
     AssessmentEvidenceByte,
     AssessmentEvidenceReference,
+    ReviewAssessment,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-from .curator_coherence import resolve_curator_evidence_ref
+from .curator_coherence_paths import resolve_curator_evidence_ref
 
 EVIDENCE_DIRECTORY = Path("notes") / "reports" / "evidence"
 
@@ -213,43 +215,85 @@ def read_back_published_bytes(
     """
 
     for item in publication.published:
-        resolved = _resolve_recorded(contract, item.byte)
-        if not resolved.is_file():
-            raise AssessmentEvidenceBlockedError(
-                "review-assessment-evidence-read-back-absent",
-                f"the recorded evidence byte could not be opened after publication: "
-                f"{item.byte.path}",
-                expected=_expected(item.byte),
-                observed={"path": resolved.as_posix(), "state": "absent-or-unreadable"},
-            )
-        observed = _read(resolved)
-        digest = hashlib.sha256(observed).hexdigest()
-        if digest != item.byte.sha256 or len(observed) != item.byte.size:
-            raise AssessmentEvidenceBlockedError(
-                "review-assessment-evidence-read-back-mismatch",
-                f"the recorded evidence byte does not match its recorded digest: {item.byte.path}",
-                expected=_expected(item.byte),
-                observed={
-                    "path": resolved.as_posix(),
-                    "sha256": digest,
-                    "size": len(observed),
-                    "state": "present-but-different",
-                },
-            )
+        read_retained_evidence_byte(contract, item.byte)
     return publication.bytes
 
 
-def _expected(byte: AssessmentEvidenceByte) -> dict[str, object]:
-    return {"path": byte.path, "sha256": byte.sha256, "size": byte.size}
+def read_retained_evidence_byte(
+    contract: WorktreeContract, artifact: AssessmentEvidenceByte
+) -> EvidenceFact:
+    """Validate the existing task-relative path/digest/size custody value."""
+
+    return _read_bound_byte(contract, artifact.path, artifact.sha256, expected_size=artifact.size)
 
 
-def _resolve_recorded(contract: WorktreeContract, byte: AssessmentEvidenceByte) -> Path:
+def read_assessment_evidence(
+    contract: WorktreeContract, assessment: ReviewAssessment
+) -> tuple[EvidenceFact, ...]:
+    """Read the evidence paths and digests the published assessment actually bound, after cleanup."""
+
+    directory = evidence_directory_for(contract, assessment.assessmentId).relative_to(
+        contract.task_root
+    )
+    edges = {
+        edge.name: edge
+        for edge in assessment.examinedInputs.declaration.edges
+        if edge.kind == "evidence-bytes" and edge.name not in {"comparison", "scope-manifest"}
+    }
+    if bool(edges) != bool(assessment.evidenceRefs) or any(
+        edge.algorithm != "sha256" or Path(edge.name).parent != directory for edge in edges.values()
+    ):
+        raise AssessmentEvidenceBlockedError(
+            "review-assessment-evidence-binding-invalid",
+            "the assessment must name its actual published evidence within its own destination",
+            expected={"directory": str(directory)},
+            observed={"paths": sorted(edges)},
+        )
+    return tuple(
+        _read_bound_byte(contract, name, edge.digest) for name, edge in sorted(edges.items())
+    )
+
+
+def _read_bound_byte(
+    contract: WorktreeContract, relative: str, digest: str, *, expected_size: int | None = None
+) -> EvidenceFact:
+    """The one publication/readback integrity check, with size checked when the input records it."""
+
+    resolved = _resolve_recorded(contract, relative)
+    expected: dict[str, object] = {"path": relative, "sha256": digest}
+    if expected_size is not None:
+        expected["size"] = expected_size
+    if not resolved.is_file():
+        raise AssessmentEvidenceBlockedError(
+            "review-assessment-evidence-read-back-absent",
+            f"the recorded evidence byte could not be opened after publication: {relative}",
+            expected=expected,
+            observed={"path": resolved.as_posix(), "state": "absent-or-unreadable"},
+        )
+    observed = _read(resolved)
+    measured = hashlib.sha256(observed).hexdigest()
+    if measured != digest or (expected_size is not None and len(observed) != expected_size):
+        raise AssessmentEvidenceBlockedError(
+            "review-assessment-evidence-read-back-mismatch",
+            f"the recorded evidence byte does not match its recorded digest: {relative}",
+            expected=expected,
+            observed={
+                "path": resolved.as_posix(),
+                "sha256": measured,
+                "size": len(observed),
+                "state": "present-but-different",
+            },
+        )
+    return EvidenceFact(path=resolved.as_posix(), sha256=measured)
+
+
+def _resolve_recorded(contract: WorktreeContract, relative: str) -> Path:
     root = contract.task_root.resolve()
-    resolved = (root / byte.path).resolve(strict=False)
+    resolved = (root / relative).resolve(strict=False)
     if not resolved.is_relative_to(root):
         raise AssessmentEvidenceBlockedError(
             "review-assessment-evidence-path-escapes-task-root",
-            f"a recorded evidence path does not resolve inside the task root: {byte.path}",
+            f"a recorded evidence path does not resolve inside the task root: {relative}",
             expected={"taskRoot": root.as_posix()},
             observed={"path": resolved.as_posix()},
         )
