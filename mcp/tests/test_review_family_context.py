@@ -24,7 +24,7 @@ The load-bearing properties, one case each:
   family revision the membership owner records;
 * a changed member makes its family context available and changes nothing about the guarantee: both
   sides carry the exact text the store holds, and no field states a conclusion about it;
-* a side that records no membership is ``not_recorded`` rather than an empty roster, a selection in
+* a side that records no family is ``not_recorded`` rather than an empty roster, a selection in
   no family is a *measured* zero, and missing knowledge is the review's own refusal rather than an
   empty family collection;
 * a roster that did not fit its page stays partial with the read owner's own counts and the owner's
@@ -287,8 +287,8 @@ def test_a_selected_invariant_resolves_both_recorded_families_with_their_own_gua
     """The reviewed invariant's two recorded families are composed, each at its exact revision.
 
     The retry obligation is recorded in two families by the fixture itself, and each one is carried
-    with the family revision that snapshot records a membership for, that revision's own stored
-    guarantee, and its recorded roster -- read through the production composition, not built.
+    with the family's independently selected authored head, its own stored guarantee, and its recorded
+    roster -- read through the production composition, not built.
     """
 
     fixture = scenario.endpoints.diff.before.fixture
@@ -501,7 +501,7 @@ def test_a_task_context_review_states_that_it_selected_no_subject(
 def test_a_family_only_the_candidate_records_is_a_one_sided_context_with_a_stated_absence(
     tmp_path: Path,
 ) -> None:
-    """The side that records no membership is ``not_recorded`` -- never a measured empty roster."""
+    """The side that records no family is ``not_recorded`` -- never a measured empty roster."""
 
     scenario = build_family_scenario(tmp_path / "one-sided")
     added = _author_added_family(scenario)

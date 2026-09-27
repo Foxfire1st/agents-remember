@@ -2,8 +2,8 @@
 
 This module owns the composition the accepted family-centred reviewer needs and neither
 ``ICR-R09@v1``'s flat subject catalogue nor ``ICR-R08@v1``'s movement union produces: for the
-review's selected subject, **which recorded families it belongs to on each of the two bound
-snapshots, each selected family revision's own authored joint guarantee, and that revision's complete
+review's selected subject, **which recorded families either bound snapshot directly relates it to,
+each selected family revision's own authored joint guarantee, and that revision's complete
 recorded member roster -- unchanged siblings included** -- composed into
 :mod:`agents_remember.models.knowledge.review_family_context`.
 
@@ -12,9 +12,10 @@ recorded member roster -- unchanged siblings included** -- composed into
 * the **selection policy** is ``recorded-family-frontier/v1``
   (:mod:`agents_remember.memory.knowledge.read`), run through the shipped read operation
   :func:`agents_remember.application.knowledge_read.read_knowledge_scope`. One read per side with the
-  reviewed identity's own seed answers *which family revisions the seed reaches directly*
-  (``directly_containing_families``, the policy's frozen family set, computed before any page is cut
-  and therefore complete whatever budget the page applied).
+  reviewed invariant's own seed discovers *which family identities the seed reaches directly*
+  (``directly_containing_families``, the policy's frozen family set, computed before any page is cut).
+  Each discovered family's independent context is then resolved on both snapshots through the family
+  owner, including revisions that do not contain the selected invariant.
 * the **head rule** is ``ICR-R07@v1``'s own :func:`…review_revision_comparison.revision_heads`, called
   over the selected family revisions and the snapshots' own authored predecessor edges. This module
   chooses no revision by label, by version or by order: an ambiguous or a cyclic lineage is carried as
@@ -29,7 +30,7 @@ recorded member roster -- unchanged siblings included** -- composed into
 **What it refuses.** No family is inferred from a folder, a label, a shared source file or a
 similarity score; no guarantee is derived from members; no revision is chosen when the authored
 lineage leaves several heads; and no verdict about a member's consequence for its family's guarantee
-exists anywhere in the value this returns. A snapshot that does not record the reviewed identity
+exists anywhere in the value this returns. A snapshot that does not record the selected family
 reports ``not_recorded`` on that side, a read the owner refused reports ``unreadable`` with the
 owner's own words, and a measured zero is spelled ``no_family_recorded`` rather than ``empty``.
 
@@ -149,28 +150,22 @@ class FamilyContextOutcome:
 
 
 # Which question a family selection asked, which is what decides both the population the head rule
-# runs over and the sentence the selection publishes. The three are separate values rather than a
-# boolean because each names a different recorded fact: the family's own revisions, one named exact
-# revision, or the family revisions a subject's memberships cite.
+# runs over and the sentence the selection publishes: the family's own revisions or one named exact
+# revision. An invariant discovers family identities; its memberships do not select their heads.
 _AXIS_FAMILY_IDENTITY = "family_identity"
 _AXIS_FAMILY_REVISION = "family_revision"
-_AXIS_INVARIANT = "invariant"
 
 # The clause each axis states about the revision pair it selected. Every one of them is a recorded
 # fact about the two snapshots and none of them is a claim about a revision nobody read.
 _SELECTION_BASIS: dict[str, str] = {
-    _AXIS_FAMILY_IDENTITY: "each the unique revision its own snapshot records for this family",
+    _AXIS_FAMILY_IDENTITY: "each the unique authored head its own snapshot establishes for this family",
     _AXIS_FAMILY_REVISION: "each the exact revision this selection names",
-    _AXIS_INVARIANT: (
-        "each the family revision its own snapshot records a membership of the selected subject in"
-    ),
 }
 
 # The clause each axis states about a one-sided selection, where there is no pair at all.
 _ADDED_BASIS: dict[str, str] = {
     _AXIS_FAMILY_IDENTITY: "records no revision of the family",
     _AXIS_FAMILY_REVISION: "records not the revision this selection names",
-    _AXIS_INVARIANT: "records no membership of the selected subject in the family",
 }
 
 
@@ -181,9 +176,8 @@ class _FamilyRevisions:
     ``before``/``after`` are the populations the head rule runs over and ``before_heads``/
     ``after_heads`` are what it establishes. ``before_recorded``/``after_recorded`` are the family
     owner's own lists of every revision each snapshot records for this family -- a *different*
-    population, because a revision that cites no member is recorded without being part of a
-    membership-derived selection. ``axis`` says which question was asked, so the sentence can state
-    the recorded fact it actually measured instead of a generic one.
+    population when an exact revision was requested. ``axis`` says which question was asked, so the
+    sentence can state the recorded fact it actually measured instead of a generic one.
     """
 
     before: tuple[str, ...] = ()
@@ -192,7 +186,7 @@ class _FamilyRevisions:
     after_heads: tuple[str, ...] = ()
     before_recorded: tuple[str, ...] = ()
     after_recorded: tuple[str, ...] = ()
-    axis: str = _AXIS_INVARIANT
+    axis: str = _AXIS_FAMILY_IDENTITY
 
     def other_recorded(self) -> tuple[str, ...]:
         """Every recorded revision of this family that the selection did not choose, sorted.
@@ -215,16 +209,13 @@ class _FamilyRevisions:
 class _Applicable:
     """One side's family populations, or the stated reason none could be reported.
 
-    Two populations travel here and they are deliberately different. ``families`` is what the head
-    rule runs over: for an invariant selection, the family revisions whose recorded memberships cite
-    one of the selected invariant's own revisions; for a family selection, **every revision the
-    family owner records in this snapshot**, because the selection *is* the family and a revision that
-    cites no member is still a revision of it. ``recorded`` is the family owner's own list for every
-    applicable family, so a sentence about the family's recorded history can be measured against the
-    store rather than against the population this composition happened to read (ICR-R31 fix round 1).
+    During invariant discovery, ``families`` carries only directly applicable identity keys; their
+    populations are filled by the family owner before head selection. For a family selection it holds
+    every recorded revision, or only an explicitly requested revision. ``recorded`` is always the
+    family's whole history, including memberless revisions and revisions outside an exact request.
 
-    ``absent`` is the *measured* answer that this snapshot records no such identity (so no family is
-    applicable and none is missing), while ``reason`` is a read that did not serve a page at all --
+    ``absent`` is the *measured* answer that this snapshot records no such selector. An absent
+    invariant does not make a family discovered on the other side absent. ``reason`` is an unread scope;
     the two are never collapsed, because one is a fact about the snapshot and the other is a part
     this composition could not establish.
     """
@@ -310,7 +301,8 @@ def _compose(
 ) -> FamilyContextOutcome:
     """Read both sides' applicable families, then each family's selected revision and roster."""
 
-    applicable = {"before": _applicable(before, sources), "after": _applicable(after, sources)}
+    selector = _required_selector(sources)
+    applicable = {"before": _applicable(before, selector), "after": _applicable(after, selector)}
     if not applicable["before"].read and not applicable["after"].read:
         return FamilyContextOutcome(
             context=_stated(
@@ -425,28 +417,18 @@ def _axis(sources: FamilyContextSources) -> str:
     selector = sources.selector
     if isinstance(selector, FamilyRevisionSeed):
         return _AXIS_FAMILY_REVISION
-    if isinstance(selector, FamilyIdentitySeed):
-        return _AXIS_FAMILY_IDENTITY
-    return _AXIS_INVARIANT
+    return _AXIS_FAMILY_IDENTITY
 
 
 def _not_recorded_detail(axis: str, revisions: _FamilyRevisions, side: str) -> str:
     """One sentence stating, for the axis the selection was made on, why a side selected nothing.
 
-    The three axes state three different recorded facts, and the difference matters to a reviewer: an
-    invariant whose membership this snapshot does not record, a selection naming an exact revision
-    this snapshot does not record, and a family this snapshot records no revision of at all. Each
-    sentence also names how many revisions of the family this snapshot *does* record, so an empty
-    selection is never read as an empty family.
+    An exact revision may be absent while other revisions of its family exist. A family-identity
+    selection is absent only when the family owner records no revision, independently of whether the
+    primary invariant has a membership on this side.
     """
 
     recorded = revisions.before_recorded if side == "before" else revisions.after_recorded
-    if axis == _AXIS_INVARIANT:
-        return (
-            f"this snapshot records no membership of the selected subject in this family, so it has "
-            f"no selected family revision here and no roster is claimed for it; it records "
-            f"{len(recorded)} revision(s) of the family in total"
-        )
     if axis == _AXIS_FAMILY_REVISION:
         return (
             "this snapshot does not record the exact family revision this selection names, so no "
@@ -512,7 +494,7 @@ def _required_selector(sources: FamilyContextSources) -> KnowledgeReadSeed:
     return selector
 
 
-def _applicable(side: FamilyRosterSide, sources: FamilyContextSources) -> _Applicable:
+def _applicable(side: FamilyRosterSide, selector: KnowledgeReadSeed) -> _Applicable:
     """One side's family populations, by the axis the reviewed selector names.
 
     A **family** selection is answered from the family owner, and that is the fix this leaf needed: a
@@ -521,15 +503,13 @@ def _applicable(side: FamilyRosterSide, sources: FamilyContextSources) -> _Appli
     memberless head invisible, which silently resolved an authored ambiguity (and made a family with a
     recorded guarantee and no members read as no family at all).
 
-    An **invariant** selection keeps the policy's own answer: the families whose recorded memberships
-    cite a selected revision of the reviewed identity are the applicable families, and the revisions
-    that cite it are the ones whose rosters that subject's context is about. The family's *whole*
-    recorded revision list is still read from the owner, for the counts the sentences publish.
+    An **invariant** selection discovers only the policy's directly applicable family identities.
+    Each known identity is subsequently composed on both snapshots through this same family path;
+    membership absence never stands in for the independent family's absence or head selection.
     """
 
     if side.unreadable is not None or side.read_context is None:
         return _Applicable(reason=side.unreadable or "the snapshot could not be opened")
-    selector = _required_selector(sources)
     if isinstance(selector, (FamilyIdentitySeed, FamilyRevisionSeed)):
         return _applicable_family(side, selector)
     return _applicable_invariant(side, selector)
@@ -563,7 +543,7 @@ def _applicable_family(
 
 
 def _applicable_invariant(side: FamilyRosterSide, selector: KnowledgeReadSeed) -> _Applicable:
-    """One side's applicable families, from the selection policy's own frozen family set."""
+    """Discover only family identities from the invariant policy's frozen direct family set."""
 
     assert side.read_context is not None  # the caller answers an unopenable side before this read
     result = read_knowledge_scope(
@@ -581,19 +561,8 @@ def _applicable_invariant(side: FamilyRosterSide, selector: KnowledgeReadSeed) -
         if code == _SELECTOR_ABSENT:
             return _Applicable(absent=detail)
         return _Applicable(reason=detail)
-    grouped: dict[str, list[str]] = {}
-    for row in result.directly_containing_families:
-        revisions = grouped.setdefault(row.family_id, [])
-        if row.family_revision_id not in revisions:
-            revisions.append(row.family_revision_id)
-    assert side.store is not None
-    populations = {family_id: tuple(sorted(revisions)) for family_id, revisions in grouped.items()}
     return _Applicable(
-        families=populations,
-        recorded={
-            family_id: families.list_family_revision_ids(side.store, family_id)
-            for family_id in populations
-        },
+        families={row.family_id: () for row in result.directly_containing_families},
     )
 
 
@@ -609,6 +578,10 @@ def _entry(
 ) -> tuple[ReviewFamilyContextEntry, ReviewFamilyRosterPage | None, KnowledgeRefusal | None]:
     """Compose one family's context: its selection, its two sides and its inspectable candidates."""
 
+    if _required_selector(sources).kind in _INVARIANT_SEED_KINDS:
+        # Discovery bound the relevant identities; the family owner binds their independent history.
+        selector = FamilyIdentitySeed(family_id=family_id)
+        applicable = {side.name: _applicable(side, selector) for side in sides}
     before, after = sides
     revisions = _FamilyRevisions(
         before=applicable["before"].population(family_id),
@@ -705,11 +678,10 @@ def _selection(family_id: str, revisions: _FamilyRevisions) -> ReviewRevisionSel
     """State the family's revision selection in ``ICR-R07@v1``'s own value and vocabulary.
 
     The head rule above is that packet's own. What this function adds is the state and the sentence
-    for the population the axis selected -- the family's own recorded revisions for a family
-    selection, the revisions a subject's memberships cite for an invariant selection: one unique head
-    per side is compared, a side whose population is empty is the one-sided addition or removal, and
-    several heads or a lineage that establishes none is carried as exactly that -- with no revision
-    chosen and no guarantee presented as the family's own.
+    for the population the axis selected -- the family's own recorded revisions, or one exact revision
+    explicitly requested: one unique head per side is compared, and an empty side is a one-sided
+    addition or removal. Several heads or a lineage that establishes none remain explicit, with no
+    revision chosen and no guarantee presented as the family's own.
     """
 
     state = _selection_state(revisions)
@@ -808,34 +780,17 @@ def _unresolved_sentence(family_id: str, ambiguous: bool, revisions: _FamilyRevi
 
     if ambiguous:
         return (
-            (
-                f"ambiguous family revision selection for {family_id}: the recorded memberships place "
-                "the selected subject in several legitimate family revisions with no authored "
-                "successor ordering between them (before heads "
-                f"[{', '.join(revisions.before_heads)}], after heads "
-                f"[{', '.join(revisions.after_heads)}]), so no revision was chosen; each candidate's own "
-                "guarantee is listed instead"
-            )
-            if revisions.axis == _AXIS_INVARIANT
-            else (
-                f"ambiguous family revision selection for {family_id}: the snapshots record several "
-                "legitimate head revisions of this family with no authored successor ordering between "
-                f"them (before heads [{', '.join(revisions.before_heads)}], after heads "
-                f"[{', '.join(revisions.after_heads)}]), so no revision was chosen; each candidate's own "
-                "guarantee is listed instead"
-            )
+            f"ambiguous family revision selection for {family_id}: the snapshots record several "
+            "legitimate head revisions of this family with no authored successor ordering between "
+            f"them (before heads [{', '.join(revisions.before_heads)}], after heads "
+            f"[{', '.join(revisions.after_heads)}]), so no revision was chosen; each candidate's own "
+            "guarantee is listed instead"
         )
     return (
-        f"unresolved family revision selection for {family_id}: the "
-        f"{'revisions whose recorded memberships cite the selected subject' if revisions.axis == _AXIS_INVARIANT else 'recorded revisions of this family'} "
+        f"unresolved family revision selection for {family_id}: the recorded revisions of this family "
         f"(before [{', '.join(revisions.before)}], after [{', '.join(revisions.after)}]) establish "
-        "no unique head -- the authored lineage leaves several ends or none"
-        + (
-            ", or a snapshot records no membership here"
-            if revisions.axis == _AXIS_INVARIANT
-            else ", or a snapshot records no revision of it"
-        )
-        + " -- so no revision was chosen and no guarantee is presented as this family's own"
+        "no unique head -- the authored lineage leaves several ends or none, or a snapshot records "
+        "no revision of it -- so no revision was chosen and no guarantee is presented as this family's own"
     )
 
 

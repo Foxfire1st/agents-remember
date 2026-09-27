@@ -1,28 +1,14 @@
-"""The family revision population, and the states it decides (ICR-R31@v1, fix round 1).
+"""The independently selected family population and its bounded readback (ICR-R31@v1).
 
-The composition's cases in ``mcp/tests/test_review_family_context.py`` measure what one family
-context carries. These four measure the *population* that decides it, which is where this leaf's one
-real defect lived: the revision population of a family selection must be the family owner's own
-revision list, because a family revision that cites no member is still a revision of that family.
-Deriving the population from membership-bearing read rows instead made a memberless head invisible --
-and that is the repository's own canonical ambiguity shape, and the normal intermediate state of a
-curator who authors a family revision before its memberships.
+The family owner's complete revision list determines family heads, including memberless heads and
+revisions that do not cite the selected invariant. Invariant policy discovers only relevant family
+identities: a new member does not erase its family's before context, and a removed member does not
+pin after context to a stored predecessor. Ambiguity remains explicit; primary invariant operands and
+evidence stay independent. Exact family-revision requests still select their named revision and count
+the owner's complete history. An absent family remains different from a recorded empty roster.
 
-One case each, and three of the four fail on the pre-fix bytes (the fourth is the guard against
-over-correcting):
-
-* the canonical **memberless successor** shape is an authored ambiguity: two legitimate heads, no
-  revision chosen, every head an inspectable candidate -- never a `compared` pair naming the
-  superseded revision;
-* a family the snapshot **records with an authored guarantee and no members** is `recorded`, with its
-  guarantee and a *measured* empty roster, not `no_family_recorded`;
-* the selection's **history sentence is measured against the family owner**, so a revision no
-  membership reached is still counted as recorded history rather than reported as zero;
-* a family **no snapshot records** is still the measured zero, which keeps the fix from turning a
-  genuinely absent family into an empty one.
-
-The enclosure, the authored movement and the request helpers are the sibling case module's, imported
-rather than duplicated -- the pattern this test tree already uses for shared fixtures.
+The real-store enclosure and shared helpers come from ``test_review_family_context``. The HTTP walks
+also verify sparse member/claim pages and preserve primary panes across continuation (L38).
 """
 
 from __future__ import annotations
@@ -35,7 +21,7 @@ from agents_remember.application.knowledge_review import read_knowledge_review
 from agents_remember.memory.knowledge import families, memberships, realizations
 from agents_remember.memory.knowledge.store import open_knowledge_store
 from agents_remember.models.knowledge.family import FamilyRevisionDraft
-from agents_remember.models.knowledge.read import FamilyIdentitySeed
+from agents_remember.models.knowledge.read import FamilyIdentitySeed, FamilyRevisionSeed
 from agents_remember.models.knowledge.result import (
     FamilyRequest,
     FamilyRevisionRequest,
@@ -44,17 +30,23 @@ from agents_remember.models.knowledge.result import (
 from agents_remember.serving.review import KNOWLEDGE_REVIEW_ROUTE
 from fastapi.testclient import TestClient
 from read_scope_test_support import BASE_LABEL
-from test_knowledge_review_source_endpoints import LEAF_ID, _place_datasets
+from test_knowledge_review_source_endpoints import (
+    LEAF_ID,
+    _place_datasets,
+    build_endpoint_fixture,
+)
 from test_review_family_context import (
     LEFT_GUARANTEE,
     RIGHT_GUARANTEE,
     FamilyScenario,
     _author_family_successor,
+    _author_membership,
     _review_of_unfamiliar_invariant,
     _served,
     build_family_scenario,
     entry_for,
     family_request,
+    members_of,
     review,
 )
 
@@ -242,16 +234,16 @@ def _author_recorded_empty_family(scenario: FamilyScenario) -> tuple[str, str]:
 
 
 def test_the_history_sentence_is_measured_against_the_family_owner(tmp_path: Path) -> None:
-    """The revisions the selection did not reach are still counted, because the owner records them.
+    """Independent family heads participate even when only one contains the selected invariant.
 
-    The selected invariant is cited by two family revisions and the family records a third that cites
-    no member. The sentence must state the family owner's own counts -- one before and three after,
-    with one other recorded revision -- rather than the population this composition selected. The
-    pre-fix bytes printed "0 other recorded revision(s) of this family remain selectable history"
-    while the store held that third revision, which a reviewer can select by its exact id.
+    This case previously expected the membership-containing subset to choose a family head while a
+    competing memberless head appeared only in a history count. L40 corrects that false determinacy:
+    the invariant's own operands remain unchanged, but its family context is genuinely ambiguous.
+    An explicit family-revision request still selects exactly that revision and reports all history.
     """
 
     scenario = build_family_scenario(tmp_path / "history")
+    primary = review(scenario.endpoints)
     memberless = _author_memberless_successor(scenario, LEFT_GUARANTEE)
     _withdraw_parent_membership(scenario)
     _place_datasets(scenario.endpoints.diff, scenario.endpoints.contract)
@@ -260,26 +252,133 @@ def test_the_history_sentence_is_measured_against_the_family_owner(tmp_path: Pat
     selection = entry.selection
     before_recorded = recorded_revisions(scenario, "before")
     after_recorded = recorded_revisions(scenario, "after")
-    others = sorted(
-        (set(before_recorded) | set(after_recorded))
-        - {selection.before_revision_id, selection.after_revision_id}
-    )
-
     assert len(before_recorded) == 1
     assert len(after_recorded) == 3
-    assert others == [memberless]
-    assert entry.selection.state == "compared"
-    # The carried population is one revision per side, so a count over it would print zero while the
-    # owner records three revisions of this family: one of them is the parent the candidate withdrew
-    # the membership from, and the other is the memberless successor.
+    assert selection.state == "ambiguous"
+    assert selection.before_revision_id is None and selection.after_revision_id is None
+    assert set(selection.after_heads) == {scenario.successor_family_revision_id, memberless}
     assert selection.before_retained == (scenario.parent_family_revision_id,)
-    assert selection.after_retained == (scenario.successor_family_revision_id,)
-    assert f"{len(before_recorded)} before and {len(after_recorded)} after revision(s)" in (
-        selection.statement
+    assert selection.after_retained == tuple(sorted(after_recorded))
+    assert {candidate.revision_id for candidate in entry.candidates} == set(after_recorded)
+    assert entry.before.guarantee is None and entry.after.guarantee is None
+    assert entry.before.state == entry.after.state == "not_resolved"
+    _assert_primary_unchanged(primary, payload)
+
+    explicit = review(
+        scenario.endpoints,
+        scenario.endpoints.request().model_copy(
+            update={
+                "selector": FamilyRevisionSeed(
+                    family_id=scenario.family_id,
+                    revision_id=scenario.parent_family_revision_id,
+                )
+            }
+        ),
     )
-    assert f"{len(others)} other recorded revision(s)" in selection.statement
-    assert "0 other recorded revision(s)" not in selection.statement
-    assert entry.after.recorded_revision_ids == tuple(sorted(after_recorded))
+    explicit_entry = entry_for(explicit, scenario.family_id)
+    selected = explicit_entry.selection
+    assert selected.state == "compared"
+    assert (
+        selected.before_revision_id
+        == selected.after_revision_id
+        == scenario.parent_family_revision_id
+    )
+    assert "1 before and 3 after revision(s)" in selected.statement
+    assert "2 other recorded revision(s)" in selected.statement
+    assert explicit_entry.after.recorded_revision_ids == tuple(sorted(after_recorded))
+
+
+def _assert_primary_unchanged(before, after) -> None:
+    """Family curation cannot replace the selected invariant's operands or evidence."""
+
+    assert after.knowledge.revision_selection == before.knowledge.revision_selection
+    assert after.knowledge.before_statement == before.knowledge.before_statement
+    assert after.knowledge.after_statement == before.knowledge.after_statement
+    assert after.knowledge.before_conditions == before.knowledge.before_conditions
+    assert after.knowledge.after_conditions == before.knowledge.after_conditions
+    assert after.evidence == before.evidence
+    assert after.source.inventory == before.source.inventory
+
+
+def _author_successor_roster(endpoints, revisions: set[str]) -> str:
+    """Author a family's successor and only the requested exact memberships through store owners."""
+
+    diff = endpoints.diff
+    fixture = diff.before.fixture
+    store = open_knowledge_store(diff.after.database_path, diff.repository_id)
+    try:
+        successor = _author_family_successor(
+            store, diff.repository_id, fixture, fixture.direct_family
+        )
+        for revision in sorted(revisions):
+            _author_membership(store, diff.repository_id, successor, revision, fixture)
+    finally:
+        store.close()
+    _place_datasets(diff, endpoints.contract)
+    return successor
+
+
+def test_a_new_member_keeps_the_existing_familys_before_context(tmp_path: Path) -> None:
+    endpoints, selector = _review_of_unfamiliar_invariant(tmp_path / "new-member")
+    primary = review(endpoints, family_request(endpoints, selector))
+    selected = primary.knowledge.revision_selection
+    assert selected is not None and selected.state == "added"
+    assert selected.before_revision_id is None and selected.after_revision_id is not None
+    assert primary.knowledge.before_statement.state == "absent"
+    fixture = endpoints.diff.before.fixture
+    old_revisions = {endpoints.diff.subject_revision_id, fixture.auxiliary_revision_id}
+    new_revisions = old_revisions | {selected.after_revision_id}
+    successor = _author_successor_roster(endpoints, new_revisions)
+
+    payload = review(endpoints, family_request(endpoints, selector))
+    _assert_primary_unchanged(primary, payload)
+    assert payload.family_context.families_total == 1
+    entry = entry_for(payload, fixture.direct_family.family_id)
+    assert entry.selection.state == "compared"
+    assert entry.before.family_revision_id == fixture.direct_family.revision_id
+    assert entry.after.family_revision_id == successor
+    assert entry.before.guarantee is not None and entry.after.guarantee is not None
+    assert set(members_of(entry.before)) == old_revisions
+    assert set(members_of(entry.after)) == new_revisions
+    for revision in old_revisions:
+        assert (
+            members_of(entry.before)[revision].statement
+            == members_of(entry.after)[revision].statement
+        )
+    assert entry.before.recorded_revision_ids == (fixture.direct_family.revision_id,)
+    assert set(entry.after.recorded_revision_ids) == {fixture.direct_family.revision_id, successor}
+
+
+def test_a_removed_member_does_not_pin_family_context_to_its_retained_predecessor(
+    tmp_path: Path,
+) -> None:
+    endpoints = build_endpoint_fixture(tmp_path / "removed-member")
+    fixture = endpoints.diff.before.fixture
+    request = endpoints.request(fixture.auxiliary_invariant_id)
+    primary = review(endpoints, request)
+    successor = _author_successor_roster(endpoints, {endpoints.diff.subject_revision_id})
+
+    payload = review(endpoints, request)
+    _assert_primary_unchanged(primary, payload)
+    entry = entry_for(payload, fixture.direct_family.family_id)
+    assert entry.selection.state == "compared"
+    assert entry.before.family_revision_id == fixture.direct_family.revision_id
+    assert entry.after.family_revision_id == successor
+    assert set(members_of(entry.before)) == {
+        endpoints.diff.subject_revision_id,
+        fixture.auxiliary_revision_id,
+    }
+    assert set(members_of(entry.after)) == {endpoints.diff.subject_revision_id}
+    store = open_knowledge_store(endpoints.diff.after.database_path, endpoints.diff.repository_id)
+    try:
+        retained = memberships.find_membership_by_pair(
+            store, fixture.direct_family.revision_id, fixture.auxiliary_revision_id
+        )
+        assert (
+            retained is not None
+        )  # The historical after membership was never deleted to force v2.
+    finally:
+        store.close()
 
 
 def _withdraw_parent_membership(scenario: FamilyScenario) -> None:
