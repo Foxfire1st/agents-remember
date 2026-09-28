@@ -170,6 +170,7 @@ unit-regression = [
   "mcp/tests/test_quality_diagnostics.py",
   "mcp/tests/test_quality_retry_proof.py",
   "mcp/tests/test_quality_subprocess_environment.py",
+  "mcp/tests/test_read_anchor_memo.py",
   "mcp/tests/test_read_ar_files.py",
   "mcp/tests/test_record_landing.py",
   "mcp/tests/test_repository_certification_profiles.py",

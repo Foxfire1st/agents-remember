@@ -14,18 +14,42 @@ into a promotion:
 * no content. The observation carries identities, an entry kind and a status; the bytes stay where
   they are, which is what keeps a read page a facts-only packet rather than a document dump.
 
+The Git and parser answers behind an observation are remembered for the life of the process, keyed
+by complete object ids (:mod:`.read_anchor_memo`): which entry a tree holds at a path, which lines a
+blob holds and which names those lines define are functions of the ids alone, so every owner that
+observes the same anchor -- and every subject of the same comparison -- reuses one answer instead of
+spawning Git and re-parsing the blob again. Only answers are remembered; a lookup that failed is
+asked again, so an object that becomes readable later is observed then.
+
+What is never remembered is whether the repository still *holds* the tree: that is a fact about the
+repository, not the id, and it changes when history is released and pruned or an alternate is
+revoked. Every :class:`_TreeAnchorResolver` probes the tree afresh, and the remembered answers are
+consulted only behind a probe that succeeded. Two cases fall outside that guard. A repository that
+still holds the tree but has lost one of its blobs -- corruption, or a partial clone whose promisor
+never supplied it -- is answered from memory for a blob that was read before. And a caller of
+:func:`observe_anchor` that builds no resolver skips the probe altogether; the one such production
+caller, curator ingest, reads the tree's membership in the same run before it observes.
+
 The stored identity is preserved on every outcome, including the failures, because the recorded
 attribution is a fact about what an author claimed and not a value that resolution may rewrite.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from types import MappingProxyType
 from typing import Any
 
 from agents_remember.errors import GrammarUnavailableError
 from agents_remember.kernel.git_command import run_git
+from agents_remember.memory.knowledge.read_anchor_memo import (
+    BLOB_DEFINITIONS,
+    BLOB_LINES,
+    TREE_ENTRIES,
+    Definitions,
+    is_complete_object_id,
+)
 from agents_remember.memory_quality.style.citations import extents, grammars
 from agents_remember.models.knowledge.read import AnchorResolution, KnowledgeReadContext
 from agents_remember.models.knowledge.source import LineRangeLocator
@@ -261,8 +285,7 @@ def _observed_symbol(
             ),
         )
     try:
-        lines = _recorded_lines(repository_root, object_id)
-        defined = _defining_extents(name, path, lines)
+        defined = _defining_extents(name, _blob_definitions(repository_root, object_id, path))
     except (GrammarUnavailableError, _BlobUnreadable) as failure:
         return AnchorResolution(
             **common,
@@ -351,7 +374,7 @@ def _observed_line_range(
     )
 
 
-def _line_count(lines: list[str]) -> int:
+def _line_count(lines: Sequence[str]) -> int:
     """How many lines the blob holds: a final newline ends the last line rather than opening one."""
 
     return len(lines) - 1 if lines and lines[-1] == "" else len(lines)
@@ -361,23 +384,55 @@ class _BlobUnreadable(Exception):
     """The recorded blob's bytes could not be obtained from the requested tree."""
 
 
-def _recorded_lines(repository_root: Path, object_id: str) -> list[str]:
+def _recorded_lines(repository_root: Path, object_id: str) -> tuple[str, ...]:
     """The recorded blob's own bytes, as the lines the parser reads.
 
     Git answers with the object's bytes and nothing else: no working tree, no ``HEAD`` and no
     checkout is substituted, so what is parsed is the blob the record names. The runner decodes
     with ``surrogateescape``, so a blob that is not valid UTF-8 still yields lines rather than an
-    exception of its own.
+    exception of its own. The lines are a tuple because a remembered answer is shared by every
+    later caller and must not be edited by any one of them.
     """
 
+    key = (str(repository_root), object_id)
+    remembered = BLOB_LINES.get(key)
+    if remembered is not None:
+        return remembered[0]
     result = run_git(repository_root, ["cat-file", "blob", object_id])
     if result.returncode != 0:
         raise _BlobUnreadable(f"git could not read blob {object_id}")
-    return result.stdout.split("\n")
+    lines = tuple(result.stdout.split("\n"))
+    if is_complete_object_id(object_id):
+        BLOB_LINES.put(key, lines)
+    return lines
 
 
-def _defining_extents(name: str, path: str, lines: list[str]) -> tuple[tuple[int, int], ...]:
-    """Where the shipped extractor says ``path`` defines ``name``, as distinct ``(start, end)`` lines.
+def _blob_definitions(repository_root: Path, object_id: str, path: str) -> Definitions:
+    """Every name the recorded blob defines under ``path``'s grammar, parsed once per blob.
+
+    The extractor's answer depends on the bytes and on which grammar reads them -- ``path``
+    contributes only its suffix -- so one parse serves every symbol anchored in the same blob, in
+    every read. The distinct ``(start, end)`` extents are kept in the extractor's document order.
+    """
+
+    key = (str(repository_root), object_id, grammars.grammar_of(path) or "")
+    remembered = BLOB_DEFINITIONS.get(key)
+    if remembered is not None:
+        return remembered[0]
+    bound = extents.definitions(path, list(_recorded_lines(repository_root, object_id)))
+    definitions: Definitions = MappingProxyType(
+        {
+            name: tuple(dict.fromkeys((extent.start, extent.end) for extent in found))
+            for name, found in bound.items()
+        }
+    )
+    if is_complete_object_id(object_id):
+        BLOB_DEFINITIONS.put(key, definitions)
+    return definitions
+
+
+def _defining_extents(name: str, definitions: Definitions) -> tuple[tuple[int, int], ...]:
+    """Where the blob defines ``name``, as distinct ``(start, end)`` lines, or nothing.
 
     A qualified name is resolved by its real halves, exactly as the extractor's own callers do:
     the last segment has to be a definition and every namespace segment before it has to be one
@@ -385,11 +440,10 @@ def _defining_extents(name: str, path: str, lines: list[str]) -> tuple[tuple[int
     a real method's identity.
     """
 
-    bound = extents.definitions(path, lines)
     parts = [part for part in name.split(".") if part]
-    if not parts or any(part not in bound for part in parts):
+    if not parts or any(part not in definitions for part in parts):
         return ()
-    return tuple(dict.fromkeys((extent.start, extent.end) for extent in bound[parts[-1]]))
+    return definitions[parts[-1]]
 
 
 def _locator_text(locator: Any, field: str) -> str:
@@ -423,7 +477,12 @@ def _identity_object_id(identity: Any) -> str:
 
 
 def _tree_exists(repository_root: Path, tree_id: str) -> bool:
-    """Return whether the requested tree object is present in the selected repository."""
+    """Return whether the requested tree object is present in the selected repository.
+
+    Never remembered: holding a tree is a fact about the repository, not the id -- it can be fetched,
+    or pruned, lose its alternate or become unreadable -- so every resolver asks Git afresh, and the
+    remembered content answers are served only behind a probe that succeeded.
+    """
 
     result = run_git(repository_root, ["cat-file", "-e", f"{tree_id}^{{tree}}"])
     return result.returncode == 0
@@ -451,6 +510,10 @@ def _tree_entry(repository_root: Path, tree_id: str, path: str) -> tuple[str, st
     confined = _confined_posix_relative(path)
     if confined is None:
         raise _UnaddressableRecordedPath(path)
+    key = (str(repository_root), tree_id, confined)
+    remembered = TREE_ENTRIES.get(key)
+    if remembered is not None:
+        return remembered[0]
     try:
         result = run_git(repository_root, ["ls-tree", "-z", tree_id, "--", confined])
     except OSError as failed:
@@ -460,7 +523,12 @@ def _tree_entry(repository_root: Path, tree_id: str, path: str) -> tuple[str, st
         raise _TreeLookupFailed(tree_id, 0, str(failed)) from failed
     if result.returncode != 0:
         raise _TreeLookupFailed(tree_id, result.returncode)
-    return _parse_ls_tree(result.stdout)
+    # Only a lookup that answered reaches here, so ``None`` is Git's own "no entry at this path"
+    # about an existing immutable tree -- as permanent as a found entry, and remembered the same way.
+    entry = _parse_ls_tree(result.stdout)
+    if is_complete_object_id(tree_id):
+        TREE_ENTRIES.put(key, entry)
+    return entry
 
 
 class _UnaddressableRecordedPath(Exception):
