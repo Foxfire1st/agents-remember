@@ -69,8 +69,11 @@ response — it must be this leaf's memory worktree — and preview any write wi
    Notes target as a last resort, never as the default drop point for something merely inconvenient to place.
 3. **Author and publish the durable knowledge through the real writer.** The reconciliation's requirement-shaped items are
    knowledge, not prose. First author each entry's `scope` with the real applicability, conditions and exclusions
-   in the hand-off template's shape; missing scope is unfinished curation and ingest refuses that entry. Then hand
-   the entries to the shipped ingest with the invocation the ordinary route carries —
+   in the hand-off template's shape; missing scope is unfinished curation and ingest refuses that entry. Make sure
+   every target carries its own authored `rationale`: why that place carries the obligation, specific to the
+   construct it names, with an optional `role`. Where the producer gave none, write it from the evidence. The
+   writer never generates one, and a target with no rationale refuses its entry with `realization_rationale_absent`.
+   Then hand the entries to the shipped ingest with the invocation the ordinary route carries —
    `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the JSON hand-off list>
    --authorization-ref <the authorization this run is admitted under> --baseline <the published dataset this task
    forked from> --publish --commit --json`. `--publish` is the repository's **one declared published dataset

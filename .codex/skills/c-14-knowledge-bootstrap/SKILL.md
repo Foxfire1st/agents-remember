@@ -143,6 +143,9 @@ The reconciliation is the substance of the run, and it is the curator's:
   author the invariant's `scope` object with `applicability`, `conditions` and `exclusions` before
   ingest. Empty clause lists mean examined and none; missing scope remains `unfilled_curation_scope`,
   never an inferred workflow sentence;
+- an authored **realization rationale for every target**: why that place carries the invariant,
+  specific to the construct it names, with an optional `role`. The writer never generates one and
+  refuses an entry with an unexplained target (`realization_rationale_absent`);
 - **families**: where the evidence justifies a joint obligation, the family's own guarantee text and
   the exact memberships that place exact invariant revisions in it; where it does not, the deliberate
   `no_family` outcome **with its basis**. An obligation that was not examined is left with neither key

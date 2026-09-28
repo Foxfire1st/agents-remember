@@ -211,6 +211,7 @@ def entry(
                 "path": path or CODE_FILE,
                 "locator": {"kind": "symbol", "value": symbol_name},
                 "governing_route": "pkg",
+                "rationale": f"{symbol_name} is where this obligation is carried.",
             }
         )
     return {

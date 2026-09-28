@@ -8,7 +8,14 @@ hands the curator **that same list**, unparaphrased, as data. `roles/worker.md`,
 **The contract's authority is the owning seat's schema note, the increment's own
 *260915-KS-curator-handoff-list-schema.md*, at revision 1** — its thirteen fields (nine producer,
 four curator), its revision-1 rules 1–9, and the reasons the rules exist are authored there once. This file transposes revision 1
-into the shape a producer writes and nothing more; where the two disagree, the schema note wins. The
+into the shape a producer writes, with **one stated supersession**. Revision 1's rule 1 makes `target` a
+list of `{path, locator, governing_route}`. Here each `target` element is
+`{path, locator, governing_route, rationale, role}`, and **this file's element shape supersedes rule 1's**
+(the rest of rule 1, that `target` is a list, stands). The supersession carries the developer ruling of
+2026-09-28T13:05+02:00: every realization target carries an authored rationale, and the writer refuses a new
+target without one (see *Realization rationale and role* below). A producer following revision 1's element
+shape alone produces a refused entry. On that element shape this file wins; everywhere else, where the two
+disagree, the schema note wins. The
 worked example that priced revision 1 is the 41-entry fixture beside it, the increment's
 *260915-KS-curator-handoff-fixture-L23-rev1.json* with its note. Both live with the increment that
 produced them, outside this repository; the names are what a reader can look up.
@@ -36,7 +43,7 @@ where the *producer's* verdict came from, which only the producer knows.)
 | `id` | producer | the entry's stable identity, in the producer's own spelling — `KS-R22@v1 §3.2`, `A-1`, `S-4`, `item 32`. It is the curator's handle for the entry and the thing a later revision names in `supersedes`. |
 | `statement` | producer | **what is true**, as one sentence: the invariant, not "the case passes" but what the passing case asserts about the world. |
 | `kind` | producer | `clause` \| `finding` \| `carried-defect` \| `decision` \| `measurement` — which of the five shapes it came from, so a reader knows what its `disposition` vocabulary means. |
-| `target` | producer | **where it applies** — a list of `{path, locator, governing_route}`. This is the attribution: an invariant is a citation beside code. |
+| `target` | producer | **where it applies** — a list of `{path, locator, governing_route, rationale, role}`. This is the attribution: an invariant is a citation beside code. Each target's `rationale` is its own authored explanation of why that place carries the obligation, and the writer requires it; `role` is optional. See *Realization rationale and role* below. |
 | `found_at` | producer | **where it was evidenced** — a list of `{path, locator, commit}`; it may be plural, because one invariant is often realized in several places while applying in one sense. |
 | `disposition` | producer | the producer's own verdict in its own vocabulary (`satisfied`, `partial`, `refused`, `fixed`, `recorded`), carried verbatim — the curator's job is not to re-derive it but to decide what it means for the record. |
 | `evidence` | producer | the case name, the command, the report path — the pointer that would let a reader check the claim. |
@@ -63,7 +70,9 @@ enum; **`disposition` may not** — it is free text carried verbatim.
       {
         "path": "<repo-relative path>",
         "locator": { "kind": "symbol", "value": "<symbol>" },
-        "governing_route": "<route | absent>"
+        "governing_route": "<route; omit the key when no route governs this target>",
+        "rationale": "<why this place carries the obligation, in the author's words; omit only when the entry states realization_rationale>",
+        "role": "<primary-authority | enforcement | propagation-persistence | support | presentation | incidental | unclassified; omit the key to inherit the entry's realization_role>"
       }
     ],
     "found_at": [
@@ -72,7 +81,7 @@ enum; **`disposition` may not** — it is free text carried verbatim.
     "disposition": "<the producer's verdict, verbatim>",
     "disposition_source": null,
     "evidence": "<case name | command | report path — the checkable pointer>",
-    "authority": { "governing_route": "<route | absent>", "task_document": "<task document>" },
+    "authority": { "governing_route": "<route; omit the key when no route governs the entry>", "task_document": "<task document>" },
     "resolution": null,
     "validated_at": null,
     "record_action": null,
@@ -88,6 +97,47 @@ place" is a claim a producer has to make explicitly. Line ranges are **one-based
 `{start: 0}` names nothing and is refused with that reason. `found_at[].locator` may additionally be
 **`null`** — "the source says it was found, not where" is information, and different from an empty
 list.
+
+### Realization rationale and role: one authored explanation per target
+
+Each target becomes one realization claim, and that claim stores the author's own explanation of what
+this place does for the obligation. The writer never generates one.
+
+- **`target[].rationale` is required.** Write why *this* place carries the obligation, specific to the
+  construct its locator names. Two constructs cited by one entry usually do different work, so give
+  each its own explanation. "The statement is realized at <path>" is not a rationale: it restates the
+  path and explains nothing.
+- **`target[].role` is optional, and it is one of the shipped role words:** `primary-authority`,
+  `enforcement`, `propagation-persistence`, `support`, `presentation`, `incidental` or `unclassified`.
+  There is no `absent` value: to state nothing, **omit the key**. An omitted `role` inherits the entry's
+  `realization_role`; only when neither level states a role is the claim stored `unclassified`. Write
+  `unclassified` yourself only to say that nobody assessed this place although the entry states a role.
+  Any other word, including the string `"absent"`, refuses the entry with `realization_role_unknown`; it
+  is never stored and never replaced by the entry's role.
+- **Entry-level `realization_rationale` and `realization_role` are an explicit default.** They apply to
+  every target of the entry that does not state its own, and a target's own value always wins. Use the
+  default only when one explanation is genuinely true of every place the entry cites. The same role
+  vocabulary applies to `realization_role`.
+- **Each value is one JSON string.** A list, object, number or boolean in `rationale`, `role`,
+  `governing_route`, `realization_rationale`, `realization_role` or `authority.governing_route` refuses
+  the entry with `realization_value_not_text`, naming where it was written; the writer never renders
+  another value as text.
+- **A target with no rationale at either level refuses its whole entry** with
+  `realization_rationale_absent`, and a rationale longer than 20000 characters refuses it with
+  `realization_rationale_too_long`. Each refusal lands before any identity is minted or any row is
+  written, names the entry and every offending target by position, path and locator, and leaves the
+  other entries of the list to commit. Correct them and run the list again.
+- **These checks apply to entries that would write new realizations.** An exact retry of an entry the
+  candidate already committed writes nothing, so it is not checked again: it replays, and it can publish,
+  exactly as before. That includes entries committed before targets carried a rationale. Changing the
+  content of an already committed entry is still refused as `allocation_content_conflict`; author a
+  successor entry instead.
+
+The producer states the rationale when it emits the target, because it knows why it named the place.
+A curator who receives a target without one authors it from the evidence before ingest. That is
+supplying a missing explanation, not re-deriving a producer field. A target's own `rationale` and
+`role`, and the entry-level defaults, are part of the entry's retry content: changing any of them under
+an already-minted entry key is changed content, not an exact retry.
 
 ## Rule 1 — co-resolution: name where the thing lives, not where you looked
 
@@ -167,7 +217,9 @@ honest encodings; a filler path is not.
 
 The two shapes a producer most often gets wrong are **one requirement in several places** and **a
 requirement with no code place at all**. These two entries are carried from the increment's own
-*260915-KS-curator-handoff-fixture-L23-rev1.json* with `evidence` elided for length.
+*260915-KS-curator-handoff-fixture-L23-rev1.json* with `evidence` elided for length. The fixture
+predates per-target rationale, so its targets carry none: before ingest, each of them also needs its
+authored `rationale` (see *Realization rationale and role* above).
 
 **One defect, two places, one entry** — `target` is a list, the second place carries no
 `governing_route` because none was named, and one `found_at` record has no locator at all:
@@ -234,7 +286,14 @@ by the commit it was measured at:
   decision the leaf owes, or a bare commit with no code place. Its `kind` is what says why, and the
   content lives in the statement; a filler path is what a missing rule produces. Eight of the
   fixture's 41 entries are this shape; none of them was invented into a place.
-- **`governing_route` may be absent**, and absent is honest: of the fixture's 41 entries, 3 of its 40
+- **`governing_route` may be missing, and missing is spelled by omitting the key.** Never write the
+  word `"absent"` (or any other filler) in its place: the writer reads a target's route as a path, so
+  the word would author a route named `absent` and govern the anchor with it. The word is matched in any
+  case once trimmed (`"Absent"`, `" ABSENT "`). Written at a target or at
+  `authority.governing_route`, it refuses the entry with `realization_governing_route_absent_literal`,
+  naming where it was written; `null` is read as no route. As with the other realization checks, an
+  exact retry of an entry the candidate already committed is not checked again. Missing is honest:
+  of the fixture's 41 entries, 3 of its 40
   real target places had no memory route at all (`system/tools.md`, the repository-root
   `pyproject.toml`, and a task-tree path), and a fourth entry's whole target list is empty. Never
   invent a route to fill the field. (An earlier revision of this line said "11 of 41", which counted

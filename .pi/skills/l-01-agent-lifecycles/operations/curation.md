@@ -69,7 +69,10 @@ their accumulated change is reviewed on the canonical master at master-to-parent
    - **semantic history** — append-only changes in accepted understanding: what changed, why, and
      what it superseded. Not a replay of task rounds.
 3. **Route the durable knowledge through the real writer, and publish it.** The reconciliation's
-   requirement-shaped items are authored knowledge, not onboarding prose: hand the same JSON hand-off list to
+   requirement-shaped items are authored knowledge, not onboarding prose. Every target in it carries its own
+   authored `rationale` (why that place carries the obligation) and optionally a `role`, as
+   `../templates/curator-handoff-list.md` states; the writer never generates a rationale and refuses an entry with
+   an unexplained target (`realization_rationale_absent`). Hand the same JSON hand-off list to
    `agents-remember knowledge-ingest --contract <this leaf's enclosure contract> --list <the list>
    --authorization-ref <the authorization this run is admitted under> --baseline <the published dataset this task
    forked from> --publish --commit --json`. `--publish` selects the repository's **one declared published dataset

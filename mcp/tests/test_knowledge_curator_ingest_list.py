@@ -349,8 +349,9 @@ def entry(
     kind: str = "clause",
     disposition: str = "satisfied",
     targets: list[dict[str, Any]] | None = None,
+    rationale: str | None = "The cited place carries this obligation in the fixture.",
 ) -> dict[str, Any]:
-    """One hand-off entry with explicit curator scope for the controlled source slice."""
+    """One hand-off entry with explicit curator scope and an entry-level realization default."""
 
     return {
         "id": entry_id,
@@ -362,6 +363,7 @@ def entry(
         },
         "kind": kind,
         "target": targets if targets is not None else [],
+        "realization_rationale": rationale,
         "found_at": [],
         "disposition": disposition,
         "disposition_source": None,

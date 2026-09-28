@@ -89,9 +89,9 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, cast, get_args
+from typing import Any, cast
 from uuid import UUID, uuid4, uuid5
 
 import apsw
@@ -122,10 +122,19 @@ from agents_remember.application.curator_ingest_planes import (
     plane_coverage,
     read_curator_planes,
 )
+from agents_remember.application.curator_realization_authoring import (
+    EntryRealization,
+    TargetRealization,
+    realization_refusal,
+)
 from agents_remember.application.curator_scope import CuratorScope, read_curator_scope
 from agents_remember.application.curator_source_manifest import (
     SourceCoverage,
     write_source_manifest,
+)
+from agents_remember.application.curator_stored_revisions import (
+    committed_revisions,
+    stored_revisions,
 )
 from agents_remember.application.knowledge import (
     open_admitted_knowledge_store,
@@ -179,7 +188,6 @@ from agents_remember.models.knowledge.candidate import (
     SnapshotIdentity,
 )
 from agents_remember.models.knowledge.context import AdmittedKnowledgeDestination
-from agents_remember.models.knowledge.graph import UNCLASSIFIED_ROLE, RealizationRole
 from agents_remember.models.knowledge.repository import RepositoryIdentity
 from agents_remember.models.knowledge.result import KnowledgeRefusal
 from agents_remember.models.knowledge.snapshot import (
@@ -190,6 +198,7 @@ from agents_remember.models.knowledge.snapshot import (
     PublishSnapshotRequest,
     SnapshotDestinationRequest,
     SnapshotPublicationResult,
+    candidate_database_path,
 )
 from agents_remember.models.knowledge.source import (
     FileLocator,
@@ -594,8 +603,7 @@ class _TargetPlan:
     blob: str
     locator: SourceLocator
     observation: str
-    role: RealizationRole
-    rationale: str
+    realization: TargetRealization
     route_path: str | None
     route_id: str
     anchor_id: UUID
@@ -627,13 +635,13 @@ class _TargetPlan:
         )
 
     def citation(self) -> CuratorCitation:
-        """The anchor plus the claim citing it, as the write module's command list expects."""
+        """The anchor plus the claim citing it, with the role and rationale its producer authored."""
 
         return CuratorCitation(
             anchor=self.anchor,
             claim_id=self.claim_id,
-            role=self.role,
-            rationale=self.rationale or f"The statement is realized at {self.completed_path}.",
+            role=self.realization.role,
+            rationale=self.realization.rationale,
             declares_anchor=self.declares_anchor,
         )
 
@@ -700,11 +708,14 @@ class _Allocations:
     and cannot be read is **not** the same fact and is not treated as empty: every entry that would
     have to mint an identity is refused with ``allocation_journal_unreadable``, because minting
     without answering "does this operation already hold one?" is how a retry becomes a duplicate.
+    ``committed`` is the recorded revisions the candidate already stores: a retry of one of those
+    operations writes nothing new, so it is not admitted again.
     """
 
     path: Path
     records: Mapping[str, _Allocation]
     unreadable: str | None = None
+    committed: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -833,8 +844,7 @@ class _EntryFields:
     declares_invariant: bool = True
     predecessors: tuple[str, ...] = ()
     named_invariant_id: str | None = None
-    role: RealizationRole | None = None
-    role_rationale: str = ""
+    realization: EntryRealization = field(default_factory=EntryRealization)
     scope: CuratorScope | str = "scope has not been authored"
 
     @classmethod
@@ -855,10 +865,6 @@ class _EntryFields:
         # is found by, never the name of a stored truth.
         declared = raw.get("invariant_id")
         named = str(declared).strip() if declared is not None and str(declared).strip() else None
-        # The role a producer authors for this realization, validated against the SHIPPED vocabulary
-        # rather than a second copy of it. An unrecognised spelling becomes no role at all: a word
-        # this code does not know must not be stored as a semantic claim about the knowledge.
-        stated = str(raw.get("realization_role") or "").strip()
         return cls(
             entry_id=str(raw["id"]),
             kind=str(raw.get("kind", "")),
@@ -869,8 +875,7 @@ class _EntryFields:
             declares_invariant=not predecessors,
             predecessors=predecessors,
             named_invariant_id=named,
-            role=cast("RealizationRole", stated) if stated in get_args(RealizationRole) else None,
-            role_rationale=str(raw.get("realization_rationale") or ""),
+            realization=EntryRealization.read(raw),
             scope=read_curator_scope(raw.get("scope")),
         )
 
@@ -1170,6 +1175,9 @@ def ingest_curator_list(
         raw, paths.candidate, _retry_scope(source.admission), fork_point=_fork_point(baseline)
     )
     allocations = _read_allocations(paths.candidate)
+    recorded = (one.revision_id for one in allocations.records.values())
+    committed = committed_revisions(candidate_database_path(paths.candidate), recorded)
+    allocations = replace(allocations, committed=committed)
     plans, refused, resolved_before_refusal = _plan_entries(raw, source, allocations, planes)
     read = _Read(
         ids=tuple(str(one["id"]) for one in raw),
@@ -1852,8 +1860,9 @@ def _content_digest(fields: _EntryFields, targets: Sequence[_TargetPlan]) -> str
     realization and attribution: the kind, the statement, the evidence, the producer's disposition
     **and the source it rules from**, which invariant an entry revises when it names one, the
     predecessor edges it declares, the authored realization role and its rationale, and each resolved
-    place with the locator that names the construct inside it **and the governing route the producer
-    declared for it**.
+    place with the locator that names the construct inside it, **the governing route the producer
+    declared for it**, and the role and rationale that target stated for itself. A target that states
+    neither contributes exactly what it did before targets could, so an existing list replays.
 
     The route path belongs in that list and is not generated metadata: it is producer-authored, it is
     stored with the authorship envelope, and it is read back by the public surface. A target whose
@@ -1883,14 +1892,15 @@ def _content_digest(fields: _EntryFields, targets: Sequence[_TargetPlan]) -> str
             "dispositionSource": fields.disposition_source,
             "namedInvariantId": fields.named_invariant_id,
             "predecessors": list(fields.predecessors),
-            "role": fields.role,
-            "roleRationale": fields.role_rationale,
+            "role": fields.realization.role,
+            "roleRationale": fields.realization.rationale,
             "scope": fields.scope.payload() if isinstance(fields.scope, CuratorScope) else None,
             "targets": [
                 {
                     "path": one.completed_path,
                     "locator": _locator_text(one.locator),
                     "route": one.route_path,
+                    **dict(one.realization.stated),
                 }
                 for one in targets
             ],
@@ -2037,29 +2047,10 @@ def _require_minted_content(
     return allocation, None
 
 
-def _stored_revisions(database: Path) -> dict[str, str]:
-    """Every revision the candidate already holds, by revision id, with the statement it records.
-
-    This is what makes a repeat of an operation a **replay** rather than a second write. The identity
-    a repeat resolves to is the same one, so the candidate that already holds that revision is
-    answering the question "was this creation admitted?" from the dataset itself -- not from the
-    journal, which cannot know whether a batch that ran after the record was written committed.
-    """
-
-    connection = open_read_only_database(database)
-    try:
-        return {
-            str(row[0]): str(row[1])
-            for row in connection.execute("SELECT revision_id, statement FROM invariant_revision")
-        }
-    finally:
-        connection.close()
-
-
 def _with_replays(read: _Read, database: Path) -> _Read:
     """Mark every plan an earlier run of this same operation already stored as a replay."""
 
-    held = _stored_revisions(database)
+    held = stored_revisions(database)
     return replace(
         read,
         planned=tuple(replace(plan, replayed=plan.revision_id in held) for plan in read.planned),
@@ -2242,6 +2233,15 @@ def _resolve_creation(
 
     if isinstance(fields.scope, str):
         return None, (), _Refusal("unfilled_curation_scope", fields.scope)
+    # Refused before an identity is minted: a claim written without an authored rationale would
+    # need the writer to invent one, and the stored claim has no way to say "none was given". An
+    # operation the candidate already committed writes no realization on retry, so it replays (or
+    # conflicts on changed content) exactly as it always did instead of being admitted again.
+    held = allocations.records.get(_retry_key(source.admission, fields.entry_id))
+    if held is None or held.revision_id not in allocations.committed:
+        unexplained = realization_refusal(fields.entry_id, fields.realization, targets)
+        if unexplained is not None:
+            return None, (), _Refusal(*unexplained)
     allocation, refusal = _creation(source, fields, allocations)
     if refusal is not None:
         return None, (), _Refusal(refusal.code, refusal.reason)
@@ -2581,8 +2581,7 @@ def _plan_target_inner(
             blob=resolved.blob,
             locator=locator,
             observation=observation,
-            role=_authored_role(fields.role),
-            rationale=fields.role_rationale,
+            realization=fields.realization.for_target(target),
             route_path=None if route_path is None else str(route_path),
             route_id=identities.route_id,
             anchor_id=UUID(identities.anchor_id),
@@ -3554,24 +3553,6 @@ def _identity(
     return str(
         uuid5(_INGEST_NAMESPACE, f"{repository.repository_id}|{kind}|{discriminator}|{within}")
     )
-
-
-def _authored_role(authored: RealizationRole | None) -> RealizationRole:
-    """The role the producer authored for this realization, or an explicit non-answer.
-
-    This used to be inferred from the locator's kind -- ``primary-authority`` for a whole file or a
-    range, ``enforcement`` for a symbol -- which locator syntax cannot establish. A symbol can be
-    presentation, propagation, support or enforcement, and so can a range; the spelling of a locator
-    says where to look, never what the thing found there means. Persisting an inferred role inside a
-    valid provenance envelope did not make the attribution sound, and later family review and
-    relevance filtering inherited the false premise from it.
-
-    So a role is now a fact the producer states or it is absent. ``UNCLASSIFIED_ROLE`` is the shipped
-    vocabulary's own answer for an unassessed edge, which is why nothing had to be widened to say so:
-    an unclassified realization is a claim about what is known, not a default standing in for one.
-    """
-
-    return authored if authored is not None else UNCLASSIFIED_ROLE
 
 
 def _fields_of(plan: _Plan) -> _EntryFields:
