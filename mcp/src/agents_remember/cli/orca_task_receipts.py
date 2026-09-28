@@ -49,7 +49,11 @@ class _TasklessLegacyMigration:
     seen_ids: set[str]
 
 
-def _execute_prepared_launch(path: Path, receipt: dict[str, Any]) -> JSONResponse:
+def _execute_prepared_launch(
+    config: McpRuntimeConfig,
+    path: Path,
+    receipt: dict[str, Any],
+) -> JSONResponse:
     launch_request = receipt.get("replayRequest")
     if not isinstance(launch_request, dict):
         raise HTTPException(
@@ -57,7 +61,7 @@ def _execute_prepared_launch(path: Path, receipt: dict[str, Any]) -> JSONRespons
             detail="The unresolved launch has no retained replay payload; reconcile the native runtime before retrying.",
         )
     try:
-        result = _runtime_call("launch-replay", {"request": launch_request})
+        result = _runtime_call(config, "launch-replay", {"request": launch_request})
     except OrcaRuntimeFailure as error:
         rejected = error.code in {
             "agent_launch_replay_unsupported",
@@ -490,7 +494,7 @@ def _public_execution(receipt: dict[str, Any]) -> dict[str, Any]:
             "result",
             "prompt",
             "capsuleOperation",
-            "nativeMcpScope",
+            "arMcpContext",
             "resumeResult",
             "canRevive",
         )

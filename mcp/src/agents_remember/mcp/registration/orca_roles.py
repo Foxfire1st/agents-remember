@@ -35,7 +35,8 @@ def register_orca_role_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
         No AR Task or native Run/Task/Dispatch is created here; use the returned identity and
         next-action inputs with native Orca run-create and worker-start. The handover and report
         remain task-scoped, and an uncertain native start can be replayed with the returned
-        requestId. Requires AR_ORCA_RUNTIME_ROOT and ORCA_USER_DATA_PATH in this MCP process.
+        requestId. Requires the optional shared AR MCP `orcaRuntime` settings block; this
+        selects the pinned Orca source tree and user profile without adding credentials.
         """
         request = OrcaDispatchRequest.model_validate(
             {

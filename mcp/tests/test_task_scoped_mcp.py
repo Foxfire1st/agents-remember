@@ -17,9 +17,11 @@ from agents_remember.application.task_scoped_mcp import (
     mcp_config_from_scope_profile,
     projects_mcp_config,
     task_scoped_mcp_config,
+    task_scoped_mcp_config_for_reader,
+    task_scoped_mcp_config_for_task,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
-from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.task_document_ref import TaskDocumentRef, TaskScopedReaderContext
 from agents_remember.tasks import TaskDocument, write_task_doc
 from agents_remember.tasks.document_refs import TaskDocumentTopology
 from agents_remember.tasks.task_paths import leaf_enclosure_path
@@ -105,6 +107,12 @@ class TaskScopedMcpConfigTests(unittest.TestCase):
                 self.assertEqual(scoped.repositories["repo"].path, code)
                 self.assertEqual(scoped.repositories["repo"].memory_root, memory)
                 self.assertEqual(scoped.repositories["repo"].contract_path, contract_path)
+                derived = task_scoped_mcp_config_for_task(base, ref, contract_path)
+                self.assertIsNot(derived, base)
+                self.assertEqual(derived.workspace_root, workspace)
+                self.assertEqual(derived.repositories["repo"].path, code)
+                self.assertEqual(derived.repositories["repo"].memory_root, memory)
+                self.assertEqual(derived.repositories["repo"].contract_path, contract_path)
                 with self.assertRaisesRegex(ValueError, "do not match"):
                     task_scoped_mcp_config(
                         base,
@@ -129,6 +137,18 @@ class TaskScopedMcpConfigTests(unittest.TestCase):
                 loaded = mcp_config_from_scope_profile(base, profile)
                 self.assertEqual(loaded.repositories["repo"].path, code)
                 self.assertEqual(loaded.repositories["repo"].memory_root, memory)
+                reader_scope = TaskScopedReaderContext(
+                    task_document_ref=ref,
+                    contract_path=contract_path.as_posix(),
+                )
+                with self.assertRaisesRegex(ValueError, "repo_id must match"):
+                    task_scoped_mcp_config_for_reader(
+                        base,
+                        repository_id="different-repo",
+                        task_context=reader_scope,
+                    )
+                self.assertEqual(base.workspace_root, root)
+                self.assertEqual(base.repositories["repo"].path, root / "repo")
 
     def test_projects_scope_clears_only_contract_pins_and_keeps_configured_pairs(self) -> None:
         with TemporaryDirectory() as temporary:

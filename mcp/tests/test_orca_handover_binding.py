@@ -5,11 +5,8 @@ import unittest
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
-from typing import cast
 from unittest.mock import patch
 
-from agents_remember.application.context_packet import ContextPacketRequest, build_context_packet
 from agents_remember.application.orca_task_context import OrcaRoleContext, resolve_orca_role_context
 from agents_remember.application.skill_resources import CapsuleCompileRequest, compile_task_capsule
 from agents_remember.application.task_docs.task_doc_tools import (
@@ -18,18 +15,16 @@ from agents_remember.application.task_docs.task_doc_tools import (
     TaskDocTarget,
     task_doc_tool,
 )
-from agents_remember.application.task_scoped_mcp import TaskScopedMcpBinding, task_scoped_mcp_config
+from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_task
 from agents_remember.application.worktree_services import build_default_worktree_services
 from agents_remember.cli import orca_task_preparation
-from agents_remember.cli.orca_runtime import MAX_PROMPT_BYTES, digest
-from agents_remember.cli.orca_scoped_mcp import ScopedNativeMcp
+from agents_remember.cli.orca_runtime import digest
 from agents_remember.cli.orca_task_preparation import (
     ROLE_START_OPERATIONS,
     OrcaHandoverRequest,
     _bind_task_report_access,
     _compile_handover,
     _ensure_leaf_enclosure,
-    _prepare_projects_mcp_scope,
     _resolve_workspace,
     _role_report_path,
     prepare_orca_role_handover,
@@ -143,24 +138,11 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
 
             with patch.dict(checkout_coordination._declared, {"mode": "test"}):
                 base_config = load_config(settings_path)
-                scoped_config = task_scoped_mcp_config(
+                scoped_config = task_scoped_mcp_config_for_task(
                     base_config,
-                    TaskScopedMcpBinding(
-                        task_document_ref=task_ref,
-                        contract_path=contract.contract_path,
-                        workspace_root=contract.worktree_group,
-                        code_root=contract.code_worktree,
-                        memory_root=contract.memory_worktree,
-                    ),
+                    task_ref,
+                    contract.contract_path,
                 )
-                bind_worktree_services(build_default_worktree_services())
-                try:
-                    context_packet = build_context_packet(
-                        scoped_config,
-                        ContextPacketRequest(repo_id=repo_id, include_providers=False),
-                    )
-                finally:
-                    reset_worktree_services()
 
             self.assertNotEqual(contract.code_worktree.name, repo_id)
             self.assertEqual(scoped_config.repositories[repo_id].path, contract.code_worktree)
@@ -182,25 +164,10 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                     workspace_path, task_reports
                 ).as_posix(),
             }
-            native_scope = cast(
-                ScopedNativeMcp,
-                SimpleNamespace(
-                    context_packet=context_packet,
-                    launch_args=(),
-                    verification={
-                        "status": "verified",
-                        "workspaceRoot": workspace_path.as_posix(),
-                        "codeRoot": contract.code_worktree.as_posix(),
-                        "memoryRoot": contract.memory_worktree.as_posix(),
-                        "contractPath": contract.contract_path.as_posix(),
-                    },
-                ),
-            )
-
             for role in ("worker", "reviewer", "curator"):
                 with self.subTest(role=role):
                     context = resolve_orca_role_context(
-                        scoped_config,
+                        base_config,
                         OrcaSelection(
                             role=role,
                             sprintDocumentRef=sprint_ref,
@@ -209,16 +176,25 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                         ),
                     )
                     request_id = uuid.uuid4()
-                    prepared = _compile_handover(
-                        OrcaHandoverRequest(
-                            config=scoped_config,
-                            context=context,
-                            workspace=workspace,
-                            agent_id="codex",
-                            native_mcp_scope=native_scope,
-                            request_id=request_id,
-                        )
+                    ar_mcp_context = orca_task_preparation._ar_mcp_context(
+                        base_config,
+                        context,
+                        workspace,
                     )
+                    bind_worktree_services(build_default_worktree_services())
+                    try:
+                        prepared = _compile_handover(
+                            OrcaHandoverRequest(
+                                config=base_config,
+                                context=context,
+                                workspace=workspace,
+                                agent_id="claude",
+                                ar_mcp_context=ar_mcp_context,
+                                request_id=request_id,
+                            )
+                        )
+                    finally:
+                        reset_worktree_services()
                     handover = json.loads(
                         prepared["prompt"].rsplit(
                             "\n\nAR owner assignment and canonical task handover:\n", 1
@@ -312,6 +288,48 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                     self.assertEqual(
                         handover["workspace"]["contractPath"], contract.contract_path.as_posix()
                     )
+                    reader_context = {
+                        "task_document_ref": task_ref.model_dump(mode="json"),
+                        "contract_path": contract.contract_path.resolve().as_posix(),
+                    }
+                    self.assertEqual(
+                        {
+                            key: handover["arMcpContext"][key]
+                            for key in (
+                                "schema",
+                                "scopeKind",
+                                "repositoryId",
+                                "taskContext",
+                                "readerArguments",
+                                "requiredArguments",
+                                "requiredCapability",
+                            )
+                        },
+                        {
+                            "schema": "ar-mcp-reader-context/v1",
+                            "scopeKind": "canonical-leaf",
+                            "repositoryId": repo_id,
+                            "taskContext": reader_context,
+                            "readerArguments": {
+                                "context_packet": {
+                                    "repo_id": repo_id,
+                                    "task_context": reader_context,
+                                    "include_providers": False,
+                                },
+                                "read_ar_files": {
+                                    "repo_id": repo_id,
+                                    "task_context": reader_context,
+                                },
+                            },
+                            "requiredArguments": {
+                                "context_packet": ["repo_id", "task_context"],
+                                "read_ar_files": ["repo_id", "files", "task_context"],
+                            },
+                            "requiredCapability": "ar-task-scoped-readers/v1",
+                        },
+                    )
+                    self.assertIn("task_context", handover["nativeOrca"]["arMcpUsage"])
+                    self.assertNotIn("nativeMcpScope", handover)
                     self.assertEqual(
                         handover["nativeOrca"]["guidesOnDemand"],
                         ["orca skills get orca-cli", "orca skills get orchestration"],
@@ -321,10 +339,6 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                         "Only an active Dispatch worker", handover["nativeOrca"]["messageSemantics"]
                     )
                     self.assertTrue(canonical_report.is_relative_to(task_reports.resolve()))
-                    self.assertLess(
-                        len(prepared["prompt"].encode("utf-8")),
-                        MAX_PROMPT_BYTES,
-                    )
                     self.assertEqual(len(documents), 3)
                     documents_by_ref = {
                         document.ref.key: document
@@ -417,9 +431,6 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                     "_resolve_agent_selection",
                     return_value=("codex", session_options, agent_arg_tokens),
                 ) as resolve_agent,
-                patch.object(
-                    orca_task_preparation, "_prepare_projects_mcp_scope", return_value=None
-                ) as prepare_mcp_scope,
             ):
                 role_handover = prepare_orca_role_handover(
                     config,
@@ -441,13 +452,13 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
                 role_handover.agent_id,
                 role_handover.session_options,
                 role_handover.agent_arg_tokens,
-                role_handover.native_mcp_scope,
             ),
-            (context, workspace, "codex", session_options, agent_arg_tokens, None),
+            (context, workspace, "codex", session_options, agent_arg_tokens),
         )
         resolve_workspace.assert_called_once_with(config, context)
-        resolve_agent.assert_called_once_with(workspace["selector"], defaults, ("codex",), None)
-        prepare_mcp_scope.assert_called_once_with(config, context, workspace, "codex")
+        resolve_agent.assert_called_once_with(
+            config, workspace["selector"], defaults, ("codex",), None
+        )
 
         self.assertEqual(prepared["capsuleOperation"], "planning")
         self.assertEqual(handover["operation"], "planning")
@@ -504,46 +515,25 @@ class OrcaScopedCapsuleBindingTests(unittest.TestCase):
         self.assertFalse(source["ambientRoleFilesSelected"])
         self.assertIn("do not load them as a second role", handover["ownerHandover"])
         self.assertIn("Preserve native system/developer instructions", prepared["prompt"])
-        self.assertIsNone(handover["nativeMcpScope"])
+        self.assertEqual(
+            {
+                key: handover["arMcpContext"][key]
+                for key in (
+                    "scopeKind",
+                    "repositoryId",
+                    "availableRepositoryIds",
+                    "readerArguments",
+                )
+            },
+            {
+                "scopeKind": "configured-projects",
+                "repositoryId": None,
+                "availableRepositoryIds": [],
+                "readerArguments": None,
+            },
+        )
         self.assertTrue(prepared["taskReportPath"].endswith(f"/{request_id}.md"))
         self.assertEqual(ROLE_START_OPERATIONS["architect"], "planning")
-
-
-class ProjectsMcpScopeSelectionTests(unittest.TestCase):
-    def test_taskless_role_does_not_infer_a_repo_and_bound_role_uses_its_selected_repo(
-        self,
-    ) -> None:
-        config = cast(
-            McpRuntimeConfig,
-            SimpleNamespace(config_path=Path("/private/ar.json")),
-        )
-        workspace = {"path": "/home/firefox/projects"}
-        taskless = OrcaRoleContext(
-            role="architect", sprint=None, master=None, task=None, effective_task=None
-        )
-        selected = SimpleNamespace(ref=SimpleNamespace(repository="agents-remember"))
-        manager = OrcaRoleContext(
-            role="manager", sprint=None, master=selected, task=None, effective_task=selected
-        )
-        with patch(
-            "agents_remember.cli.orca_task_preparation.prepare_codex_projects_mcp",
-            return_value=object(),
-        ) as prepare:
-            taskless_scope = _prepare_projects_mcp_scope(config, taskless, workspace, "codex")
-            manager_scope = _prepare_projects_mcp_scope(config, manager, workspace, "codex")
-            unsupported = _prepare_projects_mcp_scope(config, taskless, workspace, "claude")
-
-        self.assertIsNotNone(taskless_scope)
-        self.assertIsNotNone(manager_scope)
-        self.assertIsNone(unsupported)
-        self.assertEqual(
-            [call.kwargs["repository_id"] for call in prepare.call_args_list],
-            [None, "agents-remember"],
-        )
-        self.assertEqual(
-            [call.kwargs["workspace_root"] for call in prepare.call_args_list],
-            [Path("/home/firefox/projects"), Path("/home/firefox/projects")],
-        )
 
 
 class LeafEnclosureSprintBindingTests(unittest.TestCase):

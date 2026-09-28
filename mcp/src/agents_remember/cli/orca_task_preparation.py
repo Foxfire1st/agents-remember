@@ -25,19 +25,15 @@ from agents_remember.application.task_docs.task_doc_tools import (
     task_doc_tool,
 )
 from agents_remember.application.task_docs.task_ref import TaskRef
+from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
 from agents_remember.application.worktree_tool_requests import StartExecution, TaskIdentity
 from agents_remember.application.worktree_tools import worktree_start_tool, worktree_status_tool
-from agents_remember.cli.orca_runtime import OrcaRuntimeFailure, orca_catalog_scope
 from agents_remember.cli.orca_runtime import (
     digest as _digest,
 )
+from agents_remember.cli.orca_runtime import orca_catalog_scope
 from agents_remember.cli.orca_runtime import (
     runtime_call as _runtime_call,
-)
-from agents_remember.cli.orca_scoped_mcp import (
-    ScopedNativeMcp,
-    prepare_codex_projects_mcp,
-    prepare_codex_scoped_mcp,
 )
 from agents_remember.cli.orca_task_receipts import _message_binding_projection_reference
 from agents_remember.kernel.agentic_settings import load_agentic_settings
@@ -48,6 +44,7 @@ from agents_remember.models.orca_launcher import (
     OrcaRole,
 )
 from agents_remember.models.role_capsules.vocabulary import CapsuleOperation
+from agents_remember.models.task_document_ref import TaskScopedReaderContext
 from agents_remember.serving.launch_capsule import LaunchCapsuleRequest
 from agents_remember.tasks.document_refs import ResolvedTaskDocument
 from agents_remember.tasks.task_paths import leaf_enclosure_path, slugify
@@ -78,7 +75,7 @@ class OrcaHandoverRequest:
     context: OrcaRoleContext
     workspace: dict[str, str]
     agent_id: str
-    native_mcp_scope: ScopedNativeMcp | None = None
+    ar_mcp_context: dict[str, Any]
     request_id: uuid.UUID | None = None
     entry_mode: Literal["manual-dashboard-role-start", "native-orca-task"] = (
         "manual-dashboard-role-start"
@@ -94,7 +91,7 @@ class PreparedOrcaRoleHandover:
     agent_id: str
     session_options: dict[str, str]
     agent_arg_tokens: tuple[str, ...]
-    native_mcp_scope: ScopedNativeMcp | None
+    ar_mcp_context: dict[str, Any]
     handover: dict[str, Any]
     request_id: uuid.UUID
 
@@ -114,22 +111,16 @@ def prepare_orca_role_handover(
     workspace = _resolve_workspace(config, context)
     defaults, harness_order = _role_defaults(config, context)
     agent_id, session_options, agent_arg_tokens = _resolve_agent_selection(
-        workspace["selector"], defaults, harness_order, agent_override
+        config, workspace["selector"], defaults, harness_order, agent_override
     )
-    native_mcp_scope = (
-        _prepare_leaf_mcp_scope(config, context, workspace, agent_id)
-        if context.role in LEAF_ROLES
-        else _prepare_projects_mcp_scope(config, context, workspace, agent_id)
-    )
-    if native_mcp_scope is not None:
-        agent_arg_tokens = (*agent_arg_tokens, *native_mcp_scope.launch_args)
+    ar_mcp_context = _ar_mcp_context(config, context, workspace)
     handover = _compile_handover(
         OrcaHandoverRequest(
-            config=native_mcp_scope.config if native_mcp_scope else config,
+            config=config,
             context=context,
             workspace=workspace,
             agent_id=agent_id,
-            native_mcp_scope=native_mcp_scope,
+            ar_mcp_context=ar_mcp_context,
             request_id=request_id,
             entry_mode=entry_mode,
         )
@@ -140,7 +131,7 @@ def prepare_orca_role_handover(
         agent_id=agent_id,
         session_options=session_options,
         agent_arg_tokens=agent_arg_tokens,
-        native_mcp_scope=native_mcp_scope,
+        ar_mcp_context=ar_mcp_context,
         handover=handover,
         request_id=request_id,
     )
@@ -163,8 +154,8 @@ def _launcher_catalog(
     workspace: dict[str, str] | None = None
     agent_catalog = _ORCA_CATALOG_CACHE.get((*scope, None))
     if agent_catalog is None:
-        workspace = _ensure_orca_workspace(config.workspace_root)
-        catalog = _runtime_call("catalog", {"workspaceSelector": workspace["selector"]})
+        workspace = _ensure_orca_workspace(config, config.workspace_root)
+        catalog = _runtime_call(config, "catalog", {"workspaceSelector": workspace["selector"]})
         agent_catalog = {"agents": catalog.get("agents", [])}
         _ORCA_CATALOG_CACHE[(*scope, None)] = agent_catalog
     installed = _agent_ids(agent_catalog)
@@ -176,8 +167,9 @@ def _launcher_catalog(
         selected_catalog = _ORCA_CATALOG_CACHE.get((*scope, selected_agent))
         if selected_catalog is None:
             if workspace is None:
-                workspace = _ensure_orca_workspace(config.workspace_root)
+                workspace = _ensure_orca_workspace(config, config.workspace_root)
             result = _runtime_call(
+                config,
                 "catalog",
                 {"workspaceSelector": workspace["selector"], "agentId": selected_agent},
             )
@@ -245,12 +237,13 @@ def _configured_or_detected_agent(
 
 
 def _resolve_agent_selection(
+    config: McpRuntimeConfig,
     selector: str,
     defaults: dict[str, str | None],
     harness_order: tuple[str, ...],
     override: OrcaAgentOverride | None,
 ) -> tuple[str, dict[str, str], tuple[str, ...]]:
-    available = _runtime_call("catalog", {"workspaceSelector": selector})
+    available = _runtime_call(config, "catalog", {"workspaceSelector": selector})
     installed = _agent_ids(available)
     default_agent = _configured_or_detected_agent(defaults["agent"], harness_order, installed)
     agent_id = override.agent_id if override else default_agent
@@ -258,7 +251,11 @@ def _resolve_agent_selection(
         raise ValueError(
             "No Orca agent is selected. Configure the AR role harness or choose an installed Orca agent."
         )
-    catalog = _runtime_call("catalog", {"workspaceSelector": selector, "agentId": agent_id})
+    catalog = _runtime_call(
+        config,
+        "catalog",
+        {"workspaceSelector": selector, "agentId": agent_id},
+    )
     selected = catalog.get("selected")
     if not isinstance(selected, dict):
         raise ValueError(f"The selected Orca agent {agent_id!r} is not installed on this runtime.")
@@ -291,7 +288,11 @@ def _resolve_agent_selection(
     options = {key: value for key, value in (("model", model_id), ("effort", effort_id)) if value}
     agent_args: tuple[str, ...] = ()
     if model_id:
-        resolved = _runtime_call("option-launch", {"agentId": agent_id, "sessionOptions": options})
+        resolved = _runtime_call(
+            config,
+            "option-launch",
+            {"agentId": agent_id, "sessionOptions": options},
+        )
         applied = resolved.get("appliedValues", {})
         if applied.get("model") != model_id or (effort_id and applied.get("effort") != effort_id):
             raise ValueError(
@@ -303,43 +304,78 @@ def _resolve_agent_selection(
     return agent_id, options, agent_args
 
 
-def _prepare_leaf_mcp_scope(
+def _ar_mcp_context(
     config: McpRuntimeConfig,
     context: OrcaRoleContext,
     workspace: dict[str, str],
-    agent_id: str,
-) -> ScopedNativeMcp:
-    if agent_id != "codex":
-        raise OrcaRuntimeFailure(
-            "task_scoped_mcp_unverified",
-            (
-                f"Leaf launch for {agent_id!r} is blocked until its native workspace-scoped "
-                "AR MCP profile is verified. No Orca session was started."
-            ),
+) -> dict[str, Any]:
+    """Declare the exact arguments native roles pass to the existing shared AR MCP tools."""
+
+    if context.role in LEAF_ROLES:
+        if context.task is None:
+            raise ValueError("A leaf role requires its canonical task document for AR MCP reads.")
+        task_context = TaskScopedReaderContext(
+            task_document_ref=context.task.ref,
+            contract_path=Path(workspace["contractPath"]).resolve().as_posix(),
         )
-    if context.task is None:
-        raise ValueError("A leaf-role MCP scope requires the selected canonical task.")
-    return prepare_codex_scoped_mcp(
-        config,
-        task_document_ref=context.task.ref,
-        workspace=workspace,
-    )
+        task_context_args = task_context.model_dump(mode="json")
+        return {
+            "schema": "ar-mcp-reader-context/v1",
+            "scopeKind": "canonical-leaf",
+            "repositoryId": context.task.ref.repository,
+            "taskContext": task_context_args,
+            "readerArguments": {
+                "context_packet": {
+                    "repo_id": context.task.ref.repository,
+                    "task_context": task_context_args,
+                    "include_providers": False,
+                },
+                "read_ar_files": {
+                    "repo_id": context.task.ref.repository,
+                    "task_context": task_context_args,
+                },
+            },
+            "requiredArguments": {
+                "context_packet": ["repo_id", "task_context"],
+                "read_ar_files": ["repo_id", "files", "task_context"],
+            },
+            "readArFilesNote": "Add the requested files list to readerArguments.read_ar_files.",
+            "requiredCapability": "ar-task-scoped-readers/v1",
+            "missingCapabilityAction": (
+                "If either installed AR MCP tool schema lacks task_context with both "
+                "task_document_ref and contract_path, stop and report the missing "
+                "ar-task-scoped-readers/v1 capability. Do not call a task reader without "
+                "task_context or substitute caller-selected roots."
+            ),
+        }
 
-
-def _prepare_projects_mcp_scope(
-    config: McpRuntimeConfig,
-    context: OrcaRoleContext,
-    workspace: dict[str, str],
-    agent_id: str,
-) -> ScopedNativeMcp | None:
-    if agent_id != "codex":
-        return None
     repository_id = context.effective_task.ref.repository if context.effective_task else None
-    return prepare_codex_projects_mcp(
-        config,
-        workspace_root=Path(workspace["path"]),
-        repository_id=repository_id,
+    if repository_id is not None and repository_id not in config.repositories:
+        raise ValueError("The selected Projects repository is not admitted by MCP settings.")
+    reader_arguments = (
+        {
+            "context_packet": {"repo_id": repository_id, "include_providers": False},
+            "read_ar_files": {"repo_id": repository_id},
+        }
+        if repository_id
+        else None
     )
+    return {
+        "schema": "ar-mcp-reader-context/v1",
+        "scopeKind": "configured-projects",
+        "repositoryId": repository_id,
+        "availableRepositoryIds": sorted(config.repositories),
+        "readerArguments": reader_arguments,
+        "repositorySelection": (
+            None
+            if repository_id
+            else "Choose repo_id from availableRepositoryIds for each reader call."
+        ),
+        "missingCapabilityAction": (
+            "If a registered AR MCP reader schema is unavailable, report that installation issue; "
+            "do not invent a repository id or pass caller-selected roots."
+        ),
+    }
 
 
 def _verify_leaf_revival_scope(
@@ -348,34 +384,17 @@ def _verify_leaf_revival_scope(
     receipt: dict[str, Any],
 ) -> None:
     workspace = _resolve_workspace(config, context)
-    agent = receipt.get("agent")
-    agent_id = agent.get("id") if isinstance(agent, dict) else None
-    if not isinstance(agent_id, str):
+    expected = _ar_mcp_context(config, context, workspace)
+    if receipt.get("arMcpContext") != expected:
         raise ValueError(
-            "The saved leaf execution has no agent identity for MCP scope verification."
-        )
-    verified = _prepare_leaf_mcp_scope(config, context, workspace, agent_id)
-    stored = receipt.get("nativeMcpScope")
-    required_keys = (
-        "taskDocumentRef",
-        "contractPath",
-        "workspaceRoot",
-        "codeRoot",
-        "memoryRoot",
-        "contextPacketVerified",
-        "readArFiles",
-    )
-    if not isinstance(stored, dict) or any(
-        stored.get(key) != verified.verification.get(key) for key in required_keys
-    ):
-        raise ValueError(
-            "The saved leaf session does not carry the verified MCP scope required for safe revive."
+            "The saved leaf execution does not carry the current canonical AR MCP task reader "
+            "context; prepare a new native handover before revive."
         )
 
 
 def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> dict[str, str]:
     if context.role not in LEAF_ROLES:
-        return _ensure_orca_workspace(config.workspace_root)
+        return _ensure_orca_workspace(config, config.workspace_root)
     assert context.task is not None and context.sprint is not None
     contract_path, status = _ensure_leaf_enclosure(
         config,
@@ -385,7 +404,7 @@ def _resolve_workspace(config: McpRuntimeConfig, context: OrcaRoleContext) -> di
     group = _require_directory(status, "worktree_group")
     code = _require_directory(status, "code_worktree")
     memory = _require_directory(status, "memory_worktree")
-    workspace = _ensure_orca_workspace(group)
+    workspace = _ensure_orca_workspace(config, group)
     task_reports = context.task.path.parent / "notes" / "reports"
     task_reports.mkdir(parents=True, exist_ok=True)
     report_access = _bind_task_report_access(group, task_reports)
@@ -477,14 +496,14 @@ def _ensure_leaf_enclosure(
     return contract_path, status
 
 
-def _ensure_orca_workspace(path: Path) -> dict[str, str]:
+def _ensure_orca_workspace(config: McpRuntimeConfig, path: Path) -> dict[str, str]:
     root = path.resolve()
     root.mkdir(parents=True, exist_ok=True)
-    workspaces = _runtime_call("workspaces", {})
+    workspaces = _runtime_call(config, "workspaces", {})
     matches = _matching_workspace(workspaces, root)
     if not matches:
-        _runtime_call("add-folder", {"path": root.as_posix(), "displayName": root.name})
-        workspaces = _runtime_call("workspaces", {})
+        _runtime_call(config, "add-folder", {"path": root.as_posix(), "displayName": root.name})
+        workspaces = _runtime_call(config, "workspaces", {})
         matches = _matching_workspace(workspaces, root)
     if len(matches) != 1:
         raise ValueError(f"Orca must expose exactly one registered workspace for {root}.")
@@ -522,20 +541,32 @@ def _compile_handover(
     context = request.context
     workspace = request.workspace
     agent_id = request.agent_id
-    native_mcp_scope = request.native_mcp_scope
+    ar_mcp_context = request.ar_mcp_context
     request_id = request.request_id
     operation = role_start_operation(context.role)
     task_ref = context.effective_task.ref if context.effective_task else None
+    role_config = config
+    if context.role in LEAF_ROLES:
+        if context.task is None:
+            raise ValueError(
+                "A leaf role requires its canonical task document for role preparation."
+            )
+        task_context = TaskScopedReaderContext.model_validate(ar_mcp_context["taskContext"])
+        role_config = task_scoped_mcp_config_for_reader(
+            config,
+            repository_id=context.task.ref.repository,
+            task_context=task_context,
+        )
     capsule_request = LaunchCapsuleRequest(
         role=context.role,
         workspace_root=Path(workspace["path"]),
         task_document_ref=task_ref,
         allow_project_task_binding=(
             context.role in {"orchestrator", "manager"}
-            and Path(workspace["path"]).resolve() == config.workspace_root.resolve()
+            and Path(workspace["path"]).resolve() == role_config.workspace_root.resolve()
         ),
     )
-    capsule = compile_launch_capsule(config, capsule_request, operation=operation)
+    capsule = compile_launch_capsule(role_config, capsule_request, operation=operation)
     if capsule.is_refusal:
         raise ValueError(capsule.explain())
     if capsule.codex_delivery is None:
@@ -544,8 +575,11 @@ def _compile_handover(
     task_reads = [_read_task_doc(config, document) for document in documents]
     primary = context.effective_task
     context_packet = None
-    if native_mcp_scope is not None:
-        context_packet = native_mcp_scope.context_packet
+    if context.role in LEAF_ROLES and context.task is not None:
+        context_packet = build_context_packet(
+            role_config,
+            ContextPacketRequest(repo_id=context.task.ref.repository, include_providers=False),
+        )
     elif primary and primary.ref.repository in config.repositories:
         context_packet = build_context_packet(
             config,
@@ -593,7 +627,7 @@ def _compile_handover(
         "taskReportPath": report_path,
         "canonicalTaskReportPath": Path(report_path).resolve(strict=False).as_posix(),
         "contextPacket": context_packet,
-        "nativeMcpScope": native_mcp_scope.verification if native_mcp_scope else None,
+        "arMcpContext": ar_mcp_context,
         "capsule": {
             "role": capsule.role,
             "operation": capsule.codex_delivery.binding.operation,
@@ -617,6 +651,13 @@ def _compile_handover(
                 "orca skills get orca-cli",
                 "orca skills get orchestration",
             ],
+            "arMcpUsage": (
+                "Use the existing shared Agents Remember MCP connection. For a leaf, pass the "
+                "exact arMcpContext.readerArguments; add the requested files list to "
+                "read_ar_files. If either "
+                "installed tool schema lacks the declared task_context fields, stop and report the "
+                "missing AR reader capability; do not drop task_context or substitute another root."
+            ),
             "messageSemantics": (
                 "For a cross-workspace message, address the exact native recipient supplied by the active Orca preamble. "
                 "If absent, use the assignment's explicitly named recipient workspace; resolve its exact native workspace selector "
@@ -665,7 +706,11 @@ def _compile_handover(
             "operation, hierarchy, parent, or transport. "
             "Keep higher-priority native instructions and applicable repository coding, tool, and safety "
             "rules. AR owns task requirements, review and curation decisions, task lifecycle, and paired "
-            "Git acceptance. This native Orca session performs only the assignment above. Resolve each task document by calling task_doc "
+            "Git acceptance. This native Orca session performs only the assignment above. For leaf "
+            "context_packet/read_ar_files calls, use the exact arMcpContext.readerArguments; task scope "
+            "is per call and includes no caller-selected roots. If the existing AR MCP schema does not "
+            "expose task_context with both required fields, stop and report that capability mismatch. "
+            "Resolve each task document by calling task_doc "
             "with the row's taskDocReadArgs exactly, then read its canonical JSON at the returned "
             "docPath before acting. Do not add .json to the slug. Each contentDigest records the "
             "document snapshot used for this launch. Never claim AR review, curation, lifecycle, or "
@@ -702,11 +747,7 @@ def _compile_handover(
         },
         "taskReportPath": report_path,
         "canonicalTaskReportPath": Path(report_path).resolve(strict=False).as_posix(),
-        **(
-            {"nativeMcpScope": native_mcp_scope.verification}
-            if native_mcp_scope is not None
-            else {}
-        ),
+        "arMcpContext": ar_mcp_context,
     }
 
 

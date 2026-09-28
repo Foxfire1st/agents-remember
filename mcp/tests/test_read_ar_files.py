@@ -271,6 +271,45 @@ class FrontDoorDedupTests(unittest.TestCase):
         self.assertNotIn("repository_overview", again)
         self.assertNotIn("route_overviews", again)
 
+    def test_equal_overviews_dedup_independently_across_roots(self) -> None:
+        self._read([{"path": "pkg/sub/mod.py"}])
+
+        other_root = self._dir / "other"
+        other_code = other_root / "workspace" / REPO
+        (other_code / "pkg" / "sub").mkdir(parents=True)
+        (other_code / "pkg" / "sub" / "mod.py").write_text("a = 1\n", encoding="utf-8")
+        other_onboarding = other_root / "memory" / "onboarding"
+        other_onboarding.mkdir(parents=True)
+        _write_overview(other_onboarding, "", "# Repo overview\nroot text\n")
+        _write_overview(other_onboarding, "pkg", "# pkg overview\npkg text\n")
+        _write_overview(other_onboarding, "pkg/sub", "# sub overview\nsub text\n")
+        _write_sidecar(other_onboarding, "pkg/sub/mod.py", "Mod body.")
+        _write_route_index(other_onboarding, "pkg/sub", covered=["pkg/sub/mod.py"])
+        other_config = _make_config(other_root, other_code)
+        other_context = _build_context(
+            other_code,
+            other_onboarding,
+            coordination_root=other_config.coordination_root,
+            storage_mode="repo-sidecar",
+        )
+
+        other_first = read_ar_files_tool(
+            other_config,
+            repo_id=REPO,
+            files=[{"path": "pkg/sub/mod.py"}],
+            _context=other_context,
+        )
+        self.assertIn("repository_overview", other_first)
+        self.assertIn("route_overviews", other_first)
+        other_second = read_ar_files_tool(
+            other_config,
+            repo_id=REPO,
+            files=[{"path": "pkg/sub/mod.py"}],
+            _context=other_context,
+        )
+        self.assertNotIn("repository_overview", other_second)
+        self.assertNotIn("route_overviews", other_second)
+
     def test_changed_overview_is_reserved(self) -> None:
         self._read([{"path": "pkg/sub/mod.py"}])
         _write_overview(self.onb, "", "# Repo overview\nCHANGED root text\n")

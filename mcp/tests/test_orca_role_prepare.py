@@ -3,13 +3,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import tempfile
 import threading
 import unittest
 import uuid
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
 
@@ -19,9 +17,8 @@ from agents_remember.cli.orca_handover_artifacts import (
     write_role_handover_artifact,
 )
 from agents_remember.cli.orca_runtime import OrcaRuntimeFailure
-from agents_remember.cli.orca_scoped_mcp import _codex_mcp_entry
 from agents_remember.cli.orca_task_routes import NativeRoleSessionPreparation
-from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, OrcaRuntimeSettings
 from agents_remember.mcp.registration.orca_roles import register_orca_role_tools
 from agents_remember.mcp.tools.orca_handover import orca_role_prepare_payload
 from agents_remember.models.orca_launcher import OrcaDispatchRequest
@@ -31,6 +28,16 @@ from mcp.server.fastmcp import FastMCP
 
 class OrcaRolePrepareTest(unittest.TestCase):
     def setUp(self) -> None:
+        self.config = McpRuntimeConfig(
+            config_path=Path("/test/ar/mcp-settings.json"),
+            coordination_root=Path("/test/ar/coordination"),
+            workspace_root=Path("/test/ar/projects"),
+            transcript_root=Path("/test/ar/coordination/logs/mcp"),
+            orca_runtime=OrcaRuntimeSettings(
+                runtime_root=Path("/test/orca/source"),
+                user_data_path=Path("/test/orca/profile"),
+            ),
+        )
         self.task_ref = TaskDocumentRef(
             repository="agents-remember",
             path="260922_orca-native-workspace-trial/10_flat-native-orchestration.json",
@@ -105,18 +112,13 @@ class OrcaRolePrepareTest(unittest.TestCase):
             handover_reference=self.handover_reference,
             handover_artifact=self.artifact,
         )
-        runtime_env = {
-            "AR_ORCA_RUNTIME_ROOT": "/pinned/orca",
-            "ORCA_USER_DATA_PATH": "/user/orca-data",
-        }
         with (
-            patch.dict(os.environ, runtime_env, clear=True),
             patch(
                 "agents_remember.mcp.tools.orca_handover.prepare_idle_native_role_session",
                 return_value=prepared,
             ),
         ):
-            result = orca_role_prepare_payload(cast(McpRuntimeConfig, object()), self.request)
+            result = orca_role_prepare_payload(self.config, self.request)
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["status"], "idle-session-ready")
@@ -141,17 +143,23 @@ class OrcaRolePrepareTest(unittest.TestCase):
         self.assertEqual(spec["handoverArtifact"], self.handover_reference)
         self.assertNotIn("full prompt kept in the artifact", json.dumps(result))
 
-    def test_missing_native_runtime_paths_fail_before_any_native_start(self) -> None:
+    def test_missing_shared_orca_settings_fail_before_native_start(self) -> None:
+        config = McpRuntimeConfig(
+            config_path=self.config.config_path,
+            coordination_root=self.config.coordination_root,
+            workspace_root=self.config.workspace_root,
+            transcript_root=self.config.transcript_root,
+        )
         with (
-            patch.dict(os.environ, {}, clear=True),
             patch(
                 "agents_remember.mcp.tools.orca_handover.prepare_idle_native_role_session"
             ) as start,
             self.assertRaises(OrcaRuntimeFailure) as raised,
         ):
-            orca_role_prepare_payload(cast(McpRuntimeConfig, object()), self.request)
+            orca_role_prepare_payload(config, self.request)
         start.assert_not_called()
-        self.assertIn("AR_ORCA_RUNTIME_ROOT and ORCA_USER_DATA_PATH", str(raised.exception))
+        self.assertIn("orcaRuntime.runtimeRoot and orcaRuntime.userDataPath", str(raised.exception))
+        self.assertIn("Data-only MCP tools remain available", str(raised.exception))
 
     def test_task_handover_artifact_is_bounded_immutable_and_report_confined(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -185,31 +193,6 @@ class OrcaRolePrepareTest(unittest.TestCase):
             self.assertEqual(
                 hashlib.sha256(Path(ref["path"]).read_bytes()).hexdigest(), ref["sha256"]
             )
-
-    def test_scoped_mcp_propagates_only_nonsecret_orca_paths(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            config = SimpleNamespace(config_path=Path(temporary) / "settings.json")
-            workspace = Path(temporary) / "leaf"
-            workspace.mkdir()
-            package_root = Path(temporary) / "python" / "site-packages"
-            package_root.mkdir(parents=True)
-            package_init = package_root / "agents_remember" / "__init__.py"
-            package_init.parent.mkdir()
-            package_init.write_text("")
-            environment = {
-                "AR_ORCA_RUNTIME_ROOT": "/pinned/orca",
-                "ORCA_USER_DATA_PATH": "/user/orca-data",
-                "ORCA_PAIRING_CODE": "must-not-cross-the-scope",
-            }
-            with (
-                patch.dict(os.environ, environment, clear=True),
-                patch("agents_remember.cli.orca_scoped_mcp.importlib.util.find_spec") as find_spec,
-            ):
-                find_spec.return_value = SimpleNamespace(origin=package_init.as_posix())
-                entry = _codex_mcp_entry(cast(McpRuntimeConfig, config), workspace)
-        self.assertEqual(entry["env"]["AR_ORCA_RUNTIME_ROOT"], "/pinned/orca")
-        self.assertEqual(entry["env"]["ORCA_USER_DATA_PATH"], "/user/orca-data")
-        self.assertNotIn("ORCA_PAIRING_CODE", entry["env"])
 
     def test_registered_tool_offloads_native_preparation_from_mcp_event_loop(self) -> None:
         preparation_threads: list[int] = []
@@ -251,7 +234,7 @@ class OrcaRolePrepareTest(unittest.TestCase):
 
         async def call_registered_tool() -> tuple[int, dict[str, object]]:
             server = FastMCP("orca-role-preparation-event-loop-test")
-            register_orca_role_tools(server, cast(McpRuntimeConfig, object()))
+            register_orca_role_tools(server, self.config)
             loop_thread = threading.get_ident()
             _content, structured = await server.call_tool(
                 "orca_role_prepare",
@@ -274,14 +257,6 @@ class OrcaRolePrepareTest(unittest.TestCase):
             return loop_thread, cast(dict[str, object], structured)
 
         with (
-            patch.dict(
-                os.environ,
-                {
-                    "AR_ORCA_RUNTIME_ROOT": "/pinned/orca",
-                    "ORCA_USER_DATA_PATH": "/user/orca-data",
-                },
-                clear=True,
-            ),
             patch(
                 "agents_remember.mcp.tools.orca_handover.prepare_idle_native_role_session",
                 side_effect=sync_preparation,

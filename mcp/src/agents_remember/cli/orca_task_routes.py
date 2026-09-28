@@ -32,7 +32,6 @@ from agents_remember.cli.orca_handover_artifacts import (
     write_role_handover_artifact,
 )
 from agents_remember.cli.orca_runtime import (
-    MAX_PROMPT_BYTES,
     OrcaRuntimeFailure,
 )
 from agents_remember.cli.orca_runtime import (
@@ -87,6 +86,7 @@ _DISPATCH_LOCK = threading.Lock()
 
 @dataclass(frozen=True, slots=True)
 class _PreparedRoleStart:
+    config: McpRuntimeConfig
     request: OrcaDispatchRequest
     context: OrcaRoleContext
     binding: dict[str, Any]
@@ -168,7 +168,9 @@ def _orca_options_endpoint(
         else:
             receipt_path = _receipt_path(config, request)
             receipt = _read_receipt(receipt_path)
-            response["execution"] = _refresh_execution(receipt_path, receipt) if receipt else None
+            response["execution"] = (
+                _refresh_execution(config, receipt_path, receipt) if receipt else None
+            )
         return JSONResponse(response)
     except (OSError, ValueError, TaskDocumentRefError, OrcaRuntimeFailure) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -212,7 +214,7 @@ def _orca_result_endpoint(config: McpRuntimeConfig, request: OrcaResultRequest) 
                 status_code=409,
                 detail="The recorded Orca execution belongs to another AR selection.",
             )
-        return JSONResponse(_refresh_execution(path, receipt))
+        return JSONResponse(_refresh_execution(config, path, receipt))
     except (OSError, ValueError, OrcaRuntimeFailure) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     finally:
@@ -267,7 +269,7 @@ def _reserve_message_binding_projection(
     _verify_prior_message_binding_projection(
         config, _read_receipt(path), request, binding, reference
     )
-    prior = _reconcile_prior_execution(path, request, request_digest)
+    prior = _reconcile_prior_execution(config, path, request, request_digest)
     if prior is not None:
         return reference, prior
     _write_message_binding_projection(config, request.request_id, binding, reference)
@@ -285,7 +287,7 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
         config, request, request.request_id if request.role in TASKLESS_ROLES else None
     )
     if request.role in TASKLESS_ROLES:
-        prior = _reconcile_prior_execution(path, request, request_digest)
+        prior = _reconcile_prior_execution(config, path, request, request_digest)
         if prior is not None:
             return prior
     role_handover = prepare_orca_role_handover(
@@ -296,17 +298,13 @@ def _start_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> 
     )
     prepared = role_handover.handover
     prompt = prepared["prompt"]
-    if len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail="The canonical AR role handover exceeds Orca's launch prompt limit.",
-        )
     projection_reference, prior = _reserve_message_binding_projection(
         config, path, request, request_digest, prepared
     )
     if prior is not None:
         return prior
     start = _PreparedRoleStart(
+        config=config,
         request=request,
         context=context,
         binding=binding,
@@ -340,12 +338,6 @@ def prepare_idle_native_role_session(
             entry_mode="native-orca-task",
         )
         prepared = role_handover.handover
-        prompt = prepared["prompt"]
-        if len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
-            raise HTTPException(
-                status_code=413,
-                detail="The canonical AR role handover exceeds Orca's launch prompt limit.",
-            )
         request_digest = _digest(
             {
                 "selection": binding,
@@ -360,7 +352,7 @@ def prepare_idle_native_role_session(
                 "workspace": role_handover.workspace,
                 "agent": role_handover.agent_id,
                 "sessionOptions": role_handover.session_options,
-                "nativeMcpScope": prepared.get("nativeMcpScope"),
+                "arMcpContext": prepared.get("arMcpContext"),
             }
         )
         message_binding_projection, prior = _reserve_message_binding_projection(
@@ -395,6 +387,7 @@ def prepare_idle_native_role_session(
         artifact = build_role_handover_artifact(role_handover)
         handover_reference = write_role_handover_artifact(prepared["taskReportPath"], artifact)
         start = _PreparedRoleStart(
+            config=config,
             request=request,
             context=context,
             binding=binding,
@@ -460,7 +453,7 @@ def _launch_prepared_role_session(
                 "workspace": workspace,
                 "agent": agent_id,
                 "sessionOptions": session_options,
-                "nativeMcpScope": prepared.get("nativeMcpScope"),
+                "arMcpContext": prepared.get("arMcpContext"),
             }
         ),
         "capsuleDigest": prepared["capsuleDigest"],
@@ -472,8 +465,8 @@ def _launch_prepared_role_session(
             "canonicalPath": prepared["canonicalTaskReportPath"],
         },
         **(
-            {"nativeMcpScope": prepared["nativeMcpScope"]}
-            if isinstance(prepared.get("nativeMcpScope"), dict)
+            {"arMcpContext": prepared["arMcpContext"]}
+            if isinstance(prepared.get("arMcpContext"), dict)
             else {}
         ),
         **({"handoverProjection": handover_projection} if handover_projection else {}),
@@ -497,7 +490,7 @@ def _launch_prepared_role_session(
         ),
     }
     _write_receipt(start.receipt_path, receipt)
-    return _execute_prepared_launch(start.receipt_path, receipt)
+    return _execute_prepared_launch(start.config, start.receipt_path, receipt)
 
 
 def _revive_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) -> JSONResponse:
@@ -520,7 +513,7 @@ def _revive_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) ->
     if request.role in LEAF_ROLES:
         context = resolve_orca_role_context(config, request)
         _verify_leaf_revival_scope(config, context, receipt)
-    status = _refresh_execution(path, receipt)
+    status = _refresh_execution(config, path, receipt)
     if status.get("canRevive") is not True:
         raise HTTPException(
             status_code=409,
@@ -531,7 +524,7 @@ def _revive_execution(config: McpRuntimeConfig, request: OrcaDispatchRequest) ->
         raise HTTPException(
             status_code=409, detail="The saved structured session identity is incomplete."
         )
-    resumed = _runtime_call("restart-continue", {"sessionId": session_id})
+    resumed = _runtime_call(config, "restart-continue", {"sessionId": session_id})
     resumed_rows = resumed.get("resumed", [])
     continued_rows = resumed.get("continued", [])
     resumed_row = next(

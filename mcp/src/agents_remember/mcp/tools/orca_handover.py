@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +17,7 @@ from .base import _tool_payload
 def orca_role_prepare_payload(
     config: McpRuntimeConfig, request: OrcaDispatchRequest
 ) -> dict[str, Any]:
-    _require_native_runtime()
+    _require_native_runtime(config)
     task_document_ref = request.task_document_ref
     if task_document_ref is None:
         raise ValueError("orca_role_prepare requires a canonical task document reference.")
@@ -76,18 +75,12 @@ def orca_role_prepare_payload(
     )
 
 
-def _require_native_runtime() -> None:
-    missing = [
-        name
-        for name in ("AR_ORCA_RUNTIME_ROOT", "ORCA_USER_DATA_PATH")
-        if not os.environ.get(name, "").strip()
-    ]
-    if missing:
+def _require_native_runtime(config: McpRuntimeConfig) -> None:
+    if getattr(config, "orca_runtime", None) is None:
         raise OrcaRuntimeFailure(
             "native_runtime_configuration_missing",
-            "orca_role_prepare needs the configured pinned Orca source and user-data paths in the MCP environment: "
-            + ", ".join(missing)
-            + ". Set AR_ORCA_RUNTIME_ROOT and ORCA_USER_DATA_PATH for the dashboard and scoped MCP process.",
+            "orca_role_prepare requires orcaRuntime.runtimeRoot and orcaRuntime.userDataPath "
+            "in the shared Agents Remember MCP settings. Data-only MCP tools remain available.",
         )
 
 

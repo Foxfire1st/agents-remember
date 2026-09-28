@@ -8,8 +8,6 @@ import unittest
 import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
-from typing import cast
 from unittest.mock import patch
 
 from agents_remember.application.orca_task_context import OrcaRoleContext, selection_binding
@@ -160,7 +158,11 @@ class MessageBindingProjectionTests(unittest.TestCase):
             receipt_path = orca_task_receipts._receipt_path(config, request, request_id)
             workspace = {"id": "projects-id", "selector": "id:projects-id", "path": root.as_posix()}
 
-            def execute(path: Path, receipt: dict[str, object]) -> JSONResponse:
+            def execute(
+                _config: McpRuntimeConfig,
+                path: Path,
+                receipt: dict[str, object],
+            ) -> JSONResponse:
                 projection_path = Path(reference["path"])
                 self.assertEqual(json.loads(projection_path.read_text(encoding="utf-8")), binding)
                 self.assertEqual(
@@ -203,9 +205,6 @@ class MessageBindingProjectionTests(unittest.TestCase):
                             ("--model", "gpt-5.6-luna"),
                         ),
                     ),
-                    patch.object(
-                        orca_task_preparation, "_prepare_projects_mcp_scope", return_value=None
-                    ),
                     patch.object(orca_task_preparation, "_compile_handover", return_value=prepared),
                     patch.object(orca_task_routes, "_receipt_path", return_value=receipt_path),
                     patch.object(orca_task_routes, "_execute_prepared_launch", side_effect=execute),
@@ -239,7 +238,11 @@ class OrcaCatalogCacheTests(unittest.TestCase):
             config.coordination_root.mkdir()
             runtime_calls: list[tuple[str, dict[str, object]]] = []
 
-            def runtime_call(command: str, payload: dict[str, object]) -> dict[str, object]:
+            def runtime_call(
+                _config: McpRuntimeConfig,
+                command: str,
+                payload: dict[str, object],
+            ) -> dict[str, object]:
                 runtime_calls.append((command, payload))
                 if "agentId" in payload:
                     return {
@@ -389,9 +392,6 @@ class OrcaNativeResultTests(unittest.TestCase):
 
         self.assertEqual(public["capsuleOperation"], "implementation")
 
-    def test_prompt_limit_matches_linux_single_argument_capacity(self) -> None:
-        self.assertEqual(orca_runtime.MAX_PROMPT_BYTES, 131071)
-
     def test_taskless_can_start_means_fresh_request_while_bound_live_seat_remains_singleton(
         self,
     ) -> None:
@@ -460,6 +460,7 @@ class OrcaNativeResultTests(unittest.TestCase):
     def test_saved_terminal_refresh_uses_native_auth_and_keeps_disconnect_unknown(self) -> None:
         with TemporaryDirectory() as temporary:
             path = Path(temporary) / "receipt.json"
+            config = _runtime_config(Path(temporary))
             receipt = {
                 "schema": "ar-orca-native-execution/v1",
                 "requestId": str(uuid.uuid4()),
@@ -485,11 +486,11 @@ class OrcaNativeResultTests(unittest.TestCase):
                     ],
                 ) as runtime_call,
             ):
-                stopped = orca_task_liveness._refresh_execution(path, dict(receipt))
+                stopped = orca_task_liveness._refresh_execution(config, path, dict(receipt))
             self.assertEqual(stopped["status"], "stopped")
             self.assertIn("terminal_gone", stopped["detail"])
             self.assertEqual(
-                [call.args[0] for call in runtime_call.call_args_list],
+                [call.args[1] for call in runtime_call.call_args_list],
                 ["terminal-show", "terminal-status"],
             )
             self.assertEqual(stopped["requestId"], receipt["requestId"])
@@ -517,59 +518,11 @@ class OrcaNativeResultTests(unittest.TestCase):
                     ],
                 ),
             ):
-                uncertain = orca_task_liveness._refresh_execution(path, dict(receipt))
+                uncertain = orca_task_liveness._refresh_execution(config, path, dict(receipt))
             self.assertEqual(uncertain["status"], "unknown")
 
 
-class OrcaLeafScopeGateTests(unittest.TestCase):
-    def test_unverified_harness_leaf_refuses_before_native_runtime_calls(self) -> None:
-        with (
-            patch.object(orca_task_routes, "_require_pairing"),
-            patch.object(orca_task_routes, "resolve_orca_role_context") as resolve_context,
-            patch.object(orca_task_routes, "selection_binding", return_value={"role": "worker"}),
-            patch.object(orca_task_routes, "_request_digest", return_value="digest"),
-            patch.object(orca_task_routes, "_receipt_path", return_value=Path("receipt.json")),
-            patch.object(
-                orca_task_preparation,
-                "_resolve_workspace",
-                return_value={"selector": "id:leaf"},
-            ),
-            patch.object(orca_task_preparation, "_role_defaults", return_value=({}, ())),
-            patch.object(
-                orca_task_preparation,
-                "_resolve_agent_selection",
-                return_value=("claude", {}, None),
-            ),
-            patch.object(orca_task_preparation, "_runtime_call") as runtime_call,
-        ):
-            for role in ("worker", "reviewer", "curator"):
-                task = SimpleNamespace(
-                    ref=TaskDocumentRef(
-                        repository="agents-remember",
-                        path="series/leaf.json",
-                    )
-                )
-                resolve_context.return_value = cast(
-                    OrcaRoleContext,
-                    SimpleNamespace(
-                        role=role,
-                        sprint=None,
-                        master=task,
-                        task=task,
-                        effective_task=task,
-                    ),
-                )
-                with self.subTest(role=role), self.assertRaises(HTTPException) as raised:
-                    orca_task_routes._orca_dispatch_endpoint(
-                        _runtime_config(Path("/tmp/orca-unverified-leaf-test")),
-                        OrcaDispatchRequest(role=role, requestId=uuid.uuid4()),
-                    )
-                self.assertEqual(raised.exception.status_code, 409)
-                self.assertIn(
-                    "workspace-scoped AR MCP profile is verified", raised.exception.detail
-                )
-            runtime_call.assert_not_called()
-
+class OrcaProjectDispatchTests(unittest.TestCase):
     def test_projects_architect_dispatch_remains_available(self) -> None:
         with (
             patch.object(orca_task_routes, "_require_pairing"),
@@ -664,9 +617,10 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
                 return_value=JSONResponse({"status": "running"}),
             ) as replay:
                 same_request = orca_task_liveness._reconcile_prior_execution(
-                    first_path, first, "same-payload"
+                    config, first_path, first, "same-payload"
                 )
                 second_intent = orca_task_liveness._reconcile_prior_execution(
+                    config,
                     orca_task_receipts._receipt_path(config, second, second_id),
                     second,
                     "same-payload",
@@ -675,7 +629,7 @@ class TasklessExecutionIdentityTests(unittest.TestCase):
             self.assertIsNotNone(same_request)
             self.assertEqual(replay.call_count, 1)
             self.assertEqual(
-                replay.call_args.args[1]["replayRequest"]["operationId"], "owned-operation"
+                replay.call_args.args[2]["replayRequest"]["operationId"], "owned-operation"
             )
             self.assertIsNone(second_intent)
 

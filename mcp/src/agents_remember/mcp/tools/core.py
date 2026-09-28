@@ -9,9 +9,11 @@ from agents_remember.application.coordination_tools import resolve_context_tool
 from agents_remember.application.runtime.install import RuntimeInstallRequest, run_runtime_install
 from agents_remember.application.runtime.skills import skills_install_tool
 from agents_remember.application.task_docs.task_ref import TaskRef
+from agents_remember.application.task_scoped_mcp import task_scoped_mcp_config_for_reader
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.kernel.primitives.tool_reports import write_tool_report
 from agents_remember.models.core import ServingBuildPayload
+from agents_remember.models.task_document_ref import TaskScopedReaderContext
 
 from .. import SERVER_NAME, SERVER_VERSION
 from .base import PUBLIC_TOOLS, RESERVED_TOOLS, TRANSPORT, _tool_payload
@@ -57,23 +59,18 @@ def server_info_payload(
 
 def context_packet_payload(
     config: McpRuntimeConfig,
-    repo_id: str,
+    request: ContextPacketRequest,
     *,
-    include_providers: bool = True,
-    include_drift: bool = False,
-    include_freshness: bool = False,
+    task_context: TaskScopedReaderContext | None = None,
 ) -> dict[str, Any]:
+    scoped_config = task_scoped_mcp_config_for_reader(
+        config,
+        repository_id=request.repo_id,
+        task_context=task_context,
+    )
     return _tool_payload(
         "context_packet",
-        build_context_packet(
-            config,
-            ContextPacketRequest(
-                repo_id=repo_id,
-                include_providers=include_providers,
-                include_drift=include_drift,
-                include_freshness=include_freshness,
-            ),
-        ),
+        build_context_packet(scoped_config, request),
     )
 
 

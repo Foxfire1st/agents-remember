@@ -17,7 +17,7 @@ from agents_remember.application.lifecycle.configured_contract_admission import 
     admit_configured_contract,
 )
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig, RepositoryScope
-from agents_remember.models.task_document_ref import TaskDocumentRef
+from agents_remember.models.task_document_ref import TaskDocumentRef, TaskScopedReaderContext
 from agents_remember.tasks.document_refs import ResolvedTaskDocument, TaskDocumentTopology
 from agents_remember.tasks.task_paths import leaf_enclosure_path
 
@@ -44,19 +44,65 @@ def task_scoped_mcp_config(
     admission proves that the paths belong to that exact leaf.
     """
 
-    base_repository, admitted_workspace, admitted_code, admitted_memory, contract_path = (
-        _admit_task_scope(config, binding)
+    admitted = _admit_task_scope(
+        config,
+        binding.task_document_ref,
+        binding.contract_path,
     )
+    _require_binding_roots(binding, admitted)
+    return _config_from_admitted_task(config, binding.task_document_ref, admitted)
+
+
+def task_scoped_mcp_config_for_task(
+    config: McpRuntimeConfig,
+    task_document_ref: TaskDocumentRef,
+    contract_path: str | Path,
+) -> McpRuntimeConfig:
+    """Derive an immutable call-local config from a canonical task and contract address.
+
+    Roots come only from the admitted contract and lifecycle location. Callers assert the exact
+    task/contract identity but cannot choose workspace, code, or memory roots.
+    """
+
+    admitted = _admit_task_scope(config, task_document_ref, Path(contract_path))
+    return _config_from_admitted_task(config, task_document_ref, admitted)
+
+
+def task_scoped_mcp_config_for_reader(
+    config: McpRuntimeConfig,
+    *,
+    repository_id: str,
+    task_context: TaskScopedReaderContext | None,
+) -> McpRuntimeConfig:
+    """Select configured Projects roots or one admitted leaf for a reader call."""
+
+    if task_context is None:
+        return config
+    if task_context.task_document_ref.repository != repository_id:
+        raise ValueError("repo_id must match task_context.task_document_ref.repository.")
+    return task_scoped_mcp_config_for_task(
+        config,
+        task_context.task_document_ref,
+        task_context.contract_path,
+    )
+
+
+def _config_from_admitted_task(
+    config: McpRuntimeConfig,
+    task_document_ref: TaskDocumentRef,
+    admitted: tuple[RepositoryScope, Path, Path, Path | None, Path],
+) -> McpRuntimeConfig:
+    base_repository, workspace_root, code_root, memory_root, contract_path = admitted
     scoped_repository = replace(
         base_repository,
-        path=admitted_code,
-        memory_root=admitted_memory,
+        path=code_root,
+        memory_root=memory_root,
         contract_path=contract_path,
     )
     return replace(
         config,
-        workspace_root=admitted_workspace,
-        repositories={binding.task_document_ref.repository: scoped_repository},
+        workspace_root=workspace_root,
+        repositories={task_document_ref.repository: scoped_repository},
     )
 
 
@@ -84,15 +130,16 @@ def projects_mcp_config(config: McpRuntimeConfig, repository_id: str | None) -> 
 
 
 def _admit_task_scope(
-    config: McpRuntimeConfig, binding: TaskScopedMcpBinding
+    config: McpRuntimeConfig,
+    task_document_ref: TaskDocumentRef,
+    contract_path: Path,
 ) -> tuple[RepositoryScope, Path, Path, Path | None, Path]:
-    task_document_ref = binding.task_document_ref
     resolved = TaskDocumentTopology(config.coordination_root).resolve(task_document_ref)
-    supplied_contract = _canonical_leaf_contract(binding, resolved)
+    supplied_contract = _canonical_leaf_contract(task_document_ref, contract_path, resolved)
     admission = admit_configured_contract(config, supplied_contract)
     if isinstance(admission, ConfiguredContractRefused):
         raise ValueError(
-            "AR refused the task-scoped MCP profile because its enclosure authority is not current: "
+            "AR refused the task-scoped MCP context because its enclosure authority is not current: "
             f"{admission.status}."
         )
     assert isinstance(admission, ConfiguredContractAccepted)
@@ -100,22 +147,26 @@ def _admit_task_scope(
     if contract.kind != "leaf" or contract.leaf_id != resolved.document.id:
         raise ValueError("The admitted contract does not own the selected leaf.")
 
-    admitted_workspace, admitted_code, admitted_memory = _admitted_leaf_roots(binding, admission)
+    admitted_workspace, admitted_code, admitted_memory = _admitted_leaf_roots(admission)
     base_repository = config.repositories.get(task_document_ref.repository)
     if base_repository is None:
         raise ValueError("The task repository is not present in the original MCP authority.")
     return base_repository, admitted_workspace, admitted_code, admitted_memory, supplied_contract
 
 
-def _canonical_leaf_contract(binding: TaskScopedMcpBinding, resolved: ResolvedTaskDocument) -> Path:
+def _canonical_leaf_contract(
+    task_document_ref: TaskDocumentRef,
+    contract_path: Path,
+    resolved: ResolvedTaskDocument,
+) -> Path:
     if resolved.document.kind != "subTask":
-        raise ValueError("A task-scoped MCP profile requires a canonical leaf document.")
+        raise ValueError("A task-scoped MCP context requires a canonical leaf document.")
     expected_contract = leaf_enclosure_path(resolved.path.parent, resolved.document.id).resolve(
         strict=False
     )
-    supplied_contract = binding.contract_path.resolve(strict=False)
+    supplied_contract = contract_path.resolve(strict=False)
     if supplied_contract != expected_contract:
-        raise ValueError("The MCP profile contract is not the canonical enclosure for this leaf.")
+        raise ValueError("The task context contract is not the canonical enclosure for this leaf.")
     if len(resolved.document.enclosures) != 1:
         raise ValueError("The selected leaf must have exactly one canonical enclosure binding.")
     enclosure = resolved.document.enclosures[0]
@@ -123,11 +174,13 @@ def _canonical_leaf_contract(binding: TaskScopedMcpBinding, resolved: ResolvedTa
         raise ValueError("The selected leaf enclosure has a conflicting leaf identity.")
     if Path(enclosure.enclosurePath).resolve(strict=False) != supplied_contract:
         raise ValueError("The selected leaf document does not bind the supplied enclosure.")
+    if resolved.ref.repository != task_document_ref.repository:
+        raise ValueError("The selected task document does not match its repository identity.")
     return supplied_contract
 
 
 def _admitted_leaf_roots(
-    binding: TaskScopedMcpBinding, admission: ConfiguredContractAccepted
+    admission: ConfiguredContractAccepted,
 ) -> tuple[Path, Path, Path | None]:
     admitted_workspace = admission.location.worktree_group.resolve(strict=False)
     admitted_code = admission.contract.code_worktree.resolve(strict=False)
@@ -136,20 +189,24 @@ def _admitted_leaf_roots(
         if admission.contract.memory_worktree is not None
         else None
     )
-    if (
-        binding.workspace_root.resolve(strict=False) != admitted_workspace
-        or binding.code_root.resolve(strict=False) != admitted_code
-        or (binding.memory_root.resolve(strict=False) if binding.memory_root else None)
-        != admitted_memory
-    ):
-        raise ValueError(
-            "The MCP profile roots do not match the admitted leaf code and memory worktrees."
-        )
     if not admitted_workspace.is_dir() or not admitted_code.is_dir():
         raise ValueError("The admitted leaf MCP workspace or code worktree is unavailable.")
     if admitted_memory is not None and not admitted_memory.is_dir():
         raise ValueError("The admitted leaf memory worktree is unavailable.")
     return admitted_workspace, admitted_code, admitted_memory
+
+
+def _require_binding_roots(
+    binding: TaskScopedMcpBinding,
+    admitted: tuple[RepositoryScope, Path, Path, Path | None, Path],
+) -> None:
+    _repository, workspace, code, memory, _contract = admitted
+    if (
+        binding.workspace_root.resolve(strict=False) != workspace
+        or binding.code_root.resolve(strict=False) != code
+        or (binding.memory_root.resolve(strict=False) if binding.memory_root else None) != memory
+    ):
+        raise ValueError("The MCP profile roots do not match the admitted leaf worktrees.")
 
 
 def mcp_config_from_scope_profile(
@@ -212,4 +269,6 @@ __all__ = [
     "mcp_config_from_scope_profile",
     "projects_mcp_config",
     "task_scoped_mcp_config",
+    "task_scoped_mcp_config_for_reader",
+    "task_scoped_mcp_config_for_task",
 ]

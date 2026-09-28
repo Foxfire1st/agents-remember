@@ -7,7 +7,7 @@ request, resolve the coordination context once, then per file confine the path,
 read source (full or range), and look up onboarding via the storage mode plus the
 precomputed route index. On top of the per-file onboarding bodies it auto-attaches
 the repo overview and the governing route-overview chain, deduplicated per
-lifecycle, and emits a facts-only ``read.packet`` (paths/ranges/statuses/bytes --
+lifecycle and code/onboarding root, and emits a facts-only ``read.packet`` (paths/ranges/statuses/bytes --
 never content).
 """
 
@@ -259,7 +259,7 @@ def _attach_front_door(
 ) -> dict[str, Any]:
     """Build the deduped repo + route overview attachment for this read.
 
-    Each piece is served once per lifecycle, or again when its content hash
+    Each piece is served once per lifecycle and code/onboarding root, or again when its content hash
     changed; an already-served-unchanged piece is omitted. With no active
     lifecycle there is no ledger, so everything is served (best effort). Each
     request path is run through the same ``_confined_rel`` confinement here, so
@@ -267,10 +267,15 @@ def _attach_front_door(
     having confined the path first (it rejects an escape on its own).
     """
     served: dict[str, Any] = {"repository_overview": None, "route_overviews": {}}
+    scope_key = _overview_scope_key(context, code_root)
 
     repo_overview = _repo_overview(context)
     if repo_overview is not None and _should_serve(
-        amb, lifecycle_id, _KIND_REPO_OVERVIEW, repo_overview["path"], repo_overview["_hash"]
+        amb,
+        lifecycle_id,
+        f"{_KIND_REPO_OVERVIEW}@{scope_key}",
+        repo_overview["path"],
+        repo_overview["_hash"],
     ):
         served["repository_overview"] = {
             "path": repo_overview["path"],
@@ -290,7 +295,7 @@ def _attach_front_door(
             if _should_serve(
                 amb,
                 lifecycle_id,
-                _KIND_ROUTE_OVERVIEW,
+                f"{_KIND_ROUTE_OVERVIEW}@{scope_key}",
                 route_overview["path"],
                 route_overview["_hash"],
             ):
@@ -299,6 +304,17 @@ def _attach_front_door(
                     "overview": route_overview["overview"],
                 }
     return served
+
+
+def _overview_scope_key(context: CoordinationContext, code_root: Path) -> str:
+    """Separate identical relative overview paths owned by distinct code/memory roots."""
+    scope = "\0".join(
+        (
+            code_root.resolve(strict=False).as_posix(),
+            context.onboarding_root.resolve(strict=False).as_posix(),
+        )
+    )
+    return hashlib.sha256(scope.encode("utf-8")).hexdigest()
 
 
 def _should_serve(

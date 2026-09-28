@@ -175,7 +175,7 @@ async function readCatalog(workspaceSelector, selectedAgent) {
           const discoveredIds = new Set(
             result.models.flatMap((model) => typeof model?.id === 'string' ? [model.id] : [])
           )
-          models = combineModels(selectedAgent, seeded, result.models, sharedModule)
+          models = combineModels(seeded, result.models, sharedModule)
             .filter((model) => discoveredIds.has(model.id))
         }
       } else {
@@ -265,32 +265,65 @@ async function listWorkspaces() {
   }
 }
 
-function combineModels(agentId, catalog, discoveredRows, shared) {
+function combineModels(catalog, discoveredRows, shared) {
+  const byId = new Map(
+    discoveredRows
+      .filter((model) => model && typeof model.id === 'string')
+      .map((model) => [model.id, model])
+  )
+  const seededModels = catalog.models.map((seed) => {
+    const live = byId.get(seed.id)
+    return live
+      ? { ...seed, ...live, options: projectThinkingLevels(seed.options ?? [], live, shared) }
+      : seed
+  })
+  const fallbackOptions = catalog.unknownModelOptions ?? []
   const discovered = discoveredRows
     .filter((model) => model && typeof model.id === 'string' && typeof model.label === 'string')
     .map((model) => {
-      const seeded = catalog.models.find((candidate) => candidate.id === model.id)
-      let options = seeded?.options ?? catalog.unknownModelOptions ?? []
-      if (agentId === 'claude' && typeof shared.createClaudeCatalogOptions === 'function') {
-        options = shared.createClaudeCatalogOptions({
-          effortLevelIds: Array.isArray(model.thinkingLevels)
-            ? model.thinkingLevels.flatMap((level) => typeof level?.id === 'string' ? [level.id] : [])
-            : [],
-          supportsFastMode: model.supportsFastMode
-        })
-      }
+      const seeded = shared.findCatalogModel(catalog, model.id)
       return {
         id: model.id,
         label: model.label,
         ...(typeof model.description === 'string' ? { description: model.description } : {}),
         ...(model.isDefault === true ? { isDefault: true } : {}),
-        options
+        options: projectThinkingLevels(seeded?.options ?? fallbackOptions, model, shared)
       }
     })
   if (catalog.discoveredModelsAreAuthoritative === true) {
-    return shared.mergeDiscoveredAuthoritativeModels(catalog.models, discovered)
+    return shared.mergeDiscoveredAuthoritativeModels(seededModels, discovered)
   }
-  return shared.mergeCatalogModels(catalog.models, discovered)
+  return shared.mergeCatalogModels(seededModels, discovered)
+}
+
+function projectThinkingLevels(options, model, shared) {
+  const levels = Array.isArray(model.thinkingLevels)
+    ? model.thinkingLevels.filter(
+      (level) => typeof level?.id === 'string' && typeof level?.label === 'string'
+    )
+    : []
+  const effort = shared.findCatalogOption({ options }, 'effort')
+  if (!levels.length || effort?.kind?.type !== 'select') return options
+
+  const choices = levels.map((level) => ({ value: level.id, label: level.label }))
+  const defaults = [model.defaultThinkingLevel, effort.kind.defaultValue]
+  const defaultValue = defaults.find(
+    (value) => typeof value === 'string' && choices.some((choice) => choice.value === value)
+  )
+  const kindWithoutDefault = { ...effort.kind }
+  delete kindWithoutDefault.defaultValue
+  return options.map((option) => (
+    option.id === effort.id
+      ? {
+        ...option,
+        kind: {
+          ...kindWithoutDefault,
+          choices,
+          ...(typeof defaultValue === 'string' ? { defaultValue } : {})
+        }
+      }
+      : option
+  ))
 }
 
 async function addFolder(folderPath, displayName) {

@@ -22,11 +22,15 @@ from agents_remember.cli.orca_task_receipts import (
     _read_receipt,
     _write_receipt,
 )
+from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.models.orca_launcher import OrcaDispatchRequest
 
 
 def _reconcile_prior_execution(
-    path: Path, request: OrcaDispatchRequest, request_digest: str
+    config: McpRuntimeConfig,
+    path: Path,
+    request: OrcaDispatchRequest,
+    request_digest: str,
 ) -> JSONResponse | None:
     current = _read_receipt(path)
     if current is None:
@@ -38,9 +42,9 @@ def _reconcile_prior_execution(
                 detail="This request id is already bound to different AR task or agent-selection content.",
             )
         if current.get("status") in {"starting", "unknown"}:
-            return _execute_prepared_launch(path, current)
-        return JSONResponse(_refresh_execution(path, current))
-    status = _refresh_execution(path, current)
+            return _execute_prepared_launch(config, path, current)
+        return JSONResponse(_refresh_execution(config, path, current))
+    status = _refresh_execution(config, path, current)
     if status["status"] not in {"completed", "failed", "stopped", "rejected"}:
         raise HTTPException(
             status_code=409,
@@ -50,7 +54,11 @@ def _reconcile_prior_execution(
     return None
 
 
-def _refresh_execution(path: Path, receipt: dict[str, Any]) -> dict[str, Any]:
+def _refresh_execution(
+    config: McpRuntimeConfig,
+    path: Path,
+    receipt: dict[str, Any],
+) -> dict[str, Any]:
     if receipt.get("status") in {"completed", "failed", "stopped", "rejected"}:
         return _public_execution(receipt)
     reference = receipt.get("execution")
@@ -58,9 +66,9 @@ def _refresh_execution(path: Path, receipt: dict[str, Any]) -> dict[str, Any]:
         return _public_execution(receipt)
     try:
         if reference.get("kind") == "terminal":
-            _refresh_terminal_execution(receipt)
+            _refresh_terminal_execution(config, receipt)
         else:
-            _refresh_structured_session(receipt)
+            _refresh_structured_session(config, receipt)
     except (KeyError, OrcaRuntimeFailure, ValueError) as error:
         if getattr(error, "code", None) == "terminal_gone":
             receipt.update(
@@ -79,7 +87,7 @@ def _refresh_execution(path: Path, receipt: dict[str, Any]) -> dict[str, Any]:
     return _public_execution(receipt)
 
 
-def _refresh_terminal_execution(receipt: dict[str, Any]) -> None:
+def _refresh_terminal_execution(config: McpRuntimeConfig, receipt: dict[str, Any]) -> None:
     reference = receipt.get("execution")
     handle = reference.get("handle") if isinstance(reference, dict) else None
     if not isinstance(handle, str) or not handle:
@@ -89,9 +97,9 @@ def _refresh_terminal_execution(receipt: dict[str, Any]) -> None:
             updatedAt=_now_iso(),
         )
         return
-    terminal_result = _runtime_call("terminal-show", {"handle": handle})
+    terminal_result = _runtime_call(config, "terminal-show", {"handle": handle})
     terminal = terminal_result.get("terminal")
-    agent_result = _runtime_call("terminal-status", {"handle": handle})
+    agent_result = _runtime_call(config, "terminal-status", {"handle": handle})
     agent_status = agent_result.get("agentStatus")
     if not isinstance(terminal, dict) or not isinstance(agent_status, dict):
         receipt.update(
@@ -133,10 +141,10 @@ def _refresh_terminal_execution(receipt: dict[str, Any]) -> None:
         )
 
 
-def _refresh_structured_session(receipt: dict[str, Any]) -> None:
+def _refresh_structured_session(config: McpRuntimeConfig, receipt: dict[str, Any]) -> None:
     reference = receipt["execution"]
     session_id = reference["sessionId"]
-    status = _runtime_call("agent-history", {"sessionId": session_id})
+    status = _runtime_call(config, "agent-history", {"sessionId": session_id})
     state = status.get("status")
     turn_state = status.get("turnState")
     outcome = status.get("turnOutcome")
@@ -159,7 +167,7 @@ def _refresh_structured_session(receipt: dict[str, Any]) -> None:
         )
         return
     if turn_state in {"interrupted", "unverifiable"}:
-        candidates = _runtime_call("restart-resumable", {})
+        candidates = _runtime_call(config, "restart-resumable", {})
         sessions = candidates.get("sessions", [])
         exact = next(
             (

@@ -1,4 +1,4 @@
-"""Pinned public Orca RuntimeClient boundary and shared launch limits."""
+"""Pinned public Orca RuntimeClient boundary."""
 
 from __future__ import annotations
 
@@ -16,11 +16,20 @@ from fastapi import HTTPException
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 
 ORCA_RUNTIME_TIMEOUT_SECONDS = 180
-# The Codex TUI receives the prompt as one WSL/Linux argv item; the limit includes NUL.
-MAX_PROMPT_BYTES = 131071
 
 
-def runtime_call(command: str, payload: dict[str, Any]) -> dict[str, Any]:
+def runtime_call(
+    config: McpRuntimeConfig,
+    command: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    settings = config.orca_runtime
+    if settings is None:
+        raise OrcaRuntimeFailure(
+            "native_runtime_configuration_missing",
+            "Native Orca launch requires orcaRuntime.runtimeRoot and orcaRuntime.userDataPath "
+            "in the shared Agents Remember MCP settings.",
+        )
     node = shutil.which("node")
     script = Path(__file__).with_name("orca_runtime_capabilities.mjs")
     if not node or not script.is_file():
@@ -28,14 +37,9 @@ def runtime_call(command: str, payload: dict[str, Any]) -> dict[str, Any]:
             "runtime_boundary_unavailable", "The pinned Orca RuntimeClient boundary is unavailable."
         )
     env = dict(os.environ)
-    if not env.get("AR_ORCA_RUNTIME_ROOT", "").strip():
-        configured_cli = env.get("AR_ORCA_CLI", "orca").strip()
-        cli = configured_cli if Path(configured_cli).is_absolute() else shutil.which(configured_cli)
-        if not cli or not Path(cli).is_file():
-            raise OrcaRuntimeFailure(
-                "runtime_boundary_unavailable", "Set AR_ORCA_CLI to the installed public Orca CLI."
-            )
-        env["AR_ORCA_CLI"] = cli
+    env.pop("AR_ORCA_CLI", None)
+    env["AR_ORCA_RUNTIME_ROOT"] = settings.runtime_root.as_posix()
+    env["ORCA_USER_DATA_PATH"] = settings.user_data_path.as_posix()
     try:
         response = subprocess.run(
             [node, script.as_posix(), command],
@@ -85,21 +89,23 @@ def configured_frame_url() -> str | None:
 
 
 def configured_pairing_code() -> str | None:
-    value = os.environ.get("ORCA_PAIRING_CODE", "").strip()
+    value = (
+        os.environ.get("ORCA_PAIRING_CODE", "").strip()
+        or os.environ.get("ORCA_REMOTE_PAIRING", "").strip()
+    )
     return value or None
 
 
 def orca_catalog_scope(config: McpRuntimeConfig) -> tuple[str, str]:
     pairing = configured_pairing_code() or ""
+    runtime = config.orca_runtime
     runtime_key = digest(
         {
             "pairingFingerprint": hashlib.sha256(pairing.encode("utf-8")).hexdigest(),
             "frameUrl": configured_frame_url(),
             "environment": os.environ.get("ORCA_ENVIRONMENT", "").strip() or None,
-            "runtimeRoot": (
-                os.environ.get("AR_ORCA_RUNTIME_ROOT", "").strip()
-                or os.environ.get("AR_ORCA_CLI", "orca").strip()
-            ),
+            "runtimeRoot": runtime.runtime_root.as_posix() if runtime else None,
+            "userDataPath": runtime.user_data_path.as_posix() if runtime else None,
         }
     )
     return runtime_key, config.workspace_root.resolve().as_posix()
