@@ -22,13 +22,23 @@ import { familyExpressionExcerpts, type FamilyMembershipRow } from "./familyExpr
 
 let claimCounter = 0;
 
+// A constructed claim follows the server's own locator rule: an observed address carries a whole-file
+// locator, which is `whole_file` on the exact recorded blob and `unresolved` on any other reading.
 function claim(over: Partial<ReviewFamilyMemberSource> & { detail: string }): ReviewFamilyMemberSource {
   claimCounter += 1;
+  const observed = over.path !== undefined;
   return {
     claim_id: `claim-${claimCounter}`,
     invariant_revision_id: "rev",
     role: "primary-authority",
     rationale: "recorded by this case",
+    locator: observed ? { kind: "file" } : undefined,
+    resolved_ranges: [],
+    locator_state: !observed
+      ? "not_observed"
+      : over.resolution === "exact_recorded_blob"
+        ? "whole_file"
+        : "unresolved",
     ...over,
   };
 }

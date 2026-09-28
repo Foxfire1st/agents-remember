@@ -58,6 +58,9 @@ export type {
   ReviewReadCounts,
   ReviewRevisionSelection,
   ReviewRevisionSelectionState,
+  ReviewSourceLineRange,
+  ReviewSourceLocator,
+  ReviewSourceLocatorState,
 } from "./reviewFamily";
 
 export type ReviewSideState = "present" | "absent" | "binary" | "unresolved";

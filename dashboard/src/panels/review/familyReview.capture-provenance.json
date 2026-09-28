@@ -1,0 +1,53 @@
+{
+  "captured_source_tree": "a8039b8e036e2c0d83100e9b4683901d6d54bd0d",
+  "captured_at": "2026-09-28T10:39:12.669478+00:00",
+  "command": "/home/firefox/projects/agents-remember/mcp/.venv/bin/python /home/firefox/projects/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/l44_recapture_review_fixtures.py /home/firefox/projects/ar-coordination/worktrees/agents-remember/260921-icr-l44-ar/260921-icr-l44",
+  "route": "GET /api/review/intent served by serving.review.register_review_routes wired with cli.dashboard.serving_collaborators(config) (review routes only) under uvicorn on a free 127.0.0.1 port; bodies read over HTTP",
+  "capture_record": "/home/firefox/projects/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/fixture-capture/capture-record.json",
+  "capture_record_sha256": "aeae0851e110a5244ccebfa34555479662e2e8e6a5a611695e3a167be5fb0172",
+  "selection_rule": "each scenario was rebuilt with fresh identities until every route body it produced carried the committed capture's structural signature; attempts per group are recorded",
+  "signature": "per body: revision_selection.state, before/after statement state, family_context.state, per family entry in order (display_label, entry state, selection state, per side: side state, members_total, roster page state, (member label, member state) pairs in served order), and the published page's (state, total, returned, remaining); familyPaging: every walk body",
+  "attempts": {
+    "complete": 22,
+    "identical": 11,
+    "subject": 46
+  },
+  "scope": "Real review-route bodies over disposable enclosures built by the repository's own test builders; test evidence, not product knowledge or mounted acceptance. Fixtures not listed here keep their original capture.",
+  "fixtures": [
+    {
+      "file": "familyReview.complete.captured.json",
+      "sha256": "1a218df366efaef04fd925950895bf611839c25afdfa48ac0ff5457bd558e91f",
+      "scenario": "build_family_scenario (test_review_family_context): successor family revision, moved member; the selected invariant at pageSize 6",
+      "requests": [
+        "complete22-complete"
+      ],
+      "normalization": "repository_id replaced by \"<repository_id>\" at the top level and in payload.candidate; keys sorted, compact separators"
+    },
+    {
+      "file": "familyReview.identical.captured.json",
+      "sha256": "fa7a257f08801afb7143e181bf5d0877bb517bd63e203360a18a692efdace660",
+      "scenario": "build_endpoint_fixture + a successor of retry-and-anchor-family carrying its parent's own guarantee text and one membership (the revised retry revision)",
+      "requests": [
+        "identical11-identical"
+      ],
+      "normalization": "repository_id replaced by \"<repository_id>\" at the top level and in payload.candidate; keys sorted, compact separators"
+    }
+  ],
+  "not_recaptured": {
+    "stated_by": "260921-ICR-L44 worker, attempt L44-A2 (not written by the producer)",
+    "reason": "The current route cannot emit these committed shapes. At the L24 capture commit 63b47629, application/review_family_rosters._members listed only the family_membership items on a roster page; since L38 (a5bec6c3) it also resolves the member revisions represented by content and claim items. A page whose first items are content therefore now carries that member, and a walk's final claim page now carries the subject row. These fixtures keep their original bytes and do not carry the member-source fields locator, resolved_ranges and locator_state.",
+    "fixtures": {
+      "familyReview.truncated.captured.json": "0 of 24 current-route builds (every side carries its first member)",
+      "familyReview.continued.captured.json": "continues the truncated body's cursor, so it cannot be re-captured without it",
+      "familyReview.oneSided.captured.json": "0 of 10 current-route builds",
+      "familyReview.walkFinal.captured.json": "0 of 10 current-route builds (the final page always carries the subject row)",
+      "familyPaging.captured.json": "0 of 10 current-route builds (captured at L38; walk bodies differ in selection and roster)",
+      "familyReview.emptyRoster.captured.json": "reproducible (10 of 10) but carries no member source, so left unchanged"
+    },
+    "evidence": [
+      "/home/firefox/projects/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/fixture-bounded-analysis.txt",
+      "/home/firefox/projects/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/fixture-probe.log",
+      "/home/firefox/projects/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/fixture-complete-analysis.txt"
+    ]
+  }
+}

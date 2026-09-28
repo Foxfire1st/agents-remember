@@ -37,13 +37,17 @@ from pydantic import Field, model_validator
 
 from agents_remember.models.knowledge.base import (
     LABEL_MAX_LENGTH,
-    PATH_MAX_LENGTH,
     PROSE_MAX_LENGTH,
     REFERENCE_MAX_LENGTH,
     SHA256_PATTERN,
     KnowledgeModel,
 )
 from agents_remember.models.knowledge.read import KnowledgeReadCounts
+from agents_remember.models.knowledge.review_family_source import (
+    ReviewFamilyMemberSource,
+    ReviewSourceLocatorState,
+    source_locator_state,
+)
 from agents_remember.models.knowledge.revision_selection import ReviewRevisionSelection
 
 __all__ = [
@@ -60,6 +64,8 @@ __all__ = [
     "ReviewFamilyRosterPage",
     "ReviewFamilySideName",
     "ReviewFamilySideState",
+    "ReviewSourceLocatorState",
+    "source_locator_state",
 ]
 
 # What this context answers: whether the recorded scope was read, held no applicable family, could
@@ -129,38 +135,6 @@ class ReviewFamilyGuarantee(KnowledgeModel):
     acceptance_ref: str | None = Field(default=None, max_length=REFERENCE_MAX_LENGTH)
     provenance: dict[str, object] = Field(default_factory=dict)
     payload_digest: str = Field(pattern=SHA256_PATTERN)
-
-
-class ReviewFamilyMemberSource(KnowledgeModel):
-    """One recorded realization claim of a member revision, as an inspectable source reference.
-
-    This is a *reference*: the claim's own identity, the author's recorded role and rationale, and
-    the address the read observed for it. Whether the address resolves, whether the bytes moved and
-    what any of it means stay with the owners -- the source inventory and the relationship union --
-    and nothing here restates them. ``resolution`` is absent exactly when this read observed the
-    anchor not at all, which ``detail`` states rather than leaving an empty resolution to be read as
-    a measured agreement.
-    """
-
-    claim_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    invariant_revision_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
-    role: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    rationale: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-    path: str | None = Field(default=None, max_length=PATH_MAX_LENGTH)
-    recorded_source_identity: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    observed_source_identity: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    resolution: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
-
-    @model_validator(mode="after")
-    def _require_an_address_to_travel_with_its_observation(self) -> ReviewFamilyMemberSource:
-        if (self.path is None) != (self.resolution is None):
-            raise ValueError(
-                "a source reference carries the address this read observed and the resolution it "
-                "reached, or neither; an address without an observation reads as a resolved "
-                "realization and a resolution without an address names nothing"
-            )
-        return self
 
 
 class ReviewFamilyMember(KnowledgeModel):

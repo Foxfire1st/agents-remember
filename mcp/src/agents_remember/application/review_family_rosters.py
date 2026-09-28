@@ -29,6 +29,7 @@ from pathlib import Path
 
 from agents_remember.application.knowledge_read import open_read_context, read_knowledge_scope
 from agents_remember.application.review_candidate_resolution import refusal
+from agents_remember.application.review_family_sources import member_source
 from agents_remember.memory.knowledge import families, memberships
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.read_queries import fetch_predecessor_edges
@@ -56,7 +57,6 @@ from agents_remember.models.knowledge.review import ReviewCollectionPage, Review
 from agents_remember.models.knowledge.review_family_context import (
     ReviewFamilyGuarantee,
     ReviewFamilyMember,
-    ReviewFamilyMemberSource,
     ReviewFamilyRevisionContext,
     ReviewFamilyRosterPage,
     ReviewFamilySideName,
@@ -520,7 +520,7 @@ def _member(
         provenance={} if revision is None or revision.provenance is None else revision.provenance,
         payload_digest=None if revision is None else revision.payload_digest,
         other_family_revision_ids=others,
-        sources=tuple(_source(claim) for claim in lookups.claims.get(revision_id, ())),
+        sources=tuple(member_source(claim) for claim in lookups.claims.get(revision_id, ())),
         movement_reference=member_id if member_id in lookups.movements else None,
         detail=_member_detail(side, item, revision, others),
     )
@@ -558,29 +558,6 @@ def _other_families(
                 if member.family_revision_id != family_revision_id
             }
         )
-    )
-
-
-def _source(claim: ReadItem) -> ReviewFamilyMemberSource:
-    """One recorded realization claim as an inspectable source reference."""
-
-    anchor = claim.anchor
-    return ReviewFamilyMemberSource(
-        claim_id=str(claim.claim_id),
-        invariant_revision_id=str(claim.invariant_revision_id),
-        role=str(claim.role),
-        rationale=str(claim.rationale),
-        path=None if anchor is None else anchor.path,
-        recorded_source_identity=None if anchor is None else anchor.recorded_source_identity,
-        observed_source_identity=None if anchor is None else anchor.observed_source_identity,
-        resolution=None if anchor is None else anchor.resolution,
-        detail=(
-            f"the author recorded this realization at {anchor.path} ({anchor.resolution}): "
-            f"{anchor.detail}"
-            if anchor is not None
-            else "this read observed no address for this recorded realization, so it reports the "
-            "claim's own identity and no resolution"
-        ),
     )
 
 

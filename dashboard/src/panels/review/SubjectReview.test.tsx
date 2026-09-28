@@ -1,4 +1,5 @@
-// Exact owner-produced responses from the frozen reviewer counterexamples. See the adjacent receipt.
+// Real review-route bodies (family, invariant) and exact owner-produced responses (single-head cases)
+// from the frozen reviewer counterexamples. See the adjacent receipt.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';

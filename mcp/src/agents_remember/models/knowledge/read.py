@@ -44,8 +44,12 @@ from agents_remember.models.knowledge.base import (
 )
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.models.knowledge.graph import RealizationRole
+from agents_remember.models.knowledge.read_anchor import (
+    ANCHOR_RESOLUTIONS,
+    AnchorResolution,
+    AnchorResolutionState,
+)
 from agents_remember.models.knowledge.result import KnowledgeRefusal
-from agents_remember.models.knowledge.source import SourceLocator
 
 __all__ = [
     "ANCHOR_RESOLUTIONS",
@@ -108,26 +112,6 @@ ItemKind = Literal[
 # invariant revision, and an advertised family is a frontier membership.
 EXACT_REVISION_SEED_KINDS: tuple[str, ...] = ("invariant", "family")
 IDENTITY_SEED_KINDS: tuple[str, ...] = ("invariant", "family")
-
-AnchorResolutionState = Literal[
-    "exact_recorded_blob",
-    "recorded_blob_mismatch",
-    "path_absent",
-    "entry_not_blob",
-    "recorded_object_unavailable",
-    "unsupported_locator",
-    "not_requested",
-]
-
-ANCHOR_RESOLUTIONS: tuple[str, ...] = (
-    "exact_recorded_blob",
-    "recorded_blob_mismatch",
-    "path_absent",
-    "entry_not_blob",
-    "recorded_object_unavailable",
-    "unsupported_locator",
-    "not_requested",
-)
 
 ReadStage = Literal[
     "seed_selected",
@@ -340,24 +324,6 @@ class AdvertisedExpansion(KnowledgeModel):
     family_id: str = Field(pattern=UUID_PATTERN)
     family_revision_id: str = Field(pattern=UUID_PATTERN)
     member_id: str = Field(pattern=UUID_PATTERN)
-
-
-class AnchorResolution(KnowledgeModel):
-    """One recorded anchor observed against the requested code snapshot.
-
-    The recorded identity stays on the observation whatever the outcome: an anchor whose bytes
-    differ, whose path is gone or whose locator this increment cannot resolve is reported as that
-    observation and is never promoted to a current realization, and no path is looked up in a
-    working tree or at HEAD instead.
-    """
-
-    anchor_id: str = Field(pattern=UUID_PATTERN)
-    path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
-    recorded_source_identity: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
-    observed_source_identity: str | None = Field(default=None, max_length=LABEL_MAX_LENGTH)
-    locator: SourceLocator
-    resolution: AnchorResolutionState
-    detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
 
 
 class ReadItem(KnowledgeModel):

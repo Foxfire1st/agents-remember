@@ -18,6 +18,7 @@ import pytest
 from agents_remember.models.knowledge.read import KnowledgeReadCounts
 from agents_remember.models.knowledge.review_family_context import (
     ReviewFamilyContext,
+    ReviewFamilyMemberSource,
     ReviewFamilyRevisionContext,
     ReviewFamilyRosterPage,
 )
@@ -161,6 +162,58 @@ def test_a_final_page_of_a_multi_page_walk_may_carry_only_its_own_share() -> Non
     first["page"] = first_page
     with pytest.raises(ValidationError):
         ReviewFamilyRevisionContext.model_validate(first)
+
+
+def test_a_member_source_may_not_state_a_region_its_observation_does_not_support() -> None:
+    """A source's locator state, locator, ranges and resolution are one fact; no range is invented.
+
+    The honest resolved source is accepted, and each mutation is refused: ranges beside a resolution
+    other than the exact recorded blob, a resolved state with no range, a whole file claimed for a
+    symbol locator, ranges presented as unresolved, and a locator carried with no observed address.
+    A reference without the claim's stored role or rationale is refused too.
+    """
+
+    honest = {
+        "claim_id": "claim",
+        "invariant_revision_id": "revision",
+        "role": "enforcement",
+        "rationale": "the authored explanation",
+        "path": "src/shared.py",
+        "recorded_source_identity": "a" * 40,
+        "observed_source_identity": "a" * 40,
+        "resolution": "exact_recorded_blob",
+        "detail": "the requested tree holds the exact recorded blob",
+        "locator": {"kind": "symbol", "language": "python", "qualified_name": "alpha"},
+        "resolved_ranges": [{"kind": "line_range", "start_line": 1, "end_line": 2}],
+        "locator_state": "resolved",
+    }
+    assert ReviewFamilyMemberSource.model_validate(honest).locator_state == "resolved"
+    unobserved = {
+        "claim_id": "claim",
+        "invariant_revision_id": "revision",
+        "role": "enforcement",
+        "rationale": "the authored explanation",
+        "detail": "no address was observed",
+        "locator_state": "not_observed",
+    }
+    assert ReviewFamilyMemberSource.model_validate(unobserved).locator is None
+    # The store holds a role and a rationale for every claim, so a reference without either is
+    # refused rather than published with an absent explanation.
+    for stored in ("role", "rationale"):
+        with pytest.raises(ValidationError):
+            ReviewFamilyMemberSource.model_validate(
+                {key: value for key, value in unobserved.items() if key != stored}
+            )
+
+    for mutation in (
+        {"resolution": "recorded_blob_mismatch"},
+        {"resolved_ranges": []},
+        {"resolved_ranges": [], "locator_state": "whole_file"},
+        {"locator_state": "unresolved"},
+        {"path": None, "resolution": None, "resolved_ranges": [], "locator_state": "unresolved"},
+    ):
+        with pytest.raises(ValidationError):
+            ReviewFamilyMemberSource.model_validate({**honest, **mutation})
 
 
 def _honest_context() -> ReviewFamilyContext:

@@ -9,6 +9,8 @@ into a promotion:
   ever consulted is the requested tree the caller named;
 * no locator search and no line re-anchoring -- a recorded range is reported against the recorded
   blob, and a locator this increment cannot resolve is reported as unsupported rather than guessed;
+  the ranges an exact recorded blob does support travel as structured values beside the prose, so a
+  reader never has to recover them from the sentence;
 * no content. The observation carries identities, an entry kind and a status; the bytes stay where
   they are, which is what keeps a read page a facts-only packet rather than a document dump.
 
@@ -26,6 +28,7 @@ from agents_remember.errors import GrammarUnavailableError
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory_quality.style.citations import extents, grammars
 from agents_remember.models.knowledge.read import AnchorResolution, KnowledgeReadContext
+from agents_remember.models.knowledge.source import LineRangeLocator
 
 __all__ = ["anchor_resolver_for", "observe_anchor"]
 
@@ -201,6 +204,8 @@ def _observed_entry(
     if object_id == recorded:
         if _locator_kind(locator) == "symbol":
             return _observed_symbol(common, locator, object_id, repository_root)
+        if _locator_kind(locator) == "line_range":
+            return _observed_line_range(common, locator, object_id, repository_root)
         return AnchorResolution(
             **common,
             observed_source_identity=object_id,
@@ -280,15 +285,76 @@ def _observed_symbol(
                 "obligation is not retired"
             ),
         )
+    spelled = ", ".join(f"{path}:{start}-{end}" for start, end in defined)
     return AnchorResolution(
         **common,
         observed_source_identity=object_id,
         resolution="exact_recorded_blob",
         detail=(
             f"the requested tree holds the exact recorded blob at the recorded path, and those "
-            f"bytes define {name!r} at {', '.join(defined)}"
+            f"bytes define {name!r} at {spelled}"
+        ),
+        resolved_ranges=tuple(
+            LineRangeLocator(start_line=start, end_line=end) for start, end in defined
         ),
     )
+
+
+def _observed_line_range(
+    common: dict[str, Any],
+    locator: Any,
+    object_id: str,
+    repository_root: Path,
+) -> AnchorResolution:
+    """Observe a recorded line range against the exact recorded blob's own lines.
+
+    The range is the author's own and is never re-anchored. Matching bytes prove which blob the
+    claim names; they do not prove that the blob reaches the recorded lines. So the blob's line
+    count is read the same way a symbol's bytes are, and a resolved range is published only for
+    lines the blob holds. The resolution stays ``exact_recorded_blob`` either way, because it is
+    the blob-identity fact the attribution and comparison owners act on and that fact is true. A
+    range past the blob's end, or one that could not be measured, is stated in ``detail`` and
+    carries no resolved range, so a reader's locator state for it is never ``resolved``.
+    """
+
+    start = int(_locator_text(locator, "start_line"))
+    end = int(_locator_text(locator, "end_line"))
+    exact = "the requested tree holds the exact recorded blob at the recorded path"
+    try:
+        held = _line_count(_recorded_lines(repository_root, object_id))
+    except _BlobUnreadable as failure:
+        return AnchorResolution(
+            **common,
+            observed_source_identity=object_id,
+            resolution="exact_recorded_blob",
+            detail=(
+                f"{exact}; its lines could not be read ({failure}), so the recorded lines "
+                f"{start}-{end} are not resolved to a range"
+            ),
+        )
+    if end > held:
+        return AnchorResolution(
+            **common,
+            observed_source_identity=object_id,
+            resolution="exact_recorded_blob",
+            detail=(
+                f"{exact}; those bytes hold {held} line(s), so the recorded lines {start}-{end} "
+                "are not lines they hold and no range is resolved for them"
+            ),
+        )
+    return AnchorResolution(
+        **common,
+        observed_source_identity=object_id,
+        resolution="exact_recorded_blob",
+        detail=exact,
+        resolved_ranges=(LineRangeLocator(start_line=start, end_line=end),),
+    )
+
+
+def _line_count(lines: list[str]) -> int:
+    """How many lines the blob holds: a final newline ends the last line rather than opening one."""
+
+    return len(lines) - 1 if lines and lines[-1] == "" else len(lines)
 
 
 class _BlobUnreadable(Exception):
@@ -310,8 +376,8 @@ def _recorded_lines(repository_root: Path, object_id: str) -> list[str]:
     return result.stdout.split("\n")
 
 
-def _defining_extents(name: str, path: str, lines: list[str]) -> tuple[str, ...]:
-    """Where the shipped extractor says ``path`` defines ``name``, in ``path:start-end`` spelling.
+def _defining_extents(name: str, path: str, lines: list[str]) -> tuple[tuple[int, int], ...]:
+    """Where the shipped extractor says ``path`` defines ``name``, as distinct ``(start, end)`` lines.
 
     A qualified name is resolved by its real halves, exactly as the extractor's own callers do:
     the last segment has to be a definition and every namespace segment before it has to be one
@@ -323,9 +389,7 @@ def _defining_extents(name: str, path: str, lines: list[str]) -> tuple[str, ...]
     parts = [part for part in name.split(".") if part]
     if not parts or any(part not in bound for part in parts):
         return ()
-    return tuple(
-        dict.fromkeys(f"{path}:{extent.start}-{extent.end}" for extent in bound[parts[-1]])
-    )
+    return tuple(dict.fromkeys((extent.start, extent.end) for extent in bound[parts[-1]]))
 
 
 def _locator_text(locator: Any, field: str) -> str:

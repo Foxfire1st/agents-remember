@@ -5,9 +5,19 @@
 // every request below is built by the shipped client and every response travels the way the
 // browser's does (status, body, the shared decode in `data/reviewTransport.ts`, the component tree,
 // the read cycle in `ReviewReadCycle.ts`). Only `fetch` is stubbed, and the bodies it is stubbed WITH
-// are the real route's own: `familyReview.*.captured.json` holds the bytes `serving/review.py`
-// published over the real application owners and the real store for one real enclosure, recorded by
-// `temp/icr/probe-l24-family-body.py`. No assertion below reads a prop this test itself passed, and
+// are the real route's own: each `familyReview.*.captured.json` holds the bytes `serving/review.py`
+// published over the real application owners and the real store for one real enclosure. Not all of
+// them are from the same route revision:
+//   * `complete` and `identical` were re-captured over HTTP by the producer, command and source tree
+//     named in `familyReview.capture-provenance.json`, and carry each member source's structured
+//     locator, resolved ranges and locator state;
+//   * `truncated`, `continued`, `oneSided`, `walkFinal` and `emptyRoster` still hold their capture at
+//     63b47629. That route listed only the membership rows on a roster page; the current route also
+//     resolves the members that a page's content and claim items represent, so it cannot reproduce
+//     the first four (`emptyRoster` carries no member source and was left as captured; see the
+//     receipt's `not_recaptured` section). Their re-capture belongs with the change that moves the
+//     cases reading them to the current route's roster states, and is not done here.
+// No assertion below reads a prop this test itself passed, and
 // no payload is assembled here: a case that reached into the component with a hand-built value would
 // prove nothing about the wire contract, which is what these cases are about.
 //

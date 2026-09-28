@@ -95,7 +95,7 @@ __all__ = [
 
 # The policy this detection contract is produced by, in the shipped constant idiom
 # (``DIFF_POLICY_VERSION`` at ``models/knowledge/diff.py:98``;
-# ``KNOWLEDGE_READ_POLICY_VERSION`` at ``models/knowledge/read.py:87``). It names the detection
+# ``read.KNOWLEDGE_READ_POLICY_VERSION`` in ``models/knowledge/read.py``). It names the detection
 # contract, not a second selection rule: which records are selected is R07's policy and which union
 # is compared is R08's, and neither is restated here.
 DETECTION_POLICY_VERSION = "family-detection/v1"
@@ -194,8 +194,8 @@ DetectionLimitation = Literal[
 
 # The same members as the ``Literal`` above, as a tuple, so a caller can iterate the closed set and
 # a case can assert the two agree. Keeping both is the shipped idiom (``ANCHOR_RESOLUTIONS`` beside
-# ``AnchorResolutionState`` at ``models/knowledge/read.py:112-130``): the ``Literal`` is the type a
-# field is validated against and the tuple is the value a reader enumerates.
+# ``read_anchor.AnchorResolutionState`` in ``models/knowledge/read_anchor.py``): the ``Literal`` is
+# the type a field is validated against and the tuple is the value a reader enumerates.
 DETECTION_LIMITATIONS: tuple[DetectionLimitation, ...] = (
     "unread_declared_input",
     "unmapped_changed_paths",

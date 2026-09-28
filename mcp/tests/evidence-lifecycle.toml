@@ -1494,6 +1494,7 @@ consumers = [
   "mcp/tests/test_review_final_output_receipt.py",
   "mcp/tests/test_review_sync_rebinding.py",
   "mcp/tests/test_review_sync_movement_read.py",
+  "mcp/tests/test_review_family_member_sources.py",
 ]
 
 [[artifact]]

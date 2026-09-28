@@ -45,9 +45,30 @@ export interface ReviewFamilyGuarantee {
   payload_digest: string;
 }
 
+// An anchor's own recorded locator, in the server's three kinds (`models/knowledge/source.py`).
+export type ReviewSourceLocator =
+  | { kind: "file" }
+  | { kind: "line_range"; start_line: number; end_line: number }
+  | { kind: "symbol"; language: string; qualified_name: string };
+
+// One one-based inclusive line range in the exact recorded blob of one side.
+export interface ReviewSourceLineRange {
+  kind: "line_range";
+  start_line: number;
+  end_line: number;
+}
+
+// Which locator fact one side established for one claim. `resolved` carries the range(s);
+// `whole_file` is a file locator on the exact recorded blob and names no range; `unresolved` is a
+// recorded locator the side could not place on the recorded bytes (`resolution` says why) and never
+// carries a guessed range; `not_observed` is a claim with no anchor observation at all.
+export type ReviewSourceLocatorState = "resolved" | "whole_file" | "unresolved" | "not_observed";
+
 export interface ReviewFamilyMemberSource {
   claim_id: string;
   invariant_revision_id: string;
+  // The claim's stored role and rationale, unchanged. The store holds both for every claim and the
+  // server refuses a reference without them, so neither is optional here.
   role: string;
   rationale: string;
   // The address and the resolution travel together or not at all (the server refuses one without the
@@ -58,6 +79,11 @@ export interface ReviewFamilyMemberSource {
   observed_source_identity?: string;
   resolution?: string;
   detail: string;
+  // The structured recorded locator travels with the address, and the resolved ranges are this
+  // side's own: two claims at one path keep two regions, and none is ever read out of `detail`.
+  locator?: ReviewSourceLocator;
+  resolved_ranges: ReviewSourceLineRange[];
+  locator_state: ReviewSourceLocatorState;
 }
 
 // One recorded membership of a selected family revision, with its exact member revision.

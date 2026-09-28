@@ -10,8 +10,13 @@ import { useReviewReadCycle, type ReviewPageRequest } from './ReviewReadCycle';
 import { shownPayload } from './ReviewOutcome';
 import { ReviewSurface } from './ReviewSurface';
 
-// These are complete HTTP bodies captured from the public authorship + real review route used by
-// test_review_family_context_population.py::walk_responses, at page size 4. No display payload is constructed.
+// These are complete HTTP bodies captured from the public authorship + real review route, following the
+// published cursors at page size 4 as test_review_family_context_population.py::walk_responses does. No
+// display payload is constructed. familyPaging.captured.json still holds its capture at a5bec6c3: its
+// member sources predate the structured locator, resolved ranges and locator state, and the current
+// route's walk bodies differ in selection and roster (familyReview.capture-provenance.json,
+// `not_recaptured`). Its re-capture belongs with the change that moves these cases to the current
+// route's walk, and is not done here.
 interface Body {
   payload: ReviewPayload;
 }
