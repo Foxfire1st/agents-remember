@@ -36,6 +36,7 @@ import { ReviewSurface } from "../panels/review/ReviewSurface";
 import type { TaskArtifactReaderTarget as NotesReaderTarget } from "../data/taskArtifacts";
 import { NotesReaderViewer } from "../panels/notes-reader/NotesReaderViewer";
 import { DetailPanel } from "../panels/detail-panel/DetailPanel";
+import { IntentEntryRevalidation } from "../data/intentEntryRevalidation";
 import type { ViewedTaskContext } from "../panels/detail-panel/state";
 import { EngineRoom } from "../panels/EngineRoom";
 import { useShouldAnimate } from "../panels/engine-room/useShouldAnimate";
@@ -903,39 +904,41 @@ export function CockpitShell({ initialView = "operations" }: { initialView?: Coc
   );
 
   return (
-    <div className={cx(shell, "cockpit--shell")}>
-      <div className="crt-overlay" aria-hidden="true" />
-      <TopBar />
-      {state.changeSet ? (
-        <ChangeSetTakeover
-          target={state.changeSet}
-          onBack={actions.closeChangeSet}
-          onOpenChangeSet={actions.openChangeSet}
+    <IntentEntryRevalidation shown={state.view === "operations" && !state.takeover}>
+      <div className={cx(shell, "cockpit--shell")}>
+        <div className="crt-overlay" aria-hidden="true" />
+        <TopBar />
+        {state.changeSet ? (
+          <ChangeSetTakeover
+            target={state.changeSet}
+            onBack={actions.closeChangeSet}
+            onOpenChangeSet={actions.openChangeSet}
+          />
+        ) : null}
+        {/* The Notes Reader takeover: mounted once opened and kept mounted (hidden via display) even
+            after Back — like the File Viewer — so its listing + open note survive back/forward. Its own
+            `notesOpen` toggles visibility; a change-set takeover (if both were somehow set) wins the screen. */}
+        {state.notes ? (
+          <NotesTakeover
+            target={state.notes}
+            hidden={Boolean(state.changeSet) || !state.notesOpen}
+            onSelectNote={actions.selectNote}
+            onBack={actions.closeNotes}
+          />
+        ) : null}
+        <RailedBody state={state} actions={actions} />
+        <ModeBar items={VIEWS} value={state.view} onChange={actions.changeView} label="Views" />
+        {/* A cockpit-wide composer that a text selection raises — send the selection (+ a
+            message) to a chat session as a context package. Mounted once here so it works on every view;
+            renders nothing until there is a selection. `onSent` flips to Chats so the operator sees it land. */}
+        <HighlightComposer
+          selectedLifecycleId={state.selectedLifecycleId}
+          viewedLeafKey={state.viewedLeafKey}
+          leafChatActive={!state.fullBleed && state.railView === "chat"}
+          onSent={actions.showSentSession}
         />
-      ) : null}
-      {/* The Notes Reader takeover: mounted once opened and kept mounted (hidden via display) even
-          after Back — like the File Viewer — so its listing + open note survive back/forward. Its own
-          `notesOpen` toggles visibility; a change-set takeover (if both were somehow set) wins the screen. */}
-      {state.notes ? (
-        <NotesTakeover
-          target={state.notes}
-          hidden={Boolean(state.changeSet) || !state.notesOpen}
-          onSelectNote={actions.selectNote}
-          onBack={actions.closeNotes}
-        />
-      ) : null}
-      <RailedBody state={state} actions={actions} />
-      <ModeBar items={VIEWS} value={state.view} onChange={actions.changeView} label="Views" />
-      {/* A cockpit-wide composer that a text selection raises — send the selection (+ a
-          message) to a chat session as a context package. Mounted once here so it works on every view;
-          renders nothing until there is a selection. `onSent` flips to Chats so the operator sees it land. */}
-      <HighlightComposer
-        selectedLifecycleId={state.selectedLifecycleId}
-        viewedLeafKey={state.viewedLeafKey}
-        leafChatActive={!state.fullBleed && state.railView === "chat"}
-        onSent={actions.showSentSession}
-      />
-    </div>
+      </div>
+    </IntentEntryRevalidation>
   );
 }
 

@@ -77,7 +77,6 @@ from agents_remember.application.review_candidate_resolution import (
     REVIEW_CANDIDATE_DIRECTORY,
     REVIEW_CANDIDATE_RELATIVE_ROOT,
     ReviewCandidateResolution,
-    candidate_receipt_refusal,
     candidate_ref,
     missing_dataset_half,
     refusal,
@@ -115,6 +114,7 @@ from agents_remember.application.review_pagination import (
     records_page_refusal,
     reset_comparison_page,
 )
+from agents_remember.application.review_pair_preflight import pair_preflight_refusal
 from agents_remember.application.review_record_applicability import (
     AppliedRecords,
     review_applicability,
@@ -286,21 +286,13 @@ def list_knowledge_review_entries(
     resolved = resolve_review_candidate(config, repository_id, master, leaf_id, recorded=recorded)
     if isinstance(resolved, ReviewRefusal):
         return _entry_refused(repository_id, master, leaf_id, resolved)
-    # The pair's own refusals come first and are one answer: a closed leaf's record answers in its
-    # own words -- the absence of an intent generation this leaf never recorded is a fact about the
-    # repository's history, and reporting it as "the resolved half is absent" would read as content
-    # that was expected and lost (ICR-R12) -- and a live pair with an absent half earns the shipped
-    # one. Both are stated before any subject is listed, so the catalogue can never answer for a pair
-    # nothing could open.
-    pair = closed_leaf_dataset_refusal(resolved) or _absent_pair_refusal(resolved)
+    # The pair's own refusals come first and are one answer, stated before any subject is listed so
+    # the catalogue can never answer for a pair nothing could open. The rule and its order are
+    # shared with the changed-intent summary (``review_pair_preflight``), so the entry cannot offer
+    # a count for a pair its catalogue refuses.
+    pair = pair_preflight_refusal(resolved)
     if pair is not None:
         return _entry_refused(repository_id, master, leaf_id, pair)
-    unreadable = unreadable_half_refusal(resolved.baseline_database, resolved.candidate_database)
-    if unreadable is not None:
-        return _entry_refused(repository_id, master, leaf_id, unreadable)
-    unreadable_receipt = candidate_receipt_refusal(resolved)
-    if unreadable_receipt is not None:
-        return _entry_refused(repository_id, master, leaf_id, unreadable_receipt)
     try:
         entries = read_subject_catalogue(resolved)
     except KnowledgeStorageError as error:
@@ -322,35 +314,6 @@ def list_knowledge_review_entries(
         total_subjects=len(entries),
         invariant_total=invariant_total,
         family_total=len(entries) - invariant_total,
-    )
-
-
-def _absent_pair_refusal(resolved: ReviewCandidateResolution) -> ReviewRefusal | None:
-    """The refusal one half of a resolved pair being absent earns, or ``None`` when both are there.
-
-    It is the *live* pair's answer and it is deliberately narrower than the closed leaf's: it names
-    the half and the file, and it says that neither half is read out of the live coordination tree.
-    Which half is missing is the fact a reader acts on -- authoring a candidate and placing the
-    dataset it forks from are different actions -- so the two are never reported as one.
-    """
-
-    absent = missing_dataset_half(resolved)
-    if absent is None:
-        return None
-    half, database = absent
-    return refusal(
-        "candidate_dataset_absent",
-        (
-            f"the resolved {half} dataset is absent, so the pair has nothing to compare; the review "
-            "reads neither of its two halves out of the live coordination tree and substitutes no "
-            "other dataset"
-        ),
-        next_action=(
-            "author the candidate's knowledge in the leaf's disposable knowledge root, and place the "
-            "dataset it forks from in the baseline half if this leaf has one; the surface substitutes "
-            "no other dataset"
-        ),
-        offending_input=database.name,
     )
 
 

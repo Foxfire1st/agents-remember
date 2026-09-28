@@ -38,6 +38,7 @@ from agents_remember.serving.review import (
     KnowledgeReviewPort,
     ReviewSourceContentPort,
 )
+from agents_remember.serving.review_summary import ReviewIntentSummaryPort
 from agents_remember.serving.served_state import served_state_tail
 from agents_remember.serving.terminal import TerminalHost, TerminalSessionSpec
 from agents_remember.serving.terminal_liveness import (
@@ -486,6 +487,15 @@ class ServingCollaborators:
     it refuses that route by name -- "this process cannot read the entry" and "this entry has no
     content" are different facts, and a browser served an empty file for the second would be reading
     a document this repository does not hold.
+    """
+
+    review_intent_summary: ReviewIntentSummaryPort | None = None
+    """The same adapter's changed-intent summary: the counts the task entry shows before opening.
+
+    A fourth port because it answers a fourth question from the same resolution -- how many
+    statements each side of the comparison alone holds -- and the task entry asks it without
+    loading the subject catalogue. Omitting it refuses that route by name, because "this process
+    cannot count" is not "nothing changed".
     """
 
     capsule_launch: LaunchCapsuleResolverPort | None = None

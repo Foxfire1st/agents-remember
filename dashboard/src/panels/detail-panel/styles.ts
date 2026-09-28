@@ -172,6 +172,34 @@ export const changeSetBtn = css({
   _hover: { borderColor: "cyan", color: "ink" },
 });
 export const changeSetCounts = css({ color: "muted" });
+// A change-set or Intent review control's state detail: a brief label stays in the control and the
+// owner's full explanation is one click away, so an entry never prints a backend paragraph inline.
+export const entryStateDetails = css({
+  display: "inline-block",
+  fontSize: "0.72rem",
+  fontFamily: "mono",
+  color: "muted",
+  maxWidth: "100%",
+  "&[open]": { flexBasis: "100%" },
+});
+export const entryStateSummary = css({
+  display: "inline-block",
+  cursor: "pointer",
+  listStyle: "none",
+  paddingInline: "0.3rem",
+  borderWidth: "1px",
+  borderStyle: "solid",
+  borderColor: "grid",
+  borderRadius: "3px",
+  "&::-webkit-details-marker": { display: "none" },
+  _hover: { borderColor: "cyan", color: "ink" },
+});
+export const entryStateBody = css({
+  margin: "0.3rem 0 0",
+  maxWidth: "72ch",
+  lineHeight: "1.4",
+  overflowWrap: "anywhere",
+});
 
 export const tokensRow = css({ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem" });
 export const label = css({

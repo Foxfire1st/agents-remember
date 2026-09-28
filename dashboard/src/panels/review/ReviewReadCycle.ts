@@ -414,6 +414,17 @@ interface ReviewReadQuestion {
   history?: ReviewHistory;
   instead: ReviewFailure | null;
   selection: ReviewPageRequest | undefined;
+  // True while the question is not settled yet (the reviewer's first subject is still being chosen):
+  // no read is started, so the surface does not ask for a question it is about to replace.
+  hold?: boolean;
+}
+
+// A ref that always holds the latest render's value: read by callbacks and effects that must see the
+// current value without re-running when it changes.
+function useLatest<T>(value: T): { current: T } {
+  const ref = useRef(value);
+  ref.current = value;
+  return ref;
 }
 
 export function useReviewReadCycle({
@@ -425,6 +436,7 @@ export function useReviewReadCycle({
   history,
   instead,
   selection,
+  hold = false,
 }: ReviewReadQuestion): ReviewReadCycle {
   const [read, setRead] = useState<ReviewRead>({ phase: 'loading' });
   const [retained, setRetained] = useState<RetainedReview | null>(null);
@@ -475,13 +487,12 @@ export function useReviewReadCycle({
   const reads = useRef(0);
   // The displayed payload and the carried identity, as refs: the refresh callback reads both without
   // restarting a read, and `startRead` decides from them whether the identity may be sent.
-  const retainedRef = useRef(retained);
-  retainedRef.current = retained;
-  const carriedRef = useRef(carried);
-  carriedRef.current = carried;
+  const retainedRef = useLatest(retained);
+  const carriedRef = useLatest(carried);
 
   // One read, for the question that is on screen when it starts.
   useEffect(() => {
+    if (hold) return undefined;
     return startRead(reads, {
       targetKey,
       questionKey,
@@ -491,7 +502,7 @@ export function useReviewReadCycle({
       setRetained,
       request: asked,
     });
-  }, [targetKey, questionKey, refreshNonce, asked]);
+  }, [targetKey, questionKey, refreshNonce, asked, hold, retainedRef, carriedRef]);
 
   const refresh = useCallback(() => {
     const shown = retainedRef.current;
@@ -507,7 +518,7 @@ export function useReviewReadCycle({
       });
     }
     setRefreshNonce((nonce) => nonce + 1);
-  }, []);
+  }, [retainedRef]);
 
   // The identity the notice may describe: the one THIS read carried, for the question being asked NOW,
   // and only when this read is the one the refresh asked to replace that display. All THREE conjuncts

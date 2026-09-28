@@ -421,11 +421,11 @@ afterEach(() => {
 
 // ChangeSetButton fetches its counters on mount; a tiny stub keeps the doc-reader-bar tests from
 // touching a real fetch (the counts are incidental — these tests assert the buttons + click target).
-// `reviewEntry` optionally answers the review-entry route the Intent-review button reads first: a
-// recorded subject, an empty list and a refusal are three different answers, and the bar offers the
-// task-context entry for all of them. Omitted, the route falls through to the counters body, which
-// is what a caller that does not exercise the entry wants.
-export function stubCounters(reviewEntry?: unknown) {
+// `reviewSummary` optionally answers the changed-intent summary route the Intent review control reads:
+// counts, partial counts and an unavailable refusal are three different answers, and the control
+// opens the review for all of them. Omitted, the route falls through to the counters body (not a
+// summary answer), which is what a caller that does not exercise the entry wants.
+export function stubCounters(reviewSummary?: unknown) {
   vi.stubGlobal(
     "fetch",
     vi.fn(
@@ -438,8 +438,8 @@ export function stubCounters(reviewEntry?: unknown) {
             taskDoc({ kind: docPath.endsWith("/task.json") ? "master" : "subTask", docPath });
           return { ok: true, status: 200, json: async () => doc } as unknown as Response;
         }
-        if (reviewEntry !== undefined && url.startsWith("/api/review/intent/entries")) {
-          return { ok: true, status: 200, json: async () => reviewEntry } as unknown as Response;
+        if (reviewSummary !== undefined && url.startsWith("/api/review/intent/summary")) {
+          return { ok: true, status: 200, json: async () => reviewSummary } as unknown as Response;
         }
         return {
           ok: true,

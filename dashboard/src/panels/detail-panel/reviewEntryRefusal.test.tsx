@@ -1,22 +1,18 @@
-// R16 (visible structured refusals) at the persistent, discoverable ENTRY: the task document's
-// Intent-review bar shows what the entry read answered instead of dropping it.
+// The task document's compact entry: one `Intent review +N −N` control, brief states with their
+// explanation one click away (ICR-R16), and an economical set of reads.
 //
-// WHAT THIS EXERCISES. The real `DocChangeSetBar` over the real review client; only `fetch` is
-// stubbed. The bar's entry read goes to `/api/review/intent/entries`, whose refusals the route
-// publishes in the body of a non-2xx response -- the read that used to be thrown away, leaving the
-// entry with nothing to say (VERIFICATION.md F08: "Entry catches this and hides itself").
+// WHAT THIS EXERCISES. The real `DocChangeSetBar` over the real review and change-set clients; only
+// `fetch` is stubbed. The Intent review control reads `/api/review/intent/summary`, which answers every
+// typed state (counted, partial, unavailable with the owner's refusal) as a 200 with the state in the
+// body, so a leaf with no knowledge yet puts no console error on the page.
 //
-// WHERE THE VALUES COME FROM. The refusal body is the measured output of the REAL route over REAL
-// HTTP in this leaf's evidence run, recorded in
-// `ar-coordination/temp/icr/evidence-l16-refusals.txt` as `body-normalized` (the per-run fixture uuid
-// `repository_id` replaced by `<repository_id>`) with sha256-normalized
-// fdbabc97219c6f0a7b531acbe1032622bbb21f3bbfc441f406f1ee34a2bf828e. The refusal's own code, reason,
-// offending input and next action are verbatim; `repository_id`/`master`/`leaf_id` are the request
-// echoes of this module's own task context, which is what the route echoes them from.
-//
-// THE DEFECT THESE CASES CATCH. The hook set its subject to `undefined` on any failure, so a refused
-// read and an empty list were indistinguishable and neither was ever shown -- the reader saw an entry
-// with no reason, or (before that) no entry at all. Every case below fails against that hook.
+// THE DEFECTS THESE CASES CATCH (measured on the installed dashboard before this change): the Intent
+// review reused the change-set button, so it printed the change set's code+memory LINE totals
+// (+3775 −1056 on L41) and made a second, identical committed change-set request; the entry read the
+// whole subject catalogue before the reviewer was opened and re-read it whenever the serialized global
+// analytics document moved; and the entry printed whole backend explanations inside and beside itself.
+// A reproduction against that code recorded two committed requests, one catalogue read before entry,
+// and `⇄ Intent review+3775 −1056`.
 
 import { act, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,55 +25,76 @@ const REPO = "agents-remember";
 const MASTER = "260921_complete-code-and-intent-review";
 const LEAF = "260921-ICR-L16";
 
-// The real route's 404 for the entry read of a never-initialized task (measured body-normalized;
-// see the module header for its digest).
-const ENTRY_DETAIL =
+// The real route's refusal for a never-initialized task (the owner's own sentences, verbatim).
+const ABSENT_DETAIL =
   "the resolved baseline dataset is absent, so the pair has nothing to compare; the review reads " +
   "neither of its two halves out of the live coordination tree and substitutes no other dataset";
-const ENTRY_NEXT =
+const ABSENT_NEXT =
   "author the candidate's knowledge in the leaf's disposable knowledge root, and place the dataset " +
   "it forks from in the baseline half if this leaf has one; the surface substitutes no other dataset";
-const entryRefusal = {
-  state: "refused",
-  operation: "list_knowledge_review_entries",
-  repository_id: "<repository_id>",
+const UNAVAILABLE = {
+  state: "unavailable",
+  operation: "read_review_intent_summary",
+  repository_id: REPO,
   master: MASTER,
   leaf_id: LEAF,
-  entries: [],
   refusal: {
     code: "candidate_dataset_absent",
-    detail: ENTRY_DETAIL,
-    next_action: ENTRY_NEXT,
+    detail: ABSENT_DETAIL,
+    next_action: ABSENT_NEXT,
     offending_input: "knowledge-candidate.sqlite",
   },
 };
 
+const counted = (added: number, removed: number, extra: Record<string, number> = {}) => ({
+  state: extra.unresolved ? "partial" : "counted",
+  operation: "read_review_intent_summary",
+  repository_id: REPO,
+  master: MASTER,
+  leaf_id: LEAF,
+  counts: {
+    added,
+    removed,
+    invariants: { after_only: added, before_only: removed },
+    guarantees: { after_only: 0, before_only: 0 },
+    realization_only: 0,
+    membership_only: 0,
+    unresolved: 0,
+    ...extra,
+  },
+});
+
+// Line totals that must never appear on the Intent review control.
 const COUNTERS = {
   counters: {
-    code: { files: 0, insertions: 0, deletions: 0 },
-    memory: { files: 0, insertions: 0, deletions: 0 },
+    code: { files: 31, insertions: 3000, deletions: 1000 },
+    memory: { files: 5, insertions: 775, deletions: 56 },
   },
 };
 
-// The bar's other read (the committed change-set counters) is incidental here; anything that is not
-// the entry route answers it, exactly as the shared task-bar helper does.
-function serveEntry(status: number, body: unknown, statusText = "") {
+const respond = (status: number, body: unknown) =>
+  ({ ok: status >= 200 && status < 300, status, statusText: "", json: async () => body }) as unknown as Response;
+
+// Answer the summary route with `summary` (or with each of `summaries` in turn); every other route is
+// the change-set counters.
+function serve(summaries: Array<{ status: number; body: unknown }>) {
+  let call = 0;
   const fetchFn = vi.fn(async (url: string) => {
-    if (url.startsWith("/api/review/intent/entries")) {
-      return {
-        ok: status >= 200 && status < 300,
-        status,
-        statusText,
-        json: async () => body,
-      } as unknown as Response;
+    if (url.startsWith("/api/review/intent/summary")) {
+      const answer = summaries[Math.min(call, summaries.length - 1)];
+      call += 1;
+      return respond(answer.status, answer.body);
     }
-    return { ok: true, status: 200, json: async () => COUNTERS } as unknown as Response;
+    return respond(200, COUNTERS);
   });
   vi.stubGlobal("fetch", fetchFn);
   return fetchFn;
 }
 
-function liveLeaf() {
+const urlsOf = (fetchFn: ReturnType<typeof vi.fn>, fragment: string) =>
+  fetchFn.mock.calls.map((call) => String(call[0])).filter((url) => url.includes(fragment));
+
+function liveLeaf(over: Partial<ReturnType<typeof enclosure>> = {}) {
   seedProjection({
     enclosures: [
       enclosure({
@@ -87,482 +104,244 @@ function liveLeaf() {
         repoName: REPO,
         taskName: MASTER,
         worktreeGroup: "/worktrees/l16-ar",
+        ...over,
       }),
     ],
     activeWorktreeGroups: ["l16-ar"],
   });
 }
 
-function mount() {
+function mount(leaf = LEAF) {
   const onOpen = vi.fn();
   const view = render(
-    <DocChangeSetBar kind="leaf" repo={REPO} master={MASTER} leaf={LEAF} onOpen={onOpen} />,
+    <DocChangeSetBar kind="leaf" repo={REPO} master={MASTER} leaf={leaf} onOpen={onOpen} />,
   );
   return { view, onOpen };
 }
-
-const intentButton = (view: ReturnType<typeof mount>["view"]) =>
-  view
-    .getAllByTestId("open-changeset")
-    .find((button) => (button.textContent ?? "").includes("Intent review"));
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("the review entry's own read state", () => {
-  it("shows a never-initialized refusal beside the entry and still offers the entry", async () => {
+describe("the compact Intent review entry", () => {
+  it("is one control with the comparison's changed-intent counts and nothing beside it", async () => {
     liveLeaf();
-    serveEntry(404, entryRefusal, "Not Found");
-
+    serve([{ status: 200, body: counted(4, 2) }]);
     const { view, onOpen } = mount();
 
-    const state = await view.findByTestId("review-entry-state");
-    expect(state.dataset.reviewState).toBe("not-initialized");
+    const entry = await view.findByTestId("open-intent-review");
+    await waitFor(() => expect(entry.dataset.intentState).toBe("counted"));
+    const counts = within(entry).getByTestId("intent-review-counts");
+    expect(counts.textContent).toBe("+4 −2");
+    expect(entry.textContent).toBe("⇄ Intent review+4 −2");
+    // The change set's line totals belong to the change-set controls, never to this one.
+    expect(entry.textContent).not.toContain("3775");
+    // No task-level subject picker, no separate refresh control, no entry paragraph, no disclosure.
+    for (const gone of [
+      "review-subject-picker",
+      "review-catalogue-refresh",
+      "review-entry-state",
+      "review-catalogue-totals",
+      "intent-review-details",
+    ])
+      expect(view.queryByTestId(gone)).toBeNull();
+    fireEvent.click(entry);
+    expect(onOpen).toHaveBeenCalledWith({ repo: REPO, master: MASTER, leaf: LEAF, review: {} });
+  });
+
+  it("makes one summary read, no catalogue read and one committed change-set read", async () => {
+    liveLeaf();
+    const fetchFn = serve([{ status: 200, body: counted(1, 0) }]);
+    const { view } = mount();
+
+    const entry = await view.findByTestId("open-intent-review");
+    await waitFor(() => expect(entry.dataset.intentState).toBe("counted"));
+    await waitFor(() => expect(urlsOf(fetchFn, "mode=working")).toHaveLength(1));
+
+    expect(urlsOf(fetchFn, "/api/review/intent/summary")).toHaveLength(1);
+    expect(urlsOf(fetchFn, "/api/review/intent/entries")).toHaveLength(0);
+    expect(urlsOf(fetchFn, "mode=committed")).toHaveLength(1);
+    // Clicking the entry hands the target to the reviewer; the entry itself reads nothing more.
+    fireEvent.click(entry);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("the Intent review entry's own states (ICR-R16: brief, never swallowed)", () => {
+  it("states missing knowledge briefly, never as +0 −0, with the owner's refusal in the disclosure", async () => {
+    liveLeaf();
+    serve([{ status: 200, body: UNAVAILABLE }]);
+    const { view, onOpen } = mount();
+
+    const entry = await view.findByTestId("open-intent-review");
+    const state = await waitFor(() => {
+      const found = within(entry).getByTestId("intent-review-state");
+      expect(found.dataset.reviewState).toBe("not-initialized");
+      return found;
+    });
     expect(state.dataset.reviewCode).toBe("candidate_dataset_absent");
-    expect(state.textContent).toContain(ENTRY_DETAIL);
-    expect(state.textContent).toContain(ENTRY_NEXT);
-    // F2 (fix round): the owner named an offending input, so the entry states it too -- the
-    // Required Behavior names reason, offending input and next action, and a condensed rendering is
-    // still a rendering of the refusal.
-    expect(state.textContent).toContain("offending input: knowledge-candidate.sqlite");
+    expect(state.textContent).toBe("no knowledge yet");
+    expect(entry.textContent).not.toMatch(/[+−]\d/);
+    expect(entry.textContent).not.toContain(ABSENT_DETAIL);
 
-    // The refusal is a reason, never a gate: the entry is still there and still opens the task
-    // context, because that review needs no dataset.
-    const button = intentButton(view);
-    expect(button).toBeDefined();
-    fireEvent.click(button as HTMLElement);
+    const details = view.getByTestId("intent-review-details");
+    expect(details.textContent).toContain("candidate_dataset_absent");
+    expect(details.textContent).toContain(ABSENT_DETAIL);
+    expect(details.textContent).toContain("knowledge-candidate.sqlite");
+    expect(details.textContent).toContain(ABSENT_NEXT);
+    // The disclosure is closed by default: the page shows one control and a small marker.
+    expect(details.hasAttribute("open")).toBe(false);
+
+    // Still the entry: the task-context review opens on the source inventory.
+    fireEvent.click(entry);
     expect(onOpen).toHaveBeenCalledWith({ repo: REPO, master: MASTER, leaf: LEAF, review: {} });
   });
 
-  it("says known empty when the pair offers no subject, without calling it a failure", async () => {
+  it("says a response the route did not produce is unreadable, and invents no refusal for it", async () => {
     liveLeaf();
-    serveEntry(200, {
-      state: "entries",
-      operation: "list_knowledge_review_entries",
-      repository_id: REPO,
-      master: MASTER,
-      leaf_id: LEAF,
-      entries: [],
-    });
-
+    serve([{ status: 502, body: null }]);
     const { view } = mount();
 
-    const state = await view.findByTestId("review-entry-state");
-    expect(state.dataset.reviewState).toBe("known-empty");
-    expect(state.textContent).toContain("no subject is recorded for this pair");
-    expect(intentButton(view)).toBeDefined();
+    const entry = await view.findByTestId("open-intent-review");
+    const state = await waitFor(() => {
+      const found = within(entry).getByTestId("intent-review-state");
+      expect(found.dataset.reviewState).toBe("unreadable");
+      return found;
+    });
+    expect(state.textContent).toBe("unreadable");
+    expect(view.getByTestId("intent-review-details").textContent).toContain("502");
   });
 
-  it("shows a transport failure with its reason, and raises no refusal body it does not have", async () => {
+  it("marks partial counts as partial and explains what they leave out", async () => {
     liveLeaf();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (url.startsWith("/api/review/intent/entries")) throw new TypeError("fetch failed");
-        return { ok: true, status: 200, json: async () => COUNTERS } as unknown as Response;
-      }),
-    );
+    serve([{ status: 200, body: counted(3, 1, { unresolved: 2 }) }]);
+    const { view } = mount();
 
-    const { view, onOpen } = mount();
-
-    const state = await view.findByTestId("review-entry-state");
-    expect(state.dataset.reviewState).toBe("network");
-    expect(state.textContent).toContain("could not reach the server");
-    const button = intentButton(view);
-    expect(button).toBeDefined();
-    fireEvent.click(button as HTMLElement);
-    expect(onOpen).toHaveBeenCalledWith({ repo: REPO, master: MASTER, leaf: LEAF, review: {} });
-  });
-
-  it("carries the server's recorded subject into the entry, and prints no state for an answer", async () => {
-    liveLeaf();
-    serveEntry(200, {
-      state: "entries",
-      operation: "list_knowledge_review_entries",
-      repository_id: REPO,
-      master: MASTER,
-      leaf_id: LEAF,
-      entries: [
-        {
-          selector_kind: "invariant",
-          selector_id: "inv-1",
-          label: "Retries share one budget",
-          presence: "both",
-        },
-      ],
-      total_subjects: 1,
-      invariant_total: 1,
-      family_total: 0,
-    });
-
-    const { view, onOpen } = mount();
-    const button = intentButton(view) as HTMLElement;
-
-    await waitFor(() => expect(view.queryByTestId("review-entry-state")).toBeNull());
-    fireEvent.click(button);
-    expect(onOpen).toHaveBeenLastCalledWith({
-      repo: REPO,
-      master: MASTER,
-      leaf: LEAF,
-      review: { selectorKind: "invariant", selectorId: "inv-1" },
-    });
+    const entry = await view.findByTestId("open-intent-review");
+    await waitFor(() => expect(entry.dataset.intentState).toBe("partial"));
+    expect(within(entry).getByTestId("intent-review-counts").textContent).toBe("+3 −1");
+    expect(within(entry).getByTestId("intent-review-state").textContent).toBe("partial");
+    expect(view.getByTestId("intent-review-details").textContent).toContain("2 subject(s)");
   });
 });
 
-// ── ICR-R17: the entry notices candidate generations, and no superseded read wins ──────────────
-//
-// WHAT THIS EXERCISES. The real `DocChangeSetBar` over the real review client; only `fetch` is
-// stubbed, and the store is driven through its OWN public channel (`applySnapshot`, the same call the
-// `/api/state` snapshot and its delta channel reach the store through). Every assertion reads the
-// rendered DOM or the query string the real client built.
-//
-// THE DEFECT THESE CASES CATCH. The entry read depended on its props alone, so a subject published
-// after the panel opened was invisible until the panel was closed and reopened -- and a response that
-// answered a PREVIOUS leaf could still write the read state after the props had moved on. The first
-// case below fails against that hook (it never asks again when the workspace projection is
-// republished); the second fails against it too, because the late answer for the first leaf is the
-// last write and it replaces the second leaf's catalogue.
-
-// The workspace publishing something new, through the store's OWN delta channel -- the same call the
-// SSE `analytics` frame makes (`serving/delta.py` sends the whole projection under this event name,
-// because it replaces wholesale). It is deliberately not a re-render of the same props: the entry has
-// to notice a fact that moved, and this is the fact channel it already has.
-function workspacePublished(revision: number) {
-  act(() => {
-    dashboardStore.getState().applyDelta("analytics", {
-      driftSnapshots: [],
-      stalestSidecars: [],
-      setupSummaries: [],
-      setupProgress: [],
-      routeCoverage: [],
-      toolReports: [],
-      ledgers: [],
-      taskDocuments: [],
-      series: [],
-      attentionQueue: [],
-      engineProcesses: [],
-      agentPickups: [],
-      expectationRows: [],
-      publishedRevision: revision,
-    });
-  });
-}
-
-const ENTRY_ONE = {
-  state: "entries",
-  operation: "list_knowledge_review_entries",
-  repository_id: REPO,
-  master: MASTER,
-  leaf_id: LEAF,
-  entries: [
-    { selector_kind: "invariant", selector_id: "inv-1", label: "First", presence: "both" },
-  ],
-  total_subjects: 1,
-  invariant_total: 1,
-  family_total: 0,
-};
-
-// The FIRST leaf's own answer, with a subject the second leaf's catalogue does not hold. If the late
-// response were allowed to win, this is the row the picker would show under the second leaf's header.
-const ENTRY_EARLIER_LEAF = {
-  state: "entries",
-  operation: "list_knowledge_review_entries",
-  repository_id: REPO,
-  master: MASTER,
-  leaf_id: "260921-ICR-L17-a",
-  entries: [
-    {
-      selector_kind: "invariant",
-      selector_id: "inv-earlier-leaf",
-      label: "Only the earlier leaf records this",
-      presence: "both",
-    },
-  ],
-  total_subjects: 1,
-  invariant_total: 1,
-  family_total: 0,
-};
-
-const ENTRY_TWO = {
-  state: "entries",
-  operation: "list_knowledge_review_entries",
-  repository_id: REPO,
-  master: MASTER,
-  leaf_id: LEAF,
-  entries: [
-    { selector_kind: "invariant", selector_id: "inv-2", label: "Second", presence: "after_only" },
-  ],
-  total_subjects: 1,
-  invariant_total: 1,
-  family_total: 0,
-};
-
-function serveAnswers(answers: unknown[]) {
-  let call = 0;
-  const fetchFn = vi.fn(async (url: string) => {
-    if (url.startsWith("/api/review/intent/entries")) {
-      const body = answers[Math.min(call, answers.length - 1)];
-      call += 1;
-      return { ok: true, status: 200, json: async () => body } as unknown as Response;
-    }
-    return { ok: true, status: 200, json: async () => COUNTERS } as unknown as Response;
-  });
-  vi.stubGlobal("fetch", fetchFn);
-  return fetchFn;
-}
-
-const entryUrls = (fetchFn: ReturnType<typeof vi.fn>) =>
-  fetchFn.mock.calls.map((call) => String(call[0])).filter((url) => url.includes("/intent/entries"));
-
-describe("the review entry notices a new candidate generation (ICR-R17)", () => {
-  it("re-reads the pair's subjects when the workspace republishes, and keeps the reader's subject", async () => {
+describe("the entry re-reads only for its own comparison (ICR-R17)", () => {
+  it("ignores unrelated workspace publications and re-reads when this leaf's lifecycle moves", async () => {
     liveLeaf();
-    const fetchFn = serveAnswers([ENTRY_ONE, ENTRY_TWO]);
-
-    const { view, onOpen } = mount();
-
-    const picker = (await view.findByTestId("review-subject-picker")) as HTMLSelectElement;
-    expect(picker.value).toBe("inv-1");
-    expect(entryUrls(fetchFn)).toHaveLength(1);
-
-    // The publication: the same panel, the same props, and a projection the workspace republished.
-    workspacePublished(2);
-
-    // The entry asked again by itself -- no remount, no prop change, no polling loop.
-    await waitFor(() => expect(entryUrls(fetchFn)).toHaveLength(2));
-    await waitFor(() =>
-      expect(
-        (view.getByTestId("review-subject-picker") as HTMLSelectElement).value,
-      ).toBe("inv-2"),
-    );
-    // The selected identity was `inv-1`, which the newer catalogue does not list, so the entry falls
-    // back to the recorded row the answer does carry rather than opening a stale id.
-    fireEvent.click(intentButton(view) as HTMLElement);
-    expect(onOpen).toHaveBeenLastCalledWith({
-      repo: REPO,
-      master: MASTER,
-      leaf: LEAF,
-      review: { selectorKind: "invariant", selectorId: "inv-2" },
-    });
-  });
-
-  it("offers an explicit refresh control that re-reads the pair on the reader's own click", async () => {
-    liveLeaf();
-    const fetchFn = serveAnswers([ENTRY_ONE, ENTRY_TWO]);
-
+    const fetchFn = serve([
+      { status: 200, body: counted(1, 0) },
+      { status: 200, body: counted(2, 1) },
+    ]);
     const { view } = mount();
+    const entry = await view.findByTestId("open-intent-review");
+    await waitFor(() => expect(entry.textContent).toContain("+1 −0"));
 
-    const control = await view.findByTestId("review-catalogue-refresh");
-    // Nothing has moved since the read, so the control reports no movement and still offers the
-    // reader their own way to ask again -- an explicit control, not a timer.
-    expect(control.dataset.catalogueStale).toBe("false");
-    await waitFor(() => expect(entryUrls(fetchFn)).toHaveLength(1));
+    // Another task's publication moves the global analytics document: no re-read.
+    act(() => {
+      dashboardStore.getState().applyDelta("analytics", {
+        ...dashboardStore.getState().analytics,
+        publishedRevision: 2,
+      });
+    });
+    await act(async () => {});
+    expect(urlsOf(fetchFn, "/api/review/intent/summary")).toHaveLength(1);
 
-    fireEvent.click(view.getByTestId("review-catalogue-refresh"));
-
-    await waitFor(() => expect(entryUrls(fetchFn)).toHaveLength(2));
-    await waitFor(() =>
-      expect((view.getByTestId("review-subject-picker") as HTMLSelectElement).value).toBe("inv-2"),
-    );
-    expect(view.getByTestId("review-subject-picker").textContent).toContain("Second");
-    expect(view.getByTestId("review-catalogue-refresh").dataset.catalogueStale).toBe("false");
-  });
-
-  it("never lets an answer for a previous leaf overwrite the leaf on screen now", async () => {
-    // THE ROUTED DEBT (recorded when L16 landed): a prop/target change while a request is in flight
-    // must not let the older response win. The first leaf's answer is held open until after the bar
-    // has moved to the second leaf and that leaf's answer has already rendered.
-    // Both leaves are live, so the entry is addressed to the LIVE candidate on each side of the
-    // switch and the assertion is about the race rather than about liveness.
-    seedProjection({
-      enclosures: [
+    // This leaf's own closeout moves: the comparison the entry opens may have changed, so it asks.
+    act(() => {
+      dashboardStore.getState().applyDelta(
+        "enclosure",
         enclosure({
-          enclosure: "/contracts/l17-a",
-          lifecycleId: "L17",
-          leafId: "260921-ICR-L17-a",
-          repoName: REPO,
-          taskName: MASTER,
-          worktreeGroup: "/worktrees/l17-ar",
-        }),
-        enclosure({
-          enclosure: "/contracts/l17-b",
-          lifecycleId: "L17",
-          leafId: "260921-ICR-L17-b",
-          repoName: REPO,
-          taskName: MASTER,
-          worktreeGroup: "/worktrees/l17-ar",
-        }),
-      ],
-      activeWorktreeGroups: ["l17-ar"],
-    });
-    let releaseFirst: ((value: unknown) => void) | undefined;
-    const fetchFn = vi.fn(async (url: string) => {
-      if (url.startsWith("/api/review/intent/entries")) {
-        const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
-        const asked = params.get("leaf") ?? "";
-        if (asked === "260921-ICR-L17-a") {
-          return await new Promise<Response>((resolve) => {
-            releaseFirst = () => {
-              resolve({
-                ok: true,
-                status: 200,
-                json: async () => ({ ...ENTRY_EARLIER_LEAF, leaf_id: "260921-ICR-L17-a" }),
-              } as unknown as Response);
-            };
-          });
-        }
-        return { ok: true, status: 200, json: async () => ENTRY_TWO } as unknown as Response;
-      }
-      return { ok: true, status: 200, json: async () => COUNTERS } as unknown as Response;
-    });
-    vi.stubGlobal("fetch", fetchFn);
-
-    const onOpen = vi.fn();
-    const view = render(
-      <DocChangeSetBar
-        kind="leaf"
-        repo={REPO}
-        master={MASTER}
-        leaf="260921-ICR-L17-a"
-        onOpen={onOpen}
-      />,
-    );
-    await waitFor(() => expect(entryUrls(fetchFn)).toHaveLength(1));
-
-    view.rerender(
-      <DocChangeSetBar
-        kind="leaf"
-        repo={REPO}
-        master={MASTER}
-        leaf="260921-ICR-L17-b"
-        onOpen={onOpen}
-      />,
-    );
-    await waitFor(() =>
-      expect((view.getByTestId("review-subject-picker") as HTMLSelectElement).value).toBe("inv-2"),
-    );
-
-    // The older leaf's answer arrives last. It must not win.
-    await act(async () => {
-      releaseFirst?.(undefined);
-      await Promise.resolve();
-    });
-
-    expect((view.getByTestId("review-subject-picker") as HTMLSelectElement).value).toBe("inv-2");
-    expect(view.getByTestId("review-subject-picker").textContent).toContain("Second");
-    fireEvent.click(intentButton(view) as HTMLElement);
-    expect(onOpen).toHaveBeenLastCalledWith({
-      repo: REPO,
-      master: MASTER,
-      leaf: "260921-ICR-L17-b",
-      review: { selectorKind: "invariant", selectorId: "inv-2" },
-    });
-  });
-});
-
-// ── ICR-R17 (fix round 1, L17-F4): the pre-click marker is observable ───────────────────────────
-//
-// THE DEFECT THESE CASES CATCH. The mark was derived as `!loading && read.facts !== facts`, and the
-// same effect that observes the projection move immediately sets `loading: true` and re-reads -- so the
-// mark was committed once and withdrawn in the same flush and never appeared in a settled DOM. The
-// comment claimed the reader was told before they clicked; the reader never was.
-//
-// WHAT IS ASSERTED. The mark is present in the settled state it describes -- the list on screen was read
-// from facts the workspace has moved past -- and absent once the answer for those facts is filed. The
-// answer is held open here, which is the real shape of the window (a read crosses the network); the
-// assertion is on a settled DOM, not on a transient commit.
-describe("the entry's pre-click freshness marker (ICR-R17 / L17-F4)", () => {
-  it("marks the list while the projection has moved past the answer on screen, and clears it on the answer", async () => {
-    seedProjection({
-      enclosures: [
-        enclosure({
-          enclosure: "/contracts/l17-marker",
-          lifecycleId: "L17",
+          enclosure: "/contracts/l16",
+          lifecycleId: "L16",
           leafId: LEAF,
           repoName: REPO,
           taskName: MASTER,
-          worktreeGroup: "/worktrees/l17-marker-ar",
+          worktreeGroup: "/worktrees/l16-ar",
+          closeoutStatus: "completed",
         }),
-      ],
-      activeWorktreeGroups: ["l17-marker-ar"],
+      );
     });
-    // The FIRST entry read answers at once; the read the publication triggers is held open, so the
-    // window the mark describes is a settled state the test can observe rather than a transient commit.
-    let release: (() => void) | undefined;
-    let entryReads = 0;
+    await waitFor(() => expect(urlsOf(fetchFn, "/api/review/intent/summary")).toHaveLength(2));
+    await waitFor(() => expect(entry.textContent).toContain("+2 −1"));
+  });
+
+  it("never lets an answer for a previous leaf overwrite the leaf on screen now", async () => {
+    seedProjection({
+      enclosures: ["a", "b"].map((suffix) =>
+        enclosure({
+          enclosure: `/contracts/l17-${suffix}`,
+          lifecycleId: "L17",
+          leafId: `260921-ICR-L17-${suffix}`,
+          repoName: REPO,
+          taskName: MASTER,
+          worktreeGroup: "/worktrees/l17-ar",
+        }),
+      ),
+      activeWorktreeGroups: ["l17-ar"],
+    });
+    let releaseFirst: (() => void) | undefined;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url.startsWith("/api/review/intent/entries")) {
-          entryReads += 1;
-          if (entryReads === 1) {
-            return { ok: true, status: 200, json: async () => ENTRY_TWO } as unknown as Response;
-          }
+        if (!url.startsWith("/api/review/intent/summary")) return respond(200, COUNTERS);
+        const asked = new URLSearchParams(url.split("?", 2)[1] ?? "").get("leaf");
+        if (asked === "260921-ICR-L17-a")
           return await new Promise<Response>((resolve) => {
-            release = () =>
-              resolve({ ok: true, status: 200, json: async () => ENTRY_ONE } as unknown as Response);
+            releaseFirst = () => resolve(respond(200, counted(9, 9)));
           });
-        }
-        return { ok: true, status: 200, json: async () => COUNTERS } as unknown as Response;
+        return respond(200, counted(1, 1));
       }),
     );
+    const { view, onOpen } = mount("260921-ICR-L17-a");
+    view.rerender(
+      <DocChangeSetBar kind="leaf" repo={REPO} master={MASTER} leaf="260921-ICR-L17-b" onOpen={onOpen} />,
+    );
+    const entry = await view.findByTestId("open-intent-review");
+    await waitFor(() => expect(entry.textContent).toContain("+1 −1"));
 
-    const { view } = mount();
-    await view.findByTestId("review-subject-picker");
-    expect(view.getByTestId("review-catalogue-refresh").dataset.catalogueStale).toBe("false");
-
-    // The publication: the projection moves, and the answer for it is in flight.
-    workspacePublished(3);
-
-    // The reader is told, in a settled DOM, that the list beside the control is behind the workspace.
-    const marker = await view.findByTestId("review-catalogue-stale");
-    expect(marker.textContent).toContain("workspace facts changed");
-    expect(view.getByTestId("review-catalogue-refresh").dataset.catalogueStale).toBe("true");
-    expect(entryReads).toBe(2);
-
-    // The answer is filed: the list on screen is the one the answer named, so the mark is gone.
     await act(async () => {
-      release?.();
+      releaseFirst?.();
       await Promise.resolve();
     });
-    await waitFor(() =>
-      expect(view.getByTestId("review-catalogue-refresh").dataset.catalogueStale).toBe("false"),
-    );
-    expect(view.queryByTestId("review-catalogue-stale")).toBeNull();
+    expect(view.getByTestId("open-intent-review").textContent).toContain("+1 −1");
+    expect(view.getByTestId("open-intent-review").textContent).not.toContain("+9");
   });
 });
 
-// B6 — the committed probe of a leaf whose landed commit nothing has recorded yet.
-//
-// WHAT THIS CATCHES. The bar renders the `committed` control for every leaf, and a live leaf has no
-// recorded range yet. The route used to answer that state with a 404, which the browser logs as a
-// console error -- and B6's criterion is zero console errors on the page. The route now answers it in
-// the body; these cases hold the control to the distinction the answer exists to make: an unrecorded
-// range is not a range measured empty, and it is not a refusal either.
+// B6: a `committed` read of a live leaf has no landed commit yet. The route answers that state in the
+// body; the control keeps an unrecorded range apart from a measured empty one and from a refusal, and
+// now says so in one word with the route's own sentence in the disclosure beside it.
 const UNRECORDED_DETAIL =
   "the contract records no code landed commit for leaf 260921-ICR-L16, so this leaf has no committed " +
   "code range yet: the committed view reads the two recorded commits and substitutes no HEAD, branch " +
   "or working tree for either. Read the uncommitted view (mode=working) while the task is live, or " +
   "reopen this view after closeout records the range";
-const UNRECORDED_BODY = { ...COUNTERS, scope: LEAF, mode: "committed", state: "unrecorded", stateDetail: UNRECORDED_DETAIL };
+const EMPTY = {
+  counters: {
+    code: { files: 0, insertions: 0, deletions: 0 },
+    memory: { files: 0, insertions: 0, deletions: 0 },
+  },
+};
+const UNRECORDED_BODY = { ...EMPTY, scope: LEAF, mode: "committed", state: "unrecorded", stateDetail: UNRECORDED_DETAIL };
 
 const committedButton = (view: ReturnType<typeof mount>["view"]) =>
   view
     .getAllByTestId("open-changeset")
     .find((button) => (button.textContent ?? "").includes("committed"));
 
-describe("the committed counter read of a leaf whose range nothing has recorded (B6)", () => {
-  it("shows the unrecorded state with the route's own sentence, and never prints its zero as a total", async () => {
-    liveLeaf();
-    const fetchFn = vi.fn(async (url: string) => {
-      if (url.includes("/api/changeset/task") && url.includes("mode=committed")) {
-        return { ok: true, status: 200, json: async () => UNRECORDED_BODY } as unknown as Response;
-      }
-      return { ok: true, status: 200, json: async () => COUNTERS } as unknown as Response;
-    });
-    vi.stubGlobal("fetch", fetchFn);
+function serveCommitted(body: unknown) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      respond(200, url.includes("/api/changeset/task") && url.includes("mode=committed") ? body : EMPTY),
+    ),
+  );
+}
 
+describe("the committed counter read of a leaf whose range nothing has recorded (B6)", () => {
+  it("shows the unrecorded state briefly, the route's sentence on demand, and never its zero as a total", async () => {
+    liveLeaf();
+    serveCommitted(UNRECORDED_BODY);
     const { view } = mount();
     const button = await waitFor(() => {
       const found = committedButton(view);
@@ -570,47 +349,25 @@ describe("the committed counter read of a leaf whose range nothing has recorded 
       return found as HTMLElement;
     });
 
-    // Scoped to the committed control: a live leaf's bar carries three of these controls, and only
-    // this one's read is the unrecorded range.
     const state = await waitFor(() => {
       const found = within(button).getByTestId("changeset-state");
       expect(found.dataset.reviewState).toBe("unrecorded");
       return found;
     });
-
-    // The route's own sentence reaches the reader, including the two alternatives it names.
-    expect(state.textContent).toContain("no committed code range yet");
-    expect(state.textContent).toContain("mode=working");
-    // The distinction the state exists to carry: unrecorded is NOT a measured empty range.
-    expect(state.dataset.reviewState).not.toBe("known-empty");
+    expect(state.textContent).toBe("unrecorded");
     expect(state.dataset.reviewCode).toBeUndefined();
-    // And the zero of nothing is not presented as a measurement: no `+0 −0` beside the control.
     expect(button.textContent).not.toContain("+0 −0");
-    // No request was answered with a failing status, which is the whole of B6: nothing here is a
-    // console error, because nothing here is a 404.
-    expect(fetchFn.mock.results.length).toBeGreaterThan(0);
-    for (const call of fetchFn.mock.calls) {
-      expect(String(call[0])).not.toContain("mode=committed&mode=");
-    }
+    expect(button.textContent).not.toContain("no committed code range yet");
+
+    const details = view.getByTestId("changeset-state-details");
+    expect(details.textContent).toContain("not measured empty");
+    expect(details.textContent).toContain("no committed code range yet");
+    expect(details.textContent).toContain("mode=working");
   });
 
   it("keeps an unrecorded range apart from a measured empty one and from a refusal", async () => {
     liveLeaf();
-    // A measured empty range: the answer every other case in this file serves.
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (url.includes("/api/changeset/task") && url.includes("mode=committed")) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({ ...COUNTERS, state: "recorded", stateDetail: "" }),
-          } as unknown as Response;
-        }
-        return { ok: true, status: 200, json: async () => COUNTERS } as unknown as Response;
-      }),
-    );
-
+    serveCommitted({ ...EMPTY, state: "recorded", stateDetail: "" });
     const { view } = mount();
     const button = await waitFor(() => {
       const found = committedButton(view);
@@ -622,9 +379,10 @@ describe("the committed counter read of a leaf whose range nothing has recorded 
       expect(found.dataset.reviewState).toBe("known-empty");
       return found;
     });
-    expect(empty.textContent).toContain("no changed file in either half");
-    // The measured-empty rendering is the one that prints the zero, so the two states cannot be the
-    // same screen: a recorded-and-empty range says so, an unrecorded one names what is missing.
+    expect(empty.textContent).toBe("empty");
+    expect(empty.title).toContain("no changed file in either half");
     await waitFor(() => expect(button.textContent).toContain("+0 −0"));
+    // A measured empty range needs no explanation beyond its own word.
+    expect(view.queryByTestId("changeset-state-details")).toBeNull();
   });
 });

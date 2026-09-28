@@ -1,10 +1,9 @@
 // Recorded subject navigation. The catalogue supplies identity; the review supplies family content.
-import { useState } from 'react';
-import { useDashboard } from '../../data/store';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useReviewCatalogue } from '../../data/useReviewCatalogue';
 import type { FamilySelection } from './FamilyTree';
 import { css } from '../../../styled-system/css';
-import type { ReviewEntry, ReviewSelectorKind } from '../../data/review';
+import type { ReviewEntry, ReviewPayload, ReviewSelectorKind } from '../../data/review';
 import type { ReviewCatalogueRead } from '../../data/useReviewCatalogue';
 
 export interface ReviewSubject {
@@ -15,6 +14,20 @@ export interface ReviewNavigationState {
   catalogue: ReviewCatalogueRead & { refresh: () => void };
   subject?: ReviewSubject;
   onSelect: (subject: ReviewSubject | undefined, context?: FamilySelection) => void;
+}
+
+// The navigation the surface drives: the state above plus the two signals the read cycle needs.
+export interface ReviewNavigation extends ReviewNavigationState {
+  // True while the reviewer was opened with no subject, the catalogue that chooses its first one has
+  // not answered yet, and `SUBJECT_HOLD_MS` has not passed. The surface holds its first read that
+  // long, so a prompt catalogue costs one subject read instead of a whole-task read and then a
+  // subject read -- and a slow or stalled catalogue never withholds the task-context review and its
+  // source explorer for longer than the bound.
+  settling: boolean;
+  // Report the compared snapshot pair the surface is showing. The first pair it reports is the one
+  // the entry catalogue describes; a different pair later (a refresh that reached a new candidate
+  // generation) re-reads the catalogue for it.
+  observeComparison: (snapshots: string | undefined) => void;
 }
 
 const row = css({
@@ -126,6 +139,12 @@ export function ReviewNavigation({
   );
 }
 
+// The longest the reviewer's first read waits for the catalogue to choose a subject. The catalogue
+// read is one indexed listing (tens of milliseconds on a real task), so the bound only matters when it
+// is slow or stalled; then the task-context review is read at the bound, exactly as it is when the
+// catalogue refuses, and the first subject is selected when the catalogue does answer.
+export const SUBJECT_HOLD_MS = 750;
+
 // An explicit source-only choice remains source-only when the catalogue refreshes.
 export function useReviewNavigation(target: {
   repo: string;
@@ -134,14 +153,61 @@ export function useReviewNavigation(target: {
   selectorKind?: ReviewSelectorKind;
   selectorId?: string;
   history?: 'recorded';
-}): ReviewNavigationState {
-  const analytics = useDashboard((state) => state.analytics);
-  const facts = analytics === null ? 'no-projection' : JSON.stringify(analytics);
-  const catalogue = useReviewCatalogue(target.repo, target.master, target.leaf, facts);
+}): ReviewNavigation {
+  const [generation, setGeneration] = useState(0);
+  // The snapshot pair first reported for this task context and record; a pair reported under
+  // another context is that context's first, not a new generation of this one.
+  const comparison = `${target.repo}/${target.master}/${target.leaf}/${target.history ?? 'live'}`;
+  const seen = useRef<{ comparison: string; snapshots: string } | undefined>(undefined);
+  const catalogue = useReviewCatalogue({
+    repo: target.repo,
+    master: target.master,
+    leaf: target.leaf,
+    history: target.history,
+    generation,
+  });
   const key = JSON.stringify(target);
   const [choice, setChoice] = useState<{ key: string; subject?: ReviewSubject }>();
-  const subject = choice?.key === key ? choice.subject : initialSubject(target, catalogue.entries);
-  return { catalogue, subject, onSelect: (subject) => setChoice({ key, subject }) };
+  const chosen = choice?.key === key;
+  const subject = chosen ? choice.subject : initialSubject(target, catalogue.entries);
+  const answered = catalogue.entries !== undefined || catalogue.problem !== undefined;
+  const waiting = !chosen && !(target.selectorKind && target.selectorId) && !answered;
+  const [expired, setExpired] = useState<string>();
+  useEffect(() => {
+    if (!waiting) return undefined;
+    const timer = setTimeout(() => setExpired(key), SUBJECT_HOLD_MS);
+    return () => clearTimeout(timer);
+  }, [waiting, key]);
+  const settling = waiting && expired !== key;
+  const observeComparison = useCallback(
+    (snapshots: string | undefined) => {
+      const previous = seen.current;
+      if (snapshots === undefined) return;
+      if (previous?.comparison === comparison && previous.snapshots === snapshots) return;
+      seen.current = { comparison, snapshots };
+      if (previous?.comparison === comparison) setGeneration((value) => value + 1);
+    },
+    [comparison],
+  );
+  return {
+    catalogue,
+    subject,
+    onSelect: (subject) => setChoice({ key, subject }),
+    settling,
+    observeComparison,
+  };
+}
+
+// Report the snapshot pair the surface shows to the navigation that keys its catalogue on it.
+export function useObservedComparison(
+  observeComparison: ReviewNavigation['observeComparison'],
+  shown: ReviewPayload | null,
+): void {
+  const identity = shown?.comparison;
+  const snapshots = identity?.knowledge_compared
+    ? `${identity.before_snapshot_digest ?? ''}:${identity.after_snapshot_digest ?? ''}`
+    : undefined;
+  useEffect(() => observeComparison(snapshots), [observeComparison, snapshots]);
 }
 
 function catalogueLabel(catalogue: ReviewNavigationState['catalogue']): string {

@@ -78,6 +78,9 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         read_knowledge_review,
         review_records_for,
     )
+    from agents_remember.application.review_intent_summary import (  # noqa: PLC0415 - composition
+        read_review_intent_summary,
+    )
     from agents_remember.application.review_source_content import (  # noqa: PLC0415 - composition
         read_review_source_content,
     )
@@ -123,12 +126,22 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
 
         return read_review_source_content(config, request)
 
+    def review_intent_summary_port(repository_id, master, leaf_id):
+        """Count the changed intent of the comparison the task entry opens, before it is opened.
+
+        Same resolution as the two ports above, so the numbers beside the entry describe the review
+        it opens; no subject catalogue is read to produce them.
+        """
+
+        return read_review_intent_summary(config, repository_id, master, leaf_id)
+
     return replace(
         EXECUTION_REGISTRATION_COLLABORATORS,
         capsule_launch=partial(compile_launch_capsule, config),
         knowledge_review=review_port,
         knowledge_review_entries=review_entries_port,
         review_source_content=review_source_content_port,
+        review_intent_summary=review_intent_summary_port,
     )
 
 

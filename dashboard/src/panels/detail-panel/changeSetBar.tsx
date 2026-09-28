@@ -3,7 +3,9 @@
 // live candidate while the enclosure is live, and the leaf's own recorded comparison once it is
 // closed, ICR-R12). Counters come from the changeset data layer; liveness is read from the dashboard
 // store, and it selects WHICH record the review entry is addressed to rather than whether it exists.
-import { useEffect, useState } from 'react';
+// The Intent review control is its own component (`intentReviewEntry.tsx`): its counts are the
+// comparison's changed intent, not this change set's line totals.
+import { Fragment, useEffect, useState } from 'react';
 
 import {
   type ChangeCounters,
@@ -13,11 +15,13 @@ import {
   masterChangeset,
   taskChangeset,
 } from '../../data/changeset';
-import { type ReviewEntry, type ReviewFailure, reviewProblemFromCause } from '../../data/review';
-import { type ReviewCatalogueRead, useReviewCatalogue } from '../../data/useReviewCatalogue';
+import { useIntentEntryGeneration } from '../../data/intentEntryRevalidation';
+import { type ReviewFailure, reviewProblemFromCause } from '../../data/review';
 import { useDashboard } from '../../data/store';
-import type { Analytics } from '../../types/projection';
+import type { EnclosureNode } from '../../types/projection';
 import type { ChangeSetTarget } from '../changeset/ChangeSetViewer';
+import { EntryStateDetails, briefProblem, problemSentence } from './entryState';
+import { IntentReviewEntry } from './intentReviewEntry';
 import { changeSetBar, changeSetBtn, changeSetCounts } from './styles';
 
 // The net's leaf attribution as one phrase: how many leaves the master carries and how many of them
@@ -31,6 +35,16 @@ function leafAttribution(leaves: MasterChangeset['leaves'] | null): string | nul
     `${leaves.length} leaf/leaves`,
     working > 0 ? `${committed} committed · ${working} working` : `${committed} committed`,
   ].join(' · ');
+}
+
+function LeafAttribution({ leaves }: { leaves: MasterChangeset['leaves'] | null }) {
+  const attribution = leafAttribution(leaves);
+  if (!attribution) return null;
+  return (
+    <span className={changeSetCounts} data-testid="changeset-leaf-attribution">
+      {attribution}
+    </span>
+  );
 }
 
 // The net bar's total, or nothing when the range is unrecorded: `+0 −0` would present a zero of
@@ -134,53 +148,40 @@ export function ChangeSetButton({
   // An unrecorded range prints no total: `+0 −0` would present a zero of nothing as a measurement.
   const total = changesetTotal(counters, unrecorded);
   return (
-    <button
-      type="button"
-      className={changeSetBtn}
-      onClick={() => onOpen(generation ? { ...target, generation } : target)}
-      data-testid="open-changeset"
-    >
-      ⇄ {label}
-      {total ? <span className={changeSetCounts}>{total}</span> : null}
-      {leafAttribution(leaves) ? (
-        <span className={changeSetCounts} data-testid="changeset-leaf-attribution">
-          {leafAttribution(leaves)}
-        </span>
-      ) : null}
-      <ChangeSetReadState counters={counters} problem={problem} unrecorded={unrecorded} />
-    </button>
+    <Fragment>
+      <button
+        type="button"
+        className={changeSetBtn}
+        onClick={() => onOpen(generation ? { ...target, generation } : target)}
+        data-testid="open-changeset"
+      >
+        ⇄ {label}
+        {total ? <span className={changeSetCounts}>{total}</span> : null}
+        <LeafAttribution leaves={leaves} />
+        <ChangeSetReadState counters={counters} problem={problem} unrecorded={unrecorded} />
+      </button>
+      <ChangeSetStateDetails label={label} problem={problem} unrecorded={unrecorded} />
+    </Fragment>
   );
 }
 
-// The counter read's own state, printed in the control rather than hidden in the absence of a total,
-// and modelled on `ReviewEntryState` below -- one span, `data-review-state` for the state it is in
-// and `data-review-code` for the owner's own code -- because five different things have to stay
-// tellable apart and only three of them are states of the change-set itself:
+// The counter read's own state, as a brief word inside the control -- one span, `data-review-state`
+// for the state it is in and `data-review-code` for the owner's own code -- because five different
+// things have to stay tellable apart and only three of them are states of the change-set itself:
 //
 //   * `loading`     -- the read is in flight: nothing was measured, so nothing is claimed;
 //   * `unrecorded`  -- the read ANSWERED and the mode's own endpoints are not recorded yet (a
 //                      `committed` view of a live leaf). It is its own state and NOT `known-empty`:
-//                      an unrecorded range was never measured, and reading it as an empty one is the
-//                      conflation this control exists to prevent. The route's own sentence naming the
-//                      missing endpoint -- and the view or action that produces it -- is printed
-//                      beside the state, and the counter total is withheld (see `total` above), so
-//                      the control shows a reason where a measured range would show a number;
+//                      an unrecorded range was never measured, and the counter total is withheld
+//                      (see `total` above) so the control shows a state where a measured range would
+//                      show a number. The route's own sentence naming the missing endpoint is in the
+//                      disclosure beside the control;
 //   * `known-empty` -- the read ANSWERED and the delta is measured empty (no changed file in either
-//                      half). A measured zero is a measurement, and it is neither a failure nor an
-//                      absence of an answer -- so it is printed as the zero it is;
-//   * an answer carrying changed files prints no state here at all: the counters beside it ARE the
-//                      answer, exactly as the catalogue is the answer to the entry read;
-//   * a refusal     -- the route named it. Its code, its reason in the owner's own words and the
-//                      identifier the route echoed are all shown (and the next action too, when a
-//                      route publishes one — this family's refusals put their guidance in the reason
-//                      itself), so a reader is never left with a bare count and no explanation;
-//   * an unreadable or unreachable answer -- the same span under its own token (`unreadable`: a
-//                      response this route did not produce; `network`: no response at all), each
-//                      saying which of the two happened.
-//
-// The token is the shared one (`reviewFailureToken`), so this control and the review surface cannot
-// come to disagree about what a refusal's code means. What is NOT claimed here is anything about a
-// delta that did not answer: no code, no total, and no "empty".
+//                      half). A measured zero is a measurement, so the zero is printed with `empty`;
+//   * an answer carrying changed files prints no state here at all: the counters ARE the answer;
+//   * a refusal, an unreadable answer or no answer at all -- a brief word under the shared token
+//                      (`reviewFailureToken`), with the code, the owner's reason, the input it named
+//                      and its next action in the disclosure (ICR-R16: brief, never swallowed).
 function ChangeSetReadState({
   counters,
   problem,
@@ -198,29 +199,21 @@ function ChangeSetReadState({
         data-review-state={problem.token}
         data-review-code={problem.code}
       >
-        this change-set could not be read ({problem.code}): {problem.detail}
-        {problem.offendingInput ? ` — offending input: ${problem.offendingInput}` : ''}
-        {problem.nextAction ? ` — next: ${problem.nextAction}` : ''}
+        {briefProblem(problem)}
       </span>
     );
   }
   if (unrecorded !== null) {
     return (
-      <span
-        className={changeSetCounts}
-        data-testid="changeset-state"
-        data-review-state="unrecorded"
-      >
-        nothing has recorded this change-set&apos;s endpoint yet — this range is unrecorded, not
-        measured empty.
-        {unrecorded ? ` ${unrecorded}` : ''}
+      <span className={changeSetCounts} data-testid="changeset-state" data-review-state="unrecorded">
+        unrecorded
       </span>
     );
   }
   if (!counters) {
     return (
       <span className={changeSetCounts} data-testid="changeset-state" data-review-state="loading">
-        reading this change-set…
+        …
       </span>
     );
   }
@@ -228,196 +221,54 @@ function ChangeSetReadState({
   // zero insertion/deletion count is not a zero change-set.
   if (counters.code.files > 0 || counters.memory.files > 0) return null;
   return (
-    <span className={changeSetCounts} data-testid="changeset-state" data-review-state="known-empty">
-      no changed file in either half — this change-set is measured empty.
-    </span>
-  );
-}
-
-// What the catalogue read answered, as the task view needs it: every subject the pair offers with
-// the labelled totals, and -- when the read did not answer with a subject list -- the reason, in
-// the owner's own words.
-// One workspace fact the entry's catalogue depends on, as a value that changes when the fact does.
-//
-// WHY THE ENTRY NEEDS THIS AT ALL (ICR-R17, the packet's defect). The catalogue read used to depend on
-// the props alone, so the only way to discover data published after the panel opened was to close and
-// reopen it. The dashboard already has the invalidation infrastructure for this: `/api/state` and its
-// delta channel republish the workspace projection whenever the task documents, drift snapshots,
-// ledgers or series a repository records move, and `analytics` is that projection's own value --
-// replaced when content changed and otherwise identity-preserving (data/store.ts). The entry asks
-// again when that content moves, which is how first ingest becomes visible while the panel stays open.
-//
-// It is deliberately the projection and not a timer: no interval, no retry ladder, no unbounded loop.
-// An idle store republishes an equal projection, an equal projection serializes to an equal string,
-// and nothing is re-read at all. The projection is a bounded document the browser already holds, so
-// this is one bounded comparison per render.
-//
-// WHAT IT IS HONEST ABOUT. It reports that the workspace facts moved -- never that the candidate
-// changed. The projection carries no candidate digest, so claiming a new generation here would assert
-// a measurement nobody made. The review surface is where a generation is actually compared against
-// the identity a read carried (see `ReviewRefresh`).
-function reviewDependencyFacts(analytics: Analytics | null): string {
-  return analytics === null ? 'no-projection' : JSON.stringify(analytics);
-}
-
-// The entry's explicit refresh control. It is always offered -- the reader's own way to ask again,
-// which is the packet's "explicit refresh control" and the reason the workspace signal above can stay
-// a signal rather than a polling loop -- and it is marked for exactly as long as the list beside it is
-// behind the workspace: from the publication that moved the projection until the answer for that
-// projection is filed. The mark is therefore observable in the state it describes (a settled DOM while
-// the re-read is in flight), and it is gone once the re-read answers -- including when the answer is a
-// refusal or a failure, because then the projection HAS been answered and the list beside it is the
-// best available reading of it.
-function ReviewCatalogueRefresh({ stale, onRefresh }: { stale: boolean; onRefresh: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onRefresh}
-      data-testid="review-catalogue-refresh"
-      data-catalogue-stale={stale ? 'true' : 'false'}
-      title="re-read this pair's recorded subjects from the candidate as it is now"
-    >
-      ⟳ refresh subjects
-      {stale ? <span data-testid="review-catalogue-stale"> · workspace facts changed</span> : null}
-    </button>
-  );
-}
-
-// The labelled subject catalogue of one leaf, read from the server that owns the resolution. Every id
-// returned is a recorded identity inside the pair the server resolved from canonical task context --
-// the live candidate while the enclosure is live, and the leaf's own recorded comparison once it is
-// closed (ICR-R12) -- so this hook chooses no candidate and invents no id: it asks, and every answer
-// is carried: the whole catalogue with its totals, a known-empty list, or a typed refusal whose code,
-// reason and next action are shown beside the entry (ICR-R16). The route answers a refusal with its
-// own status and the refusal in the body, so the shared review decode reads the body whatever the
-// status; `getJson` would have thrown and the detail would have been lost. The read is made for any
-// named leaf and needs no liveness: a closed leaf's catalogue is what its record holds, and the entry
-// beside it stays openable either way.
-//
-// THE READ IS INVALIDATED, NOT REPEATED (ICR-R17). It is re-asked when the workspace facts it
-// depends on move (the store's own projection channel) or when the reader clicks refresh -- never on
-// a timer. Two properties hold across those re-reads:
-//
-//   * a superseded answer is dropped. Each read takes the next sequence number and only the newest
-//     may write state, so a response for a previous leaf (the props changed while it was in flight)
-//     can never overwrite the catalogue of the leaf on screen now;
-//   * the reader's selected identity survives an answer that still lists it. The selection lives with
-//     the picker and is only ever narrowed to the catalogue, so a refresh that records the same
-//     subjects keeps the exact row the reader chose (see `LeafEntries`).
-// One answer from the entry route, as the read state it is. The mapping is a pure function rather
-// than a branch inside the hook so the hook stays one read cycle: what "this body means" and "when to
-// ask" are different questions, and a body this client does not admit is answered as the failure it
-// is rather than read as a catalogue.
-// The entry read's own state, printed beside the entry rather than hidden. It never gates the entry:
-// the button beside it is offered for the leaf whatever this read answered -- for a live candidate and
-// for a closed leaf's recorded comparison alike -- so a refusal here is a stated reason and not a
-// missing control. A catalogue that answered carries its own picker and totals below instead of this
-// state.
-function ReviewEntryState({ read }: { read: ReviewCatalogueRead }) {
-  if (read.loading) {
-    return (
-      <span style={{ color: 'muted' }} data-testid="review-entry-state" data-review-state="loading">
-        reading this candidate&apos;s recorded subjects…
-      </span>
-    );
-  }
-  if (read.empty) {
-    return (
-      <span
-        style={{ color: 'muted' }}
-        data-testid="review-entry-state"
-        data-review-state="known-empty"
-      >
-        no subject is recorded for this pair; the review opens on the task&apos;s complete source
-        change inventory.
-      </span>
-    );
-  }
-  if (!read.problem) return null;
-  return (
     <span
-      style={{ color: 'muted' }}
-      data-testid="review-entry-state"
-      data-review-state={read.problem.token}
-      data-review-code={read.problem.code}
+      className={changeSetCounts}
+      data-testid="changeset-state"
+      data-review-state="known-empty"
+      title="no changed file in either half: this change-set is measured empty"
     >
-      this candidate&apos;s recorded subjects could not be read ({read.problem.code}):{' '}
-      {read.problem.detail}
-      {read.problem.offendingInput ? ` — offending input: ${read.problem.offendingInput}` : ''}
-      {read.problem.nextAction ? ` — next: ${read.problem.nextAction}` : ''}
+      empty
     </span>
   );
 }
 
-// One catalogue row's presence, in the reader's own words. A retired subject is still a subject:
-// it is listed and selectable, marked for what it is rather than dropped to imply a smaller
-// complete population.
-function presenceMarker(presence: ReviewEntry['presence'] | undefined): string {
-  if (presence === 'before_only') return 'retired · before-only';
-  if (presence === 'after_only') return 'new · after-only';
-  return '';
-}
-
-// The labelled subject catalogue beside the entry: every recorded subject is selectable here, with
-// the server's own totals. The Intent review button opens the selected row; the task context (the
-// whole task, no subject) stays reachable because the button carries `review: {}` while the read
-// is loading, empty, or refused.
-function ReviewCataloguePicker({
-  read,
-  selectedId,
-  onSelect,
+// The explanation behind a refused or unrecorded counter read, one click away beside the control.
+function ChangeSetStateDetails({
+  label,
+  problem,
+  unrecorded,
 }: {
-  read: ReviewCatalogueRead;
-  selectedId: string | null;
-  onSelect: (selectorId: string) => void;
+  label: string;
+  problem: ReviewFailure | null;
+  unrecorded: string | null;
 }) {
-  const entries = read.entries ?? [];
-  if (!entries.length) return null;
-  const effective = entries.find((entry) => entry.selector_id === selectedId) ?? entries[0];
+  if (problem) {
+    return (
+      <EntryStateDetails testId="changeset-state-details" label={label}>
+        This change-set could not be read. {problemSentence(problem)}
+      </EntryStateDetails>
+    );
+  }
+  if (unrecorded === null) return null;
   return (
-    <span style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
-      <select
-        data-testid="review-subject-picker"
-        aria-label="reviewed subject"
-        value={effective.selector_id}
-        onChange={(event) => onSelect(event.target.value)}
-      >
-        {entries.map((entry) => {
-          const marker = presenceMarker(entry.presence);
-          return (
-            <option
-              key={`${entry.selector_kind}:${entry.selector_id}`}
-              value={entry.selector_id}
-              data-testid="review-subject-option"
-              data-selector-kind={entry.selector_kind}
-              data-presence={entry.presence ?? ''}
-            >
-              {entry.selector_kind} · {entry.label}
-              {marker ? ` · ${marker}` : ''}
-            </option>
-          );
-        })}
-      </select>
-      <span style={{ color: 'muted' }} data-testid="review-catalogue-totals">
-        {read.totalSubjects ?? entries.length} subject(s)
-        {read.invariantTotal !== undefined && read.familyTotal !== undefined
-          ? ` · ${read.invariantTotal} invariant(s) · ${read.familyTotal} family/families`
-          : ''}
-      </span>
-    </span>
+    <EntryStateDetails testId="changeset-state-details" label={label}>
+      Nothing has recorded this change-set&apos;s endpoint yet: the range is unrecorded, not measured
+      empty.{unrecorded ? ` ${unrecorded}` : ''}
+    </EntryStateDetails>
   );
 }
 
-// One leaf's own entries: the working change-set (live only), the reviewer entry with its
-// catalogue picker, and the entry read's own state. The catalogue read and the selection state live
-// here rather than in the bar above, because they belong to one leaf's question.
+// One leaf's own entries: the working change-set (live only) and the Intent review control.
 //
-// `live` selects WHICH record the entry is addressed to (ICR-R12) and nothing else: a live leaf's
-// review is the candidate it holds now, and a closed leaf's is the comparison its own durable
-// generation bound. It is not a gate. A closed leaf keeps the Intent review entry -- that is the
-// whole point of the packet, because its worktree is gone and the recorded comparison is the only
-// comparison there is -- while the WORKING change-set stays live-gated, since "what is not committed
-// yet" genuinely does not exist once the enclosure is closed.
+// `live` selects WHICH record the review entry is addressed to (ICR-R12) and nothing else: a live
+// leaf's review is the candidate it holds now, and a closed leaf's is the comparison its own durable
+// generation bound. It is not a gate. A closed leaf keeps the Intent review entry -- its worktree is
+// gone and the recorded comparison is the only comparison there is -- while the WORKING change-set
+// stays live-gated, since "what is not committed yet" does not exist once the enclosure is closed.
+//
+// The Intent review is NOT a `ChangeSetButton`: that control reads the committed change set (a second,
+// identical committed request beside the committed button) and would show its line totals as if they
+// were the review's.
 function LeafEntries({
   repo,
   master,
@@ -430,38 +281,9 @@ function LeafEntries({
   master: string;
   leaf: string;
   live: boolean;
-  // The workspace facts this leaf's catalogue depends on, as the value whose movement invalidates
-  // the read (ICR-R17). The bar reads it from the store and threads it down, so the hook asks again
-  // exactly when the projection its answer came from was republished.
   facts: string;
   onOpen: (target: ChangeSetTarget) => void;
 }) {
-  const catalogue = useReviewCatalogue(repo, master, leaf, facts);
-  // The catalogue row the Intent review button opens. It defaults to the catalogue's first row
-  // and follows the reader's own choice afterwards; a choice that outlives the catalogue (a new
-  // answer that no longer lists it) falls back to the first row rather than opening a stale id.
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const listed = catalogue.entries ?? [];
-  const selected =
-    listed.length > 0
-      ? (listed.find((entry) => entry.selector_id === selectedId) ?? listed[0])
-      : undefined;
-  // The working change-set, the reviewer entry and the entry read's own state. The entry is added
-  // BESIDE the working/committed actions and never in their place: it is offered for the leaf -- a
-  // live curator candidate while the enclosure is live, and the leaf's own recorded comparison once
-  // it is closed (ICR-R12) -- and **the task context is the entry**: the target names the
-  // repo/master/leaf the server resolves the candidate from and carries no filesystem path, because
-  // the browser never chooses the candidate.
-  //
-  // The server's subject catalogue is a REFINEMENT and never a gate. Every recorded subject is
-  // offered in the picker beside the button, and the selected identity travels with the target
-  // so the review is opened on it; when the read answers with no subject, refuses, or fails
-  // outright (ICR-R16: the route puts its refusal in the body of a non-2xx response, and this
-  // client reads it whatever the status), the target still carries `review: {}` and the review
-  // opens on the task's complete source change inventory. The read's own answer is printed
-  // beside the entry by `ReviewEntryState`, so a refusal is a visible reason rather than a
-  // silently missing refinement. Offering the entry only for a subject is exactly how a task
-  // with no knowledge lost its source review.
   return (
     <>
       {live ? (
@@ -471,27 +293,14 @@ function LeafEntries({
           onOpen={onOpen}
         />
       ) : null}
-      <ChangeSetButton
-        target={{
-          repo,
-          master,
-          leaf,
-          review: {
-            ...(selected
-              ? {
-                  selectorKind: selected.selector_kind,
-                  selectorId: selected.selector_id,
-                }
-              : {}),
-            ...(live ? {} : { historical: true }),
-          },
-        }}
-        label={live ? 'Intent review' : 'Intent review (recorded)'}
+      <IntentReviewEntry
+        repo={repo}
+        master={master}
+        leaf={leaf}
+        live={live}
+        facts={facts}
         onOpen={onOpen}
       />
-      <ReviewCataloguePicker read={catalogue} selectedId={selectedId} onSelect={setSelectedId} />
-      <ReviewEntryState read={catalogue} />
-      <ReviewCatalogueRefresh stale={catalogue.stale} onRefresh={catalogue.refresh} />
     </>
   );
 }
@@ -518,14 +327,15 @@ export function DocChangeSetBar({
 }) {
   const enclosures = useDashboard((s) => s.enclosures);
   const activeWorktreeGroups = useDashboard((s) => s.activeWorktreeGroups);
-  // The invalidation signal the review entry depends on (ICR-R17). `analytics` is the projection the
-  // workspace republishes whenever a task document, drift snapshot or ledger moves -- the store keeps
-  // its identity while nothing changed and replaces it when anything did -- so reading it here is
-  // what makes a publication after the panel opened visible without closing the panel. It is a
-  // subscription to an existing channel, not a poll: an idle workspace performs no read at all.
-  const analytics = useDashboard((s) => s.analytics);
-  const facts = reviewDependencyFacts(analytics);
   const live = leaf ? leafIsLive(enclosures, activeWorktreeGroups, repo, leaf) : false;
+  // The Intent review summary's invalidation signal (ICR-R17): THIS leaf's own lifecycle facts -- its
+  // liveness and its enclosure's closeout/integration/cleanup state, which decide which comparison
+  // the entry opens -- plus the entry's re-validation generation, which moves when the task detail is
+  // shown again or the reviewer refreshes (`data/intentEntryRevalidation.tsx`; no dashboard signal
+  // carries a knowledge write). It is deliberately not the serialized global analytics document,
+  // which moves on every workspace publication and made the entry re-read on unrelated tasks.
+  const generation = useIntentEntryGeneration();
+  const facts = leaf ? `${leafFacts(enclosures, repo, leaf, live)}#${generation}` : '';
   if (!onOpen || !repo || !master) return null;
   if (kind === 'master') {
     return (
@@ -552,6 +362,33 @@ export function DocChangeSetBar({
       />
     </div>
   );
+}
+
+function leafEnclosure(
+  enclosures: Record<string, EnclosureNode>,
+  repo: string,
+  leaf: string,
+): EnclosureNode | undefined {
+  return Object.values(enclosures).find(
+    (e) => e.repoName === repo && e.leafId.toLowerCase() === leaf.toLowerCase(),
+  );
+}
+
+// This leaf's lifecycle facts as one comparable value: equal while nothing about the leaf moved.
+function leafFacts(
+  enclosures: Record<string, EnclosureNode>,
+  repo: string,
+  leaf: string,
+  live: boolean,
+): string {
+  const node = leafEnclosure(enclosures, repo, leaf);
+  return JSON.stringify([
+    live,
+    node?.closeoutStatus ?? null,
+    node?.integrationStatus ?? null,
+    node?.cleanup ?? null,
+    node?.codeWorktreeExists ?? null,
+  ]);
 }
 
 // Whether THIS leaf's enclosure is live: what the working change-set is gated on, and which record

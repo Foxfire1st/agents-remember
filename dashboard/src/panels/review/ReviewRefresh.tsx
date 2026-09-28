@@ -30,6 +30,7 @@
 // (see `ReviewReadCycle`), so the notice can never announce a candidate publication for a question
 // the reader had merely switched to.
 
+import { useRevalidateIntentEntry } from '../../data/intentEntryRevalidation';
 import type { ReviewPayload } from '../../data/review';
 import type { ReviewRead } from './ReviewOutcome';
 
@@ -54,11 +55,16 @@ export function ReviewRefresh({
   busy: boolean;
   generation: ReviewGeneration | null;
 }) {
+  const revalidateEntry = useRevalidateIntentEntry();
   return (
     <span style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'center' }}>
       <button
         type="button"
-        onClick={onRefresh}
+        onClick={() => {
+          onRefresh();
+          // The task entry's counts describe this comparison too: re-validate them with it.
+          revalidateEntry();
+        }}
         data-testid="review-refresh"
         data-review-busy={busy ? 'true' : 'false'}
         aria-busy={busy}

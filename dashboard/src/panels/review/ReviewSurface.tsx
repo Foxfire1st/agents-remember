@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { css } from '../../../styled-system/css';
 import {
+  useObservedComparison,
   useReviewNavigation,
   type ReviewNavigationState,
   type ReviewSubject,
@@ -813,6 +814,7 @@ function useSurface({
     history,
     instead,
     selection,
+    hold: navigation.settling,
   });
   const targetKey = targetKeyOf(
     repo,
@@ -828,6 +830,7 @@ function useSurface({
   const coherent = retained !== null && retained.key === targetKey ? retained.payload : null;
   const shown = shownPayload(read, coherent);
   const problem = problemOf(read);
+  useObservedComparison(navigation.observeComparison, shown);
 
   return {
     repo,

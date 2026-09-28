@@ -1,4 +1,4 @@
-import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { dashboardStore } from "../../data/store";
@@ -54,75 +54,73 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
     });
   });
 
+  // The changed-intent summary answers in the route's own shape; `counts` is what the control prints.
+  const summary = (added: number, removed: number) => ({
+    state: "counted",
+    operation: "read_review_intent_summary",
+    repository_id: "agents-remember",
+    master: "260628_operations-integration",
+    leaf_id: "260628-L4a",
+    counts: {
+      added,
+      removed,
+      invariants: { after_only: added, before_only: removed },
+      guarantees: { after_only: 0, before_only: 0 },
+      realization_only: 0,
+      membership_only: 0,
+      unresolved: 0,
+    },
+  });
+
   it("offers the Intent review for a closed leaf, bound to its recorded comparison", async () => {
     // The packet's defect: a cleaned leaf's Intent Review answered candidate_not_live. The entry that
     // opens it must exist for a leaf with no live enclosure, and it must name the record it is
-    // addressed to -- the leaf's own durable generation -- rather than the live candidate.
-    stubCounters({
-      state: "entries",
-      operation: "list_knowledge_review_entries",
-      repository_id: "agents-remember",
-      master: "260628_operations-integration",
-      leaf_id: "260628-L4a",
-      entries: [
-        {
-          selector_kind: "invariant",
-          selector_id: "inv-1",
-          label: "Retries share one budget",
-          presence: "both",
-        },
-      ],
-      total_subjects: 1,
-      invariant_total: 1,
-      family_total: 0,
-    });
+    // addressed to -- the leaf's own durable generation -- rather than the live candidate. It is one
+    // compact control with the comparison's changed-intent counts and no subject picker beside it.
+    stubCounters(summary(2, 1));
     closedLeaf();
     const onOpenChangeSet = vi.fn();
-    const { findAllByTestId, findByTestId } = render(
+    const { findAllByTestId, findByTestId, queryByTestId } = render(
       <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
     );
     const labels = (await findAllByTestId("open-changeset")).map((b) => b.textContent ?? "");
     expect(labels.some((t) => t.includes("working"))).toBe(false);
-    const entry = (await findAllByTestId("open-changeset")).find((b) =>
-      (b.textContent ?? "").includes("Intent review"),
-    );
-    expect(entry).toBeDefined();
-    // The catalogue still refines the entry: the recorded subject travels with the historical target.
-    const picker = await findByTestId("review-subject-picker");
-    expect(picker).toBeDefined();
-    fireEvent.click(entry as HTMLElement);
+    const entry = await findByTestId("open-intent-review");
+    await waitFor(() => expect(entry.textContent).toContain("+2 −1"));
+    expect(entry.textContent).toContain("Intent review (recorded)");
+    expect(queryByTestId("review-subject-picker")).toBeNull();
+    fireEvent.click(entry);
     expect(onOpenChangeSet).toHaveBeenCalledWith({
       repo: "agents-remember",
       master: "260628_operations-integration",
       leaf: "260628-L4a",
-      review: { selectorKind: "invariant", selectorId: "inv-1", historical: true },
+      review: { historical: true },
     });
   });
 
-  it("keeps the closed leaf's Intent review when its record offers no subject", async () => {
-    // The read is a refinement and never the gate: a closed leaf whose record holds no catalogue, or
-    // whose read refused, still opens the review on its recorded comparison (the task-context entry).
+  it("keeps the closed leaf's Intent review when its knowledge is unavailable", async () => {
+    // The summary is a label and never the gate: a closed leaf whose record holds no knowledge still
+    // opens the review on its recorded comparison (the task-context entry).
     stubCounters({
-      state: "entries",
-      operation: "list_knowledge_review_entries",
+      state: "unavailable",
+      operation: "read_review_intent_summary",
       repository_id: "agents-remember",
       master: "260628_operations-integration",
       leaf_id: "260628-L4a",
-      entries: [],
-      total_subjects: 0,
-      invariant_total: 0,
-      family_total: 0,
+      refusal: {
+        code: "candidate_dataset_absent",
+        detail: "the resolved candidate dataset is absent",
+        next_action: "author the candidate's knowledge",
+      },
     });
     closedLeaf();
     const onOpenChangeSet = vi.fn();
-    const { findAllByTestId } = render(
+    const { findByTestId } = render(
       <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
     );
-    const entry = (await findAllByTestId("open-changeset")).find((b) =>
-      (b.textContent ?? "").includes("Intent review"),
-    );
-    expect(entry).toBeDefined();
-    fireEvent.click(entry as HTMLElement);
+    const entry = await findByTestId("open-intent-review");
+    await waitFor(() => expect(entry.dataset.intentState).toBe("unavailable"));
+    fireEvent.click(entry);
     expect(onOpenChangeSet).toHaveBeenCalledWith({
       repo: "agents-remember",
       master: "260628_operations-integration",
@@ -345,15 +343,14 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
       <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
     );
     const labels = (await findAllByTestId("open-changeset")).map((b) => b.textContent ?? "");
-    expect(labels).toHaveLength(3);
+    expect(labels).toHaveLength(2);
     expect(labels.some((t) => t.includes("committed"))).toBe(true);
     expect(labels.some((t) => t.includes("working"))).toBe(true);
-    expect(labels.some((t) => t.includes("Intent review"))).toBe(true);
+    expect((await findAllByTestId("open-intent-review"))[0].textContent).toContain("Intent review");
   });
 
-  // The reviewed subject is a REFINEMENT of the entry and never its gate: the entry is the task
-  // context, so a live leaf opens its source review whether or not the server offers a subject.
-  // Each case below pins one of the three answers the entry route can give.
+  // The entry is the task context: a live leaf opens its source review whatever the summary answers,
+  // and the reviewer -- not the entry -- chooses the subject once it has read its own catalogue.
   const liveLeaf = () => {
     const doc = taskDoc({
       id: "260628-l4a",
@@ -393,30 +390,18 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
     });
   };
 
-  const reviewButton = async (findAllByTestId: (id: string) => Promise<HTMLElement[]>) =>
-    (await findAllByTestId("open-changeset")).find((b) =>
-      (b.textContent ?? "").includes("Intent review"),
-    );
-
-  it("opens the task-context review when the server offers no subject", async () => {
-    // The packet's own failing case: no invariant is recorded, so the entry list is empty. The
-    // entry must still be offered and must carry the task context rather than a selector.
-    stubCounters({
-      state: "entries",
-      operation: "list_knowledge_review_entries",
-      repository_id: "agents-remember",
-      master: "260628_operations-integration",
-      leaf_id: "260628-l4a",
-      entries: [],
-    });
+  it("opens the task-context review; the reviewer chooses the subject", async () => {
+    stubCounters(summary(1, 1));
     liveLeaf();
     const onOpenChangeSet = vi.fn();
-    const { findAllByTestId } = render(
+    const { findByTestId } = render(
       <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
     );
-    const button = await reviewButton(findAllByTestId);
-    expect(button).toBeDefined();
-    fireEvent.click(button as HTMLElement);
+    const button = await findByTestId("open-intent-review");
+    await waitFor(() => expect(button.textContent).toContain("+1 −1"));
+    expect(button.textContent).toContain("Intent review");
+    expect(button.textContent).not.toContain("(recorded)");
+    fireEvent.click(button);
     expect(onOpenChangeSet).toHaveBeenCalledWith({
       repo: "agents-remember",
       master: "260628_operations-integration",
@@ -425,134 +410,31 @@ describe("DetailPanel doc-reader change-set bar (L4a)", () => {
     });
   });
 
-  it("carries the server's recorded subject when the pair offers one", async () => {
-    stubCounters({
-      state: "entries",
-      operation: "list_knowledge_review_entries",
-      repository_id: "agents-remember",
-      master: "260628_operations-integration",
-      leaf_id: "260628-l4a",
-      entries: [
-        {
-          selector_kind: "invariant",
-          selector_id: "inv-1",
-          label: "Retries share one budget",
-          presence: "both",
-        },
-      ],
-      total_subjects: 1,
-      invariant_total: 1,
-      family_total: 0,
-    });
-    liveLeaf();
-    const onOpenChangeSet = vi.fn();
-    const { findAllByTestId } = render(
-      <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
-    );
-    const button = (await reviewButton(findAllByTestId)) as HTMLElement;
-
-    // The entry exists before this flush -- it is gated on the leaf being live and never on the
-    // server's subject list -- and the subject *refines* it once the read answers. The flush is what
-    // separates the two states rather than timing the assertion against a pending promise: a click
-    // that lands before the answer opens the whole-task review, which is the entry the two other
-    // cases pin down (an empty list and a failing read both keep it).
-    await act(async () => {});
-    fireEvent.click(button);
-    expect(onOpenChangeSet).toHaveBeenLastCalledWith({
-      repo: "agents-remember",
-      master: "260628_operations-integration",
-      leaf: "260628-l4a",
-      review: { selectorKind: "invariant", selectorId: "inv-1" },
-    });
-  });
-
-  it("offers every catalogue row for review, not just the first", async () => {
-    // ICR-R09's failing case: several invariants and families are all selectable from the task
-    // review. The picker lists the whole catalogue with the server's totals, and the Intent review
-    // button opens whichever row the reader selected -- the second and third rows exactly like the
-    // first. A retired (before-only) row is marked for what it is, never dropped.
-    stubCounters({
-      state: "entries",
-      operation: "list_knowledge_review_entries",
-      repository_id: "agents-remember",
-      master: "260628_operations-integration",
-      leaf_id: "260628-l4a",
-      entries: [
-        {
-          selector_kind: "invariant",
-          selector_id: "inv-1",
-          label: "Retries share one budget",
-          presence: "both",
-        },
-        {
-          selector_kind: "invariant",
-          selector_id: "inv-2",
-          label: "Retired obligation",
-          presence: "before_only",
-        },
-        {
-          selector_kind: "family",
-          selector_id: "fam-9",
-          label: "Retry budget family",
-          presence: "after_only",
-        },
-      ],
-      total_subjects: 3,
-      invariant_total: 2,
-      family_total: 1,
-    });
-    liveLeaf();
-    const onOpenChangeSet = vi.fn();
-    const { findAllByTestId, findByTestId, getAllByTestId } = render(
-      <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
-    );
-    const picker = (await findByTestId("review-subject-picker")) as HTMLSelectElement;
-    const options = getAllByTestId("review-subject-option");
-    expect(options).toHaveLength(3);
-    expect(options[1].textContent).toContain("retired · before-only");
-    expect(options[2].textContent).toContain("new · after-only");
-    const totals = await findByTestId("review-catalogue-totals");
-    expect(totals.textContent).toContain("3 subject(s)");
-    expect(totals.textContent).toContain("2 invariant(s)");
-    expect(totals.textContent).toContain("1 family/families");
-
-    // The button opens the picker's current row: the second row, then the third -- each exactly
-    // like the first was reachable before.
-    fireEvent.change(picker, { target: { value: "inv-2" } });
-    const button = (await reviewButton(findAllByTestId)) as HTMLElement;
-    fireEvent.click(button);
-    expect(onOpenChangeSet).toHaveBeenLastCalledWith({
-      repo: "agents-remember",
-      master: "260628_operations-integration",
-      leaf: "260628-l4a",
-      review: { selectorKind: "invariant", selectorId: "inv-2" },
-    });
-    fireEvent.change(picker, { target: { value: "fam-9" } });
-    fireEvent.click(button);
-    expect(onOpenChangeSet).toHaveBeenLastCalledWith({
-      repo: "agents-remember",
-      master: "260628_operations-integration",
-      leaf: "260628-l4a",
-      review: { selectorKind: "family", selectorId: "fam-9" },
-    });
-  });
-
-  it("keeps the entry when the entry read itself fails", async () => {
-    // An unreadable entry read (a refusal, a transport failure) is not a reason to hide the source
-    // review: the task context is the entry, and the review's own refusal is rendered in the pane.
+  it("keeps the entry when the summary read itself fails", async () => {
+    // An unreachable summary is not a reason to hide the source review: the task context is the
+    // entry, and the control states that it could not count rather than printing a zero.
     const failing = vi.fn(async () => {
-      throw new Error("404 candidate_dataset_absent");
+      throw new Error("socket closed");
     });
-    stubCounters();
     vi.stubGlobal("fetch", failing);
     liveLeaf();
     const onOpenChangeSet = vi.fn();
-    const { findAllByTestId } = render(
+    const { findByTestId } = render(
       <DetailPanel selectedId={`taskdoc:${leafPath}`} onOpenChangeSet={onOpenChangeSet} />,
     );
-    const button = await reviewButton(findAllByTestId);
-    expect(button).toBeDefined();
-    fireEvent.click(button as HTMLElement);
+    const button = await findByTestId("open-intent-review");
+    await waitFor(() => expect(button.dataset.intentState).toBe("unavailable"));
+    expect(button.textContent).not.toMatch(/\+\d/);
+    // Brief in the control, and the reason reaches the disclosure beside it (R16: never swallowed).
+    const state = within(button).getByTestId("intent-review-state");
+    expect(state.dataset.reviewState).toBe("network");
+    expect(state.textContent).toBe("offline");
+    const details = await findByTestId("intent-review-details");
+    fireEvent.click(within(details).getByText("?"));
+    expect(details.hasAttribute("open")).toBe(true);
+    expect(details.textContent).toContain("network");
+    expect(details.textContent).toContain("socket closed");
+    fireEvent.click(button);
     expect(onOpenChangeSet).toHaveBeenCalledWith({
       repo: "agents-remember",
       master: "260628_operations-integration",
@@ -653,10 +535,16 @@ describe("the counter read's refusal (L32/D01)", () => {
     expect(refusedText).not.toBe(pendingText);
 
     // The refusal's OWN code, and its reason in the owner's own words.
+    // The control carries a brief state; the owner's reason is in the disclosure beside it (brief,
+    // never swallowed).
     const state = refused.view.getByTestId("changeset-state");
     expect(state.dataset.reviewState).toBe("not-found");
     expect(state.dataset.reviewCode).toBe("not-found");
-    expect(state.textContent).toContain(MASTER_NET_REASON);
+    expect(state.textContent).toBe("not found");
+    expect(refusedText).not.toContain(MASTER_NET_REASON);
+    const details = refused.view.getByTestId("changeset-state-details");
+    expect(details.textContent).toContain("not-found");
+    expect(details.textContent).toContain(MASTER_NET_REASON);
 
     // The refusal is a reason and never a gate: the control still opens the change-set it names.
     fireEvent.click(refusedButton);
@@ -673,6 +561,7 @@ describe("the counter read's refusal (L32/D01)", () => {
     const answeredButton = await answered.view.findByTestId("open-changeset");
     await waitFor(() => expect(answeredButton.textContent).toContain("+7 −2"));
     expect(answered.view.queryByTestId("changeset-state")).toBeNull();
+    expect(answered.view.queryByTestId("changeset-state-details")).toBeNull();
     expect(answeredButton.textContent).not.toContain(MASTER_NET_REASON);
   });
 
@@ -690,7 +579,8 @@ describe("the counter read's refusal (L32/D01)", () => {
       return found;
     });
     expect(button.textContent).toContain("+0 −0");
-    expect(state.textContent).toContain("no changed file in either half");
+    expect(state.textContent).toBe("empty");
+    expect(state.title).toContain("no changed file in either half");
     // It names no refusal code: an empty delta is not a failure, and it is not a pending read.
     expect(state.dataset.reviewCode).toBeUndefined();
     expect(state.dataset.reviewState).not.toBe("loading");
