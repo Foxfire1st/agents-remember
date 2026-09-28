@@ -9,9 +9,11 @@ logic lives in this module; it is the common leaf the split modules import.
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agents_remember.observer.task_document_cache import TaskDocumentPayloadCache
@@ -75,14 +77,76 @@ def _iter_task_json(tasks_root: Path) -> list[Path]:
     A task root is exactly ``tasks/<repository>/<task>/``. Recursive discovery used
     to admit valid-schema historical copies under ``notes/`` as live masters, which
     duplicated and flattened the dashboard hierarchy.
+
+    Only the three canonical levels are listed, and only their entries are sorted:
+    walking every ``notes/``, report and enclosure folder just to discard those
+    paths afterwards dominated each read once the corpus held thousands of JSON files.
+    """
+    return sorted(
+        path
+        for task in _task_directories(tasks_root)
+        for path in _json_entries(task)
+        if _outside_archive_and_enclosures(path)
+    )
+
+
+def _canonical_task_json_candidates(tasks_root: Path, relative_paths: Iterable[str]) -> list[Path]:
+    """The :func:`_iter_task_json` paths whose ``<task>/<file>.json`` tail is named.
+
+    ``relative_paths`` are repository-relative task-document paths (a
+    ``TaskDocumentRef.path``), matched under every repository folder. The result is
+    exactly that subset of the enumeration, in the same order, but beyond the repository
+    folders only the named task folders are listed, so its cost follows the named
+    documents rather than the corpus.
+    """
+    wanted: dict[str, set[str]] = {}
+    for value in relative_paths:
+        parts = PurePosixPath(value).parts
+        if len(parts) == 2:
+            wanted.setdefault(parts[0], set()).add(parts[1])
+    return sorted(
+        path
+        for task in _task_directories(tasks_root)
+        if task.name in wanted
+        for path in _json_entries(task)
+        if path.name in wanted[task.name] and _outside_archive_and_enclosures(path)
+    )
+
+
+def _task_directories(tasks_root: Path) -> list[Path]:
+    """Every ``tasks/<repository>/<task>/`` folder, descended the way ``rglob`` descends.
+
+    Symlinked directories are not followed, and a folder that cannot be listed
+    contributes nothing, exactly as the recursive glob this walk replaced behaved.
     """
     return [
-        path
-        for path in sorted(tasks_root.rglob("*.json"))
-        if ARCHIVE_DIR not in path.parts
-        and ENCLOSURES_DIR not in path.parts
-        and len(path.relative_to(tasks_root).parts) == 3
+        task
+        for repository in _walked_directories(tasks_root)
+        for task in _walked_directories(repository)
     ]
+
+
+def _outside_archive_and_enclosures(path: Path) -> bool:
+    return ARCHIVE_DIR not in path.parts and ENCLOSURES_DIR not in path.parts
+
+
+def _walked_directories(directory: Path) -> list[Path]:
+    try:
+        with os.scandir(directory) as entries:
+            return [
+                directory / entry.name for entry in entries if entry.is_dir(follow_symlinks=False)
+            ]
+    except OSError:
+        return []
+
+
+def _json_entries(directory: Path) -> list[Path]:
+    """Every entry named ``*.json``, of any type; the reader accepts or refuses it."""
+    try:
+        with os.scandir(directory) as entries:
+            return [directory / entry.name for entry in entries if entry.name.endswith(".json")]
+    except OSError:
+        return []
 
 
 def _read_json(path: Path) -> dict[str, object] | None:  # pragma: no cover

@@ -47,6 +47,7 @@ from agents_remember.observer.projection_graph import (
     build_execution_graph_view,
 )
 from agents_remember.serving.projections.snapshots_impl._common import (
+    _canonical_task_json_candidates,
     _file_age_seconds,
     _iter_task_document_payloads,
     _read_json,
@@ -164,7 +165,11 @@ def read_task_document_body(  # pragma: no cover
     enclosures: list[EnclosureNode],
     now: datetime,
 ) -> TaskDocNode | None:
-    """Read one full task-document body for the on-demand dashboard endpoint."""
+    """Read one full task-document body for the on-demand dashboard endpoint.
+
+    The read touches the requested document and only the masters its projection consumes
+    (:func:`_graph_master_docs`); it never enumerates the task corpus.
+    """
     tasks_root = (coordination_root / "tasks").resolve()
     path = Path(doc_path)
     candidates = [path] if path.is_absolute() else [coordination_root / path, tasks_root / path]
@@ -185,14 +190,37 @@ def read_task_document_body(  # pragma: no cover
     doc = _projected_document(payload)
     if doc is None:
         return None
-    lifecycle_maps = _task_document_lifecycle_maps(enclosures)
-    docs = _iter_task_document_payloads(tasks_root, now=now)
     return _task_doc_node(
         doc,
         resolved,
-        lifecycle_maps,
+        _task_document_lifecycle_maps(enclosures),
         now,
-        _TaskDocProjectionOptions(include_body=True, master_docs=_master_docs_by_ref(docs)),
+        _TaskDocProjectionOptions(
+            include_body=True, master_docs=_graph_master_docs(tasks_root, doc)
+        ),
+    )
+
+
+def _graph_master_docs(tasks_root: Path, doc: TaskDocument) -> dict[TaskDocumentRef, TaskDocument]:
+    """The master join table one document's projection reads, found without the corpus.
+
+    Only the sprint execution-graph view consumes master documents, and it looks them up
+    solely by the refs its nodes carry. A document without a graph therefore needs none, and
+    a sprint needs only the masters its nodes name: the same entries the corpus-wide table
+    holds for those refs, read from their own paths.
+    """
+    if doc.executionGraph is None:
+        return {}
+    paths = _canonical_task_json_candidates(
+        tasks_root, [ref.path for ref in doc.executionGraph.master_refs()]
+    )
+    return _master_docs_by_ref(
+        [
+            (path, payload)
+            for path in paths
+            if (payload := _read_json(path)) is not None
+            and payload.get("schema") == TASK_DOCUMENT_SCHEMA
+        ]
     )
 
 

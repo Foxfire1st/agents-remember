@@ -205,6 +205,7 @@ unit-regression = [
   "mcp/tests/test_task_doc_review_public.py",
   "mcp/tests/test_task_document.py",
   "mcp/tests/test_task_document_application_1.py",
+  "mcp/tests/test_task_document_body_lookup.py",
   "mcp/tests/test_task_documents_graph_projection.py",
   "mcp/tests/test_task_execution_topology_segments.py",
   "mcp/tests/test_task_intent_identity.py",
