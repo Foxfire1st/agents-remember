@@ -43,8 +43,43 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "49b1e98bdf4adead6a36038ecfb182646ab6de324d0a4e4f3c3ac81a28372e83"
+LIFECYCLE_CATALOG_SHA256 = "1c682524157cb12075319069b03410b39053317946a61847c51a603c146a68b2"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Thirty-second deliberate re-pin (260921-ICR-L57, at base ``ae2fd5c8``, 2026-09-28) -- the consumer
+rows the census derived for eight landed case modules and three file-size splits, and three earlier
+row additions that were never re-pinned.** ``260921-ICR-L57`` is the master's exit-gate repair leaf
+and **owns no ICR requirement**; it registers no artifact and no contract. At its base the oracle
+reported **five** rows, each ``unsupported=[]``: ``mcp/tests/curator_coherence_test_support.py``
+(2 missing), ``mcp/tests/fixtures/repository_profiles/node/package-lock.json`` (7),
+``mcp/tests/snapshot_lifecycle_test_support.py`` (3), ``mcp/tests/diff_scope_test_support.py`` (6) and
+``mcp/tests/read_scope_test_support.py`` (5). The missing paths are case modules that landed without
+their rows: ``test_review_assessment_history.py``, ``test_review_assessment_history_repairs.py``,
+``test_review_recorded_knowledge.py``, ``test_review_unchanged_knowledge.py``,
+``test_curator_candidate_progression.py``, ``test_curator_family_retention.py``,
+``test_curator_scope.py`` and ``test_knowledge_review_attributed_source_content.py``. The same leaf
+split three case modules that had crossed the **1200**-line hard limit, each by moving one cohesive
+section into a new ordinary unit module that imports the sibling's helpers:
+``test_knowledge_diff_scope.py`` (1384 lines, 22 cases) into itself (790, 13) and
+``test_knowledge_diff_attribution.py`` (626, 9); ``test_knowledge_review_source_endpoints.py``
+(1515, 20) into itself (1093, 14) and ``test_knowledge_review_attribution_precedence.py`` (450, 6);
+``test_knowledge_review_surface.py`` (1475, 31) into itself (1056, 22) and
+``test_knowledge_review_resolution_and_route.py`` (470, 9). The census then named the three new
+modules on the two rows their siblings consume, ``diff_scope_test_support.py`` and
+``read_scope_test_support.py``, raising those two findings to 9 and 8 missing paths. Every missing
+path was added to its row beside the sibling it was split from or the family it belongs to (the
+curator modules after ``test_curator_realization_authoring.py``), otherwise at the row's end, and
+each new module's lane row was added to ``mcp/tests/test-evidence-lanes.toml`` in the
+unit-regression lane beside its sibling. Separately, the bytes had already left the Thirty-first pin
+without a re-pin: ``55c62237``, ``9b2f775f`` and ``eda94732`` each added consumer paths (one, one and
+two) and left the file at ``aaf23d7890387ad6f069a5206c10717091b03360f12928b011dca1b83794459c``. The
+drift was masked because the inventory-closure assertion above the byte check failed first. **Nothing
+was registered, no row was removed and no artifact's identity moved**, so the population stays at
+**sixteen contracts / sixty-six artifacts**, and the catalog is re-pinned from
+``49b1e98bdf4adead6a36038ecfb182646ab6de324d0a4e4f3c3ac81a28372e83`` (the Thirty-first) to
+``1c682524157cb12075319069b03410b39053317946a61847c51a603c146a68b2``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml`` on the resolved candidate. The proof's own artifact delta remains
+exactly empty.
 
 **Thirty-first deliberate re-pin (260921-ICR-L32, at base ``71a17079``, 2026-09-24) -- one module split
 across the file-size rail, and the TWO consumer rows the census derived for the new half.**

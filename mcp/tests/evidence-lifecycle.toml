@@ -453,6 +453,8 @@ consumers = [
   "mcp/tests/test_memory_mode_removal.py",
   "mcp/tests/test_knowledge_review_evidence_channels.py",
   "mcp/tests/test_knowledge_review_subject_isolation.py",
+  "mcp/tests/test_review_assessment_history.py",
+  "mcp/tests/test_review_assessment_history_repairs.py",
 ]
 
 [[artifact]]
@@ -697,6 +699,9 @@ consumers = [
   "mcp/tests/test_curator_family_authoring.py",
   "mcp/tests/test_curator_ingest_write_and_retention.py",
   "mcp/tests/test_curator_realization_authoring.py",
+  "mcp/tests/test_curator_candidate_progression.py",
+  "mcp/tests/test_curator_family_retention.py",
+  "mcp/tests/test_curator_scope.py",
   "mcp/tests/test_clean_quality_executor.py",
   "mcp/tests/test_closeout_certification_entrypoint.py",
   "mcp/tests/test_closeout_certification_recovery.py",
@@ -808,6 +813,10 @@ consumers = [
   "mcp/tests/test_review_final_output_receipt.py",
   "mcp/tests/test_review_sync_rebinding.py",
   "mcp/tests/test_review_sync_movement_read.py",
+  "mcp/tests/test_review_assessment_history.py",
+  "mcp/tests/test_review_assessment_history_repairs.py",
+  "mcp/tests/test_review_recorded_knowledge.py",
+  "mcp/tests/test_review_unchanged_knowledge.py",
 ]
 
 [[artifact]]
@@ -1284,6 +1293,9 @@ consumers = [
   "mcp/tests/test_curator_family_authoring.py",
   "mcp/tests/test_curator_ingest_write_and_retention.py",
   "mcp/tests/test_curator_realization_authoring.py",
+  "mcp/tests/test_curator_candidate_progression.py",
+  "mcp/tests/test_curator_family_retention.py",
+  "mcp/tests/test_curator_scope.py",
   "mcp/tests/test_knowledge_curator_ingest_list.py",
   "mcp/tests/test_knowledge_ingest_comparison_generation.py",
   "mcp/tests/test_knowledge_ingest_failure_windows.py",
@@ -1427,12 +1439,16 @@ consumers = [
   "mcp/tests/test_knowledge_review_comparison_generation.py",
   "mcp/tests/test_historical_committed_leaf_review.py",
   "mcp/tests/test_knowledge_diff_scope.py",
+  "mcp/tests/test_knowledge_diff_attribution.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_detection_runs.py",
   "mcp/tests/test_knowledge_family_integrity_pipeline.py",
   "mcp/tests/test_knowledge_review_surface.py",
+  "mcp/tests/test_knowledge_review_resolution_and_route.py",
   "mcp/tests/test_knowledge_review_source_endpoints.py",
+  "mcp/tests/test_knowledge_review_attribution_precedence.py",
   "mcp/tests/test_knowledge_review_source_content.py",
+  "mcp/tests/test_knowledge_review_attributed_source_content.py",
   "mcp/tests/test_knowledge_review_evidence_channels.py",
   "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_review_external_git_movement_read.py",
@@ -1446,6 +1462,11 @@ consumers = [
   "mcp/tests/test_review_final_output_receipt.py",
   "mcp/tests/test_review_sync_rebinding.py",
   "mcp/tests/test_review_sync_movement_read.py",
+  "mcp/tests/test_curator_candidate_progression.py",
+  "mcp/tests/test_review_assessment_history.py",
+  "mcp/tests/test_review_assessment_history_repairs.py",
+  "mcp/tests/test_review_recorded_knowledge.py",
+  "mcp/tests/test_review_unchanged_knowledge.py",
 ]
 
 [[artifact]]
@@ -1469,6 +1490,7 @@ consumers = [
   "mcp/tests/test_knowledge_detection_runs.py",
   "mcp/tests/test_knowledge_diff_boundaries.py",
   "mcp/tests/test_knowledge_diff_scope.py",
+  "mcp/tests/test_knowledge_diff_attribution.py",
   "mcp/tests/test_knowledge_family_composition_boundaries.py",
   "mcp/tests/test_knowledge_family_integrity_pipeline.py",
   "mcp/tests/test_knowledge_projection_vault_safety.py",
@@ -1478,7 +1500,9 @@ consumers = [
   "mcp/tests/test_knowledge_read_scope.py",
   "mcp/tests/test_knowledge_registered_scope.py",
   "mcp/tests/test_knowledge_review_surface.py",
+  "mcp/tests/test_knowledge_review_resolution_and_route.py",
   "mcp/tests/test_knowledge_review_source_endpoints.py",
+  "mcp/tests/test_knowledge_review_attribution_precedence.py",
   "mcp/tests/test_knowledge_review_source_content.py",
   "mcp/tests/test_knowledge_review_attributed_source_content.py",
   "mcp/tests/test_knowledge_review_one_sided_statements.py",
@@ -1497,6 +1521,11 @@ consumers = [
   "mcp/tests/test_review_sync_rebinding.py",
   "mcp/tests/test_review_sync_movement_read.py",
   "mcp/tests/test_review_family_member_sources.py",
+  "mcp/tests/test_curator_candidate_progression.py",
+  "mcp/tests/test_review_assessment_history.py",
+  "mcp/tests/test_review_assessment_history_repairs.py",
+  "mcp/tests/test_review_recorded_knowledge.py",
+  "mcp/tests/test_review_unchanged_knowledge.py",
 ]
 
 [[artifact]]

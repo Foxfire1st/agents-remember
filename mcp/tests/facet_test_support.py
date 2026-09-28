@@ -93,8 +93,18 @@ PRE_LEAF_GENERATION_2_FINGERPRINT = (
     "39576df6fb2c952726e8b89b577468a58f131dde3ac02d86d39faac0974d1ba1"
 )
 PRE_LEAF_DATASET_DIGEST = "90758f63e2de6cd87ad6832e49029f8869919a2870c11d434eb5c45d2aaf082a"
-PRE_LEAF_PAGE_DIGEST = "d2df8e74a807ac4a99211fca931176cf81a0ab9a5ab94be07e761d17835c4a93"
-PRE_LEAF_RESULT_DIGEST = "9deba0cf8f1e2e6e757012685bc4c5bcdb1c88705d875d813f87b8f0c35b7be8"
+# The page and result digests were re-measured, deliberately, when the read contract's anchor
+# observation (``AnchorResolution``) gained its always-serialized ``resolved_ranges`` field: the
+# structured line ranges an exact recorded blob supports, empty for this fixture's one whole-file
+# locator. That field is the only byte change to either serialization. Each grew by exactly one
+# ``,"resolved_ranges":[]`` (21 bytes) on the fixture's single anchor, and deleting it reproduces the
+# bytes first measured before this leaf existed, whose digests were
+# d2df8e74a807ac4a99211fca931176cf81a0ab9a5ab94be07e761d17835c4a93 (page) and
+# 9deba0cf8f1e2e6e757012685bc4c5bcdb1c88705d875d813f87b8f0c35b7be8 (result). The dataset, the selected
+# items, the counts and every other field are unchanged, so the comparison still measures that facets
+# leave the shipped selection where it was.
+PRE_LEAF_PAGE_DIGEST = "0cebda8b0fb402d99fc6dd265d817557b61ea9a512264001ed7c06f80f3e943d"
+PRE_LEAF_RESULT_DIGEST = "6e290ce6e93ff5a8f5f9768b1b0cc94b355270f6f711ab69796166939ecbb366"
 PRE_LEAF_SELECTED_ITEMS = 4
 PRE_LEAF_ITEM_LIMIT = 5000
 PRE_LEAF_MAX_PAGE_ITEMS = 32
