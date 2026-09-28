@@ -212,6 +212,27 @@ export function RetainedGenerationNote({ payload }: { payload: ReviewPayload }) 
   );
 }
 
+const loadingLine = (read: ReviewRead, readingInWorkspace: boolean) =>
+  read.phase === 'loading' && !readingInWorkspace ? <ReviewLoading /> : null;
+
+function problemLine(
+  read: ReviewRead,
+  readingInWorkspace: boolean,
+  onRetry?: () => void,
+  onOpenTaskContext?: () => void,
+) {
+  const problem = problemOf(read);
+  if (problem === null || readingInWorkspace) return null;
+  return (
+    <ReviewProblemBlock
+      origin={read.phase === 'refused' ? 'refusal' : 'failure'}
+      problem={problem}
+      onRetry={onRetry}
+      onOpenTaskContext={onOpenTaskContext}
+    />
+  );
+}
+
 // Every note the surface shows for a read, in one place: the loading state, the refusal/failure
 // block, the note that keeps a refusal visible beside the inventory the reader asked for instead, and
 // the two statements about a shown payload that is not a written review -- the known-empty result it
@@ -230,6 +251,7 @@ export function ReviewOutcomeRegion({
   lastCoherent,
   onRetry,
   onOpenTaskContext,
+  readingInWorkspace = false,
 }: {
   read: ReviewRead;
   instead: ReviewFailure | null;
@@ -237,21 +259,17 @@ export function ReviewOutcomeRegion({
   lastCoherent: ReviewPayload | null;
   onRetry?: () => void;
   onOpenTaskContext?: () => void;
+  // True when the workspace stays mounted and states the requested subject's pending state, failure
+  // or refusal in its reading area (labelled with that subject); a surface-level line would then be a
+  // second, subject-less statement of the same read.
+  readingInWorkspace?: boolean;
 }) {
-  const problem = problemOf(read);
   const measuredNothing = shown !== null && knownEmpty(shown);
   const retainedIsReal = lastCoherent !== null && !knownEmpty(lastCoherent);
   return (
     <>
-      {read.phase === 'loading' ? <ReviewLoading /> : null}
-      {problem ? (
-        <ReviewProblemBlock
-          origin={read.phase === 'refused' ? 'refusal' : 'failure'}
-          problem={problem}
-          onRetry={onRetry}
-          onOpenTaskContext={onOpenTaskContext}
-        />
-      ) : null}
+      {loadingLine(read, readingInWorkspace)}
+      {problemLine(read, readingInWorkspace, onRetry, onOpenTaskContext)}
       {instead && read.phase === 'reviewed' ? <TaskContextInsteadNote problem={instead} /> : null}
       {measuredNothing ? <KnownEmptyNote /> : null}
       {retainedIsReal ? <RetainedGenerationNote payload={lastCoherent} /> : null}

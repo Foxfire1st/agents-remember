@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { ReviewPayload } from '../../data/review';
 import { FamilyReviewCenter } from './FamilyReviewCenter';
 import { useReviewReadCycle, type ReviewPageRequest } from './ReviewReadCycle';
+import { ReviewReadCache } from './ReviewReadCache';
 import { shownPayload } from './ReviewOutcome';
 import { ReviewSurface } from './ReviewSurface';
 
@@ -64,6 +65,7 @@ function mountCycle() {
   let body: unknown = first;
   const fetch = vi.fn<(input: RequestInfo | URL) => Promise<Response>>(async () => response(body));
   vi.stubGlobal('fetch', fetch);
+  const cache = new ReviewReadCache();
   const view = renderHook(
     ({
       selection,
@@ -73,7 +75,7 @@ function mountCycle() {
       selection?: ReviewPageRequest;
       selectorId: string;
       history?: 'recorded';
-    }) => useReviewReadCycle({ ...target, selectorId, history, instead: null, selection }),
+    }) => useReviewReadCycle({ ...target, selectorId, history, instead: null, selection, cache }),
     {
       initialProps: { selectorId: target.selectorId } as {
         selection?: ReviewPageRequest;
@@ -436,9 +438,10 @@ it('resets accumulated context on refresh, subject and history changes and drops
       .mockReturnValueOnce(late)
       .mockResolvedValue(response(first)),
   );
+  const cache = new ReviewReadCache();
   const fresh = renderHook(
     ({ selectorId, selection }: { selectorId: string; selection?: ReviewPageRequest }) =>
-      useReviewReadCycle({ ...target, selectorId, selection, instead: null }),
+      useReviewReadCycle({ ...target, selectorId, selection, instead: null, cache }),
     {
       initialProps: { selectorId: target.selectorId } as {
         selectorId: string;

@@ -1,27 +1,20 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { css } from '../../../styled-system/css';
 import {
   useObservedComparison,
+  useReaderEngagement,
   useReviewNavigation,
   type ReviewNavigationState,
   type ReviewSubject,
 } from './ReviewNavigation';
 
 import type {
-  ReviewApplicabilitySummary,
-  ReviewAssessmentDisplay,
-  ReviewAuthoredEffect,
   ReviewCollectionPage,
-  ReviewContextRecord,
-  ReviewDisplayedApplicability,
   ReviewFailure,
   ReviewHistory,
-  ReviewKnowledgePane,
   ReviewPagedCollection,
   ReviewPayload,
   ReviewSelectorKind,
-  ReviewSignal,
-  ReviewUnresolvedReference,
 } from '../../data/review';
 import {
   REVIEW_WALKABLE_COLLECTIONS,
@@ -32,11 +25,18 @@ import {
 } from '../../data/review';
 import type { ReviewRefusal } from '../../data/review';
 import type { FamilySelection } from './FamilyTree';
-import { KnowledgeStatements } from './KnowledgeStatements';
 import { type ReviewPageRequest, targetKeyOf, useReviewReadCycle } from './ReviewReadCycle';
+import { ReviewReadCache, ReviewReadCacheContext } from './ReviewReadCache';
+import { ReviewTechnicalDetails } from './ReviewRecordPanes';
 import { ReviewRefresh, generationOf } from './ReviewRefresh';
-import { type ReviewRead, ReviewOutcomeRegion, problemOf, shownPayload } from './ReviewOutcome';
-import { ReviewWorkspace, useWorkspaceState } from './ReviewWorkspace';
+import {
+  type ReviewRead,
+  ReviewOutcomeRegion,
+  ReviewProblemBlock,
+  problemOf,
+  shownPayload,
+} from './ReviewOutcome';
+import { type ReadingStatus, ReviewWorkspace, useWorkspaceState } from './ReviewWorkspace';
 
 export interface ReviewTarget {
   repo: string;
@@ -77,370 +77,6 @@ const reviewShell = css({
   '& button:hover': { color: 'amber' },
   '& [data-testid=review-center-column]': { outlineOffset: '3px' },
 });
-
-const TAKEOVER = 'changeset-viewer';
-
-const pane = (title: string, children: React.ReactNode) => (
-  <section
-    style={{ marginBottom: '1.25rem', minWidth: 0, overflowWrap: 'anywhere' }}
-    data-pane={title}
-  >
-    <h3 style={{ margin: '0 0 0.4rem' }}>{title}</h3>
-    {children}
-  </section>
-);
-
-const muted = (text: string, testid?: string) => (
-  <p style={{ color: 'var(--muted)', margin: '0.2rem 0' }} data-testid={testid}>
-    {text}
-  </p>
-);
-
-const attribution = (author?: string, inputs: string[] = []) =>
-  author === undefined
-    ? `author: unresolved reference${inputs.length ? ` · inputs: ${inputs.join(', ')}` : ''}`
-    : `author: ${author}${inputs.length ? ` · inputs: ${inputs.join(', ')}` : ''}`;
-
-const applicabilityNote = (entry: { applicability?: ReviewDisplayedApplicability }) => {
-  const label = entry.applicability;
-  if (label === undefined) {
-    return null;
-  }
-  const subject =
-    label.subject_kind !== undefined && label.subject_id !== undefined
-      ? ` (${label.subject_kind} ${label.subject_id})`
-      : '';
-  return (
-    <div style={{ color: 'var(--muted)' }} data-applicability={label.state}>
-      applicability: {label.state}
-      {subject} · {label.detail}
-    </div>
-  );
-};
-
-const contextList = (records?: ReviewContextRecord[]) =>
-  records?.length ? (
-    <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }} data-testid="review-context">
-      {records.map((entry) => (
-        <li
-          key={`${entry.records}:${entry.record_id}`}
-          data-context-of={`${entry.subject_kind}:${entry.subject_id}`}
-        >
-          context {entry.records} {entry.record_id} · {entry.label} · of {entry.subject_kind}{' '}
-          {entry.subject_id} · via {entry.relationship}
-          <div style={{ color: 'var(--muted)' }}>
-            {attribution(entry.author_ref)} · references: {entry.references.join(', ')}
-          </div>
-        </li>
-      ))}
-    </ul>
-  ) : null;
-
-const applicabilityCounts = (summaries?: ReviewApplicabilitySummary[]) =>
-  summaries?.length ? (
-    <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }} data-testid="review-applicability">
-      {summaries.map((row) => (
-        <li key={row.records}>
-          supplied {row.records}: {row.supplied} · direct {row.direct} · historical {row.historical}{' '}
-          · context {row.context} · candidate {row.candidate} · unresolved {row.unresolved} · not
-          displayed {row.unrelated} — {row.detail}
-        </li>
-      ))}
-    </ul>
-  ) : null;
-
-const unresolvedList = (entries: ReviewUnresolvedReference[]) =>
-  entries.length ? (
-    <ul
-      style={{ margin: '0.2rem 0 0.6rem', paddingLeft: '1.1rem' }}
-      data-testid="review-unresolved"
-    >
-      {entries.map((entry, index) => (
-        <li key={`${entry.field}:${entry.recorded_reference ?? index}`}>
-          unresolved {entry.field}
-          {entry.recorded_reference ? ` (${entry.recorded_reference})` : ''}: {entry.detail}
-        </li>
-      ))}
-    </ul>
-  ) : null;
-
-const fieldValue = (value?: string) =>
-  value === undefined ? '(absent)' : value === '' ? '(recorded empty)' : value;
-
-function assessmentBlock(entry: ReviewAssessmentDisplay) {
-  return (
-    <li
-      key={entry.assessment_id}
-      data-testid="review-assessment"
-      data-binding={entry.binding_state}
-    >
-      <strong>{entry.disposition}</strong> · {entry.finding}
-      <div style={{ color: 'var(--muted)' }}>{entry.rationale}</div>
-      <div style={{ color: 'var(--muted)' }}>
-        {attribution(entry.author_ref, entry.examined_inputs)} · binding: {entry.binding_state}
-        {entry.role_ref ? ` · role: ${entry.role_ref}` : ''}
-      </div>
-      {applicabilityNote(entry)}
-    </li>
-  );
-}
-
-function authoredEffect(effect: ReviewAuthoredEffect) {
-  return (
-    <li key={`${effect.record_kind}:${effect.record_id}`} data-testid="review-authored-effect">
-      <strong>{effect.record_kind}</strong>
-      {effect.label ? ` · ${effect.label}` : ''} · {effect.record_id}
-      {effect.rationale ? <div>{effect.rationale}</div> : null}
-      <div style={{ color: 'var(--muted)' }}>
-        {attribution(effect.author_ref, effect.examined_inputs)}
-      </div>
-      {applicabilityNote(effect)}
-      {unresolvedList(effect.unresolved)}
-    </li>
-  );
-}
-
-function signalBlock(signal: ReviewSignal) {
-  return (
-    <li key={signal.signal_id} data-testid="review-signal">
-      <strong>{signal.condition}</strong> · input set: {signal.input_set} · {signal.signal_id}
-      <div style={{ color: 'var(--muted)' }}>
-        extractor: {signal.extractor_version} · policy: {signal.policy_version}
-      </div>
-      {signal.relationship_paths.length ? (
-        <div style={{ color: 'var(--muted)' }}>paths: {signal.relationship_paths.join(', ')}</div>
-      ) : null}
-      {signal.scope_limitations.length ? (
-        <div style={{ color: 'var(--muted)' }}>
-          scope limitations: {signal.scope_limitations.join(', ')}
-        </div>
-      ) : null}
-      {applicabilityNote(signal)}
-    </li>
-  );
-}
-
-function KnowledgeFacts({ knowledge }: { knowledge: ReviewKnowledgePane }) {
-  const conditions = knowledge.before_conditions.length || knowledge.after_conditions.length;
-  return (
-    <>
-      {conditions ? (
-        <div style={{ color: 'var(--muted)' }} data-testid="review-conditions">
-          before conditions: {knowledge.before_conditions.join('; ') || 'none recorded'} · after
-          conditions: {knowledge.after_conditions.join('; ') || 'none recorded'}
-        </div>
-      ) : null}
-      <p style={{ margin: '0.4rem 0' }} data-testid="review-revision-groups">
-        retained revisions —{' '}
-        {knowledge.revision_groups
-          .map((group) => `${group.side}:${group.record_id}=${group.selected_revision_count}`)
-          .join(' · ') || 'none selected'}
-      </p>
-      <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }} data-testid="review-field-changes">
-        {knowledge.field_changes.map((change) => (
-          <li key={`${change.item_id}:${change.field}`}>
-            {change.field}: {fieldValue(change.before_value)} → {fieldValue(change.after_value)}
-          </li>
-        ))}
-      </ul>
-    </>
-  );
-}
-
-function AuthoredRecords({ knowledge }: { knowledge: ReviewKnowledgePane }) {
-  return (
-    <>
-      <h4 style={{ margin: '0.6rem 0 0.2rem' }}>Authored effects and preservation claims</h4>
-      {knowledge.authored_effects.length ? (
-        <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }}>
-          {knowledge.authored_effects.map(authoredEffect)}
-        </ul>
-      ) : (
-        muted('No authored effect, preservation claim or unresolved question is recorded here.')
-      )}
-      <h4 style={{ margin: '0.6rem 0 0.2rem' }}>Detection signals (facts, not findings)</h4>
-      {knowledge.signals.length ? (
-        <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }}>
-          {knowledge.signals.map(signalBlock)}
-        </ul>
-      ) : (
-        muted('No detection signal was supplied to this rendering.')
-      )}
-    </>
-  );
-}
-
-function KnowledgePane({ payload }: { payload: ReviewPayload }) {
-  const { knowledge } = payload;
-  return pane(
-    'Knowledge',
-    <>
-      <div style={{ color: 'var(--muted)' }} data-testid="review-selection">
-        {payload.comparison
-          ? `comparison: ${payload.comparison.reference} · policy ${payload.comparison.policy_version}`
-          : `no knowledge comparison was made · ${knowledge.selection_detail ?? 'no subject selected'}`}
-      </div>
-      <KnowledgeStatements before={knowledge.before_statement} after={knowledge.after_statement} />
-      <KnowledgeFacts knowledge={knowledge} />
-      <AuthoredRecords knowledge={knowledge} />
-      {knowledge.assessments.length ? (
-        <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }}>
-          {knowledge.assessments.map(assessmentBlock)}
-        </ul>
-      ) : (
-        muted('UNASSESSED — no assessment is recorded against this subject.', 'review-unassessed')
-      )}
-      {contextList(knowledge.context)}
-      {applicabilityCounts(knowledge.applicability)}
-      {unresolvedList(knowledge.unresolved)}
-    </>,
-  );
-}
-
-function SourcePane({ payload }: { payload: ReviewPayload }) {
-  const { source } = payload;
-  return pane(
-    'Source',
-    <>
-      <p
-        style={{ color: 'var(--muted)', margin: '0.2rem 0' }}
-        data-testid="review-source-explorer-pointer"
-      >
-        the complete source change explorer ({source.inventory.listed_total} measured listed
-        path(s), state {source.inventory.state}
-        {source.inventory.partial ? ', partial' : ''}) is the population section of the workspace
-        above; every listed path is openable there.
-      </p>
-      <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }} data-testid="review-locations">
-        {source.locations.map((location) => (
-          <li
-            key={`${location.claim_id}:${location.path}`}
-            data-change-state={location.change_state}
-          >
-            {location.path} · role: {location.role ?? 'unclassified (no role recorded)'}
-            {location.before_only ? ' · before-only' : ''} · {location.change_state} ·{' '}
-            {location.resolution}
-            {location.rationale ? (
-              <div style={{ color: 'var(--muted)' }}>{location.rationale}</div>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-      <p style={{ margin: '0.4rem 0' }} data-testid="review-remaining">
-        {source.remaining
-          .map((count) =>
-            count.value === undefined
-              ? `${count.name}: not measured (${count.reason ?? 'no reason recorded'})`
-              : `${count.name}: ${count.value}`,
-          )
-          .join(' · ')}
-      </p>
-      {source.unattributed_changed_paths.length ? (
-        <p style={{ margin: '0.2rem 0' }} data-testid="review-unattributed">
-          changed paths with no registered attribution:{' '}
-          {source.unattributed_changed_paths.join(', ')}
-        </p>
-      ) : null}
-      {source.expansion_reference ? (
-        <p style={{ color: 'var(--muted)', margin: '0.2rem 0' }} data-testid="review-expansion">
-          full selected-candidate diff: {source.expansion_reference}
-          {source.expansion_command ? ` — ${source.expansion_command}` : ''}
-        </p>
-      ) : (
-        muted('The comparison published no source expansion for this selection.')
-      )}
-      {unresolvedList(source.unresolved)}
-    </>,
-  );
-}
-
-function EvidencePane({ payload }: { payload: ReviewPayload }) {
-  const { evidence } = payload;
-  return pane(
-    'Evidence and assessment',
-    <>
-      {evidence.evidence_state === 'recorded' ? (
-        <>
-          <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }} data-testid="review-evidence">
-            {evidence.evidence_links.map((link) => (
-              <li key={link.claim_id}>
-                evidence claim {link.claim_id}
-                {link.assessment_refs.length
-                  ? ` · assessments: ${link.assessment_refs.join(', ')}`
-                  : ''}
-                {applicabilityNote(link)}
-                {unresolvedList(link.unresolved)}
-              </li>
-            ))}
-          </ul>
-          <ul
-            style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }}
-            data-testid="review-observations"
-          >
-            {evidence.observations.map((observation) => (
-              <li key={observation.observation_id}>
-                observation {observation.observation_id} · result: {observation.execution_result}
-                <div style={{ color: 'var(--muted)' }}>
-                  candidate: {observation.tested_candidate ?? 'not recorded'} · command:{' '}
-                  {observation.command_identity ?? 'not recorded'} · artifact:{' '}
-                  {observation.result_artifact_ref ?? 'not recorded'} (
-                  {observation.result_artifact_digest ?? 'no digest'}) · environment:{' '}
-                  {observation.environment_identity ?? 'not recorded'}
-                </div>
-                {applicabilityNote(observation)}
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : (
-        muted('No recorded evidence links', 'review-no-evidence')
-      )}
-      {evidence.source_inspection_available
-        ? muted('Source-based inspection remains available in the Source pane.')
-        : null}
-      {evidence.assessments.length ? (
-        <ul style={{ margin: '0.2rem 0', paddingLeft: '1.1rem' }} data-testid="review-assessments">
-          {evidence.assessments.map(assessmentBlock)}
-        </ul>
-      ) : (
-        muted('UNASSESSED — no assessment is recorded against this subject.', 'review-unassessed')
-      )}
-      {contextList(evidence.context)}
-      {applicabilityCounts(evidence.applicability)}
-      {unresolvedList(evidence.unresolved)}
-    </>,
-  );
-}
-
-function SubmissionBlock({ payload }: { payload: ReviewPayload }) {
-  const { submission, staleness } = payload;
-  return (
-    <section style={{ marginBottom: '1.25rem' }} data-testid="review-submission">
-      {staleness.state === 'stale' ? (
-        <p style={{ margin: '0.2rem 0' }} data-testid="review-stale">
-          {staleness.statement} — previous input: {staleness.previous_comparison_ref}
-        </p>
-      ) : null}
-      {staleness.state === 'not-measured' ? (
-        <p style={{ margin: '0.2rem 0' }} data-testid="review-staleness-unmeasured">
-          {staleness.statement}
-        </p>
-      ) : null}
-      <p
-        style={{ color: 'var(--muted)', margin: '0.2rem 0' }}
-        data-submission-state={submission.state}
-      >
-        assessment submission: {submission.state === 'disabled_stale' ? 'DISABLED' : 'not offered'}{' '}
-        — {submission.reason}
-      </p>
-      <p style={{ color: 'var(--muted)', margin: '0.2rem 0' }}>next: {submission.next_action}</p>
-      <p style={{ color: 'var(--muted)', margin: '0.2rem 0' }}>
-        dispositions the existing authority accepts: {submission.proposed_dispositions.join(', ')} —
-        none is publication approval.
-      </p>
-    </section>
-  );
-}
 
 function subjectLabel(
   selectorKind: ReviewSelectorKind | undefined,
@@ -656,8 +292,15 @@ function PageControls({
   );
 }
 
+// The workspace and its record panes. `shown` is the answer for the subject on screen; while another
+// subject is pending, or its read failed or was refused, `frame` (the last admitted payload of this
+// task context) keeps the shell -- scope, navigation, family rail, source explorer and the open
+// disclosures -- mounted, and the reading area alone states the requested subject's status. Nothing
+// of the frame's subject is rendered as the requested subject's reading.
 function ReviewPanes({
   shown,
+  frame,
+  reading,
   selection,
   onSelect,
   repo,
@@ -670,6 +313,8 @@ function ReviewPanes({
   navigation,
 }: {
   shown: ReviewPayload | null;
+  frame: ReviewPayload | null;
+  reading: ReadingStatus | null;
   selection: ReviewPageRequest | undefined;
   onSelect: (page: ReviewPageRequest | undefined) => void;
   repo: string;
@@ -681,11 +326,13 @@ function ReviewPanes({
   workspace: ReturnType<typeof useWorkspaceState>;
   navigation: ReviewNavigationState;
 }) {
-  if (shown === null) return null;
+  const payload = shown ?? (reading ? frame : null);
+  if (payload === null) return null;
   return (
     <>
       <ReviewWorkspace
-        payload={shown}
+        payload={payload}
+        reading={shown === null ? reading : null}
         repo={repo}
         master={master}
         leaf={leaf}
@@ -696,28 +343,42 @@ function ReviewPanes({
         state={workspace}
         navigation={navigation}
       />
-      <details data-testid="review-details" style={{ marginTop: '1rem' }}>
-        <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>
-          Technical details · records, paging and submission contract
-        </summary>
-        <div
-          className={TAKEOVER}
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr)',
-            gap: '1rem',
-            marginTop: '0.6rem',
-          }}
-        >
-          <SubmissionBlock payload={shown} />
-          <PageControls payload={shown} selection={selection} onSelect={onSelect} />
-          <KnowledgePane payload={shown} />
-          <SourcePane payload={shown} />
-          <EvidencePane payload={shown} />
-        </div>
-      </details>
+      <ReviewTechnicalDetails
+        payload={shown}
+        unanswered={{ label: reading?.label ?? '', unavailable: Boolean(reading?.problem) }}
+        paging={
+          shown === null ? null : (
+            <PageControls payload={shown} selection={selection} onSelect={onSelect} />
+          )
+        }
+      />
     </>
   );
+}
+
+// The status of a subject whose review has not answered, bound to the question it asked: its key is
+// the read cycle's target key, and its label names the requested subject (the catalogue's label when
+// it has one). A failure or refusal carries the owner's block, labelled with that subject.
+function readingStatusOf(
+  read: ReviewRead,
+  targetKey: string,
+  subject: ReviewSubject | undefined,
+  catalogue: ReviewNavigationState['catalogue'],
+  problemBlock: (label: string) => React.ReactNode,
+): ReadingStatus | null {
+  if (read.phase === 'reviewed') return null;
+  const entry = subject
+    ? catalogue.entries?.find(
+        (row) => row.selector_kind === subject.kind && row.selector_id === subject.id,
+      )
+    : undefined;
+  const label = subject ? `${subject.kind} ${entry?.label ?? subject.id}` : 'all source changes';
+  return {
+    key: targetKey,
+    subject: subject ? `${subject.kind}:${subject.id}` : 'task-context',
+    label,
+    problem: read.phase === 'loading' ? null : problemBlock(label),
+  };
 }
 
 function ReviewHeader({
@@ -798,14 +459,16 @@ function useSurface({
   const [instead, setInstead] = useState<ReviewFailure | null>(null);
   const [selection, setSelection] = useState<ReviewPageRequest | undefined>(undefined);
   const workspace = useWorkspaceState();
+  // One cache per mounted surface: reclaimed with it (see `ReviewReadCache`).
+  const [cache] = useState(() => new ReviewReadCache());
   const selectSubject = (subject: ReviewSubject | undefined, context?: FamilySelection) => {
-    workspace.focusSelection.current = true;
+    workspace.focusSelection.current = { from: document.activeElement };
     navigation.onSelect(subject);
     setInstead(null);
     setSelection(undefined);
     workspace.setChosen(context ?? null);
   };
-  const { read, retained, carried, refresh } = useReviewReadCycle({
+  const cycle = useReviewReadCycle({
     repo,
     master,
     leaf,
@@ -815,8 +478,10 @@ function useSurface({
     instead,
     selection,
     hold: navigation.settling,
+    cache,
   });
-  const targetKey = targetKeyOf(
+  const { read, retained, frame } = cycle;
+  const key = targetKeyOf(
     repo,
     master,
     leaf,
@@ -826,106 +491,95 @@ function useSurface({
     selection,
     history,
   );
-
-  const coherent = retained !== null && retained.key === targetKey ? retained.payload : null;
+  const coherent = retained !== null && retained.key === key ? retained.payload : null;
   const shown = shownPayload(read, coherent);
-  const problem = problemOf(read);
   useObservedComparison(navigation.observeComparison, shown);
-
+  const asked = instead === null ? navigation.subject : undefined;
+  const problem = problemOf(read);
+  // The owner's failure or refusal for the requested subject, rendered in the reading area.
+  const problemBlock = (label: string) =>
+    problem === null ? null : (
+      <ReviewProblemBlock
+        origin={read.phase === 'refused' ? 'refusal' : 'failure'}
+        problem={problem}
+        subject={label}
+        onRetry={retryFor(read, cycle.refresh)}
+        onOpenTaskContext={insteadFor(read, problem, instead, setInstead)}
+      />
+    );
   return {
-    repo,
-    master,
-    leaf,
-    selectorKind,
-    selectorId,
-    history,
-    onBack,
-    navigation,
-    selectSubject,
-    instead,
-    setInstead,
-    selection,
-    setSelection,
-    workspace,
-    read,
-    carried,
-    refresh,
-    coherent,
-    shown,
-    problem,
+    ...{ repo, master, leaf, selectorKind, selectorId, history, onBack, navigation, selectSubject },
+    ...{ instead, setInstead, selection, setSelection, workspace, cache, frame, coherent, shown },
+    ...{ read, carried: cycle.carried, refresh: cycle.refresh, problem },
+    reading:
+      frame === null || shown !== null
+        ? null
+        : readingStatusOf(read, key, asked, navigation.catalogue, problemBlock),
   };
 }
 
 export function ReviewSurface(props: ReviewTarget & { onBack: () => void }) {
-  const {
-    repo,
-    master,
-    leaf,
-    selectorKind,
-    selectorId,
-    history,
-    onBack,
-    navigation,
-    selectSubject,
-    instead,
-    setInstead,
-    selection,
-    setSelection,
-    workspace,
-    read,
-    carried,
-    refresh,
-    coherent,
-    shown,
-    problem,
-  } = useSurface(props);
+  const surface = useSurface(props);
+  const { repo, master, leaf, history, read, shown, reading, refresh, instead } = surface;
+  // Any reading gesture makes the subject on screen the reader's own: a catalogue that answers late
+  // then fills the navigation without moving the reader (see `useReviewNavigation`).
+  const root = useRef<HTMLDivElement>(null);
+  useReaderEngagement(root, surface.navigation.engage);
   return (
     <div
+      ref={root}
       className={reviewShell}
       data-testid="review-surface"
       data-comparison={shown?.comparison?.reference}
       data-review-target={`${repo}/${master}/${leaf}`}
       data-review-history={history ?? 'live'}
+      data-review-pending={reading && !reading.problem ? reading.subject : undefined}
+      data-review-unavailable={reading?.problem ? reading.subject : undefined}
       style={{ height: '100%', minHeight: 0, minWidth: 0, overflowY: 'auto' }}
     >
-      <ReviewHeader
-        repo={repo}
-        master={master}
-        leaf={leaf}
-        selectorKind={selectorKind}
-        selectorId={selectorId}
-        instead={instead}
-        history={history}
-        onBack={onBack}
-        refresh={
-          <ReviewRefresh
-            onRefresh={refresh}
-            busy={read.phase === 'loading'}
-            generation={generationOf(read, carried, shown)}
-          />
-        }
-      />
-      <ReviewOutcomeRegion
-        read={read}
-        instead={instead}
-        shown={shown}
-        lastCoherent={read.phase === 'failed' ? coherent : null}
-        onRetry={retryFor(read, refresh)}
-        onOpenTaskContext={insteadFor(read, problem, instead, setInstead)}
-      />
-      <ReviewPanes
-        shown={shown}
-        selection={selection}
-        onSelect={setSelection}
-        repo={repo}
-        master={master}
-        leaf={leaf}
-        selectorKind={selectorKind}
-        selectorId={selectorId}
-        history={history}
-        workspace={workspace}
-        navigation={{ ...navigation, onSelect: selectSubject }}
-      />
+      <ReviewReadCacheContext.Provider value={surface.cache}>
+        <ReviewHeader
+          repo={repo}
+          master={master}
+          leaf={leaf}
+          selectorKind={surface.selectorKind}
+          selectorId={surface.selectorId}
+          instead={instead}
+          history={history}
+          onBack={surface.onBack}
+          refresh={
+            <ReviewRefresh
+              onRefresh={refresh}
+              busy={read.phase === 'loading'}
+              generation={generationOf(read, surface.carried, shown)}
+            />
+          }
+        />
+        <ReviewOutcomeRegion
+          read={read}
+          instead={instead}
+          shown={shown}
+          lastCoherent={read.phase === 'failed' ? surface.coherent : null}
+          onRetry={retryFor(read, refresh)}
+          onOpenTaskContext={insteadFor(read, surface.problem, instead, surface.setInstead)}
+          readingInWorkspace={reading !== null}
+        />
+        <ReviewPanes
+          shown={shown}
+          frame={surface.frame}
+          reading={reading}
+          selection={surface.selection}
+          onSelect={surface.setSelection}
+          repo={repo}
+          master={master}
+          leaf={leaf}
+          selectorKind={surface.selectorKind}
+          selectorId={surface.selectorId}
+          history={history}
+          workspace={surface.workspace}
+          navigation={{ ...surface.navigation, onSelect: surface.selectSubject }}
+        />
+      </ReviewReadCacheContext.Provider>
     </div>
   );
 }

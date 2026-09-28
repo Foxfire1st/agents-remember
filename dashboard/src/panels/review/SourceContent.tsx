@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 
 import type {
   ReviewChangedFile,
@@ -10,6 +10,7 @@ import type {
 } from '../../data/review';
 import { reviewProblemFromCause, reviewSourceContent } from '../../data/review';
 import { ReviewProblemBlock } from './ReviewOutcome';
+import { ReviewReadCacheContext, sourceContentKey } from './ReviewReadCache';
 import { DiffPane, type DiffMode } from '../changeset/DiffPane';
 import { FilePane } from '../file-viewer/FilePane';
 
@@ -164,6 +165,60 @@ function Expansion({
   );
 }
 
+interface SourceContentRequest {
+  repo: string;
+  master: string;
+  leaf: string;
+  path: string;
+  beforeCodeTreeId: string;
+  afterCodeTreeId: string;
+}
+
+// One entry's content read. The answer and the failure are held with the request they answer, so a
+// different path or generation never renders a previous entry's content, and content the surface
+// already opened for this exact request is rendered from its cache without asking again.
+function useSourceContentRead(request: SourceContentRequest): {
+  result: ReviewSourceContentResult | null;
+  problem: ReviewFailure | null;
+  retry: () => void;
+} {
+  const { repo, master, leaf, path, beforeCodeTreeId, afterCodeTreeId } = request;
+  const cache = useContext(ReviewReadCacheContext);
+  const key = sourceContentKey(repo, master, leaf, path, beforeCodeTreeId, afterCodeTreeId);
+  const [answer, setAnswer] = useState<{ key: string; result: ReviewSourceContentResult } | null>(
+    null,
+  );
+  const [failure, setFailure] = useState<{ key: string; problem: ReviewFailure } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (cache?.source(key) !== undefined) return undefined;
+    let live = true;
+    reviewSourceContent(repo, master, leaf, path, beforeCodeTreeId, afterCodeTreeId)
+      .then((opened) => {
+        if (!live) return;
+        cache?.keepSource(key, opened);
+        setAnswer({ key, result: opened });
+      })
+      .catch((cause: unknown) => {
+        if (live) setFailure({ key, problem: reviewProblemFromCause(cause) });
+      });
+    return () => {
+      live = false;
+    };
+  }, [cache, key, repo, master, leaf, path, beforeCodeTreeId, afterCodeTreeId, attempt]);
+
+  const result = cache?.source(key) ?? (answer?.key === key ? answer.result : null);
+  return {
+    result,
+    problem: result === null && failure?.key === key ? failure.problem : null,
+    retry: () => {
+      setFailure(null);
+      setAttempt((previous) => previous + 1);
+    },
+  };
+}
+
 export function SourceContent({
   repo,
   master,
@@ -183,25 +238,14 @@ export function SourceContent({
   mode?: DiffMode;
   collapse?: boolean;
 }) {
-  const [result, setResult] = useState<ReviewSourceContentResult | null>(null);
-  const [problem, setProblem] = useState<ReviewFailure | null>(null);
-  const [attempt, setAttempt] = useState(0);
-
-  useEffect(() => {
-    let live = true;
-    setResult(null);
-    setProblem(null);
-    reviewSourceContent(repo, master, leaf, entry.path, beforeCodeTreeId, afterCodeTreeId)
-      .then((opened) => {
-        if (live) setResult(opened);
-      })
-      .catch((cause: unknown) => {
-        if (live) setProblem(reviewProblemFromCause(cause));
-      });
-    return () => {
-      live = false;
-    };
-  }, [repo, master, leaf, entry.path, beforeCodeTreeId, afterCodeTreeId, attempt]);
+  const { result, problem, retry } = useSourceContentRead({
+    repo,
+    master,
+    leaf,
+    path: entry.path,
+    beforeCodeTreeId,
+    afterCodeTreeId,
+  });
 
   if (problem !== null) {
     return (
@@ -209,7 +253,7 @@ export function SourceContent({
         origin="failure"
         subject="this entry's content"
         problem={problem}
-        onRetry={() => setAttempt((previous) => previous + 1)}
+        onRetry={retry}
       />
     );
   }

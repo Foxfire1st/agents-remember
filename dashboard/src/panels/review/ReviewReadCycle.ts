@@ -4,8 +4,9 @@
 // WHY THIS IS ITS OWN MODULE. `ReviewSurface.tsx` is over the repository's file-size rail and the
 // component was over the per-function rail; the read cycle is a responsibility of its own (it owns a
 // request sequence, a retained generation and a refresh), so it lives here and the surface renders
-// what it returns. The outcome states stay in `ReviewOutcome.tsx` and the refresh control in
-// `ReviewRefresh.tsx`: one owner each, no second copy of either.
+// what it returns. The outcome states stay in `ReviewOutcome.tsx`, the refresh control in
+// `ReviewRefresh.tsx`, the admitted roster-walk merge in `familyWalkMerge.ts` and the kept answers in
+// `ReviewReadCache.ts`: one owner each, no second copy of any.
 //
 // THE THREE RULES THIS MODULE ENFORCES
 //
@@ -35,6 +36,14 @@
 //     enough: switching away from a question and back again restores the key, and the stale identity
 //     with it.
 //
+//   * AN ANSWER IS BOUND TO ITS QUESTION. The read state carries the key it answers, and the surface is
+//     handed a read only for the question on screen: until the new question's answer (or its kept
+//     copy) exists, the read is `loading` for THAT question, never the previous subject's payload.
+//   * A WHOLE SUBJECT IS READ ONCE PER COMPARISON. An admitted whole-subject answer is kept in the
+//     surface's `ReviewReadCache` under its key, and returning to that question renders the kept
+//     answer without a request. A refresh forgets the question it re-asks; an answer from another
+//     comparison generation empties the cache (see that module).
+//
 // WHAT IT DOES NOT DO. No timer, no retry ladder, no polling: a read happens when the question changes
 // or when the reader asks. A read that fails leaves the last coherent payload retained and lets the
 // outcome region state the failure beside it, which is the packet's "a failed refresh retains the
@@ -43,8 +52,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type {
-  ReviewFamilyMember,
-  ReviewFamilyRevisionContext,
   ReviewFailure,
   ReviewHistory,
   ReviewPagedCollection,
@@ -53,6 +60,8 @@ import type {
 } from '../../data/review';
 import { intentReview, reviewProblemFromCause, reviewProblemFromRefusal } from '../../data/review';
 import { type ReviewRead, readFrom } from './ReviewOutcome';
+import type { ReviewReadCache } from './ReviewReadCache';
+import { mergeFamilyContinuation } from './familyWalkMerge';
 
 // The bounded collection this surface is paging and the cursor it continues (ICR-R10). It is part of
 // the question rather than a decoration on the answer, so it participates in the target key.
@@ -129,26 +138,29 @@ function askReview(
 // One read, started for the question that is on screen now, returning the cleanup that supersedes it.
 // The sequence number and the cleanup flag are the two reasons an answer may be dropped, and they are
 // decided here rather than in the hook so the hook reads as the cycle it is.
-function startRead(
-  reads: { current: number },
-  context: {
-    targetKey: string;
-    questionKey: string;
-    retainedRef: { current: RetainedReview | null };
-    carriedRef: { current: CarriedBinding | null };
-    setRead: (read: ReviewRead) => void;
-    setRetained: (update: (previous: RetainedReview | null) => RetainedReview | null) => void;
-    request: {
-      repo: string;
-      master: string;
-      leaf: string;
-      selectorKind?: ReviewSelectorKind;
-      selectorId?: string;
-      selection: ReviewPageRequest | undefined;
-      history?: ReviewHistory;
-    };
-  },
-): () => void {
+interface ReadContext {
+  targetKey: string;
+  questionKey: string;
+  retainedRef: { current: RetainedReview | null };
+  carriedRef: { current: CarriedBinding | null };
+  cache: ReviewReadCache;
+  setAnswer: (answer: KeyedRead) => void;
+  setRetained: (update: (previous: RetainedReview | null) => RetainedReview | null) => void;
+  // Called with every admitted payload: the shell the surface keeps while a newly selected subject is
+  // pending, failed or refused.
+  setFrame: (payload: ReviewPayload) => void;
+  request: {
+    repo: string;
+    master: string;
+    leaf: string;
+    selectorKind?: ReviewSelectorKind;
+    selectorId?: string;
+    selection: ReviewPageRequest | undefined;
+    history?: ReviewHistory;
+  };
+}
+
+function startRead(reads: { current: number }, context: ReadContext): () => void {
   let superseded = false;
   const askedFor = context.targetKey;
   const seq = ++reads.current;
@@ -163,6 +175,14 @@ function startRead(
     carried !== null && carried.key === askedFor && carried.readNumber === seq
       ? carried.digest
       : null;
+  const whole = context.request.selection === undefined;
+  const kept = whole && previous === null ? context.cache.review(askedFor) : undefined;
+  if (kept !== undefined) {
+    // The question was answered for this comparison already: render that answer, ask nothing. The
+    // read number is still consumed, so a later read of this question cannot pose as a refresh.
+    admit(context, askedFor, kept);
+    return () => undefined;
+  }
   const shown = context.retainedRef.current;
   const cursor =
     context.request.selection?.of === 'family_members'
@@ -170,27 +190,44 @@ function startRead(
       : undefined;
   const continuing = continuedReview(shown, context.questionKey, cursor, previous);
   // Keep the coherent reading path mounted while a continuation is checked. Every other question
-  // and ordinary refresh retains the existing replacement and newest-answer rules.
-  context.setRead(
-    continuing ? { phase: 'reviewed', payload: continuing.payload } : { phase: 'loading' },
-  );
+  // and ordinary refresh is pending for its own key until its answer arrives.
+  context.setAnswer({
+    key: askedFor,
+    read: continuing ? { phase: 'reviewed', payload: continuing.payload } : { phase: 'loading' },
+  });
   context.setRetained((retained) =>
     continuing ? { ...continuing, key: askedFor } : retained?.key === askedFor ? retained : null,
   );
   askReview({ ...context.request, previous }, (answered) => {
     if (!current()) return;
     const admitted = familyContinuationRead(answered, continuing, cursor);
-    context.setRead(admitted);
-    if (admitted.phase === 'reviewed')
-      context.setRetained(() => ({
-        key: askedFor,
-        questionKey: context.questionKey,
-        payload: admitted.payload,
-      }));
+    if (admitted.phase === 'reviewed') {
+      // A refresh's answer states its staleness against the identity it carried; it is shown once,
+      // for that refresh, and never re-rendered later as the plain answer to a returning selection.
+      if (whole && previous === null) context.cache.keepReview(askedFor, admitted.payload);
+      else context.cache.observe(admitted.payload);
+      admit(context, askedFor, admitted.payload);
+      return;
+    }
+    context.setAnswer({ key: askedFor, read: admitted });
   });
   return () => {
     superseded = true;
   };
+}
+
+function admit(context: ReadContext, key: string, payload: ReviewPayload): void {
+  context.setAnswer({ key, read: { phase: 'reviewed', payload } });
+  context.setRetained(() => ({ key, questionKey: context.questionKey, payload }));
+  context.setFrame(payload);
+}
+
+// A read together with the question it answers. The surface is only ever handed the read whose key is
+// the question on screen, so a previous subject's answer cannot render under the new subject's header
+// even for the render between the selection and the effect that starts the new read.
+interface KeyedRead {
+  key: string;
+  read: ReviewRead;
 }
 
 interface RetainedReview {
@@ -232,152 +269,6 @@ function familyContinuationRead(
   };
 }
 
-function mergeMember(
-  previous: ReviewFamilyMember | undefined,
-  next: ReviewFamilyMember,
-): ReviewFamilyMember | null {
-  if (!previous) return next;
-  if (
-    previous.invariant_revision_id !== next.invariant_revision_id ||
-    (previous.state === 'recorded' &&
-      next.state === 'recorded' &&
-      previous.payload_digest !== next.payload_digest)
-  )
-    return null;
-  const sources = new Map(previous.sources.map((source) => [source.claim_id, source]));
-  for (const source of next.sources) {
-    const known = sources.get(source.claim_id);
-    if (known && JSON.stringify(known) !== JSON.stringify(source)) return null;
-    sources.set(source.claim_id, source);
-  }
-  // Sparse later claims never erase the exact content already delivered for this membership.
-  return { ...(previous.state === 'recorded' ? previous : next), sources: [...sources.values()] };
-}
-
-function mergeFamilySide(
-  previous: ReviewFamilyRevisionContext,
-  next: ReviewFamilyRevisionContext,
-  cursor: string,
-): ReviewFamilyRevisionContext | null {
-  if (!sameFamilyWalk(previous, next)) return null;
-  // Other walks are resent at page one by the server; they cannot reset an already advanced walk.
-  if (next.page?.state !== 'continued') return previous;
-  if (next.page.continued_from !== cursor) return null;
-  if (previous.page?.continuation !== cursor) {
-    return JSON.stringify(previous.page) === JSON.stringify(next.page) ? previous : null;
-  }
-  const members = new Map(previous.members.map((member) => [member.member_id, member]));
-  for (const member of next.members) {
-    const merged = mergeMember(members.get(member.member_id), member);
-    if (!merged) return null;
-    members.set(member.member_id, merged);
-  }
-  return {
-    ...next,
-    members: [...members.values()],
-    detail: `Loaded ${members.size} exact member context(s) of ${next.members_total} recorded memberships across this roster walk.`,
-  };
-}
-
-function sameFamilyWalk(
-  previous: ReviewFamilyRevisionContext,
-  next: ReviewFamilyRevisionContext,
-): boolean {
-  return [
-    [previous.family_id, next.family_id],
-    [previous.side, next.side],
-    [previous.state, next.state],
-    [previous.family_revision_id, next.family_revision_id],
-    [previous.guarantee?.payload_digest, next.guarantee?.payload_digest],
-    [JSON.stringify(previous.page?.scope), JSON.stringify(next.page?.scope)],
-  ].every(([known, supplied]) => known === supplied);
-}
-
-function admittedFamilyContinuation(
-  previous: ReviewPayload,
-  next: ReviewPayload,
-  cursor: string,
-): boolean {
-  const page = next.page;
-  if (
-    !previous.comparison ||
-    !next.comparison ||
-    !previous.family_context ||
-    !next.family_context ||
-    !page
-  )
-    return false;
-  return [
-    page.collection === 'family_members',
-    page.state === 'continued',
-    page.continued_from === cursor,
-    !next.page_refusal,
-    next.staleness.state !== 'stale',
-    JSON.stringify(previous.comparison) === JSON.stringify(next.comparison),
-    JSON.stringify(previous.candidate) === JSON.stringify(next.candidate),
-    JSON.stringify(previous.knowledge.revision_selection) ===
-      JSON.stringify(next.knowledge.revision_selection),
-    previous.family_context.entries.length === next.family_context.entries.length,
-  ].every(Boolean);
-}
-
-// This is presentation of one admitted walk, not another dataset or selection authority. The
-// latest response still owns the primary statements, source inventory, evidence and assessments.
-function mergeFamilyContinuation(
-  previous: ReviewPayload,
-  next: ReviewPayload,
-  cursor: string,
-): ReviewPayload | null {
-  if (!admittedFamilyContinuation(previous, next, cursor)) return null;
-  const families = previous.family_context!;
-  const incoming = next.family_context!;
-  const byFamily = new Map(families.entries.map((entry) => [entry.family_id, entry]));
-  const entries = [];
-  let continued = 0;
-  for (const entry of incoming.entries) {
-    const known = byFamily.get(entry.family_id);
-    if (!known || JSON.stringify(known.selection) !== JSON.stringify(entry.selection)) return null;
-    const before = mergeFamilySide(known.before, entry.before, cursor);
-    const after = mergeFamilySide(known.after, entry.after, cursor);
-    if (!before || !after) return null;
-    continued += [entry.before, entry.after].filter(
-      (side) => side.page?.continued_from === cursor,
-    ).length;
-    const complete = [before, after].every(
-      (side) =>
-        side.state === 'not_recorded' ||
-        (side.page?.complete &&
-          side.members.length === side.members_total &&
-          side.members.every((member) => member.state === 'recorded')),
-    );
-    entries.push({
-      ...entry,
-      before,
-      after,
-      state: complete ? ('recorded' as const) : entry.state,
-      detail: `${entry.selection.statement}; before: ${before.detail}; after: ${after.detail}`,
-    });
-  }
-  if (continued !== 1) return null;
-  return {
-    ...next,
-    family_context: {
-      ...incoming,
-      entries,
-      state: entries.every((entry) => entry.state === 'recorded') ? 'recorded' : incoming.state,
-      unique_member_revision_total: new Set(
-        entries.flatMap((entry) =>
-          [entry.before, entry.after].flatMap((side) =>
-            side.members.map((member) => member.invariant_revision_id),
-          ),
-        ),
-      ).size,
-      detail:
-        'Loaded family context retains the exact members and source claims from these bounded roster walks.',
-    },
-  };
-}
-
 // A comparison identity together with the ONE read it is the previous input of (L17-F1). The three
 // fields are one value because an identity alone cannot answer "is this read replacing the display it
 // names?": the question key says which display it came from, and the read number says which read was
@@ -403,6 +294,10 @@ export interface ReviewReadCycle {
   // The reader's own request that the displayed comparison be re-read against the candidate as it is
   // now: the same question, carrying the identity of what is on screen.
   refresh: () => void;
+  // The last payload admitted for this task context, whichever subject it answered. The surface keeps
+  // its shell (scope, navigation, source explorer) over it while another subject is pending, failed or
+  // refused, and never renders it as that subject's reading. `null` before any answer.
+  frame: ReviewPayload | null;
 }
 
 interface ReviewReadQuestion {
@@ -417,6 +312,39 @@ interface ReviewReadQuestion {
   // True while the question is not settled yet (the reviewer's first subject is still being chosen):
   // no read is started, so the surface does not ask for a question it is about to replace.
   hold?: boolean;
+  // The surface's cache of answers for the comparison on screen.
+  cache: ReviewReadCache;
+}
+
+function readOnScreen(
+  answer: KeyedRead,
+  targetKey: string,
+  question: {
+    retained: RetainedReview | null;
+    questionKey: string;
+    selection: ReviewPageRequest | undefined;
+    hold: boolean;
+    cache: ReviewReadCache;
+  },
+): ReviewRead {
+  if (answer.key === targetKey) return answer.read;
+  const { retained, questionKey, selection, hold, cache } = question;
+  const cursor = selection?.of === 'family_members' ? selection.continuation : undefined;
+  const continuing = continuedReview(retained, questionKey, cursor, null);
+  if (continuing) return { phase: 'reviewed', payload: continuing.payload };
+  const kept = hold || selection !== undefined ? undefined : cache.review(targetKey);
+  return kept ? { phase: 'reviewed', payload: kept } : { phase: 'loading' };
+}
+
+// The last admitted payload of one task context. A payload admitted under another context (the
+// surface re-targeted to another leaf or record) is never that context's frame.
+function useFrame(context: string): [ReviewPayload | null, (payload: ReviewPayload) => void] {
+  const [frame, setFrameOf] = useState<{ context: string; payload: ReviewPayload } | null>(null);
+  const setFrame = useCallback(
+    (payload: ReviewPayload) => setFrameOf({ context, payload }),
+    [context],
+  );
+  return [frame?.context === context ? frame.payload : null, setFrame];
 }
 
 // A ref that always holds the latest render's value: read by callbacks and effects that must see the
@@ -437,9 +365,11 @@ export function useReviewReadCycle({
   instead,
   selection,
   hold = false,
+  cache,
 }: ReviewReadQuestion): ReviewReadCycle {
-  const [read, setRead] = useState<ReviewRead>({ phase: 'loading' });
+  const [answer, setAnswer] = useState<KeyedRead>({ key: '', read: { phase: 'loading' } });
   const [retained, setRetained] = useState<RetainedReview | null>(null);
+  const [frame, setFrame] = useFrame(`${repo}/${master}/${leaf}/${history ?? 'live'}`);
   // The displayed comparison's identity, WITH the question it was displayed under and the read asked
   // to replace it (L17-F1): an identity alone is what let a digest be carried into a read that never
   // replaced the display it names.
@@ -450,25 +380,8 @@ export function useReviewReadCycle({
   // ones it really reads and no lint suppression is needed to say so. The two `instead`-selected
   // fields are part of the question: a refusal answered by the task's own source inventory asks no
   // subject, so the request names none.
-  const targetKey = targetKeyOf(
-    repo,
-    master,
-    leaf,
-    instead,
-    selectorKind,
-    selectorId,
-    selection,
-    history,
-  );
-  const questionKey = targetKeyOf(
-    repo,
-    master,
-    leaf,
-    instead,
-    selectorKind,
-    selectorId,
-    undefined,
-    history,
+  const [targetKey, questionKey] = [selection, undefined].map((page) =>
+    targetKeyOf(repo, master, leaf, instead, selectorKind, selectorId, page, history),
   );
   const asked = useMemo(
     () => ({
@@ -489,6 +402,7 @@ export function useReviewReadCycle({
   // restarting a read, and `startRead` decides from them whether the identity may be sent.
   const retainedRef = useLatest(retained);
   const carriedRef = useLatest(carried);
+  const targetRef = useLatest(targetKey);
 
   // One read, for the question that is on screen when it starts.
   useEffect(() => {
@@ -498,13 +412,17 @@ export function useReviewReadCycle({
       questionKey,
       retainedRef,
       carriedRef,
-      setRead,
+      cache,
+      setAnswer,
       setRetained,
+      setFrame,
       request: asked,
     });
-  }, [targetKey, questionKey, refreshNonce, asked, hold, retainedRef, carriedRef]);
+  }, [targetKey, questionKey, refreshNonce, asked, hold, retainedRef, carriedRef, cache, setFrame]);
 
   const refresh = useCallback(() => {
+    // A refresh re-asks the server: the kept answer for the question on screen is not the answer.
+    cache.forgetReview(targetRef.current);
     const shown = retainedRef.current;
     const shownBinding = shown?.payload.comparison?.binding_digest;
     // The identity is filed with the question it was displayed for AND the read that will replace it,
@@ -518,7 +436,7 @@ export function useReviewReadCycle({
       });
     }
     setRefreshNonce((nonce) => nonce + 1);
-  }, [retainedRef]);
+  }, [retainedRef, targetRef, cache]);
 
   // The identity the notice may describe: the one THIS read carried, for the question being asked NOW,
   // and only when this read is the one the refresh asked to replace that display. All THREE conjuncts
@@ -535,5 +453,19 @@ export function useReviewReadCycle({
       ? carried.digest
       : null;
 
-  return { read, retained, carried: carriedHere, refresh };
+  // The read for the question on screen: its own answer; else, in the same pass as the selection, the
+  // walk it continues or the answer kept for it (so neither a roster page nor a return to a subject
+  // flashes a pending state); else pending for this question.
+  const read = useMemo(
+    () => readOnScreen(answer, targetKey, { retained, questionKey, selection, hold, cache }),
+    [answer, targetKey, retained, questionKey, selection, hold, cache],
+  );
+
+  return {
+    read,
+    retained,
+    carried: carriedHere,
+    refresh,
+    frame,
+  };
 }

@@ -28,6 +28,11 @@ export interface ReviewNavigation extends ReviewNavigationState {
   // the entry catalogue describes; a different pair later (a refresh that reached a new candidate
   // generation) re-reads the catalogue for it.
   observeComparison: (snapshots: string | undefined) => void;
+  // The reader acted inside the reviewer (pointer, key, wheel or touch). Once the bounded wait has
+  // released a read, the subject on screen becomes the reader's own choice, so a catalogue that
+  // answers later fills the navigation without moving the reader to its first family. A reader who
+  // has not acted yet is still moved there: that is the landing a prompt catalogue gives.
+  engage: () => void;
 }
 
 const row = css({
@@ -142,7 +147,8 @@ export function ReviewNavigation({
 // The longest the reviewer's first read waits for the catalogue to choose a subject. The catalogue
 // read is one indexed listing (tens of milliseconds on a real task), so the bound only matters when it
 // is slow or stalled; then the task-context review is read at the bound, exactly as it is when the
-// catalogue refuses, and the first subject is selected when the catalogue does answer.
+// catalogue refuses. When the catalogue does answer, its first subject is selected only if the reader
+// has not started working in the task-context view (`engage`); otherwise it only fills the navigation.
 export const SUBJECT_HOLD_MS = 750;
 
 // An explicit source-only choice remains source-only when the catalogue refreshes.
@@ -189,13 +195,38 @@ export function useReviewNavigation(target: {
     },
     [comparison],
   );
+  const engage = useCallback(() => {
+    if (settling) return;
+    // Functional so an explicit selection queued by the same gesture is never overwritten.
+    setChoice((previous) => (previous?.key === key ? previous : { key, subject }));
+  }, [settling, key, subject]);
   return {
     catalogue,
     subject,
     onSelect: (subject) => setChoice({ key, subject }),
     settling,
     observeComparison,
+    engage,
   };
+}
+
+// The gestures that count as the reader working in the reviewer, observed (never handled) on the
+// surface's root: they only tell the navigation the subject on screen is now the reader's own.
+const ENGAGING_EVENTS = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
+
+export function useReaderEngagement(
+  root: React.RefObject<HTMLElement | null>,
+  engage: ReviewNavigation['engage'],
+): void {
+  useEffect(() => {
+    const node = root.current;
+    if (!node) return undefined;
+    for (const name of ENGAGING_EVENTS)
+      node.addEventListener(name, engage, { capture: true, passive: true });
+    return () => {
+      for (const name of ENGAGING_EVENTS) node.removeEventListener(name, engage, { capture: true });
+    };
+  }, [root, engage]);
 }
 
 // Report the snapshot pair the surface shows to the navigation that keys its catalogue on it.

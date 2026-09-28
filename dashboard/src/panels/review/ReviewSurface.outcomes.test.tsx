@@ -450,8 +450,15 @@ describe("the review surface's read states", () => {
     const failure = await view.findByTestId("review-failure");
     expect(failure.dataset.reviewState).toBe("network");
     expect(view.getByTestId("review-subject").textContent).toContain("a-different-subject");
-    // The header above names B; A's comparison, A's inventory and any retention note are gone.
-    expect(view.queryByTestId("review-inventory")).toBeNull();
+    // The header above names B; A's comparison, A's reading and any retention note are gone. The
+    // failure is stated in the reading area, labelled with B, while the task's own shell -- its
+    // complete source change inventory and navigation, which belong to no subject -- stays usable
+    // (a failed selection does not destroy available navigation).
+    expect(failure.closest('[data-testid="review-reading-problem"]')?.getAttribute("data-problem-subject")).toBe(
+      "invariant:a-different-subject",
+    );
+    expect(view.getByTestId("review-inventory").textContent).toContain("6 changed files");
+    expect(view.queryByTestId("review-center")).toBeNull();
     expect(view.queryByTestId("review-retained-generation")).toBeNull();
     expect(view.queryByTestId("review-known-empty")).toBeNull();
     expect(view.queryByTestId("review-surface")?.getAttribute("data-comparison")).toBeNull();
