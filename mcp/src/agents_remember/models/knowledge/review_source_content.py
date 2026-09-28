@@ -41,10 +41,12 @@ from agents_remember.models.knowledge.review import (
 )
 
 __all__ = [
+    "ReviewSourceAdmission",
     "ReviewSourceContentRequest",
     "ReviewSourceContentResult",
     "ReviewSourceCurrentness",
     "ReviewSourceExpansion",
+    "ReviewSourceExpansionStatus",
     "ReviewSourcePathBound",
     "ReviewSourceSide",
     "ReviewSourceSideState",
@@ -83,11 +85,26 @@ _TEXT_STATES: tuple[ReviewSourceSideState, ...] = ("present", "symlink")
 # now, or the leaf has moved past them, or (``unmeasured``) the recheck could not answer.
 ReviewSourceCurrentness = Literal["current", "superseded", "unmeasured"]
 
-# The two measurements that can admit a path, named on every expansion. The first is the requested
+# The two measurements that bound a path, named on every expansion. The first is the requested
 # generation's own change set; the second is the one this leaf's review publishes, used only when the
-# requested pair's measurement could not be made -- so a path is never read outside a measured change
-# set, whatever state the requested generation is in.
+# requested pair's measurement could not be made. A changed path is read only when one of them lists
+# it; the one other admitted population -- an unchanged path a realization recorded in the same
+# comparison's knowledge is anchored at (``admission`` below) -- is bounded by the requested
+# generation's own measurement, which is what establishes that it is unchanged. No path outside those
+# two populations is read, whatever state the requested generation is in.
 ReviewSourcePathBound = Literal["requested_generation", "leaf_change_set"]
+
+# Why the path was opened at all, named on every expansion so a renderer states it rather than
+# inferring it. ``changed`` is a path a measured change set lists. ``attributed_unchanged`` is a path
+# the requested pair's measured change set does *not* list, opened only because a realization the
+# bound comparison's own knowledge records is anchored at it; it is context for that realization and
+# never a member of the change inventory or its counts.
+ReviewSourceAdmission = Literal["changed", "attributed_unchanged"]
+
+# An expansion's status: the inventory's own vocabulary for a changed path, plus ``unchanged`` for an
+# attributed path the measured pair did not change. ``unchanged`` is a measurement (the pair was
+# compared and does not differ here) and is kept apart from ``unknown`` (no comparison was made).
+ReviewSourceExpansionStatus = ReviewFileStatus | Literal["unchanged"]
 
 
 class ReviewSourceSide(KnowledgeModel):
@@ -149,6 +166,12 @@ class ReviewSourceExpansion(KnowledgeModel):
     read -- the path is still a changed path of a measured pair -- and it is stated rather than
     implied, so a reader can always tell which change set the row came from.
 
+    ``admission`` states why the path was opened: ``changed`` for a path a measured change set lists,
+    and ``attributed_unchanged`` for a path the requested pair's measured change set does not list but
+    that a realization recorded in the bound comparison's knowledge is anchored at. The second is
+    always ``unchanged`` in ``status`` and always bounded by the requested generation's own
+    measurement, because "unchanged" is only a fact about a pair that was measured.
+
     ``command`` is the exact reproduction of the two reads, naming both trees and the path, so a
     reader can obtain the same bytes without this surface. It is evidence *beside* the content and
     never a substitute for it: a reference with no text is the failure this vocabulary exists to
@@ -156,7 +179,7 @@ class ReviewSourceExpansion(KnowledgeModel):
     """
 
     path: str = Field(min_length=1, max_length=PATH_MAX_LENGTH)
-    status: ReviewFileStatus
+    status: ReviewSourceExpansionStatus
     mode_change: bool = False
     language: str = Field(min_length=1, max_length=LABEL_MAX_LENGTH)
     before: ReviewSourceSide
@@ -167,8 +190,28 @@ class ReviewSourceExpansion(KnowledgeModel):
     currentness_detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
     path_bound: ReviewSourcePathBound
     path_bound_detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    admission: ReviewSourceAdmission
+    admission_detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
     reference: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     command: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+
+    @model_validator(mode="after")
+    def _require_attributed_context_to_be_a_measured_unchanged_path(
+        self,
+    ) -> ReviewSourceExpansion:
+        attributed = self.admission == "attributed_unchanged"
+        if attributed != (self.status == "unchanged"):
+            raise ValueError(
+                "an attributed unchanged path is exactly the expansion whose status is 'unchanged': "
+                "a changed path opened as context, or unchanged context presented as a change, "
+                "would misstate what the measured pair holds"
+            )
+        if attributed and self.path_bound != "requested_generation":
+            raise ValueError(
+                "unchanged is a fact about a measured pair, so an attributed unchanged path is "
+                "bounded by the requested generation's own measurement and by no other"
+            )
+        return self
 
 
 class ReviewSourceContentRequest(KnowledgeModel):

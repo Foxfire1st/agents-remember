@@ -123,6 +123,7 @@ unit-regression = [
   "mcp/tests/test_knowledge_review_revision_selection.py",
   "mcp/tests/test_knowledge_review_source_endpoints.py",
   "mcp/tests/test_knowledge_review_source_content.py",
+  "mcp/tests/test_knowledge_review_attributed_source_content.py",
   "mcp/tests/test_knowledge_review_relationship_movement.py",
   "mcp/tests/test_knowledge_review_relationship_reach.py",
   "mcp/tests/test_knowledge_review_relationship_line.py",

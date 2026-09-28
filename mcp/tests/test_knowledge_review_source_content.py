@@ -725,7 +725,9 @@ def test_a_generation_that_names_a_commit_is_refused_rather_than_served(
 def test_a_path_outside_the_measured_change_set_is_refused_by_name(
     content_fixture: tuple[EndpointFixture, UnusualContent],
 ) -> None:
-    """The route expands the inventory's entries and reads no path outside them."""
+    """An unchanged path no recorded realization links is refused: with no knowledge bound at all,
+    the route reads only the inventory's entries (attributed unchanged context is covered in
+    ``test_knowledge_review_attributed_source_content.py``)."""
 
     fixture, _content = content_fixture
     inventory = _listed_inventory(fixture)

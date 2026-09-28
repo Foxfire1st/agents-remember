@@ -20,9 +20,11 @@ answers it from the objects the listing named and from nothing else:
 
 What this module does not own: it does not diff (the shipped ``DiffPane`` renders the two texts), it
 does not re-measure the change set (the inventory owner does that, and this module calls it), and it
-selects nothing. The one addressable population is the inventory's own entries: a path that the
-requested generation's measurement does not list is refused by name rather than read, so this route
-cannot be used as a general file reader for arbitrary paths at arbitrary objects.
+does not decide which paths are addressable -- :mod:`agents_remember.application.review_source_admission`
+does, and it admits exactly two populations: the inventory's own entries, and an unchanged path that a
+realization recorded in the same comparison's knowledge is anchored at. Every other path is refused by
+name rather than read, so this route cannot be used as a general file reader for arbitrary paths at
+arbitrary objects.
 """
 
 from __future__ import annotations
@@ -36,6 +38,10 @@ from agents_remember.application.review_candidate_resolution import (
     require_current_candidate_identity,
     resolve_review_candidate,
 )
+from agents_remember.application.review_source_admission import (
+    admit_source_path,
+    bounded_input,
+)
 from agents_remember.application.review_source_inventory import (
     review_inventory,
     source_tree_side,
@@ -43,18 +49,12 @@ from agents_remember.application.review_source_inventory import (
 from agents_remember.kernel.git_command import read_git_blob_bytes, run_git
 from agents_remember.kernel.git_preparation import GitPreparationError, require_git_object_id
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
-from agents_remember.models.knowledge.review import (
-    ReviewChangedFile,
-    ReviewFileStatus,
-    ReviewRefusal,
-    ReviewSourceInventory,
-)
+from agents_remember.models.knowledge.review import ReviewRefusal
 from agents_remember.models.knowledge.review_source_content import (
     ReviewSourceContentRequest,
     ReviewSourceContentResult,
     ReviewSourceCurrentness,
     ReviewSourceExpansion,
-    ReviewSourcePathBound,
     ReviewSourceSide,
 )
 from agents_remember.serving.scope import decode_capped, language_for
@@ -128,7 +128,7 @@ def read_review_source_content(
     inadmissible = _inadmissible(request, resolved)
     if inadmissible is not None:
         return _refused(request.repository_id, inadmissible)
-    return _content(request, resolved)
+    return _content(config, request, resolved)
 
 
 def _refused(repository_id: str, why: ReviewRefusal) -> ReviewSourceContentResult:
@@ -167,7 +167,7 @@ def _inadmissible(
                     "expand an entry from the inventory the review returned, whose own "
                     "before_code_tree_id and after_code_tree_id are complete object identities"
                 ),
-                offending_input=_input(tree_id),
+                offending_input=bounded_input(tree_id),
             )
     if request.before_code_tree_id != resolved.baseline_code_tree_id:
         return refusal(
@@ -181,7 +181,7 @@ def _inadmissible(
             next_action=(
                 "reopen the review and expand an entry from the inventory its response published"
             ),
-            offending_input=_input(request.before_code_tree_id),
+            offending_input=bounded_input(request.before_code_tree_id),
         )
     not_a_tree = _non_tree_generation(resolved.candidate_code_root, request.after_code_tree_id)
     if not_a_tree is not None:
@@ -192,7 +192,7 @@ def _inadmissible(
                 "expand an entry from the inventory the review returned, whose after code tree id "
                 "is the captured candidate tree"
             ),
-            offending_input=_input(request.after_code_tree_id),
+            offending_input=bounded_input(request.after_code_tree_id),
         )
     if not _addressable(request.path):
         return refusal(
@@ -202,7 +202,7 @@ def _inadmissible(
                 "surface can address inside a tree, so no content was read for it"
             ),
             next_action="expand a path exactly as the inventory listed it",
-            offending_input=_input(request.path),
+            offending_input=bounded_input(request.path),
         )
     return None
 
@@ -239,7 +239,9 @@ def _non_tree_generation(root: Path | None, tree_id: str) -> str | None:
 
 
 def _content(
-    request: ReviewSourceContentRequest, resolved: ReviewCandidateResolution
+    config: McpRuntimeConfig,
+    request: ReviewSourceContentRequest,
+    resolved: ReviewCandidateResolution,
 ) -> ReviewSourceContentResult:
     """The expansion itself: the measured entry, both sides' content, and the generation statement."""
 
@@ -249,7 +251,7 @@ def _content(
         source_tree_side(request.before_code_tree_id, before_root),
         source_tree_side(request.after_code_tree_id, after_root),
     )
-    admission = _admit(request, resolved, inventory, before_root, after_root)
+    admission = admit_source_path(config, request, resolved, inventory)
     if isinstance(admission, ReviewRefusal):
         return _refused(request.repository_id, admission)
     before = _side_content(before_root, request.before_code_tree_id, request.path)
@@ -260,8 +262,8 @@ def _content(
         repository_id=request.repository_id,
         expansion=ReviewSourceExpansion(
             path=request.path,
-            status=_status(admission.entry),
-            mode_change=False if admission.entry is None else admission.entry.mode_change,
+            status=admission.status,
+            mode_change=admission.mode_change,
             language=language_for(Path(request.path)),
             before=before,
             after=after,
@@ -271,6 +273,8 @@ def _content(
             currentness_detail=currentness_detail,
             path_bound=admission.path_bound,
             path_bound_detail=admission.path_bound_detail,
+            admission=admission.admission,
+            admission_detail=admission.admission_detail,
             reference=SOURCE_CONTENT_REFERENCE,
             command=_reproduction(
                 request.path,
@@ -279,137 +283,6 @@ def _content(
             ),
         ),
     )
-
-
-@dataclass(frozen=True)
-class _Admission:
-    """Which measured change set admitted one path, and the entry it carried when it was the requested one."""
-
-    entry: ReviewChangedFile | None
-    path_bound: ReviewSourcePathBound
-    path_bound_detail: str
-
-
-def _admit(
-    request: ReviewSourceContentRequest,
-    resolved: ReviewCandidateResolution,
-    inventory: ReviewSourceInventory,
-    before_root: Path | None,
-    after_root: Path | None,
-) -> _Admission | ReviewRefusal:
-    """The measured change set that admits the requested path, or the refusal that none does.
-
-    Two measurements can admit a path and the second exists only because the first may be unavailable.
-    The requested generation's own change set is asked first; a path it lists is admitted with that
-    entry's own status. When that measurement could not be made, the request is bounded by the change
-    set **this leaf's review actually publishes** -- its recorded baseline against the candidate tree
-    it binds now -- so a path is still read only from a measured pair. A path no measurement admits is
-    refused in every state, which is what keeps this route a change-set read rather than a general file
-    reader over the recorded base.
-    """
-
-    entry = _entry_for(inventory, request.path)
-    if entry is not None:
-        return _Admission(
-            entry=entry,
-            path_bound="requested_generation",
-            path_bound_detail=(
-                "the requested generation's own change set is the measurement that lists this path"
-            ),
-        )
-    if inventory.state == "measured":
-        return _not_listed(request, inventory)
-    leaf = review_inventory(
-        source_tree_side(resolved.baseline_code_tree_id, before_root),
-        source_tree_side(resolved.candidate_code_tree_id, after_root),
-    )
-    if leaf.state == "measured" and _entry_for(leaf, request.path) is not None:
-        return _Admission(
-            entry=None,
-            path_bound="leaf_change_set",
-            path_bound_detail=(
-                f"the requested generation could not be measured ({inventory.detail}), so the "
-                f"change set this leaf's review publishes -- its recorded baseline against the "
-                f"candidate tree it binds now, {leaf.listed_total} changed path(s) -- is the "
-                "measurement that lists this path"
-            ),
-        )
-    return _unconfined(request, inventory, leaf)
-
-
-def _unconfined(
-    request: ReviewSourceContentRequest,
-    requested: ReviewSourceInventory,
-    leaf: ReviewSourceInventory,
-) -> ReviewRefusal:
-    """The refusal for a path no measured change set admits while the requested pair could not be read."""
-
-    bound = (
-        "the change set this leaf's review publishes lists "
-        f"{leaf.listed_total} changed path(s) and does not list this one"
-        if leaf.state == "measured"
-        else (
-            "the change set this leaf's review publishes could not be measured either "
-            f"({leaf.detail}), so no measurement admits this path"
-        )
-    )
-    return refusal(
-        "source_content_unresolved",
-        (
-            f"the requested after generation could not be measured against this leaf's recorded "
-            f"baseline ({requested.detail}), and {bound}: no content was read for the requested "
-            f"path {request.path!r}. An entry is expanded from a measured change set -- the requested "
-            "generation's "
-            "or, when that cannot be measured, the one this leaf's review publishes -- and this "
-            "route reads no path outside one"
-        ),
-        next_action=(
-            "expand a path the leaf's own inventory listed, or reopen the review so the requested "
-            "generation is measured again"
-        ),
-        offending_input=_input(request.path),
-    )
-
-
-def _not_listed(
-    request: ReviewSourceContentRequest, inventory: ReviewSourceInventory
-) -> ReviewRefusal:
-    """The refusal for a path the requested generation's own measurement does not list."""
-
-    return refusal(
-        "source_content_unresolved",
-        (
-            f"the requested path {request.path!r} is not one of the {inventory.listed_total} changed "
-            "path(s) this surface measured between the requested trees, so no content was read for "
-            "it; an entry is expanded from the inventory's own measurement and this route reads no "
-            "path outside it"
-        ),
-        next_action=(
-            "expand a path the inventory listed for this generation, or reopen the review if the "
-            "generation has moved"
-        ),
-        offending_input=_input(request.path),
-    )
-
-
-def _status(entry: ReviewChangedFile | None) -> ReviewFileStatus:
-    """The entry's measured status, or ``unknown`` when the pair's change set was not measured.
-
-    An unmeasured pair is not a reason to answer nothing: each side is still read on its own, and the
-    status states that the change classification was not made rather than guessing one from the
-    bytes that happen to be there.
-    """
-
-    return "unknown" if entry is None else entry.status
-
-
-def _entry_for(inventory: ReviewSourceInventory, path: str) -> ReviewChangedFile | None:
-    """The inventory's own entry for one path, matched exactly as the address it is."""
-
-    for entry in inventory.entries:
-        if entry.path == path:
-            return entry
-    return None
 
 
 def _currentness(
@@ -712,7 +585,7 @@ def _quoted(path: str) -> str:
 def _addressable(path: str) -> bool:
     """Whether one path is a repository-relative spelling this surface will hand to Git.
 
-    The measured population is already confined to the inventory's own entries, so this is the
+    The admitted population is already confined to measured and attributed paths, so this is the
     second of two checks and not the first: it refuses the spellings Git could not have reported for
     a changed path (an empty name, a NUL, an absolute path, a ``..`` segment) before any argv is
     built from it.
@@ -721,13 +594,3 @@ def _addressable(path: str) -> bool:
     if not path or "\x00" in path or path.startswith("/"):
         return False
     return ".." not in path.split("/")
-
-
-def _input(text: str) -> str:
-    """One offending input, bounded to the field that carries it.
-
-    A path is bounded by the path limit and an offending input by the shorter reference limit, so a
-    very long path is truncated here rather than failing the refusal that names it.
-    """
-
-    return text if len(text) <= 512 else f"{text[:508]}..."

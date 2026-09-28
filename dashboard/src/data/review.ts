@@ -340,13 +340,23 @@ export interface ReviewSourceSide {
 // content is the requested generation's either way, and a superseded read never silently becomes a
 // read of the newer one.
 //
-// `path_bound` says which *measured* change set admitted the path: the requested generation's own
+// `path_bound` says which *measured* change set bounded the path: the requested generation's own
 // (`requested_generation`), or -- when that measurement could not be made -- the one this leaf's
-// review publishes (`leaf_change_set`). A path in no measured change set is refused outright, so
+// review publishes (`leaf_change_set`). Two populations are read: a path a measured change set
+// lists, and an unchanged path a realization recorded in the same comparison's knowledge is anchored
+// at (see `admission`; always bounded by `requested_generation`). Every other path is refused, so
 // this field states which measurement was the bound rather than widening the read.
+//
+// `admission` says why the path was opened at all: `changed` for an inventory entry, and
+// `attributed_unchanged` for a path the measured pair did not change that a realization recorded in
+// the same comparison's knowledge is anchored at. The second always has status `unchanged`, is never
+// an inventory entry and never counts as a changed file; a renderer reads this field rather than
+// inferring it from the inventory.
+export type ReviewSourceAdmission = "changed" | "attributed_unchanged";
+
 export interface ReviewSourceExpansion {
   path: string;
-  status: ReviewFileStatus;
+  status: ReviewFileStatus | "unchanged";
   mode_change: boolean;
   language: string;
   before: ReviewSourceSide;
@@ -357,6 +367,8 @@ export interface ReviewSourceExpansion {
   currentness_detail: string;
   path_bound: "requested_generation" | "leaf_change_set";
   path_bound_detail: string;
+  admission: ReviewSourceAdmission;
+  admission_detail: string;
   reference: string;
   command: string;
 }

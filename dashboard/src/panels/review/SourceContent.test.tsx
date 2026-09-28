@@ -187,6 +187,8 @@ function expansion(over: Partial<ReviewSourceExpansion> = {}): ReviewSourceExpan
     path_bound: "requested_generation",
     path_bound_detail:
       "the requested generation's own change set is the measurement that lists this path",
+    admission: "changed",
+    admission_detail: "a measured change set lists this path as changed",
     reference: "review:source-content-of-one-inventory-entry-at-the-bound-tree-pair",
     command: `before: git -C /repo ls-tree -l ${BEFORE_TREE} -- src/unmapped.py\nafter: git -C /wt ls-tree -l ${AFTER_TREE} -- src/unmapped.py ; git -C /wt cat-file blob aa11`,
     ...over,
