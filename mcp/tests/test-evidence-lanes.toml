@@ -99,6 +99,8 @@ unit-regression = [
   "mcp/tests/test_knowledge_history_files.py",
   "mcp/tests/test_knowledge_validator.py",
   "mcp/tests/test_knowledge_validator_routes.py",
+  "mcp/tests/test_knowledge_census_files.py",
+  "mcp/tests/test_knowledge_census_report.py",
   "mcp/tests/test_knowledge_index.py",
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",

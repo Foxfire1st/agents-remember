@@ -14,7 +14,8 @@ Paths are memory-repository-relative POSIX strings:
 A document names its format in ``schema``; :func:`parse_document` dispatches on it and refuses a
 schema this module does not know. The history schema (``ar-history/v1``) is MIK-R07's
 (:mod:`.history`); a history file is read with :func:`parse_history_document`, which also checks that
-the file is named after its owner. Census schemas belong to MIK-R20 and are not registered here.
+the file is named after its owner. The census schemas (``ar-census-*/v1``) are MIK-R20's
+(:mod:`.census`); they are registered here so every census file dispatches like any other.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from collections.abc import Mapping
 from typing import Any, Final
 
 from agents_remember.models.knowledge_files.canonical import parse_json
+from agents_remember.models.knowledge_files.census import CENSUS_MODELS, CensusDocument
 from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA, HistoryFile
 from agents_remember.models.knowledge_files.ids import CROCKFORD_ALPHABET, RecordKind
 from agents_remember.models.knowledge_files.records import (
@@ -65,9 +67,12 @@ SCHEMA_MODELS: Final[Mapping[str, type[FileModel]]] = {
     ROUTE_SIDECAR_SCHEMA: RouteSidecar,
     LAYOUT_MARKER_SCHEMA: LayoutMarker,
     HISTORY_SCHEMA: HistoryFile,
+    **CENSUS_MODELS,
 }
 
-KnowledgeDocument = KnowledgeRecord | FileSidecar | RouteSidecar | LayoutMarker | HistoryFile
+KnowledgeDocument = (
+    KnowledgeRecord | FileSidecar | RouteSidecar | LayoutMarker | HistoryFile | CensusDocument
+)
 
 _SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _RECORD_FILENAME = re.compile(

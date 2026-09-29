@@ -8,8 +8,8 @@ the registry report. Each problem carries a *category* so that one rule owns it:
 ``content`` field is an anchor problem (rule 6), a filename that does not begin with the record's ID
 is an identity problem (rule 2), and everything else is shape (rule 1).
 
-Census files (``knowledge/census/``) are MIK-R20's; they are not read here until that packet
-registers their schemas and rules.
+Census files (``knowledge/census/``) are MIK-R20's: they are not read here but by
+:mod:`.rules_census`, which registers their schema and append-only rules.
 """
 
 from __future__ import annotations
