@@ -109,6 +109,12 @@ each of those is stated as its own fact (``publicationRoute``, the ``publication
 ``publishedIdentity``). Reading the status as proof that every entry committed, or that the
 repository now holds them, is exactly the mistake these three fields exist to make impossible.
 
+CONVERTED MEMORY IS WRITTEN AS FILES (MIK-R12 rule 7). When the contract's memory worktree holds the
+layout marker ``knowledge/layout.json``, this command runs the curator file writer instead
+(:mod:`agents_remember.cli.knowledge_write_route`): it writes records, sidecar entries and the leaf's
+history file into the memory worktree, validated, and refuses the database-only arguments by name.
+Until the cutover (MIK-R37) no memory worktree is converted, so everything below is unchanged.
+
 This is the production caller for :func:`agents_remember.application.knowledge_curator_ingest.
 ingest_curator_list`. The mounted ``knowledge_change`` tool does NOT write and says so; the write
 plane has ONE writer, and this subcommand is one of the TWO shipped entry points that reach it — the
@@ -146,6 +152,11 @@ from agents_remember.application.knowledge_review import (
     REVIEW_CANDIDATE_RELATIVE_ROOT,
 )
 from agents_remember.cli.knowledge_ingest_report import payload, summary
+from agents_remember.cli.knowledge_write_route import (
+    is_converted,
+    load_leaf_contract,
+    run_leaf_write,
+)
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
@@ -587,10 +598,10 @@ def _invocation_refusal(args: argparse.Namespace) -> str | None:
     return None
 
 
-def _invocation(args: argparse.Namespace) -> _Invocation:
+def _invocation(args: argparse.Namespace, loaded: WorktreeContract | None = None) -> _Invocation:
     """Resolve the enclosure, the candidate and the destination this run is admitted under."""
 
-    contract = load_contract(Path(args.contract))
+    contract = loaded if loaded is not None else load_contract(Path(args.contract))
     captured_baseline = _capture_baseline(args)
     return _Invocation(
         contract=contract,
@@ -661,12 +672,16 @@ def _print_report(
 def run(args: argparse.Namespace) -> int:
     """Run one ingest and print its report; the report IS the result."""
 
+    loaded = load_leaf_contract(args.contract)
+    if loaded is not None and is_converted(loaded.memory_worktree):
+        # A converted memory worktree is written by the curator file writer (MIK-R12 rule 7).
+        return run_leaf_write(args, loaded)
     refusal = _invocation_refusal(args)
     if refusal is not None:
         print(refusal)
         return EXIT_REFUSED
     try:
-        invocation = _invocation(args)
+        invocation = _invocation(args, loaded)
     except (ValueError, OSError) as error:
         print(f"the ingest was refused before it read the list: {error}")
         return EXIT_REFUSED

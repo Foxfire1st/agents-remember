@@ -447,7 +447,8 @@ their fields become. The models, the ID helper and the formatter live in
   - `content` is `sha256:` of the located bytes.
 
   The role vocabulary is `primary-authority`, `enforcement`, `propagation-persistence`, `support`,
-  `presentation` and `unclassified`. `incidental` has no spelling in the file format.
+  `presentation` and `unclassified`. `incidental` has no spelling in the file format; the writer
+  writes it as `support`.
 - **Test evidence becomes a `proves` entry** in the test file's sidecar, with the fields `id`,
   `invariant`, `anchor` (the test symbol) and `facet` (what the test demonstrates).
 - **Origin.** Every record's `origin` names `task`, then `leaf` or `wave`, and optionally
@@ -480,6 +481,103 @@ places the routes; nothing assigns them automatically.
   when that parent holds nothing but family code. It proposes `.` only when a realization file lies
   directly at the root. It is a starting point, and the command never writes a route.
   `agents-remember knowledge-validate` runs the rules.
+
+## The file writer's sections (MIK-R12)
+
+On a **converted** memory tree (one that holds the knowledge layout marker, MIK-R21 rule 1), `agents-remember knowledge-ingest`
+and `agents-remember knowledge-bootstrap` write through the curator file writer instead of the
+database. On unconverted memory, which is every memory tree until the cutover (MIK-R37), nothing
+below applies and the installed ingest is unchanged. The producer's thirteen fields do not change
+either: everything below is the **curator's**.
+
+The writer reads the list you already have, or an object with three sections:
+
+```json
+{ "entries": [ "<the producer's entries, with the curator's keys>" ],
+  "records": [ "<curator-authored records of any kind>" ],
+  "history": [ "<the leaf's judgment rows>" ] }
+```
+
+**Entries.** Each entry with a `target`, an `admission` or an `invariant_id` authors one invariant
+record from its verbatim `statement`. An entry with none of the three names no record: it is
+written only when a `records` item names it in `entry` (its evidence then lives in that record's
+`origin`). Otherwise the writer refuses the run, and the curator either attaches the entry to a
+record or keeps it task-local and leaves it out of the list. `proofs` on such an entry are refused.
+
+- `scope` (as above) gives `applicability`, `conditions` and `exclusions`. It is required for a new
+  invariant.
+- `admission` is `{criteria, justification}` and is required for a new invariant.
+- `status` is optional. A new record starts `proposed`.
+- `invariant_id` names a stored invariant the entry updates. Without it, a new invariant is created,
+  or on a rerun the one this leaf already created from the same entry is reused.
+- `supersedes` names the invariants the new one supersedes: an `INV-…` ID, or the `id` of an entry
+  in this list.
+- Each `target` becomes a `realizes` entry in `onboarding/<path>.json`. The role `incidental` is
+  written as `support`.
+- `proofs` is `[{ "test": "<path>::<name>", "facet": "<what this test demonstrates>" }]`, and each
+  item becomes a `proves` entry in the test file's sidecar. `test` may also be `{path, symbol}`.
+- `evidence` is stored in the record's `origin.handoff.evidence` when this leaf authored the record.
+  A record another leaf authored keeps its origin exactly: the run then needs a `history` row about
+  that record, and the writer appends the evidence to that row's `reason`. Without the row the run is
+  refused.
+- A rerun removes the entries this leaf wrote earlier from the same entry that the list no longer
+  names, and reports them `removed`. Entries another leaf wrote are never removed. The report lists every
+  `path::name` test the evidence names:
+  - `proof_written` when `proofs` carries its facet;
+  - `needs_facet` when it resolves but has no facet yet;
+  - `unresolvable` when it names no test at C.
+
+**Records.** A record item is:
+
+```json
+{ "key": "<local handle>", "kind": "decision", "entry": "<the entry it came from, optional>",
+  "id": "<a stored ID to update; omit to create>", "slug": "<display slug, required to create>",
+  "fields": { "<the kind's own fields: status, admission, context, alternatives, links …>" } }
+```
+
+- `kind` is one of `invariant`, `family`, `decision`, `incident`, `assumption`, `limitation`,
+  `failure_mode`, `scenario`, `diagnostic` or `term`.
+- `fields` never holds `id`, `schema`, `origin` or `revision`.
+- The `entry`'s evidence is stored in the record's `origin`.
+- A link target may be `{path, locator}`, and the writer resolves the anchor.
+
+**History.** A history item is `{subject, disposition, reason, items?, …}`:
+
+- An invariant row adds `covers`, `effect` and `because`. Each cover is one of:
+  - an entry ID, re-anchored at C with its own locator;
+  - `{id, locator}`, re-anchored at a new locator;
+  - `{id, remove: true}`, which removes the entry;
+  - `{handoff: "<entry id>"}`, which covers every entry this list wrote for the subject.
+- A family row adds `examined`, the member IDs the curator examined.
+
+**Handles.** `"handoff:<key>"` names the record this document authors under that entry `id` or record
+`key`. Use it wherever an ID goes: link targets, `members`, `subject`, `examined` or `supersedes`.
+
+**What the writer fills in.**
+
+- IDs are minted, and a rerun reuses the ID recorded in `origin.handoffEntry`.
+- Anchors are resolved at the leaf's code candidate C, with `blob` and `content`. A symbol must bind
+  exactly once.
+- `revision` goes up by one when a record's meaning differs from the memory base. `admission`,
+  `status` and `origin` are not meaning.
+- `origin` records the task, the leaf or wave, the list, the entry and the evidence.
+- Each history row gets its row ID and the invariant's revision. It also gets each examined member's
+  revision and each cover's `before` anchor (from the memory base) and `after` anchor. The `after`
+  anchor is written into the entry in the same run.
+- Every file is written in the canonical formatting.
+- Every row of the leaf's history file must still agree with the result: covered anchors, the
+  invariant's revision and each examined member's revision. A row a later run contradicts refuses
+  the run until the row is named again in `history`, so the writer rewrites it.
+
+**What the writer checks.**
+
+- The writer runs the knowledge validator over the resulting tree.
+- Any problem refuses the whole run. The report names every problem and nothing is written.
+- Report-only findings are listed but never refuse. The family route rules (MIK-R04: route
+  directory, Coverage, Non-empty) are reported inside the writer too, so a leaf can place routes
+  across several runs; the closeout and every other commit route still refuse them.
+- Without `--commit`, the run plans, validates and reports, and writes nothing.
+- `--authorization-ref` must not be blank. The report records it.
 
 ## What this template is not
 

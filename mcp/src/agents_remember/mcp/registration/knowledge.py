@@ -127,9 +127,10 @@ def _register_knowledge_change(server: FastMCP) -> None:
         -- the batch operation that commits a whole curator hand-off list -- and both shipped CLI
         subcommands reach it: `agents-remember knowledge-ingest` for a leaf enclosure's ordinary
         route, and `agents-remember knowledge-bootstrap` for a repository with no enclosure in
-        scope. `knowledge-ingest` additionally publishes that candidate to the repository's one
-        declared published dataset location and reads the published identity back; read the
-        committed result back with `knowledge_read`."""
+        scope. On a converted memory tree (it holds `knowledge/layout.json`) both write
+        knowledge files through the curator file writer instead. `knowledge-ingest` additionally
+        publishes that candidate to the repository's one declared published dataset location and
+        reads the published identity back; read the committed result back with `knowledge_read`."""
         return knowledge_change_payload(
             ChangeToolRequest(
                 database_path=databasePath,

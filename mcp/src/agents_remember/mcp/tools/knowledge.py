@@ -498,7 +498,9 @@ def _change_result(request: ChangeToolRequest) -> dict[str, Any]:
             "destination is missing: the knowledge write plane has one writer, and both of its "
             f"shipped CLI entry points reach it -- {WRITE_ENTRY_POINT!r} for a leaf enclosure's "
             f"ordinary route and {TASKLESS_WRITE_ENTRY_POINT!r} for a repository with no enclosure "
-            "in scope. Call one of those, or read the result here with knowledge_read"
+            "in scope. On a converted memory tree (knowledge/layout.json) both write knowledge "
+            "files through the curator file writer (MIK-R12) instead of the database. Call one of "
+            "those, or read the result here with knowledge_read"
         ),
     }
 

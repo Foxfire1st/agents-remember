@@ -49,6 +49,12 @@ declared location provably holds the very dataset the staged candidate holds now
 files, not inferred from a finished-looking run -- and refuses by name in every other state, leaving
 the bytes exactly as they are.
 
+CONVERTED MEMORY IS WRITTEN AS FILES (MIK-R12 rule 7). When the admitted memory root holds the layout
+marker ``knowledge/layout.json``, a run writes through the curator file writer
+(:mod:`agents_remember.cli.knowledge_write_route`) as the wave ``--wave`` names, with the bootstrap's
+own scope as the records' task. Until the cutover (MIK-R37) no memory root is converted, so the
+database route below is unchanged.
+
 Exit status: 0 when the invocation produced its report, and 2 when the invocation itself is refused
 (a missing or unreadable list, a blank authorization reference, an unusable destination, a context
 that cannot be admitted, an undecidable settings path, a cleanup the guard refused).
@@ -83,6 +89,7 @@ from agents_remember.application.published_intent import (
     resolve_published_intent,
 )
 from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
+from agents_remember.cli.knowledge_write_route import is_converted, run_wave_write
 from agents_remember.kernel.primitives.runtime_config import (
     McpRuntimeConfig,
     load_config,
@@ -133,6 +140,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Path to the MCP authority settings file. Omit to use the umbrella CLI's trusted "
         "settings discovery from the current directory.",
+    )
+    parser.add_argument(
+        "--wave",
+        default=None,
+        help="The wave a bootstrap of converted memory writes as (MIK-R07 rule 8); its judgment "
+        "rows go to knowledge/history/<wave>.json. Required only when the memory is converted.",
     )
     parser.add_argument(
         "--json",
@@ -496,6 +509,21 @@ def _dispatch(args: argparse.Namespace) -> int:
     if args.status:
         _print(args.as_json, _status_payload(admitted))
         return EXIT_REPORTED
+    return _run(args, admitted)
+
+
+def _run(args: argparse.Namespace, admitted: AdmittedKnowledgeBootstrap) -> int:
+    """A bootstrap run: the file writer for converted memory, the database ingest otherwise."""
+
+    memory = admitted.admission.memory_worktree
+    if memory is not None and is_converted(memory):
+        # A converted memory tree is written by the curator file writer (MIK-R12 rule 7).
+        return run_wave_write(
+            args,
+            memory_root=memory,
+            code_root=admitted.admission.code_worktree,
+            task=admitted.admission.scope,
+        )
     result = bootstrap_knowledge(
         admitted,
         Path(args.hand_off_list),
