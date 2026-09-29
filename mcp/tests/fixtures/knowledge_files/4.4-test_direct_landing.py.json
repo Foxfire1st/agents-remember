@@ -1,0 +1,21 @@
+{
+  "path": "mcp/tests/test_direct_landing.py",
+  "proves": [
+    {
+      "anchor": {
+        "blob": "6aa80fe43345f17ee2533b3d1f54b1c4b4e7a940",
+        "content": "sha256:bfef9c023a67107a344ac6ad4c1fe78ec7f18df1ba9f0a20200a9cbb4c319b70",
+        "locator": {
+          "kind": "symbol",
+          "name": "DirectLandingTests.test_direct_landing_publishes_memory_and_recovers_independently_of_cache"
+        }
+      },
+      "facet": "negative: mismatched candidate tree is refused",
+      "id": "PRF-T3ST0K",
+      "invariant": "INV-7K3F9Q"
+    }
+  ],
+  "realizes": [],
+  "references": {},
+  "schema": "ar-onboarding-file/v1"
+}

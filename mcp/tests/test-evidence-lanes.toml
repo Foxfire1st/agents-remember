@@ -93,6 +93,8 @@ unit-regression = [
   "mcp/tests/test_kernel_pure_regressions.py",
   "mcp/tests/test_knowledge_candidate_workspace.py",
   "mcp/tests/test_knowledge_citation_bindings.py",
+  "mcp/tests/test_knowledge_file_canonical.py",
+  "mcp/tests/test_knowledge_file_formats.py",
   "mcp/tests/test_knowledge_curator_ingest.py",
   "mcp/tests/test_knowledge_curator_ingest_list.py",
   "mcp/tests/test_knowledge_ingest_comparison_generation.py",

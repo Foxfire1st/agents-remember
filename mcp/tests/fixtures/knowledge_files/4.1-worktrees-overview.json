@@ -1,0 +1,34 @@
+{
+  "path": "mcp/src/agents_remember/worktrees",
+  "references": {
+    "1": {
+      "targets": [
+        {
+          "anchor": {
+            "blob": "d8baa15ca43be010159ae15f6b0e744949e6d33a",
+            "content": "sha256:3ce8c3c4dcf07b79c48ea0f79e3e85a29c25789408c5cba67db12e99d3178954",
+            "locator": {
+              "kind": "file"
+            },
+            "path": "mcp/src/agents_remember/worktrees/direct_landing.py"
+          },
+          "kind": "code"
+        },
+        {
+          "anchor": {
+            "blob": "03ef71d6dd2d2fe7b06e5dbc3d4d61931199855d",
+            "content": "sha256:f3adf607fbf865461dec0a39e45228294b8666586318ccbbf8834fc3501d5ec9",
+            "locator": {
+              "end": 210,
+              "kind": "line_range",
+              "start": 193
+            },
+            "path": "mcp/src/agents_remember/worktrees/modules/integrate.py"
+          },
+          "kind": "code"
+        }
+      ]
+    }
+  },
+  "schema": "ar-onboarding-route/v1"
+}

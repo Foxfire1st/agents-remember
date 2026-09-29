@@ -422,6 +422,40 @@ manifest's own digest.
   examine it.** The report keeps the two apart.
 - At most 32 sources per entry: a manifest is bounded and attributable, not a second store.
 
+## Where an entry lands once knowledge is text (MIK-R21)
+
+**Nothing here changes what a producer emits today.** Until the text-storage cutover (MIK-R37) the
+installed ingest still writes the knowledge database. This section records the file formats the
+curator writer (MIK-R12) will write the same entries into, so a producer and a curator can read what
+their fields become. The models, the ID helper and the formatter live in
+`mcp/src/agents_remember/models/knowledge_files/`; their docstrings are the format reference.
+
+- **Records** are one JSON file each, flat per kind, named `knowledge/<kind-dir>/<ID>-<slug>.json`
+  with an optional `.md` beside it. The schema is `ar-<kind>/v1`. An invariant carries `statement`,
+  `applicability`, `conditions[]`, `exclusions[]`, `supersedes[]`, `revision`, `status`, `admission`
+  and `origin`. It never lists its code locations, tests, families or decisions: each relationship
+  is written once, on its owner's side.
+- **IDs** are minted by the writer, never by a producer. The form is `<KIND>-<6 Crockford base32>`,
+  for example `INV-7K3F9Q`, with the prefixes `INV FAM DEC INC ASM LIM FLM SCN DGN TRM`, and `RLZ` or
+  `PRF` for entries. Exported legacy records have 8 characters derived from their legacy ID.
+- **A target becomes a `realizes` entry** in the file sidecar `onboarding/<path>.json`, with the
+  fields `id`, `invariant`, `anchor`, `role` and `rationale`, and an optional `origin` of
+  `{ leaf, handoffEntry? }`. The anchor is `{ locator, blob, content }`, and it omits `path` because
+  the sidecar belongs to that file:
+  - `locator` is `{kind: symbol, name}`, `{kind: line_range, start, end}` or `{kind: file}`;
+  - `blob` is the recorded Git blob;
+  - `content` is `sha256:` of the located bytes.
+
+  The role vocabulary is `primary-authority`, `enforcement`, `propagation-persistence`, `support`,
+  `presentation` and `unclassified`. `incidental` has no spelling in the file format.
+- **Test evidence becomes a `proves` entry** in the test file's sidecar, with the fields `id`,
+  `invariant`, `anchor` (the test symbol) and `facet` (what the test demonstrates).
+- **Origin.** Every record's `origin` names `task`, then `leaf` or `wave`, and optionally
+  `handoff` (the list path and any carried evidence text), `handoffEntry` and `legacyId`.
+- **Formatting.** Every JSON file is written in one canonical formatting: UTF-8, two-space indent,
+  sorted keys, identified entries sorted by `id`, and one trailing newline.
+  `agents-remember knowledge-format` rewrites a file into it, and `--check` only reports.
+
 ## What this template is not
 
 It is not the curator's side. The curator consumes this list as data, fills `resolution`,

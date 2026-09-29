@@ -1,0 +1,35 @@
+{
+  "applicability": "resolved",
+  "cause": "The ingest mapped no field of the stored record to the hand-off evidence.",
+  "cause_uncertainty": "Low: the ingest code path was read end to end.",
+  "corrective_actions": [
+    "MIK-R28 makes proves entries first-class."
+  ],
+  "detection": "Architect audit of the store during the 260928-MIK planning.",
+  "id": "INC-5WQ8HB",
+  "links": [
+    {
+      "relation": "violated",
+      "target": "INV-7K3F9Q"
+    },
+    {
+      "relation": "exposed_gap_in",
+      "target": "FAM-SEQNTS6C"
+    },
+    {
+      "relation": "led_to",
+      "target": "DEC-D12RTE"
+    }
+  ],
+  "observed_at": "2026-09-28",
+  "observed_effect": "The knowledge store held zero test links.",
+  "occurrence": "The curator hand-off list's evidence field was accepted but never persisted.",
+  "origin": {
+    "leaf": "260928-MIK-L21",
+    "task": "260928-MIK"
+  },
+  "recovery": "Proofs become first-class entries in test sidecars (D15).",
+  "revision": 1,
+  "schema": "ar-incident/v1",
+  "status": "accepted"
+}

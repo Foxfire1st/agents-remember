@@ -1,0 +1,22 @@
+{
+  "admission": "legacy-unassessed",
+  "guarantee": "Nothing a stored record or a landing claims about its inputs is authored by the run that reports it: a code realization names a repository-relative path and the exact blob the recorded tree holds, a source that is not a repository file keeps its own document identity, and a leaf's code commit and its refreshed memory content land as one attributed pair.",
+  "id": "FAM-SEQNTS6C",
+  "members": [
+    "INV-7K3F9Q",
+    "INV-R8M2TD"
+  ],
+  "origin": {
+    "legacyId": "0b8124cd-1f0e-4c55-9a51-d3a1c0f1b2e4",
+    "task": "260915-KS"
+  },
+  "revision": 1,
+  "routes": [
+    "mcp/src/agents_remember/worktrees",
+    "mcp/src/agents_remember/models/knowledge",
+    "mcp/src/agents_remember/application"
+  ],
+  "schema": "ar-family/v1",
+  "status": "proposed",
+  "title": "attribution-and-landing-pairing"
+}

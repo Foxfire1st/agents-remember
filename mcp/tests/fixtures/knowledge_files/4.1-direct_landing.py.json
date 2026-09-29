@@ -1,0 +1,126 @@
+{
+  "path": "mcp/src/agents_remember/worktrees/direct_landing.py",
+  "realizes": [
+    {
+      "anchor": {
+        "blob": "d8baa15ca43be010159ae15f6b0e744949e6d33a",
+        "content": "sha256:5524589d645ba825e3c1d636d8ff517e0ea83a10297258eaf443808095afd44d",
+        "locator": {
+          "kind": "symbol",
+          "name": "_verify_code_commit"
+        }
+      },
+      "id": "RLZ-D1RW4N",
+      "invariant": "INV-7K3F9Q",
+      "origin": {
+        "leaf": "260928-MIK-L21"
+      },
+      "rationale": "Apply requires the supplied pre-commit candidate tree to match the verified commit's tree.",
+      "role": "primary-authority"
+    }
+  ],
+  "references": {
+    "1": {
+      "targets": [
+        {
+          "anchor": {
+            "blob": "d8baa15ca43be010159ae15f6b0e744949e6d33a",
+            "content": "sha256:7dd862a44a8df5216dda38bb5a5771ce6b0be1e1854544de157f9a8b6cc2cde7",
+            "locator": {
+              "kind": "symbol",
+              "name": "DirectLandingRequest"
+            }
+          },
+          "kind": "code"
+        }
+      ]
+    },
+    "2": {
+      "targets": [
+        {
+          "anchor": {
+            "blob": "d8baa15ca43be010159ae15f6b0e744949e6d33a",
+            "content": "sha256:5524589d645ba825e3c1d636d8ff517e0ea83a10297258eaf443808095afd44d",
+            "locator": {
+              "kind": "symbol",
+              "name": "_verify_code_commit"
+            }
+          },
+          "kind": "code"
+        }
+      ]
+    },
+    "3": {
+      "targets": [
+        {
+          "anchor": {
+            "blob": "d8baa15ca43be010159ae15f6b0e744949e6d33a",
+            "content": "sha256:d36fa4aab8ad9f5c146e7214eaf71f42ad595ec3eb92edfd3ac852c49fa85d5f",
+            "locator": {
+              "kind": "symbol",
+              "name": "_direct_memory_admission_snapshot"
+            }
+          },
+          "kind": "code"
+        }
+      ]
+    },
+    "4": {
+      "targets": [
+        {
+          "anchor": {
+            "blob": "d8baa15ca43be010159ae15f6b0e744949e6d33a",
+            "content": "sha256:1454cd46e8c14b10a12837e6eb698e87d37bbfbf56d82f6f39d7b8978f97f54c",
+            "locator": {
+              "kind": "symbol",
+              "name": "_create_direct_landing"
+            }
+          },
+          "kind": "code"
+        }
+      ]
+    },
+    "5": {
+      "targets": [
+        {
+          "id": "INV-7K3F9Q",
+          "kind": "invariant"
+        }
+      ]
+    },
+    "6": {
+      "targets": [
+        {
+          "anchor": {
+            "blob": "8b386e9074f7f7e40dd308cb4a35ad1a34d5c168",
+            "content": "sha256:c4414b251c841f7940518df8c9386abcb53759d10d1a7d2f7631497ef95bb956",
+            "locator": {
+              "kind": "symbol",
+              "name": "direct_landing_tool"
+            },
+            "path": "mcp/src/agents_remember/application/lifecycle/direct_landing.py"
+          },
+          "kind": "code"
+        }
+      ]
+    },
+    "7": {
+      "note": "The cache holds no admission or recovery authority.",
+      "targets": [
+        {
+          "anchor": {
+            "blob": "6aa80fe43345f17ee2533b3d1f54b1c4b4e7a940",
+            "content": "sha256:bfef9c023a67107a344ac6ad4c1fe78ec7f18df1ba9f0a20200a9cbb4c319b70",
+            "locator": {
+              "kind": "symbol",
+              "name": "DirectLandingTests.test_direct_landing_publishes_memory_and_recovers_independently_of_cache"
+            },
+            "path": "mcp/tests/test_direct_landing.py"
+          },
+          "kind": "test"
+        }
+      ]
+    }
+  },
+  "schema": "ar-onboarding-file/v1"
+}

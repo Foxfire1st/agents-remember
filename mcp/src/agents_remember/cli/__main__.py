@@ -2,8 +2,9 @@
 
 The single front door for the package's CLI tools. It carries ``dashboard``, the memory
 maintenance and migration commands, the knowledge write plane's ingest and its **taskless**
-``knowledge-bootstrap`` entry, the review plane's ``review-record-comparison`` entry, and the
-existing ``context_packet`` adapter as subparsers. The MCP server keeps its own
+``knowledge-bootstrap`` entry, the text knowledge format's ``knowledge-format`` formatter, the
+review plane's ``review-record-comparison`` entry, and the existing ``context_packet`` adapter as
+subparsers. The MCP server keeps its own
 ``agents-remember-mcp`` console script -- harness configs launch the server by that exact name, so
 it is never folded in here.
 """
@@ -15,6 +16,7 @@ import argparse
 from agents_remember.cli import (
     dashboard,
     knowledge_bootstrap,
+    knowledge_format,
     knowledge_ingest,
     memory_backfill,
     memory_citations,
@@ -58,6 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     knowledge_bootstrap.add_arguments(bootstrap)
     bootstrap.set_defaults(func=knowledge_bootstrap.run)
+    fmt = sub.add_parser(
+        "knowledge-format",
+        help="Rewrite knowledge JSON files in the canonical formatting; --check only reports.",
+    )
+    knowledge_format.add_arguments(fmt)
+    fmt.set_defaults(func=knowledge_format.run)
     record = sub.add_parser(
         "review-record-comparison",
         help=(
