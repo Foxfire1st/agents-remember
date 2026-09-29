@@ -15,7 +15,10 @@ The lookups:
   directory or one of its ancestors;
 * :meth:`KnowledgeIndex.incoming_links` -- any record -> its incoming links;
 * :meth:`KnowledgeIndex.history_rows_of` -- leaf, wave or crossing -> its history rows;
-* :meth:`KnowledgeIndex.history_rows_about` -- subject -> the rows about it, across all owners.
+* :meth:`KnowledgeIndex.history_rows_about` -- subject -> the rows about it, across all owners;
+* :meth:`KnowledgeIndex.proofs_of` -- invariants -> their proof entries (MIK-R28 rule 4);
+* :meth:`KnowledgeIndex.invariants_without_proof` -- the live invariants no proof names (MIK-R28
+  rule 5).
 """
 
 from __future__ import annotations
@@ -253,6 +256,30 @@ class KnowledgeIndex:
 
     def history_rows_about(self, subject: str) -> Answer[tuple[HistoryRow, ...]]:
         return self._answer(self._history("subject = ?", (subject,)))
+
+    def proofs_of(self, invariant_ids: Sequence[str]) -> Answer[tuple[Entry, ...]]:
+        """The proof entries of ``invariant_ids`` (MIK-R28 rule 4), by path then entry ID."""
+
+        if not invariant_ids:
+            return self._answer(())
+        placeholders = ", ".join("?" for _ in invariant_ids)
+        return self._answer(
+            self._entries(f"kind = 'proof' AND invariant IN ({placeholders})", tuple(invariant_ids))
+        )
+
+    def invariants_without_proof(self) -> Answer[tuple[Record, ...]]:
+        """Every live invariant no proof entry names (MIK-R28 rule 5), by ID.
+
+        A retired invariant is not live and is not listed. The list is information, not a gate: the
+        admission rule accepts criteria other than a proving test (MIK-R27).
+        """
+
+        rows = self._rows(
+            "SELECT id FROM ix_record WHERE kind = 'invariant' AND status != 'retired' "
+            "AND id NOT IN (SELECT invariant FROM ix_entry WHERE kind = 'proof') ORDER BY id"
+        )
+        records = (self._record(str(row[0])) for row in rows)
+        return self._answer(tuple(record for record in records if record is not None))
 
     def record(self, record_id: str) -> Answer[Record | None]:
         return self._answer(self._record(record_id))

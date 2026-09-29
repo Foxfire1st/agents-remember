@@ -51,6 +51,21 @@ _ROW_KEYS: Final = frozenset(
 # file format and is written as ``support``.
 ROLE_SPELLINGS: Final = {"incidental": "support"}
 _TEST_ID = re.compile(r"(?P<path>[\w./@+-]+\.py)::(?P<name>[A-Za-z_][\w]*(?:::[A-Za-z_][\w]*)*)")
+# MIK-R28 rule 2's "path plus symbol": the pytest selection ``<path> -k <name>`` where the ``-k``
+# expression is one bare identifier (optionally quoted). An expression (``a and not b``) names no one
+# test, so it is not read as one.
+_SELECTED_TEST = re.compile(
+    r"(?P<path>[\w./@+-]+\.py)\s+-k\s+(?P<quote>['\"]?)(?P<name>[A-Za-z_]\w*)(?P=quote)"
+    r"(?=$|[\s,;:.)\]`'\"])(?!\s+(?:and|or|not)\b)"
+)
+# A test module named without a test in it: a ``test_*.py`` or ``*_test.py`` file (pytest's module
+# pattern), not followed by ``::``. It names no resolvable test, so it is reported rather than
+# silently dropped (MIK-R28 rule 2). Helper modules (``conftest.py``, ``*_test_support.py``, any
+# other module under ``tests/``) hold no tests and are never reported.
+_TEST_FILE = re.compile(
+    r"(?<![\w./@+-])(?P<path>(?:[\w.@+-]+/)*(?:test_[\w.@+-]*|[\w.@+-]*_test)\.py)"
+    r"(?![\w./@+-]|::)"
+)
 
 
 @dataclass(frozen=True)
@@ -106,6 +121,42 @@ class TestReference:
 
 
 @dataclass(frozen=True)
+class TestFileMention:
+    """A test file the evidence names without naming a test in it: no proof can be prepared."""
+
+    path: str
+
+    @property
+    def spelling(self) -> str:
+        return self.path
+
+
+def tests_named_in(evidence: Sequence[str]) -> tuple[TestReference | TestFileMention, ...]:
+    """Every test ``evidence`` names, in order of appearance, once each (MIK-R28 rule 2).
+
+    A test is named as a test ID ``path::name`` (``path::Class::method`` is ``Class.method``) or as a
+    path plus symbol, the pytest selection ``path -k name``. A test file named with neither is a
+    :class:`TestFileMention`, so the report can say the evidence names no resolvable test. Reading
+    resolves nothing: whether a named test exists at C is the writer's to establish.
+    """
+
+    found: list[tuple[int, int, TestReference | TestFileMention]] = []
+    for position, text in enumerate(evidence):
+        for pattern in (_TEST_ID, _SELECTED_TEST):
+            for match in pattern.finditer(text):
+                reference = TestReference(match["path"], match["name"].replace("::", "."))
+                found.append((position, match.start(), reference))
+    # A file some evidence string names a test in is named, wherever else it is mentioned bare.
+    named = {item.path for _, _, item in found}
+    for position, text in enumerate(evidence):
+        for match in _TEST_FILE.finditer(text):
+            if match["path"] not in named:
+                found.append((position, match.start(), TestFileMention(match["path"])))
+    ordered = [item for _, _, item in sorted(found, key=lambda one: (one[0], one[1]))]
+    return tuple(dict.fromkeys(ordered))
+
+
+@dataclass(frozen=True)
 class ProofRequest:
     """A curator-confirmed proof: the test that proves the entry's invariant, and what it shows."""
 
@@ -133,15 +184,10 @@ class EntryRequest:
     # ruling: nothing is written for it.
     ruling: bool = False
 
-    def cited_tests(self) -> tuple[TestReference, ...]:
-        """Every ``path::name`` test the evidence text names, in order, once each."""
+    def cited_tests(self) -> tuple[TestReference | TestFileMention, ...]:
+        """Every test the evidence text names, in order, once each (see :func:`tests_named_in`)."""
 
-        found = [
-            TestReference(match["path"], match["name"].replace("::", "."))
-            for text in self.evidence
-            for match in _TEST_ID.finditer(text)
-        ]
-        return tuple(dict.fromkeys(found))
+        return tests_named_in(self.evidence)
 
 
 @dataclass(frozen=True)

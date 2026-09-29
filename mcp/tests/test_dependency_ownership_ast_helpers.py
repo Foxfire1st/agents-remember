@@ -43,8 +43,21 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 80
-LIFECYCLE_CATALOG_SHA256 = "6fb4934d9120e1f593aaaa0e5534f49e01bf88a0f4dee04592f75063575fab65"
+LIFECYCLE_CATALOG_SHA256 = "b96198c3b59d0a7909dccd3dca389b8af93182d51c9886d0b2b9cb02ed5c64c9"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Thirty-fourth deliberate re-pin (260928-MIK-L28, at base ``8b025426``, 2026-09-29) -- the new
+case module ``test_knowledge_proofs.py`` (MIK-R28, first-class test proofs) added to the three rows
+the census derives it consumes.** It imports ``knowledge_index_test_support.py`` and
+``knowledge_writer_test_support.py``, and the census's source derivation also assigns it
+``fixtures/repository_profiles/node/package-lock.json`` (as for the other text-knowledge case modules
+in that row); each of those three ``consumer_scope =
+"exact"`` rows gains the one consumer, appended without re-sorting. **No row was added or removed, no
+consumer removed and no other field changed**; the population stays **sixteen contracts / eighty
+artifacts**, and the catalog is re-pinned from
+``6fb4934d9120e1f593aaaa0e5534f49e01bf88a0f4dee04592f75063575fab65`` (the Thirty-third) to
+``b96198c3b59d0a7909dccd3dca389b8af93182d51c9886d0b2b9cb02ed5c64c9``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml``. The proof's own artifact delta remains exactly empty.
 
 **Thirty-third deliberate re-pin (260928-MIK-L24, at base ``cd3e943d``, 2026-09-29) -- the shared
 test support of the text-knowledge leaves, registered, and the consumer rows the census derived for

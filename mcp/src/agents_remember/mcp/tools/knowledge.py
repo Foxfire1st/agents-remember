@@ -43,6 +43,7 @@ from agents_remember.application.knowledge_projection import (
     ProjectionOptions,
     project_knowledge,
 )
+from agents_remember.application.knowledge_proofs import tree_view_proofs
 from agents_remember.application.knowledge_read import open_read_context
 from agents_remember.application.knowledge_views import (
     VIEW_RENDERER_VERSION,
@@ -65,7 +66,7 @@ from agents_remember.memory.knowledge.detection import (
 )
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
-from agents_remember.memory.knowledge_index import MemoryTreeError
+from agents_remember.memory.knowledge_index import IndexMismatchError, MemoryTreeError
 from agents_remember.models.knowledge.diff import KnowledgeDiffRequest
 from agents_remember.models.knowledge.projection_manifest import DestinationProfile
 from agents_remember.models.knowledge.view import (
@@ -255,6 +256,7 @@ def _select(path: str, coordination_root: str | None) -> SelectedKnowledgeDatase
 # the same way: an index that cannot be built (the tree, its Git objects, the cache) is
 # ``snapshot_unavailable`` naming the tree; everything else is the dataset refusal it was before.
 _SELECTION_FAILURES = (
+    IndexMismatchError,
     MemoryTreeError,
     GitPreparationError,
     KnowledgeStorageError,
@@ -409,6 +411,11 @@ def _read_result(
         if isinstance(built, ViewRefusal):
             return _refused_read(view, repositoryId, built.code, built.detail)
         result = read_knowledge_view(path, context, built)
+        proofs = (
+            None
+            if selected.memory_tree is None or result.state == "refused"
+            else tree_view_proofs(selected.database_path, selected.memory_tree.tree_key, request)
+        )
     except _SELECTION_FAILURES as error:
         return _refused_read(view, repositoryId, *_selection_refusal(str(path), error))
     if result.state == "refused" or result.payload is None:
@@ -432,6 +439,7 @@ def _read_result(
         "payload": body,
         "memoryTree": memory_tree_block(selected.memory_tree),
         "indexComplete": _index_complete(selected),
+        "proofs": proofs,
     }
 
 

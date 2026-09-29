@@ -43,6 +43,8 @@ from agents_remember.application.knowledge_writer.handoff import (
     RecordRequest,
     RowRequest,
     TargetRequest,
+    TestFileMention,
+    TestReference,
     read_locator,
 )
 from agents_remember.application.knowledge_writer.memory_state import (
@@ -510,9 +512,21 @@ class Authoring:
         )
         return f"proof {self.entries[-1].id} in {self.entries[-1].sidecar}"
 
-    def _cited_test(self, entry: EntryRequest, test: Any, proven: Mapping[Any, str]) -> CitedTest:
+    def _cited_test(
+        self,
+        entry: EntryRequest,
+        test: TestReference | TestFileMention,
+        proven: Mapping[Any, str],
+    ) -> CitedTest:
         """What became of one test the evidence names: proved, awaiting a facet, or unresolvable."""
 
+        if isinstance(test, TestFileMention):
+            return CitedTest(
+                test.spelling,
+                "unresolvable",
+                "the evidence names this test file but no test in it; write "
+                f"'{test.path}::<name>' (or '{test.path} -k <name>') to prepare a proof",
+            )
         if test in proven:
             return CitedTest(test.spelling, "proof_written", proven[test])
         try:

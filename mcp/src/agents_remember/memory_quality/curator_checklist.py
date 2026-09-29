@@ -57,6 +57,18 @@ class CuratorChecklist:
     # stale route indexes only, which is §8.2's "does not fold into curatorActionableCount" enforced
     # by the shape of the function rather than by a comment.
     knowledge_review: tuple[AssessmentSummary, ...] = ()
+    # MIK-R28 rule 5: the live invariants no proof entry names, for a converted memory tree only.
+    # ``None`` (every unconverted tree) renders nothing, so today's checklist bytes are unchanged.
+    # Like ``knowledge_review`` it is information and never an input to ``actionable_count``.
+    without_proof: WithoutProof | None = None
+
+
+@dataclass(frozen=True)
+class WithoutProof:
+    """The "without proof" list: one row per invariant, and why it may be incomplete."""
+
+    rows: tuple[dict[str, Any], ...]
+    problem: str | None = None
 
 
 @dataclass(frozen=True)
@@ -263,6 +275,8 @@ def _render(checklist: CuratorChecklist, sections: _ChecklistSections) -> str:
     _append_findings(lines, "Closeout-owned real-commit provenance", sections.commit_owned)
     _append_findings(lines, "Noteworthy report-only findings", sections.report_only)
     lines.extend(sections.knowledge_review.lines)
+    if checklist.without_proof is not None:
+        _append_without_proof(lines, checklist.without_proof)
     lines.extend(
         [
             "## Completion Rule",
@@ -320,6 +334,41 @@ def _append_missing(lines: list[str], rows: list[dict[str, Any]]) -> None:
                 for key in ("sourceFile", "expectedOnboarding", "state", "note")
             )
             + " |"
+        )
+    lines.append("")
+
+
+def _append_without_proof(lines: list[str], section: WithoutProof) -> None:
+    lines.extend(
+        [
+            "## Invariants without proof",
+            "",
+            (
+                "Information, not a gate (MIK-R28 rule 5): the admission rule accepts criteria "
+                "other than a proving test. Tests the recorded evidence names can become proofs "
+                "through the writer's `proofs` key once the curator authors each facet. Rows do "
+                "not count toward `curatorActionableCount`."
+            ),
+            "",
+        ]
+    )
+    if section.problem is not None:
+        lines.extend([f"Incomplete: {_cell(section.problem)}", ""])
+    if not section.rows:
+        lines.extend(["_None._", ""])
+        return
+    lines.extend(
+        [
+            "| Invariant | Status | Record | Tests named in evidence |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for row in section.rows:
+        tests = ", ".join(f"`{_cell(str(test))}`" for test in row.get("evidenceTests", ()))
+        lines.append(
+            "| "
+            + " | ".join(_cell(str(row.get(key, ""))) for key in ("invariant", "status", "path"))
+            + f" | {tests or '—'} |"
         )
     lines.append("")
 

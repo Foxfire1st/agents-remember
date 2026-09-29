@@ -827,6 +827,7 @@ consumers = [
   "mcp/tests/test_knowledge_index_surfaces.py",
   "mcp/tests/test_knowledge_validator_routes.py",
   "mcp/tests/test_knowledge_writer.py",
+  "mcp/tests/test_knowledge_proofs.py",
 ]
 
 [[artifact]]
@@ -1813,6 +1814,7 @@ consumers = [
   "mcp/tests/test_knowledge_index.py",
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
+  "mcp/tests/test_knowledge_proofs.py",
 ]
 
 [[artifact]]
@@ -1831,6 +1833,7 @@ replacement_contract = "node:mcp/tests/test_knowledge_writer.py::test_a_decision
 consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_knowledge_writer.py",
+  "mcp/tests/test_knowledge_proofs.py",
 ]
 
 [[artifact]]

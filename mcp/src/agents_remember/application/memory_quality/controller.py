@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
+from agents_remember.application.knowledge_proofs import invariants_without_proof
 from agents_remember.application.memory_quality.census import (
     PreparedMemoryCensus,
     census_curator_candidates,
@@ -44,6 +45,7 @@ from agents_remember.memory_quality.check import (
 )
 from agents_remember.memory_quality.curator_checklist import (
     CuratorChecklist,
+    WithoutProof,
     split_commit_owned_findings,
     write_curator_checklist,
 )
@@ -644,6 +646,7 @@ def _attach_curator_checklist(
             drift_rows=drift_rows,
             report_only_findings=report_only,
             knowledge_review=knowledge_review,
+            without_proof=_without_proof(scope.onboarding_root.parent, config.coordination_root),
         )
     )
     response.pop("reportOnlyFindings", None)
@@ -655,6 +658,20 @@ def _attach_curator_checklist(
         candidate_inputs=candidate_inputs,
         missing_onboarding=missing_onboarding,
         stale_route_indexes=route_indexes.stale_indexes,
+    )
+
+
+def _without_proof(memory_root: Path, coordination_root: Path | None = None) -> WithoutProof | None:
+    """MIK-R28 rule 5's informational list for a converted memory tree; ``None`` otherwise.
+
+    The tree's index comes from the coordination index cache, keyed by the tree id.
+    """
+
+    coverage = invariants_without_proof(memory_root, coordination_root=coordination_root)
+    if coverage is None:
+        return None
+    return WithoutProof(
+        rows=tuple(row.as_row() for row in coverage.unproven), problem=coverage.problem
     )
 
 

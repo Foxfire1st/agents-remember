@@ -16,6 +16,12 @@ state and every file a ``partial`` index could not read, plus ``indexComplete`` 
 side was read from a partial index). A partial index is never presented as complete: a read from one
 also reports ``completeWithinDeclaredScope: false``. The fields are absent for a database.
 
+**Proofs beside the view (MIK-R28 rule 4).** An ``invariant`` or ``family`` read from a memory tree
+adds ``proofs``: the ``proves`` entries of the invariant, or of every family member, each
+``{id, invariant, path, anchor, facet, sidecar}``. A proof states what its test demonstrates, never
+that the test passed or that the invariant holds. The field is absent for a database and for the
+other views.
+
 **A refusal is a state, not a partial success.** ``state`` is ``view``/``result`` or ``refused``, and
 the refusal fields name the offending input. A handler never translates a refusal into an empty
 result or a default value, so a caller can always tell "nothing was selected" from "the selection was
@@ -57,6 +63,7 @@ class KnowledgeReadResponse(ToolResponse):
     payload: dict[str, Any] | None = None
     memoryTree: dict[str, Any] | None = None
     indexComplete: bool | None = None
+    proofs: list[dict[str, Any]] | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None
 
