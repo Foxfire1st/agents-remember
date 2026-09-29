@@ -16,6 +16,14 @@ state and every file a ``partial`` index could not read, plus ``indexComplete`` 
 side was read from a partial index). A partial index is never presented as complete: a read from one
 also reports ``completeWithinDeclaredScope: false``. The fields are absent for a database.
 
+**A memory tree's read is a bounded page (MIK-R02).** A read of a memory tree adds ``page``: the
+shared token threshold, the memory tree, the selection policy and manifest, and the walk's
+``total``, ``returned`` (through this page) and ``remaining`` rows, ``enumerationComplete``, the
+``headerReference`` a page that continues a family starts with, and ``flags: ["oversized_row"]``
+when one row alone exceeds the threshold. ``continuation`` is the shared token, which this tool
+resumes whichever surface minted it; resuming the published-intent block's token answers
+``state: "page"`` with the scope page as ``payload``. Absent for a database.
+
 **Proofs beside the view (MIK-R28 rule 4).** An ``invariant`` or ``family`` read from a memory tree
 adds ``proofs``: the ``proves`` entries of the invariant, or of every family member, each
 ``{id, invariant, path, anchor, facet, sidecar}``. A proof states what its test demonstrates, never
@@ -64,12 +72,14 @@ class KnowledgeReadResponse(ToolResponse):
     """
 
     operation: Literal["knowledge_read"] = "knowledge_read"
-    state: Literal["view", "refused"]
+    state: Literal["view", "page", "refused"]
     view: str
     repositoryId: str
     snapshot: str | None = None
     completeWithinDeclaredScope: bool | None = None
     continuation: str | None = None
+    page: dict[str, Any] | None = None
+    threshold: dict[str, Any] | None = None
     payload: dict[str, Any] | None = None
     memoryTree: dict[str, Any] | None = None
     indexComplete: bool | None = None

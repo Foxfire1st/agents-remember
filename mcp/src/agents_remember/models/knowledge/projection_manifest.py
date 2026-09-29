@@ -121,6 +121,7 @@ class ProjectionRefusalCode:
     MANIFEST_UNREADABLE: Literal["manifest_unreadable"] = "manifest_unreadable"
     DESTINATION_UNAVAILABLE: Literal["destination_unavailable"] = "destination_unavailable"
     UNAUTHORIZED_OVERWRITE: Literal["unauthorized_overwrite"] = "unauthorized_overwrite"
+    OVERSIZED_ROW: Literal["oversized_row"] = "oversized_row"
 
 
 RefusalCode = Literal[
@@ -131,6 +132,7 @@ RefusalCode = Literal[
     "manifest_unreadable",
     "destination_unavailable",
     "unauthorized_overwrite",
+    "oversized_row",
 ]
 
 

@@ -220,15 +220,36 @@ generation this publication does not carry. Neither is filled from today's data,
 recorded anchor could carry is refused as a seed rather than answered with an absence the read
 never observed.
 
-Read deeper by identity instead of re-reading everything, and do not try to continue a bounded page
-through the mounted read tool: the `continuation` a page mints continues the selective scope read
-(the block names it as `continuationOperation: "read_knowledge_scope"`), while `knowledge_read`
-continues *views* and refuses a scope cursor. Take the identities a page returned instead: pass the
-**value of** `datasetPath` as the mounted tool's `databasePath`, plus `repositoryId` from the block,
-`view: "invariant"` and `invariantRevisionId` for one exact retained revision (or `sourcePath` for
-the registered neighborhood of one file). The snapshot is retained evidence of an owner-produced
-input and never a new source of authored truth: no route here substitutes another repository, the
-current working tree, or a scratch dataset for the publication the repository actually records.
+**Follow a bounded page through `knowledge_read`.** When the block's `memoryTree` is present (a
+converted memory tree), the whole knowledge block is cut to one shared threshold, stated as
+`threshold` (8,000 `tiktoken:o200k_base` tokens); each page's `page` block states the walk's
+`total`, `returned` and `remaining` rows. A page with `continuation` set continues through the
+mounted read (`continuationOperation: "knowledge_read"`): pass the **value of**
+`memoryTree.memoryRoot` (not `datasetPath`, which names the derived index) as `databasePath`,
+`repositoryId` from the block, the `continuationView` as `view`, and the token as `continuation`
+-- nothing else. The token carries its seed, its ordering and the code tree page 1 resolved
+anchors at, so naming a different `orderingInput` or `codeTreeId` is refused; name
+`repositoryRoot` only when the code repository is not the mount's workspace. Repeat with each
+response's `continuation` (and its `payload.continuationView`) until a response carries none.
+
+The threshold bounds the whole block, not each path. Once the block is full, each remaining path
+arrives as `state: "deferred"` with only its counts and a first `continuation`; when even those
+would not fit, they arrive as one deferred entry listing its `seeds`, whose single continuation
+walks them in turn. Follow either the same way. Every row arrives exactly once per path; a page
+that continues a family names it first in `page.headerReference`, and a single row too large for
+the threshold on its own arrives alone, whole, flagged `oversized_row`. A `knowledge_read` view
+page of a memory tree pages the same way. A refusal `continuation_binding_mismatch` means the
+memory tree, the selection, the ordering or the code tree differs from the walk's: restart from
+the seed, without a continuation. `continuation_unreadable` means the token is not one of these,
+or belongs to another view.
+
+A block read from a database (no `memoryTree`) keeps its `read_knowledge_scope` cursor, which the
+mounted read does not continue: read deeper by identity instead -- pass the **value of**
+`datasetPath` as `databasePath`, plus `repositoryId` from the block, `view: "invariant"` and
+`invariantRevisionId` for one exact retained revision (or `sourcePath` for the registered
+neighborhood of one file). The snapshot is retained evidence of an owner-produced input and never a
+new source of authored truth: no route here substitutes another repository, the current working
+tree, or a scratch dataset for the publication the repository actually records.
 
 ## Route Index Semantics
 

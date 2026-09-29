@@ -38,11 +38,17 @@ from typing import Any
 import apsw
 from pydantic import ValidationError
 
-from agents_remember.application.knowledge_currentness import (
-    read_currentness,
-    requested_code_tree,
-)
+from agents_remember.application.knowledge_currentness import CodeTree
 from agents_remember.application.knowledge_diff import diff_knowledge_scope
+from agents_remember.application.knowledge_paging import threshold_block
+from agents_remember.application.knowledge_paging.currentness import WalkCurrentness
+from agents_remember.application.knowledge_paging.tree_read import (
+    DEFAULT_ORDERING,
+    PageExtras,
+    ReadSubject,
+    TreeExtras,
+    read_tree_page,
+)
 from agents_remember.application.knowledge_projection import (
     ProjectionOptions,
     project_knowledge,
@@ -56,6 +62,7 @@ from agents_remember.application.knowledge_views import (
 from agents_remember.application.knowledge_worklist.surface import leaf_worklist_fields
 from agents_remember.application.published_intent import (
     SelectedKnowledgeDataset,
+    converted_memory_tree,
     memory_tree_block,
     select_knowledge_dataset,
 )
@@ -77,6 +84,7 @@ from agents_remember.models.knowledge.projection_manifest import DestinationProf
 from agents_remember.models.knowledge.view import (
     ViewRefusal,
     ViewRequest,
+    ViewResult,
     rebuild_continuation,
     require_admitted_ordering_input,
 )
@@ -156,7 +164,7 @@ class ReadToolRequest:
     database_path: str
     repository_id: str
     view: str
-    ordering_input: str = "stable_ordering"
+    ordering_input: str | None = None
     limit: int = 32
     continuation: str | None = None
     invariant_revision_id: str | None = None
@@ -356,10 +364,11 @@ def knowledge_read_payload(
 ) -> dict[str, Any]:
     """Retrieve one named view at one snapshot, through the response-model choke point."""
 
-    return _tool_payload(
-        "knowledge_read",
-        _read_result(request, workspace_root=workspace_root, coordination_root=coordination_root),
-    )
+    body = _read_result(request, workspace_root=workspace_root, coordination_root=coordination_root)
+    if body["state"] == "refused" and converted_memory_tree(Path(request.database_path)):
+        # MIK-R02 rule 1: a memory-tree refusal states the threshold too (a page states it in page).
+        body.setdefault("threshold", threshold_block())
+    return _tool_payload("knowledge_read", body)
 
 
 def _read_result(
@@ -396,7 +405,7 @@ def _read_result(
     # where §2.5 promises ``unadmitted_ordering_input`` with the offending input. Asking the view
     # module's one closure check first is what keeps the ordering refusal reachable from this surface
     # (adversarial coverage review finding ``A-2``; the refusal itself is L20's, unchanged).
-    ordering_refusal = require_admitted_ordering_input(request.ordering_input)
+    ordering_refusal = require_admitted_ordering_input(_ordering(request))
     if ordering_refusal is not None:
         return _refused_read(view, repositoryId, ordering_refusal.code, ordering_refusal.detail)
     # The dataset is opened inside the boundary, because every failure to open or read it is a fact
@@ -413,14 +422,19 @@ def _read_result(
             repository_root=None if repository_root is None else Path(repository_root),
             code_tree_id=code_tree_id,
         )
+        if selected.memory_tree is not None:  # MIK-R02: a tree's pages are cut by the threshold
+            return read_tree_page(
+                request,
+                selected,
+                context,
+                extras=_tree_extras(selected),
+                workspace_root=workspace_root,
+            )
         built = _view_request(request)
-        if isinstance(built, ViewRefusal):
-            return _refused_read(view, repositoryId, built.code, built.detail)
-        result = read_knowledge_view(path, context, built)
-        proofs = (
-            None
-            if selected.memory_tree is None or result.state == "refused"
-            else tree_view_proofs(selected.database_path, selected.memory_tree.tree_key, request)
+        result = (
+            ViewResult(state="refused", repository_id=repositoryId, refusal=built)
+            if isinstance(built, ViewRefusal)
+            else read_knowledge_view(path, context, built)
         )
     except _SELECTION_FAILURES as error:
         return _refused_read(view, repositoryId, *_selection_refusal(str(path), error))
@@ -428,36 +442,41 @@ def _read_result(
         assert result.refusal is not None
         return _refused_read(view, repositoryId, result.refusal.code, result.refusal.detail)
     payload = result.payload
-    body = payload.model_dump(mode="json")
-    currentness = (  # MIK-R03: at the caller's named tree only; advisory, it never refuses the read
-        None
-        if selected.memory_tree is None
-        else read_currentness(
-            selected.database_path,
-            selected.memory_tree.tree_key,
-            requested_code_tree(request.code_tree_id, request.repository_root, workspace_root),
-            body,
-        )
-    )
-    complete = payload.completeness.complete_within_declared_scope
-    if _index_complete(selected) is False:
-        # The view is complete within what the index holds, and the index is not the whole tree.
-        complete = False
-        body["completeness"]["complete_within_declared_scope"] = False
     return {
         "ok": True,
         "state": "view",
         "view": payload.view,
         "repositoryId": repositoryId,
         "snapshot": payload.snapshot.logical_digest,
-        "completeWithinDeclaredScope": complete,
+        "completeWithinDeclaredScope": payload.completeness.complete_within_declared_scope,
         "continuation": None if payload.continuation is None else payload.continuation.token,
-        "payload": body,
-        "memoryTree": memory_tree_block(selected.memory_tree),
-        "indexComplete": _index_complete(selected),
-        "proofs": proofs,
-        "currentness": currentness,
+        "payload": payload.model_dump(mode="json"),
     }
+
+
+def _ordering(request: ReadToolRequest) -> str:
+    """The ordering a read uses: the caller's, or the default only when the caller named none."""
+
+    return DEFAULT_ORDERING if request.ordering_input is None else request.ordering_input
+
+
+def _tree_extras(selected: SelectedKnowledgeDataset) -> TreeExtras:
+    """What a memory-tree page carries beside its rows, prepared once per page.
+
+    The proofs of its subject (MIK-R28), and the currentness of every invariant the page returns
+    (MIK-R03) at the walk's code tree: the tree the caller named on a fresh read, or the tree the
+    continuation binds when the walk resumes, so one walk reports one tree's states on every page.
+    """
+
+    tree = selected.memory_tree
+    assert tree is not None
+
+    def prepare(subject: ReadSubject, code: CodeTree | None, candidates: list[Any]) -> PageExtras:
+        proofs = tree_view_proofs(selected.database_path, tree.tree_key, subject)
+        states = WalkCurrentness(selected.database_path, tree.tree_key, code, candidates)
+        return lambda body: {"proofs": proofs, "currentness": states.document(body)}
+
+    return prepare
 
 
 def _view_request(request: ReadToolRequest) -> ViewRequest | ViewRefusal:
@@ -482,7 +501,7 @@ def _view_request(request: ReadToolRequest) -> ViewRequest | ViewRefusal:
         invariant_revision_id=request.invariant_revision_id,
         family_revision_id=request.family_revision_id,
         source_path=request.source_path,
-        ordering_input=request.ordering_input,  # type: ignore[arg-type]
+        ordering_input=_ordering(request),  # type: ignore[arg-type]
         limit=request.limit,
         continuation=token,
     )

@@ -830,6 +830,7 @@ consumers = [
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_worklist_leaf.py",
   "mcp/tests/test_knowledge_currentness.py",
+  "mcp/tests/test_knowledge_paging.py",
 ]
 
 [[artifact]]
@@ -1817,6 +1818,7 @@ consumers = [
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
   "mcp/tests/test_knowledge_proofs.py",
+  "mcp/tests/test_knowledge_paging.py",
 ]
 
 [[artifact]]

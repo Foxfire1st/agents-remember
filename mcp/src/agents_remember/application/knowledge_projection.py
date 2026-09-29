@@ -44,6 +44,7 @@ from agents_remember.memory.knowledge.managed_projection import (
     ProjectionHooks,
     refusal_report,
 )
+from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
 from agents_remember.models.knowledge.projection_manifest import (
     DestinationProfile,
     ProjectionPlan,
@@ -242,7 +243,10 @@ def project_knowledge(
                     next_action="resolve the refused input and re-run the projection",
                 ),
             )
-        outputs.extend(_outputs_for(result.payload, subject, profile))
+        rendered = _outputs_for(result.payload, subject, profile)
+        if isinstance(rendered, ProjectionRefusal):
+            return refusal_report(profile, rendered)
+        outputs.extend(rendered)
     plan = ProjectionPlan(
         destination=profile,
         outputs=tuple(outputs),
@@ -254,33 +258,85 @@ def project_knowledge(
 
 def _outputs_for(
     payload: ViewPayloadUnion, subject: str, profile: DestinationProfile
-) -> list[RenderedOutput]:
-    """The sibling artifacts for one payload, one per format the profile declares."""
+) -> list[RenderedOutput] | ProjectionRefusal:
+    """The sibling artifacts for one payload, one per format the profile declares, per part.
 
+    A payload whose rendering fits one artifact is one part, written exactly as before. One that
+    does not is continued across parts (``<subject>.part-<n>``), each holding whole rows and each
+    fitting the artifact bound, so every row reaches exactly one part (MIK-R02). A row that does
+    not fit even alone is refused by name rather than cut short or raised.
+    """
+
+    parts = _parts(payload, subject, profile)
+    if isinstance(parts, ProjectionRefusal):
+        return parts
     base = _document_path(payload, subject)
     rendered: list[RenderedOutput] = []
-    for declared in profile.formats:
-        if declared == "markdown":
-            rendered.append(
-                _output(
-                    payload,
-                    subject,
-                    f"{base}.md",
-                    "markdown",
-                    render_payload_as_markdown(payload, subject),
-                )
-            )
-        else:
-            rendered.append(
-                _output(
-                    payload,
-                    subject,
-                    f"{base}.json",
-                    "json",
-                    render_payload_as_json(payload, subject),
-                )
-            )
+    for number, part in enumerate(parts, start=1):
+        stem = base if number == 1 else f"{base}.part-{number}"
+        label = subject if len(parts) == 1 else f"{subject} (part {number} of {len(parts)})"
+        for declared in profile.formats:
+            extension, text = _render(declared, part, label)
+            rendered.append(_output(part, subject, f"{stem}.{extension}", declared, text))
     return rendered
+
+
+def _render(declared: str, payload: ViewPayloadUnion, label: str) -> tuple[str, str]:
+    if declared == "markdown":
+        return "md", render_payload_as_markdown(payload, label)
+    return "json", render_payload_as_json(payload, label)
+
+
+def _fits(payload: ViewPayloadUnion, label: str, profile: DestinationProfile) -> bool:
+    return all(
+        len(_render(declared, payload, label)[1]) <= PROSE_MAX_LENGTH
+        for declared in profile.formats
+    )
+
+
+def _parts(
+    payload: ViewPayloadUnion, subject: str, profile: DestinationProfile
+) -> list[ViewPayloadUnion] | ProjectionRefusal:
+    """The payload as consecutive parts of whole rows whose every rendering fits an artifact."""
+
+    if _fits(payload, subject, profile):
+        return [payload]
+    # Measured with the longest label a part can carry, so the numbering never pushes a part over.
+    label = f"{subject} (part {len(payload.rows)} of {len(payload.rows)})"
+    parts: list[ViewPayloadUnion] = []
+    current: list[Any] = []
+    for row in payload.rows:
+        if _fits(_with_rows(payload, [*current, row]), label, profile):
+            current.append(row)
+            continue
+        if not current or not _fits(_with_rows(payload, [row]), label, profile):
+            return _oversized_row(payload, subject, profile, row)
+        parts.append(_with_rows(payload, current))
+        current = [row]
+    if not current:
+        return _oversized_row(payload, subject, profile, None)
+    parts.append(_with_rows(payload, current))
+    return parts
+
+
+def _with_rows(payload: ViewPayloadUnion, rows: list[Any]) -> ViewPayloadUnion:
+    return payload.model_copy(update={"rows": tuple(rows)})
+
+
+def _oversized_row(
+    payload: ViewPayloadUnion, subject: str, profile: DestinationProfile, row: Any
+) -> ProjectionRefusal:
+    what = "its header" if row is None else f"the row at position {row.order.position}"
+    return ProjectionRefusal(
+        code="oversized_row",
+        detail=(
+            f"the {payload.view} view of {subject} cannot be projected: {what} alone renders "
+            f"past the {PROSE_MAX_LENGTH}-character artifact bound, and a row is never cut short"
+        ),
+        offending_path=_document_path(payload, subject),
+        resolved_root=profile.destination_root,
+        next_action="read the view through knowledge_read, whose pages carry an oversized row whole",
+    )
 
 
 def _output(

@@ -43,8 +43,21 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 80
-LIFECYCLE_CATALOG_SHA256 = "dcc1ab1dd89330fa429608a4483183fa10e755690e6cdc6071f71ddc27dbd53c"
+LIFECYCLE_CATALOG_SHA256 = "5c0a15941c93d17a808263a9250afb7074d76ef7014ada0114b2780d6eea2fe5"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Thirty-seventh deliberate re-pin (260928-MIK-L02, at base ``719acba6``, 2026-09-29) -- two
+consumers the census derived for the paging case module.** ``260928-MIK-L02`` (MIK-R02, bounded
+continuation accepted by the mounted read) adds ``mcp/tests/test_knowledge_paging.py``, which
+transitively consumes ``fixtures/repository_profiles/node/package-lock.json`` and imports
+``mcp/tests/knowledge_index_test_support.py``; each of those two rows gains the one path, appended
+after its last consumer (after the Thirty-sixth's ``test_knowledge_currentness.py`` in the first
+row) without re-sorting. **No row was added or removed, no other consumer changed and no field
+changed**, so the population stays at **sixteen contracts / eighty artifacts**, and the catalog is
+re-pinned from ``dcc1ab1dd89330fa429608a4483183fa10e755690e6cdc6071f71ddc27dbd53c`` (the
+Thirty-sixth) to ``5c0a15941c93d17a808263a9250afb7074d76ef7014ada0114b2780d6eea2fe5``, measured
+with ``sha256sum mcp/tests/evidence-lifecycle.toml``. The proof's own artifact delta remains
+exactly empty.
 
 **Thirty-sixth deliberate re-pin (260928-MIK-L03, at base ``e40c314c``, 2026-09-29) -- one consumer
 the census derived for the currentness case module.** ``260928-MIK-L03`` (MIK-R03, stale invariants

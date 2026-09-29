@@ -68,11 +68,15 @@ without the marker keeps the database selection above, unchanged. Only this read
 write side's :func:`resolve_published_intent` still selects the database, and no writer reaches the
 index.
 
-One limitation travels with a bounded page rather than being left for a caller to discover: the
-``continuation`` a page mints is a ``read_knowledge_scope`` cursor (``continuationOperation``), and
-the mounted ``knowledge_read`` tool continues *views*, so it refuses that token. A caller that needs
-more than the page carries reads on by identity -- the exact ``invariant_id``/``revision_id`` the
-page returned -- rather than by paging this cursor through a tool that does not accept it.
+**A memory tree's page continues through ``knowledge_read`` (MIK-R02).** A seed read from a
+converted tree is paged by the shared token threshold (:mod:`agents_remember.application.
+knowledge_paging`): the block states the threshold and the walk's counts in ``page``, and its
+``continuation`` is the shared token that the mounted ``knowledge_read`` accepts
+(``continuationOperation: "knowledge_read"``, with the view named in ``continuationView``). The
+threshold bounds the whole block, not each seed: seeds are laid out in order, and once the block
+is full each remaining seed returns only its counts and a position-0 continuation. A page read
+from a database keeps its ``read_knowledge_scope`` cursor and item/byte budget, which the mounted
+tool does not continue; a caller reads on by the identities that page returned.
 """
 
 from __future__ import annotations
@@ -82,13 +86,23 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import apsw
 from pydantic import ValidationError
 
 from agents_remember.application.knowledge_before_half import read_dataset_identity
-from agents_remember.application.knowledge_currentness import CodeTree, read_currentness
+from agents_remember.application.knowledge_currentness import CodeTree
+from agents_remember.application.knowledge_paging import threshold_block
+from agents_remember.application.knowledge_paging.bindings import PagingRefusal
+from agents_remember.application.knowledge_paging.block_pages import bounded_block
+from agents_remember.application.knowledge_paging.currentness import WalkCurrentness
+from agents_remember.application.knowledge_paging.scope_pages import (
+    PreparedScope,
+    ScopePageRequest,
+    TreeBinding,
+    prepare_scope,
+)
 from agents_remember.application.knowledge_read import open_read_context, read_knowledge_scope
 from agents_remember.kernel.coordination_context.models import CoordinationContext
 from agents_remember.kernel.git_command import run_git
@@ -117,7 +131,6 @@ from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 __all__ = [
     "PUBLISHED_DATASET_NAME",
     "PUBLISHED_INTENT_MAX_ITEMS",
-    "PUBLISHED_INTENT_MAX_UTF8_BYTES",
     "PublishedIntentSelection",
     "PublishedIntentSourcePair",
     "PublishedIntentUnavailable",
@@ -149,8 +162,10 @@ PUBLISHED_DATASET_NAME = "knowledge.sqlite"
 # One bounded page per seed. A path seed selects the revisions realized at that path plus the
 # families directly containing them, so the bound is a page size rather than a narrowing: a page
 # that leaves items behind reports ``hasMore`` and hands back the continuation that reaches them.
+# These two bounds apply to a database read only. A memory tree's pages are cut by the one shared
+# token threshold instead, and the byte bound is retired with the database route.
 PUBLISHED_INTENT_MAX_ITEMS = 8
-PUBLISHED_INTENT_MAX_UTF8_BYTES = 8192
+_DATABASE_PAGE_MAX_UTF8_BYTES = 8192
 
 # The two spellings a Git object identity of a tree can have. Nothing is invented for a value that
 # matches neither: the pair is then left unrequested, which the read reports as "no source
@@ -460,17 +475,50 @@ def read_published_intent(
     if isinstance(context, PublishedIntentUnavailable):
         return _unavailable_block(context)
     blocks = [_seed_block(selection, context, seed, max_items) for seed in seeds]
-    block = _recorded_block(selection, [_bind_index_state(block, selection) for block in blocks])
-    tree = selection.memory_tree
-    if tree is not None:  # MIK-R03: each returned invariant's state at the resolved source tree
-        pair = selection.source_pair
-        code = None if pair is None else CodeTree(pair.repository_root, pair.code_tree_id)
-        block["currentness"] = read_currentness(  # never raises: advisory beside the pages
-            selection.database_path, tree.tree_key, code, block["seeds"]
+    if selection.memory_tree is not None:  # MIK-R02: the threshold bounds the whole block
+        tree = selection.memory_tree
+        currentness = WalkCurrentness(
+            selection.database_path, tree.tree_key, _code_tree(selection), _candidates(blocks)
         )
-        if pair is not None:
-            block["currentness"]["treeScope"] = _TREE_SCOPE.format(tree=pair.code_tree_id)
+        return bounded_block(blocks, lambda laid: _tree_block(selection, laid, currentness))
+    # A database selection prepares no scope to cut: every seed entry is already its block.
+    pages = cast(list[dict[str, Any]], blocks)
+    return _recorded_block(selection, [_bind_index_state(block, selection) for block in pages])
+
+
+def _tree_block(
+    selection: PublishedIntentSelection,
+    laid: list[dict[str, Any]],
+    currentness: WalkCurrentness,
+) -> dict[str, Any]:
+    """The complete block of a memory-tree read around its laid-out seeds.
+
+    Everything the block carries beside its seeds -- the threshold, and each returned invariant's
+    currentness (MIK-R03) at the source-resolution tree -- is added here, so it is inside the
+    measured block that the threshold bounds.
+    """
+
+    block = _recorded_block(selection, [_bind_index_state(entry, selection) for entry in laid])
+    block["threshold"] = threshold_block()
+    block["currentness"] = currentness.document(block["seeds"])
+    pair = selection.source_pair
+    if pair is not None:
+        block["currentness"]["treeScope"] = _TREE_SCOPE.format(tree=pair.code_tree_id)
     return block
+
+
+def _code_tree(selection: PublishedIntentSelection) -> CodeTree | None:
+    pair = selection.source_pair
+    return None if pair is None else CodeTree(pair.repository_root, pair.code_tree_id)
+
+
+def _candidates(blocks: list[dict[str, Any] | PreparedScope]) -> list[Any]:
+    """Every row any seed of the block could carry, for the one currentness computation."""
+
+    return [
+        [dict(row.body) for row in block.rows] if isinstance(block, PreparedScope) else block
+        for block in blocks
+    ]
 
 
 # The currentness block's statement of which tree it observed (MIK-R03, L03 ruling Q1): the tree
@@ -592,7 +640,7 @@ def _seed_block(
     context: KnowledgeReadContext,
     seed: KnowledgeReadSeed | _UnseedablePath,
     max_items: int,
-) -> dict[str, Any]:
+) -> dict[str, Any] | PreparedScope:
     if isinstance(seed, _UnseedablePath):
         return _refused_block(
             {"kind": "path", "path": seed.path}, "invalid_payload", seed.detail, None
@@ -601,13 +649,15 @@ def _seed_block(
     if seed_json is None:
         return _unaddressable_seed_block(seed)
     try:
+        if selection.memory_tree is not None:  # MIK-R02: paged by the shared threshold
+            return _tree_page_block(selection, selection.memory_tree, context, seed, seed_json)
         result = read_knowledge_scope(
             selection.database_path,
             context,
             KnowledgeReadRequest(
                 seed=seed,
                 budget=KnowledgeReadBudget(
-                    max_items=max_items, max_utf8_bytes=PUBLISHED_INTENT_MAX_UTF8_BYTES
+                    max_items=max_items, max_utf8_bytes=_DATABASE_PAGE_MAX_UTF8_BYTES
                 ),
             ),
         )
@@ -619,6 +669,30 @@ def _seed_block(
             None,
         )
     return _result_block(seed_json, result)
+
+
+def _tree_page_block(
+    selection: PublishedIntentSelection,
+    tree: PublishedMemoryTree,
+    context: KnowledgeReadContext,
+    seed: KnowledgeReadSeed,
+    seed_json: dict[str, Any],
+) -> PreparedScope | dict[str, Any]:
+    """A seed's scope in a memory tree, ready to be cut within the block, or its refusal."""
+
+    paged = prepare_scope(
+        ScopePageRequest(
+            database_path=selection.database_path,
+            context=context,
+            seed=seed,
+            tree=TreeBinding(tree_id=tree.tree_key, index_state=tree.index_state),
+        )
+    )
+    if isinstance(paged, KnowledgeReadResult):
+        return _result_block(seed_json, paged)
+    if isinstance(paged, PagingRefusal):  # pragma: no cover - a first page carries no continuation
+        return _refused_block(seed_json, paged.code, paged.detail, None)
+    return paged
 
 
 def _seed_json(seed: object) -> dict[str, Any] | None:

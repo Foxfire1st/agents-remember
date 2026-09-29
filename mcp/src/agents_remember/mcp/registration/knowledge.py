@@ -73,7 +73,7 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         repositoryId: str,
         view: str,
         *,
-        orderingInput: str = "stable_ordering",
+        orderingInput: str | None = None,
         limit: int = 32,
         continuation: str | None = None,
         invariantRevisionId: str | None = None,
@@ -87,9 +87,15 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         review_matrix and curation_queue. Returns recorded claims and assessments as attributed
         records: every ordered position and every no-consequence statement carries an `authored` or
         `mechanical` provenance class, and a value that cannot be classified is reported as an
-        unresolved limitation rather than returned with an empty class. For a converted memory
-        tree, `currentness` gives each returned invariant's state (stale, unverifiable, unrealized,
-        current) at the code tree named by `codeTreeId`; without it they are unverifiable."""
+        unresolved limitation rather than returned with an empty class. orderingInput defaults to
+        stable_ordering. For a converted memory tree (databasePath is its root) every response is a
+        page within one token threshold (`page`, and `threshold` on a refusal), and `continuation`
+        accepts the token any page minted, including the published-intent block of read_ar_files:
+        pass it with its `continuationView` as `view` and no other subject (the token binds its
+        ordering and code tree; repositoryRoot relocates the code repository). `currentness`
+        gives each returned invariant's state (stale, unverifiable, unrealized, current) at the
+        walk's code tree: the one named by `codeTreeId`, or the continuation's on a resumed page;
+        without either they are unverifiable."""
         return knowledge_read_payload(
             ReadToolRequest(
                 database_path=databasePath,
