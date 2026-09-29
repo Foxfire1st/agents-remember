@@ -8,7 +8,10 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from agents_remember.application.knowledge_proofs import invariants_without_proof
-from agents_remember.application.knowledge_worklist import recompute_leaf_worklist
+from agents_remember.application.knowledge_worklist import (
+    leaf_onboarding_trace_sides,
+    recompute_leaf_worklist,
+)
 from agents_remember.application.memory_quality.census import (
     PreparedMemoryCensus,
     census_curator_candidates,
@@ -84,6 +87,7 @@ from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusa
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.modules.onboarding import (
     contract_memory_verified_commit,
+    onboarding_trace_gate_for_context,
     validate_memory_refresh_attestations,
 )
 from agents_remember.worktrees.modules.onboarding_acceptance import OnboardingBodyGateEvidence
@@ -621,31 +625,15 @@ def _attach_curator_checklist(
             accepted_no_impact = no_impact.content_sources
             accepted_route_no_impact = no_impact.source_routes
             knowledge_review = curator_knowledge_review_summaries(coherence)
-        try:
-            validate_memory_refresh_attestations(
-                scope.quality_context,
-                changed_paths,
-                working_paths=current_working_paths,
-                body_gate=OnboardingBodyGateEvidence(
-                    memory_tree=scope.onboarding_root.parent,
-                    memory_verified_commit=contract_memory_verified_commit(scope.contract),
-                    accepted_no_impact=accepted_no_impact,
-                ),
-                route_body_gate=OnboardingBodyGateEvidence(
-                    memory_tree=scope.onboarding_root.parent,
-                    memory_verified_commit=contract_memory_verified_commit(scope.contract),
-                    accepted_no_impact=accepted_route_no_impact,
-                ),
-            )
-        except RuntimeError as error:
-            repair_findings.append(
-                {
-                    "check": "memory-refresh-attestations",
-                    "code": "memory-refresh-attestation-failed",
-                    "path": "",
-                    "message": str(error),
-                }
-            )
+        gate_findings, gate_report_only = _onboarding_refresh_gate(
+            scope,
+            changed_paths,
+            current_working_paths,
+            (accepted_no_impact, accepted_route_no_impact),
+            response,
+        )
+        repair_findings.extend(gate_findings)
+        report_only.extend(gate_report_only)
     repair_findings.extend(
         {
             "check": "memory-census",
@@ -690,6 +678,59 @@ def _attach_curator_checklist(
         missing_onboarding=missing_onboarding,
         stale_route_indexes=route_indexes.stale_indexes,
     )
+
+
+def _onboarding_refresh_gate(
+    scope: MemoryScope,
+    changed_paths: list[str],
+    working_paths: list[str],
+    no_impact: tuple[frozenset[str], frozenset[str]],
+    response: dict[str, object],
+) -> tuple[list[Any], list[Any]]:
+    """The leaf's onboarding gate: its repair findings and its report-only findings.
+
+    A converted tree (K_B or K_C holds the layout marker) runs MIK-R30's history-file gate: one
+    repair finding per missing trace, unnecessary rows report-only, and ``onboardingTrace`` on the
+    response. An unconverted tree runs today's Update History gate, unchanged.
+    """
+
+    contract = scope.contract
+    assert contract is not None
+    memory_tree = scope.onboarding_root.parent
+    trace_sides = leaf_onboarding_trace_sides(contract, memory_tree=memory_tree)
+    if trace_sides is not None:
+        trace, findings = onboarding_trace_gate_for_context(
+            scope.quality_context, changed_paths, trace_sides, working_paths=working_paths
+        )
+        response["onboardingTrace"] = trace.brief()
+        return list(findings), trace.report_only_findings()
+    verified = contract_memory_verified_commit(contract)
+    try:
+        validate_memory_refresh_attestations(
+            scope.quality_context,
+            changed_paths,
+            working_paths=working_paths,
+            body_gate=OnboardingBodyGateEvidence(
+                memory_tree=memory_tree,
+                memory_verified_commit=verified,
+                accepted_no_impact=no_impact[0],
+            ),
+            route_body_gate=OnboardingBodyGateEvidence(
+                memory_tree=memory_tree,
+                memory_verified_commit=verified,
+                accepted_no_impact=no_impact[1],
+            ),
+        )
+    except RuntimeError as error:
+        return [
+            {
+                "check": "memory-refresh-attestations",
+                "code": "memory-refresh-attestation-failed",
+                "path": "",
+                "message": str(error),
+            }
+        ], []
+    return [], []
 
 
 def _without_proof(memory_root: Path, coordination_root: Path | None = None) -> WithoutProof | None:

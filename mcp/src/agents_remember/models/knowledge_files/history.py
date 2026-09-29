@@ -251,9 +251,13 @@ class OnboardingTraceRow(HistoryRow):
     """A reviewed-no-impact attestation about one onboarding card or route overview.
 
     Subject ``onboarding:<source path>`` for a file card and ``onboarding:<route>/overview`` for a
-    route overview. MIK-R30 owns the kind; MIK-R24 rule 8 step 1 is its first writer (an open leaf's
-    Update History ``No content impact:``/``No route impact:`` markers move here when its line is
-    converted), so the kind is registered with the one disposition that move writes.
+    route overview (``onboarding:overview`` for the root route). MIK-R30 owns the kind: such a row,
+    with disposition ``no_impact``, satisfies the onboarding gate's item for a changed source file's
+    card or governing route overview that has no counted change
+    (``worktrees/modules/onboarding_trace.py``); ``no_impact`` is the only disposition. The curator
+    writes it through the writer's ``history`` section; MIK-R24 rule 8 step 1 also writes it (an
+    open leaf's Update History ``No content impact:``/``No route impact:`` markers move here when
+    its line is converted).
 
     ``markers`` holds the moved marker lines, one entry per line (a line longer than one text value
     is split deterministically into consecutive pieces); ``reason`` is then a short fixed summary.

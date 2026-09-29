@@ -6,6 +6,10 @@ refuses one that MIXES offset-bearing and offset-less timestamps, because sortin
 together means ordering two frames against each other and writing the result to disk. The
 checker's ``update_history_timestamp_naive`` finding names the same sections; the remedy
 for both is to state the offsets, after which this tool sorts them.
+
+A converted memory tree (``knowledge/layout.json``) has no Update History: its onboarding
+gate is the history-file gate (MIK-R30 rule 5), so this fixer reads and writes nothing there
+and says so. The fixer itself retires with the cutover (MIK-R37).
 """
 
 from __future__ import annotations
@@ -23,9 +27,21 @@ from agents_remember.memory_quality.style.update_history.history_order import (
     parse_timestamp,
     update_history_sections,
 )
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 
 
 def fix_onboarding_root(onboarding_root: Path, *, dry_run: bool = False) -> dict[str, Any]:
+    if (onboarding_root.parent / LAYOUT_MARKER_PATH).is_file():
+        return {
+            "ok": True,
+            "operation": "history_order_fix",
+            "status": "not-applicable-converted",
+            "onboardingRoot": onboarding_root.as_posix(),
+            "dryRun": dry_run,
+            "filesChecked": 0,
+            "changedFiles": [],
+            "skippedFiles": [],
+        }
     changed_files: list[str] = []
     skipped_files: list[str] = []
     files_checked = 0

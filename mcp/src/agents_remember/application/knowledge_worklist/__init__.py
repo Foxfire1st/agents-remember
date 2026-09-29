@@ -10,7 +10,9 @@ MIK-R07 rule 0) and persisted as ``knowledge-worklist/v1`` in the leaf's enclosu
 * :mod:`.registry` -- the item-kind registry and stable item IDs (rules 1-3);
 * :mod:`.compute` -- one run: inventory, one-pass scope, items, gate linkage, digest;
 * :mod:`.leaf` -- a leaf's sides from its contract, its run, and the persisted file;
-* :mod:`.surface` -- what ``knowledge_integrity_check`` returns for a leaf.
+* :mod:`.surface` -- what ``knowledge_integrity_check`` returns for a leaf;
+* :mod:`.onboarding_trace` -- MIK-R30's ``onboarding_trace`` kind (registered on import), the
+  gate's sides and its items in the worklist.
 
 An entry is raised only when changed lines intersect its own range, when it moved or disappeared,
 or when it changed outside the managed flow; a change elsewhere in the same file raises nothing.
@@ -31,12 +33,16 @@ from agents_remember.application.knowledge_worklist.leaf import (
     WORKLIST_FILE_NAME,
     ExplicitSides,
     LeafWorklistRecompute,
+    leaf_onboarding_trace_sides,
     leaf_worklist,
     persist_worklist,
     read_leaf_worklist,
     recompute_leaf_worklist,
     worklist_for_sides,
     worklist_path,
+)
+from agents_remember.application.knowledge_worklist.onboarding_trace import (
+    ONBOARDING_TRACE_KIND,
 )
 from agents_remember.application.knowledge_worklist.registry import (
     ITEM_KINDS,
@@ -48,6 +54,7 @@ from agents_remember.application.knowledge_worklist.registry import (
 
 __all__ = [
     "ITEM_KINDS",
+    "ONBOARDING_TRACE_KIND",
     "WORKLIST_FILE_NAME",
     "WORKLIST_SCHEMA",
     "ExplicitSides",
@@ -59,6 +66,7 @@ __all__ = [
     "compute_worklist",
     "incomplete_worklist",
     "item_id",
+    "leaf_onboarding_trace_sides",
     "leaf_worklist",
     "persist_worklist",
     "read_leaf_worklist",

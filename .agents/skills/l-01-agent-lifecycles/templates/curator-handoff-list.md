@@ -555,6 +555,12 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
   - `{id, remove: true}`, which removes the entry;
   - `{handoff: "<entry id>"}`, which covers every entry this list wrote for the subject.
 - A family row adds `examined`, the member IDs the curator examined.
+- An onboarding row (MIK-R30, converted memory only) has the subject `onboarding:<source path>` or
+  `onboarding:<route>/overview` (`onboarding:overview` for the root route) and the disposition
+  `no_impact`, and nothing else. It records that a changed source file's card, or its governing
+  route overview, was reviewed and needs no change. A counted change of the card or overview
+  (its Markdown, or a sidecar field other than an anchor's `blob`, line numbers and `content`)
+  needs no row.
 
 **Handles.** `"handoff:<key>"` names the record this document authors under that entry `id` or record
 `key`. Use it wherever an ID goes: link targets, `members`, `subject`, `examined` or `supersedes`.

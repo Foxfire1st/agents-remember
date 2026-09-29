@@ -66,6 +66,7 @@ from agents_remember.models.knowledge_files.documents import history_path
 from agents_remember.models.knowledge_files.history import (
     HISTORY_SCHEMA,
     InvariantRow,
+    OnboardingTraceRow,
 )
 from agents_remember.models.knowledge_files.ids import (
     RECORD_ID_PATTERN,
@@ -569,6 +570,8 @@ class Authoring:
 
     def _row(self, request: RowRequest, rows: Mapping[str, Any]) -> dict[str, Any] | None:
         where = f"history[{request.position}]"
+        if re.match(OnboardingTraceRow.subject_pattern, request.subject):
+            return self._onboarding_row(request, rows.get(request.subject), where)
         subject = self.resolve_id(request.subject, where)
         found = None if subject is None else self.state.record(subject)
         if subject is None or found is None:
@@ -590,6 +593,42 @@ class Authoring:
             return self._family_row(request, row, where)
         self.problem(where, f"no registered history row kind has a {found[1]} subject")
         return None
+
+    def _onboarding_row(
+        self, request: RowRequest, existing: Mapping[str, Any] | None, where: str
+    ) -> dict[str, Any] | None:
+        """An ``onboarding_trace`` row (MIK-R30): a reviewed no-impact judgment about a card or
+        route overview. It carries no covers, effect, because or examined members. Marker lines a
+        crossing sync moved into an existing row (MIK-R24 rule 8 step 1) are kept."""
+
+        extra = [
+            name
+            for name, value in (
+                ("covers", request.covers),
+                ("effect", request.effect),
+                ("because", request.because),
+                ("examined", request.examined),
+            )
+            if value
+        ]
+        if extra:
+            self.problem(where, f"an onboarding_trace row carries no {extra}")
+            return None
+        row: dict[str, Any] = {
+            "id": existing["id"] if existing is not None else self.mint("history_row"),
+            "subject": request.subject,
+            "disposition": request.disposition,
+            "reason": request.reason,
+            "items": list(request.items),
+        }
+        if existing is not None and existing.get("markers"):
+            row["markers"] = list(existing["markers"])
+        try:
+            OnboardingTraceRow.model_validate(row)
+        except ValidationError as error:
+            self.problem(where, _first_error(error))
+            return None
+        return row
 
     def _reason_with_evidence(self, subject: str, reason: str) -> str:
         """The row's reason, with the evidence of this run's updates of another owner's record."""

@@ -22,6 +22,7 @@ from agents_remember.application.knowledge_worklist import (
     leaf_worklist,
     worklist_for_sides,
 )
+from agents_remember.application.knowledge_worklist import base_cache as worklist_base_cache
 from agents_remember.application.knowledge_worklist import leaf as worklist_leaf
 from agents_remember.application.knowledge_worklist.code import CodeTrees
 from agents_remember.application.knowledge_writer.memory_state import Owner
@@ -396,7 +397,11 @@ def test_the_tool_returns_the_latest_worklist_and_the_checklist_shows_it(leaf: L
     assert present["worklistState"] == "present"
     worklist = present["worklist"]
     assert worklist["digest"] == document["digest"] and worklist["owner"] == LEAF
-    assert worklist["itemsByKind"] == {"reached_family": 1, "touched_invariant": 1}
+    assert worklist["itemsByKind"] == {
+        "reached_family": 1,
+        "touched_invariant": 1,
+        "onboarding_trace": 2,  # MIK-R30: the edited file's card and its root route (ruling Q2)
+    }
     assert [item["id"] for item in worklist["items"]] == [item["id"] for item in document["items"]]
     neither = knowledge_integrity_check_payload(IntegrityCheckRequest())
     assert neither["state"] == "refused"
@@ -653,7 +658,11 @@ def test_the_memory_quality_controller_persists_the_worklist_and_renders_it_in_t
     assert document["state"] == "complete"
     summary = cast(dict[str, Any], response["knowledgeWorklist"])
     assert summary["digest"] == document["digest"] and summary["path"] == persisted.as_posix()
-    assert summary["itemsByKind"] == {"reached_family": 1, "touched_invariant": 1}
+    assert summary["itemsByKind"] == {
+        "reached_family": 1,
+        "touched_invariant": 1,
+        "onboarding_trace": 2,  # MIK-R30: the edited file's card and its root route (ruling Q2)
+    }
     rendered = report.read_text(encoding="utf-8")
     assert WORKLIST_SECTION_HEADING in rendered
     assert "| touched_invariant | INV-AAAAAA |" in rendered
@@ -740,14 +749,14 @@ def test_converted_bases_are_cached_by_commit_version_and_code_commit(tmp_path: 
     assert first is not None and first["state"] == "complete"
     assert len(list(cache.glob("*.json.gz"))) == 1
     with mock.patch.object(
-        worklist_leaf, "converted_base", side_effect=AssertionError("reconvert")
+        worklist_base_cache, "converted_base", side_effect=AssertionError("reconvert")
     ):
         second = worklist_for_sides(sides)
     assert second == first
     # A cache location inside a Git working tree is refused: the run converts and writes nothing.
     inside = replace(sides, cache_directory=memory / ".cache" / "bases")
     with mock.patch.object(
-        worklist_leaf, "converted_base", wraps=worklist_leaf.converted_base
+        worklist_base_cache, "converted_base", wraps=worklist_base_cache.converted_base
     ) as converting:
         third = worklist_for_sides(inside)
     assert third == first and converting.called

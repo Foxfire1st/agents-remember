@@ -35,8 +35,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, Final
 
 from agents_remember.application.knowledge_worklist.base_cache import (
-    ConvertedBaseCache,
-    base_cache_key,
+    converted_base_files,
     default_base_cache_directory,
 )
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
@@ -50,6 +49,11 @@ from agents_remember.application.knowledge_worklist.knowledge import (
     KnowledgeSide,
     KnowledgeSideUnreadable,
 )
+from agents_remember.application.knowledge_worklist.onboarding_trace import (
+    TraceSideRequest,
+    onboarding_trace_sides,
+    worklist_onboarding,
+)
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
@@ -58,23 +62,20 @@ from agents_remember.kernel.git_command import (
 )
 from agents_remember.kernel.memory_attribution import MemoryAttributionError, attributed_commits
 from agents_remember.memory.conversion.base import (
-    converted_base,
-    own_paired_code_commit,
     pinned_version,
 )
-from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.memory.knowledge_index import (
     MemoryTreeError,
     MemoryTreeSnapshot,
     directory_snapshot,
     git_tree_snapshot,
-    is_indexed_path,
 )
 from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTree
 from agents_remember.memory_quality.knowledge_worklist_section import worklist_summary
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.tasks.leaf_doc import find_leaf_doc
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
+from agents_remember.worktrees.modules.onboarding_trace import OnboardingTraceSides
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 __all__ = [
@@ -82,6 +83,7 @@ __all__ = [
     "ExplicitSides",
     "LeafWorklistRecompute",
     "leaf_maintenance_scope",
+    "leaf_onboarding_trace_sides",
     "leaf_worklist",
     "persist_worklist",
     "read_leaf_worklist",
@@ -286,34 +288,20 @@ def _converted_base_side(
 ) -> KnowledgeSide:
     """K_B as its conversion (MIK-R24 rule 7), read from the converted-base cache when present.
 
-    The conversion runs at K_B's own paired code commit (its ``Code-Commit`` trailer, when the code
-    store holds it; B otherwise), exactly as :class:`GitBaseConverter` chooses, and the cache key is
-    (K_B commit, conversion-format version, that code commit).
+    :func:`converted_base_files` chooses the code commit (K_B's own ``Code-Commit`` trailer when the
+    code store holds it, B otherwise) and keys the cache on (K_B commit, version, that commit).
     """
 
     version = pinned_version(candidate)
     if version is None:
         raise ValueError("the candidate is not converted, so there is no version to pin")
-    own = own_paired_code_commit(sides.memory_repository, memory_base_commit)
-    code_commit = (
-        own if own is not None and CodeObjects(sides.code_repository).commit(own) else base_commit
+    files = converted_base_files(
+        sides.memory_repository,
+        memory_base_commit,
+        code=(sides.code_repository, base_commit),
+        version=version,
+        cache_directory=sides.cache_directory,
     )
-    cache = (
-        None if sides.cache_directory is None else ConvertedBaseCache.open(sides.cache_directory)
-    )
-    key = base_cache_key(memory_base_commit, version, code_commit)
-    files = None if cache is None else cache.load(key)
-    if files is None:
-        converted = converted_base(
-            sides.memory_repository,
-            memory_base_commit,
-            code_repository=sides.code_repository,
-            code_commit=code_commit,
-            version=version,
-        )
-        files = {path: data for path, data in converted.files.items() if is_indexed_path(path)}
-        if cache is not None:
-            cache.store(key, files)
     label = f"converted:{base_key}"
     return KnowledgeSide.from_tree("K_B", label, KnowledgeTree(label=label, files=files))
 
@@ -371,6 +359,7 @@ def leaf_worklist(contract: WorktreeContract, *, persist: bool = True) -> dict[s
             error.missing, owner=owner, pairing=None
         )
     else:
+        cache = default_base_cache_directory(contract.coordination_root)
         document = worklist_for_sides(
             ExplicitSides(
                 code_repository=contract.code_repo_path,
@@ -381,13 +370,73 @@ def leaf_worklist(contract: WorktreeContract, *, persist: bool = True) -> dict[s
                 code_worktree=contract.code_worktree,
                 maintenance_scope=leaf_maintenance_scope(contract),
                 owner=owner,
-                cache_directory=default_base_cache_directory(contract.coordination_root),
+                cache_directory=cache,
             )
         )
+        if document is not None:
+            # MIK-R30's items join the one list (ruling Q2), over the worklist's own B..C paths.
+            document = worklist_onboarding(
+                document, contract, _trace_request(contract, memory_repository, memory_base)
+            )
     path = worklist_path(contract)
     if persist and document is not None and path is not None:
         persist_worklist(path, document)
     return document
+
+
+def _trace_request(
+    contract: WorktreeContract,
+    memory_repository: Path,
+    memory_base: str,
+    memory_tree: Path | None = None,
+) -> TraceSideRequest:
+    candidate = memory_tree if memory_tree is not None else contract.memory_worktree
+    assert candidate is not None
+    return TraceSideRequest(
+        owner=contract.leaf_id or contract.task_name,
+        memory_repository=memory_repository,
+        memory_base=memory_base,
+        memory_candidate=Path(candidate),
+        code_repository=contract.code_repo_path,
+        code_base=contract.code_base_commit,
+        cache_directory=default_base_cache_directory(contract.coordination_root),
+    )
+
+
+def leaf_onboarding_trace_sides(
+    contract: WorktreeContract, *, memory_tree: Path | None = None
+) -> OnboardingTraceSides | None:
+    """A leaf's MIK-R30 gate sides from its contract; ``None`` where today's gate still applies.
+
+    Today's gate applies to a non-leaf contract, a leaf without its own memory worktree, and a leaf
+    whose K_B and K_C are both unconverted (every production leaf before MIK-R37). K_B pairs exactly
+    as the worklist's does. A side that cannot be established is an ``incomplete`` side, which the
+    gate reports as a finding, never a pass.
+    """
+
+    candidate = memory_tree if memory_tree is not None else contract.memory_worktree
+    if contract.kind != "leaf" or candidate is None:
+        return None
+    memory_repository = contract.memory_repo_path or contract.memory_worktree
+    if memory_repository is None:
+        return None
+    if not (Path(candidate) / LAYOUT_MARKER_PATH).is_file() and not _official_converted(
+        memory_repository, contract.memory_source_branch
+    ):
+        return None  # cheap probe before any read: nothing is converted, today's gate applies
+    owner = contract.leaf_id or contract.task_name
+    try:
+        memory_base = paired_memory_commit(
+            memory_repository,
+            contract.memory_source_branch,
+            contract.code_repo_path,
+            contract.code_base_commit,
+        )
+        return onboarding_trace_sides(
+            _trace_request(contract, memory_repository, memory_base, Path(candidate))
+        )
+    except Exception as error:  # an unestablished side is a finding, never a lapsed gate
+        return OnboardingTraceSides(owner=owner, incomplete=f"{type(error).__name__}: {error}")
 
 
 def _official_converted(memory_repository: Path, official_line: str) -> bool:

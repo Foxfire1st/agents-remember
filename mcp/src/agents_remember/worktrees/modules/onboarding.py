@@ -19,6 +19,7 @@ from agents_remember.kernel.onboarding_doc import (
     table_metadata,
 )
 from agents_remember.kernel.route_index import build_route_indexes
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.git import (
     changed_worktree_paths,
@@ -42,6 +43,11 @@ from agents_remember.worktrees.modules.onboarding_acceptance import (
     OnboardingBodyGateEvidence,
     apply_route_no_impact,
     apply_sidecar_no_impact,
+)
+from agents_remember.worktrees.modules.onboarding_trace import (
+    OnboardingTraceResult,
+    OnboardingTraceSides,
+    onboarding_trace_result,
 )
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
@@ -69,6 +75,17 @@ def _changed_memory_paths(memory_root: Path, memory_verified_commit: str) -> set
             committed_changed_paths(memory_root, memory_verified_commit, memory_verified_commit)
         )
     return changed
+
+
+def converted_onboarding(context, memory_tree: Path | None = None) -> bool:
+    """Whether the memory tree holds the layout marker: no Update History, no verification stamps.
+
+    On a converted tree (MIK-R21 rule 1) the onboarding gate is MIK-R30's history-file gate and
+    closeout stamps no ``lastVerifiedCommit*`` metadata (MIK-R30 rule 5); an unconverted tree keeps
+    today's gate and stamps unchanged.
+    """
+    root = memory_tree if memory_tree is not None else Path(context.onboarding_root).parent
+    return (Path(root) / LAYOUT_MARKER_PATH).is_file()
 
 
 def _joined_sample(paths: list[str]) -> str:
@@ -485,6 +502,8 @@ def refresh_route_overview_metadata_for_context(
     # Closeout owns a mechanical metadata commit.  Body review and curator
     # judgments remain explicit operations outside this Git transaction.
     _ = accepted_no_impact
+    if converted_onboarding(context, memory_tree):
+        return []  # a converted overview carries no verification metadata (MIK-R30 rule 5)
     plan = route_overview_metadata_refresh_plan_for_context(
         context,
         change.changed_paths,
@@ -831,20 +850,7 @@ def validate_onboarding_refresh_plan_for_context(
     body_gate: OnboardingBodyGateEvidence | None = None,
 ) -> OnboardingRefreshPlan:
     evidence = body_gate or OnboardingBodyGateEvidence()
-    plan = onboarding_refresh_plan_for_context(context, changed_paths, working_paths=working_paths)
-    missing = plan["missing"]
-    unsupported = plan["unsupported"]
-    if missing or unsupported:
-        details: list[str] = []
-        if missing:
-            details.append(f"missing sidecar onboarding for: {', '.join(missing)}")
-        if unsupported:
-            details.append(f"unsupported onboarding storage for: {', '.join(unsupported)}")
-        raise RuntimeError(
-            "external-memory closeout requires current onboarding for changed source files before memory commit; "
-            + "; ".join(details)
-            + ". Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
-        )
+    plan = _require_onboarded_sources(context, changed_paths, working_paths)
     require_updated_sidecar_content(
         context,
         plan,
@@ -942,6 +948,69 @@ def validate_memory_refresh_attestations(
     }
 
 
+def _require_onboarded_sources(
+    context, changed_paths: list[str], working_paths: list[str] | None
+) -> OnboardingRefreshPlan:
+    """Today's missing/unsupported sidecar refusal, shared by both gates unchanged."""
+    plan = onboarding_refresh_plan_for_context(context, changed_paths, working_paths=working_paths)
+    details: list[str] = []
+    if plan["missing"]:
+        details.append(f"missing sidecar onboarding for: {', '.join(plan['missing'])}")
+    if plan["unsupported"]:
+        details.append(f"unsupported onboarding storage for: {', '.join(plan['unsupported'])}")
+    if details:
+        raise RuntimeError(
+            "external-memory closeout requires current onboarding for changed source files before memory commit; "
+            + "; ".join(details)
+            + ". Run the c-05-create-or-update-onboarding-files skill, then rerun closeout."
+        )
+    return plan
+
+
+def onboarding_trace_gate_for_context(
+    context,
+    changed_paths: list[str],
+    sides: OnboardingTraceSides,
+    *,
+    working_paths: list[str] | None = None,
+) -> tuple[OnboardingTraceResult, list[dict[str, str]]]:
+    """MIK-R30 on a converted tree, for the curator's memory-quality run: never raises.
+
+    Returns the gate's result and its repair findings: one per missing trace (rule 6), one per
+    unreadable input, and one for changed sources without onboarding (today's refusal, unchanged).
+    """
+    result = onboarding_trace_result(context, changed_paths, sides)
+    findings = result.repair_findings()
+    try:
+        _require_onboarded_sources(context, changed_paths, working_paths)
+    except RuntimeError as error:
+        findings.insert(
+            0,
+            {
+                "check": "memory-refresh-attestations",
+                "code": "memory-refresh-attestation-failed",
+                "path": "",
+                "message": f"sidecar onboarding: {error}",
+            },
+        )
+    return result, findings
+
+
+def validate_onboarding_traces_for_context(
+    context,
+    changed_paths: list[str],
+    sides: OnboardingTraceSides,
+    *,
+    working_paths: list[str] | None = None,
+) -> OnboardingTraceResult:
+    """MIK-R30 on a converted tree, for the closeout validator: refuse naming every missing trace."""
+    _require_onboarded_sources(context, changed_paths, working_paths)
+    result = onboarding_trace_result(context, changed_paths, sides)
+    if not result.ok:
+        raise RuntimeError(result.refusal())
+    return result
+
+
 def validate_onboarding_refresh_plan(
     contract: WorktreeContract,
     changed_paths: list[str],
@@ -973,6 +1042,8 @@ def refresh_onboarding_metadata_for_context(
     verified_date = change.commit_date
     # Closeout stamps existing metadata; it does not certify onboarding content.
     _ = memory_verified_commit, accepted_no_impact
+    if converted_onboarding(context, memory_tree):
+        return []  # a converted card carries no verification metadata (MIK-R30 rule 5)
     plan = onboarding_refresh_plan_for_context(
         context,
         change.changed_paths,

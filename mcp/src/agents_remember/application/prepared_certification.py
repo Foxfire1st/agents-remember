@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from agents_remember.application.knowledge_worklist import leaf_onboarding_trace_sides
 from agents_remember.certification.certificate_authority import compile_gate_certificate
 from agents_remember.certification.certificate_models import (
     GateCertificateIssuanceContext,
@@ -118,6 +119,7 @@ from agents_remember.worktrees.modules.onboarding import (
     refresh_route_indexes_for_context,
     refresh_route_overview_metadata_for_context,
     validate_onboarding_refresh_plan_for_context,
+    validate_onboarding_traces_for_context,
     validate_route_overview_refresh_plan_for_context,
 )
 from agents_remember.worktrees.modules.onboarding_acceptance import OnboardingBodyGateEvidence
@@ -364,20 +366,27 @@ def _realize_prepared_memory(
         memory_verified_commit=memory_verified_commit,
         accepted_no_impact=no_impact.content_sources,
     )
-    validate_onboarding_refresh_plan_for_context(
-        context,
-        change.changed_paths,
-        working_paths=change.working_paths,
-        body_gate=body_gate,
-    )
     route_no_impact = no_impact.source_routes
-    validate_route_overview_refresh_plan_for_context(
-        context,
-        change.changed_paths,
-        memory_tree=memory,
-        memory_verified_commit=memory_verified_commit,
-        accepted_no_impact=route_no_impact,
-    )
+    trace_sides = leaf_onboarding_trace_sides(current.contract, memory_tree=memory)
+    if trace_sides is not None:
+        # MIK-R30: a converted tree's onboarding gate is the history-file gate.
+        validate_onboarding_traces_for_context(
+            context, change.changed_paths, trace_sides, working_paths=change.working_paths
+        )
+    else:
+        validate_onboarding_refresh_plan_for_context(
+            context,
+            change.changed_paths,
+            working_paths=change.working_paths,
+            body_gate=body_gate,
+        )
+        validate_route_overview_refresh_plan_for_context(
+            context,
+            change.changed_paths,
+            memory_tree=memory,
+            memory_verified_commit=memory_verified_commit,
+            accepted_no_impact=route_no_impact,
+        )
     _require_supported_entity_refresh(context, entity_changed_paths)
     build_route_indexes(
         code_root=physical_code,
