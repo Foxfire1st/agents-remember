@@ -10,7 +10,7 @@ live at the cutover (MIK-R37).
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Final
 
 __all__ = ["WORKLIST_SECTION_HEADING", "knowledge_worklist_lines", "worklist_summary"]
@@ -52,20 +52,19 @@ def _entry_facts(facts: Mapping[str, Any]) -> list[str]:
     return parts
 
 
+def _stale_facts(_item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str]:
+    return [f"{entry['id']} stale at base" for entry in facts.get("entries") or ()]
+
+
+def _family_facts(_item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str]:
+    members = facts.get("members") or ()
+    return [f"{len(members)} member(s) to examine", *(facts.get("reachedBy") or ())]
+
+
 def _item_facts(item: Mapping[str, Any]) -> str:
     facts = item.get("facts") or {}
-    kind = item.get("kind")
-    if kind == "touched_invariant":
-        parts = _entry_facts(facts)
-    elif kind == "stale_invariant":
-        parts = [f"{entry['id']} stale at base" for entry in facts.get("entries") or ()]
-    elif kind == "reached_family":
-        members = facts.get("members") or ()
-        parts = [f"{len(members)} member(s) to examine", *(facts.get("reachedBy") or ())]
-    elif kind == "planned_untouched":
-        parts = _planned_facts(item, facts)
-    else:
-        parts = [f"{key}" for key in sorted(facts)]
+    render = _FACT_RENDERERS.get(str(item.get("kind")))
+    parts = render(item, facts) if render is not None else [f"{key}" for key in sorted(facts)]
     return "; ".join(parts) or "-"
 
 
@@ -109,6 +108,50 @@ def _planned_lines(document: Mapping[str, Any]) -> list[str]:
         lines.append(f"- `{_cell(str(entry.get('key')))}` ({entry.get('requirementRef')}): {state}")
     lines.append("")
     return lines
+
+
+def _route_facts(item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str]:
+    """MIK-R06: what is affected, where it went, the suggestion and what answers the item."""
+
+    parts = [f"{facts.get('condition')}: {', '.join(_route_affected(facts)) or 'no routes'}"]
+    if facts.get("renameCandidates"):
+        parts.append(f"renamed to {', '.join(facts['renameCandidates'])}")
+    parts.append(_route_suggestion(facts.get("suggestion")))
+    if facts.get("unmappedLocations"):
+        parts.append(f"absent without a rename: {', '.join(facts['unmappedLocations'])}")
+    satisfied = item.get("satisfiedBy")
+    parts.append(
+        f"answered by {satisfied}"
+        if satisfied
+        else "needs a family row (rerouted, assigned, changed or retired; never no_impact) "
+        "and routes that satisfy MIK-R04"
+    )
+    return parts
+
+
+def _route_affected(facts: Mapping[str, Any]) -> list[str]:
+    """The affected routes or entry paths, from the base view when it shows the condition."""
+
+    affected = facts.get("affected") or {}
+    named = affected.get("base") if affected.get("base") is not None else affected.get("candidate")
+    return [one["path"] if isinstance(one, Mapping) else str(one) for one in named or ()]
+
+
+def _route_suggestion(suggestion: Any) -> str:
+    if isinstance(suggestion, Mapping):
+        return f"mechanical suggestion {', '.join(suggestion['routes']) or '-'}"
+    return "no suggestion (ambiguous rename target, or a file absent at C without a rename)"
+
+
+_FACT_RENDERERS: Final[
+    Mapping[str, Callable[[Mapping[str, Any], Mapping[str, Any]], list[str]]]
+] = {
+    "touched_invariant": lambda _item, facts: _entry_facts(facts),
+    "stale_invariant": _stale_facts,
+    "reached_family": _family_facts,
+    "planned_untouched": _planned_facts,
+    "family_route_condition": _route_facts,
+}
 
 
 def _cell(value: str) -> str:

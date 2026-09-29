@@ -16,7 +16,9 @@ landed inventory owner measures it (:func:`git_rename_inference`, ICR-R08), then
    without classifying their members unless step 3 already reached them;
 5. reconciles the leaf's declared ``expectedKnowledgeEffects`` against its history rows in K_C
    (MIK-R11, :mod:`.planned_effects`): every invariant and family item is marked ``planned`` or
-   ``unplanned``, and every declaration no row delivers raises ``planned_untouched``.
+   ``unplanned``, and every declaration no row delivers raises ``planned_untouched``;
+6. evaluates the family route conditions (MIK-R06, :mod:`.route_conditions`) of every reached
+   family, and ``route_path_absent`` of every family with a route this leaf's range killed.
 
 Every changed hunk is also marked **linked** or **unexplained** (definition 8) for the gate's
 registrants; that marking raises nothing here. An input that cannot be read makes the run
@@ -52,6 +54,13 @@ from agents_remember.application.knowledge_worklist.planned_effects import (
     reconcile_planned_effects,
 )
 from agents_remember.application.knowledge_worklist.registry import item_id, kinds_document
+from agents_remember.application.knowledge_worklist.route_conditions import (
+    ITEM_KIND as ROUTE_CONDITION_KIND,
+)
+from agents_remember.application.knowledge_worklist.route_conditions import (
+    RouteInputs,
+    family_route_conditions,
+)
 from agents_remember.application.review_rename_inference import git_rename_inference
 from agents_remember.application.review_source_inventory import (
     byte_form,
@@ -92,19 +101,29 @@ class WorklistIncomplete(Exception):
 
 @dataclass(frozen=True)
 class Item:
-    """One worklist item: its registered kind, its subject, its facts and its identities."""
+    """One worklist item: its registered kind, its subject, its facts and its identities.
+
+    ``extra`` holds a registrant's further top-level fields (MIK-R06's ``satisfiedBy``).
+    """
 
     kind: str
     subject: str
     facts: Mapping[str, Any]
     identities: Any
+    extra: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def id(self) -> str:
         return item_id(self.kind, self.subject, self.identities)
 
     def to_document(self) -> dict[str, Any]:
-        return {"id": self.id, "kind": self.kind, "subject": self.subject, "facts": self.facts}
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "subject": self.subject,
+            "facts": self.facts,
+            **self.extra,
+        }
 
 
 @dataclass(frozen=True)
@@ -192,55 +211,23 @@ class _Run:
     def document(self) -> dict[str, Any]:
         inputs = self.inputs
         changes, unrepresentable, renamed = _changes(inputs)
-        base, candidate = inputs.base, inputs.candidate
-        classifier = Classifier(inputs.code, base, renamed)
         changed_paths = {change.path for change in changes}
-        first = (
-            sorted(base.entries)
-            if inputs.maintenance_scope
-            else sorted(
-                entry for path in changed_paths for entry in base.entries_by_path.get(path, ())
-            )
+        knowledge, touched, reached, stale = self._scope(
+            Classifier(inputs.code, inputs.base, renamed), changed_paths
         )
-        self._classify(classifier, first)
-        knowledge = knowledge_changes(base, candidate, classifier)
-        # A re-anchored entry whose class covers it (definition 7) raises that class's item, so an
-        # entry classified only to decide the re-anchor joins the classified set when it does.
-        self._classify(
-            classifier,
-            sorted(
-                one.entry_id
-                for one in classifier.classified()
-                if one.entry_class in COVERING_CLASSES
-            ),
-        )
-        touched = self._touched(knowledge)
-        reached = self._reached(touched, knowledge)
-        members = sorted(
-            {member for family in reached for member in self._members(family)}
-            & set(base.invariants)
-        )
-        self._classify(
-            classifier,
-            [entry for member in members for entry in base.entries_by_invariant.get(member, ())],
-        )
-        touched = self._touched(knowledge)
-        stale = sorted(
-            {
-                one.invariant
-                for one in self.classified.values()
-                if one.entry_class == "stale_at_base"
-            }
-        )
+        family_items = self._family_items(reached, touched, stale, knowledge)
         items = [
             *(
                 self._touched_item(invariant, knowledge.invariants[invariant])
                 for invariant in touched
             ),
             *(self._stale_item(invariant) for invariant in stale),
-            *self._family_items(reached, touched, stale, knowledge),
+            *family_items,
+            *self._route_items({item.subject for item in family_items}, renamed),
         ]
-        planned = reconcile_planned_effects(inputs.expected_effects, base, candidate, inputs.owner)
+        planned = reconcile_planned_effects(
+            inputs.expected_effects, inputs.base, inputs.candidate, inputs.owner
+        )
         rendered = sorted(
             [*(planned.mark(item.to_document()) for item in items), *planned.items],
             key=lambda item: (item["kind"], item["subject"]),
@@ -251,29 +238,85 @@ class _Run:
             "state": "complete",
             "incomplete": [],
             "pairing": dict(inputs.pairing),
-            "scope": {
-                "knowledgeMaintenanceScope": inputs.maintenance_scope,
-                "changedPaths": len(changed_paths),
-                "unrepresentablePaths": unrepresentable,
-                "classifiedEntries": len(self.classified),
-                "classes": _class_counts(self.classified.values()),
-                "reachedFamilies": sorted(reached),
-            },
-            "entries": [
-                {
-                    "id": one.entry_id,
-                    "invariant": one.invariant,
-                    "path": one.path,
-                    "class": one.entry_class,
-                }
-                for one in sorted(self.classified.values(), key=lambda one: one.entry_id)
-            ],
+            "scope": self._scope_document(changed_paths, unrepresentable, reached),
+            "entries": self._entries_document(),
             "changes": self._linkage(changes, renamed),
             "plannedEffects": planned.summary(),
             "items": rendered,
             "kinds": kinds_document(),
             "digest": worklist_digest("complete", rendered, []),
         }
+
+    def _scope(
+        self, classifier: Classifier, changed_paths: set[str]
+    ) -> tuple[KnowledgeChanges, list[str], set[str], list[str]]:
+        """Steps 1-4: classify, compare the knowledge sides, reach families, classify members."""
+
+        base = self.inputs.base
+        self._classify(classifier, self._first_entries(changed_paths))
+        knowledge = knowledge_changes(base, self.inputs.candidate, classifier)
+        # A re-anchored entry whose class covers it (definition 7) raises that class's item, so an
+        # entry classified only to decide the re-anchor joins the classified set when it does.
+        self._classify(
+            classifier,
+            sorted(
+                one.entry_id
+                for one in classifier.classified()
+                if one.entry_class in COVERING_CLASSES
+            ),
+        )
+        reached = self._reached(self._touched(knowledge), knowledge)
+        members = sorted(
+            {member for family in reached for member in self._members(family)}
+            & set(base.invariants)
+        )
+        self._classify(
+            classifier,
+            [entry for member in members for entry in base.entries_by_invariant.get(member, ())],
+        )
+        return knowledge, self._touched(knowledge), reached, self._stale()
+
+    def _first_entries(self, changed_paths: set[str]) -> list[str]:
+        """Step 1's entries: those at a changed path, or every K_B entry in maintenance scope."""
+
+        base = self.inputs.base
+        if self.inputs.maintenance_scope:
+            return sorted(base.entries)
+        return sorted(
+            entry for path in changed_paths for entry in base.entries_by_path.get(path, ())
+        )
+
+    def _stale(self) -> list[str]:
+        return sorted(
+            {
+                one.invariant
+                for one in self.classified.values()
+                if one.entry_class == "stale_at_base"
+            }
+        )
+
+    def _scope_document(
+        self, changed_paths: set[str], unrepresentable: int, reached: set[str]
+    ) -> dict[str, Any]:
+        return {
+            "knowledgeMaintenanceScope": self.inputs.maintenance_scope,
+            "changedPaths": len(changed_paths),
+            "unrepresentablePaths": unrepresentable,
+            "classifiedEntries": len(self.classified),
+            "classes": _class_counts(self.classified.values()),
+            "reachedFamilies": sorted(reached),
+        }
+
+    def _entries_document(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": one.entry_id,
+                "invariant": one.invariant,
+                "path": one.path,
+                "class": one.entry_class,
+            }
+            for one in sorted(self.classified.values(), key=lambda one: one.entry_id)
+        ]
 
     # -- scope ---------------------------------------------------------------------------------
 
@@ -411,6 +454,31 @@ class _Run:
             for side in ("base", "candidate")
         }
         return Item("reached_family", family, facts, identities)
+
+    def _route_items(self, reached: set[str], renamed: Mapping[str, str]) -> list[Item]:
+        """MIK-R06: the route conditions of the reached families and of every dead route."""
+
+        inputs = self.inputs
+        return [
+            Item(
+                ROUTE_CONDITION_KIND,
+                condition.subject,
+                condition.facts,
+                condition.identities,
+                {"satisfiedBy": condition.satisfied_by},
+            )
+            for condition in family_route_conditions(
+                RouteInputs(
+                    base=inputs.base,
+                    candidate=inputs.candidate,
+                    code_paths=inputs.code.candidate(),
+                    base_code_paths=inputs.code.base(),
+                    renamed=renamed,
+                    owner=inputs.owner,
+                ),
+                reached,
+            )
+        ]
 
     # -- gate linkage (definition 8) -----------------------------------------------------------
 

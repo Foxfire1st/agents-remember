@@ -725,10 +725,11 @@ class Authoring:
         record: Mapping[str, Any],
         where: str,
     ) -> dict[str, Any] | None:
+        moving = request.disposition == "moved"
         row["covers"] = [
             cover
             for one in request.covers
-            for cover in self._covers(one, row["subject"], f"{where}.covers")
+            for cover in self._covers(one, row["subject"], f"{where}.covers", moving=moving)
         ]
         row["revision"] = record.get("revision")
         if request.effect is not None:
@@ -759,7 +760,12 @@ class Authoring:
         row["examined"] = examined
         return row
 
-    def _covers(self, request: CoverRequest, subject: str, where: str) -> list[dict[str, Any]]:
+    def _covers(
+        self, request: CoverRequest, subject: str, where: str, *, moving: bool = False
+    ) -> list[dict[str, Any]]:
+        if request.path is not None and not moving:
+            self.problem(where, "a cover names another source path only on a moved row")
+            return []
         if request.handoff is not None:
             identified = self.state.entries_by_origin(self.owner, request.handoff, subject)
             if not identified:
@@ -817,6 +823,8 @@ class Authoring:
             return ABSENT
         locator = request.locator.document if request and request.locator else None
         anchor = located.document["anchor"]
+        if request is not None and request.path not in (None, located.source_path):
+            located = self._relocate(located, str(request.path))
         if reanchor:
             resolved = self._reanchor(located.source_path, locator or anchor["locator"], where)
             if resolved is None:
@@ -824,6 +832,19 @@ class Authoring:
             located.document["anchor"] = anchor = resolved
             self.state.touch(located.sidecar)
         return {**anchor, "path": located.source_path}
+
+    def _relocate(self, located: EntryLocation, path: str) -> EntryLocation:
+        """Move the entry into ``path``'s file sidecar (a moved row's ``after``, MIK-R07 rule 4).
+
+        The entry keeps its ID, invariant and authored fields; the caller re-anchors it at C, so
+        its ``blob`` and ``content`` are C's.
+        """
+
+        self.state.remove_entry(str(located.document.get("id")))
+        sidecar_path, sidecar = self.state.file_sidecar(path)
+        sidecar.setdefault(located.entries, []).append(located.document)
+        self.state.touch(sidecar_path)
+        return EntryLocation(sidecar_path, path, located.entries, located.document)
 
     def _reanchor(self, path: str, locator: Mapping[str, Any], where: str) -> dict[str, Any] | None:
         try:

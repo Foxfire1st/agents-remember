@@ -14,7 +14,9 @@ MIK-R07 rule 0) and persisted as ``knowledge-worklist/v1`` in the leaf's enclosu
 * :mod:`.planned_effects` -- MIK-R11's ``planned_untouched`` kind (registered on import), the
   ``planned``/``unplanned`` marks and the reconciliation of declared effects against rows;
 * :mod:`.onboarding_trace` -- MIK-R30's ``onboarding_trace`` kind (registered on import), the
-  gate's sides and its items in the worklist.
+  gate's sides and its items in the worklist;
+* :mod:`.route_conditions` -- MIK-R06's ``family_route_condition`` kind (registered on import by
+  :mod:`.compute`): the family route conditions and their satisfying rule.
 
 An entry is raised only when changed lines intersect its own range, when it moved or disappeared,
 or when it changed outside the managed flow; a change elsewhere in the same file raises nothing.
@@ -56,8 +58,13 @@ from agents_remember.application.knowledge_worklist.registry import (
     register_item_kind,
     satisfying_row,
 )
+from agents_remember.application.knowledge_worklist.route_conditions import (
+    FAMILY_ROUTE_CONDITION_KIND,
+    family_route_item_open,
+)
 
 __all__ = [
+    "FAMILY_ROUTE_CONDITION_KIND",
     "ITEM_KINDS",
     "ONBOARDING_TRACE_KIND",
     "PLANNED_UNTOUCHED_KIND",
@@ -70,6 +77,7 @@ __all__ = [
     "LeafWorklistRecompute",
     "WorklistInputs",
     "compute_worklist",
+    "family_route_item_open",
     "incomplete_worklist",
     "item_id",
     "leaf_onboarding_trace_sides",

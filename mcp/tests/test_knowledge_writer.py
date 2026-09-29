@@ -673,3 +673,77 @@ def test_the_writer_refuses_a_new_invariant_whose_claim_the_tree_does_not_suppor
 
     proven = {**authored, "proofs": [{"test": f"{TEST_FILE}::test_plain", "facet": "it lands"}]}
     assert _write(world, [proven]).state == "written"
+
+
+def test_a_moved_row_whose_after_names_another_path_relocates_the_entry(tmp_path: Path) -> None:
+    """L06 ruling Q6 (MIK-R07 rule 4, MIK-R12 rule 2): a moved row re-anchors an entry across files.
+
+    The file moves; the curator's ``moved`` row names the entry and its new ``path``. The writer
+    moves the entry into that file's sidecar with its ID and authored fields, and fills ``blob``
+    and ``content`` at C. Any other disposition naming a path is refused.
+    """
+
+    world = build_world(tmp_path)
+    moved = "pkg/moved/landing.py"
+    (world.code / "pkg/moved").mkdir(parents=True)
+    git(world.code, "mv", CODE_FILE, moved)
+    cover = {"id": BASE_REALIZATION, "path": moved}
+    refused = _write(
+        world,
+        {
+            "history": [
+                {
+                    "subject": BASE_INVARIANT,
+                    "disposition": "extended",
+                    "reason": "r",
+                    "covers": [cover],
+                }
+            ]
+        },
+    )
+    assert refused.state == "refused"
+    assert any("only on a moved row" in one.message for one in refused.problems)
+    # Review F1 and N7: a path that is empty, absolute or escapes the repository, or a path on a
+    # cover that also removes its entry, is a named problem -- never an uncaught error.
+    untouched = tree_bytes(world.memory)
+    for bad, named in (
+        ({"id": BASE_REALIZATION, "path": "../outside.py"}, "not a repository path"),
+        ({"id": BASE_REALIZATION, "path": "/abs/landing.py"}, "not a repository path"),
+        ({"id": BASE_REALIZATION, "path": ""}, "not a repository path"),
+        ({"id": BASE_REALIZATION, "path": moved, "remove": True}, "either removes"),
+    ):
+        row = {"subject": BASE_INVARIANT, "disposition": "moved", "reason": "r", "covers": [bad]}
+        report = _write(world, {"history": [row]})
+        assert report.state == "refused", bad
+        assert any(named in one.message for one in report.problems), report.render()
+    assert tree_bytes(world.memory) == untouched
+
+    document = {
+        "history": [
+            {
+                "subject": BASE_INVARIANT,
+                "disposition": "moved",
+                "reason": "The module moved into pkg/moved.",
+                "covers": [cover],
+            }
+        ]
+    }
+    report = _write(world, document)
+    assert report.state == "written", report.render()
+    old_sidecar = read_json(world.memory, f"onboarding/{CODE_FILE}.json")
+    assert BASE_REALIZATION not in {one["id"] for one in old_sidecar["realizes"]}
+    new_sidecar = read_json(world.memory, f"onboarding/{moved}.json")
+    (relocated,) = new_sidecar["realizes"]
+    assert relocated["id"] == BASE_REALIZATION and relocated["role"] == "primary-authority"
+    blob = git(world.code, "hash-object", moved)
+    assert relocated["anchor"]["blob"] == blob
+    history = read_json(world.memory, f"knowledge/history/{LEAF_ID}.json")
+    (row,) = history["rows"]
+    (covered,) = row["covers"]
+    assert covered["before"]["path"] == CODE_FILE and covered["after"]["path"] == moved
+    assert covered["after"]["content"] == covered["before"]["content"]  # same symbol body
+    assert InvariantRow.model_validate(row).disposition == "moved"
+    # A rerun of the same list finds the entry already there and changes nothing.
+    before = tree_bytes(world.memory)
+    assert _write(world, document).state == "written"
+    assert tree_bytes(world.memory) == before

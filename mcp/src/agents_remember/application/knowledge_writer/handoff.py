@@ -20,7 +20,8 @@ nothing.
 
 **History** rows are ``{subject, disposition, reason, items?, covers?, effect?, because?,
 examined?}``. The writer mints the row ID, fills the invariant's revision and each examined member's
-revision, and writes each covered entry's ``before`` and ``after`` anchor.
+revision, and writes each covered entry's ``before`` and ``after`` anchor. A cover of a ``moved`` row
+may name another source ``path``: the entry moves there and is re-anchored at C.
 
 A string ``"handoff:<key>"`` names the record the same document authors under that key (an entry's
 ``id``, or a record's ``key``) wherever an ID is expected. Reading never resolves anything: it checks
@@ -40,6 +41,7 @@ from agents_remember.application.curator_realization_authoring import (
 )
 from agents_remember.application.curator_scope import CuratorScope, read_curator_scope
 from agents_remember.models.knowledge_files.ids import RECORD_PREFIXES, RecordKind
+from agents_remember.models.knowledge_files.shapes import require_repository_path
 
 HANDLE_PREFIX: Final = "handoff:"
 WRITER_OWNED_FIELDS: Final = frozenset({"id", "schema", "origin", "revision"})
@@ -214,6 +216,8 @@ class CoverRequest:
     handoff: str | None = None
     locator: LocatorRequest | None = None
     remove: bool = False
+    path: str | None = None
+    """The source path the entry moves to (a ``moved`` row only, MIK-R07 rule 4)."""
 
 
 @dataclass(frozen=True)
@@ -556,7 +560,7 @@ def _cover(value: Any, where: str, problems: list[Problem]) -> CoverRequest | No
         return CoverRequest(entry_id=value)
     if not isinstance(value, Mapping):
         problems.append(
-            Problem(where, "a cover is an entry ID or {id, locator?, remove?} or {handoff}")
+            Problem(where, "a cover is an entry ID or {id, path?, locator?, remove?} or {handoff}")
         )
         return None
     handoff = _text(value.get("handoff"))
@@ -566,14 +570,48 @@ def _cover(value: Any, where: str, problems: list[Problem]) -> CoverRequest | No
     if entry_id is None:
         problems.append(Problem(where, "a cover names the entry 'id' it covers"))
         return None
-    locator = None
-    if value.get("locator") is not None:
-        read = read_locator(value.get("locator"))
-        if isinstance(read, str):
-            problems.append(Problem(where, read))
-            return None
-        locator = read
-    return CoverRequest(entry_id=entry_id, locator=locator, remove=value.get("remove") is True)
+    remove = value.get("remove") is True
+    valid, locator = _cover_locator(value, where, problems)
+    valid_path, path = _cover_path(value, remove, where, problems)
+    if not (valid and valid_path):
+        return None
+    return CoverRequest(entry_id=entry_id, locator=locator, remove=remove, path=path)
+
+
+def _cover_locator(
+    value: Mapping[str, Any], where: str, problems: list[Problem]
+) -> tuple[bool, LocatorRequest | None]:
+    """A cover's optional ``locator``: whether it reads, and the locator when named."""
+
+    if value.get("locator") is None:
+        return True, None
+    read = read_locator(value.get("locator"))
+    if isinstance(read, str):
+        problems.append(Problem(where, read))
+        return False, None
+    return True, read
+
+
+def _cover_path(
+    value: Mapping[str, Any], remove: bool, where: str, problems: list[Problem]
+) -> tuple[bool, str | None]:
+    """A cover's ``path`` (review F1, N7): whether it is acceptable, and the path when named.
+
+    A path is a plain repository-relative path; one that is empty, absolute or escapes the
+    repository is a named problem, and so is a path on a cover that also removes its entry.
+    """
+
+    if "path" not in value:
+        return True, None
+    if remove:
+        problems.append(Problem(where, "a cover either removes its entry or moves it to a path"))
+        return False, None
+    raw = value["path"]
+    try:
+        return True, require_repository_path(raw if isinstance(raw, str) else "")
+    except ValueError as error:
+        problems.append(Problem(where, f"a cover's path is not a repository path: {error}"))
+        return False, None
 
 
 def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
