@@ -29,7 +29,9 @@ from agents_remember.application.knowledge_writer import (
     WriteRequest,
     write_knowledge,
 )
+from agents_remember.application.knowledge_writer.authoring import DecisionResolver
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.tasks.leaf_decisions import leaf_decision_refusal
 from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusal
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
@@ -131,6 +133,13 @@ def _print(report: WriteReport, as_json: bool) -> None:
         print(report.render())
 
 
+def leaf_decisions(contract: WorktreeContract) -> DecisionResolver:
+    """The task owner's resolution of a decision the leaf's planned ``dropped`` rows cite."""
+
+    leaf = contract.leaf_id or contract.task_name
+    return lambda at: leaf_decision_refusal(contract.task_root, leaf, at)
+
+
 def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
     """``knowledge-ingest`` on a converted memory worktree: the leaf writes through the file writer."""
 
@@ -159,6 +168,7 @@ def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
             document=document,
             commit=bool(args.commit),
             authorization=str(args.authorization_ref).strip(),
+            decisions=leaf_decisions(contract),
         )
     )
     _print(report, bool(args.as_json))

@@ -29,7 +29,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from agents_remember.application.knowledge_writer.authoring import Authoring
+from agents_remember.application.knowledge_writer.authoring import Authoring, DecisionResolver
 from agents_remember.application.knowledge_writer.carry import carry_entries
 from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.application.knowledge_writer.handoff import Problem, read_handoff
@@ -76,6 +76,9 @@ class WriteRequest:
     document: Any
     commit: bool = False
     authorization: str = ""
+    decisions: DecisionResolver | None = None
+    """The task owner's resolution of a planned ``dropped`` row's decision (MIK-R11); a write
+    without a task owner (a wave) refuses such a row."""
 
 
 def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) -> WriteReport:
@@ -93,7 +96,9 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
     if not state.converted:
         return replace(report, problems=(*problems, Problem(LAYOUT_MARKER_PATH, UNCONVERTED)))
     snapshot = code if code is not None else CodeSnapshot.capture(request.code_root)
-    authoring = Authoring(state, snapshot, request.owner, request.handoff_path)
+    authoring = Authoring(
+        state, snapshot, request.owner, request.handoff_path, decisions=request.decisions
+    )
     authoring.run(document)
     carried = carry_entries(state, snapshot, request.owner)
     history_problems = owner_history_problems(state, request.owner)

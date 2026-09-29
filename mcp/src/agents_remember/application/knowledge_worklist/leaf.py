@@ -54,6 +54,10 @@ from agents_remember.application.knowledge_worklist.onboarding_trace import (
     onboarding_trace_sides,
     worklist_onboarding,
 )
+from agents_remember.application.knowledge_worklist.planned_effects import (
+    Declaration,
+    declarations_from,
+)
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
@@ -73,6 +77,7 @@ from agents_remember.memory.knowledge_index import (
 from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTree
 from agents_remember.memory_quality.knowledge_worklist_section import worklist_summary
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.tasks.leaf_decisions import LeafDocumentUnresolved, strict_leaf_doc
 from agents_remember.tasks.leaf_doc import find_leaf_doc
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.modules.onboarding_trace import OnboardingTraceSides
@@ -82,6 +87,7 @@ __all__ = [
     "WORKLIST_FILE_NAME",
     "ExplicitSides",
     "LeafWorklistRecompute",
+    "leaf_expected_effects",
     "leaf_maintenance_scope",
     "leaf_onboarding_trace_sides",
     "leaf_worklist",
@@ -132,6 +138,18 @@ def leaf_maintenance_scope(contract: WorktreeContract) -> bool:
     return bool(found is not None and found[1].knowledgeMaintenanceScope)
 
 
+def leaf_expected_effects(contract: WorktreeContract) -> tuple[Declaration, ...] | None:
+    """The leaf task document's ``expectedKnowledgeEffects`` (MIK-R11), or ``None`` if none.
+
+    The document is found through the strict lookup (:func:`strict_leaf_doc`): a document that
+    exists but cannot be read, or two claiming the leaf, raise :class:`LeafDocumentUnresolved`,
+    which the run reports as ``incomplete`` -- never as an absent declaration (fail closed).
+    """
+
+    found = strict_leaf_doc(contract.task_root, contract.leaf_id or contract.task_name)
+    return None if found is None else declarations_from(found[1].expectedKnowledgeEffects)
+
+
 @dataclass(frozen=True)
 class ExplicitSides:
     """The four sides named directly (the command line, and evidence runs on scratch copies).
@@ -152,6 +170,8 @@ class ExplicitSides:
     owner: str | None = None
     cache_directory: Path | None = None
     """Where converted bases are cached (:mod:`.base_cache`); ``None`` converts on every run."""
+    expected_effects: tuple[Declaration, ...] | None = None
+    """The leaf's declared ``expectedKnowledgeEffects`` (MIK-R11); ``None`` declares none."""
 
 
 def _git(repository: Path, *args: str) -> str | None:
@@ -328,6 +348,7 @@ def worklist_for_sides(sides: ExplicitSides) -> dict[str, Any] | None:
             pairing=resolved.pairing,
             maintenance_scope=sides.maintenance_scope,
             owner=sides.owner,
+            expected_effects=sides.expected_effects,
         )
     )
 
@@ -348,16 +369,19 @@ def leaf_worklist(contract: WorktreeContract, *, persist: bool = True) -> dict[s
     ):
         return None  # cheap applicability probe before any capture: nothing is converted
     try:
+        expected_effects = leaf_expected_effects(contract)
         memory_base = paired_memory_commit(
             memory_repository,
             contract.memory_source_branch,
             contract.code_repo_path,
             contract.code_base_commit,
         )
-    except _Unreadable as error:
+    except LeafDocumentUnresolved as error:
         document: dict[str, Any] | None = incomplete_worklist(
-            error.missing, owner=owner, pairing=None
+            Incomplete("leaf task document", str(error)), owner=owner, pairing=None
         )
+    except _Unreadable as error:
+        document = incomplete_worklist(error.missing, owner=owner, pairing=None)
     else:
         cache = default_base_cache_directory(contract.coordination_root)
         document = worklist_for_sides(
@@ -371,6 +395,7 @@ def leaf_worklist(contract: WorktreeContract, *, persist: bool = True) -> dict[s
                 maintenance_scope=leaf_maintenance_scope(contract),
                 owner=owner,
                 cache_directory=cache,
+                expected_effects=expected_effects,
             )
         )
         if document is not None:

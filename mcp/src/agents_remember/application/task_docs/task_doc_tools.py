@@ -135,6 +135,7 @@ _MUTABLE_FIELDS = frozenset(
         "executionNature",
         "executionGraph",
         "knowledgeMaintenanceScope",
+        "expectedKnowledgeEffects",
     }
 )
 

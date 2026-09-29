@@ -45,7 +45,7 @@ HANDLE_PREFIX: Final = "handoff:"
 WRITER_OWNED_FIELDS: Final = frozenset({"id", "schema", "origin", "revision"})
 SECTIONS: Final = ("entries", "records", "history")
 _ROW_KEYS: Final = frozenset(
-    {"subject", "disposition", "reason", "items", "covers", "effect", "because", "examined"}
+    {"subject", "disposition", "reason", "items", "covers", "effect", "because", "examined", "ref"}
 )
 # The architect's ruling (L21 review, finding 6): the template's ``incidental`` has no spelling in the
 # file format and is written as ``support``.
@@ -229,6 +229,8 @@ class RowRequest:
     effect: str | None = None
     because: tuple[Any, ...] = ()
     examined: tuple[str, ...] = ()
+    ref: Mapping[str, Any] | None = None
+    """A planned row's ``ref`` (MIK-R11 rule 5)."""
 
 
 @dataclass(frozen=True)
@@ -587,6 +589,8 @@ def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
         problems.append(Problem(where, f"unknown row key(s) {unknown}; known: {sorted(_ROW_KEYS)}"))
     if raw.get("because") is not None and not isinstance(raw.get("because"), list):
         problems.append(Problem(where, "'because' is a list of decision IDs and requirements"))
+    if raw.get("ref") is not None and not isinstance(raw.get("ref"), Mapping):
+        problems.append(Problem(where, "'ref' is an object naming one row, invariant, ..."))
     subject, disposition, reason = (
         _text(raw.get("subject")),
         _text(raw.get("disposition")),
@@ -611,4 +615,5 @@ def _row(position: int, raw: Any, problems: list[Problem]) -> RowRequest | None:
         effect=_text(raw.get("effect")),
         because=tuple(because) if isinstance(because, list) else (),
         examined=_identifiers(raw.get("examined")),
+        ref=raw["ref"] if isinstance(raw.get("ref"), Mapping) else None,
     )

@@ -23,6 +23,15 @@ from agents_remember.memory_quality.knowledge_worklist_section import worklist_s
 __all__ = ["leaf_worklist_fields"]
 
 
+def _compact(item: dict[str, Any]) -> dict[str, Any]:
+    """One item's wire row; the MIK-R11 ``planning`` mark rides along where the item has one."""
+
+    row = {"id": item.get("id"), "kind": item.get("kind"), "subject": item.get("subject")}
+    if item.get("planning") is not None:
+        row["planning"] = item["planning"]
+    return row
+
+
 def leaf_worklist_fields(contract_path: str) -> dict[str, Any]:
     """The response fields for the leaf whose series contract is at ``contract_path``."""
 
@@ -41,9 +50,7 @@ def leaf_worklist_fields(contract_path: str) -> dict[str, Any]:
         "worklist": {
             **worklist_summary(document, path.as_posix()),
             "owner": document.get("owner"),
-            "items": [
-                {"id": item.get("id"), "kind": item.get("kind"), "subject": item.get("subject")}
-                for item in document.get("items") or ()
-            ],
+            "items": [_compact(item) for item in document.get("items") or ()],
+            "plannedEffects": document.get("plannedEffects"),
         },
     }

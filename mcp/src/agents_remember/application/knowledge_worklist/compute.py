@@ -13,7 +13,10 @@ landed inventory owner measures it (:func:`git_rename_inference`, ICR-R08), then
    record changed;
 4. classifies every K_B entry of those families' members -- once. What step 4 finds raises items but
    reaches no further family, and a ``stale_invariant`` raises ``reached_family`` for its families
-   without classifying their members unless step 3 already reached them.
+   without classifying their members unless step 3 already reached them;
+5. reconciles the leaf's declared ``expectedKnowledgeEffects`` against its history rows in K_C
+   (MIK-R11, :mod:`.planned_effects`): every invariant and family item is marked ``planned`` or
+   ``unplanned``, and every declaration no row delivers raises ``planned_untouched``.
 
 Every changed hunk is also marked **linked** or **unexplained** (definition 8) for the gate's
 registrants; that marking raises nothing here. An input that cannot be read makes the run
@@ -44,6 +47,10 @@ from agents_remember.application.knowledge_worklist.code import (
     hits_old,
 )
 from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
+from agents_remember.application.knowledge_worklist.planned_effects import (
+    Declaration,
+    reconcile_planned_effects,
+)
 from agents_remember.application.knowledge_worklist.registry import item_id, kinds_document
 from agents_remember.application.review_rename_inference import git_rename_inference
 from agents_remember.application.review_source_inventory import (
@@ -110,6 +117,8 @@ class WorklistInputs:
     pairing: Mapping[str, Any]
     maintenance_scope: bool = False
     owner: str | None = None
+    expected_effects: tuple[Declaration, ...] | None = None
+    """The leaf's ``expectedKnowledgeEffects`` (MIK-R11); ``None`` when it declares none."""
 
 
 def worklist_digest(state: str, items: Iterable[Mapping[str, Any]], missing: Any) -> str:
@@ -231,8 +240,11 @@ class _Run:
             *(self._stale_item(invariant) for invariant in stale),
             *self._family_items(reached, touched, stale, knowledge),
         ]
-        items.sort(key=lambda item: (item.kind, item.subject))
-        rendered = [item.to_document() for item in items]
+        planned = reconcile_planned_effects(inputs.expected_effects, base, candidate, inputs.owner)
+        rendered = sorted(
+            [*(planned.mark(item.to_document()) for item in items), *planned.items],
+            key=lambda item: (item["kind"], item["subject"]),
+        )
         return {
             "schema": WORKLIST_SCHEMA,
             "owner": inputs.owner,
@@ -257,6 +269,7 @@ class _Run:
                 for one in sorted(self.classified.values(), key=lambda one: one.entry_id)
             ],
             "changes": self._linkage(changes, renamed),
+            "plannedEffects": planned.summary(),
             "items": rendered,
             "kinds": kinds_document(),
             "digest": worklist_digest("complete", rendered, []),

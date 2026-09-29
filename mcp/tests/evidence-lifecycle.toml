@@ -831,6 +831,7 @@ consumers = [
   "mcp/tests/test_knowledge_worklist_leaf.py",
   "mcp/tests/test_knowledge_currentness.py",
   "mcp/tests/test_knowledge_paging.py",
+  "mcp/tests/test_planned_knowledge_effects.py",
 ]
 
 [[artifact]]

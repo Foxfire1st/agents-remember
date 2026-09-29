@@ -11,6 +11,8 @@ MIK-R07 rule 0) and persisted as ``knowledge-worklist/v1`` in the leaf's enclosu
 * :mod:`.compute` -- one run: inventory, one-pass scope, items, gate linkage, digest;
 * :mod:`.leaf` -- a leaf's sides from its contract, its run, and the persisted file;
 * :mod:`.surface` -- what ``knowledge_integrity_check`` returns for a leaf;
+* :mod:`.planned_effects` -- MIK-R11's ``planned_untouched`` kind (registered on import), the
+  ``planned``/``unplanned`` marks and the reconciliation of declared effects against rows;
 * :mod:`.onboarding_trace` -- MIK-R30's ``onboarding_trace`` kind (registered on import), the
   gate's sides and its items in the worklist.
 
@@ -44,6 +46,9 @@ from agents_remember.application.knowledge_worklist.leaf import (
 from agents_remember.application.knowledge_worklist.onboarding_trace import (
     ONBOARDING_TRACE_KIND,
 )
+from agents_remember.application.knowledge_worklist.planned_effects import (
+    PLANNED_UNTOUCHED_KIND,
+)
 from agents_remember.application.knowledge_worklist.registry import (
     ITEM_KINDS,
     ItemKind,
@@ -55,6 +60,7 @@ from agents_remember.application.knowledge_worklist.registry import (
 __all__ = [
     "ITEM_KINDS",
     "ONBOARDING_TRACE_KIND",
+    "PLANNED_UNTOUCHED_KIND",
     "WORKLIST_FILE_NAME",
     "WORKLIST_SCHEMA",
     "ExplicitSides",

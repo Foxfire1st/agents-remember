@@ -561,6 +561,17 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
   route overview, was reviewed and needs no change. A counted change of the card or overview
   (its Markdown, or a sidecar field other than an anchor's `blob`, line numbers and `content`)
   needs no row.
+- A planned row (MIK-R11, converted memory only) answers a `planned_untouched` worklist item: an
+  effect the leaf's task document declared in `expectedKnowledgeEffects` that no row delivered.
+  Its subject is the item's, `planned:<declared subject>#<effect>`; its disposition is
+  `realized_elsewhere`, `deferred` or `dropped`; it adds `ref` and nothing else:
+  - `realized_elsewhere`: `{row: "ROW-…"}` or `{invariant: "INV-…"}`, which must exist;
+  - `deferred`: `{requirement: {task, packet, id, version}}` or `{leaf: "<leaf id>"}`;
+  - `dropped`: `{decision: "<at>"}`, the `at` of exactly one decision entry in the leaf's task
+    document; the writer asks the task owner and refuses a decision that does not resolve.
+  A `no_impact` row about the declared invariant does not answer the item; a `changed` row with
+  the declared effect (or, for `retire`, a `deleted` row that retires it) delivers the effect and
+  raises no item.
 
 **Handles.** `"handoff:<key>"` names the record this document authors under that entry `id` or record
 `key`. Use it wherever an ID goes: link targets, `members`, `subject`, `examined` or `supersedes`.

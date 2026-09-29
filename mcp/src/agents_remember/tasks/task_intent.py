@@ -20,7 +20,7 @@ from agents_remember.models.task_intent import (
     require_task_intent_identity,
 )
 
-from .document import CodeExample, Step, SubStep, TaskDocument
+from .document import CodeExample, ExpectedKnowledgeEffect, Step, SubStep, TaskDocument
 from .document_field_effects import (
     TaskDocumentFieldEffect,
     TaskDocumentFieldEffectProjector,
@@ -85,8 +85,18 @@ class TaskIntentAcceptanceObligation(_StrictProjection):
     question: str
 
 
+class TaskIntentExpectedKnowledgeEffect(_StrictProjection):
+    subject: str
+    effect: str
+    requirementRef: str
+
+
 class TaskIntentV1(_StrictProjection):
-    """Only explicitly allowlisted normative slots; never a whole-document hash."""
+    """Only explicitly allowlisted normative slots; never a whole-document hash.
+
+    ``expectedKnowledgeEffects`` (MIK-R11) is optional: a leaf that declares none projects exactly
+    as before, without the key, so every existing intent digest is unchanged.
+    """
 
     schema_: Literal["task-intent/v1"] = Field(default=TASK_INTENT_SCHEMA, alias="schema")
     leaf: TaskIntentLeafIdentity
@@ -97,9 +107,13 @@ class TaskIntentV1(_StrictProjection):
     codeExamples: tuple[TaskIntentCodeExample, ...]
     codeExamplesNote: str | None
     acceptanceObligations: tuple[TaskIntentAcceptanceObligation, ...]
+    expectedKnowledgeEffects: tuple[TaskIntentExpectedKnowledgeEffect, ...] | None = None
 
     def canonical_value(self) -> dict[str, object]:
-        return self.model_dump(mode="json", by_alias=True, exclude_none=False)
+        value = self.model_dump(mode="json", by_alias=True, exclude_none=False)
+        if value.get("expectedKnowledgeEffects") is None:
+            value.pop("expectedKnowledgeEffects", None)  # absent is absent: digests unchanged
+        return value
 
 
 _ROOT_FIELDS = frozenset(
@@ -117,6 +131,7 @@ _ROOT_FIELDS = frozenset(
         "codeExamples",
         "codeExamplesNote",
         "openQuestions",
+        "expectedKnowledgeEffects",
     }
 )
 _NESTED_FIELDS: dict[type[BaseModel], frozenset[str]] = {
@@ -126,6 +141,7 @@ _NESTED_FIELDS: dict[type[BaseModel], frozenset[str]] = {
     ApprovedRequirementPacketRef: frozenset({"kind", "path", "stableId", "version"}),
     AcceptanceObligationQuestion: frozenset({"kind", "id", "question"}),
     TaskDocumentRef: frozenset({"repository", "path"}),
+    ExpectedKnowledgeEffect: frozenset({"subject", "effect", "requirementRef"}),
 }
 
 
@@ -169,6 +185,7 @@ def task_intent_projection(
             ),
             codeExamplesNote=candidate.document.codeExamplesNote,
             acceptanceObligations=_acceptance_obligations(candidate.document),
+            expectedKnowledgeEffects=_expected_effects(projected),
         )
     except (KeyError, TypeError, ValidationError) as exc:
         raise TaskIntentError(
@@ -215,6 +232,8 @@ def task_intent_master_projection(
         )
     _validate_allowlisted_classifications()
     projected = _normative_projection(candidate.document)
+    if projected.get("expectedKnowledgeEffects") is None:
+        projected.pop("expectedKnowledgeEffects", None)  # leaf-only; masters project as before
     projected["requirements"] = [
         value.model_dump(mode="json", by_alias=True)
         for value in _requirements(task_root, candidate.document)
@@ -362,6 +381,18 @@ def _packet_metadata(text: str, *, packet_path: str) -> dict[str, str]:
     return metadata
 
 
+def _expected_effects(
+    projected: dict[str, object],
+) -> tuple[TaskIntentExpectedKnowledgeEffect, ...] | None:
+    declared = projected.get("expectedKnowledgeEffects")
+    if declared is None:
+        return None
+    return tuple(
+        TaskIntentExpectedKnowledgeEffect.model_validate(value)
+        for value in cast(list[object], declared)
+    )
+
+
 def _acceptance_obligations(
     document: TaskDocument,
 ) -> tuple[TaskIntentAcceptanceObligation, ...]:
@@ -376,6 +407,7 @@ __all__ = [
     "TaskIntentAcceptanceObligation",
     "TaskIntentCodeExample",
     "TaskIntentError",
+    "TaskIntentExpectedKnowledgeEffect",
     "TaskIntentLeafIdentity",
     "TaskIntentRequirementPacket",
     "TaskIntentRequirementText",

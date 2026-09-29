@@ -28,6 +28,7 @@ from .document import (
     DiscardedSubTask,
     DiscardSourceProof,
     DiscardUnstartedProof,
+    ExpectedKnowledgeEffect,
     HeaderNote,
     ReviewFinding,
     ReviewState,
@@ -163,6 +164,7 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "executionRegistrations": LIFECYCLE,
         "lifecycleId": LIFECYCLE,
         "knowledgeMaintenanceScope": LIFECYCLE,
+        "expectedKnowledgeEffects": NORMATIVE,
         "objective": NORMATIVE,
         "requirements": NORMATIVE,
         "design": NORMATIVE,
@@ -265,6 +267,11 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "snippet": NORMATIVE,
     },
     HeaderNote: {"label": AUDIT, "value": AUDIT},
+    ExpectedKnowledgeEffect: {
+        "subject": NORMATIVE,
+        "effect": NORMATIVE,
+        "requirementRef": NORMATIVE,
+    },
     TaskEnclosureRef: {"leafId": LIFECYCLE, "enclosurePath": LIFECYCLE},
     TaskExecutionRegistration: {
         "sourceKind": LIFECYCLE,

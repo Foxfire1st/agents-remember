@@ -62,9 +62,53 @@ def _item_facts(item: Mapping[str, Any]) -> str:
     elif kind == "reached_family":
         members = facts.get("members") or ()
         parts = [f"{len(members)} member(s) to examine", *(facts.get("reachedBy") or ())]
+    elif kind == "planned_untouched":
+        parts = _planned_facts(item, facts)
     else:
         parts = [f"{key}" for key in sorted(facts)]
     return "; ".join(parts) or "-"
+
+
+def _planned_facts(item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str]:
+    declared = facts.get("declared") or {}
+    parts = [f"declared by {declared.get('requirementRef')}", str(facts.get("unmatched"))]
+    parts += [
+        f"{row.get('id')} {row.get('disposition')} {row.get('effect') or ''}".rstrip()
+        + " (does not deliver it)"
+        for row in facts.get("rows") or ()
+    ]
+    answered = item.get("satisfiedBy")
+    parts.append(f"answered by {answered}" if answered else "needs a planned row")
+    return parts
+
+
+def _planned_lines(document: Mapping[str, Any]) -> list[str]:
+    """Rule 7: the declaration's reconciliation, one line per declared effect."""
+
+    planned = document.get("plannedEffects") or {}
+    if not planned.get("declared"):
+        return [
+            "Planned effects (MIK-R11): none declared in the task document, so every item is "
+            "`unplanned`.",
+            "",
+        ]
+    answered = {
+        item.get("id"): item.get("satisfiedBy")
+        for item in document.get("items") or ()
+        if item.get("kind") == "planned_untouched"
+    }
+    lines = ["Planned effects (MIK-R11), declared in the task document:", ""]
+    for entry in planned.get("entries") or ():
+        row = answered.get(entry.get("item"))
+        state = (
+            f"matched by `{entry.get('matchedBy')}`"
+            if entry.get("matched")
+            else f"**unmatched** ({entry.get('unmatched')}): `planned_untouched`, "
+            + (f"answered by `{row}`" if row else "needs a planned row")
+        )
+        lines.append(f"- `{_cell(str(entry.get('key')))}` ({entry.get('requirementRef')}): {state}")
+    lines.append("")
+    return lines
 
 
 def _cell(value: str) -> str:
@@ -108,13 +152,14 @@ def knowledge_worklist_lines(document: Mapping[str, Any], path: str | None) -> l
         ),
         "",
     ]
+    lines += _planned_lines(document)
     if not items:
         lines += ["No item: the change reaches no recorded knowledge.", ""]
         return lines
-    lines += ["| Kind | Subject | Item | Facts |", "| --- | --- | --- | --- |"]
+    lines += ["| Kind | Subject | Plan | Item | Facts |", "| --- | --- | --- | --- | --- |"]
     lines += [
-        f"| {item.get('kind')} | {item.get('subject')} | `{_short(item.get('id'))}` | "
-        f"{_cell(_item_facts(item))} |"
+        f"| {item.get('kind')} | {_cell(str(item.get('subject')))} | {item.get('planning') or '-'} "
+        f"| `{_short(item.get('id'))}` | {_cell(_item_facts(item))} |"
         for item in items
     ]
     lines.append("")

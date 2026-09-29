@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -67,6 +67,7 @@ from agents_remember.models.knowledge_files.history import (
     HISTORY_SCHEMA,
     InvariantRow,
     OnboardingTraceRow,
+    PlannedEffectRow,
 )
 from agents_remember.models.knowledge_files.ids import (
     RECORD_ID_PATTERN,
@@ -76,6 +77,10 @@ from agents_remember.models.knowledge_files.ids import (
     mint_id,
 )
 from agents_remember.models.knowledge_files.records import schema_name
+
+DecisionResolver = Callable[[str], str | None]
+"""The task owner's answer about one decision entry of the leaf's task document: ``None`` when it
+resolves, else why not (MIK-R11 rule 5, ``dropped``)."""
 
 NON_MEANING_FIELDS: Final = frozenset({"id", "schema", "origin", "revision", "admission", "status"})
 ABSENT: Final = "absent"
@@ -115,6 +120,8 @@ class Authoring:
     # Evidence for records another owner authored: stored in this owner's history row about the
     # record (ruling R2-1), keyed by record ID.
     _foreign_evidence: dict[str, list[tuple[str, tuple[str, ...]]]] = field(default_factory=dict)
+    # The task owner's decision resolution for planned ``dropped`` rows; ``None`` has no task owner.
+    decisions: DecisionResolver | None = None
 
     # -- the operation ------------------------------------------------------------------------
 
@@ -572,6 +579,8 @@ class Authoring:
         where = f"history[{request.position}]"
         if re.match(OnboardingTraceRow.subject_pattern, request.subject):
             return self._onboarding_row(request, rows.get(request.subject), where)
+        if re.match(PlannedEffectRow.subject_pattern, request.subject):
+            return self._planned_row(request, rows.get(request.subject), where)
         subject = self.resolve_id(request.subject, where)
         found = None if subject is None else self.state.record(subject)
         if subject is None or found is None:
@@ -629,6 +638,74 @@ class Authoring:
             self.problem(where, _first_error(error))
             return None
         return row
+
+    def _planned_row(
+        self, request: RowRequest, existing: Mapping[str, Any] | None, where: str
+    ) -> dict[str, Any] | None:
+        """A planned row (MIK-R11 rule 5): the disposition of a declared effect no row delivered.
+
+        It carries ``ref`` and nothing an invariant or family row carries. What ``ref`` names must
+        exist: a stored row or invariant for ``realized_elsewhere``, and for ``dropped`` a decision
+        entry of the leaf's task document, which the task owner resolves now -- an unresolved one
+        refuses the row.
+        """
+
+        extra = [
+            name
+            for name, value in (
+                ("covers", request.covers),
+                ("effect", request.effect),
+                ("because", request.because),
+                ("examined", request.examined),
+            )
+            if value
+        ]
+        if extra or request.ref is None:
+            self.problem(
+                where,
+                f"a planned row carries 'ref' and no {extra}"
+                if extra
+                else "a planned row carries 'ref'",
+            )
+            return None
+        row: dict[str, Any] = {
+            "id": existing["id"] if existing is not None else self.mint("history_row"),
+            "subject": request.subject,
+            "disposition": request.disposition,
+            "reason": request.reason,
+            "items": list(request.items),
+            "ref": dict(request.ref),
+        }
+        try:
+            model = PlannedEffectRow.model_validate(row)
+        except ValidationError as error:
+            self.problem(where, _first_error(error))
+            return None
+        unresolved = self._unresolved_ref(model)
+        if unresolved is not None:
+            self.problem(where, unresolved)
+            return None
+        return row
+
+    def _unresolved_ref(self, row: PlannedEffectRow) -> str | None:
+        ref = row.ref
+        if ref.decision is not None:
+            if self.decisions is None:
+                return (
+                    "a dropped planned row cites a decision of the leaf's task document, and this "
+                    "write has no task owner to resolve it"
+                )
+            detail = self.decisions(ref.decision)
+            return (
+                None if detail is None else f"the dropped row's decision does not resolve: {detail}"
+            )
+        if ref.invariant is not None:
+            found = self.state.record(ref.invariant)
+            if found is None or found[1] != "invariant":
+                return f"ref.invariant {ref.invariant} names no stored invariant"
+        if ref.row is not None and ref.row not in self.state.known_ids():
+            return f"ref.row {ref.row} names no history row"
+        return None
 
     def _reason_with_evidence(self, subject: str, reason: str) -> str:
         """The row's reason, with the evidence of this run's updates of another owner's record."""

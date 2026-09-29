@@ -197,6 +197,12 @@ def _header_lines(doc: TaskDocument) -> list[str]:
         lines.append(f"**Execution nature:** `{doc.executionNature}`")
     if doc.knowledgeMaintenanceScope:  # MIK-R08: the worklist classifies every base entry
         lines.append("**Knowledge maintenance scope:** `true`")
+    if doc.expectedKnowledgeEffects:  # MIK-R11: declared before implementation
+        lines.append("**Expected knowledge effects:**")
+        lines += [
+            f"- `{one.subject}` — `{one.effect}` ({one.requirementRef})"
+            for one in doc.expectedKnowledgeEffects
+        ]
     if doc.seats:  # the sprint's first-class seats (L14-R3); sprint-only by schema
         lines += _seat_lines(doc.seats)
     lines += [

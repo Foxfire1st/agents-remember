@@ -23,8 +23,9 @@ only -- the gate finds a row by ``subject``, MIK-R09). A row's kind is decided b
   ``no_impact``, with ``examined[]``: ``{ id, revision }`` of every member examined, at its K_C
   revision (D7).
 
-The other registered item kinds (MIK-R06, R10, R11, R14, R30) add their row kinds to
-:data:`HISTORY_ROW_KINDS` when they land; until then a row whose subject no kind claims is refused.
+The other registered item kinds add their row kinds to :data:`HISTORY_ROW_KINDS` when they land
+(MIK-R30 ``onboarding:…``, MIK-R11 ``planned:…``; MIK-R06, R10 and R14 later); until then a row
+whose subject no kind claims is refused.
 
 **Checks that need the trees.** The models check shape. The writer support below checks a row
 against K_B/K_C facts the caller reads: :func:`reanchor_mismatches` (rule 4: each ``after`` equals
@@ -55,6 +56,11 @@ from agents_remember.models.knowledge_files.ids import (
     RECORD_PREFIXES,
     ROW_ID_PATTERN,
     id_pattern,
+)
+from agents_remember.models.knowledge_files.planned import (
+    PLANNED_DISPOSITIONS,
+    PLANNED_SUBJECT_PATTERN,
+    REFS_BY_DISPOSITION,
 )
 from agents_remember.models.knowledge_files.shapes import (
     Anchor,
@@ -272,6 +278,61 @@ class OnboardingTraceRow(HistoryRow):
     markers: tuple[Text, ...] | None = Field(default=None, min_length=1)
 
 
+class PlannedRef(FileModel):
+    """What a planned row names (MIK-R11 rule 5); exactly one key, the one its disposition takes.
+
+    * ``realized_elsewhere``: ``row`` (the ``ROW-…`` that delivered the effect) or ``invariant``;
+    * ``deferred``: ``requirement`` (the follow-up requirement) or ``leaf`` (the follow-up leaf);
+    * ``dropped``: ``decision`` -- the ``at`` of one decision entry in the leaf's task document,
+      resolved through the task owner when the writer writes the row.
+    """
+
+    row: RowId | None = None
+    invariant: InvariantId | None = None
+    requirement: RequirementReference | None = None
+    leaf: OwnerId | None = None
+    decision: Label | None = None
+
+    @model_validator(mode="after")
+    def _require_exactly_one(self) -> PlannedRef:
+        if len(self.named) != 1:
+            raise ValueError(
+                "a planned row's ref names exactly one of row, invariant, requirement, leaf or "
+                "decision"
+            )
+        return self
+
+    @property
+    def named(self) -> tuple[str, ...]:
+        return tuple(key for key in type(self).model_fields if getattr(self, key) is not None)
+
+
+class PlannedEffectRow(HistoryRow):
+    """The authored disposition of a declared effect no row delivered (MIK-R11 rule 5).
+
+    Subject ``planned:<declared subject>#<effect>`` -- built from the declaration, never from its
+    list position -- and disposition ``realized_elsewhere``, ``deferred`` or ``dropped``, with the
+    ``ref`` that disposition names. MIK-R11 owns the kind; the row answers a ``planned_untouched``
+    worklist item.
+    """
+
+    row_kind: ClassVar[str] = "planned"
+    subject_pattern: ClassVar[str] = PLANNED_SUBJECT_PATTERN
+    dispositions: ClassVar[tuple[str, ...]] = PLANNED_DISPOSITIONS
+
+    ref: PlannedRef
+
+    @model_validator(mode="after")
+    def _require_ref_of_disposition(self) -> PlannedEffectRow:
+        allowed = REFS_BY_DISPOSITION.get(self.disposition, frozenset())
+        if not set(self.ref.named) <= allowed:
+            raise ValueError(
+                f"a {self.disposition} planned row's ref names one of {sorted(allowed)}, "
+                f"not {list(self.ref.named)}"
+            )
+        return self
+
+
 @dataclass(frozen=True)
 class HistoryRowKind:
     """A registered row kind: the subject form it claims, its model and its owner packet."""
@@ -287,6 +348,7 @@ HISTORY_ROW_KINDS: Final[tuple[HistoryRowKind, ...]] = (
     HistoryRowKind("invariant", InvariantRow, "MIK-R07"),
     HistoryRowKind("family", FamilyRow, "MIK-R07"),
     HistoryRowKind("onboarding_trace", OnboardingTraceRow, "MIK-R30"),
+    HistoryRowKind("planned", PlannedEffectRow, "MIK-R11"),
 )
 
 

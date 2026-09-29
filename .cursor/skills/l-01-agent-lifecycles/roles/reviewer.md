@@ -71,6 +71,9 @@ You must be given all of these; a brief missing one is refused and reported, nev
    attempt and candidate. An aggregate verdict or a sampled subset is invalid. Append a separate immutable **reviewer
    record** against that exact attempt and candidate to the same physical leaf journal — never modifying the worker
    record or earlier bytes — and link that anchor from your verdict.
+   When the leaf's task document declares `expectedKnowledgeEffects` (MIK-R11), check that declaration against the
+   leaf's requirement packet: its declared subjects and effects match what the packet requires, with no effect missing
+   and none invented. A mismatch is a finding.
 8. **Write the verdict**, then end your turn.
 
 Classify every rejection as exactly one of `implementation defect`, `evidence gap`,

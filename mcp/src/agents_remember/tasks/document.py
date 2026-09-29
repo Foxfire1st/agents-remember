@@ -17,6 +17,7 @@ the observer never projects them as a lifecycle node.
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, Literal, Self
@@ -31,6 +32,11 @@ from pydantic import (
     model_validator,
 )
 
+from agents_remember.models.knowledge.effect import EffectLabel
+from agents_remember.models.knowledge_files.planned import (
+    DECLARED_SUBJECT_PATTERN,
+    REQUIREMENT_REF_PATTERN,
+)
 from agents_remember.models.task_document import DocStatus, MasterExecutionNature, StepStatus
 from agents_remember.models.task_document_ref import TaskDocumentRef
 from agents_remember.models.task_intent import (
@@ -646,6 +652,40 @@ class Section(_Doc):
     body: str = ""
 
 
+class ExpectedKnowledgeEffect(_Doc):
+    """One declared knowledge effect of a leaf, written before implementation (MIK-R11 rule 1).
+
+    ``subject`` is ``invariant:<INV-ID>``, ``family:<FAM-ID>`` or ``new:<hand-off label>``;
+    ``effect`` is one of the nine effect labels; ``requirementRef`` is the packet identity
+    ``<stable ID>@v<n>`` the effect answers. The task plane checks the shape only: it never reads
+    knowledge, so an ID the memory does not hold is the worklist's ``subject_unknown`` fact.
+    """
+
+    subject: str = Field(min_length=1, max_length=512, pattern=DECLARED_SUBJECT_PATTERN)
+    effect: EffectLabel
+    requirementRef: str = Field(min_length=1, max_length=256, pattern=REQUIREMENT_REF_PATTERN)
+
+
+def _check_expected_knowledge_effects(
+    kind: DocKind, effects: list[ExpectedKnowledgeEffect] | None
+) -> None:
+    if effects is None:
+        return
+    if kind == "master":
+        raise ValueError("expectedKnowledgeEffects belongs to a leaf document, not a master")
+    if not effects:
+        raise ValueError(
+            "expectedKnowledgeEffects declares at least one effect; clear it with null instead"
+        )
+    counts = Counter(f"{effect.subject}#{effect.effect}" for effect in effects)
+    repeated = sorted(key for key, count in counts.items() if count > 1)
+    if repeated:
+        raise ValueError(
+            "expectedKnowledgeEffects repeats a declaration (the same subject and effect): "
+            + ", ".join(repeated)
+        )
+
+
 class TaskDocument(_Doc):
     schema_: Literal["ar-task-document/v1"] = Field(default=TASK_DOCUMENT_SCHEMA, alias="schema")
     id: str
@@ -680,6 +720,9 @@ class TaskDocument(_Doc):
     # MIK-R08 definition 5: a knowledge-maintenance leaf classifies every entry of its memory base,
     # not only those its code change reaches. Absent means false; only ``true`` is ever written.
     knowledgeMaintenanceScope: bool | None = None
+    # MIK-R11: the invariant and family effects the leaf expects, declared before implementation.
+    # Absent means no declaration: every worklist item is ``unplanned``.
+    expectedKnowledgeEffects: list[ExpectedKnowledgeEffect] | None = None
     objective: str = ""
     requirements: list[str | ApprovedRequirementPacketRef] = Field(default_factory=list)
     design: str | None = None
@@ -722,6 +765,7 @@ class TaskDocument(_Doc):
         self._check_sprint_rows_and_seats()
         self._check_discarded_subtasks()
         self._normalize_integration_branch()
+        _check_expected_knowledge_effects(self.kind, self.expectedKnowledgeEffects)
         return self
 
     def _check_master_fields(self) -> None:
