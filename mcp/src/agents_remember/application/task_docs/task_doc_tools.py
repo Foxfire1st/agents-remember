@@ -134,6 +134,7 @@ _MUTABLE_FIELDS = frozenset(
         "integrationBranch",
         "executionNature",
         "executionGraph",
+        "knowledgeMaintenanceScope",
     }
 )
 

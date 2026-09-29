@@ -11,6 +11,10 @@ operation: nothing is written, and the report names every problem and every viol
 findings are carried in the report and never refuse, and so are the rules the registry marks
 ``writer_reports`` -- the MIK-R04 family route rules -- which only commit routes refuse.
 
+**Carried entries (MIK-R08).** Every operation also re-records, at C, each entry whose anchored
+content is identical at C while its file's blob moved (:mod:`.carry`): the mechanical ``blob`` and
+line-number update the worklist's ``carried`` class promises, so such an entry needs no disposition.
+
 **Converted trees only.** The writer writes a memory tree that holds the layout marker. An
 unconverted tree is refused by name: until the cutover (MIK-R37) the installed runtime's database
 ingest is the production path for unconverted memory, and nothing here changes it.
@@ -26,6 +30,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from agents_remember.application.knowledge_writer.authoring import Authoring
+from agents_remember.application.knowledge_writer.carry import carry_entries
 from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
 from agents_remember.application.knowledge_writer.handoff import Problem, read_handoff
 from agents_remember.application.knowledge_writer.history_check import owner_history_problems
@@ -90,6 +95,7 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
     snapshot = code if code is not None else CodeSnapshot.capture(request.code_root)
     authoring = Authoring(state, snapshot, request.owner, request.handoff_path)
     authoring.run(document)
+    carried = carry_entries(state, snapshot, request.owner)
     history_problems = owner_history_problems(state, request.owner)
     rendered, render_problems = _render(state.changed_documents())
     problems = [*problems, *authoring.problems, *history_problems, *render_problems]
@@ -102,6 +108,7 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         evidence=tuple(authoring.evidence),
         rulings=tuple(entry.entry_id for entry in document.rulings),
         notes=tuple(authoring.notes),
+        carried=carried,
     )
     if problems:
         return replace(report, problems=tuple(problems))

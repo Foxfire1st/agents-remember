@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from agents_remember.application.knowledge_proofs import invariants_without_proof
+from agents_remember.application.knowledge_worklist import recompute_leaf_worklist
 from agents_remember.application.memory_quality.census import (
     PreparedMemoryCensus,
     census_curator_candidates,
@@ -64,6 +65,7 @@ from agents_remember.memory_quality.knowledge_review import (
     AssessmentSummaryInput,
     summarise_assessment_state,
 )
+from agents_remember.memory_quality.knowledge_worklist_section import worklist_summary
 from agents_remember.models.lifecycles.review_assessment import assessment_subject_id
 from agents_remember.models.memory import (
     MemoryQualityPollRequest,
@@ -410,6 +412,7 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
         _curator_candidate_inputs(scope) if execution.publish_curator_report else None
     )
     census = prepare_memory_census(scope)
+    worklist = _knowledge_worklist(scope)
     payload = run_memory_quality_check(
         scope.onboarding_root,
         checks=execution.checks,
@@ -445,6 +448,8 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
         response["memoryCensus"] = publish_memory_census(
             census, detail_limit=execution.detail_limit
         )
+    if worklist is not None:
+        response["knowledgeWorklist"] = worklist_summary(*worklist)
     if not execution.publish_curator_report:
         return _bounded_quality_response(response, execution.detail_limit)
     _attach_curator_checklist(
@@ -452,9 +457,29 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
         payload,
         response,
         candidate_inputs=candidate_inputs,
-        census=census,
+        prepared=_PreparedInputs(census=census, worklist=worklist),
     )
     return _bounded_quality_response(response, execution.detail_limit)
+
+
+@dataclass(frozen=True)
+class _PreparedInputs:
+    """What the run prepared before the checks: the census, and the leaf's worklist (MIK-R08)."""
+
+    census: PreparedMemoryCensus | None
+    worklist: tuple[dict[str, Any], str | None] | None = None
+
+
+def _knowledge_worklist(scope: MemoryScope) -> tuple[dict[str, Any], str | None] | None:
+    """Recompute and persist the leaf's MIK-R08 worklist; ``None`` where none applies.
+
+    A leaf contract gets a worklist when K_B or K_C is converted; every other scope (and every
+    unconverted leaf, which is every production leaf before MIK-R37) gets none, so its run is
+    unchanged. :func:`recompute_leaf_worklist` is the one recompute entry point.
+    """
+
+    contract = scope.contract
+    return None if contract is None else recompute_leaf_worklist(contract)
 
 
 def _bounded_quality_response(response: dict[str, object], detail_limit: int) -> dict[str, object]:
@@ -490,7 +515,7 @@ def _attach_curator_checklist(
     response: dict[str, object],
     *,
     candidate_inputs: _CuratorCandidateInputs | None = None,
-    census: PreparedMemoryCensus | None,
+    prepared: _PreparedInputs,
 ) -> None:
     config = execution.config
     scope = revalidate_memory_candidate_scope(config, execution.scope)
@@ -565,9 +590,9 @@ def _attach_curator_checklist(
         expected=candidate_inputs,
         observed=_curator_candidate_inputs(scope),
     )
-    if census is None:
+    if prepared.census is None:
         raise RuntimeError("curator publication requires its complete plane-derived census")
-    source_candidates = census_curator_candidates(census)
+    source_candidates = census_curator_candidates(prepared.census)
     # The knowledge-review summary is derived from the curator-coherence authority, which only the
     # external-memory leaf path below can read -- but `CuratorChecklist` is built for EVERY scope.
     # It is therefore initialised here, on the same path as the other two accepted-no-impact
@@ -579,8 +604,12 @@ def _attach_curator_checklist(
         and scope.contract.memory_mode == "external"
         and scope.contract.kind == "leaf"
     ):
-        changed_paths = sorted({*census.scope.working_paths, *census.scope.committed_paths})
-        current_working_paths = _current_working_code_paths(scope, census.scope.working_paths)
+        changed_paths = sorted(
+            {*prepared.census.scope.working_paths, *prepared.census.scope.committed_paths}
+        )
+        current_working_paths = _current_working_code_paths(
+            scope, prepared.census.scope.working_paths
+        )
         accepted_no_impact = frozenset()
         accepted_route_no_impact = frozenset()
         try:
@@ -626,7 +655,7 @@ def _attach_curator_checklist(
             else blocker.sourcePath or "",
             "message": blocker.detail,
         }
-        for blocker in census.result.blockers
+        for blocker in prepared.census.result.blockers
     )
     checklist = write_curator_checklist(
         CuratorChecklist(
@@ -647,6 +676,8 @@ def _attach_curator_checklist(
             report_only_findings=report_only,
             knowledge_review=knowledge_review,
             without_proof=_without_proof(scope.onboarding_root.parent, config.coordination_root),
+            knowledge_worklist=None if prepared.worklist is None else prepared.worklist[0],
+            knowledge_worklist_path=None if prepared.worklist is None else prepared.worklist[1],
         )
     )
     response.pop("reportOnlyFindings", None)

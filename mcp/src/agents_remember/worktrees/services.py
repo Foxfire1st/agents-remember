@@ -186,6 +186,17 @@ class KnowledgeCrossingPort(Protocol):
     def plan(self, request: CrossingRequest) -> CrossingPlanView: ...
 
 
+class KnowledgeWorklistPort(Protocol):
+    """MIK-R08 rule 8: recompute and persist a leaf's worklist; bound by the composition layer.
+
+    Returns the worklist's compact summary, or ``None`` where no worklist applies (both memory
+    sides unconverted, or not a leaf). It never raises: an unanticipated failure is persisted as
+    the ``incomplete`` worklist naming the run.
+    """
+
+    def recompute(self, contract: WorktreeContract) -> dict[str, Any] | None: ...
+
+
 class CertificationContinuationPort(Protocol):
     """Composition-owned Gate 5 and finalization boundaries after exact code certificates."""
 
@@ -209,6 +220,7 @@ class WorktreeServices:
     prepared_memory_certification: PreparedMemoryCertificationPort | None = None
     knowledge_validation: KnowledgeValidationPort | None = None
     knowledge_crossing: KnowledgeCrossingPort | None = None
+    knowledge_worklist: KnowledgeWorklistPort | None = None
 
 
 @dataclass(frozen=True)
@@ -267,6 +279,7 @@ __all__ = [
     "CrossingStepFailed",
     "KnowledgeCrossingPort",
     "KnowledgeValidationPort",
+    "KnowledgeWorklistPort",
     "MemoryQualityPort",
     "ProviderLifecyclePort",
     "TerminalGuard",

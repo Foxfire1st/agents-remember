@@ -195,6 +195,8 @@ def _header_lines(doc: TaskDocument) -> list[str]:
         lines.append(f"**Integration branch:** `{doc.integrationBranch}`")
     if doc.executionNature:
         lines.append(f"**Execution nature:** `{doc.executionNature}`")
+    if doc.knowledgeMaintenanceScope:  # MIK-R08: the worklist classifies every base entry
+        lines.append("**Knowledge maintenance scope:** `true`")
     if doc.seats:  # the sprint's first-class seats (L14-R3); sprint-only by schema
         lines += _seat_lines(doc.seats)
     lines += [

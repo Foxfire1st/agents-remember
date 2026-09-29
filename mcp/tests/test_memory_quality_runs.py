@@ -437,7 +437,7 @@ class MemoryQualityControllerTests(unittest.TestCase):
                     {"checks": {}},
                     response,
                     candidate_inputs=candidate_inputs,
-                    census=cast(Any, census),
+                    prepared=controller._PreparedInputs(census=cast(Any, census)),
                 )
 
         published = publish.call_args.args[0]

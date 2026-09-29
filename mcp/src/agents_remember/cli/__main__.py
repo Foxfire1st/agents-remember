@@ -3,7 +3,8 @@
 The single front door for the package's CLI tools. It carries ``dashboard``, the memory
 maintenance and migration commands, the knowledge write plane's ingest and its **taskless**
 ``knowledge-bootstrap`` entry, the text knowledge format's ``knowledge-format`` formatter, ``knowledge-convert`` conversion,
-``knowledge-validate`` validator, ``knowledge-index`` derived index and read-only
+``knowledge-validate`` validator, ``knowledge-index`` derived index, ``knowledge-worklist``
+change-to-knowledge worklist and read-only
 ``knowledge-routes`` family-route report, the migration census's ``knowledge-census`` inventory
 and report, the review plane's ``review-record-comparison`` entry, and the existing
 ``context_packet`` adapter as subparsers. The MCP server keeps its own ``agents-remember-mcp``
@@ -25,6 +26,7 @@ from agents_remember.cli import (
     knowledge_ingest,
     knowledge_routes,
     knowledge_validate,
+    knowledge_worklist,
     memory_backfill,
     memory_citations,
     review_comparison_record,
@@ -91,6 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     knowledge_index.add_arguments(index)
     index.set_defaults(func=knowledge_index.run)
+    worklist = sub.add_parser(
+        "knowledge-worklist",
+        help="Compute the change-to-knowledge worklist of a leaf or of four named sides.",
+    )
+    knowledge_worklist.add_arguments(worklist)
+    worklist.set_defaults(func=knowledge_worklist.run)
     routes = sub.add_parser(
         "knowledge-routes",
         help="Show each family's routes, route state and mechanical route suggestion (read-only).",

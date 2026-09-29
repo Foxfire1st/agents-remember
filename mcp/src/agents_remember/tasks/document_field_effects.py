@@ -162,6 +162,7 @@ TASK_DOCUMENT_FIELD_EFFECTS: dict[type[BaseModel], dict[str, FieldEffects]] = {
         "enclosures": LIFECYCLE,
         "executionRegistrations": LIFECYCLE,
         "lifecycleId": LIFECYCLE,
+        "knowledgeMaintenanceScope": LIFECYCLE,
         "objective": NORMATIVE,
         "requirements": NORMATIVE,
         "design": NORMATIVE,

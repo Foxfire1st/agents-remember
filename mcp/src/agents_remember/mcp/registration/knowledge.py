@@ -31,6 +31,7 @@ from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from ..tools.knowledge import (
     ChangeToolRequest,
     DiffToolRequest,
+    IntegrityCheckRequest,
     ProjectToolRequest,
     ReadToolRequest,
     knowledge_change_payload,
@@ -172,12 +173,13 @@ def _register_knowledge_integrity_check(server: FastMCP) -> None:
 
     @server.tool()
     def knowledge_integrity_check(
-        databasePath: str,
-        repositoryId: str,
+        databasePath: str | None = None,
+        repositoryId: str | None = None,
         scopeId: str | None = None,
         *,
         runId: str | None = None,
         inputDigest: str | None = None,
+        contractPath: str | None = None,
     ) -> dict[str, Any]:
         """Report declared structural-rule violations, mechanically matched review conditions, their
         registered traversal scope and the observable mapping and scan limitations. It produces no
@@ -185,13 +187,19 @@ def _register_knowledge_integrity_check(server: FastMCP) -> None:
         omitted by accident, and an unresolved assessment stays unresolved. The scope selects the
         recorded run; `runId` or `inputDigest` selects one exact run among several in that scope, and
         the response names the selected run and its input identities so the conditions cannot be
-        read as belonging to a run they were not measured over."""
+        read as belonging to a run they were not measured over. `contractPath` names a leaf by its
+        series contract and adds that leaf's latest change-to-knowledge worklist (MIK-R08): its
+        state, digest, item counts and items, with the persisted file's path for every item's
+        facts; a leaf may be named without a dataset."""
         return knowledge_integrity_check_payload(
-            databasePath=databasePath,
-            repositoryId=repositoryId,
-            scopeId=scopeId,
-            runId=runId,
-            inputDigest=inputDigest,
+            IntegrityCheckRequest(
+                databasePath=databasePath,
+                repositoryId=repositoryId,
+                scopeId=scopeId,
+                runId=runId,
+                inputDigest=inputDigest,
+                contractPath=contractPath,
+            )
         )
 
 

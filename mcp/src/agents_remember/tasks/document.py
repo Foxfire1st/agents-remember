@@ -677,6 +677,9 @@ class TaskDocument(_Doc):
     # "never started". One marker per source kind and role keeps the task document bounded.
     executionRegistrations: list[TaskExecutionRegistration] = Field(default_factory=list)
     lifecycleId: str | None = None
+    # MIK-R08 definition 5: a knowledge-maintenance leaf classifies every entry of its memory base,
+    # not only those its code change reaches. Absent means false; only ``true`` is ever written.
+    knowledgeMaintenanceScope: bool | None = None
     objective: str = ""
     requirements: list[str | ApprovedRequirementPacketRef] = Field(default_factory=list)
     design: str | None = None

@@ -49,6 +49,7 @@ from agents_remember.application.knowledge_views import (
     VIEW_RENDERER_VERSION,
     read_knowledge_view,
 )
+from agents_remember.application.knowledge_worklist.surface import leaf_worklist_fields
 from agents_remember.application.published_intent import (
     SelectedKnowledgeDataset,
     memory_tree_block,
@@ -81,6 +82,7 @@ from .base import _tool_payload
 __all__ = [
     "ChangeToolRequest",
     "DiffToolRequest",
+    "IntegrityCheckRequest",
     "ProjectToolRequest",
     "ReadToolRequest",
     "knowledge_change_payload",
@@ -633,26 +635,56 @@ def _supplied_effect_labels(request: dict[str, Any] | None) -> list[dict[str, An
     return labels
 
 
-def knowledge_integrity_check_payload(
-    *,
-    databasePath: str,
-    repositoryId: str,
-    scopeId: str | None = None,
-    runId: str | None = None,
-    inputDigest: str | None = None,
-) -> dict[str, Any]:
-    """Report declared structural-rule violations and their limits, through the choke point."""
+@dataclass(frozen=True)
+class IntegrityCheckRequest:
+    """One ``knowledge_integrity_check`` call's inputs, as the registered tool received them."""
 
-    return _tool_payload(
-        "knowledge_integrity_check",
-        _integrity_check_result(
-            databasePath=databasePath,
-            repositoryId=repositoryId,
-            scopeId=scopeId,
-            runId=runId,
-            inputDigest=inputDigest,
-        ),
-    )
+    databasePath: str | None = None
+    repositoryId: str | None = None
+    scopeId: str | None = None
+    runId: str | None = None
+    inputDigest: str | None = None
+    contractPath: str | None = None
+
+
+def knowledge_integrity_check_payload(request: IntegrityCheckRequest) -> dict[str, Any]:
+    """Report declared structural-rule violations and their limits, through the choke point.
+
+    ``contractPath`` names a leaf by its series contract and adds the leaf's latest persisted
+    MIK-R08 worklist (:func:`leaf_worklist_fields`). A dataset (``databasePath`` with
+    ``repositoryId``) and a leaf may be named together or alone; naming neither is refused.
+    """
+
+    if request.databasePath is not None and request.repositoryId is not None:
+        result = _integrity_check_result(
+            databasePath=request.databasePath,
+            repositoryId=request.repositoryId,
+            scopeId=request.scopeId,
+            runId=request.runId,
+            inputDigest=request.inputDigest,
+        )
+    elif request.contractPath is not None and request.databasePath is None:
+        result = {
+            "ok": True,
+            "state": "reported",
+            "repositoryId": request.repositoryId,
+            "compatible": None,
+        }
+    else:
+        result = {
+            "ok": True,
+            "state": "refused",
+            "repositoryId": request.repositoryId,
+            "refusalCode": "selected_input_unavailable",
+            "refusalDetail": (
+                "name a knowledge dataset (databasePath with repositoryId), a leaf "
+                "(contractPath), or both"
+            ),
+            "compatible": None,
+        }
+    if request.contractPath is not None:
+        result.update(leaf_worklist_fields(request.contractPath))
+    return _tool_payload("knowledge_integrity_check", result)
 
 
 def _integrity_check_result(

@@ -43,8 +43,20 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 80
-LIFECYCLE_CATALOG_SHA256 = "b96198c3b59d0a7909dccd3dca389b8af93182d51c9886d0b2b9cb02ed5c64c9"
+LIFECYCLE_CATALOG_SHA256 = "11ce80899b5a38e4b5fe73691a1cfa4dee076161a2554c21d15b0f2b31c18a51"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Thirty-fifth deliberate re-pin (260928-MIK-L08, at base ``e49ba078``, 2026-09-29) -- one consumer
+the census derived for the worklist's leaf case module.** ``260928-MIK-L08`` (MIK-R08, the
+change-to-knowledge worklist) adds ``mcp/tests/test_knowledge_worklist_leaf.py``, which drives the
+memory-quality controller and so transitively consumes
+``fixtures/repository_profiles/node/package-lock.json``; that row gains the one path, appended after
+the Thirty-fourth's ``test_knowledge_proofs.py`` without re-sorting. **No row was added or removed,
+no other consumer changed and no field changed**, so the population stays at **sixteen contracts /
+eighty artifacts**, and the catalog is re-pinned from
+``b96198c3b59d0a7909dccd3dca389b8af93182d51c9886d0b2b9cb02ed5c64c9`` (the Thirty-fourth) to
+``11ce80899b5a38e4b5fe73691a1cfa4dee076161a2554c21d15b0f2b31c18a51``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml``. The proof's own artifact delta remains exactly empty.
 
 **Thirty-fourth deliberate re-pin (260928-MIK-L28, at base ``8b025426``, 2026-09-29) -- the new
 case module ``test_knowledge_proofs.py`` (MIK-R28, first-class test proofs) added to the three rows

@@ -11,6 +11,7 @@ from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.git import branch_commit, head_commit, is_ancestor
 from agents_remember.worktrees.modules.guidance import contract_next_args, recovery_guidance
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.services import WorktreeServicesUnboundError, worktree_services
 from agents_remember.worktrees.sync_transaction_authority import (
     authority_refs_exist,
     command_result,
@@ -89,7 +90,41 @@ def finalize_sync(
     record = update_record(store, record, phase="completed")
     remove_temporary_worktrees(record)
     delete_authority(record)
-    return completed_sync_result(current, record, fetch)
+    return with_recomputed_worklist(completed_sync_result(current, record, fetch), current)
+
+
+def with_recomputed_worklist(
+    result: WorktreeCommandResult, contract: WorktreeContract
+) -> WorktreeCommandResult:
+    """Attach the recomputed worklist's summary to a completed sync's result, where one applies.
+
+    Used by the finalization and by the ``continue`` replay of a completed generation, so both
+    report the worklist of the base pair the sync wrote. The result is otherwise untouched.
+    """
+
+    worklist = recompute_knowledge_worklist(contract)
+    if worklist is not None:
+        result.payload["knowledgeWorklist"] = worklist
+    return result
+
+
+def recompute_knowledge_worklist(contract: WorktreeContract) -> dict[str, object] | None:
+    """MIK-R08 rule 8: a completed managed sync recomputes the leaf's worklist.
+
+    The sync moved the base pair, so B and K_B moved with it. The bound port computes and persists
+    the worklist and returns its summary; with no port bound (or no worklist applicable, every
+    unconverted leaf) the sync result is exactly what it was. It runs after the completed journal is
+    published, so nothing it does may fail the sync: any failure here -- reading the contract, the
+    port itself -- leaves the summary out and the completed result as it was.
+    """
+
+    try:
+        port = worktree_services().knowledge_worklist
+        return None if port is None else port.recompute(reload_contract(contract))
+    except WorktreeServicesUnboundError:
+        return None
+    except Exception:  # a worklist failure never fails a completed sync (MIK-R08 rule 8)
+        return None
 
 
 def completed_sync_result(

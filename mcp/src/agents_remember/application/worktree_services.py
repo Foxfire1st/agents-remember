@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application import provider_runtime as provider_runtime_api
+from agents_remember.application.knowledge_worklist import LeafWorklistRecompute
 from agents_remember.application.prepared_certification import (
     PreparedMemoryCertificationAdapter,
 )
@@ -215,6 +216,7 @@ def build_default_worktree_services() -> WorktreeServices:
         prepared_memory_certification=PreparedMemoryCertificationAdapter(),
         knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),
         knowledge_crossing=GitKnowledgeCrossing(),
+        knowledge_worklist=LeafWorklistRecompute(),
     )
 
 

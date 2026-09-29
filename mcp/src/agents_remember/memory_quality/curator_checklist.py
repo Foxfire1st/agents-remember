@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from agents_remember.memory_quality.knowledge_review import (
     KnowledgeReview,
     knowledge_review_section,
 )
+from agents_remember.memory_quality.knowledge_worklist_section import knowledge_worklist_lines
 from agents_remember.models.lifecycles.curator_coherence import (
     CuratorSourceCandidate,
     memory_quality_attestation_dependencies,
@@ -61,6 +63,11 @@ class CuratorChecklist:
     # ``None`` (every unconverted tree) renders nothing, so today's checklist bytes are unchanged.
     # Like ``knowledge_review`` it is information and never an input to ``actionable_count``.
     without_proof: WithoutProof | None = None
+    # The leaf's persisted MIK-R08 worklist and where it lives, shown as information. ``None`` (every
+    # unconverted leaf) renders nothing; it never enters ``curator_actionable_count`` (MIK-R09 owns
+    # what an open item blocks).
+    knowledge_worklist: Mapping[str, Any] | None = None
+    knowledge_worklist_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -277,6 +284,12 @@ def _render(checklist: CuratorChecklist, sections: _ChecklistSections) -> str:
     lines.extend(sections.knowledge_review.lines)
     if checklist.without_proof is not None:
         _append_without_proof(lines, checklist.without_proof)
+    if checklist.knowledge_worklist is not None:
+        lines.extend(
+            knowledge_worklist_lines(
+                checklist.knowledge_worklist, checklist.knowledge_worklist_path
+            )
+        )
     lines.extend(
         [
             "## Completion Rule",

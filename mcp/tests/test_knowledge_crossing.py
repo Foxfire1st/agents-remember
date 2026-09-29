@@ -358,7 +358,10 @@ def _crossing_fixture(tmp_path: Path) -> tuple[SyncFixture, Path, dict[str, str]
         (fixture.memory_repo / relative).write_text(text, encoding="utf-8")
     git(fixture.memory_repo, "add", "-A")
     git(fixture.memory_repo, "commit", "-q", "-m", render_memory_content_message("cards", verified))
-    assert fixture.sync(memory_sync_choice="merge-memory").payload["state"] == "synced"
+    first = fixture.sync(memory_sync_choice="merge-memory").payload
+    assert first["state"] == "synced"
+    # Both memory sides are unconverted: the sync recomputes no worklist (MIK-R08 rule 8).
+    assert "knowledgeWorklist" not in first
     # An ordinary (non-crossing) sync journal keeps the shape the installed runtime reads.
     journal = sync_operation_path(fixture.contract.worktree_group).read_text(encoding="utf-8")
     assert "crossingReport" not in journal
@@ -429,6 +432,15 @@ def test_the_managed_sync_crosses_an_unconverted_leaf_into_a_converted_line(
     journal = json.loads(sync_operation_path(fixture.contract.worktree_group).read_text())
     report = Path(journal["memory"]["crossingReport"])
     assert report.parent == fixture.contract.worktree_group / "reports" and report.is_file()
+    # MIK-R08 rule 8: the completed sync recomputed the now-converted leaf's worklist at its new
+    # base pair and persisted it beside the contract.
+    worklist = result.payload["knowledgeWorklist"]
+    assert isinstance(worklist, dict) and worklist["state"] == "complete", worklist
+    persisted = fixture.contract.contract_path.parent / "knowledge-worklist.json"
+    assert worklist["path"] == persisted.as_posix()
+    document = json.loads(persisted.read_text(encoding="utf-8"))
+    assert document["pairing"]["base"]["commit"] == git(fixture.code_repo, "rev-parse", "main")
+    assert document["pairing"]["memoryBase"]["commit"] == line_head
 
 
 def test_a_crossing_leaves_overlapping_edits_to_the_curator_and_a_failed_step_changes_nothing(

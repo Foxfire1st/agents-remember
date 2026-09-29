@@ -16,6 +16,7 @@ from agents_remember.worktrees.sync_transaction_git import (
 from agents_remember.worktrees.sync_transaction_recovery import (
     completed_sync_result,
     manual_repair_result,
+    with_recomputed_worklist,
 )
 from agents_remember.worktrees.sync_transaction_state import (
     SyncOperationRecord,
@@ -374,7 +375,7 @@ def terminal_resolution_replay(
             phase=record.phase,
         )
     if args.resolution_action == "continue":
-        return completed_sync_result(contract, record, fetch)
+        return with_recomputed_worklist(completed_sync_result(contract, record, fetch), contract)
     return command_result(
         2,
         "sync-already-completed",

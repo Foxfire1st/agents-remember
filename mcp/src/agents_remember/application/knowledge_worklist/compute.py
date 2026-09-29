@@ -1,0 +1,481 @@
+"""One worklist run: the change inventory, the one-pass scope, the items and the digest (MIK-R08).
+
+The run is a pure function of its inputs -- the code trees B and C, the knowledge trees K_B and K_C,
+and the leaf's ``knowledgeMaintenanceScope`` -- so identical inputs give identical items and an
+identical digest (rule 6). It reads the changed paths from the landed ICR change inventory
+(:func:`tree_difference_observation`, ICR-R02) and the renames from Git's rename detection as the
+landed inventory owner measures it (:func:`git_rename_inference`, ICR-R08), then:
+
+1. classifies every K_B entry at a changed path (every K_B entry when the leaf sets
+   ``knowledgeMaintenanceScope``);
+2. computes the knowledge-side changes between K_B and K_C;
+3. reaches every K_B family that contains an invariant with a ``touched_invariant`` item, or whose
+   record changed;
+4. classifies every K_B entry of those families' members -- once. What step 4 finds raises items but
+   reaches no further family, and a ``stale_invariant`` raises ``reached_family`` for its families
+   without classifying their members unless step 3 already reached them.
+
+Every changed hunk is also marked **linked** or **unexplained** (definition 8) for the gate's
+registrants; that marking raises nothing here. An input that cannot be read makes the run
+``incomplete`` naming it, with no items (rule 4); nothing is a verdict (Exclusions).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from typing import Any, Final
+
+from agents_remember.application.knowledge_worklist.classify import (
+    ABSENT,
+    COVERING_CLASSES,
+    RAISING_CLASSES,
+    Classification,
+    Classifier,
+    InvariantChange,
+    KnowledgeChanges,
+    knowledge_changes,
+)
+from agents_remember.application.knowledge_worklist.code import (
+    CodeReadError,
+    CodeTrees,
+    Hunk,
+    hits_new,
+    hits_old,
+)
+from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSide
+from agents_remember.application.knowledge_worklist.registry import item_id, kinds_document
+from agents_remember.application.review_rename_inference import git_rename_inference
+from agents_remember.application.review_source_inventory import (
+    byte_form,
+    tree_difference_observation,
+)
+from agents_remember.kernel.canonical_json import prefixed_sha256_digest
+from agents_remember.memory.knowledge.tree_observation import TreeChange, TreePaths, TreeSide
+
+__all__ = [
+    "WORKLIST_SCHEMA",
+    "Incomplete",
+    "Item",
+    "WorklistInputs",
+    "compute_worklist",
+    "incomplete_worklist",
+    "worklist_digest",
+]
+
+WORKLIST_SCHEMA: Final = "knowledge-worklist/v1"
+
+
+@dataclass(frozen=True)
+class Incomplete:
+    """An input the run could not read (rule 4): which one, and why."""
+
+    input: str
+    detail: str
+
+    def to_document(self) -> dict[str, str]:
+        return {"input": self.input, "detail": self.detail}
+
+
+class WorklistIncomplete(Exception):
+    def __init__(self, missing: Incomplete) -> None:
+        super().__init__(missing.detail)
+        self.missing = missing
+
+
+@dataclass(frozen=True)
+class Item:
+    """One worklist item: its registered kind, its subject, its facts and its identities."""
+
+    kind: str
+    subject: str
+    facts: Mapping[str, Any]
+    identities: Any
+
+    @property
+    def id(self) -> str:
+        return item_id(self.kind, self.subject, self.identities)
+
+    def to_document(self) -> dict[str, Any]:
+        return {"id": self.id, "kind": self.kind, "subject": self.subject, "facts": self.facts}
+
+
+@dataclass(frozen=True)
+class WorklistInputs:
+    """What one run reads: the code trees, the two knowledge sides, the scope flag, the pairing."""
+
+    code: CodeTrees
+    base: KnowledgeSide
+    candidate: KnowledgeSide
+    pairing: Mapping[str, Any]
+    maintenance_scope: bool = False
+    owner: str | None = None
+
+
+def worklist_digest(state: str, items: Iterable[Mapping[str, Any]], missing: Any) -> str:
+    return prefixed_sha256_digest({"state": state, "items": list(items), "incomplete": missing})
+
+
+def incomplete_worklist(
+    missing: Incomplete, *, owner: str | None, pairing: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """The one representation of unreadable input: ``incomplete``, naming it, with no items."""
+
+    return {
+        "schema": WORKLIST_SCHEMA,
+        "owner": owner,
+        "state": "incomplete",
+        "incomplete": [missing.to_document()],
+        "pairing": dict(pairing or {}),
+        "items": [],
+        "kinds": kinds_document(),
+        "digest": worklist_digest("incomplete", [], [missing.to_document()]),
+    }
+
+
+def compute_worklist(inputs: WorklistInputs) -> dict[str, Any]:
+    """Run the worklist over ``inputs`` and return its ``knowledge-worklist/v1`` document."""
+
+    try:
+        return _Run(inputs).document()
+    except WorklistIncomplete as error:
+        return incomplete_worklist(error.missing, owner=inputs.owner, pairing=inputs.pairing)
+    except CodeReadError as error:
+        return incomplete_worklist(
+            Incomplete("C", str(error)), owner=inputs.owner, pairing=inputs.pairing
+        )
+
+
+def _changes(inputs: WorklistInputs) -> tuple[tuple[TreeChange, ...], int, dict[str, str]]:
+    root = str(inputs.code.repository)
+    before = TreeSide(tree_id=inputs.code.base_tree, root=root)
+    after = TreeSide(tree_id=inputs.code.candidate_tree, root=root)
+    observed = tree_difference_observation(before, after)
+    if not observed.available:
+        raise WorklistIncomplete(Incomplete("B/C change inventory", observed.detail))
+    if observed.partial:
+        raise WorklistIncomplete(Incomplete("B/C change inventory", _partial_detail(observed)))
+    renames = git_rename_inference(before, after)
+    if not renames.available:
+        raise WorklistIncomplete(Incomplete("B/C renames", renames.detail))
+    renamed = {pair.before_path: pair.after_path for pair in renames.pairs}
+    return tuple(observed.entries), len(observed.unrepresentable), renamed
+
+
+def _partial_detail(observed: TreePaths) -> str:
+    """Name what a partial inventory could not report whole (rule 4: never a silent fallback)."""
+
+    unrepresentable = [byte_form(change.path) for change in observed.unrepresentable]
+    unclassified = [change.path for change in observed.entries if change.content == "unknown"]
+    parts = [observed.detail or "the change inventory is partial"]
+    if unrepresentable:
+        parts.append(f"paths that are not valid text: {', '.join(sorted(unrepresentable))}")
+    if unclassified:
+        parts.append(f"paths without a content classification: {', '.join(sorted(unclassified))}")
+    return "; ".join(parts)
+
+
+@dataclass
+class _Run:
+    inputs: WorklistInputs
+    classified: dict[str, Classification] = field(default_factory=dict)
+
+    def document(self) -> dict[str, Any]:
+        inputs = self.inputs
+        changes, unrepresentable, renamed = _changes(inputs)
+        base, candidate = inputs.base, inputs.candidate
+        classifier = Classifier(inputs.code, base, renamed)
+        changed_paths = {change.path for change in changes}
+        first = (
+            sorted(base.entries)
+            if inputs.maintenance_scope
+            else sorted(
+                entry for path in changed_paths for entry in base.entries_by_path.get(path, ())
+            )
+        )
+        self._classify(classifier, first)
+        knowledge = knowledge_changes(base, candidate, classifier)
+        # A re-anchored entry whose class covers it (definition 7) raises that class's item, so an
+        # entry classified only to decide the re-anchor joins the classified set when it does.
+        self._classify(
+            classifier,
+            sorted(
+                one.entry_id
+                for one in classifier.classified()
+                if one.entry_class in COVERING_CLASSES
+            ),
+        )
+        touched = self._touched(knowledge)
+        reached = self._reached(touched, knowledge)
+        members = sorted(
+            {member for family in reached for member in self._members(family)}
+            & set(base.invariants)
+        )
+        self._classify(
+            classifier,
+            [entry for member in members for entry in base.entries_by_invariant.get(member, ())],
+        )
+        touched = self._touched(knowledge)
+        stale = sorted(
+            {
+                one.invariant
+                for one in self.classified.values()
+                if one.entry_class == "stale_at_base"
+            }
+        )
+        items = [
+            *(
+                self._touched_item(invariant, knowledge.invariants[invariant])
+                for invariant in touched
+            ),
+            *(self._stale_item(invariant) for invariant in stale),
+            *self._family_items(reached, touched, stale, knowledge),
+        ]
+        items.sort(key=lambda item: (item.kind, item.subject))
+        rendered = [item.to_document() for item in items]
+        return {
+            "schema": WORKLIST_SCHEMA,
+            "owner": inputs.owner,
+            "state": "complete",
+            "incomplete": [],
+            "pairing": dict(inputs.pairing),
+            "scope": {
+                "knowledgeMaintenanceScope": inputs.maintenance_scope,
+                "changedPaths": len(changed_paths),
+                "unrepresentablePaths": unrepresentable,
+                "classifiedEntries": len(self.classified),
+                "classes": _class_counts(self.classified.values()),
+                "reachedFamilies": sorted(reached),
+            },
+            "entries": [
+                {
+                    "id": one.entry_id,
+                    "invariant": one.invariant,
+                    "path": one.path,
+                    "class": one.entry_class,
+                }
+                for one in sorted(self.classified.values(), key=lambda one: one.entry_id)
+            ],
+            "changes": self._linkage(changes, renamed),
+            "items": rendered,
+            "kinds": kinds_document(),
+            "digest": worklist_digest("complete", rendered, []),
+        }
+
+    # -- scope ---------------------------------------------------------------------------------
+
+    def _classify(self, classifier: Classifier, entries: Iterable[str]) -> None:
+        for entry in entries:
+            if entry not in self.classified:
+                self.classified[entry] = classifier.classify(entry)
+
+    def _touched(self, knowledge: KnowledgeChanges) -> list[str]:
+        raised = {
+            one.invariant for one in self.classified.values() if one.entry_class in RAISING_CLASSES
+        }
+        raised |= knowledge.changed_invariants()
+        return sorted(raised & set(self.inputs.base.invariants))
+
+    def _members(self, family: str) -> set[str]:
+        members: set[str] = set()
+        for side in (self.inputs.base, self.inputs.candidate):
+            record = side.families.get(family)
+            if record is not None:
+                members.update(record.members)
+        return members
+
+    def _reached(self, touched: list[str], knowledge: KnowledgeChanges) -> set[str]:
+        """Step 3: K_B families containing a touched invariant, or whose record changed."""
+
+        touched_set = set(touched)
+        return {
+            family
+            for family in self.inputs.base.families
+            if self._members(family) & touched_set or family in knowledge.families
+        }
+
+    # -- items ---------------------------------------------------------------------------------
+
+    def _entries_of(self, invariant: str) -> list[Classification]:
+        return sorted(
+            (one for one in self.classified.values() if one.invariant == invariant),
+            key=lambda one: one.entry_id,
+        )
+
+    def _touched_item(self, invariant: str, change: InvariantChange) -> Item:
+        base, candidate = self.inputs.base, self.inputs.candidate
+        entries = self._entries_of(invariant)
+        facts = {
+            "entries": [one.to_document() for one in entries],
+            "added": change.added,
+            "retired": change.retired,
+            "reanchored": change.reanchored,
+            "record": {
+                "changed": change.record_changed,
+                "baseRevision": base.revision(invariant),
+                "candidateRevision": candidate.revision(invariant),
+            },
+            "context": {
+                "families": sorted(
+                    {
+                        *base.families_of.get(invariant, ()),
+                        *candidate.families_of.get(invariant, ()),
+                    }
+                ),
+                "linkedFrom": list(candidate.linked_from.get(invariant, ())),
+            },
+        }
+        identities = {
+            "entries": [one.contents() for one in entries if one.entry_class in RAISING_CLASSES],
+            "added": [[fact["id"], fact["anchor"]["content"]] for fact in change.added],
+            "retired": [[fact["id"], fact["anchor"]["content"]] for fact in change.retired],
+            "reanchored": [
+                [fact["id"], fact["before"]["content"], fact["after"]["content"]]
+                for fact in change.reanchored
+            ],
+            "record": [base.revision(invariant), candidate.revision(invariant)]
+            if change.record_changed
+            else None,
+        }
+        return Item("touched_invariant", invariant, facts, identities)
+
+    def _stale_item(self, invariant: str) -> Item:
+        stale = [one for one in self._entries_of(invariant) if one.entry_class == "stale_at_base"]
+        facts = {
+            "entries": [
+                {
+                    "id": one.entry_id,
+                    "path": one.path,
+                    "entryBlob": one.anchor["blob"],
+                    "baseBlob": one.base_blob or ABSENT,
+                    "recordedContent": one.anchor["content"],
+                    "baseContent": ABSENT if one.base is None else one.base.content,
+                }
+                for one in stale
+            ]
+        }
+        identities = [
+            [fact["id"], fact["recordedContent"], fact["baseContent"]] for fact in facts["entries"]
+        ]
+        return Item("stale_invariant", invariant, facts, identities)
+
+    def _family_items(
+        self,
+        reached: set[str],
+        touched: list[str],
+        stale: list[str],
+        knowledge: KnowledgeChanges,
+    ) -> list[Item]:
+        base = self.inputs.base
+        reasons: dict[str, set[str]] = {family: set() for family in reached}
+        for family in reached:
+            members = self._members(family)
+            reasons[family].update(f"touched:{one}" for one in touched if one in members)
+            if family in knowledge.families:
+                reasons[family].add("record-changed")
+        for invariant in stale:
+            for family in base.families_of.get(invariant, ()):
+                reasons.setdefault(family, set()).add(f"stale:{invariant}")
+        return [self._family_item(family, sorted(why)) for family, why in sorted(reasons.items())]
+
+    def _family_item(self, family: str, why: list[str]) -> Item:
+        base, candidate = self.inputs.base, self.inputs.candidate
+        members = [
+            {"id": member, "base": base.revision(member), "candidate": candidate.revision(member)}
+            for member in sorted(self._members(family))
+        ]
+        routes = {
+            "base": list(base.families[family].routes),
+            "candidate": (
+                list(candidate.families[family].routes) if family in candidate.families else None
+            ),
+        }
+        facts = {"members": members, "routes": routes, "reachedBy": why}
+        identities = {
+            side: [
+                {"id": one["id"], "revision": one[side]} for one in members if one[side] is not None
+            ]
+            for side in ("base", "candidate")
+        }
+        return Item("reached_family", family, facts, identities)
+
+    # -- gate linkage (definition 8) -----------------------------------------------------------
+
+    def _linkage(
+        self, changes: tuple[TreeChange, ...], renamed: Mapping[str, str]
+    ) -> list[dict[str, Any]]:
+        return [self._change(change, renamed.get(change.path)) for change in changes]
+
+    def _change(self, change: TreeChange, renamed_to: str | None) -> dict[str, Any]:
+        code = self.inputs.code
+        path = change.path
+        base_blob, candidate_blob = code.base().get(path), code.candidate().get(path)
+        document: dict[str, Any] = {
+            "path": path,
+            "status": change.status,
+            "content": change.content,
+            "modeChange": change.mode_change,
+        }
+        if renamed_to is not None:
+            document["renamedTo"] = renamed_to
+        hunks = self._path_hunks(change, base_blob, candidate_blob)
+        if hunks is None or change.mode_change:
+            # Non-text changes, and the mode fact of a mode change (definition 8), are linked at
+            # file level; a text change's hunks are linked below all the same.
+            document["fileLevel"] = {"linked": self._file_covered(path)}
+        if hunks is None:
+            return document
+        base_spans = self._spans(self.inputs.base, path, base_blob)
+        candidate_spans = self._spans(self.inputs.candidate, path, candidate_blob)
+        document["hunks"] = [
+            {
+                **hunk.to_document(),
+                "linked": any(hits_old(hunk, span) for span in base_spans)
+                or any(hits_new(hunk, span) for span in candidate_spans),
+            }
+            for hunk in hunks
+        ]
+        return document
+
+    def _path_hunks(
+        self, change: TreeChange, base_blob: str | None, candidate_blob: str | None
+    ) -> tuple[Hunk, ...] | None:
+        """The path's text hunks, or ``None`` for a change linked at file level (non-text)."""
+
+        if change.content != "text" or change.status == "type_changed":
+            return None
+        code = self.inputs.code
+        if base_blob is not None and candidate_blob is not None:
+            return code.hunks(base_blob, candidate_blob)
+        present = base_blob or candidate_blob
+        count = 0 if present is None else code.line_count(present)
+        if count == 0:
+            return None
+        return (Hunk(1, count, 0, 0),) if candidate_blob is None else (Hunk(0, 0, 1, count),)
+
+    def _spans(self, side: KnowledgeSide, path: str, blob: str | None) -> list[tuple[int, int]]:
+        if blob is None:
+            return []
+        spans: list[tuple[int, int]] = []
+        for entry_id in side.entries_by_path.get(path, ()):
+            anchor = side.entries[entry_id].entry.anchor
+            resolved = self.inputs.code.resolve(
+                path, anchor.locator.to_document(), anchor.blob, blob
+            )
+            if resolved is not None:
+                spans.append(resolved.span)
+        return spans
+
+    def _file_covered(self, path: str) -> bool:
+        return any(
+            side.entries[entry_id].entry.anchor.locator.kind == "file"
+            for side in (self.inputs.base, self.inputs.candidate)
+            for entry_id in side.entries_by_path.get(path, ())
+        )
+
+
+def _class_counts(classified: Iterable[Classification]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for one in classified:
+        counts[one.entry_class] = counts.get(one.entry_class, 0) + 1
+    return dict(sorted(counts.items()))

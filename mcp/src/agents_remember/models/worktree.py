@@ -492,6 +492,8 @@ class WorktreeStatusWaitResponse(WorktreeCommandResponse):
 class WorktreeSyncResponse(WorktreeCommandResponse):
     operation: Literal["worktree_sync"] = "worktree_sync"
     phase: SyncPhase | Literal["quarantined"] | None = None
+    # MIK-R08 rule 8: a completed sync recomputes the leaf's worklist; its summary, where one applies.
+    knowledgeWorklist: dict[str, Any] | None = None
     resolution: SyncResolutionProjection | None = None
     resolutionOwner: Literal["agent"] | None = None
     nextOperation: str | None = None

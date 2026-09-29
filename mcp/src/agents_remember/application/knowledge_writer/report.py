@@ -83,6 +83,7 @@ class WriteReport:
     removed: tuple[str, ...] = ()
     notes: tuple[str, ...] = field(default=())
     authorization: str = ""
+    carried: tuple[str, ...] = ()
 
     @property
     def refused(self) -> bool:
@@ -106,6 +107,7 @@ class WriteReport:
             "removed": list(self.removed),
             "notes": list(self.notes),
             "authorization": self.authorization,
+            "carried": list(self.carried),
         }
 
     def render(self) -> str:
@@ -123,6 +125,9 @@ class WriteReport:
             for one in self.entries
         ]
         lines += [f"  row {one.id} {one.subject} {one.disposition}" for one in self.rows]
+        lines += [
+            f"  carried {one}: blob re-recorded at C (content unchanged)" for one in self.carried
+        ]
         for one in self.evidence:
             where = ", ".join(one.stored_in) or "nothing: the entry authored no record"
             lines.append(f"  evidence of {one.entry} stored in {where}")

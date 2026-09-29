@@ -120,7 +120,7 @@ class KnowledgeIntegrityCheckResponse(ToolResponse):
 
     operation: Literal["knowledge_integrity_check"] = "knowledge_integrity_check"
     state: Literal["reported", "refused"]
-    repositoryId: str
+    repositoryId: str | None = None
     conditions: list[dict[str, Any]] = Field(default_factory=list)
     traversalScope: str | None = None
     selectedRunId: str | None = None
@@ -134,6 +134,9 @@ class KnowledgeIntegrityCheckResponse(ToolResponse):
     unresolved: list[str] = Field(default_factory=list)
     refusalCode: str | None = None
     refusalDetail: str | None = None
+    # MIK-R08 rule 7: the leaf's latest persisted worklist, present only when a leaf was named.
+    worklistState: Literal["present", "absent", "unreadable"] | None = None
+    worklist: dict[str, Any] | None = None
 
 
 class KnowledgeProjectResponse(ToolResponse):
