@@ -87,7 +87,9 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         review_matrix and curation_queue. Returns recorded claims and assessments as attributed
         records: every ordered position and every no-consequence statement carries an `authored` or
         `mechanical` provenance class, and a value that cannot be classified is reported as an
-        unresolved limitation rather than returned with an empty class."""
+        unresolved limitation rather than returned with an empty class. For a converted memory
+        tree, `currentness` gives each returned invariant's state (stale, unverifiable, unrealized,
+        current) at the code tree named by `codeTreeId`; without it they are unverifiable."""
         return knowledge_read_payload(
             ReadToolRequest(
                 database_path=databasePath,

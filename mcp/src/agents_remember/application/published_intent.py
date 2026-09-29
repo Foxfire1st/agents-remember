@@ -51,6 +51,12 @@ never observed, and a record identity the snapshot does not hold is the read's o
 ``selector_absent`` -- the named absence of a generation this snapshot does not carry. Today's
 database is never substituted for a historical generation.
 
+**Returned invariants carry their currentness (MIK-R03).** For a converted tree the block adds
+``currentness``: the state of every invariant and family its pages return at the source-resolution
+tree above (``stale``, ``unverifiable``, ``unrealized`` or ``current``), each entry that is not
+current, the counts by state and each family's stale members. With no resolved pair every realized
+invariant is ``unverifiable``. The pages themselves are unchanged, so nothing is withheld.
+
 **A converted memory tree is selected as a tree (MIK-R23 rule 6).** When the memory root holds the
 layout marker (``knowledge/layout.json``), knowledge is text and there is no published database to
 select: the ordinary read's published intent is then the memory tree itself, read through the
@@ -82,6 +88,7 @@ import apsw
 from pydantic import ValidationError
 
 from agents_remember.application.knowledge_before_half import read_dataset_identity
+from agents_remember.application.knowledge_currentness import CodeTree, read_currentness
 from agents_remember.application.knowledge_read import open_read_context, read_knowledge_scope
 from agents_remember.kernel.coordination_context.models import CoordinationContext
 from agents_remember.kernel.git_command import run_git
@@ -453,7 +460,25 @@ def read_published_intent(
     if isinstance(context, PublishedIntentUnavailable):
         return _unavailable_block(context)
     blocks = [_seed_block(selection, context, seed, max_items) for seed in seeds]
-    return _recorded_block(selection, [_bind_index_state(block, selection) for block in blocks])
+    block = _recorded_block(selection, [_bind_index_state(block, selection) for block in blocks])
+    tree = selection.memory_tree
+    if tree is not None:  # MIK-R03: each returned invariant's state at the resolved source tree
+        pair = selection.source_pair
+        code = None if pair is None else CodeTree(pair.repository_root, pair.code_tree_id)
+        block["currentness"] = read_currentness(  # never raises: advisory beside the pages
+            selection.database_path, tree.tree_key, code, block["seeds"]
+        )
+        if pair is not None:
+            block["currentness"]["treeScope"] = _TREE_SCOPE.format(tree=pair.code_tree_id)
+    return block
+
+
+# The currentness block's statement of which tree it observed (MIK-R03, L03 ruling Q1): the tree
+# this route resolved for the source it returns, which is a commit's tree.
+_TREE_SCOPE = (
+    "states observed at the committed code tree {tree} this read resolved; uncommitted "
+    "working-tree edits are not reflected"
+)
 
 
 def _bind_index_state(block: dict[str, Any], selection: PublishedIntentSelection) -> dict[str, Any]:

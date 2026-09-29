@@ -829,6 +829,7 @@ consumers = [
   "mcp/tests/test_knowledge_writer.py",
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_worklist_leaf.py",
+  "mcp/tests/test_knowledge_currentness.py",
 ]
 
 [[artifact]]

@@ -38,6 +38,10 @@ from typing import Any
 import apsw
 from pydantic import ValidationError
 
+from agents_remember.application.knowledge_currentness import (
+    read_currentness,
+    requested_code_tree,
+)
 from agents_remember.application.knowledge_diff import diff_knowledge_scope
 from agents_remember.application.knowledge_projection import (
     ProjectionOptions,
@@ -425,6 +429,16 @@ def _read_result(
         return _refused_read(view, repositoryId, result.refusal.code, result.refusal.detail)
     payload = result.payload
     body = payload.model_dump(mode="json")
+    currentness = (  # MIK-R03: at the caller's named tree only; advisory, it never refuses the read
+        None
+        if selected.memory_tree is None
+        else read_currentness(
+            selected.database_path,
+            selected.memory_tree.tree_key,
+            requested_code_tree(request.code_tree_id, request.repository_root, workspace_root),
+            body,
+        )
+    )
     complete = payload.completeness.complete_within_declared_scope
     if _index_complete(selected) is False:
         # The view is complete within what the index holds, and the index is not the whole tree.
@@ -442,6 +456,7 @@ def _read_result(
         "memoryTree": memory_tree_block(selected.memory_tree),
         "indexComplete": _index_complete(selected),
         "proofs": proofs,
+        "currentness": currentness,
     }
 
 

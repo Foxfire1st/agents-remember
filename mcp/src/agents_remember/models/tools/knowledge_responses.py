@@ -22,6 +22,16 @@ adds ``proofs``: the ``proves`` entries of the invariant, or of every family mem
 that the test passed or that the invariant holds. The field is absent for a database and for the
 other views.
 
+**Currentness beside the view (MIK-R03).** A read from a memory tree adds ``currentness``: the
+state of every invariant the view returns (and of every member of every family it returns) at the
+code tree the caller named with ``codeTreeId`` -- ``stale``, ``unverifiable``, ``unrealized`` or
+``current`` -- with each entry that is not current, the counts by state and each family's stale
+members. With no ``codeTreeId`` every realized invariant is ``unverifiable``; ``HEAD`` is never
+substituted. The counts cover every invariant the answer carries, whether it names the invariant
+(for example as a relationship) or returns it in full, plus every member of a family it carries. A
+failure of the currentness step is stated as ``unverifiableReason`` and never refuses the read.
+The view payload is unchanged, so a stale invariant stays visible. Absent for a database.
+
 **A refusal is a state, not a partial success.** ``state`` is ``view``/``result`` or ``refused``, and
 the refusal fields name the offending input. A handler never translates a refusal into an empty
 result or a default value, so a caller can always tell "nothing was selected" from "the selection was
@@ -64,6 +74,7 @@ class KnowledgeReadResponse(ToolResponse):
     memoryTree: dict[str, Any] | None = None
     indexComplete: bool | None = None
     proofs: list[dict[str, Any]] | None = None
+    currentness: dict[str, Any] | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None
 
