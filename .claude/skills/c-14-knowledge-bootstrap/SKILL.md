@@ -154,7 +154,36 @@ The reconciliation is the substance of the run, and it is the curator's:
 - **external sources** declared under the list's own external-source key, so a document identity is
   never written as a repository path with a Git blob;
 - **existing records are reused or revised, not duplicated.** Text that matches is not an identity
-  rule; a correction is a successor that names the stored identity and the revision it supersedes.
+  rule; a correction is a successor that names the stored identity and the revision it supersedes;
+- **admission** for every new invariant, family and decision (MIK-R27): the criterion it meets and a
+  one-sentence justification, as below.
+
+**Admission (MIK-R27).** A foundation is a small set of meaningful records, not a second test suite
+written as prose. Each new invariant claims `spans_locations` (realized in more than one file),
+`guarded_by_test` (a proof entry names it), `family_guarantee` or `prevents_costly_mistake` (naming
+the costly error); a family claims `joint_guarantee`; a decision claims `real_alternatives` or
+`constrains_future_work`. On converted memory the knowledge validator refuses a new record with no
+criterion, with `legacy-unassessed` (the export's mark), with a justification made only of task,
+leaf, requirement or ruling (`D14`) references, commit hashes and provenance words ("Per ruling
+D14", "Added in commit a4eba7b7"), or with a `spans_locations` or `guarded_by_test` claim its
+entries do not support. An exported record (its `legacyId` derives its ID) or an already-stored
+record is only reported. A statement that meets no criterion is not a record: it stays prose in the
+onboarding Markdown under "Boundaries". A code change alone is never a reason. The reviewer judges
+whether each justification is plausible.
+
+- *Admitted:* "Landing pairs code and memory commits", `spans_locations`, "Realized in
+  `mcp/src/agents_remember/worktrees/modules/integrate.py`, which refuses an unpaired landing, and
+  in `mcp/src/agents_remember/worktrees/ledger_projection.py`, which derives the ledger rows."
+- *Admitted:* the decision to give a family several local routes, `real_alternatives`, "One owning
+  route per family was weighed and rejected, because a family spanning subtrees collapses to the
+  repository root."
+- *Refused:* "Every source-content expansion carries admission" justified "introduced by L43": only
+  a leaf reference.
+- *Refused:* an invariant claiming `guarded_by_test` "because test_direct_landing covers it" while
+  no proof entry names it: add the proof, or claim a criterion that holds.
+
+The full rule, with the checked and the judged criteria, is in the hand-off template's "The
+admission rule (MIK-R27)" section.
 
 Where code contradicts accepted intent, **preserve the intent and record the contradiction** rather
 than quietly rewriting either half.

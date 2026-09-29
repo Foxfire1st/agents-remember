@@ -30,6 +30,7 @@ from knowledge_validator_test_support import (
     CODE_PATHS,
     INTEGRATE_CARD,
     INVARIANT,
+    LEGACY_COUNT,
     encode,
     fixture_tree_files,
     invariant_document,
@@ -221,7 +222,8 @@ def test_the_standalone_command_validates_a_converted_fixture_tree(
 
     status, out = _cli(capsys, str(memory), "--code", str(code_root), "--base", base)
     assert status == 0, out
-    assert "passes: 0 violation(s), 0 report-only finding(s)" in out
+    # The one report-only finding is MIK-R27's count of the fixture's exported family.
+    assert "passes: 0 violation(s), 1 report-only finding(s)" in out
 
     (memory / INTEGRATE_CARD).write_bytes(b"# integrate.py\n\nSee [4].\n")
     status, out = _cli(
@@ -230,7 +232,8 @@ def test_the_standalone_command_validates_a_converted_fixture_tree(
     assert status == 1
     document = json.loads(out)
     assert document["ok"] is False
-    assert [violation["rule"] for violation in document["violations"]] == ["R22.3-markers"]
+    rules = sorted((one["rule"], one["reportOnly"]) for one in document["violations"])
+    assert rules == [("R22.3-markers", False), (LEGACY_COUNT, True)]
 
     unconverted = tmp_path / "unconverted"
     write_tree(unconverted, {"onboarding/x.md": b"# x [1]\n"})

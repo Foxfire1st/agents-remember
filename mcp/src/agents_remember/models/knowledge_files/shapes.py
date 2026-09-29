@@ -384,19 +384,28 @@ class _AdmissionBase(FileModel):
 
 
 class InvariantAdmission(_AdmissionBase):
-    """``{ criteria, justification }`` with the invariant criteria (meaning: MIK-R27)."""
+    """``{ criteria, justification }`` with the invariant criteria (meaning: MIK-R27).
+
+    ``spans_locations``: realized in more than one file; ``guarded_by_test``: at least one proof
+    entry; ``family_guarantee``: needed to state a family's guarantee; ``prevents_costly_mistake``:
+    guards a plausible, costly error the justification names. The validator checks the first two for
+    a new record (``memory_quality/knowledge_validator/rules_admission.py``); the reviewer judges the
+    rest.
+    """
 
     criteria: tuple[InvariantCriterion, ...] = Field(min_length=1)
 
 
 class FamilyAdmission(_AdmissionBase):
-    """``{ criteria, justification }`` with the family criterion."""
+    """``{ criteria, justification }`` with the family criterion: ``joint_guarantee``, the members
+    together promise something none promises alone."""
 
     criteria: tuple[FamilyCriterion, ...] = Field(min_length=1)
 
 
 class DecisionAdmission(_AdmissionBase):
-    """``{ criteria, justification }`` with the decision criteria."""
+    """``{ criteria, justification }`` with the decision criteria: ``real_alternatives``, at least one
+    alternative was seriously considered, and ``constrains_future_work``."""
 
     criteria: tuple[DecisionCriterion, ...] = Field(min_length=1)
 

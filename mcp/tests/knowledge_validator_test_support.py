@@ -101,6 +101,18 @@ def encode(document: dict[str, Any]) -> bytes:
     return canonical_text(document).encode("utf-8")
 
 
+# The Doc14 §4.2 family is an export (``legacy-unassessed``), so every validation of the fixture tree
+# carries MIK-R27's one report-only count of the live records still unassessed.
+LEGACY_COUNT = "R27.4-legacy-unassessed"
+
+# The two added invariants have no realization or proof of their own, so they claim only a criterion
+# the validator does not check (MIK-R27: ``spans_locations`` and ``guarded_by_test`` are checked).
+UNCHECKED_ADMISSION: dict[str, Any] = {
+    "criteria": ["prevents_costly_mistake"],
+    "justification": "A landing that pairs the wrong commits corrupts the memory ledger.",
+}
+
+
 def invariant_document(identifier: str, **changes: Any) -> dict[str, Any]:
     document = load_fixture("4.3-invariant-landing-pair.json")
     document["id"] = identifier
@@ -143,8 +155,12 @@ def fixture_tree_files() -> dict[str, bytes]:
     files = {
         "knowledge/layout.json": encode(load_fixture("layout.json")),
         INVARIANT: encode(load_fixture("4.3-invariant-landing-pair.json")),
-        invariant_path("INV-R8M2TD"): encode(invariant_document("INV-R8M2TD")),
-        invariant_path("INV-C0VR4G"): encode(invariant_document("INV-C0VR4G")),
+        invariant_path("INV-R8M2TD"): encode(
+            invariant_document("INV-R8M2TD", admission=UNCHECKED_ADMISSION)
+        ),
+        invariant_path("INV-C0VR4G"): encode(
+            invariant_document("INV-C0VR4G", admission=UNCHECKED_ADMISSION)
+        ),
         FAMILY: encode(load_fixture("4.2-family-attribution-and-landing-pairing.json")),
         "knowledge/decisions/DEC-D12RTE-local-family-routes.json": encode(
             load_fixture("4.5-decision-d12-local-family-routes.json")

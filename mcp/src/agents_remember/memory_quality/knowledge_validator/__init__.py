@@ -10,6 +10,8 @@ committed instead of by database constraints. One module, one rule registry:
 * :mod:`.rules_structure` and :mod:`.rules_references` -- MIK-R22's own rules 1 to 7;
 * :mod:`.family_routes` and :mod:`.rules_routes` -- MIK-R04's family routes: Coverage, Non-empty,
   the reported states and the mechanical route suggestion;
+* :mod:`.rules_admission` -- MIK-R27's admission rule: refused on a new record, reported on an
+  existing one, and the count of records still ``legacy-unassessed``;
 * :mod:`.validator` -- :func:`validate_tree`, rule 8's applicability and
   :func:`require_valid_commit`;
 * :mod:`.commit_route` -- the Git adapter a commit route calls through the worktree port.

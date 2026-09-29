@@ -4,8 +4,9 @@
 
 * **code** -- a small Python package and its test module, committed;
 * **memory** -- a converted tree (the layout marker) whose committed ``HEAD`` is the writer's base:
-  one invariant (``INV-BASE01``) realized by ``land_pair`` (``RLZ-BASE01``, anchored at the committed
-  code) and one family (``FAM-FAM001``) with that invariant as its member;
+  one exported invariant (:data:`BASE_INVARIANT`) realized by ``land_pair`` (``RLZ-BASE01``,
+  anchored at the committed code) and one exported family (:data:`BASE_FAMILY`) with that invariant
+  as its member; their IDs derive from their legacy IDs, as the conversion writes them;
 
 plus a task root with ``task.json`` and a leaf contract that names both worktrees, so the command
 line runs exactly as a leaf runs it.
@@ -20,13 +21,15 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.knowledge_writer.code_anchors import CodeSnapshot
-from agents_remember.models.knowledge_files import canonical_text
+from agents_remember.models.knowledge_files import canonical_text, derived_record_id
 
 TASK_ID = "260928-MIK"
 LEAF_ID = "260928-MIK-L99"
-BASE_INVARIANT = "INV-BASE01"
+BASE_INVARIANT_LEGACY_ID = "legacy-invariant-landing-pair"
+BASE_FAMILY_LEGACY_ID = "legacy-family-landing"
+BASE_INVARIANT = derived_record_id("invariant", BASE_INVARIANT_LEGACY_ID)
 BASE_REALIZATION = "RLZ-BASE01"
-BASE_FAMILY = "FAM-FAM001"
+BASE_FAMILY = derived_record_id("family", BASE_FAMILY_LEGACY_ID)
 CODE_FILE = "pkg/landing.py"
 TEST_FILE = "tests/test_landing.py"
 
@@ -113,6 +116,7 @@ def canonical(document: dict[str, Any]) -> str:
 
 def base_memory(code: Path) -> dict[str, str | bytes]:
     anchor = CodeSnapshot.capture(code).resolve(CODE_FILE, {"kind": "symbol", "name": "land_pair"})
+    # The base records are exports: ``legacy-unassessed`` with a legacy ID (MIK-R21 rule 4, MIK-R24).
     origin = {"task": "260101-OLD", "leaf": "260101-OLD-L1"}
     return {
         "knowledge/layout.json": canonical({"schema": "ar-memory-layout/v2", "conversion": "1"}),
@@ -128,7 +132,7 @@ def base_memory(code: Path) -> dict[str, str | bytes]:
                 "exclusions": [],
                 "supersedes": [],
                 "admission": "legacy-unassessed",
-                "origin": origin,
+                "origin": {**origin, "legacyId": BASE_INVARIANT_LEGACY_ID},
             }
         ),
         f"knowledge/families/{BASE_FAMILY}-landing.json": canonical(
@@ -142,7 +146,7 @@ def base_memory(code: Path) -> dict[str, str | bytes]:
                 "members": [BASE_INVARIANT],
                 "routes": ["pkg"],
                 "admission": "legacy-unassessed",
-                "origin": origin,
+                "origin": {**origin, "legacyId": BASE_FAMILY_LEGACY_ID},
             }
         ),
         f"onboarding/{CODE_FILE}.md": "# pkg/landing.py\n",
@@ -242,7 +246,12 @@ def entry(entry_id: str, **curator: Any) -> dict[str, Any]:
 
 
 SCOPE = {"applicability": "Every landing.", "conditions": [], "exclusions": []}
-ADMISSION = {"criteria": ["guarded_by_test"], "justification": "A test proves it."}
+# A criterion the validator does not check mechanically (MIK-R27), so an invariant authored without a
+# proof or a second realization file is admitted; the admission tests claim the checkable ones.
+ADMISSION = {
+    "criteria": ["prevents_costly_mistake"],
+    "justification": "Landing only one half leaves memory describing code that never landed.",
+}
 
 
 def target(symbol: str, rationale: str = "It lands both halves.", **extra: Any) -> dict[str, Any]:

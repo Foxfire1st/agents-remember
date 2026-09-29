@@ -33,6 +33,19 @@ every claimed refresh touched body sentences, not just the history list.
   they were **history-only**; the scoped curator handoff caught it (L8 decision log, cycle-6 entry:
   "report-vs-artifact verification belongs in the reviewer criteria catalog").
 
+### OM-4 — Admission justifications are plausible *(requirement-bound: MIK-R27 rule 5, developer ruling D14)*
+
+**Each new invariant, family and decision record's admission justification must be plausible for the
+criterion it claims.** The validator checks only presence, shape, a justification made only of task,
+leaf, requirement or ruling references, commit hashes and provenance words, and the two checkable
+criteria (`spans_locations`, `guarded_by_test`). Judge the rest: a `prevents_costly_mistake` that
+names no plausible, costly error; a `family_guarantee` the family's guarantee does not need; a
+`joint_guarantee` that one member already promises alone; a `real_alternatives` whose rejected
+option was never serious; a record that restates one leaf's acceptance criteria, or that a code
+change alone motivates. Such a statement stays prose in the onboarding Markdown. Binds converted
+memory only (the text format, MIK-R21); this criterion entered by the requirement, not by the
+ratchet, and is demoted only by a developer ruling.
+
 ## Candidate Criteria (seeded exploratory — one catching engagement; promote at ≥2)
 
 Run under the exploratory mandate during a baseline review only; a candidate is proposed for

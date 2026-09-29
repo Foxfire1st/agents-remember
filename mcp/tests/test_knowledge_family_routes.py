@@ -37,6 +37,7 @@ from agents_remember.models.knowledge_files.records import FamilyRecord
 from knowledge_validator_test_support import (
     CODE_PATHS,
     FAMILY,
+    LEGACY_COUNT,
     code,
     edit_json,
     encode,
@@ -103,7 +104,7 @@ def test_the_doc14_family_example_validates_with_every_route_holding_realization
         _family(files), realization_locations(parse_tree(tree(files)).sidecars)
     )
 
-    assert report.ok and report.violations == (), report.render()
+    assert report.ok and _rules(report, refusing=False) == {LEGACY_COUNT}, report.render()
     assert state.uncovered == () and state.emptied == ()
     under = {
         route: sorted(
@@ -208,7 +209,11 @@ def test_a_carried_route_whose_directory_is_gone_is_reported_not_refused() -> No
     report = _validate(files, bases=[tree(files, "K_B")], code=code(without_application))
 
     assert report.ok, report.render()
-    assert _rules(report, refusing=False) == {"R22.6-carried-stale", "R04.1-carried-route-absent"}
+    assert _rules(report, refusing=False) == {
+        "R22.6-carried-stale",
+        "R04.1-carried-route-absent",
+        LEGACY_COUNT,
+    }
     [line] = [v.render() for v in report.reports if v.rule == "R04.1-carried-route-absent"]
     assert f"carried route {APPLICATION} is absent from code: route_path_absent" in line
     # With no base the same route is added by the tree, and refused.
@@ -257,7 +262,7 @@ def test_the_refusing_route_rules_are_reported_inside_the_writer() -> None:
 def test_a_standalone_conversion_checks_no_route_directory() -> None:
     report = _validate(fixture_tree_files(), code=None, conversion=True)
 
-    assert report.ok and report.violations == (), report.render()
+    assert report.ok and _rules(report, refusing=False) == {LEGACY_COUNT}, report.render()
 
 
 def test_code_trees_answer_directory_existence(tmp_path: Path) -> None:
@@ -291,13 +296,13 @@ def test_the_root_route_covers_a_realization_at_the_repository_root() -> None:
 
     assert _rules(uncovered) == {"R04.2-coverage"}, uncovered.render()
     assert "RLZ-R00TF1 (INV-7K3F9Q) at setup.py lies under no route" in uncovered.render()
-    assert report.ok and report.violations == (), report.render()
+    assert report.ok and _rules(report, refusing=False) == {LEGACY_COUNT}, report.render()
 
 
 def test_the_root_route_alone_is_non_empty_whenever_the_family_is_realized() -> None:
     files = _with_family(fixture_tree_files(), routes=["."])
 
-    assert _validate(files).violations == ()
+    assert [violation.rule for violation in _validate(files).violations] == [LEGACY_COUNT]
 
 
 # --------------------------------------------------------------------------------------------------
@@ -311,8 +316,9 @@ def test_an_unrealized_family_is_reported_and_non_empty_is_waived() -> None:
     report = _validate(files)
 
     assert report.ok, report.render()
-    assert _rules(report, refusing=False) == {"R04.4-unrealized-family"}
-    assert report.reports[0].path == NEW_FAMILY
+    assert _rules(report, refusing=False) == {"R04.4-unrealized-family", LEGACY_COUNT}
+    (unrealized,) = (one for one in report.reports if one.rule == "R04.4-unrealized-family")
+    assert unrealized.path == NEW_FAMILY
 
 
 def test_an_unrealized_family_still_needs_a_route_unless_it_is_an_unassessed_export() -> None:
@@ -330,8 +336,9 @@ def test_an_exported_family_without_routes_is_route_unassigned_and_coverage_is_w
     report = _validate(files)
 
     assert report.ok, report.render()
-    assert _rules(report, refusing=False) == {"R04.4-route-unassigned"}
-    assert "FAM-SEQNTS6C is route_unassigned" in report.reports[0].message
+    assert _rules(report, refusing=False) == {"R04.4-route-unassigned", LEGACY_COUNT}
+    (unassigned,) = (one for one in report.reports if one.rule == "R04.4-route-unassigned")
+    assert "FAM-SEQNTS6C is route_unassigned" in unassigned.message
 
 
 def test_a_family_without_routes_that_is_not_legacy_unassessed_violates_coverage() -> None:

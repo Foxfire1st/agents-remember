@@ -16,6 +16,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from agents_remember.memory_quality.knowledge_validator import (
+    rules_admission as _rules_admission,  # noqa: F401  # registers MIK-R27's admission rules
+)
+from agents_remember.memory_quality.knowledge_validator import (
     rules_census as _rules_census,  # noqa: F401  # registers MIK-R20's census rules (rule 9)
 )
 from agents_remember.memory_quality.knowledge_validator import (

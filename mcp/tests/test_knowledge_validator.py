@@ -1,5 +1,7 @@
 """MIK-R22: the mandatory knowledge validator's rules, over converted fixture trees.
 
+The last section proves the admission rules MIK-R27 adds to the registry (MIK-R22 rule 9).
+
 Each test names the packet rule it proves. The trees are the MIK-R21 Doc14 fixtures assembled into
 one converted memory tree (``knowledge_validator_test_support``); a test changes one thing and checks
 that exactly the owning rule answers, with the file, the field and the rule named.
@@ -25,17 +27,21 @@ from agents_remember.memory_quality.knowledge_validator import (
 )
 from agents_remember.memory_quality.knowledge_validator import registry as registry_module
 from agents_remember.memory_quality.knowledge_validator.markers import find_markers
+from agents_remember.memory_quality.knowledge_validator.rules_admission import ADMISSION_RULES
 from agents_remember.memory_quality.knowledge_validator.trees import is_excluded_from_knowledge
 from agents_remember.models.knowledge_files import history_path
 from agents_remember.models.knowledge_files.history import empty_history
+from agents_remember.models.knowledge_files.ids import derived_record_id
 from knowledge_validator_test_support import (
     DIRECT_LANDING,
     DIRECT_LANDING_CARD,
     DIRECT_LANDING_SIDECAR,
+    FAMILY,
     INTEGRATE,
     INTEGRATE_CARD,
     INTEGRATE_SIDECAR,
     INVARIANT,
+    LEGACY_COUNT,
     ROUTE_CARD,
     ROUTE_SIDECAR,
     code,
@@ -88,7 +94,7 @@ def test_converted_fixture_tree_passes_every_rule() -> None:
     report = _validate(fixture_tree_files())
 
     assert report.ok, report.render()
-    assert report.violations == ()
+    assert [violation.rule for violation in report.violations] == [LEGACY_COUNT]
     rule_ids = [rule.id for rule in registered_rules()]
     assert len(rule_ids) == len(set(rule_ids))
     assert {
@@ -231,7 +237,7 @@ def test_a_file_sidecar_without_markdown_is_reported_not_refused() -> None:
     report = _validate(files)
 
     assert report.ok, report.render()
-    assert _rules(report, refusing=False) == {"R22.3-sidecar-without-markdown"}
+    assert _rules(report, refusing=False) == {"R22.3-sidecar-without-markdown", LEGACY_COUNT}
 
 
 def test_a_file_sidecar_without_markdown_holds_no_references() -> None:
@@ -279,7 +285,7 @@ def test_an_unresolved_target_is_reported_not_refused() -> None:
 
     report = _validate(files)
 
-    assert report.ok and _rules(report, refusing=False) == {"R22.3-unresolved-target"}
+    assert report.ok and _rules(report, refusing=False) == {"R22.3-unresolved-target", LEGACY_COUNT}
 
 
 def test_a_disallowed_relation_is_refused_under_the_relations_rule_by_field() -> None:
@@ -363,7 +369,11 @@ def test_a_carried_anchor_at_a_deleted_path_is_reported_stale_not_refused() -> N
 
     assert report.ok, report.render()
     # The family's carried routes are gone with the code, too: reported the same way (MIK-R04).
-    assert _rules(report, refusing=False) == {"R22.6-carried-stale", "R04.1-carried-route-absent"}
+    assert _rules(report, refusing=False) == {
+        "R22.6-carried-stale",
+        "R04.1-carried-route-absent",
+        LEGACY_COUNT,
+    }
 
 
 def test_merge_where_one_parent_deleted_a_file_the_other_parents_card_cites() -> None:
@@ -424,7 +434,7 @@ def test_an_unconverted_base_is_refused_and_a_standalone_conversion_checks_no_pa
     conversion = validate_tree(
         tree(files), bases=[tree(unconverted, "K_B")], code=None, conversion=True
     )
-    assert conversion.ok and conversion.violations == ()
+    assert conversion.ok and _rules(conversion, refusing=False) == {LEGACY_COUNT}
     with pytest.raises(ValueError, match="paired code tree"):
         validate_tree(tree(files))
 
@@ -570,3 +580,255 @@ def test_an_invalid_marker_number_names_how_to_write_it_as_text() -> None:
     [line] = _only(_validate(files), "R22.3-markers")
 
     assert "[0] is not a reference number" in line and "\\[n]" in line
+
+
+# --------------------------------------------------------------------------------------------------
+# MIK-R27: the admission rule (rule 9's registry). A new record is refused, naming the record and the
+# criterion; an exported, stored or retired record is only reported; legacy records are counted.
+# --------------------------------------------------------------------------------------------------
+
+NEW = "R27.2-new-record"
+EXISTING = "R27.2-existing-record"
+DECISION = "knowledge/decisions/DEC-D12RTE-local-family-routes.json"
+PROOF_SIDECAR = "onboarding/mcp/tests/test_direct_landing.py.json"
+
+
+def _messages(report: ValidationReport, rule: str) -> list[str]:
+    return [violation.render() for violation in report.violations if violation.rule == rule]
+
+
+def _admission(criteria: list[str], justification: str) -> Any:
+    def change(document: dict[str, Any]) -> None:
+        document["admission"] = {"criteria": criteria, "justification": justification}
+
+    return change
+
+
+def _without_proof(files: dict[str, bytes]) -> dict[str, bytes]:
+    return edit_json(files, PROOF_SIDECAR, lambda document: document.update(proves=[]))
+
+
+def _realized_in_one_file(files: dict[str, bytes]) -> dict[str, bytes]:
+    """Leave INV-7K3F9Q's realizations in ``integrate.py`` only."""
+
+    realizing = [
+        path
+        for path, data in files.items()
+        if path.startswith("onboarding/")
+        and path.endswith(".json")
+        and path != INTEGRATE_SIDECAR
+        and b'"realizes"' in data
+        and b"INV-7K3F9Q" in data
+    ]
+    edited = dict(files)
+    for path in realizing:
+        edited = edit_json(edited, path, lambda document: document.update(realizes=[]))
+    return edited
+
+
+EXPORTED_LEGACY_ID = "4f0c2a3e-legacy-invariant"
+EXPORTED = derived_record_id("invariant", EXPORTED_LEGACY_ID)
+
+
+def _with_export(
+    files: dict[str, bytes], admission: Any, *, identifier: str = EXPORTED
+) -> dict[str, bytes]:
+    """Add an exported invariant with no entries: ``origin.legacyId`` names its legacy record.
+
+    With the default ``identifier`` the legacy ID derives the record's ID, as the conversion writes
+    it (MIK-R24 rule 4); any other ``identifier`` forges the legacy ID.
+    """
+
+    document = invariant_document(identifier, admission=admission)
+    document["origin"] = {"task": "260915-KS", "legacyId": EXPORTED_LEGACY_ID}
+    return {**files, invariant_path(identifier, "exported"): encode(document)}
+
+
+def test_the_packets_admitted_example_passes_as_a_new_record() -> None:
+    """``spans_locations`` realized in ``integrate.py`` and more; ``guarded_by_test`` proved."""
+
+    report = _validate(fixture_tree_files())
+
+    assert report.ok, report.render()
+    assert _messages(report, NEW) == [] and _messages(report, EXISTING) == []
+
+
+def test_a_new_record_whose_justification_is_only_a_reference_is_refused() -> None:
+    refused = (
+        "introduced by L43",
+        "Added in L43.",
+        "260928-MIK-L27",
+        "Per MIK-R27@v1 rule 2",
+        "See ICR-R03@v1 (L43), acceptance criteria.",
+        # Developer rulings and commit hashes are provenance too (L27 rulings round, Q2).
+        "D14",
+        "4e1c9a7f2b",
+        "D14, L43",
+        # Provenance phrasings (review round F1).
+        "Per ruling D14",
+        "Per developer ruling D14",
+        "Added in commit a4eba7b7",
+        "L43's acceptance criteria",
+        "L43/L44",
+        "Implements R27.2",
+        "§2",
+        "Required by MIK-R27 §2",
+        "ICR L45",
+        "L43 \u2014 see requirement",
+        "Implemented in L43 step S2",
+        "Added on 2026-09-28 in L43",
+    )
+    admitted = (
+        "Guards against landing half a pair (L43).",
+        "Realized in integrate.py and direct_landing.py; added in L43.",
+        "Per D14 at 4e1c9a7f2b: a landing that pairs the wrong commits corrupts the ledger.",
+        # Real prose that merely contains reference-shaped words is never refused.
+        "Deadbeef cafe faced a decade",
+        "Prevents a2b3c4d5 collisions",
+        "Uses D3 to render the chart",
+        "The D14 rule forbids stale reads",
+        "L1 cache and L2 cache",
+        "Fixes the commit ordering",
+    )
+    for justification in refused:
+        files = edit_json(
+            fixture_tree_files(), INVARIANT, _admission(["spans_locations"], justification)
+        )
+        (message,) = _messages(_validate(files), NEW)
+        assert "INV-7K3F9Q" in message and "admission.justification" in message, justification
+        assert "only task, leaf, requirement or ruling references or commit hashes" in message
+        assert "spans_locations" in message
+    for justification in admitted:
+        files = edit_json(
+            fixture_tree_files(), INVARIANT, _admission(["spans_locations"], justification)
+        )
+        assert _validate(files).ok, justification
+
+    # The same rule holds for a new family and a new decision.
+    files = edit_json(
+        fixture_tree_files(),
+        DECISION,
+        _admission(["real_alternatives"], "Added in 260928-MIK-L12."),
+    )
+    files = edit_json(files, FAMILY, _admission(["joint_guarantee"], "From 260915-KS."))
+    files = edit_json(files, FAMILY, lambda document: document["origin"].pop("legacyId"))
+    decision, family = _messages(_validate(files), NEW)
+    assert "new decision DEC-D12RTE" in decision and "real_alternatives" in decision
+    assert "new family FAM-SEQNTS6C" in family and "joint_guarantee" in family
+
+
+def test_a_new_record_without_a_criterion_or_marked_legacy_unassessed_is_refused() -> None:
+    files = edit_json(fixture_tree_files(), INVARIANT, _admission([], "It matters."))
+    report = _validate(files)
+    assert not report.ok
+    # The record does not parse (MIK-R21 rule 4: at least one criterion), so the shape rule refuses
+    # it, naming the file and the admission's criteria field.
+    shapes = [one for one in report.refusals if one.rule == "R22.1-shape"]
+    assert {one.path for one in shapes} == {INVARIANT}
+    assert any(
+        one.field.startswith("admission") and one.field.endswith("criteria") for one in shapes
+    )
+
+    files = edit_json(
+        fixture_tree_files(),
+        INVARIANT,
+        lambda document: document.update(admission="legacy-unassessed"),
+    )
+    (message,) = _messages(_validate(files), NEW)
+    assert "new invariant INV-7K3F9Q is legacy-unassessed" in message
+
+
+def test_an_unsupported_checkable_criterion_on_a_new_record_is_refused_naming_it() -> None:
+    no_test = _validate(_without_proof(fixture_tree_files()))
+    (message,) = _messages(no_test, NEW)
+    assert "INV-7K3F9Q claims guarded_by_test but no proof entry" in message
+
+    one_file = _validate(_realized_in_one_file(fixture_tree_files()))
+    (message,) = _messages(one_file, NEW)
+    assert "INV-7K3F9Q claims spans_locations" in message
+    assert "mcp/src/agents_remember/worktrees/modules/integrate.py" in message
+    assert not one_file.ok and not no_test.ok
+
+
+def test_an_existing_record_whose_test_was_deleted_is_only_reported() -> None:
+    base = fixture_tree_files()
+    candidate = _without_proof(base)
+
+    report = _validate(candidate, bases=[tree(base, "K_B")])
+
+    assert report.ok, report.render()
+    (reported,) = [one for one in report.reports if one.rule == EXISTING]
+    assert reported.path == INVARIANT and reported.field == "admission.criteria"
+    assert "guarded_by_test" in reported.message and "reported, not refused" in reported.message
+
+
+def test_exported_retired_and_merged_records_are_never_refused() -> None:
+    unsupported = _without_proof(fixture_tree_files())
+
+    claim = {"criteria": ["guarded_by_test"], "justification": "L43"}
+    report = _validate(_with_export(fixture_tree_files(), claim))
+    assert report.ok, report.render()
+    (reported,) = _messages(report, EXISTING)
+    assert EXPORTED in reported and "guarded_by_test" in reported
+
+    retired = edit_json(unsupported, INVARIANT, lambda document: document.update(status="retired"))
+    retired = edit_json(retired, INVARIANT, _admission(["guarded_by_test"], "L43"))
+    report = _validate(retired)
+    assert report.ok and _messages(report, EXISTING) == [], report.render()
+
+    # At a merge, a record either parent holds is not new: an unrelated sync is never blocked.
+    other_parent = {path: data for path, data in unsupported.items() if path != INVARIANT}
+    report = _validate(
+        unsupported, bases=[tree(unsupported, "own"), tree(other_parent, "incoming")]
+    )
+    assert report.ok and len(_messages(report, EXISTING)) == 1, report.render()
+
+
+def test_a_forged_legacy_id_does_not_make_a_record_exported() -> None:
+    """Review round F2: only a ``legacyId`` that derives the record's ID marks an export."""
+
+    unsupported = {"criteria": ["guarded_by_test"], "justification": "A test pins the export."}
+    genuine = _validate(_with_export(fixture_tree_files(), unsupported))
+    assert genuine.ok and _messages(genuine, NEW) == [], genuine.render()
+    assert len(_messages(genuine, EXISTING)) == 1
+
+    forged = _validate(_with_export(fixture_tree_files(), unsupported, identifier="INV-F0RG3D"))
+    (message,) = _messages(forged, NEW)
+    assert "new invariant INV-F0RG3D claims guarded_by_test" in message
+    forged_unassessed = _validate(
+        _with_export(fixture_tree_files(), "legacy-unassessed", identifier="INV-F0RG3D")
+    )
+    (message,) = _messages(forged_unassessed, NEW)
+    assert "new invariant INV-F0RG3D is legacy-unassessed" in message
+
+
+def test_legacy_records_are_counted_until_assessed_or_demoted() -> None:
+    files = _with_export(fixture_tree_files(), "legacy-unassessed")
+
+    (count,) = [one for one in _validate(files).reports if one.rule == LEGACY_COUNT]
+    assert count.message.startswith("2 live record(s) are still legacy-unassessed")
+    assert "1 family(s), 1 invariant(s)" in count.message
+
+    # Assessed: the exported invariant states its criterion. Demoted: the family is retired and its
+    # file kept. Neither is counted any more.
+    assessed = edit_json(
+        files,
+        invariant_path(EXPORTED, "exported"),
+        _admission(["prevents_costly_mistake"], "An unpaired landing corrupts the ledger."),
+    )
+    demoted = edit_json(assessed, FAMILY, lambda document: document.update(status="retired"))
+    report = _validate(demoted)
+    assert FAMILY in demoted and [one for one in report.reports if one.rule == LEGACY_COUNT] == []
+
+
+def test_the_rules_are_registered_refusing_new_and_reporting_the_rest() -> None:
+    registered = {rule.id: rule for rule in registered_rules()}
+    flags = {rule.id: (rule.report_only, rule.writer_reports) for rule in ADMISSION_RULES}
+    assert flags == {
+        NEW: (False, False),
+        EXISTING: (True, False),
+        LEGACY_COUNT: (True, False),
+    }
+    assert all(
+        registered[rule_id] is rule for rule_id, rule in ((r.id, r) for r in ADMISSION_RULES)
+    )

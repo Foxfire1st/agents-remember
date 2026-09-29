@@ -602,6 +602,59 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
 - Without `--commit`, the run plans, validates and reports, and writes nothing.
 - `--authorization-ref` must not be blank. The report records it.
 
+## The admission rule (MIK-R27)
+
+Every **new** invariant, family and decision record states which admission criterion it meets, with
+a one-sentence justification: `"admission": {"criteria": [...], "justification": "..."}`. The
+knowledge validator enforces it on converted memory, inside the writer and at every commit route. A
+code change alone is never an admissible reason: most knowledge is local and stays prose.
+
+| Record | Criterion | Meaning |
+| --- | --- | --- |
+| invariant | `spans_locations` | realized in more than one file (checked: its `realizes` entries sit in two or more files) |
+| invariant | `guarded_by_test` | at least one proof entry names it (checked: a `proves` entry, MIK-R28) |
+| invariant | `family_guarantee` | needed to state a family's guarantee |
+| invariant | `prevents_costly_mistake` | guards a plausible, costly error; the justification names the error |
+| family | `joint_guarantee` | the members together promise something none promises alone |
+| decision | `real_alternatives` | at least one alternative was seriously considered |
+| decision | `constrains_future_work` | the choice binds later work |
+
+- **New** means the record's ID is absent from the memory base and it is not an export (an export's
+  `origin.legacyId` derives its ID; a hand-written `legacyId` does not make a record exported). A
+  new record is **refused** when it has no criterion, carries `legacy-unassessed` (only the export
+  writes that), has a justification made only of task, leaf, requirement, step or section
+  references, developer ruling IDs (`D14`), commit hashes, dates and provenance words ("Per ruling
+  D14", "Added in commit a4eba7b7", "L43's acceptance criteria": the reason must be stated in
+  words), or claims `spans_locations` or `guarded_by_test` that its entries do not support. The
+  refusal names the record and the criterion.
+- **Every other record** (exported, already in the base, or retired) is never refused for admission.
+  A checkable criterion that no longer holds, for example a deleted test, is **reported**, and the
+  records still `legacy-unassessed` are counted, until migration assesses or demotes each one.
+- **Local stays local.** A statement that meets no criterion is not a record. It stays prose in the
+  onboarding Markdown, under "Boundaries".
+- **Demotion** (migration) moves the statement into the onboarding Markdown as prose and retires the
+  record with a `deleted` history row, effect `retire`. The record file is never deleted.
+- Only presence, shape and the two checkable criteria are mechanical. The reviewer judges whether
+  each justification is plausible.
+
+**Admitted:**
+- "Landing pairs code and memory commits", `spans_locations`: "Realized in
+  `mcp/src/agents_remember/worktrees/modules/integrate.py`, which refuses an unpaired landing, and
+  in `mcp/src/agents_remember/worktrees/ledger_projection.py`, which derives the ledger rows."
+- The decision to give a family several local routes, `real_alternatives`: "One owning route per
+  family was weighed and rejected, because a family spanning subtrees collapses to the repository
+  root."
+
+**Refused:**
+- "Every source-content expansion carries admission", with the justification "introduced by L43":
+  the justification is only a leaf reference.
+- An invariant claiming `guarded_by_test` with the justification "test_direct_landing covers it",
+  when no `proves` entry names it: the claim is not supported. Add the proof through `proofs`, or
+  claim a criterion that holds.
+
+**Local, no record:** "Execution is synchronous and journaled" describes one file. It stays prose in
+the card of `mcp/src/agents_remember/worktrees/direct_landing.py`.
+
 ## What this template is not
 
 It is not the curator's side. The curator consumes this list as data, fills `resolution`,

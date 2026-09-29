@@ -387,7 +387,11 @@ def test_a_meaning_change_increments_the_revision_once_against_the_base(tmp_path
         invariant = read_json(world.memory, invariant_path)
         assert invariant["revision"] == 2
         # Another leaf's origin is kept exactly; the updater's evidence goes into its own row.
-        assert invariant["origin"] == {"task": "260101-OLD", "leaf": "260101-OLD-L1"}
+        assert invariant["origin"] == {
+            "task": "260101-OLD",
+            "leaf": "260101-OLD-L1",
+            "legacyId": "legacy-invariant-landing-pair",
+        }
         (written,) = read_json(world.memory, f"knowledge/history/{LEAF_ID}.json")["rows"]
         assert written["revision"] == 2
         assert written["reason"] == ("The statement was sharpened. Evidence (A-9): review note R-7")
@@ -650,3 +654,22 @@ def test_family_route_rules_are_reports_in_the_writer_and_refusals_at_a_commit_r
             bases=(base,),
             code=CodeDirectory("code", world.code),
         )
+
+
+def test_the_writer_refuses_a_new_invariant_whose_claim_the_tree_does_not_support(
+    tmp_path: Path,
+) -> None:
+    """MIK-R27: the validator's admission rule refuses inside the writer, and nothing is written."""
+
+    world = build_world(tmp_path)
+    before = tree_bytes(world.memory)
+    claim = {"criteria": ["guarded_by_test"], "justification": "test_plain proves the landing."}
+    authored = entry("G-1", target=[target("land_pair")], scope=SCOPE, admission=claim)
+
+    refused = _write(world, [authored])
+    assert refused.state == "refused"
+    assert "[R27.2-new-record]" in refused.render() and "guarded_by_test" in refused.render()
+    assert tree_bytes(world.memory) == before
+
+    proven = {**authored, "proofs": [{"test": f"{TEST_FILE}::test_plain", "facet": "it lands"}]}
+    assert _write(world, [proven]).state == "written"
