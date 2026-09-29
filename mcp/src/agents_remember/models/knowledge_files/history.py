@@ -247,6 +247,27 @@ class FamilyRow(HistoryRow):
         return self
 
 
+class OnboardingTraceRow(HistoryRow):
+    """A reviewed-no-impact attestation about one onboarding card or route overview.
+
+    Subject ``onboarding:<source path>`` for a file card and ``onboarding:<route>/overview`` for a
+    route overview. MIK-R30 owns the kind; MIK-R24 rule 8 step 1 is its first writer (an open leaf's
+    Update History ``No content impact:``/``No route impact:`` markers move here when its line is
+    converted), so the kind is registered with the one disposition that move writes.
+
+    ``markers`` holds the moved marker lines, one entry per line (a line longer than one text value
+    is split deterministically into consecutive pieces); ``reason`` is then a short fixed summary.
+    A card can gain many markers on one leaf (81 lines, 29,351 characters on a real card), which no
+    single ``reason`` holds.
+    """
+
+    row_kind: ClassVar[str] = "onboarding_trace"
+    subject_pattern: ClassVar[str] = r"^onboarding:\S(?:.*\S)?$"
+    dispositions: ClassVar[tuple[str, ...]] = ("no_impact",)
+
+    markers: tuple[Text, ...] | None = Field(default=None, min_length=1)
+
+
 @dataclass(frozen=True)
 class HistoryRowKind:
     """A registered row kind: the subject form it claims, its model and its owner packet."""
@@ -261,6 +282,7 @@ class HistoryRowKind:
 HISTORY_ROW_KINDS: Final[tuple[HistoryRowKind, ...]] = (
     HistoryRowKind("invariant", InvariantRow, "MIK-R07"),
     HistoryRowKind("family", FamilyRow, "MIK-R07"),
+    HistoryRowKind("onboarding_trace", OnboardingTraceRow, "MIK-R30"),
 )
 
 

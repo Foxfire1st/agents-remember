@@ -156,6 +156,7 @@ from agents_remember.cli.knowledge_write_route import (
     is_converted,
     load_leaf_contract,
     run_leaf_write,
+    unconverted_write_refusal,
 )
 from agents_remember.models.knowledge.candidate import SnapshotIdentity
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
@@ -676,7 +677,7 @@ def run(args: argparse.Namespace) -> int:
     if loaded is not None and is_converted(loaded.memory_worktree):
         # A converted memory worktree is written by the curator file writer (MIK-R12 rule 7).
         return run_leaf_write(args, loaded)
-    refusal = _invocation_refusal(args)
+    refusal = unconverted_write_refusal(loaded) or _invocation_refusal(args)
     if refusal is not None:
         print(refusal)
         return EXIT_REFUSED

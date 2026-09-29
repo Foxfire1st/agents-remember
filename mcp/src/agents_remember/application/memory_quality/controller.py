@@ -76,6 +76,7 @@ from agents_remember.worktrees.integration.closeout.curator_coherence import (
     curator_coherence_subject_assessment_state,
     require_current_curator_coherence,
 )
+from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusal
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.modules.onboarding import (
     contract_memory_verified_commit,
@@ -382,6 +383,25 @@ def _resolve_execution(
 
 def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, object]:
     scope = revalidate_memory_candidate_scope(execution.config, execution.scope)
+    contract = scope.contract
+    if contract is not None and isinstance(contract.memory_worktree, Path):
+        refusal = unconverted_line_refusal(
+            memory_worktree=contract.memory_worktree,
+            memory_repository=contract.memory_repo_path,
+            official_branch=contract.memory_source_branch,
+            operation="memory_quality_check",
+        )
+        if refusal is not None:
+            # MIK-R24 rule 9: an unconverted leaf tree whose official line is converted is never
+            # checked in the old format; the crossing sync converts it first.
+            return {
+                "ok": False,
+                "operation": "memory_quality_check",
+                "repoId": scope.repo_id,
+                "state": "refused",
+                "code": "unconverted-memory",
+                "detail": refusal,
+            }
     quality_code_root = scope.quality_code_root
     quality_context = scope.quality_context
     candidate_inputs = (

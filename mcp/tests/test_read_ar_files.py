@@ -27,6 +27,7 @@ sys.path.insert(0, str(MCP_TESTS))
 
 from agents_remember.application.published_intent import (
     PublishedIntentSelection,
+    published_intent_block,
     read_published_intent,
     resolve_published_intent,
 )
@@ -405,9 +406,16 @@ class PublishedIntentRouteTests(unittest.TestCase):
         )
 
     def _read(self, files, **kwargs):
-        return read_ar_files_tool(
-            self.config, repo_id=REPO, files=files, _context=self._context(**kwargs)
+        context = self._context(**kwargs)
+        payload = read_ar_files_tool(self.config, repo_id=REPO, files=files, _context=context)
+        # MIK-R24 rule 9: the read of an unconverted memory tree carries no knowledge section and
+        # marks its onboarding legacy-format. These cases measure the database publication route
+        # itself, which a converted tree reaches through the index, so they read its block directly.
+        assert payload["published_intent"]["state"] == "legacy-format", payload["published_intent"]
+        payload["published_intent"] = published_intent_block(
+            context, [str(entry["path"]) for entry in files]
         )
+        return payload
 
     def _selection(self, **kwargs) -> PublishedIntentSelection:
         """The fixture's publication as a resolved selection, or a case that cannot be measured.
@@ -608,17 +616,15 @@ class PublishedIntentRouteTests(unittest.TestCase):
         resolved = self._read([{"path": INTEGRATION_PATH}])["published_intent"]["seeds"][0]
         plain_root = self._dir / "plain-code"
         plain_root.mkdir()
-        unrequested = read_ar_files_tool(
-            self.config,
-            repo_id=REPO,
-            files=[{"path": INTEGRATION_PATH}],
-            _context=_build_context(
+        unrequested = published_intent_block(
+            _build_context(
                 plain_root,
                 self.memory / "onboarding",
                 coordination_root=self.config.coordination_root,
                 storage_mode="repo-sidecar",
             ),
-        )["published_intent"]
+            [INTEGRATION_PATH],
+        )
 
         # The fixture records seven realizations at six locations: five resolve against its own
         # tree, one names a path the tree does not hold and one names another blob -- so a pair
@@ -700,30 +706,26 @@ class PublishedIntentMountedRouteTests(unittest.TestCase):
     def tearDown(self) -> None:
         reset_ambient()
 
-    def test_the_mounted_route_reads_the_memory_layer_publication(self) -> None:
+    def test_the_mounted_route_returns_no_knowledge_section_for_unconverted_memory(self) -> None:
+        """MIK-R24 rule 9: an unconverted memory tree is read as legacy-format, never misread."""
+
         shutil.copyfile(self.fixture.database_path, self.memory / "knowledge.sqlite")
+        card = self.memory / "onboarding" / f"{BATCH_PATH}.md"
+        card.parent.mkdir(parents=True, exist_ok=True)
+        card.write_text("# batch\n\nLegacy card.\n", encoding="utf-8")
 
         payload = read_ar_files_payload(self.config, REPO, [{"path": BATCH_PATH}])
 
         block = payload["published_intent"]
-        self.assertEqual(block["state"], "recorded")
-        self.assertEqual(block["datasetPath"], str(self.memory / "knowledge.sqlite"))
-        self.assertEqual(block["snapshot"], self.fixture.knowledge_digest)
-        self.assertEqual(block["sourceResolution"]["repositoryRoot"], str(self.code))
-        self.assertEqual(block["sourceResolution"]["codeTreeId"], self.fixture.git_tree_id)
-        subjects = {
-            item.get("invariant_id")
-            for item in block["seeds"][0]["items"]
-            if item.get("invariant_id")
-        }
-        self.assertIn(self.fixture.batch_invariant_id, subjects)
+        self.assertEqual(block["state"], "legacy-format")
+        self.assertEqual(block["memoryRoot"], str(self.memory))
+        self.assertIn("crossing sync", block["detail"])
+        self.assertIn("# batch", payload["files"][0]["source"])
 
-    def test_the_mounted_route_names_the_absence_before_anything_is_published(self) -> None:
+    def test_the_mounted_route_names_the_legacy_format_before_anything_is_published(self) -> None:
         payload = read_ar_files_payload(self.config, REPO, [{"path": BATCH_PATH}])
 
-        block = payload["published_intent"]
-        self.assertEqual(block["state"], "not-recorded")
-        self.assertIn(str(self.memory / "knowledge.sqlite"), block["refusalDetail"])
+        self.assertEqual(payload["published_intent"]["state"], "legacy-format")
         self.assertIn("# batch", payload["files"][0]["source"])
 
 

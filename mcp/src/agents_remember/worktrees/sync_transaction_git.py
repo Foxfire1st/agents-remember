@@ -6,9 +6,11 @@ identity. Code-side files keep ordinary Git semantics, including a file named me
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.memory_cache import prepare_memory_cache, refresh_memory_cache
@@ -18,6 +20,15 @@ from agents_remember.worktrees.knowledge_conflict import (
     settle_knowledge_conflict,
     settle_knowledge_conflicts,
 )
+from agents_remember.worktrees.knowledge_crossing import (
+    CrossingSyncError,
+    apply_crossing,
+    close_crossing_history,
+    crossing_applies,
+    crossing_plan,
+    merge_base,
+    write_crossing_report,
+)
 from agents_remember.worktrees.knowledge_validation import PairedCode, memory_commit_refusal
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -26,6 +37,7 @@ from agents_remember.worktrees.modules.git import (
     is_ancestor,
     repository_identity,
 )
+from agents_remember.worktrees.services import CrossingPlanView
 from agents_remember.worktrees.sync_transaction_state import SyncSideRecord
 
 
@@ -52,6 +64,7 @@ class SideMergeOutcome:
     conflicts: tuple[str, ...] = ()
     message: str = ""
     refused: RefusedKnowledgeStage | None = None
+    crossing_report: str = ""
 
 
 def read_ref(repository: Path, ref: str) -> str | None:
@@ -447,12 +460,17 @@ def _existing_side_merge(
 
 
 def start_side_merge(
-    side: SyncSideRecord, *, paired_code: PairedCode | None = None
+    side: SyncSideRecord,
+    *,
+    paired_code: PairedCode | None = None,
+    crossing_owner: tuple[Literal["leaf", "master"], str] | None = None,
 ) -> SideMergeOutcome:
     """Attempt the pinned merge; only genuine content conflicts require resolution.
 
     ``paired_code`` is the code commit the memory merge is paired with (the code side's result):
     the knowledge validator checks the merged memory tree against it (MIK-R22 rule 8).
+    ``crossing_owner`` names who performs the sync (the leaf, or the master line's task) for a
+    crossing sync (MIK-R24 rule 8), whose knowledge paths are merged structurally.
     """
 
     worktree = Path(side.worktree)
@@ -466,10 +484,12 @@ def start_side_merge(
         raise SyncGitProofError(f"{side.side} sync requires a clean worktree before merging")
     discard_memory_cache_changes(side)
     memory_merge = side.side == "memory" and side.plan == "merge"
-    merge_args = ["merge", "--no-edit", side.sourceCommit]
-    if memory_merge:
-        merge_args.insert(1, "--no-commit")
-    result = run_git(worktree, merge_args)
+    crossing = _crossing(side, paired_code, crossing_owner, memory_merge=memory_merge)
+    # A memory merge stops before committing so the knowledge adapter and validator see it staged.
+    no_commit = ["--no-commit"] if memory_merge else []
+    result = run_git(worktree, ["merge", *no_commit, "--no-edit", side.sourceCommit])
+    if crossing is not None:
+        return _apply_crossing_merge(side, crossing, result, paired_code)
     if result.returncode == 0:
         if memory_merge:
             return _continue_memory_merge(side, paired_code)
@@ -492,6 +512,61 @@ def start_side_merge(
     )
 
 
+def _apply_crossing_merge(
+    side: SyncSideRecord,
+    crossing: CrossingPlanView,
+    result: subprocess.CompletedProcess[str],
+    paired_code: PairedCode | None,
+) -> SideMergeOutcome:
+    """Replace the started merge's knowledge and onboarding paths with the crossing plan."""
+
+    worktree = Path(side.worktree)
+    if result.returncode not in {0, 1} or merge_head(worktree) != side.sourceCommit:
+        raise SyncGitProofError(
+            (result.stderr or result.stdout).strip() or "memory crossing merge failed"
+        )
+    try:
+        apply_crossing(worktree, crossing)
+        report = write_crossing_report(worktree, side.preSyncHead, side.sourceCommit, crossing)
+    except CrossingSyncError as error:
+        raise SyncGitProofError(str(error)) from error
+    outcome = _continue_memory_merge(side, paired_code)
+    return replace(outcome, crossing_report=report.as_posix())
+
+
+def _crossing(
+    side: SyncSideRecord,
+    paired_code: PairedCode | None,
+    owner: tuple[Literal["leaf", "master"], str] | None,
+    *,
+    memory_merge: bool,
+) -> CrossingPlanView | None:
+    """The structural plan of a crossing sync (MIK-R24 rule 8), or ``None`` for a plain merge.
+
+    It runs before Git touches the worktree, so a failing step leaves the line unchanged.
+    """
+
+    if not memory_merge:
+        return None
+    worktree = Path(side.worktree)
+    try:
+        base = merge_base(worktree, side.preSyncHead, side.sourceCommit)
+        if not crossing_applies(worktree, base, side.preSyncHead, side.sourceCommit):
+            return None
+        if owner is None:
+            raise CrossingSyncError(
+                "crossing sync step 'markers' failed: the sync names no leaf or master owner"
+            )
+        return crossing_plan(
+            worktree,
+            (base, side.preSyncHead, side.sourceCommit),
+            paired_code=paired_code,
+            owner=owner,
+        )
+    except CrossingSyncError as error:
+        raise SyncGitProofError(str(error)) from error
+
+
 def _finish_staged_memory_merge(side: SyncSideRecord, paired_code: PairedCode | None) -> str:
     """Publish one ordinary memory merge with exact parents and no cache in its tree.
 
@@ -503,6 +578,10 @@ def _finish_staged_memory_merge(side: SyncSideRecord, paired_code: PairedCode | 
     _require_active_merge(side)
     prepare_memory_cache(worktree)
     _require_sync_git(worktree, ["add", "--", ".gitignore"])
+    try:
+        close_crossing_history(worktree, (side.preSyncHead, side.sourceCommit))
+    except CrossingSyncError as error:
+        raise SyncGitProofError(str(error)) from error
     refusal = memory_commit_refusal(
         memory_repository=worktree,
         candidate_tree=_require_sync_git(worktree, ["write-tree"]),

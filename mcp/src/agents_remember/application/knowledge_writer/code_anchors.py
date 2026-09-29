@@ -134,22 +134,6 @@ def _symbol_range(path: str, name: str, data: bytes) -> tuple[int, int]:
 
 
 def _bound_spans(name: str, path: str, lines: list[str]) -> tuple[tuple[int, int], ...]:
-    """The distinct extents binding ``name``; a qualified name's last part sits inside its parents.
+    """The distinct extents binding ``name`` (one rule: :func:`extents.qualified_spans`)."""
 
-    ``Holder.method`` is the ``method`` defined inside a ``Holder`` definition, so a same-named
-    method of another class in the file does not make the name ambiguous.
-    """
-
-    parts = [part for part in name.split(".") if part]
-    bound = extents.definitions(path, lines)
-    if not parts or any(part not in bound for part in parts):
-        return ()
-    candidates = list(bound[parts[-1]])
-    for parent in parts[:-1]:
-        holders = bound[parent]
-        candidates = [
-            one
-            for one in candidates
-            if any(holder.start <= one.start and one.end <= holder.end for holder in holders)
-        ]
-    return tuple(dict.fromkeys((extent.start, extent.end) for extent in candidates))
+    return extents.qualified_spans(name, extents.definitions(path, lines))

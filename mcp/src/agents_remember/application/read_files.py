@@ -29,6 +29,12 @@ from pathlib import Path
 from typing import Any
 
 from agents_remember.application.published_intent import published_intent_block
+from agents_remember.application.read_files_format import (
+    TEXT_FORMAT,
+    converted_card_parts,
+    legacy_published_intent,
+    memory_format,
+)
 from agents_remember.errors import AuthorityError
 from agents_remember.kernel import filesystem
 from agents_remember.kernel.authority import require_repo
@@ -145,7 +151,12 @@ def read_ar_files_tool(
         # absence is the answer, and an omitted block could not be told apart from a route that
         # never ran. Every one of its failures is carried inside the block, so it can never cost
         # the caller the source and onboarding bytes this call exists to return.
-        "published_intent": published_intent_block(context, [request.path for request in requests]),
+        # MIK-R24 rule 9: an unconverted memory tree returns no knowledge section.
+        "published_intent": (
+            published_intent_block(context, [request.path for request in requests])
+            if memory_format(context.onboarding_root.parent) == TEXT_FORMAT
+            else legacy_published_intent(context.onboarding_root.parent)
+        ),
     }
     if attach_any_onboarding:
         served = _attach_front_door(context, repo.path, requests, amb, lifecycle_id)
@@ -201,6 +212,11 @@ def _read_one(
         result["source"] = source
     if onboarding is not None:
         result["onboarding"] = onboarding
+        memory_root = context.onboarding_root.parent
+        if memory_format(memory_root) == TEXT_FORMAT:
+            result.update(converted_card_parts(memory_root, rel))
+        else:
+            result["format"] = "legacy-format"
 
     facts: dict[str, Any] = {
         "path": request.path,

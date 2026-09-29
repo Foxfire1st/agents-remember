@@ -563,18 +563,27 @@ def _run_side(
         )
         return _advance_after_side(store, record, side_name, completed)
     ensure_temporary_worktree(side)
-    outcome = start_side_merge(side, paired_code=_paired_code(record))
+    outcome = start_side_merge(
+        side,
+        paired_code=_paired_code(record),
+        crossing_owner=("leaf" if record.contractKind == "leaf" else "master", record.taskId),
+    )
     if outcome.state == "resolution-required":
         updated_side = side.model_copy(
             update={
                 "state": "resolution-required",
                 "conflictFiles": outcome.conflicts,
                 "knowledgeConflict": _knowledge_conflict(outcome.refused),
+                "crossingReport": outcome.crossing_report,
             }
         )
         return update_record(store, record, phase=resolution_phase(side_name), side=updated_side)
     updated_side = side.model_copy(
-        update={"state": "completed", "resultHead": side_branch_head(side)}
+        update={
+            "state": "completed",
+            "resultHead": side_branch_head(side),
+            "crossingReport": outcome.crossing_report,
+        }
     )
     record, updated_side, conflicted = restore_parked_wip(store, record, side_name, updated_side)
     if conflicted:

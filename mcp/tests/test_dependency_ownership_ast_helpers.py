@@ -42,9 +42,28 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
-LIFECYCLE_ARTIFACT_COUNT = 66
-LIFECYCLE_CATALOG_SHA256 = "1c682524157cb12075319069b03410b39053317946a61847c51a603c146a68b2"
+LIFECYCLE_ARTIFACT_COUNT = 80
+LIFECYCLE_CATALOG_SHA256 = "6fb4934d9120e1f593aaaa0e5534f49e01bf88a0f4dee04592f75063575fab65"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Thirty-third deliberate re-pin (260928-MIK-L24, at base ``cd3e943d``, 2026-09-29) -- the shared
+test support of the text-knowledge leaves, registered, and the consumer rows the census derived for
+the new case modules.** ``260928-MIK-L24`` (MIK-R24, conversion and boundary crossing) found this
+lane already red on its base: the L20-L23 leaves had landed shared test support and fixtures without
+catalog rows. By architect ruling it registers them with its own: **fourteen** new ``[[artifact]]``
+rows -- the five ``shared-support`` modules ``knowledge_validator_test_support.py`` (L22),
+``knowledge_index_test_support.py`` (L23), ``knowledge_writer_test_support.py`` (L12),
+``knowledge_census_test_support.py`` (L20) and ``knowledge_conversion_test_support.py`` (L24), and
+the nine ``fixture`` files ``mcp/tests/fixtures/knowledge_files/*.json`` (L21) -- each with its
+source-derived consumers and a ``node:`` replacement in a real consumer. Five existing rows gain the
+case modules that now transitively consume them, appended without re-sorting:
+``curator_coherence_test_support.py`` (1), ``fixtures/repository_profiles/node/package-lock.json``
+(9), ``merge_case_test_support.py`` (2), ``generation_test_support.py`` (2) and
+``read_scope_test_support.py`` (1). **No row was removed, no consumer removed and no field changed**;
+no contract was added, so the population moves to **sixteen contracts / eighty artifacts**, and the
+catalog is re-pinned from ``1c682524157cb12075319069b03410b39053317946a61847c51a603c146a68b2`` (the
+Thirty-second) to ``6fb4934d9120e1f593aaaa0e5534f49e01bf88a0f4dee04592f75063575fab65``, measured with ``sha256sum mcp/tests/evidence-lifecycle.toml``. The
+proof's own artifact delta remains exactly empty.
 
 **Thirty-second deliberate re-pin (260921-ICR-L57, at base ``ae2fd5c8``, 2026-09-28) -- the consumer
 rows the census derived for eight landed case modules and three file-size splits, and three earlier

@@ -4,6 +4,11 @@ Every ``STYLE_CHECKS`` entry receives ``StyleCheckInputs`` so tree-only, code-aw
 history-aware checks share one gate path. A required input that is unavailable must appear
 in that check's result rather than produce an empty success.
 
+On a converted memory tree (``knowledge/layout.json``, MIK-R24 rule 5) the checks that read the
+legacy card format -- metadata-based drift, Update History order and citation tables -- have nothing
+to read and say so; the drift slot runs :func:`converted_knowledge_check` instead: the knowledge
+validator (MIK-R22) plus the stale-reference report, which is report-only.
+
 ``reportOnlyFindings`` are surfaced and counted but do not affect ``ok``. Use them only
 for ranked review output, never to soften an enforcing invariant. Detail samples may be
 bounded; total counts remain exact.
@@ -16,10 +21,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.memory_quality.converted_check import (
+    CONVERTED_KNOWLEDGE_CHECK,
+    LEGACY_FORMAT_CHECKS,
+    converted_knowledge_check,
+    not_applicable_on_converted,
+)
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
     DriftSummaryOutput,
     run_drift_summary,
 )
+from agents_remember.memory_quality.reference_state import is_converted_memory
 from agents_remember.memory_quality.style.citations import claim_reopen, range_resolution
 from agents_remember.memory_quality.style.citations.source_index_state import SourceIndexError
 from agents_remember.memory_quality.style.document_shape import (
@@ -117,12 +129,17 @@ def run_memory_quality_check(
     include_report_only_findings: bool = False,
 ) -> dict[str, Any]:
     selected = normalize_checks(checks, include_integrity=drift_context is not None)
+    converted = is_converted_memory(onboarding_root.parent)
     check_results: dict[str, Any] = {}
     findings: list[dict[str, Any]] = []
     report_only: list[dict[str, Any]] = []
     finding_count = 0
-    for check in selected:
-        result = run_check(check, onboarding_root, drift_context)
+    for selected_check in selected:
+        check, result = (
+            _converted_check(selected_check, onboarding_root, drift_context)
+            if converted
+            else (selected_check, run_check(selected_check, onboarding_root, drift_context))
+        )
         check_results[check] = {
             key: value for key, value in result.items() if key not in FINDING_KEYS
         }
@@ -141,6 +158,23 @@ def run_memory_quality_check(
     if include_report_only_findings:
         payload["reportOnlyFindings"] = report_only
     return payload
+
+
+def _converted_check(
+    check: str, onboarding_root: Path, drift_context: DriftCheckContext | None
+) -> tuple[str, dict[str, Any]]:
+    """One check on a converted tree (MIK-R24 rule 5): legacy-format checks do not apply, and the
+    drift slot runs the knowledge validator plus the stale-reference report."""
+
+    if check in LEGACY_FORMAT_CHECKS:
+        return check, not_applicable_on_converted(check)
+    if check == DRIFT_CHECK_NAME:
+        if drift_context is None:
+            raise ValueError(f"{DRIFT_CHECK_NAME} requires drift context")
+        return CONVERTED_KNOWLEDGE_CHECK, converted_knowledge_check(
+            onboarding_root.parent, drift_context.code_repository_root
+        )
+    return check, run_check(check, onboarding_root, drift_context)
 
 
 def run_check(

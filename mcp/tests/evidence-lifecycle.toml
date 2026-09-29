@@ -455,6 +455,7 @@ consumers = [
   "mcp/tests/test_knowledge_review_subject_isolation.py",
   "mcp/tests/test_review_assessment_history.py",
   "mcp/tests/test_review_assessment_history_repairs.py",
+  "mcp/tests/test_knowledge_conversion_toolchain.py",
 ]
 
 [[artifact]]
@@ -817,6 +818,15 @@ consumers = [
   "mcp/tests/test_review_assessment_history_repairs.py",
   "mcp/tests/test_review_recorded_knowledge.py",
   "mcp/tests/test_review_unchanged_knowledge.py",
+  "mcp/tests/test_knowledge_census_report.py",
+  "mcp/tests/test_knowledge_conversion.py",
+  "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_file_canonical.py",
+  "mcp/tests/test_knowledge_index.py",
+  "mcp/tests/test_knowledge_index_surfaces.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
+  "mcp/tests/test_knowledge_writer.py",
 ]
 
 [[artifact]]
@@ -1329,6 +1339,8 @@ consumers = [
   "mcp/tests/test_worktree_sync.py",
   "mcp/tests/test_review_sync_rebinding.py",
   "mcp/tests/test_review_sync_movement_read.py",
+  "mcp/tests/test_knowledge_crossing.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
 ]
 
 [[artifact]]
@@ -1362,6 +1374,8 @@ consumers = [
   "mcp/tests/test_knowledge_effect_claims.py",
   "mcp/tests/test_sync_parked_candidate.py",
   "mcp/tests/test_worktree_sync.py",
+  "mcp/tests/test_knowledge_crossing.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
 ]
 
 [[artifact]]
@@ -1526,6 +1540,7 @@ consumers = [
   "mcp/tests/test_review_assessment_history_repairs.py",
   "mcp/tests/test_review_recorded_knowledge.py",
   "mcp/tests/test_review_unchanged_knowledge.py",
+  "mcp/tests/test_knowledge_conversion_toolchain.py",
 ]
 
 [[artifact]]
@@ -1756,4 +1771,310 @@ consumer_scope = "exact"
 consumers = [
   "mcp/tests/test_response_address_binding.py",
   "mcp/tests/test_tool_refusal_conformance.py",
+]
+
+[[artifact]]
+path = "mcp/tests/knowledge_validator_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_validator_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the MIK-R21 Doc14 fixtures assembled into one converted memory tree"
+introduced_by = "260928-MIK-L22"
+lifetime = "permanent"
+permanence_rationale = "Every validator, index, writer and conversion case starts from the same converted tree, so one builder is shared instead of copied."
+replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_census_files.py",
+  "mcp/tests/test_knowledge_census_report.py",
+  "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_validator.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
+]
+
+[[artifact]]
+path = "mcp/tests/knowledge_index_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_index_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the review-example tree, a fixture legacy-dataset converter and a parity dataset built through the public store operations"
+introduced_by = "260928-MIK-L23"
+lifetime = "permanent"
+permanence_rationale = "The index parity cases compare the same authored dataset over the database and over its converted tree."
+replacement_contract = "node:mcp/tests/test_knowledge_index.py::test_a_working_tree_and_its_git_tree_index_to_the_same_key_and_answers"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_index.py",
+  "mcp/tests/test_knowledge_index_reuse.py",
+  "mcp/tests/test_knowledge_index_surfaces.py",
+]
+
+[[artifact]]
+path = "mcp/tests/knowledge_writer_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_writer_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "real Git code and converted memory repositories with a contract and task.json"
+introduced_by = "260928-MIK-L12"
+lifetime = "permanent"
+permanence_rationale = "The writer cases need one real enclosure shape rather than copies of it."
+replacement_contract = "node:mcp/tests/test_knowledge_writer.py::test_a_decision_a_realization_and_a_tested_evidence_produce_validated_files"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_writer.py",
+]
+
+[[artifact]]
+path = "mcp/tests/knowledge_census_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_census_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "a converted memory tree and census inputs for the migration census"
+introduced_by = "260928-MIK-L20"
+lifetime = "permanent"
+permanence_rationale = "The census file and report cases share one census fixture."
+replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_census_files.py",
+  "mcp/tests/test_knowledge_census_report.py",
+]
+
+[[artifact]]
+path = "mcp/tests/knowledge_conversion_test_support.py"
+kind = "shared-support"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_conversion_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "a code repository and an unconverted memory tree with every legacy citation-row case and a legacy database in the real column spelling"
+introduced_by = "260928-MIK-L24"
+lifetime = "permanent"
+permanence_rationale = "The conversion, crossing and toolchain cases convert the same legacy tree."
+replacement_contract = "node:mcp/tests/test_knowledge_conversion.py::test_a_card_becomes_prose_one_evidence_section_and_numbered_references"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_conversion.py",
+  "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_crossing.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/knowledge_files/4.1-direct_landing.py.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_validator_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the MIK-R21 Doc14 worked examples in canonical form"
+introduced_by = "260928-MIK-L21"
+lifetime = "permanent"
+permanence_rationale = "The format and validator cases read the worked examples as the canonical shapes."
+replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_census_files.py",
+  "mcp/tests/test_knowledge_census_report.py",
+  "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_validator.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/knowledge_files/4.1-worktrees-overview.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_validator_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the MIK-R21 Doc14 worked examples in canonical form"
+introduced_by = "260928-MIK-L21"
+lifetime = "permanent"
+permanence_rationale = "The format and validator cases read the worked examples as the canonical shapes."
+replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_census_files.py",
+  "mcp/tests/test_knowledge_census_report.py",
+  "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_validator.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/knowledge_files/4.2-family-attribution-and-landing-pairing.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_validator_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the MIK-R21 Doc14 worked examples in canonical form"
+introduced_by = "260928-MIK-L21"
+lifetime = "permanent"
+permanence_rationale = "The format and validator cases read the worked examples as the canonical shapes."
+replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_census_files.py",
+  "mcp/tests/test_knowledge_census_report.py",
+  "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_validator.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/knowledge_files/4.3-invariant-landing-pair.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_validator_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the MIK-R21 Doc14 worked examples in canonical form"
+introduced_by = "260928-MIK-L21"
+lifetime = "permanent"
+permanence_rationale = "The format and validator cases read the worked examples as the canonical shapes."
+replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_census_files.py",
+  "mcp/tests/test_knowledge_census_report.py",
+  "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_validator.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/knowledge_files/4.4-test_direct_landing.py.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_validator_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the MIK-R21 Doc14 worked examples in canonical form"
+introduced_by = "260928-MIK-L21"
+lifetime = "permanent"
+permanence_rationale = "The format and validator cases read the worked examples as the canonical shapes."
+replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_census_files.py",
+  "mcp/tests/test_knowledge_census_report.py",
+  "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_validator.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/knowledge_files/4.5-decision-d12-local-family-routes.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_validator_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the MIK-R21 Doc14 worked examples in canonical form"
+introduced_by = "260928-MIK-L21"
+lifetime = "permanent"
+permanence_rationale = "The format and validator cases read the worked examples as the canonical shapes."
+replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_census_files.py",
+  "mcp/tests/test_knowledge_census_report.py",
+  "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_validator.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/knowledge_files/4.6-incident.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_validator_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the MIK-R21 Doc14 worked examples in canonical form"
+introduced_by = "260928-MIK-L21"
+lifetime = "permanent"
+permanence_rationale = "The format and validator cases read the worked examples as the canonical shapes."
+replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_census_files.py",
+  "mcp/tests/test_knowledge_census_report.py",
+  "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_validator.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/knowledge_files/layout.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_validator_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the MIK-R21 Doc14 worked examples in canonical form"
+introduced_by = "260928-MIK-L21"
+lifetime = "permanent"
+permanence_rationale = "The format and validator cases read the worked examples as the canonical shapes."
+replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_census_files.py",
+  "mcp/tests/test_knowledge_census_report.py",
+  "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_validator.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
+]
+
+[[artifact]]
+path = "mcp/tests/fixtures/knowledge_files/r21-integrate.py.json"
+kind = "fixture"
+authority = "internal-canonical"
+owner = "mcp/tests/knowledge_validator_test_support.py"
+category = "unit-regression"
+fidelity = "in-process"
+cadence = "affected"
+source_version_or_generator = "the MIK-R21 Doc14 worked examples in canonical form"
+introduced_by = "260928-MIK-L21"
+lifetime = "permanent"
+permanence_rationale = "The format and validator cases read the worked examples as the canonical shapes."
+replacement_contract = "node:mcp/tests/test_knowledge_census_files.py::test_every_census_file_parses_by_schema_and_is_canonical"
+consumer_scope = "exact"
+consumers = [
+  "mcp/tests/test_knowledge_census_files.py",
+  "mcp/tests/test_knowledge_census_report.py",
+  "mcp/tests/test_knowledge_family_routes.py",
+  "mcp/tests/test_knowledge_file_formats.py",
+  "mcp/tests/test_knowledge_validator.py",
+  "mcp/tests/test_knowledge_validator_routes.py",
 ]

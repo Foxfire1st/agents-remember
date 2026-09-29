@@ -375,6 +375,37 @@ def read_git_blobs_bytes(root: Path, blob_ids: Iterable[str]) -> dict[str, bytes
     return blobs
 
 
+def merge_file_bytes(
+    root: Path, ours: Path, base: Path, theirs: Path, labels: tuple[str, str, str]
+) -> tuple[bytes, int]:
+    """Three-way merge three files' exact bytes with ``git merge-file -p``.
+
+    Returns the merged bytes (conflict hunks carry ``labels`` for ours, base and theirs) and the
+    number of conflicts. Nothing is written: the result is only printed. A Git failure raises.
+    """
+    result = _run_git(
+        root,
+        [
+            "merge-file",
+            "-p",
+            "-L",
+            labels[0],
+            "-L",
+            labels[1],
+            "-L",
+            labels[2],
+            ours.as_posix(),
+            base.as_posix(),
+            theirs.as_posix(),
+        ],
+        _GitRun(root, None, GIT_LOCAL_TIMEOUT_SECONDS, git_environment()),
+        raw_output=True,
+    )
+    if result.returncode < 0 or result.returncode > 127:
+        raise GitPreparationError(f"git merge-file failed: {result.stderr!r}")
+    return result.stdout, result.returncode
+
+
 def read_git_tree_bytes(root: Path, tree: str) -> bytes:
     """Read recursive NUL-delimited tree rows with original pathname bytes."""
     require_git_object_id(tree)

@@ -10,6 +10,8 @@ from agents_remember.application import provider_runtime as provider_runtime_api
 from agents_remember.application.prepared_certification import (
     PreparedMemoryCertificationAdapter,
 )
+from agents_remember.memory.conversion.base import GitBaseConverter
+from agents_remember.memory.conversion.crossing_port import GitKnowledgeCrossing
 from agents_remember.memory_quality import check as memory_quality_check_api
 from agents_remember.memory_quality.gate_five_rails import gate_five_memory_rails
 from agents_remember.memory_quality.incremental_scope.candidate import observe_contract_task
@@ -211,7 +213,8 @@ def build_default_worktree_services() -> WorktreeServices:
         certification_memory_rails=CertificationMemoryRailsAdapter(),
         certification_continuation=PreparedCloseoutContinuation(),
         prepared_memory_certification=PreparedMemoryCertificationAdapter(),
-        knowledge_validation=GitKnowledgeValidation(),
+        knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),
+        knowledge_crossing=GitKnowledgeCrossing(),
     )
 
 

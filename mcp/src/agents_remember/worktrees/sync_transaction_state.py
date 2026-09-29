@@ -8,9 +8,16 @@ import os
 import stat
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+)
 
 from agents_remember.kernel.atomic_write import (
     atomic_replace,
@@ -73,6 +80,20 @@ class SyncSideRecord(BaseModel):
     # rows forever and re-offers a decision that has already been made and already had its
     # effect. Cleared with the conflict it belongs to.
     knowledgeReconciliations: tuple[AuthoredReconciliation, ...] = ()
+    # A crossing sync's durable report (MIK-R24 rule 8): the item-level conflicts, with each side's
+    # value, and the cards taken from each side. The resolution payload names it and summarises it.
+    crossingReport: str = Field(default="", max_length=4096)
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_crossing_report(self, handler: SerializerFunctionWrapHandler) -> Any:
+        """Write ``crossingReport`` only for a crossing sync, so an ordinary journal keeps the exact
+        shape the installed (pre-MIK-R24) runtime reads."""
+
+        data = handler(self)
+        if isinstance(data, dict) and not self.crossingReport:
+            data.pop("crossingReport", None)
+        return data
+
     # The exact parked candidate: its stash identity is journaled with the transaction, so
     # a crash mid-carry can always return the WIP it parked.
     wipState: SyncWipState = ""

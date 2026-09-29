@@ -166,10 +166,12 @@ def test_file_shape_owner_and_row_uniqueness_are_enforced() -> None:
 
 
 def test_row_kind_registry_owns_disjoint_subject_forms() -> None:
-    assert [kind.name for kind in HISTORY_ROW_KINDS] == ["invariant", "family"]
+    # MIK-R30's onboarding_trace kind is registered by MIK-R24 rule 8 step 1, its first writer.
+    assert [kind.name for kind in HISTORY_ROW_KINDS] == ["invariant", "family", "onboarding_trace"]
     assert row_kind_for_subject(INV).model is InvariantRow
     assert row_kind_for_subject(FAM).model is FamilyRow
-    for subject in ("DEC-7K3F9Q", "onboarding:mcp/x.py", "INV-0143"):
+    assert row_kind_for_subject("onboarding:mcp/x.py").name == "onboarding_trace"
+    for subject in ("DEC-7K3F9Q", "INV-0143"):
         with pytest.raises(ValueError, match="no registered"):
             row_kind_for_subject(subject)
     # D28: the seven dispositions (D6's four, extended, rerouted, assigned) plus the family's

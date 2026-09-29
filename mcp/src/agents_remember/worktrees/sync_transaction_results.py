@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from agents_remember.models.worktree import SyncKnowledgeConflict
+from agents_remember.worktrees.knowledge_crossing import crossing_summary
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.guidance import contract_next_args, recovery_guidance
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
@@ -86,6 +87,15 @@ def resolution_required(
     if knowledge is not None:
         resolution["knowledge"] = knowledge.model_dump(mode="json", exclude_none=True)
     next_operation, next_args, summary = _resolution_guidance(record, side, parked, knowledge)
+    if side.crossingReport:
+        crossing = crossing_summary(side.crossingReport)
+        resolution["crossing"] = crossing
+        summary = (
+            f"{summary} This is a crossing sync (MIK-R24 rule 8): "
+            f"{crossing.get('conflictItems', '?')} conflicted item(s) are listed in "
+            f"{side.crossingReport}; every conflicted JSON item holds a 'crossing-conflict' "
+            "marker the knowledge validator refuses until it is resolved."
+        )
     return WorktreeCommandResult(
         2,
         {

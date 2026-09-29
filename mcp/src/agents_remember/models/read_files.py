@@ -45,6 +45,12 @@ class FileRead(StrictResponseModel):
     status: FileReadStatus
     source: str | None = None
     onboarding: str | None = None
+    # MIK-R24 rules 5 and 9: ``text/v2`` for a converted memory tree, whose card comes with its
+    # sidecar and its resolved references; ``legacy-format`` for an unconverted one, returned as
+    # it is with nothing resolved.
+    format: Literal["text/v2", "legacy-format"] | None = None
+    sidecar: dict[str, Any] | None = None
+    references: list[dict[str, Any]] | None = None
 
 
 class ReadArFilesResponse(ToolResponse):

@@ -3,7 +3,8 @@
 Worktrees ranks below providers, memory_quality and code_quality, so the
 lifecycle modules never import them. The composition layer binds one
 ``WorktreeServices`` bundle (provider lifecycle, memory-quality gate,
-citation-cache guard, knowledge validator) before invoking worktree operations.
+citation-cache guard, knowledge validator,
+knowledge crossing) before invoking worktree operations.
 """
 
 from __future__ import annotations
@@ -147,6 +148,44 @@ class KnowledgeValidationPort(Protocol):
     ) -> str | None: ...
 
 
+@dataclass(frozen=True)
+class CrossingPlanView:
+    """A crossing sync's knowledge half as the sync applies it (MIK-R24 rule 8).
+
+    ``files`` maps every ``knowledge/`` and ``onboarding/`` path of the merged tree to its bytes
+    (``None`` = absent); ``conflicts`` are ``(path, item, reason)`` triples for the curator, and
+    ``conflict_versions`` the converted (base, own, incoming) bytes of each conflicted path.
+    """
+
+    files: dict[str, bytes | None]
+    conflicts: tuple[tuple[str, str, str], ...]
+    conflict_versions: dict[str, tuple[bytes | None, bytes | None, bytes | None]]
+    report: dict[str, Any]
+
+
+class CrossingStepFailed(RuntimeError):
+    """A crossing step failed before the line was touched; the message names the step."""
+
+
+@dataclass(frozen=True)
+class CrossingRequest:
+    """One crossing sync's three memory commits, its paired code commit, and who performs it."""
+
+    memory_repository: Path
+    sides: tuple[str, str, str]
+    """(merge base, own side, incoming side) commits."""
+    code_repository: Path
+    code_commit: str
+    owner_kind: Literal["leaf", "master"]
+    owner_id: str
+
+
+class KnowledgeCrossingPort(Protocol):
+    """Rule 8 steps 1-4 over three memory commits; bound by the composition layer."""
+
+    def plan(self, request: CrossingRequest) -> CrossingPlanView: ...
+
+
 class CertificationContinuationPort(Protocol):
     """Composition-owned Gate 5 and finalization boundaries after exact code certificates."""
 
@@ -169,6 +208,7 @@ class WorktreeServices:
     certification_continuation: CertificationContinuationPort | None = None
     prepared_memory_certification: PreparedMemoryCertificationPort | None = None
     knowledge_validation: KnowledgeValidationPort | None = None
+    knowledge_crossing: KnowledgeCrossingPort | None = None
 
 
 @dataclass(frozen=True)
@@ -222,6 +262,10 @@ __all__ = [
     "CertificationContinuationPort",
     "CertificationMemoryRailsPort",
     "CitationGuardPort",
+    "CrossingPlanView",
+    "CrossingRequest",
+    "CrossingStepFailed",
+    "KnowledgeCrossingPort",
     "KnowledgeValidationPort",
     "MemoryQualityPort",
     "ProviderLifecyclePort",

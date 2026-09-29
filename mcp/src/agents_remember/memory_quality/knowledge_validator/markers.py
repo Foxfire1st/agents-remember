@@ -117,3 +117,46 @@ def find_markers(text: str) -> list[Marker]:
                 line = next(number for begin, number in reversed(starts) if begin <= match.start())
                 markers.append(Marker(match.group(1), line))
     return markers
+
+
+def _paragraph_marker_offsets(paragraph: list[tuple[int, str]]) -> list[tuple[int, int]]:
+    """Each unescaped marker of one paragraph as (line number, offset within that line)."""
+
+    joined = "\n".join(line for _, line in paragraph)
+    begins: list[tuple[int, int]] = []
+    cursor = 0
+    for number, line in paragraph:
+        begins.append((cursor, number))
+        cursor += len(line) + 1
+    found: list[tuple[int, int]] = []
+    for start, end in _prose_spans(joined):
+        for match in _MARKER.finditer(joined, start, end):
+            if not _escaped(joined, match.start()):
+                begin, number = next(
+                    (begin, number) for begin, number in reversed(begins) if begin <= match.start()
+                )
+                found.append((number, match.start() - begin))
+    return found
+
+
+def escape_markers(text: str) -> str:
+    """Return ``text`` with every marker escaped as ``\\[n]``, so :func:`find_markers` finds none.
+
+    This is the one grammar the conversion (MIK-R24 rule 1) uses to keep marker-shaped legacy text
+    (``signals[0]``, ``line(s) [3]``) from being read as a reference marker: it escapes exactly the
+    brackets this module would report, and nothing inside code.
+    """
+
+    starts: list[int] = []
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        starts.append(offset)
+        offset += len(line)
+    positions = [
+        starts[number - 1] + offset
+        for paragraph in _paragraphs(text)
+        for number, offset in _paragraph_marker_offsets(paragraph)
+    ]
+    for position in sorted(positions, reverse=True):
+        text = f"{text[:position]}\\{text[position:]}"
+    return text

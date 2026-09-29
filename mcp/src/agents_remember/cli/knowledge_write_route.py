@@ -30,6 +30,7 @@ from agents_remember.application.knowledge_writer import (
     write_knowledge,
 )
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusal
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 EXIT_WRITTEN = 0
@@ -53,6 +54,19 @@ def is_converted(memory_root: Path | None) -> bool:
     """Whether the memory tree at ``memory_root`` is converted (it holds the layout marker)."""
 
     return memory_root is not None and (memory_root / LAYOUT_MARKER_PATH).is_file()
+
+
+def unconverted_write_refusal(contract: WorktreeContract | None) -> str | None:
+    """MIK-R24 rule 9: an unconverted leaf tree is refused once its official line is converted."""
+
+    if contract is None or contract.memory_worktree is None:
+        return None
+    return unconverted_line_refusal(
+        memory_worktree=contract.memory_worktree,
+        memory_repository=contract.memory_repo_path,
+        official_branch=contract.memory_source_branch,
+        operation="knowledge-ingest",
+    )
 
 
 def load_leaf_contract(contract_path: str) -> WorktreeContract | None:

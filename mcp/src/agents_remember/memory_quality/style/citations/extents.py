@@ -156,6 +156,28 @@ def definitions(path: str, lines: list[str]) -> dict[str, list[Extent]]:
     }
 
 
+def qualified_spans(name: str, bound: dict[str, list[Extent]]) -> tuple[tuple[int, int], ...]:
+    """The distinct extents binding ``name`` in one file's :func:`definitions`.
+
+    ``Holder.method`` is the ``method`` defined inside a ``Holder`` definition, so a same-named
+    method of another class in the file does not make the name ambiguous. A symbol anchor names one
+    construct only when exactly one span comes back; the curator writer (MIK-R12) and the
+    conversion (MIK-R24) both bind symbols through this one rule.
+    """
+    parts = [part for part in name.split(".") if part]
+    if not parts or any(part not in bound for part in parts):
+        return ()
+    candidates = list(bound[parts[-1]])
+    for parent in parts[:-1]:
+        holders = bound[parent]
+        candidates = [
+            one
+            for one in candidates
+            if any(holder.start <= one.start and one.end <= holder.end for holder in holders)
+        ]
+    return tuple(dict.fromkeys((extent.start, extent.end) for extent in candidates))
+
+
 def occurrence_runs(pattern: re.Pattern[str], lines: list[str]) -> tuple[Extent, ...]:
     """Consecutive lines holding the pattern, grouped -- two mentions ten lines apart are
     two ranges, because one range spanning them would quote eight lines that say nothing."""

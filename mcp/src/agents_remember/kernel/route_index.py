@@ -325,11 +325,52 @@ def _hot_path(
 ) -> dict[str, Any]:
     overview_text = _read_text_optional(overview_path)
     summary = _extract_hot_path_summary(overview_text)
+    overview_text += _route_sidecar_hint_text(overview_path)
     return {
         "summary": summary,
         "candidateHints": _candidate_hints(route, covered_files, child_routes),
         "anchorHints": _anchor_hints(summary, overview_text, covered_files, child_routes),
     }
+
+
+def _route_sidecar_hint_text(overview_path: Path) -> str:
+    """The code spans a converted overview's citations carried, read back from its sidecar.
+
+    A converted route overview (MIK-R24) keeps its citations in ``overview.json`` rather than in
+    Markdown tables, so the anchor names and paths those tables showed are read from the sidecar's
+    reference targets here and feed the same hint extraction. An unconverted overview has no
+    sidecar and nothing is added.
+    """
+
+    sidecar = overview_path.with_suffix(".json")
+    if not sidecar.is_file():
+        return ""
+    try:
+        document = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    spans = [
+        span
+        for reference in (document.get("references") or {}).values()
+        for target in reference.get("targets") or ()
+        for span in _target_hint_spans(target)
+    ]
+    return "\n" + " ".join(spans) if spans else ""
+
+
+def _target_hint_spans(target: object) -> list[str]:
+    """The symbol name (as a code span) and the path one sidecar reference target names."""
+
+    anchor = target.get("anchor") if isinstance(target, dict) else None
+    if not isinstance(anchor, dict):
+        return []
+    spans: list[str] = []
+    locator = anchor.get("locator") or {}
+    if locator.get("kind") == "symbol":
+        spans.append(f"`{locator.get('name')}`")
+    if anchor.get("path"):
+        spans.append(str(anchor["path"]))
+    return spans
 
 
 def _extract_hot_path_summary(overview_text: str) -> str:

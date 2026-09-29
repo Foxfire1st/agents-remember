@@ -12,6 +12,27 @@ from agents_remember.kernel.primitives.runtime_config import (
 
 DEFAULT_BRANCH_CONFIG_KEY = "agents-remember.defaultBranch"
 
+# The layout marker (MIK-R21 rule 1, MIK-R24 rule 9): a new memory repository is created in the
+# text format. The bytes are the canonical formatting of
+# ``{"schema": "ar-memory-layout/v2", "conversion": "1"}`` (``models.knowledge_files``), spelled
+# here because the kernel ranks below the models; a test pins them to the formatter's output.
+LAYOUT_MARKER_RELATIVE = ("knowledge", "layout.json")
+LAYOUT_MARKER_TEXT = '{\n  "conversion": "1",\n  "schema": "ar-memory-layout/v2"\n}\n'
+LEGACY_DATABASE_NAME = "knowledge.sqlite"
+
+
+def _holds_legacy_memory(memory_root: Path) -> bool:
+    """Whether an existing memory root already holds unconverted content.
+
+    Such a root is converted by the conversion command or a crossing sync, never marked: writing
+    the marker beside legacy cards would make the old format be read as the new one.
+    """
+
+    if (memory_root / LEGACY_DATABASE_NAME).exists():
+        return True
+    onboarding = memory_root / "onboarding"
+    return onboarding.is_dir() and any(path.is_file() for path in onboarding.rglob("*.md"))
+
 
 def _normalize_initial_branch(value: str) -> str:
     """One explicit local branch name, or a refusal naming the value.
@@ -244,6 +265,19 @@ def initialize_memory(
         memory_root / "system" / "tools.md": f"# {repo_id} Memory Tools\n",
         memory_root / "system" / "sources.md": f"# {repo_id} Sources\n",
     }
+    marker = memory_root.joinpath(*LAYOUT_MARKER_RELATIVE)
+    if marker.exists():
+        layout = "present"
+    elif _holds_legacy_memory(memory_root):
+        layout = "unconverted-existing-memory"
+    elif (memory_root / ".git").exists():
+        # An existing repository is repaired, never re-founded: it crosses into the text format
+        # through the conversion or a crossing sync, not by an initializer writing its marker.
+        layout = "existing-repository-unchanged"
+    else:
+        layout = "created"
+        paths.append(marker.parent)
+        files[marker] = LAYOUT_MARKER_TEXT
 
     created_dirs = _create_missing_dirs([memory_root], dry_run=dry_run)
     git = _git_init_result(
@@ -278,5 +312,6 @@ def initialize_memory(
         "initialBranchSource": branch_source,
         "createdDirs": created_dirs,
         "createdFiles": created_files,
+        "layoutMarker": layout,
         "git": git,
     }

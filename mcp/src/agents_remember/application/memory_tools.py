@@ -31,6 +31,7 @@ from agents_remember.kernel.primitives.runtime_config import (
 )
 from agents_remember.kernel.route_index import build_route_indexes
 from agents_remember.memory import baseline, carryover
+from agents_remember.memory_quality import reference_state
 from agents_remember.memory_quality.integrity.onboarding_drift_check.summary import (
     run_drift_summary,
 )
@@ -188,6 +189,14 @@ def citation_check_tool(
     """
     operation_scope.validate()
     scope = _memory_scope(config, repo_id=repo_id, contract_path=contract_path)
+    memory_root = scope.onboarding_root.parent
+    if reference_state.is_converted_memory(memory_root):
+        # MIK-R24 rule 5: a converted tree's citations are its sidecar references; a stale one
+        # is reported (report-only), never a gate finding.
+        return {
+            "repoId": scope.repo_id,
+            **reference_state.check_references(memory_root, scope.code_root),
+        }
     trees = _citation_trees(scope, operation_scope.excludes)
     return {
         "repoId": scope.repo_id,
@@ -242,6 +251,14 @@ def citation_fix_tool(
         contract_path=contract_path,
         operation="citation_fix",
     )
+    memory_root = scope.onboarding_root.parent
+    if reference_state.is_converted_memory(memory_root):
+        # MIK-R24 rule 5: the fixer re-records only mechanically moved reference anchors.
+        return {
+            "repoId": scope.repo_id,
+            **reference_state.fix_references(memory_root, scope.code_root, dry_run=dry_run),
+            **measuring_build_stamp(),
+        }
     trees = _citation_trees(scope, operation_scope.excludes)
     return {
         "repoId": scope.repo_id,

@@ -2,7 +2,7 @@
 
 The single front door for the package's CLI tools. It carries ``dashboard``, the memory
 maintenance and migration commands, the knowledge write plane's ingest and its **taskless**
-``knowledge-bootstrap`` entry, the text knowledge format's ``knowledge-format`` formatter,
+``knowledge-bootstrap`` entry, the text knowledge format's ``knowledge-format`` formatter, ``knowledge-convert`` conversion,
 ``knowledge-validate`` validator, ``knowledge-index`` derived index and read-only
 ``knowledge-routes`` family-route report, the migration census's ``knowledge-census`` inventory
 and report, the review plane's ``review-record-comparison`` entry, and the existing
@@ -19,6 +19,7 @@ from agents_remember.cli import (
     dashboard,
     knowledge_bootstrap,
     knowledge_census,
+    knowledge_convert,
     knowledge_format,
     knowledge_index,
     knowledge_ingest,
@@ -72,6 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     knowledge_format.add_arguments(fmt)
     fmt.set_defaults(func=knowledge_format.run)
+    convert = sub.add_parser(
+        "knowledge-convert",
+        help="Convert a memory tree and its knowledge database into the text knowledge format.",
+    )
+    knowledge_convert.add_arguments(convert)
+    convert.set_defaults(func=knowledge_convert.run)
     validate = sub.add_parser(
         "knowledge-validate",
         help="Validate a converted memory tree against the knowledge formats and integrity rules.",
