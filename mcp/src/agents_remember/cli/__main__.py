@@ -2,11 +2,11 @@
 
 The single front door for the package's CLI tools. It carries ``dashboard``, the memory
 maintenance and migration commands, the knowledge write plane's ingest and its **taskless**
-``knowledge-bootstrap`` entry, the text knowledge format's ``knowledge-format`` formatter and
-``knowledge-validate`` validator, the review plane's ``review-record-comparison`` entry, and the
-existing ``context_packet`` adapter as subparsers. The MCP server keeps its own
-``agents-remember-mcp`` console script -- harness configs launch the server by that exact name, so
-it is never folded in here.
+``knowledge-bootstrap`` entry, the text knowledge format's ``knowledge-format`` formatter,
+``knowledge-validate`` validator and ``knowledge-index`` derived index, the review plane's
+``review-record-comparison`` entry, and the existing ``context_packet`` adapter as subparsers. The
+MCP server keeps its own ``agents-remember-mcp`` console script -- harness configs launch the server
+by that exact name, so it is never folded in here.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from agents_remember.cli import (
     dashboard,
     knowledge_bootstrap,
     knowledge_format,
+    knowledge_index,
     knowledge_ingest,
     knowledge_validate,
     memory_backfill,
@@ -73,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     knowledge_validate.add_arguments(validate)
     validate.set_defaults(func=knowledge_validate.run)
+    index = sub.add_parser(
+        "knowledge-index",
+        help="Build or reuse the derived knowledge index of one memory tree and report it.",
+    )
+    knowledge_index.add_arguments(index)
+    index.set_defaults(func=knowledge_index.run)
     record = sub.add_parser(
         "review-record-comparison",
         help=(

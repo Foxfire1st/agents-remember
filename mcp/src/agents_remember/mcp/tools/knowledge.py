@@ -48,6 +48,12 @@ from agents_remember.application.knowledge_views import (
     VIEW_RENDERER_VERSION,
     read_knowledge_view,
 )
+from agents_remember.application.published_intent import (
+    SelectedKnowledgeDataset,
+    memory_tree_block,
+    select_knowledge_dataset,
+)
+from agents_remember.kernel.git_preparation import GitPreparationError
 from agents_remember.memory.knowledge.connection import (
     inspect_schema,
     open_read_only_database,
@@ -59,6 +65,7 @@ from agents_remember.memory.knowledge.detection import (
 )
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge.store import OpenedKnowledgeStore
+from agents_remember.memory.knowledge_index import MemoryTreeError
 from agents_remember.models.knowledge.diff import KnowledgeDiffRequest
 from agents_remember.models.knowledge.projection_manifest import DestinationProfile
 from agents_remember.models.knowledge.view import (
@@ -229,6 +236,53 @@ def _unusable_dataset(database_path: str, error: BaseException) -> tuple[str, st
     )
 
 
+def _select(path: str, coordination_root: str | None) -> SelectedKnowledgeDataset:
+    """Resolve one caller-selected dataset path: a converted memory tree reads through its index.
+
+    ``databasePath`` keeps its published meaning -- the dataset a read opens -- and gains one
+    resolution (MIK-R23 rule 6): a path naming a converted memory tree (its root, or the published
+    ``knowledge.sqlite`` location inside it) is read through the index of that tree's current
+    state, and the response names the tree and the index state. Every other path is opened as
+    before, so an unconverted tree keeps today's database selection and refusals.
+    """
+
+    return select_knowledge_dataset(
+        Path(path), coordination_root=None if coordination_root is None else Path(coordination_root)
+    )
+
+
+# Every way resolving and opening a selection can fail, so each handler refuses the same inputs
+# the same way: an index that cannot be built (the tree, its Git objects, the cache) is
+# ``snapshot_unavailable`` naming the tree; everything else is the dataset refusal it was before.
+_SELECTION_FAILURES = (
+    MemoryTreeError,
+    GitPreparationError,
+    KnowledgeStorageError,
+    apsw.Error,
+    OSError,
+)
+
+
+def _selection_refusal(path: str, error: BaseException) -> tuple[str, str]:
+    if isinstance(error, MemoryTreeError | GitPreparationError):
+        return ("snapshot_unavailable", f"the selected memory tree could not be indexed: {error}")
+    return _unusable_dataset(path, error)
+
+
+def _index_complete(*selected: SelectedKnowledgeDataset) -> bool | None:
+    """``False`` when any side was read from a partial index, ``True`` when all were complete.
+
+    ``None`` when no side is a memory tree: a database has no index state. A partial index is never
+    presented as complete (MIK-R23, Failure), so every surface that states completeness is forced
+    to ``False`` by it.
+    """
+
+    trees = [item.memory_tree for item in selected if item.memory_tree is not None]
+    if not trees:
+        return None
+    return all(tree.index_state == "complete" for tree in trees)
+
+
 def _source_resolution(
     request: ReadToolRequest, workspace_root: str | None
 ) -> tuple[str | None, str | None]:
@@ -287,14 +341,25 @@ def _current_code_tree(repository_root: str) -> str | None:
 
 
 def knowledge_read_payload(
-    request: ReadToolRequest, *, workspace_root: str | None = None
+    request: ReadToolRequest,
+    *,
+    workspace_root: str | None = None,
+    coordination_root: str | None = None,
 ) -> dict[str, Any]:
     """Retrieve one named view at one snapshot, through the response-model choke point."""
 
-    return _tool_payload("knowledge_read", _read_result(request, workspace_root=workspace_root))
+    return _tool_payload(
+        "knowledge_read",
+        _read_result(request, workspace_root=workspace_root, coordination_root=coordination_root),
+    )
 
 
-def _read_result(request: ReadToolRequest, *, workspace_root: str | None = None) -> dict[str, Any]:
+def _read_result(
+    request: ReadToolRequest,
+    *,
+    workspace_root: str | None = None,
+    coordination_root: str | None = None,
+) -> dict[str, Any]:
     """The one ``knowledge_read`` body, before the registered model validates it."""
 
     databasePath, repositoryId, view = (
@@ -331,6 +396,8 @@ def _read_result(request: ReadToolRequest, *, workspace_root: str | None = None)
     # to already turns all three into typed refusals, and a transport that let them escape as
     # ``ToolError`` would refuse the same input on one surface and raise on another.
     try:
+        selected = _select(databasePath, coordination_root)
+        path = selected.database_path
         repository_root, code_tree_id = _source_resolution(request, workspace_root)
         context = open_read_context(
             path,
@@ -342,22 +409,29 @@ def _read_result(request: ReadToolRequest, *, workspace_root: str | None = None)
         if isinstance(built, ViewRefusal):
             return _refused_read(view, repositoryId, built.code, built.detail)
         result = read_knowledge_view(path, context, built)
-    except (KnowledgeStorageError, apsw.Error, OSError) as error:
-        code, detail = _unusable_dataset(databasePath, error)
-        return _refused_read(view, repositoryId, code, detail)
+    except _SELECTION_FAILURES as error:
+        return _refused_read(view, repositoryId, *_selection_refusal(str(path), error))
     if result.state == "refused" or result.payload is None:
         assert result.refusal is not None
         return _refused_read(view, repositoryId, result.refusal.code, result.refusal.detail)
     payload = result.payload
+    body = payload.model_dump(mode="json")
+    complete = payload.completeness.complete_within_declared_scope
+    if _index_complete(selected) is False:
+        # The view is complete within what the index holds, and the index is not the whole tree.
+        complete = False
+        body["completeness"]["complete_within_declared_scope"] = False
     return {
         "ok": True,
         "state": "view",
         "view": payload.view,
         "repositoryId": repositoryId,
         "snapshot": payload.snapshot.logical_digest,
-        "completeWithinDeclaredScope": payload.completeness.complete_within_declared_scope,
+        "completeWithinDeclaredScope": complete,
         "continuation": None if payload.continuation is None else payload.continuation.token,
-        "payload": payload.model_dump(mode="json"),
+        "payload": body,
+        "memoryTree": memory_tree_block(selected.memory_tree),
+        "indexComplete": _index_complete(selected),
     }
 
 
@@ -429,13 +503,19 @@ def _change_result(request: ChangeToolRequest) -> dict[str, Any]:
     }
 
 
-def knowledge_diff_payload(request: DiffToolRequest) -> dict[str, Any]:
+def knowledge_diff_payload(
+    request: DiffToolRequest, *, coordination_root: str | None = None
+) -> dict[str, Any]:
     """Compare two exact states, through the response-model choke point."""
 
-    return _tool_payload("knowledge_diff", _diff_result(request))
+    return _tool_payload(
+        "knowledge_diff", _diff_result(request, coordination_root=coordination_root)
+    )
 
 
-def _diff_result(request: DiffToolRequest) -> dict[str, Any]:
+def _diff_result(
+    request: DiffToolRequest, *, coordination_root: str | None = None
+) -> dict[str, Any]:
     """The one ``knowledge_diff`` body, before the registered model validates it.
 
     Only the semantic labels an identified source supplied are carried; the builder never derives
@@ -462,13 +542,15 @@ def _diff_result(request: DiffToolRequest) -> dict[str, Any]:
             ),
         }
     try:
+        before = _select(request.before_path, coordination_root)
+        after = _select(request.after_path, coordination_root)
         result = diff_knowledge_scope(
             built,
-            before_path=Path(request.before_path),
-            after_path=Path(request.after_path),
+            before_path=before.database_path,
+            after_path=after.database_path,
         )
-    except (KnowledgeStorageError, apsw.Error, OSError) as error:
-        code, detail = _unusable_dataset(request.before_path, error)
+    except _SELECTION_FAILURES as error:
+        code, detail = _selection_refusal(request.before_path, error)
         return {
             "ok": True,
             "state": "refused",
@@ -490,7 +572,22 @@ def _diff_result(request: DiffToolRequest) -> dict[str, Any]:
         "repositoryId": repositoryId,
         "semanticEffectLabels": supplied,
         "payload": result.model_dump(mode="json"),
+        "memoryTrees": _memory_trees(before, after),
+        "indexComplete": _index_complete(before, after),
     }
+
+
+def _memory_trees(
+    before: SelectedKnowledgeDataset, after: SelectedKnowledgeDataset
+) -> dict[str, Any] | None:
+    """The memory-tree binding of each side read through an index, or ``None`` for two databases."""
+
+    sides = {
+        side: memory_tree_block(selected.memory_tree)
+        for side, selected in (("before", before), ("after", after))
+        if selected.memory_tree is not None
+    }
+    return sides or None
 
 
 def _diff_request(request: dict[str, Any] | None) -> Any:
@@ -846,13 +943,19 @@ def _condition_report(
     }
 
 
-def knowledge_project_payload(request: ProjectToolRequest) -> dict[str, Any]:
+def knowledge_project_payload(
+    request: ProjectToolRequest, *, coordination_root: str | None = None
+) -> dict[str, Any]:
     """Render named read-only views into an explicitly authorized destination, through the choke point."""
 
-    return _tool_payload("knowledge_project", _project_result(request))
+    return _tool_payload(
+        "knowledge_project", _project_result(request, coordination_root=coordination_root)
+    )
 
 
-def _project_result(request: ProjectToolRequest) -> dict[str, Any]:
+def _project_result(
+    request: ProjectToolRequest, *, coordination_root: str | None = None
+) -> dict[str, Any]:
     """The one ``knowledge_project`` body, before the registered model validates it."""
 
     destinationRoot = request.destination_root
@@ -869,8 +972,12 @@ def _project_result(request: ProjectToolRequest) -> dict[str, Any]:
             "unresolved_projection_input",
             "no view was named to project, so no artifact is emitted",
         )
+    try:
+        selected = _select(request.database_path, coordination_root)
+    except _SELECTION_FAILURES as error:
+        return _refused_project(destinationRoot, *_selection_refusal(request.database_path, error))
     report = project_knowledge(
-        Path(request.database_path),
+        selected.database_path,
         profile,
         requests,
         ProjectionOptions(authorized_overwrites=request.authorized_overwrites),
@@ -891,6 +998,8 @@ def _project_result(request: ProjectToolRequest) -> dict[str, Any]:
         ],
         "retained": [entry.model_dump(mode="json") for entry in report.retained],
         "discrepancies": [entry.model_dump(mode="json") for entry in report.discrepancies],
+        "memoryTree": memory_tree_block(selected.memory_tree),
+        "indexComplete": _index_complete(selected),
     }
 
 

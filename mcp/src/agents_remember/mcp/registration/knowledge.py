@@ -49,16 +49,18 @@ def register_knowledge_tools(server: FastMCP, config: McpRuntimeConfig) -> None:
     repository*, not as half of a source-resolution pair: the read builder completes the pair or
     names neither half, because a context carrying ``repository_root`` without ``code_tree_id`` is
     refused by its own model and a minimal schema-conformant call would then raise instead of
-    returning a view. Everything else a handler needs -- the dataset path, the namespace and the
+    returning a view. It also supplies the coordination root, under whose runtime directory a
+    converted memory tree's derived index is cached when a read selects that tree (MIK-R23).
+    Everything else a handler needs -- the dataset path, the namespace and the
     destination -- is caller-supplied, because the substrate decides nothing about which dataset or
     which vault is meant.
     """
 
     _register_knowledge_read(server, config)
     _register_knowledge_change(server)
-    _register_knowledge_diff(server)
+    _register_knowledge_diff(server, config)
     _register_knowledge_integrity_check(server)
-    _register_knowledge_project(server)
+    _register_knowledge_project(server, config)
 
 
 def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
@@ -100,6 +102,7 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
                 code_tree_id=codeTreeId,
             ),
             workspace_root=str(config.workspace_root),
+            coordination_root=str(config.coordination_root),
         )
 
 
@@ -137,7 +140,7 @@ def _register_knowledge_change(server: FastMCP) -> None:
         )
 
 
-def _register_knowledge_diff(server: FastMCP) -> None:
+def _register_knowledge_diff(server: FastMCP, config: McpRuntimeConfig) -> None:
     """The comparison operation, which infers no semantic label."""
 
     @server.tool()
@@ -158,7 +161,8 @@ def _register_knowledge_diff(server: FastMCP) -> None:
                 before_path=beforePath,
                 after_path=afterPath,
                 body=request,
-            )
+            ),
+            coordination_root=str(config.coordination_root),
         )
 
 
@@ -190,7 +194,7 @@ def _register_knowledge_integrity_check(server: FastMCP) -> None:
         )
 
 
-def _register_knowledge_project(server: FastMCP) -> None:
+def _register_knowledge_project(server: FastMCP, config: McpRuntimeConfig) -> None:
     """The projection operation, the only write path to a destination."""
 
     @server.tool()
@@ -219,5 +223,6 @@ def _register_knowledge_project(server: FastMCP) -> None:
                 formats=tuple(formats or ("markdown",)),
                 views=tuple(views or ()),
                 authorized_overwrites=tuple(authorizedOverwrites or ()),
-            )
+            ),
+            coordination_root=str(config.coordination_root),
         )

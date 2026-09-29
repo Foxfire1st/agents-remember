@@ -51,6 +51,17 @@ never observed, and a record identity the snapshot does not hold is the read's o
 ``selector_absent`` -- the named absence of a generation this snapshot does not carry. Today's
 database is never substituted for a historical generation.
 
+**A converted memory tree is selected as a tree (MIK-R23 rule 6).** When the memory root holds the
+layout marker (``knowledge/layout.json``), knowledge is text and there is no published database to
+select: the ordinary read's published intent is then the memory tree itself, read through the
+derived index (:mod:`agents_remember.memory.knowledge_index`) built from that tree's captured state
+and cached under the coordination runtime. The index is a dataset of the store's schema, so the
+same ``open_read_context`` + ``read_knowledge_scope`` pair reads it; the block names the tree key
+and the index state, and a ``partial`` index says so with the files that failed. A memory root
+without the marker keeps the database selection above, unchanged. Only this read switches: the
+write side's :func:`resolve_published_intent` still selects the database, and no writer reaches the
+index.
+
 One limitation travels with a bounded page rather than being left for a caller to discover: the
 ``continuation`` a page mints is a ``read_knowledge_scope`` cursor (``continuationOperation``), and
 the mounted ``knowledge_read`` tool continues *views*, so it refuses that token. A caller that needs
@@ -75,8 +86,13 @@ from agents_remember.application.knowledge_read import open_read_context, read_k
 from agents_remember.kernel.coordination_context.models import CoordinationContext
 from agents_remember.kernel.git_command import run_git
 from agents_remember.memory.knowledge.connection import open_read_only_database
-from agents_remember.memory.knowledge.logical import bound_repository
+from agents_remember.memory.knowledge.logical import bound_repository, dataset_identity
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
+from agents_remember.memory.knowledge_index import (
+    KnowledgeIndexCache,
+    MemoryTreeError,
+    default_cache_directory,
+)
 from agents_remember.models.knowledge.read import (
     KNOWLEDGE_READ_POLICY_VERSION,
     KnowledgeReadBudget,
@@ -89,6 +105,7 @@ from agents_remember.models.knowledge.read import (
     ReadItem,
 )
 from agents_remember.models.knowledge.result import KnowledgeRefusal
+from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 
 __all__ = [
     "PUBLISHED_DATASET_NAME",
@@ -97,10 +114,16 @@ __all__ = [
     "PublishedIntentSelection",
     "PublishedIntentSourcePair",
     "PublishedIntentUnavailable",
+    "PublishedMemoryTree",
+    "SelectedKnowledgeDataset",
+    "converted_memory_tree",
+    "memory_tree_block",
     "published_dataset_path",
     "published_intent_block",
     "read_published_intent",
     "resolve_published_intent",
+    "resolve_published_memory_tree",
+    "select_knowledge_dataset",
 ]
 
 # The one file name a repository's published knowledge dataset occupies inside its memory layer.
@@ -133,6 +156,7 @@ _TREE_ID_PATTERN = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 # for a worse one. ``ValidationError`` belongs here for that same reason -- a dataset whose stored
 # namespace row this build cannot decode is an input the route was handed, not a caller mistake.
 _PUBLICATION_FAILURES = (KnowledgeStorageError, apsw.Error, OSError, ValidationError)
+_TREE_FAILURES = (*_PUBLICATION_FAILURES, MemoryTreeError)
 
 
 @dataclass(frozen=True)
@@ -162,6 +186,21 @@ class PublishedIntentSelection:
     schema_version: str
     logical_digest: str
     source_pair: PublishedIntentSourcePair | None
+    memory_tree: PublishedMemoryTree | None = None
+
+
+@dataclass(frozen=True)
+class PublishedMemoryTree:
+    """The converted memory tree a selection reads, through the index built for its key.
+
+    ``index_state`` is ``complete`` or ``partial``; ``problems`` names every file a partial index
+    could not read, so a page from it is never presented as complete.
+    """
+
+    memory_root: Path
+    tree_key: str
+    index_state: str
+    problems: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
@@ -243,6 +282,108 @@ def resolve_published_intent(
     )
 
 
+def resolve_published_memory_tree(
+    context: CoordinationContext,
+) -> PublishedIntentSelection | PublishedIntentUnavailable | None:
+    """Select the converted memory tree at ``context.memory_root``, or ``None`` when unconverted.
+
+    The tree's key is recomputed from its current state on every call (MIK-R23 rule 5), and the
+    index for that key is reused or built; the selection then names the index file as the dataset
+    the shipped read opens. No authority-home check applies: the index is keyed by its tree alone,
+    and the tree is the one the repository's own coordination context resolves.
+    """
+
+    if converted_memory_tree(context.memory_root) is None:
+        return None
+    try:
+        selected = _index_selection(context.memory_root, context.coordination_root)
+        identity = dataset_identity(selected.database_path)
+    except _TREE_FAILURES as error:
+        return _unusable(context.memory_root, f"the memory tree could not be indexed ({error})")
+    return PublishedIntentSelection(
+        database_path=selected.database_path,
+        repository_id=identity.repository_id,
+        schema_version=identity.schema_version,
+        logical_digest=identity.logical_digest,
+        source_pair=_source_pair(context),
+        memory_tree=selected.memory_tree,
+    )
+
+
+@dataclass(frozen=True)
+class SelectedKnowledgeDataset:
+    """The dataset file a knowledge read opens, and the memory tree it stands for, if any."""
+
+    database_path: Path
+    memory_tree: PublishedMemoryTree | None
+
+
+def converted_memory_tree(path: Path) -> Path | None:
+    """Return the converted memory tree a dataset selection names, or ``None``.
+
+    A selection names a converted tree when it is the tree's root directory, or the published
+    dataset location inside it (``<memory-root>/knowledge.sqlite``, :data:`PUBLISHED_DATASET_NAME`):
+    once a tree holds the layout marker its knowledge is text, and the database file a caller was
+    handed before the conversion is no longer the source of truth (MIK-R23 rule 6, MIK-R37 rule 3).
+    """
+
+    if path.is_dir() and (path / LAYOUT_MARKER_PATH).is_file():
+        return path
+    if path.name == PUBLISHED_DATASET_NAME and (path.parent / LAYOUT_MARKER_PATH).is_file():
+        return path.parent
+    return None
+
+
+def select_knowledge_dataset(
+    path: Path, *, coordination_root: Path | None
+) -> SelectedKnowledgeDataset:
+    """Resolve one caller-selected dataset path the way every knowledge read does (MIK-R23 rule 6).
+
+    A path naming a converted memory tree resolves to the index of that tree's current state; any
+    other path is returned unchanged, so an unconverted tree keeps today's database selection and
+    its own refusals. Building an index needs the cache under the coordination runtime, so a
+    converted selection without a coordination root is refused with :class:`MemoryTreeError`.
+    """
+
+    memory_root = converted_memory_tree(path)
+    if memory_root is None:
+        return SelectedKnowledgeDataset(database_path=path, memory_tree=None)
+    if coordination_root is None:
+        raise MemoryTreeError(
+            f"{path} names the converted memory tree {memory_root}, and no coordination root is "
+            "known to keep its index under"
+        )
+    return _index_selection(memory_root, coordination_root)
+
+
+def memory_tree_block(tree: PublishedMemoryTree | None) -> dict[str, Any] | None:
+    """The wire spelling of a memory-tree binding: root, tree key, index state and problems."""
+
+    if tree is None:
+        return None
+    return {
+        "memoryRoot": str(tree.memory_root),
+        "treeId": tree.tree_key,
+        "indexState": tree.index_state,
+        "problems": [{"path": path, "detail": detail} for path, detail in tree.problems],
+    }
+
+
+def _index_selection(memory_root: Path, coordination_root: Path) -> SelectedKnowledgeDataset:
+    cache = KnowledgeIndexCache(default_cache_directory(coordination_root))
+    with cache.for_directory(memory_root) as index:
+        state = index.state
+    return SelectedKnowledgeDataset(
+        database_path=index.database_path,
+        memory_tree=PublishedMemoryTree(
+            memory_root=memory_root,
+            tree_key=state.key,
+            index_state=state.state,
+            problems=state.problems,
+        ),
+    )
+
+
 def _absence_state(database_path: Path, repository_name: str) -> PublishedIntentUnavailable | None:
     """The named state of a location this route cannot read a dataset from, or ``None``.
 
@@ -287,7 +428,7 @@ def published_intent_block(
     that asked for source bytes still receives them.
     """
 
-    resolved = resolve_published_intent(context)
+    resolved = resolve_published_memory_tree(context) or resolve_published_intent(context)
     if isinstance(resolved, PublishedIntentUnavailable):
         return _unavailable_block(resolved)
     seeds: list[KnowledgeReadSeed | _UnseedablePath] = [_source_seed(path) for path in source_paths]
@@ -312,7 +453,24 @@ def read_published_intent(
     if isinstance(context, PublishedIntentUnavailable):
         return _unavailable_block(context)
     blocks = [_seed_block(selection, context, seed, max_items) for seed in seeds]
-    return _recorded_block(selection, blocks)
+    return _recorded_block(selection, [_bind_index_state(block, selection) for block in blocks])
+
+
+def _bind_index_state(block: dict[str, Any], selection: PublishedIntentSelection) -> dict[str, Any]:
+    """Mark one page read from a memory tree with its index state (MIK-R23, Failure).
+
+    A page from a ``partial`` index is never presented as complete: ``enumerationComplete`` is
+    forced to ``false`` -- the page enumerated what the index holds, and the index does not hold the
+    whole tree -- and ``indexState`` says why. A page from a database is returned unchanged.
+    """
+
+    tree = selection.memory_tree
+    if tree is None or block.get("state") != "page":
+        return block
+    bound = {**block, "indexState": tree.index_state}
+    if tree.index_state != "complete":
+        bound["enumerationComplete"] = False
+    return bound
 
 
 def _source_pair(context: CoordinationContext) -> PublishedIntentSourcePair | None:
@@ -574,7 +732,15 @@ def _recorded_block(
             }
         ),
         "seeds": seeds,
+        **_memory_tree_block(selection.memory_tree),
     }
+
+
+def _memory_tree_block(tree: PublishedMemoryTree | None) -> dict[str, Any]:
+    """The memory-tree binding of a selection read through the index, or nothing for a database."""
+
+    block = memory_tree_block(tree)
+    return {} if block is None else {"memoryTree": block}
 
 
 def _unavailable_block(unavailable: PublishedIntentUnavailable) -> dict[str, Any]:

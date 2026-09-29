@@ -9,6 +9,13 @@ format would create a second renderer and therefore a second place for the class
 violated, so the payload travels as the typed view payload's own JSON and this module adds only the
 envelope around it.
 
+**A memory tree is named, never hidden (MIK-R23).** When a read's ``databasePath`` names a
+converted memory tree, the handler reads the tree's derived index and adds the optional
+``memoryTree`` (``memoryTrees`` for a comparison's two sides): the tree root, its key, the index
+state and every file a ``partial`` index could not read, plus ``indexComplete`` (``false`` when any
+side was read from a partial index). A partial index is never presented as complete: a read from one
+also reports ``completeWithinDeclaredScope: false``. The fields are absent for a database.
+
 **A refusal is a state, not a partial success.** ``state`` is ``view``/``result`` or ``refused``, and
 the refusal fields name the offending input. A handler never translates a refusal into an empty
 result or a default value, so a caller can always tell "nothing was selected" from "the selection was
@@ -48,6 +55,8 @@ class KnowledgeReadResponse(ToolResponse):
     completeWithinDeclaredScope: bool | None = None
     continuation: str | None = None
     payload: dict[str, Any] | None = None
+    memoryTree: dict[str, Any] | None = None
+    indexComplete: bool | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None
 
@@ -78,6 +87,8 @@ class KnowledgeDiffResponse(ToolResponse):
     repositoryId: str
     semanticEffectLabels: list[dict[str, Any]] = Field(default_factory=list)
     payload: dict[str, Any] | None = None
+    memoryTrees: dict[str, Any] | None = None
+    indexComplete: bool | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None
 
@@ -129,5 +140,7 @@ class KnowledgeProjectResponse(ToolResponse):
     published: list[str] = Field(default_factory=list)
     retained: list[dict[str, Any]] = Field(default_factory=list)
     discrepancies: list[dict[str, Any]] = Field(default_factory=list)
+    memoryTree: dict[str, Any] | None = None
+    indexComplete: bool | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None
