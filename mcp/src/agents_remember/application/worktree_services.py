@@ -13,6 +13,9 @@ from agents_remember.application.prepared_certification import (
 from agents_remember.memory_quality import check as memory_quality_check_api
 from agents_remember.memory_quality.gate_five_rails import gate_five_memory_rails
 from agents_remember.memory_quality.incremental_scope.candidate import observe_contract_task
+from agents_remember.memory_quality.knowledge_validator.commit_route import (
+    GitKnowledgeValidation,
+)
 from agents_remember.memory_quality.style.citations import (
     source_index_cache as citation_cache_api,
 )
@@ -208,6 +211,7 @@ def build_default_worktree_services() -> WorktreeServices:
         certification_memory_rails=CertificationMemoryRailsAdapter(),
         certification_continuation=PreparedCloseoutContinuation(),
         prepared_memory_certification=PreparedMemoryCertificationAdapter(),
+        knowledge_validation=GitKnowledgeValidation(),
     )
 
 

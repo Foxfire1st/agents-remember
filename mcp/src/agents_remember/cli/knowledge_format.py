@@ -19,9 +19,8 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes
+from agents_remember.memory_quality.knowledge_validator.trees import is_excluded_from_knowledge
 from agents_remember.models.knowledge_files.canonical import CanonicalFormatError, format_bytes
-
-CACHE_SUFFIX = ".index.json"
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -41,10 +40,7 @@ def iter_json_files(paths: list[Path]) -> Iterator[Path]:
             yield path
             continue
         for candidate in sorted(path.rglob("*.json")):
-            relative = candidate.relative_to(path)
-            if candidate.name.endswith(CACHE_SUFFIX):
-                continue
-            if any(part.startswith(".") for part in relative.parts[:-1]):
+            if is_excluded_from_knowledge(candidate.relative_to(path).as_posix()):
                 continue
             yield candidate
 

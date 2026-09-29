@@ -3,7 +3,7 @@
 Worktrees ranks below providers, memory_quality and code_quality, so the
 lifecycle modules never import them. The composition layer binds one
 ``WorktreeServices`` bundle (provider lifecycle, memory-quality gate,
-citation-cache guard) before invoking worktree operations.
+citation-cache guard, knowledge validator) before invoking worktree operations.
 """
 
 from __future__ import annotations
@@ -128,6 +128,25 @@ class MemoryQualityPort(Protocol):
     ) -> dict[str, Any]: ...
 
 
+class KnowledgeValidationPort(Protocol):
+    """The mandatory knowledge validator (MIK-R22), as a memory commit route calls it.
+
+    The worktree layer may not import memory_quality; the composition layer binds
+    ``memory_quality.knowledge_validator.commit_route.GitKnowledgeValidation``. It returns the
+    refusal naming every violation, or ``None`` when the candidate tree may be committed.
+    """
+
+    def refusal(
+        self,
+        *,
+        memory_repository: Path,
+        candidate_tree: str,
+        bases: Sequence[str],
+        code_repository: Path,
+        code_commit: str,
+    ) -> str | None: ...
+
+
 class CertificationContinuationPort(Protocol):
     """Composition-owned Gate 5 and finalization boundaries after exact code certificates."""
 
@@ -149,6 +168,7 @@ class WorktreeServices:
     certification_memory_rails: CertificationMemoryRailsPort | None = None
     certification_continuation: CertificationContinuationPort | None = None
     prepared_memory_certification: PreparedMemoryCertificationPort | None = None
+    knowledge_validation: KnowledgeValidationPort | None = None
 
 
 @dataclass(frozen=True)
@@ -202,6 +222,7 @@ __all__ = [
     "CertificationContinuationPort",
     "CertificationMemoryRailsPort",
     "CitationGuardPort",
+    "KnowledgeValidationPort",
     "MemoryQualityPort",
     "ProviderLifecyclePort",
     "TerminalGuard",

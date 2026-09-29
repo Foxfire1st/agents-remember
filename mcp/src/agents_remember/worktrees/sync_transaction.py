@@ -7,6 +7,7 @@ from pathlib import Path
 from agents_remember.models.knowledge.merge import AuthoredReconciliation
 from agents_remember.models.worktree import SyncKnowledgeConflict, SyncSide
 from agents_remember.worktrees.knowledge_conflict import RefusedKnowledgeStage
+from agents_remember.worktrees.knowledge_validation import PairedCode
 from agents_remember.worktrees.modules.args import WorktreeArgs
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.sync_transaction_authority import (
@@ -25,6 +26,7 @@ from agents_remember.worktrees.sync_transaction_authority import (
 )
 from agents_remember.worktrees.sync_transaction_git import (
     SyncGitProofError,
+    SyncKnowledgeValidationError,
     apply_parked_wip,
     content_conflicts,
     continue_side_merge,
@@ -533,6 +535,8 @@ def _run_automatic(
                 return resolution_required(record, fetch)
         if record.phase == "finalizing":
             return finalize_sync(contract, store, record, fetch)
+    except SyncKnowledgeValidationError as error:
+        return _knowledge_validation_refused(error, record, fetch)
     except SyncGitProofError as error:
         return manual_repair_result("sync-git-proof-failed", str(error), record, fetch)
     return manual_repair_result(
@@ -559,7 +563,7 @@ def _run_side(
         )
         return _advance_after_side(store, record, side_name, completed)
     ensure_temporary_worktree(side)
-    outcome = start_side_merge(side)
+    outcome = start_side_merge(side, paired_code=_paired_code(record))
     if outcome.state == "resolution-required":
         updated_side = side.model_copy(
             update={
@@ -576,6 +580,34 @@ def _run_side(
     if conflicted:
         return record
     return _advance_after_side(store, record, side_name, updated_side)
+
+
+def _knowledge_validation_refused(
+    error: SyncKnowledgeValidationError, record: SyncOperationRecord, fetch: dict[str, object]
+) -> WorktreeCommandResult:
+    """The validator refused the staged memory merge (MIK-R22): name every violation and the way on.
+
+    The merge stays staged and the phase is unchanged, so the same call that reached the refusal
+    resumes it: ``continue`` for a retained conflict, a plain rerun for the automatic merge.
+    """
+
+    worktree = record.memory.worktree if record.memory is not None else "the memory worktree"
+    retained = record.phase == "memory-resolution-required"
+    rerun = "worktree_sync with resolution_action='continue'" if retained else "worktree_sync"
+    summary = (
+        f"{error}\nRecovery: repair these files in {worktree}, stage them (git add), then rerun "
+        f"{rerun}; or cancel the sync with resolution_action='cancel'."
+    )
+    return manual_repair_result("sync-knowledge-validation-refused", summary, record, fetch)
+
+
+def _paired_code(record: SyncOperationRecord) -> PairedCode | None:
+    """The code commit a memory merge is validated against: the code side's settled result."""
+
+    code = record.code
+    if code.state != "completed" or not code.resultHead:
+        return None
+    return PairedCode(repository=Path(code.repository), commit=code.resultHead)
 
 
 def _continue_resolution(
@@ -626,7 +658,9 @@ def _finish_retained_merge(
     side = _retained_side(record)
 
     try:
-        result_head = continue_side_merge(side)
+        result_head = continue_side_merge(side, paired_code=_paired_code(record))
+    except SyncKnowledgeValidationError as error:
+        return _knowledge_validation_refused(error, record, fetch)
     except SyncGitProofError as error:
         refreshed = side.model_copy(update={"conflictFiles": content_conflicts(side)})
         record = update_record(store, record, phase=record.phase, side=refreshed)

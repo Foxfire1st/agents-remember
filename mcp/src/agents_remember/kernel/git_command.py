@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, overload
@@ -286,10 +286,11 @@ def _run_git(
 def _run_git(
     repo_root: Path, args: list[str], execution: _GitRun, *, raw_output: bool = False
 ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+    stdin_input: str | bytes | None = execution.input_text
+    if raw_output and stdin_input is not None:
+        stdin_input = stdin_input.encode("utf-8")
     stdin_kwargs: dict[str, object] = (
-        {"input": execution.input_text}
-        if execution.input_text is not None
-        else {"stdin": subprocess.DEVNULL}
+        {"input": stdin_input} if stdin_input is not None else {"stdin": subprocess.DEVNULL}
     )
     return subprocess.run(
         _git_argv(repo_root, args, execution.work_dir),
@@ -332,6 +333,46 @@ def read_git_blob_bytes(root: Path, blob_id: str) -> bytes:
     """Read one fully named original blob without decoding or newline normalization."""
     require_git_object_id(blob_id)
     return _read_git_bytes(root, ["cat-file", "blob", blob_id])
+
+
+def read_git_blobs_bytes(root: Path, blob_ids: Iterable[str]) -> dict[str, bytes]:
+    """Read many fully named blobs' original bytes through one ``git cat-file --batch``.
+
+    The result maps each requested ID to its exact bytes (no decoding, no newline
+    normalization). A missing object, or one that is not a blob, raises.
+    """
+
+    requested = sorted(set(blob_ids))
+    for blob_id in requested:
+        require_git_object_id(blob_id)
+    if not requested:
+        return {}
+    result = _run_git(
+        root,
+        ["cat-file", "--batch"],
+        _GitRun(
+            root,
+            "".join(f"{blob}\n" for blob in requested),
+            GIT_LOCAL_TIMEOUT_SECONDS,
+            git_environment(),
+        ),
+        raw_output=True,
+    )
+    if result.returncode:
+        raise GitPreparationError(f"exact Git blob observation failed: {result.stderr!r}")
+    output = result.stdout
+    blobs: dict[str, bytes] = {}
+    offset = 0
+    for blob_id in requested:
+        header_end = output.index(b"\n", offset)
+        header = output[offset:header_end].decode("ascii").split(" ")
+        if len(header) != 3 or header[0] != blob_id or header[1] != "blob":
+            raise GitPreparationError(f"{blob_id} is not a readable blob: {header!r}")
+        start = header_end + 1
+        end = start + int(header[2])
+        blobs[blob_id] = output[start:end]
+        offset = end + 1
+    return blobs
 
 
 def read_git_tree_bytes(root: Path, tree: str) -> bytes:

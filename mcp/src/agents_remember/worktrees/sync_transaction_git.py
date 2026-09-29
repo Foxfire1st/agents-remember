@@ -18,6 +18,7 @@ from agents_remember.worktrees.knowledge_conflict import (
     settle_knowledge_conflict,
     settle_knowledge_conflicts,
 )
+from agents_remember.worktrees.knowledge_validation import PairedCode, memory_commit_refusal
 from agents_remember.worktrees.modules.git import (
     branch_commit,
     current_branch,
@@ -30,6 +31,10 @@ from agents_remember.worktrees.sync_transaction_state import SyncSideRecord
 
 class SyncGitProofError(RuntimeError):
     """Live Git state cannot be attributed exactly to the journaled sync."""
+
+
+class SyncKnowledgeValidationError(SyncGitProofError):
+    """The knowledge validator (MIK-R22) refuses the staged memory merge; it stays staged."""
 
 
 @dataclass(frozen=True)
@@ -362,7 +367,9 @@ def _require_active_merge(side: SyncSideRecord) -> None:
         raise SyncGitProofError(f"{side.side} active merge is not the pinned sync merge")
 
 
-def _continue_memory_merge(side: SyncSideRecord) -> SideMergeOutcome:
+def _continue_memory_merge(
+    side: SyncSideRecord, paired_code: PairedCode | None
+) -> SideMergeOutcome:
     """Settle the memory merge: knowledge datasets route, everything else stays the agent's.
 
     A knowledge database is binary to Git, so an ordinary merge can only declare the whole file
@@ -391,7 +398,7 @@ def _continue_memory_merge(side: SyncSideRecord) -> SideMergeOutcome:
             )
     validate_staged_resolution(side)
     return SideMergeOutcome(
-        state="completed", conflicts=(), message=_finish_staged_memory_merge(side)
+        state="completed", conflicts=(), message=_finish_staged_memory_merge(side, paired_code)
     )
 
 
@@ -424,25 +431,33 @@ def reconcile_side_merge(
     )
 
 
-def _existing_side_merge(side: SyncSideRecord) -> SideMergeOutcome | None:
+def _existing_side_merge(
+    side: SyncSideRecord, paired_code: PairedCode | None
+) -> SideMergeOutcome | None:
     """Resume only the admitted merge or its exact completed output."""
     worktree = Path(side.worktree)
     if merge_head(worktree) is not None:
         _require_active_merge(side)
         if side.side == "memory" and side.plan == "merge":
-            return _continue_memory_merge(side)
+            return _continue_memory_merge(side, paired_code)
         return SideMergeOutcome(state="resolution-required", conflicts=unmerged_paths(worktree))
     if side_merge_completed(side):
         return SideMergeOutcome(state="completed", message=head_commit(worktree))
     return None
 
 
-def start_side_merge(side: SyncSideRecord) -> SideMergeOutcome:
-    """Attempt the pinned merge; only genuine content conflicts require resolution."""
+def start_side_merge(
+    side: SyncSideRecord, *, paired_code: PairedCode | None = None
+) -> SideMergeOutcome:
+    """Attempt the pinned merge; only genuine content conflicts require resolution.
+
+    ``paired_code`` is the code commit the memory merge is paired with (the code side's result):
+    the knowledge validator checks the merged memory tree against it (MIK-R22 rule 8).
+    """
 
     worktree = Path(side.worktree)
     require_side_checkout(side)
-    existing = _existing_side_merge(side)
+    existing = _existing_side_merge(side, paired_code)
     if existing is not None:
         return existing
     if head_commit(worktree) != side.preSyncHead:
@@ -457,7 +472,7 @@ def start_side_merge(side: SyncSideRecord) -> SideMergeOutcome:
     result = run_git(worktree, merge_args)
     if result.returncode == 0:
         if memory_merge:
-            return _continue_memory_merge(side)
+            return _continue_memory_merge(side, paired_code)
         result_head = head_commit(worktree)
         if not exact_created_head(side, result_head):
             raise SyncGitProofError(f"{side.side} merge did not create the exact admitted head")
@@ -466,7 +481,7 @@ def start_side_merge(side: SyncSideRecord) -> SideMergeOutcome:
     conflicts = unmerged_paths(worktree)
     if result.returncode == 1 and merge_head(worktree) == side.sourceCommit and conflicts:
         if memory_merge:
-            return _continue_memory_merge(side)
+            return _continue_memory_merge(side, paired_code)
         return SideMergeOutcome(
             state="resolution-required",
             conflicts=conflicts,
@@ -477,13 +492,25 @@ def start_side_merge(side: SyncSideRecord) -> SideMergeOutcome:
     )
 
 
-def _finish_staged_memory_merge(side: SyncSideRecord) -> str:
-    """Publish one ordinary memory merge with exact parents and no cache in its tree."""
+def _finish_staged_memory_merge(side: SyncSideRecord, paired_code: PairedCode | None) -> str:
+    """Publish one ordinary memory merge with exact parents and no cache in its tree.
+
+    The staged tree is validated first against both parents (MIK-R22 rule 8); a refused merge is
+    left staged for the agent to repair and continue.
+    """
 
     worktree = Path(side.worktree)
     _require_active_merge(side)
     prepare_memory_cache(worktree)
     _require_sync_git(worktree, ["add", "--", ".gitignore"])
+    refusal = memory_commit_refusal(
+        memory_repository=worktree,
+        candidate_tree=_require_sync_git(worktree, ["write-tree"]),
+        bases=(side.preSyncHead, side.sourceCommit),
+        paired_code=paired_code,
+    )
+    if refusal is not None:
+        raise SyncKnowledgeValidationError(refusal)
     _require_sync_git(worktree, ["commit", "--no-edit"])
     result_head = head_commit(worktree)
     if not exact_created_head(side, result_head):
@@ -492,7 +519,7 @@ def _finish_staged_memory_merge(side: SyncSideRecord) -> str:
     return result_head
 
 
-def continue_side_merge(side: SyncSideRecord) -> str:
+def continue_side_merge(side: SyncSideRecord, *, paired_code: PairedCode | None = None) -> str:
     """Validate a staged agent resolution and commit the exact retained merge."""
 
     worktree = Path(side.worktree)
@@ -508,7 +535,7 @@ def continue_side_merge(side: SyncSideRecord) -> str:
     validate_staged_resolution(side)
     if side.side == "memory":
         _remove_memory_cache_from_index(side)
-        return _finish_staged_memory_merge(side)
+        return _finish_staged_memory_merge(side, paired_code)
     _require_sync_git(worktree, ["commit", "--no-edit"])
     result_head = head_commit(worktree)
     if not exact_created_head(side, result_head):
