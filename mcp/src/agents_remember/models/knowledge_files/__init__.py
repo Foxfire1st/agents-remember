@@ -12,6 +12,8 @@ package is the one declaration of their formats; the validator (MIK-R22), the de
   incident and the six other facet kinds, each ``ar-<kind>/v1``.
 * :mod:`.sidecars` -- the local sidecars under ``onboarding/`` (file and route) with their
   realization and proof entries, and the ``knowledge/layout.json`` marker.
+* :mod:`.history` -- the per-leaf history files (``ar-history/v1``, MIK-R07): judgment rows,
+  the row-kind registry, and the freeze predicate.
 * :mod:`.documents` -- locations and the schema-to-model dispatch.
 * :mod:`.canonical` -- the canonical JSON formatting, applied by ``agents-remember
   knowledge-format``.
@@ -40,10 +42,20 @@ from agents_remember.models.knowledge_files.documents import (
     SCHEMA_MODELS,
     KnowledgeDocument,
     file_sidecar_path,
+    history_path,
     parse_document,
     parse_document_text,
+    parse_history_document,
     record_path,
     route_sidecar_path,
+)
+from agents_remember.models.knowledge_files.history import (
+    HISTORY_ROW_KINDS,
+    FamilyRow,
+    HistoryFile,
+    HistoryRow,
+    InvariantRow,
+    frozen_history_violation,
 )
 from agents_remember.models.knowledge_files.ids import (
     ENTRY_PREFIXES,
@@ -69,6 +81,7 @@ from agents_remember.models.knowledge_files.sidecars import (
 __all__ = [
     "ENTRY_PREFIXES",
     "FORMATTER_COMMAND",
+    "HISTORY_ROW_KINDS",
     "LAYOUT_MARKER_PATH",
     "RECORD_DIRECTORIES",
     "RECORD_MODELS",
@@ -77,7 +90,11 @@ __all__ = [
     "SCHEMA_MODELS",
     "Anchor",
     "CanonicalFormatError",
+    "FamilyRow",
     "FileSidecar",
+    "HistoryFile",
+    "HistoryRow",
+    "InvariantRow",
     "KnowledgeDocument",
     "KnowledgeRecord",
     "LayoutMarker",
@@ -93,10 +110,13 @@ __all__ = [
     "file_sidecar_path",
     "format_bytes",
     "format_text",
+    "frozen_history_violation",
+    "history_path",
     "is_canonical",
     "mint_id",
     "parse_document",
     "parse_document_text",
+    "parse_history_document",
     "record_path",
     "route_sidecar_path",
 ]

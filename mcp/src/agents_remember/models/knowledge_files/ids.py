@@ -15,7 +15,8 @@ An ID is ``<KIND>-<body>``, where the body is Crockford base32 (``0-9`` and ``A-
   derives from the invariant's legacy ID, the path and the locator, so it does not change when the
   legacy claim ID does. The same material always yields the same ID on every line.
 
-Record kinds and their prefixes, and the two entry kinds, are closed vocabularies declared here once.
+Record kinds and their prefixes, the two entry kinds, and the history row (``ROW-``, MIK-R07), are
+closed vocabularies declared here once.
 A filename's slug is display only (``<ID>-<slug>.json``): renaming a slug never changes the ID.
 """
 
@@ -44,6 +45,7 @@ RecordKind = Literal[
     "term",
 ]
 EntryKind = Literal["realization", "proof"]
+RowKind = Literal["history_row"]
 
 # The one table of record kinds: kind -> (ID prefix, directory under ``knowledge/``, schema name).
 RECORD_PREFIXES: Final[Mapping[RecordKind, str]] = {
@@ -59,6 +61,8 @@ RECORD_PREFIXES: Final[Mapping[RecordKind, str]] = {
     "term": "TRM",
 }
 ENTRY_PREFIXES: Final[Mapping[EntryKind, str]] = {"realization": "RLZ", "proof": "PRF"}
+# A history row's ID (MIK-R07 rule 1): minted by the writer like every other ID, never derived.
+ROW_PREFIXES: Final[Mapping[RowKind, str]] = {"history_row": "ROW"}
 
 _BODY: Final = f"[{CROCKFORD_ALPHABET}]{{{MINTED_BODY_LENGTH}}}(?:[{CROCKFORD_ALPHABET}]{{2}})?"
 
@@ -72,19 +76,21 @@ def id_pattern(*prefixes: str) -> str:
 RECORD_ID_PATTERN: Final = id_pattern(*RECORD_PREFIXES.values())
 REALIZATION_ID_PATTERN: Final = id_pattern(ENTRY_PREFIXES["realization"])
 PROOF_ID_PATTERN: Final = id_pattern(ENTRY_PREFIXES["proof"])
+ENTRY_ID_PATTERN: Final = id_pattern(*ENTRY_PREFIXES.values())
+ROW_ID_PATTERN: Final = id_pattern(ROW_PREFIXES["history_row"])
 
 
-_ALL_PREFIXES: Final[Mapping[str, str]] = {**RECORD_PREFIXES, **ENTRY_PREFIXES}
+_ALL_PREFIXES: Final[Mapping[str, str]] = {**RECORD_PREFIXES, **ENTRY_PREFIXES, **ROW_PREFIXES}
 
 
-def _prefix(kind: RecordKind | EntryKind) -> str:
+def _prefix(kind: RecordKind | EntryKind | RowKind) -> str:
     try:
         return _ALL_PREFIXES[kind]
     except KeyError:
         raise ValueError(f"unknown knowledge ID kind: {kind!r}") from None
 
 
-def mint_id(kind: RecordKind | EntryKind) -> str:
+def mint_id(kind: RecordKind | EntryKind | RowKind) -> str:
     """Mint a new random ID for ``kind``, for example ``INV-7K3F9Q``."""
 
     body = "".join(secrets.choice(CROCKFORD_ALPHABET) for _ in range(MINTED_BODY_LENGTH))

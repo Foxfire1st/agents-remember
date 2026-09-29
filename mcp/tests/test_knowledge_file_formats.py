@@ -443,7 +443,7 @@ def test_sidecars_references_and_anchors_refuse_malformed_shapes() -> None:
     _refused({**route, "path": "a/../b"})
     _refused({"schema": "ar-memory-layout/v2"})
     with pytest.raises(ValueError, match="unknown knowledge schema"):
-        parse_document({"schema": "ar-history/v1"})
+        parse_document({"schema": "ar-census/v1"})
 
 
 # ------------------------------------------------------------------------------------------------

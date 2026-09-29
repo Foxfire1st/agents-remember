@@ -2,8 +2,9 @@
 
 Canonical text is: UTF-8; two-space indentation; object keys sorted; arrays of identified entries
 sorted by ``id``; one trailing newline. An *array of identified entries* is an array held under one
-of the schema positions in :data:`IDENTIFIED_ENTRY_KEYS` (``realizes``, ``proves``, ``rows``) whose
-every element is an object with a string ``id``. Every other array keeps its authored order: a
+of the schema positions in :data:`IDENTIFIED_ENTRY_KEYS` (``realizes``, ``proves``, and a history
+file's ``rows`` with each row's ``covers`` and ``examined``) whose every element is an object with a
+string ``id``. Every other array keeps its authored order: a
 reference's ``targets`` are ordered by the author even though ID targets carry an ``id``, and a
 decision's ``alternatives`` are addressed by index, so their order is content.
 
@@ -23,8 +24,9 @@ from typing import Any, Final
 FORMATTER_COMMAND: Final = "agents-remember knowledge-format"
 
 # The schema positions that hold identified entries: a file sidecar's realization and proof entries,
-# and a history file's rows (MIK-R07). An array is sorted only in one of these positions.
-IDENTIFIED_ENTRY_KEYS: Final = frozenset({"realizes", "proves", "rows"})
+# and a history file's rows with their covered entries and examined members (MIK-R07). Each is a set
+# keyed by ``id`` whose order carries no meaning. An array is sorted only in one of these positions.
+IDENTIFIED_ENTRY_KEYS: Final = frozenset({"realizes", "proves", "rows", "covers", "examined"})
 
 
 class CanonicalFormatError(ValueError):

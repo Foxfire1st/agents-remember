@@ -12,8 +12,9 @@ Paths are memory-repository-relative POSIX strings:
 =============================================  ====================================================
 
 A document names its format in ``schema``; :func:`parse_document` dispatches on it and refuses a
-schema this module does not own. History and census schemas belong to other packets and are not
-registered here.
+schema this module does not know. The history schema (``ar-history/v1``) is MIK-R07's
+(:mod:`.history`); a history file is read with :func:`parse_history_document`, which also checks that
+the file is named after its owner. Census schemas belong to MIK-R20 and are not registered here.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from collections.abc import Mapping
 from typing import Any, Final
 
 from agents_remember.models.knowledge_files.canonical import parse_json
+from agents_remember.models.knowledge_files.history import HISTORY_SCHEMA, HistoryFile
 from agents_remember.models.knowledge_files.ids import CROCKFORD_ALPHABET, RecordKind
 from agents_remember.models.knowledge_files.records import (
     RECORD_MODELS,
@@ -62,9 +64,10 @@ SCHEMA_MODELS: Final[Mapping[str, type[FileModel]]] = {
     FILE_SIDECAR_SCHEMA: FileSidecar,
     ROUTE_SIDECAR_SCHEMA: RouteSidecar,
     LAYOUT_MARKER_SCHEMA: LayoutMarker,
+    HISTORY_SCHEMA: HistoryFile,
 }
 
-KnowledgeDocument = KnowledgeRecord | FileSidecar | RouteSidecar | LayoutMarker
+KnowledgeDocument = KnowledgeRecord | FileSidecar | RouteSidecar | LayoutMarker | HistoryFile
 
 _SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _RECORD_FILENAME = re.compile(
@@ -119,6 +122,20 @@ def history_path(owner_id: str) -> str:
     if not _SLUG.match(owner_id):
         raise ValueError(f"not a history owner id: {owner_id!r}")
     return f"{KNOWLEDGE_ROOT}/history/{owner_id}.json"
+
+
+def parse_history_document(path: str, text: str) -> HistoryFile:
+    """Parse the history file at ``path``, refusing one not named ``history_path(<its owner>)``."""
+
+    document = parse_document_text(text)
+    if not isinstance(document, HistoryFile):
+        raise ValueError(f"{path} is not an {HISTORY_SCHEMA} document")
+    expected = history_path(document.owner_id)
+    if path != expected:
+        raise ValueError(
+            f"the history file of {document.owner_id!r} lives at {expected}, not {path}"
+        )
+    return document
 
 
 def census_directory(census_id: str) -> str:
