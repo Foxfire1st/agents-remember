@@ -91,7 +91,11 @@ def test_converted_fixture_tree_passes_every_rule() -> None:
     assert report.violations == ()
     rule_ids = [rule.id for rule in registered_rules()]
     assert len(rule_ids) == len(set(rule_ids))
-    assert {rule.id for rule in registered_rules() if rule.report_only} == {
+    assert {
+        rule.id
+        for rule in registered_rules()
+        if rule.report_only and rule.owner.startswith("MIK-R22")
+    } == {
         "R22.3-sidecar-without-markdown",
         "R22.3-unresolved-target",
         "R22.6-carried-stale",
@@ -358,7 +362,8 @@ def test_a_carried_anchor_at_a_deleted_path_is_reported_stale_not_refused() -> N
     report = _validate(files, bases=[tree(files, "K_B")], code=code(frozenset()))
 
     assert report.ok, report.render()
-    assert _rules(report, refusing=False) == {"R22.6-carried-stale"}
+    # The family's carried routes are gone with the code, too: reported the same way (MIK-R04).
+    assert _rules(report, refusing=False) == {"R22.6-carried-stale", "R04.1-carried-route-absent"}
 
 
 def test_merge_where_one_parent_deleted_a_file_the_other_parents_card_cites() -> None:

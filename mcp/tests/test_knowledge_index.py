@@ -23,6 +23,7 @@ from agents_remember.memory.knowledge_index import (
     directory_key,
     is_indexed_path,
 )
+from agents_remember.models.knowledge_files import canonical_text
 from knowledge_index_test_support import (
     DECISION,
     FAMILY,
@@ -211,6 +212,24 @@ def test_a_family_answers_members_and_routes_and_routes_answer_their_families(
     assert under_route == ((FAMILY, "dashboard/src"),)
     assert the_route == deeper == ((FAMILY, "mcp/src/agents_remember/application"),)
     assert outside == () and prefix_only == ()
+
+
+def test_a_family_routed_at_the_root_governs_every_path(
+    memory: Path, cache: KnowledgeIndexCache
+) -> None:
+    """MIK-R04: the root route ``.`` covers every path, as the validator's ``route_covers`` does."""
+
+    family_file = next((memory / "knowledge" / "families").glob(f"{FAMILY}-*.json"))
+    document = json.loads(family_file.read_text(encoding="utf-8"))
+    document["routes"] = [".", *document["routes"]]
+    family_file.write_text(canonical_text(document), encoding="utf-8")
+    with cache.for_directory(memory) as index:
+        root_file = index.families_governing("README.md").value
+        deep_file = index.families_governing(
+            "mcp/src/agents_remember/application/review_family_context.py"
+        ).value
+    assert root_file == ((FAMILY, "."),)
+    assert deep_file == ((FAMILY, "."), (FAMILY, "mcp/src/agents_remember/application"))
 
 
 def test_incoming_links_reach_any_record(memory: Path, cache: KnowledgeIndexCache) -> None:

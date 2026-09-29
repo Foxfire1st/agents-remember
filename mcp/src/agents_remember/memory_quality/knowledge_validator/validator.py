@@ -19,6 +19,9 @@ from agents_remember.memory_quality.knowledge_validator import (
     rules_references as _rules_references,  # noqa: F401  # registers MIK-R22 rules 3, 5, 6
 )
 from agents_remember.memory_quality.knowledge_validator import (
+    rules_routes as _rules_routes,  # noqa: F401  # registers MIK-R04's family route rules
+)
+from agents_remember.memory_quality.knowledge_validator import (
     rules_structure as _rules_structure,  # noqa: F401  # registers MIK-R22 rules 1, 2, 4, 6, 7
 )
 from agents_remember.memory_quality.knowledge_validator.parsed import parse_tree

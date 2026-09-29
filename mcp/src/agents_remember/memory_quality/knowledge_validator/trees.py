@@ -5,8 +5,9 @@ of one memory tree, keyed by repository-relative POSIX path. The generated route
 (``*.index.json``) is not knowledge and is never read. A tree is *converted* exactly when it holds
 the layout marker ``knowledge/layout.json`` (MIK-R21 rule 1).
 
-A :class:`CodeTree` answers one question for anchor path existence (MIK-R22 rule 6): does the paired
-code tree hold a file at this path?
+A :class:`CodeTree` answers two questions: does the paired code tree hold a file at this path (anchor
+path existence, MIK-R22 rule 6), and does it hold a directory at this path (a family route, MIK-R04
+rule 1)?
 
 Both are read from a directory (a working tree, for the curator's command and the writer) or from a
 Git tree (for a commit route, where the candidate is the exact staged tree and the bases are
@@ -19,6 +20,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Final, Protocol
 
@@ -34,6 +36,7 @@ from agents_remember.models.knowledge_files.documents import (
     LAYOUT_MARKER_PATH,
     ONBOARDING_ROOT,
 )
+from agents_remember.models.knowledge_files.sidecars import ROOT_ROUTE_PATH
 
 ROUTE_INDEX_CACHE_SUFFIX: Final = ".index.json"
 _KNOWLEDGE_PREFIXES: Final = (f"{KNOWLEDGE_ROOT}/", f"{ONBOARDING_ROOT}/")
@@ -91,6 +94,8 @@ class CodeTree(Protocol):
 
     def has_file(self, path: str) -> bool: ...
 
+    def has_directory(self, path: str) -> bool: ...
+
 
 @dataclass(frozen=True)
 class CodePathSet:
@@ -102,6 +107,19 @@ class CodePathSet:
     def has_file(self, path: str) -> bool:
         return path in self.paths
 
+    @cached_property
+    def directories(self) -> frozenset[str]:
+        """Every directory that holds a file of the set, at any depth (the root excluded)."""
+
+        found: set[str] = set()
+        for path in self.paths:
+            parts = path.split("/")[:-1]
+            found.update("/".join(parts[:end]) for end in range(1, len(parts) + 1))
+        return frozenset(found)
+
+    def has_directory(self, path: str) -> bool:
+        return path == ROOT_ROUTE_PATH or path in self.directories
+
 
 @dataclass(frozen=True)
 class CodeDirectory:
@@ -112,6 +130,9 @@ class CodeDirectory:
 
     def has_file(self, path: str) -> bool:
         return (self.root / path).is_file()
+
+    def has_directory(self, path: str) -> bool:
+        return (self.root / path).is_dir()
 
 
 def knowledge_tree_from_directory(root: Path, *, label: str | None = None) -> KnowledgeTree:

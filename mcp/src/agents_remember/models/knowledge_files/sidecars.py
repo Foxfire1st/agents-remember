@@ -19,9 +19,9 @@ location.
 
 from __future__ import annotations
 
-from typing import Final, Literal
+from typing import Annotated, Final, Literal
 
-from pydantic import Field, model_validator
+from pydantic import AfterValidator, Field, model_validator
 
 from agents_remember.models.knowledge.base import PATH_MAX_LENGTH
 from agents_remember.models.knowledge_files.ids import (
@@ -110,6 +110,12 @@ class FileSidecar(FileModel):
 
 def _require_route_path(value: str) -> str:
     return value if value == ROOT_ROUTE_PATH else require_repository_path(value)
+
+
+RoutePath = Annotated[
+    str, Field(min_length=1, max_length=PATH_MAX_LENGTH), AfterValidator(_require_route_path)
+]
+"""A route directory: a repository-relative path, or ``.`` for the repository root route."""
 
 
 class RouteSidecar(FileModel):

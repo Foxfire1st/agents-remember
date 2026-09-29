@@ -10,7 +10,8 @@ and decision records carry ``admission``.
 
 * an invariant record lists no realizations, tests, families or decisions -- ``extra="forbid"``
   refuses a field that would give a relationship a second owner;
-* a family record owns ``members`` (invariant IDs) and ``routes`` (repository directories);
+* a family record owns ``members`` (invariant IDs) and ``routes`` (repository directories, ``.``
+  for the repository root route);
 * decision, incident and facet records own their outgoing ``links``, whose relations are the
   closed per-kind vocabulary :data:`RELATIONS_BY_KIND`.
 
@@ -43,10 +44,10 @@ from agents_remember.models.knowledge_files.shapes import (
     Origin,
     RecordId,
     Relation,
-    RepositoryPath,
     Text,
     require_unique,
 )
+from agents_remember.models.knowledge_files.sidecars import RoutePath
 
 RecordStatus = Literal["proposed", "accepted", "retired"]
 DecisionStatus = Literal["active", "under_reconsideration"]
@@ -149,7 +150,7 @@ class FamilyRecord(_Record):
     title: Label
     guarantee: Text
     members: tuple[InvariantId, ...]
-    routes: tuple[RepositoryPath, ...]
+    routes: tuple[RoutePath, ...]
     admission: FamilyAdmission | LegacyUnassessed
 
     @model_validator(mode="after")

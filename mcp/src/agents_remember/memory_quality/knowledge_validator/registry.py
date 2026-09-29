@@ -1,9 +1,16 @@
 """The validator's rule registry (MIK-R22 rule 9) and the context every rule reads.
 
 A rule is a :class:`ValidationRule`: a stable ``id``, the packet rule that owns it, a one-line
-summary, a ``check`` over the :class:`ValidationContext`, and ``report_only``. A report-only rule's
-findings are carried in the report and never refuse, whatever the check returns: the flag lives
-here, in the registry, and nowhere else.
+summary, a ``check`` over the :class:`ValidationContext`, ``report_only`` and ``writer_reports``. A
+report-only rule's findings are carried in the report and never refuse, whatever the check returns:
+the flag lives here, in the registry, and nowhere else.
+
+``writer_reports`` marks a rule that **refuses at every commit route but is only reported inside the
+writer**: a leaf may break it mid-way and repair it before closeout. MIK-R04's family route rules
+(Coverage, Non-empty, an added route's directory) carry it (MIK-R04 rule 6). The validator's own
+report is unchanged -- :func:`validate_tree` and :func:`require_valid_commit` still refuse such a
+finding -- so a writer (MIK-R12) reads :func:`writer_reported_rule_ids` and treats those violations
+as reports; no commit route may.
 
 MIK-R22 registers its own rules when :mod:`.rules` is imported. Later packets add theirs with
 :func:`register_rule` -- MIK-R04 (family Coverage, Non-empty and ``route_unassigned``), MIK-R20 (the
@@ -52,6 +59,7 @@ class ValidationRule:
     summary: str
     check: RuleCheck
     report_only: bool = False
+    writer_reports: bool = False
 
 
 _REGISTRY: dict[str, ValidationRule] = {}
@@ -70,6 +78,14 @@ def registered_rules() -> tuple[ValidationRule, ...]:
     """Every registered rule, in registration order."""
 
     return tuple(_REGISTRY.values())
+
+
+def writer_reported_rule_ids() -> frozenset[str]:
+    """The IDs of the refusing rules a writer reports instead of refusing (``writer_reports``)."""
+
+    return frozenset(
+        rule.id for rule in _REGISTRY.values() if rule.writer_reports and not rule.report_only
+    )
 
 
 def sidecar_entries(sidecar: SidecarFile) -> tuple[RealizationEntry | ProofEntry, ...]:

@@ -31,6 +31,7 @@ import apsw
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge_index.projection import INDEX_REPOSITORY_ID
 from agents_remember.memory.knowledge_index.schema import INDEX_FORMAT
+from agents_remember.models.knowledge_files.sidecars import ROOT_ROUTE_PATH
 
 IndexCompleteness = Literal["complete", "partial"]
 
@@ -353,9 +354,12 @@ class KnowledgeIndex:
 
 
 def _self_and_ancestors(path: str) -> list[str]:
-    """Return ``path`` and every ancestor directory of it, nearest first (never the root ``""``)."""
+    """Return ``path`` and every ancestor directory of it, nearest first, ending with the root
+    route ``.`` (MIK-R04: a family routed at ``.`` governs every path)."""
 
     current = PurePosixPath(path.strip("/"))
     candidates = [current.as_posix()]
     candidates.extend(parent.as_posix() for parent in current.parents if parent.as_posix() != ".")
+    if candidates[-1] != ROOT_ROUTE_PATH:
+        candidates.append(ROOT_ROUTE_PATH)
     return candidates

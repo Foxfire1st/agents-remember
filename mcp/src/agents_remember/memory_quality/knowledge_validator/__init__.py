@@ -8,6 +8,8 @@ committed instead of by database constraints. One module, one rule registry:
 * :mod:`.markers` -- the ``[n]`` markers of a Markdown file;
 * :mod:`.registry` -- the rule registry (rule 9) and the context every rule reads;
 * :mod:`.rules_structure` and :mod:`.rules_references` -- MIK-R22's own rules 1 to 7;
+* :mod:`.family_routes` and :mod:`.rules_routes` -- MIK-R04's family routes: Coverage, Non-empty,
+  the reported states and the mechanical route suggestion;
 * :mod:`.validator` -- :func:`validate_tree`, rule 8's applicability and
   :func:`require_valid_commit`;
 * :mod:`.commit_route` -- the Git adapter a commit route calls through the worktree port.
@@ -25,6 +27,7 @@ from agents_remember.memory_quality.knowledge_validator.registry import (
     ValidationRule,
     register_rule,
     registered_rules,
+    writer_reported_rule_ids,
 )
 from agents_remember.memory_quality.knowledge_validator.report import (
     KnowledgeValidationError,
@@ -65,4 +68,5 @@ __all__ = [
     "require_valid_commit",
     "validate_tree",
     "validation_applies",
+    "writer_reported_rule_ids",
 ]

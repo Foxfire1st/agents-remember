@@ -5,7 +5,10 @@ into one converted memory tree: the layout marker, the invariant, family, decisi
 records, the file and route sidecars of ``direct_landing.py``, its test, ``integrate.py`` and the
 ``worktrees`` route, each beside its Markdown card. The two invariants the fixtures name but do not
 define (the family's second member and the decision's link target) are added, so the tree is whole.
-Every anchor path is a real path of this repository, listed in :data:`CODE_PATHS`.
+The Doc14 §4.2 family's other realizations (``ledger_projection.py``, ``source.py``,
+``authorship.py`` and ``curator_source_manifest.py``) get their sidecars, so its three routes satisfy
+MIK-R04's Coverage and Non-empty. Every anchor path is a real path of this repository, listed in
+:data:`CODE_PATHS`.
 """
 
 from __future__ import annotations
@@ -24,7 +27,43 @@ DIRECT_LANDING = "mcp/src/agents_remember/worktrees/direct_landing.py"
 INTEGRATE = "mcp/src/agents_remember/worktrees/modules/integrate.py"
 TEST_DIRECT_LANDING = "mcp/tests/test_direct_landing.py"
 LIFECYCLE_DIRECT_LANDING = "mcp/src/agents_remember/application/lifecycle/direct_landing.py"
-CODE_PATHS = frozenset({DIRECT_LANDING, INTEGRATE, TEST_DIRECT_LANDING, LIFECYCLE_DIRECT_LANDING})
+FAMILY = "knowledge/families/FAM-SEQNTS6C-attribution-and-landing-pairing.json"
+# The Doc14 §4.2 family's other realizations: (source file, entry ID, symbol, blob).
+FAMILY_REALIZATIONS = (
+    (
+        "mcp/src/agents_remember/worktrees/ledger_projection.py",
+        "RLZ-PR0J3C",
+        "resolve_memory_source_commit",
+        "4928d1695e5b94efd6ce1e9eedcebf1c1caa9da5",
+    ),
+    (
+        "mcp/src/agents_remember/models/knowledge/source.py",
+        "RLZ-S0VRCE",
+        "SourceAnchor",
+        "26d29178fa3d9db0a179257bcf598df2ec146a14",
+    ),
+    (
+        "mcp/src/agents_remember/models/knowledge/authorship.py",
+        "RLZ-AVTH0R",
+        "Authorship",
+        "a5f7db9de3b6cbbd9f0b3b71938b820d857a14ae",
+    ),
+    (
+        "mcp/src/agents_remember/application/curator_source_manifest.py",
+        "RLZ-MAN1F5",
+        "read_source_plane",
+        "44f4415f06feeda21cb1905369184ea58ccdcf4b",
+    ),
+)
+CODE_PATHS = frozenset(
+    {
+        DIRECT_LANDING,
+        INTEGRATE,
+        TEST_DIRECT_LANDING,
+        LIFECYCLE_DIRECT_LANDING,
+        *(path for path, *_ in FAMILY_REALIZATIONS),
+    }
+)
 
 INVARIANT = "knowledge/invariants/INV-7K3F9Q-landing-pair.json"
 DIRECT_LANDING_CARD = f"onboarding/{DIRECT_LANDING}.md"
@@ -73,6 +112,31 @@ def invariant_path(identifier: str, slug: str = "invariant") -> str:
     return f"knowledge/invariants/{identifier}-{slug}.json"
 
 
+def realization_sidecar(
+    path: str, entry: str, symbol: str, blob: str, invariant: str = "INV-7K3F9Q"
+) -> dict[str, Any]:
+    """A file sidecar whose one ``realizes`` entry anchors ``symbol`` of ``path``."""
+
+    return {
+        "path": path,
+        "realizes": [
+            {
+                "anchor": {
+                    "blob": blob,
+                    "content": "sha256:" + "0" * 64,
+                    "locator": {"kind": "symbol", "name": symbol},
+                },
+                "id": entry,
+                "invariant": invariant,
+                "rationale": f"{symbol} keeps what a record claims about its inputs exact.",
+                "role": "enforcement",
+            }
+        ],
+        "references": {},
+        "schema": "ar-onboarding-file/v1",
+    }
+
+
 def fixture_tree_files() -> dict[str, bytes]:
     """The converted fixture tree, path to canonical bytes."""
 
@@ -81,9 +145,7 @@ def fixture_tree_files() -> dict[str, bytes]:
         INVARIANT: encode(load_fixture("4.3-invariant-landing-pair.json")),
         invariant_path("INV-R8M2TD"): encode(invariant_document("INV-R8M2TD")),
         invariant_path("INV-C0VR4G"): encode(invariant_document("INV-C0VR4G")),
-        "knowledge/families/FAM-SEQNTS6C-attribution-and-landing-pairing.json": encode(
-            load_fixture("4.2-family-attribution-and-landing-pairing.json")
-        ),
+        FAMILY: encode(load_fixture("4.2-family-attribution-and-landing-pairing.json")),
         "knowledge/decisions/DEC-D12RTE-local-family-routes.json": encode(
             load_fixture("4.5-decision-d12-local-family-routes.json")
         ),
@@ -101,6 +163,9 @@ def fixture_tree_files() -> dict[str, bytes]:
         INTEGRATE_SIDECAR: encode(load_fixture("r21-integrate.py.json")),
         INTEGRATE_CARD: b"# mcp/src/agents_remember/worktrees/modules/integrate.py\n",
     }
+    for path, entry, symbol, blob in FAMILY_REALIZATIONS:
+        files[f"onboarding/{path}.json"] = encode(realization_sidecar(path, entry, symbol, blob))
+        files[f"onboarding/{path}.md"] = f"# {path}\n".encode()
     return files
 
 

@@ -456,6 +456,31 @@ their fields become. The models, the ID helper and the formatter live in
   sorted keys, identified entries sorted by `id`, and one trailing newline.
   `agents-remember knowledge-format` rewrites a file into it, and `--check` only reports.
 
+### Family routes (MIK-R04)
+
+The family record owns its `routes`: repository directories where part of the family's code lives.
+Overviews never list families, and a family is never repeated at an ancestor overview. The curator
+places the routes; nothing assigns them automatically.
+
+- **Coverage:** every `realizes` entry of every member lies under at least one route. **Non-empty:**
+  every route contains at least one such entry. `proves` entries do not count.
+- **Place routes as deep as makes sense.** Several local routes are right when the family's code
+  lives in several subtrees (D12). One broad route such as `mcp/` over everything passes the rules
+  but is the wrong placement. The repository root route is spelled `.`; it is a route only when a
+  family genuinely has no narrower home, such as a realization in a file at the root.
+- **Reported, never refused:** `unrealized_family` (no member has a realization yet, so Non-empty is
+  waived) and `route_unassigned` (an exported family with `routes: []` and `admission:
+  legacy-unassessed`, so Coverage is waived until routes are assigned). Any other family with
+  `routes: []` violates Coverage. A retired family is exempt.
+- **A route the change adds must be a directory of the code tree.** A route carried from the base
+  whose directory is gone is reported for route maintenance (MIK-R06), not refused.
+- `agents-remember knowledge-routes <memory root> --code <code checkout>` shows each family's routes,
+  its route state and a mechanical suggestion labelled `mechanical`. The suggestion starts from the
+  directories that hold the realizations and collapses sibling directories into their parent only
+  when that parent holds nothing but family code. It proposes `.` only when a realization file lies
+  directly at the root. It is a starting point, and the command never writes a route.
+  `agents-remember knowledge-validate` runs the rules.
+
 ## What this template is not
 
 It is not the curator's side. The curator consumes this list as data, fills `resolution`,
