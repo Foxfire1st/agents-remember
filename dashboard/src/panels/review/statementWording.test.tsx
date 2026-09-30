@@ -45,7 +45,7 @@ function successor(change: Partial<ReviewFamilyMember> = {}) {
       knowledge={knowledge}
       subject={subject}
       layout="split"
-      members={[{ ...row, display_version: 'r2' }, after]}
+      members={{ before: [{ ...row, display_version: 'r2' }], after: [after] }}
     />,
   );
 }

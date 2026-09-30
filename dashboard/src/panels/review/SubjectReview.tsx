@@ -12,8 +12,11 @@ import type {
 import type { ReviewSubject } from './ReviewNavigation';
 import type { DiffLayout } from './SourceExplorer';
 import { KnowledgeStatements } from './KnowledgeStatements';
+import { IntentStatementBody, useTreeComparison } from './IntentWordDiff';
 import {
   revisionMeta,
+  rowWording,
+  textFirstComparison,
   wordingComparison,
   type AuthoredWording,
   type WordingComparison,
@@ -73,22 +76,48 @@ function statementLabel(
   return `Changed ${wording.fields.map((field) => FIELD_NAMES[field]).join(', ')} · ${revisions}`;
 }
 
-// The two revisions' authored text, from the member rows of the selected revisions when the page
-// carried them (every field), else from the knowledge pane (statement and conditions) plus the
-// comparison's own field changes for the rest. A field neither carries stays undefined.
+// Only a text-first comparison (a tree comparison) can find one revision whose text differs.
+function sameRevisionNote(oneRevision: boolean, wording: WordingComparison): string {
+  return oneRevision && wording.kind === 'changed'
+    ? ' · the same revision on both sides; its text differs'
+    : '';
+}
+
+// The subject's member rows, kept per side: each side's row is looked up only among that side's own
+// rows, because in a tree comparison one revision can carry different text on the two sides (a text
+// record's revision increments only when its meaning changes, MIK-R21; review R1 F1).
+export interface MemberSides {
+  before: ReviewFamilyMember[];
+  after: ReviewFamilyMember[];
+}
+
+const NO_ROWS: MemberSides = { before: [], after: [] };
+
+// The two revisions' authored text, from each side's own member row when the page carried it (every
+// field), else from the knowledge pane (statement and conditions) plus the comparison's own field
+// changes for the rest. A field neither carries stays undefined.
 function authoredSides(
   knowledge: ReviewKnowledgePane,
   selection: ReviewRevisionSelection,
-  members: ReviewFamilyMember[],
-): { before: AuthoredWording; after: AuthoredWording; labels: [string, string] } {
-  const row = (revision?: string) =>
-    members.find(
-      (member) => member.invariant_revision_id === revision && member.state === 'recorded',
-    );
-  const beforeRow = row(selection.before_revision_id);
-  const afterRow = row(selection.after_revision_id);
+  members: MemberSides,
+): {
+  before: AuthoredWording;
+  after: AuthoredWording;
+  labels: [string, string];
+  // Fields a side took from the comparison's joined field report rather than from a list.
+  projected: WordingField[];
+} {
+  const own = (rows: ReviewFamilyMember[], revision?: string) =>
+    rows.find((member) => member.state === 'recorded' && member.invariant_revision_id === revision);
+  const beforeRow = own(members.before, selection.before_revision_id);
+  const afterRow = own(members.after, selection.after_revision_id);
+  // Only the selected revisions' own field rows (keyed by revision id): the page's field rows also
+  // report other records' changes, which are never this subject's (architect ruling 2026-09-30T11:53).
+  const selected = [selection.before_revision_id, selection.after_revision_id];
   const reported = (field: string) =>
-    knowledge.field_changes.find((change) => change.field === field);
+    knowledge.field_changes.find(
+      (change) => change.field === field && selected.includes(change.item_id),
+    );
   const pane = (side: 'before' | 'after'): AuthoredWording => {
     const statement = knowledge[`${side}_statement`];
     const fromRow = side === 'before' ? beforeRow : afterRow;
@@ -98,13 +127,7 @@ function authoredSides(
         ? ((side === 'before' ? found.before_value : found.after_value) ?? null)
         : undefined;
     };
-    if (fromRow)
-      return {
-        statement: fromRow.statement,
-        applicability: fromRow.applicability ?? null,
-        conditions: fromRow.essential_conditions,
-        exclusions: fromRow.exclusions,
-      };
+    if (fromRow) return rowWording(fromRow);
     return {
       statement: statement.state === 'present' ? statement.text : undefined,
       applicability: change('applicability'),
@@ -112,14 +135,29 @@ function authoredSides(
       exclusions: listed(change('exclusions')),
     };
   };
+  const joined = (!beforeRow || !afterRow) && reported('exclusions') !== undefined;
+  return {
+    before: pane('before'),
+    after: pane('after'),
+    labels: revisionLabels(selection, beforeRow, afterRow),
+    projected: joined ? ['exclusions'] : [],
+  };
+}
+
+// Display versions when both are carried and differ; one revision's own version on both sides (it is
+// one number); otherwise the revisions' short identities, so two revisions never read as one.
+function revisionLabels(
+  selection: ReviewRevisionSelection,
+  beforeRow?: ReviewFamilyMember,
+  afterRow?: ReviewFamilyMember,
+): [string, string] {
   const short = (revision?: string) => (revision ? revision.slice(0, 8) : 'none');
-  const versions = [beforeRow?.display_version, afterRow?.display_version];
-  // Display versions only when both are carried and differ: two revisions never read as one.
-  const labels: [string, string] =
-    versions[0] && versions[1] && versions[0] !== versions[1]
-      ? [versions[0], versions[1]]
-      : [short(selection.before_revision_id), short(selection.after_revision_id)];
-  return { before: pane('before'), after: pane('after'), labels };
+  const [before, after] = [beforeRow?.display_version, afterRow?.display_version];
+  const one = before ?? after;
+  if (selection.before_revision_id === selection.after_revision_id && one) return [one, one];
+  return before && after && before !== after
+    ? [before, after]
+    : [short(selection.before_revision_id), short(selection.after_revision_id)];
 }
 
 // A reported field value as the list it is compared as: absent = not carried, null = none recorded.
@@ -218,13 +256,16 @@ export function SelectedStatement({
   knowledge,
   subject,
   layout,
-  members = [],
+  members = NO_ROWS,
 }: {
   knowledge: ReviewKnowledgePane;
   subject: ReviewSubject;
   layout: DiffLayout;
-  members?: ReviewFamilyMember[];
+  members?: MemberSides;
 }) {
+  // A tree comparison's changed wording is word-diffed (MIK-R35); a dataset review keeps the landed
+  // rendering.
+  const wordDiff = useTreeComparison();
   const selection = selectedRevision(knowledge, subject);
   if (!selection)
     return (
@@ -234,24 +275,37 @@ export function SelectedStatement({
       </p>
     );
   const sides = authoredSides(knowledge, selection, members);
-  const wording = wordingComparison(
+  const oneRevision = selection.before_revision_id === selection.after_revision_id;
+  const wording = (wordDiff ? textFirstComparison : wordingComparison)(
     sides.before,
     sides.after,
-    selection.before_revision_id === selection.after_revision_id,
+    oneRevision,
   );
   const state = statementState(selection, wording);
   return (
     <div data-testid={`review-center-member-${state}`} data-revision-state={selection.state}>
       <p className={muted} data-testid="review-center-statement-label">
         {statementLabel(selection, wording, revisionMeta(...sides.labels))}
+        {sameRevisionNote(oneRevision, wording)}
       </p>
-      <StatementBody
-        knowledge={knowledge}
-        state={state}
-        wording={wording}
-        sides={sides}
-        layout={layout}
-      />
+      {wordDiff && ['compared', 'added', 'removed'].includes(selection.state) ? (
+        <IntentStatementBody
+          knowledge={knowledge}
+          selection={selection}
+          wording={wording}
+          sides={sides}
+          projected={sides.projected}
+          layout={layout}
+        />
+      ) : (
+        <StatementBody
+          knowledge={knowledge}
+          state={state}
+          wording={wording}
+          sides={sides}
+          layout={layout}
+        />
+      )}
       {selection.state === 'ambiguous' ? (
         <p className={muted}>
           Retained revisions remain available as context. Manual revision pairing is not available

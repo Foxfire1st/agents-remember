@@ -456,6 +456,7 @@ function FamilyRailContext({
       query={state.query}
       onQuery={state.setQuery}
       embedded
+      tree={treeComparisonNumber(payload.limitations) !== undefined}
     />
   ) : (
     <FamilyNotComposed context={context} selectable={selectable} />

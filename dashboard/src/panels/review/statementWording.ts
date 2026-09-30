@@ -17,6 +17,21 @@ export interface AuthoredWording {
   exclusions?: string[];
 }
 
+// A member row's authored fields, as compared. A row without an applicability recorded none (`null`).
+export function rowWording(row: {
+  statement?: string;
+  applicability?: string;
+  essential_conditions: string[];
+  exclusions: string[];
+}): AuthoredWording {
+  return {
+    statement: row.statement,
+    applicability: row.applicability ?? null,
+    conditions: row.essential_conditions,
+    exclusions: row.exclusions,
+  };
+}
+
 export type WordingComparison =
   | { kind: 'same_revision' }
   | { kind: 'wording_unchanged' }
@@ -44,6 +59,31 @@ export function wordingComparison(
   return { kind: 'wording_unchanged' };
 }
 
+// The same decision for a tree comparison (MIK-R35 rule 1: text differs means byte inequality). A
+// text record's revision increments only when its meaning changes (MIK-R21), so one revision can
+// carry different bytes on the two sides; the fields decide, and `same_revision` is only ever said
+// of a revision whose carried fields do not differ.
+export function textFirstComparison(
+  before: AuthoredWording,
+  after: AuthoredWording,
+  sameRevision: boolean,
+): WordingComparison {
+  const wording = wordingComparison(before, after, false);
+  return sameRevision && wording.kind !== 'changed' ? { kind: 'same_revision' } : wording;
+}
+
 export function revisionMeta(before: string, after: string): string {
   return `revision ${before} → ${after}`;
+}
+
+// A guarantee comparison's compact revision labels: the display versions, or the revisions' own short
+// identities when the two display versions read alike (two authored revisions must never read as
+// one).
+export function guaranteeRevisionLabels(
+  before: { revision_id: string; display_version: string },
+  after: { revision_id: string; display_version: string },
+): [string, string] {
+  return before.display_version === after.display_version
+    ? [before.revision_id.slice(0, 8), after.revision_id.slice(0, 8)]
+    : [before.display_version, after.display_version];
 }

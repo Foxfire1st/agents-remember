@@ -24,15 +24,28 @@ import {
   type ReviewTreesRead,
 } from '../../data/reviewTrees';
 import { ExpressionCards } from './ExpressionCards';
+import {
+  GuaranteeTextChange,
+  IntentWordDiffScope,
+  OneSidedGuaranteeLabel,
+  guaranteeFact,
+  guaranteeTextChange,
+  useTreeComparison,
+} from './IntentWordDiff';
 import { LeafKnowledgeChanges } from './LeafKnowledgeChanges';
-import { revisionMeta } from './statementWording';
+import { guaranteeRevisionLabels, revisionMeta } from './statementWording';
 import { planningMarks } from './worklistGroups';
 import { cardScope } from './focusedCards';
 import { DiffPane } from '../changeset/DiffPane';
 import type { DiffLayout } from './SourceExplorer';
 import { ReviewExpressions } from './ReviewExpressions';
 import { KnowledgeStatements } from './KnowledgeStatements';
-import { SelectedStatement, SubjectEvidence, selectedRevision } from './SubjectReview';
+import {
+  SelectedStatement,
+  SubjectEvidence,
+  selectedRevision,
+  type MemberSides,
+} from './SubjectReview';
 import type { ReviewSubject } from './ReviewNavigation';
 import { RosterLine, RosterNext, emptyRosterSentence, type FamilySelection } from './FamilyTree';
 
@@ -118,6 +131,10 @@ function GuaranteeComparisonBlock({
   entry: ReviewFamilyContextEntry;
   layout: DiffLayout;
 }) {
+  // A tree comparison's changed guarantee text reads as one word-diffed passage (MIK-R35).
+  const wordDiff = useTreeComparison();
+  const textChange = wordDiff ? guaranteeTextChange(entry) : null;
+  if (textChange) return <GuaranteeTextChange {...textChange} />;
   const comparison = guaranteeComparison(entry);
   if (comparison.kind === 'unrecorded') {
     return (
@@ -131,10 +148,14 @@ function GuaranteeComparisonBlock({
     const other = comparison.side === 'before' ? 'after' : 'before';
     return (
       <div data-testid="review-center-guarantee-one-sided" data-side={comparison.side}>
-        <p className={muted}>
-          {comparison.side === 'after' ? 'Added guarantee' : 'Removed guarantee'} · recorded on{' '}
-          {comparison.side} only · no {other} revision
-        </p>
+        {wordDiff ? (
+          <OneSidedGuaranteeLabel side={comparison.side} other={entry[other]} />
+        ) : (
+          <p className={muted}>
+            {comparison.side === 'after' ? 'Added guarantee' : 'Removed guarantee'} · recorded on{' '}
+            {comparison.side} only · no {other} revision
+          </p>
+        )}
         <GuaranteeBlock guarantee={comparison.guarantee} side={comparison.side} />
       </div>
     );
@@ -185,17 +206,6 @@ function GuaranteeComparisonBlock({
       </p>
     </div>
   );
-}
-
-// The compact revision labels: the display versions, or the revisions' own short identities when
-// the two display versions read alike (two authored revisions must never read as one).
-function guaranteeRevisionLabels(
-  before: ReviewFamilyGuarantee,
-  after: ReviewFamilyGuarantee,
-): [string, string] {
-  return before.display_version === after.display_version
-    ? [before.revision_id.slice(0, 8), after.revision_id.slice(0, 8)]
-    : [before.display_version, after.display_version];
 }
 
 function MemberIdentity({ member }: { member: ReviewFamilyMember }) {
@@ -706,6 +716,7 @@ function IndependentFacts({
   payload: ReviewPayload;
   subject: ReviewSubject;
 }) {
+  const tree = useTreeComparison();
   const selected = selectedRevision(payload.knowledge, subject);
   if (!selected)
     return (
@@ -725,7 +736,7 @@ function IndependentFacts({
   return (
     <ul className={rows} data-testid="review-center-facts">
       <li data-fact="guarantee">
-        guarantee: {entry ? guaranteeComparison(entry).kind : 'no family guarantee selected'}
+        guarantee: {entry ? guaranteeFact(entry, tree) : 'no family guarantee selected'}
       </li>
       <li data-fact="statement">
         member statement: {selected.state} · before {selected.before_revision_id ?? 'not selected'}{' '}
@@ -824,15 +835,14 @@ function MemberCenter({
   );
 }
 
+// The subject's rows per side: a row's side is kept, so each side's text is read from its own row.
 function subjectRows(
   entry: ReviewFamilyContextEntry | undefined,
   subject: ReviewSubject,
-): ReviewFamilyMember[] {
-  return entry
-    ? [...entry.before.members, ...entry.after.members].filter(
-        (row) => row.invariant_id === subject.id,
-      )
-    : [];
+): MemberSides {
+  const own = (side: ReviewFamilySideName) =>
+    entry ? entry[side].members.filter((row) => row.invariant_id === subject.id) : [];
+  return { before: own('before'), after: own('after') };
 }
 
 function UnavailableMember({
@@ -878,7 +888,16 @@ interface FamilyReviewCenterProps {
   leafTrees?: ReviewTreesRead | null;
 }
 
+// The center of one review. A tree comparison's intent wording is word-diffed inside it (MIK-R35).
 export function FamilyReviewCenter(props: FamilyReviewCenterProps) {
+  return (
+    <IntentWordDiffScope payload={props.payload}>
+      <ReviewCenterBody {...props} />
+    </IntentWordDiffScope>
+  );
+}
+
+function ReviewCenterBody(props: FamilyReviewCenterProps) {
   const { payload, subject, selection, layout, onRosterNext, onOpenMember } = props;
   const { entry, member, members, listed, linksIncomplete } = centerSelection(
     payload,

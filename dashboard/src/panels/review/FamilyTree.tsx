@@ -11,6 +11,8 @@ import type {
   ReviewFamilySideName,
 } from '../../data/review';
 import { FAMILY_SIDES } from '../../data/review';
+import { TreeComparisonScope, useTreeComparison } from './IntentWordDiff';
+import { rowWording, wordingComparison } from './statementWording';
 
 export interface FamilySelection {
   familyId: string;
@@ -115,6 +117,16 @@ interface MemberRow {
   invariantRevisionId: string;
   sides: ReviewFamilySideName[];
   member: ReviewFamilyMember;
+  // For a revision listed on both sides: whether the two sides' carried texts are the same, differ,
+  // or cannot be compared (a side's content is not on this page). A tree comparison says so rather
+  // than calling one revision "unchanged" (review R1 F2).
+  wording?: 'same' | 'differs' | 'unknown';
+}
+
+function sidesWording(first: ReviewFamilyMember, second: ReviewFamilyMember): MemberRow['wording'] {
+  if (first.state !== 'recorded' || second.state !== 'recorded') return 'unknown';
+  const same = wordingComparison(rowWording(first), rowWording(second), false);
+  return same.kind === 'wording_unchanged' ? 'same' : 'differs';
 }
 
 export function memberRows(entry: ReviewFamilyContextEntry): MemberRow[] {
@@ -131,6 +143,7 @@ export function memberRows(entry: ReviewFamilyContextEntry): MemberRow[] {
         continue;
       }
       existing.sides.push(side);
+      existing.wording = sidesWording(existing.member, member);
       if (member.state === 'recorded') existing.member = member;
     }
   }
@@ -285,14 +298,27 @@ function familyLabel(entry: ReviewFamilyContextEntry): string {
   return entry.display_label ?? entry.family_id;
 }
 
+// A dataset revision is one immutable text; a tree comparison compares the bytes.
+function sameGuaranteeText(
+  before: ReviewFamilyGuarantee,
+  after: ReviewFamilyGuarantee,
+  tree: boolean,
+): boolean {
+  return !tree || before.joint_guarantee === after.joint_guarantee;
+}
+
+// One revision is "unchanged" only when its two texts are too; on a tree comparison one revision can
+// carry different bytes on its two sides (MIK-R21), and then both texts are shown (review R1 F2).
 function guaranteesOf(
   entry: ReviewFamilyContextEntry,
+  tree: boolean,
 ): { guarantee: ReviewFamilyGuarantee; side: string; note: string }[] {
   const before = entry.before.guarantee;
   const after = entry.after.guarantee;
   if (before === undefined && after === undefined) return [];
   if (before !== undefined && after !== undefined) {
-    if (before.revision_id === after.revision_id) {
+    const oneRevision = before.revision_id === after.revision_id;
+    if (oneRevision && sameGuaranteeText(before, after, tree)) {
       return [
         {
           guarantee: before,
@@ -301,9 +327,10 @@ function guaranteesOf(
         },
       ];
     }
+    const note = oneRevision ? ' · same revision, text differs' : '';
     return [
-      { guarantee: before, side: 'before', note: 'Joint guarantee · before' },
-      { guarantee: after, side: 'after', note: 'Joint guarantee · after' },
+      { guarantee: before, side: 'before', note: `Joint guarantee · before${note}` },
+      { guarantee: after, side: 'after', note: `Joint guarantee · after${note}` },
     ];
   }
   const one = (before ?? after) as ReviewFamilyGuarantee;
@@ -312,7 +339,7 @@ function guaranteesOf(
 }
 
 function FamilyGuarantees({ entry }: { entry: ReviewFamilyContextEntry }) {
-  const guarantees = guaranteesOf(entry);
+  const guarantees = guaranteesOf(entry, useTreeComparison());
   if (!guarantees.length) {
     return (
       <p className={muted} data-testid="review-family-guarantee">
@@ -365,6 +392,14 @@ function memberLabel(member: ReviewFamilyMember): string {
     : identity;
 }
 
+// The node's side tag. On a tree comparison one revision on both sides is "unchanged" only when its
+// carried texts are the same; otherwise it is the same revision, with its text differing or unknown.
+function memberSideTag(row: MemberRow, tree: boolean): string {
+  if (row.sides.length !== 2) return ` · ${row.sides[0]} only`;
+  if (!tree || row.wording === 'same') return ' · unchanged revision';
+  return row.wording === 'differs' ? ' · same revision · text differs' : ' · same revision';
+}
+
 function memberSidesNote(row: MemberRow): string {
   return row.sides.length === 2
     ? 'recorded on both snapshots'
@@ -383,6 +418,7 @@ function MemberNode({
   onSelect: (selection: FamilySelection) => void;
 }) {
   const member = row.member;
+  const tree = useTreeComparison();
   const isCurrent =
     selected?.familyId === entry.family_id &&
     selected?.memberRevisionId === member.invariant_revision_id;
@@ -412,9 +448,7 @@ function MemberNode({
           </span>
         )}
         <span className={muted}>{memberSidesNote(row)}</span>
-        <span className={sideTag}>
-          {row.sides.length === 2 ? ' · unchanged revision' : ` · ${row.sides[0]} only`}
-        </span>
+        <span className={sideTag}>{memberSideTag(row, tree)}</span>
       </button>
       {member.other_family_revision_ids.length ? (
         <details>
@@ -595,8 +629,11 @@ export function FamilyTree({
   query,
   onQuery,
   embedded = false,
+  tree = false,
 }: {
   embedded?: boolean;
+  // A tree comparison (MIK-R25): labels compare text bytes, not revision identities alone.
+  tree?: boolean;
   context: ReviewFamilyContext;
   selection: FamilySelection | null;
   onSelect: (selection: FamilySelection) => void;
@@ -636,12 +673,14 @@ export function FamilyTree({
       </p>
       <FamilyContextDetails context={context} composed={composed} />
       {shown.length ? (
-        <FamilyList
-          shown={shown}
-          selected={selection}
-          onSelect={onSelect}
-          onRosterNext={onRosterNext}
-        />
+        <TreeComparisonScope tree={tree}>
+          <FamilyList
+            shown={shown}
+            selected={selection}
+            onSelect={onSelect}
+            onRosterNext={onRosterNext}
+          />
+        </TreeComparisonScope>
       ) : (
         <p className={muted} data-testid="review-family-none-shown">
           {composed
