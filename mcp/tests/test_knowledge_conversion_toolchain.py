@@ -72,7 +72,7 @@ def test_read_ar_files_returns_legacy_format_or_resolved_references(tmp_path: Pa
     block = payload["published_intent"]
     assert block["state"] == "recorded", block
     assert block["memoryTree"]["indexState"] == "complete"
-    statements = {item.get("statement") for item in block["seeds"][0]["items"]}
+    statements = {row.get("statement") for row in block["seeds"][0]["rows"]}  # leaf (MIK-R01)
     assert "Alpha adds one." in statements  # the exported invariant realized in this file
     converted = payload["files"][0]
     assert converted["format"] == "text/v2"

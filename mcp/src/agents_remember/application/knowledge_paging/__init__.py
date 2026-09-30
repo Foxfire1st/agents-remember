@@ -5,9 +5,12 @@ Every bounded read of a converted memory tree is cut by one declared token thres
 continuation (:mod:`agents_remember.models.knowledge.continuation`), bound to the memory tree, the
 seed, the selection policy and version, the selection-manifest digest and the position
 (:mod:`.bindings`), and the mounted ``knowledge_read`` resumes it whichever surface minted it
-(:mod:`.tree_read`). Two responses are paged today:
+(:mod:`.tree_read`). Three responses are paged today:
 
-* the selective scope read behind the published-intent block of ``read_ar_files``
+* the family-complete leaf read of a path (MIK-R01, :mod:`agents_remember.application.
+  knowledge_leaf`), behind the published-intent block of ``read_ar_files`` and ``knowledge_read``'s
+  ``source_context`` view;
+* the selective scope read of an identity seed of the published-intent route
   (:mod:`.scope_pages`);
 * the named views of ``knowledge_read`` (:mod:`.view_pages`).
 

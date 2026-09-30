@@ -6,7 +6,9 @@ page carries is accepted by ``knowledge_read`` whichever surface minted it:
 * **Cross-surface walk.** The packet's conforming example -- a 40-member family whose first page
   comes from the published-intent block of ``read_ar_files`` and whose later pages come from
   ``knowledge_read`` -- returns every selected row exactly once, and a page that continues the
-  family starts with its header reference row.
+  family starts with its header reference row. Since MIK-R01 the pages of a path are the
+  family-complete leaf read's rows (``payload.rows``); the family header reference is their literal
+  first row.
 * **Threshold adherence** over randomized families, on both the scope pages and the view pages.
 * **An oversized row** is returned alone and flagged.
 * **Binding mismatches** are refused with a named code and no page, the changed tree named.
@@ -27,12 +29,12 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from agents_remember.application.knowledge_leaf import select_leaf
 from agents_remember.application.knowledge_paging import (
     KNOWLEDGE_PAGE_THRESHOLD_TOKENS,
     KNOWLEDGE_PAGE_TOKENIZER,
 )
 from agents_remember.application.knowledge_paging.threshold import response_tokens
-from agents_remember.application.knowledge_read import open_read_context, select_knowledge_scope
 from agents_remember.application.published_intent import (
     published_intent_block,
     select_knowledge_dataset,
@@ -44,10 +46,8 @@ from agents_remember.mcp.tools.knowledge import (
     knowledge_project_payload,
     knowledge_read_payload,
 )
-from agents_remember.memory.knowledge.read import SelectedScope
-from agents_remember.memory.knowledge_index import INDEX_REPOSITORY_ID, text_uuid
+from agents_remember.memory.knowledge_index import INDEX_REPOSITORY_ID, KnowledgeIndex, text_uuid
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
-from agents_remember.models.knowledge.read import PathSeed
 from agents_remember.models.knowledge_files.documents import (
     LAYOUT_MARKER_PATH,
     file_sidecar_path,
@@ -192,6 +192,16 @@ def _within_threshold(response: dict[str, Any]) -> bool:
     return response_tokens(response) <= KNOWLEDGE_PAGE_THRESHOLD_TOKENS
 
 
+def _counted(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A leaf page's returned rows: its header reference row repeats an identity already returned."""
+
+    return [row for row in rows if row["kind"] != "family_header_reference"]
+
+
+def _leaf_key(row: dict[str, Any]) -> str:
+    return f"{row['kind']}:{row['id']}:{row.get('via', '')}"
+
+
 def _walk_scope(tmp_path: Path, root: Path) -> list[dict[str, Any]]:
     """Page 1 from the published-intent block, every later page from ``knowledge_read``."""
 
@@ -215,14 +225,14 @@ def _walk_scope(tmp_path: Path, root: Path) -> list[dict[str, Any]]:
 def test_a_forty_member_family_pages_from_read_ar_files_through_knowledge_read_exactly_once(
     tmp_path: Path,
 ) -> None:
-    root = _tree(tmp_path, _statements(40))
+    root = _tree(tmp_path, _statements(40, words=150))
     pages = _walk_scope(tmp_path, root)
     assert len(pages) >= 3
-    items = [item for page in pages for item in page["items"]]
+    items = [item for page in pages for item in _counted(page["rows"])]
     total = pages[0]["page"]["total"]
-    ids = [item["item_id"] for item in items]
+    ids = [_leaf_key(item) for item in items]
     assert len(ids) == total == len(set(ids))
-    assert {item["kind"] for item in items} >= {"family_revision", "family_membership"}
+    assert {item["kind"] for item in items} >= {"family_header", "member", "realization"}
     returned = 0
     for page in pages:
         facts = page["page"]
@@ -231,15 +241,18 @@ def test_a_forty_member_family_pages_from_read_ar_files_through_knowledge_read_e
             "tokenizer": KNOWLEDGE_PAGE_TOKENIZER,
         }
         assert _within_threshold(page) or facts.get("flags") == ["oversized_row"]
-        returned += len(page["items"])
+        returned += len(_counted(page["rows"]))
         assert (facts["returned"], facts["remaining"]) == (returned, total - returned)
         assert facts["enumerationComplete"] is (facts["remaining"] == 0)
-        first = page["items"][0]
-        if facts["start"] > 0 and first["kind"] == "family_membership":
-            # A page that continues a family starts with its header reference row.
-            reference = facts["headerReference"]
+        first = _counted(page["rows"])[0]
+        if facts["start"] > 0 and first["kind"] != "family_header":
+            # A page that continues a family starts with its header reference as a literal row.
+            reference = page["rows"][0]
             assert reference["kind"] == "family_header_reference"
-            assert reference["family_revision_id"] == first["family_revision_id"]
+            assert (reference["id"], reference["title"]) == (
+                FAMILY,
+                "A family large enough to page",
+            )
     assert pages[-1]["enumerationComplete"] is True and pages[-1].get("continuation") is None
     assert [page["page"]["manifestDigest"] for page in pages] == [pages[0]["manifestDigest"]] * len(
         pages
@@ -279,7 +292,7 @@ def test_pages_stay_within_the_threshold_over_randomized_families(tmp_path: Path
         base.mkdir()
         root = _tree(base, statements)
         scope = _walk_scope(base, root)
-        scope_ids = [item["item_id"] for page in scope for item in page["items"]]
+        scope_ids = [_leaf_key(item) for page in scope for item in _counted(page["rows"])]
         assert len(scope_ids) == len(set(scope_ids)) == scope[0]["page"]["total"]
         family = text_uuid("revision", f"{FAMILY}@1")
         views = _walk_view(base, root, view="family", family_revision_id=family)
@@ -307,9 +320,9 @@ def test_a_row_larger_than_the_threshold_is_returned_alone_and_flagged(tmp_path:
     flagged = [page for page in pages if page["page"].get("flags") == ["oversized_row"]]
     assert flagged, [page["page"] for page in pages]
     for page in flagged:
-        assert len(page["items"]) == 1
-        assert noise in json.dumps(page["items"][0])  # returned whole, never cut short
-    ids = [item["item_id"] for page in pages for item in page["items"]]
+        assert len(_counted(page["rows"])) == 1
+        assert noise in json.dumps(_counted(page["rows"])[0])  # returned whole, never cut short
+    ids = [_leaf_key(item) for page in pages for item in _counted(page["rows"])]
     assert len(ids) == len(set(ids)) == pages[0]["page"]["total"]
 
 
@@ -449,7 +462,7 @@ def _walk_block(tmp_path: Path, root: Path, block: dict[str, Any]) -> dict[str, 
     for entry in block["seeds"]:
         if entry["state"] == "page":
             walked.setdefault(entry["seed"]["path"], []).extend(
-                item["item_id"] for item in entry["items"]
+                _leaf_key(item) for item in _counted(entry["rows"])
             )
         view, continuation = entry.get("continuationView"), entry.get("continuation")
         while continuation is not None:
@@ -463,7 +476,7 @@ def _walk_block(tmp_path: Path, root: Path, block: dict[str, Any]) -> dict[str, 
             )
             page = response["payload"]
             walked.setdefault(page["seed"]["path"], []).extend(
-                item["item_id"] for item in page["items"]
+                _leaf_key(item) for item in _counted(page["rows"])
             )
             view, continuation = page["continuationView"], response.get("continuation")
     return walked
@@ -471,10 +484,10 @@ def _walk_block(tmp_path: Path, root: Path, block: dict[str, Any]) -> dict[str, 
 
 def _selection_size(tmp_path: Path, root: Path, path: str) -> int:
     selected = select_knowledge_dataset(root, coordination_root=tmp_path / "coordination")
-    context = open_read_context(selected.database_path, INDEX_REPOSITORY_ID)
-    scope = select_knowledge_scope(selected.database_path, context, PathSeed(path=path))
-    assert isinstance(scope, SelectedScope)
-    return len(scope.items)
+    with KnowledgeIndex(selected.database_path) as index:
+        structure = select_leaf(index, path)
+    assert structure is not None
+    return len(structure.order)
 
 
 # A deep directory makes each deferred entry large enough that sixteen of them cannot all fit.
@@ -539,11 +552,11 @@ def test_a_view_walk_resumes_in_its_own_ordering_and_refuses_another(tmp_path: P
     assert declared["refusalCode"] == "continuation_binding_mismatch"
 
 
-def _anchor_states(items: list[dict[str, Any]]) -> dict[str, str]:
-    return {item["item_id"]: item["anchor"]["resolution"] for item in items if item.get("anchor")}
+def _entry_states(rows: list[dict[str, Any]]) -> dict[str, str]:
+    return {row["id"]: row["state"] for row in rows if row["kind"] == "realization"}
 
 
-def test_a_resumed_scope_walk_resolves_anchors_at_page_one_code_tree(tmp_path: Path) -> None:
+def test_a_resumed_leaf_walk_observes_entries_at_page_one_code_tree(tmp_path: Path) -> None:
     code = tmp_path / "code"
     init_repository(code)
     count = 30
@@ -557,9 +570,10 @@ def test_a_resumed_scope_walk_resolves_anchors_at_page_one_code_tree(tmp_path: P
         _member_path(number): git(code, "rev-parse", f"HEAD:{_member_path(number)}")
         for number in range(count)
     }
-    root = _tree(tmp_path, _statements(count), blobs=blobs)
+    root = _tree(tmp_path, _statements(count, words=150), blobs=blobs)
     page = published_intent_block(_context(tmp_path, root), [SEED_PATH])["seeds"][0]
     assert page["page"]["codeTreeId"] == first_tree
+    assert page["continuation"] is not None  # the walk has resumed pages
     for number in range(count):  # the code moves on after page 1
         (code / _member_path(number)).write_text(f"def member_{number}():\n    return -1\n")
     commit_all(code, "second")
@@ -575,27 +589,33 @@ def test_a_resumed_scope_walk_resolves_anchors_at_page_one_code_tree(tmp_path: P
         assert response["page"]["codeTreeId"] == first_tree
         # Currentness is observed at the walk's tree too, not at no tree (the caller named none).
         assert response["currentness"]["codeTree"]["treeId"] == first_tree
-        states.update(_anchor_states(response["payload"]["items"]))
+        states.update(_entry_states(response["payload"]["rows"]))
         continuation = response.get("continuation")
-    assert states and set(states.values()) == {"exact_recorded_blob"}
+    assert states and set(states.values()) == {"current"}
 
-    # The same claims read at the moved tree resolve otherwise, so the binding is what held them.
-    selected = select_knowledge_dataset(root, coordination_root=tmp_path / "coordination")
-    moved = select_knowledge_scope(
-        selected.database_path,
-        open_read_context(
-            selected.database_path,
-            INDEX_REPOSITORY_ID,
-            repository_root=code,
-            code_tree_id=second_tree,
-        ),
-        PathSeed(path=SEED_PATH),
+    # The same entries read at the moved tree are stale, so the binding is what held them.
+    moved: dict[str, str] = {}
+    response = _read(
+        tmp_path,
+        root,
+        view="source_context",
+        source_path=SEED_PATH,
+        code_tree_id=second_tree,
+        repository_root=str(code),
     )
-    assert isinstance(moved, SelectedScope)
-    moved_states = {
-        item.item_id: item.anchor.resolution for item in moved.items if item.anchor is not None
-    }
-    assert all(moved_states[item] != "exact_recorded_blob" for item in states)
+    while True:
+        assert response["state"] == "page", response
+        moved.update(_entry_states(response["payload"]["rows"]))
+        if response.get("continuation") is None:
+            break
+        response = _read(
+            tmp_path,
+            root,
+            view="source_context",
+            continuation=response["continuation"],
+            repository_root=str(code),
+        )
+    assert set(states) <= set(moved) and {moved[entry] for entry in states} == {"stale"}
 
     refused = _read(
         tmp_path,

@@ -106,6 +106,7 @@ unit-regression = [
   "mcp/tests/test_knowledge_index_reuse.py",
   "mcp/tests/test_knowledge_index_surfaces.py",
   "mcp/tests/test_knowledge_paging.py",
+  "mcp/tests/test_knowledge_leaf_read.py",
   "mcp/tests/test_knowledge_writer.py",
   "mcp/tests/test_knowledge_conversion.py",
   "mcp/tests/test_knowledge_crossing.py",

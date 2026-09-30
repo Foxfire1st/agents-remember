@@ -40,6 +40,12 @@ substituted. The counts cover every invariant the answer carries, whether it nam
 failure of the currentness step is stated as ``unverifiableReason`` and never refuses the read.
 The view payload is unchanged, so a stale invariant stays visible. Absent for a database.
 
+**The family-complete leaf read and family names (MIK-R01).** On a converted tree, a
+``source_context`` read of a path is the leaf read: ``state: "page"`` whose ``payload.rows`` hold the
+path's invariants, each containing family's header and remaining members, their entries (each with
+its state) and the advertised families, in one declared order. An ``invariant`` view adds
+``families``, the families containing its invariant by ID and title. Absent for a database.
+
 **A refusal is a state, not a partial success.** ``state`` is ``view``/``result`` or ``refused``, and
 the refusal fields name the offending input. A handler never translates a refusal into an empty
 result or a default value, so a caller can always tell "nothing was selected" from "the selection was
@@ -85,6 +91,7 @@ class KnowledgeReadResponse(ToolResponse):
     indexComplete: bool | None = None
     proofs: list[dict[str, Any]] | None = None
     currentness: dict[str, Any] | None = None
+    families: list[dict[str, Any]] | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None
 

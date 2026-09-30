@@ -45,8 +45,16 @@ class WalkCurrentness:
     def document(self, answer: Any) -> dict[str, Any]:
         """The ``currentness`` block of one candidate answer."""
 
-        if self._failure is not None or self._full is None:
+        subset = self.subset(answer)
+        if subset is None:
             return dict(self._failure or failure_document(self._code_tree, ValueError("none")))
+        return subset.to_document()
+
+    def subset(self, answer: Any) -> Currentness | None:
+        """The currentness of the records one candidate answer names, or ``None`` if it failed."""
+
+        if self._failure is not None or self._full is None:
+            return None
         full = self._full
         named = [self._records[value] for value in named_uuids(answer) if value in self._records]
         families = {record for kind, record in named if kind == "family"}
@@ -59,4 +67,4 @@ class WalkCurrentness:
             problem=full.problem,
             invariants=tuple(one for one in full.invariants if one.id in wanted),
             families=tuple(one for one in full.families if one.id in families),
-        ).to_document()
+        )

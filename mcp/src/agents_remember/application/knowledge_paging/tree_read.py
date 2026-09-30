@@ -4,9 +4,16 @@ A read of a memory tree is always a bounded page of one selection, cut by the sh
 its continuation is the shared token. A continuation is accepted whichever surface minted it:
 
 * a **view** token (minted by a ``knowledge_read`` view page) resumes that view's row walk;
-* a **scope** token (minted by the published-intent block of ``read_ar_files``, or by an earlier
+* a **leaf** token (minted by the published-intent block of ``read_ar_files`` for a path, or by an
+  earlier ``source_context`` page) resumes the family-complete leaf read (MIK-R01), and the response
+  is ``state: "page"`` with the leaf page as its ``payload``;
+* a **scope** token (minted for an identity seed of the published-intent route, or by an earlier
   ``knowledge_read`` page of the same walk) resumes the scope read's item walk, and the response is
   ``state: "page"`` with the scope page as its ``payload``.
+
+A fresh ``source_context`` read of a path is the family-complete leaf read itself: its first page,
+in the same selection and under the same manifest the ``read_ar_files`` block returns (MIK-R01
+rule 6). An ``invariant`` view names the families containing its invariant (rule 7).
 
 The token carries its seed, its effective ordering and the code tree page 1 resolved anchors at, so
 a resuming call names only the dataset, the namespace, the view and the token, and every page of
@@ -29,6 +36,18 @@ from typing import Any, Protocol
 from pydantic import TypeAdapter, ValidationError
 
 from agents_remember.application.knowledge_currentness.observe import CodeTree
+from agents_remember.application.knowledge_leaf.currentness import LeafCurrentness
+from agents_remember.application.knowledge_leaf.pages import (
+    LEAF_VIEW,
+    LeafRequest,
+    PreparedLeaf,
+    prepare_leaf,
+)
+from agents_remember.application.knowledge_leaf.selection import (
+    LEAF_POLICY,
+    LEAF_POLICY_VERSION,
+    family_names,
+)
 from agents_remember.application.knowledge_paging.bindings import (
     PagingRefusal,
     mint_continuation,
@@ -67,6 +86,7 @@ from agents_remember.application.published_intent import (
     memory_tree_block,
 )
 from agents_remember.kernel.git_command import run_git
+from agents_remember.memory.knowledge_index import KnowledgeIndex
 from agents_remember.models.knowledge.continuation import KnowledgeContinuation
 from agents_remember.models.knowledge.read import (
     KnowledgeReadContext,
@@ -88,6 +108,13 @@ __all__ = [
 DEFAULT_ORDERING = "stable_ordering"
 
 _SEED = TypeAdapter[KnowledgeReadSeed](KnowledgeReadSeed)
+
+# The selection policy and version each paged response is cut under.
+_POLICIES = {
+    "leaf": (LEAF_POLICY, LEAF_POLICY_VERSION),
+    "scope": (SCOPE_POLICY, SCOPE_POLICY_VERSION),
+    "view": (VIEW_POLICY, VIEW_POLICY_VERSION),
+}
 
 # The tool arguments that name a subject, and the seed field each one binds to.
 _SUBJECT_FIELDS = ("invariant_revision_id", "family_revision_id", "source_path")
@@ -168,7 +195,12 @@ class _TreeRead:
         """The envelope renderer of one page: fixed fields, and the extras prepared once."""
 
         extras = self.extras(subject, self.code_tree, candidates)
-        fixed = {"memoryTree": memory_tree_block(self.tree), "indexComplete": self.index_complete}
+        fixed: dict[str, Any] = {
+            "memoryTree": memory_tree_block(self.tree),
+            "indexComplete": self.index_complete,
+        }
+        if subject.view == "invariant":  # MIK-R01 rule 7: the families containing the invariant
+            fixed["families"] = _containing_families(self, subject.invariant_revision_id)
         return lambda body: {**fixed, **extras(body)}
 
 
@@ -188,17 +220,13 @@ def read_tree_page(
     read = _TreeRead(request, selected, tree, context, extras, workspace_root)
     if request.continuation is None:
         # A fresh view walk is bound to the code tree the caller named, and only that one.
-        read = _at_code_tree(read, request.code_tree_id)
-        return _view_response(read, _requested_subject(request), None)
+        return _fresh_response(_at_code_tree(read, request.code_tree_id))
     resume = read_continuation(request.continuation, view=request.view)
     if isinstance(resume, PagingRefusal):
-        return _refused(request, resume.code, resume.detail)
-    scope = resume.response == "scope"
+        return _refused(read, resume.code, resume.detail)
+    policy, version = _POLICIES[resume.response]
     refusal: PagingRefusal | None = request_binding_refusal(
-        resume,
-        memory_tree_id=tree.tree_key,
-        selection_policy=SCOPE_POLICY if scope else VIEW_POLICY,
-        policy_version=SCOPE_POLICY_VERSION if scope else VIEW_POLICY_VERSION,
+        resume, memory_tree_id=tree.tree_key, selection_policy=policy, policy_version=version
     )
     refusal = (
         refusal
@@ -207,12 +235,32 @@ def read_tree_page(
         or resolution_refusal(resume, code_tree_id=request.code_tree_id)
     )
     if refusal is not None:
-        return _refused(request, refusal.code, refusal.detail)
+        return _refused(read, refusal.code, refusal.detail)
     read = _at_code_tree(read, resume.code_tree_id)
     missing = _missing_code_tree(read, resume.code_tree_id)
     if missing is not None:
-        return _refused(request, missing.code, missing.detail)
-    if scope:
+        return _refused(read, missing.code, missing.detail)
+    return _resumed_response(read, resume)
+
+
+def _fresh_response(read: _TreeRead) -> dict[str, Any]:
+    """Page 1: a ``source_context`` read of a path is the family-complete leaf read (MIK-R01)."""
+
+    request = read.request
+    if request.view == LEAF_VIEW and request.source_path is not None:
+        return _leaf_response(read, request.source_path, None)
+    return _view_response(read, _requested_subject(request), None)
+
+
+def _resumed_response(read: _TreeRead, resume: KnowledgeContinuation) -> dict[str, Any]:
+    """A later page of the walk the continuation names, whichever response it pages."""
+
+    if resume.response == "leaf":
+        path = resume.seed.get("path")
+        if resume.seed.get("kind") != "path" or not path:
+            return _refused(read, "continuation_unreadable", "its seed is not a path")
+        return _leaf_response(read, path, resume)
+    if resume.response == "scope":
         return _scope_response(read, resume)
     return _view_response(read, _token_subject(resume), resume)
 
@@ -292,7 +340,7 @@ def _subject_refusal(
 ) -> PagingRefusal | None:
     """A named subject argument that disagrees with the continuation's seed, or ``None``."""
 
-    if resume.response == "scope":
+    if resume.response in ("leaf", "scope"):
         field, key = _SCOPE_SUBJECTS.get(str(resume.seed.get("kind")), (None, None))
         bound = {} if field is None or key is None else {field: resume.seed.get(key)}
     else:
@@ -327,10 +375,10 @@ def _view_response(
         )
     except ValidationError as error:
         code = "invalid_payload" if resume is None else "continuation_unreadable"
-        return _refused(read.request, code, f"the read's subject is not readable: {error}")
+        return _refused(read, code, f"the read's subject is not readable: {error}")
     whole = read_whole_view(read.selected.database_path, read.context, view_request)
     if isinstance(whole, ViewRefusal):
-        return _refused(read.request, whole.code, whole.detail)
+        return _refused(read, whole.code, whole.detail)
     binding = PageBinding(
         memory_tree_id=read.tree.tree_key,
         selection_policy=VIEW_POLICY,
@@ -344,7 +392,7 @@ def _view_response(
             resume, manifest_digest=binding.manifest_digest, total=len(whole.rows)
         )
         if refusal is not None:
-            return _refused(read.request, refusal.code, refusal.detail)
+            return _refused(read, refusal.code, refusal.detail)
         position = resume.position
 
     extras = read.prepared(subject, [row.model_dump(mode="json") for row in whole.rows[position:]])
@@ -393,7 +441,7 @@ def _scope_response(read: _TreeRead, resume: KnowledgeContinuation) -> dict[str,
     try:
         seed = _SEED.validate_python(resume.seed)
     except ValidationError as error:
-        return _refused(read.request, "continuation_unreadable", f"its seed is not a seed: {error}")
+        return _refused(read, "continuation_unreadable", f"its seed is not a seed: {error}")
     subject = ReadSubject(
         view=resume.view,
         invariant_revision_id=resume.seed.get("revision_id")
@@ -415,12 +463,12 @@ def _scope_response(read: _TreeRead, resume: KnowledgeContinuation) -> dict[str,
         )
     )
     if isinstance(prepared, PagingRefusal):
-        return _refused(read.request, prepared.code, prepared.detail)
+        return _refused(read, prepared.code, prepared.detail)
     if isinstance(prepared, KnowledgeReadResult):
         refusal = prepared.refusal
         code = "snapshot_unavailable" if refusal is None else refusal.code
         detail = "the scope read returned no page" if refusal is None else refusal.detail
-        return _refused(read.request, code, detail)
+        return _refused(read, code, detail)
     extras = read.prepared(subject, [dict(row.body) for row in prepared.rows[prepared.position :]])
 
     def render(cut: PageCut) -> dict[str, Any]:
@@ -444,7 +492,74 @@ def _scope_response(read: _TreeRead, resume: KnowledgeContinuation) -> dict[str,
     return response
 
 
-def _refused(request: ToolReadRequest, code: str, detail: str) -> dict[str, Any]:
+def _leaf_response(
+    read: _TreeRead, path: str, resume: KnowledgeContinuation | None
+) -> dict[str, Any]:
+    """One page of the family-complete leaf read of ``path`` (MIK-R01), or its refusal.
+
+    The leaf has one declared row order, so an ordering other than the default is refused on a
+    fresh read (a resumed one is checked against the token like every walk).
+    """
+
+    ordering = read.request.ordering_input
+    if resume is None and ordering is not None and ordering != DEFAULT_ORDERING:
+        return _refused(
+            read,
+            "invalid_payload",
+            f"the family-complete leaf read has one declared row order; orderingInput "
+            f"{ordering!r} does not apply to it -- read without orderingInput",
+        )
+    prepared = prepare_leaf(
+        LeafRequest(
+            index_path=read.selected.database_path,
+            memory_tree_id=read.tree.tree_key,
+            index_state=read.tree.index_state,
+            path=path,
+            code_tree=read.code_tree,
+            resume=resume,
+        )
+    )
+    if not isinstance(prepared, PreparedLeaf):  # a refused continuation, or registration_absent
+        return _refused(read, prepared.code, prepared.detail)
+    states = LeafCurrentness(read.code_tree, [prepared])
+    fixed = {"memoryTree": memory_tree_block(read.tree), "indexComplete": read.index_complete}
+
+    def render(cut: PageCut) -> dict[str, Any]:
+        block = prepared.render(cut)
+        # The page facts and the continuation travel once, at the top of the response.
+        payload = {k: v for k, v in block.items() if k not in ("page", "continuation")}
+        return {
+            "ok": True,
+            "state": "page",
+            "view": LEAF_VIEW,
+            "repositoryId": read.request.repository_id,
+            "snapshot": prepared.request.memory_tree_id,
+            "completeWithinDeclaredScope": block["enumerationComplete"],
+            "continuation": block["continuation"],
+            "payload": payload,
+            "page": block["page"],
+            **fixed,
+            "currentness": states.document(payload),
+        }
+
+    _cut, response = cut_page(prepared.rows, prepared.position, render)
+    return response
+
+
+def _containing_families(read: _TreeRead, revision_id: str | None) -> list[dict[str, Any]]:
+    """The live families containing the invariant an ``invariant`` view reads, by ID and title."""
+
+    if revision_id is None:
+        return []
+    with KnowledgeIndex(read.selected.database_path, expected_key=read.tree.tree_key) as index:
+        text_id = index.text_id(revision_id)
+        return [] if text_id is None else family_names(index, text_id.split("@", 1)[0])
+
+
+def _refused(read: _TreeRead, code: str, detail: str) -> dict[str, Any]:
+    """A refused tree read: it names the memory tree and its index state too (MIK-R01 rule 9)."""
+
+    request = read.request
     return {
         "ok": True,
         "state": "refused",
@@ -453,4 +568,6 @@ def _refused(request: ToolReadRequest, code: str, detail: str) -> dict[str, Any]
         "refusalCode": code,
         "refusalDetail": detail,
         "threshold": threshold_block(),
+        "memoryTree": memory_tree_block(read.tree),
+        "indexComplete": read.index_complete,
     }

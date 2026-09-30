@@ -266,10 +266,26 @@ def _select(path: str, coordination_root: str | None) -> SelectedKnowledgeDatase
     )
 
 
+class _NoCodeTreeError(ValueError):
+    """A named ``repositoryRoot`` resolves no tree: it has no commit, or it is not a repository.
+
+    The read context refuses a root without a tree, so this was a raw ``ValidationError`` out of the
+    tool (carried to L01 from L02); it is now the named refusal below.
+    """
+
+    def __init__(self, repository_root: str) -> None:
+        super().__init__(
+            f"repositoryRoot {repository_root} resolves no code tree to read anchors at (it has no "
+            "commit, or it is not a Git repository); name a repository with a commit, add "
+            "codeTreeId, or omit repositoryRoot"
+        )
+
+
 # Every way resolving and opening a selection can fail, so each handler refuses the same inputs
 # the same way: an index that cannot be built (the tree, its Git objects, the cache) is
 # ``snapshot_unavailable`` naming the tree; everything else is the dataset refusal it was before.
 _SELECTION_FAILURES = (
+    _NoCodeTreeError,
     IndexMismatchError,
     MemoryTreeError,
     GitPreparationError,
@@ -280,6 +296,8 @@ _SELECTION_FAILURES = (
 
 
 def _selection_refusal(path: str, error: BaseException) -> tuple[str, str]:
+    if isinstance(error, _NoCodeTreeError):
+        return ("selected_input_unavailable", str(error))
     if isinstance(error, MemoryTreeError | GitPreparationError):
         return ("snapshot_unavailable", f"the selected memory tree could not be indexed: {error}")
     return _unusable_dataset(path, error)
@@ -314,7 +332,8 @@ def _source_resolution(
     The pair is completed here for the same reason the context refuses it: if a tree is to be named,
     both halves of it are named. The workspace default is used only when the caller names no
     repository at all, which is the behaviour the mount already documented; a caller that names a
-    root without a tree gets that root's own current tree, resolved from it.
+    root without a tree gets that root's own current tree, resolved from it, and a root that has none
+    is refused by name (:class:`_NoCodeTreeError`).
     """
 
     if request.code_tree_id is not None and request.repository_root is not None:
@@ -329,7 +348,10 @@ def _source_resolution(
         # replace a caller's minimal read with a refusal about the mount's configuration.
         tree_id = _current_code_tree(workspace_root)
         return (workspace_root, tree_id) if tree_id is not None else (None, None)
-    return root, _current_code_tree(root)
+    tree_id = _current_code_tree(root)
+    if tree_id is None:
+        raise _NoCodeTreeError(root)
+    return root, tree_id
 
 
 def _current_code_tree(repository_root: str) -> str | None:
@@ -1056,7 +1078,10 @@ def _project_result(
         selected.database_path,
         profile,
         requests,
-        ProjectionOptions(authorized_overwrites=request.authorized_overwrites),
+        ProjectionOptions(
+            authorized_overwrites=request.authorized_overwrites,
+            whole_views=selected.memory_tree is not None,  # L01: no 64-row cap on a tree
+        ),
     )
     if report.state == "refused" or report.refusal is not None:
         assert report.refusal is not None

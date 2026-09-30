@@ -25,6 +25,11 @@ licensed to shorten and may not drop the conditions under which the invariant ap
 **A detection signal and an authored description stay separately attributed.** Requirement 4.9: the
 two are written as two blocks with their own provenance lines, and the payload carries no merged
 field combining them.
+
+**A converted memory tree is projected whole (MIK-R01, carried from L02).** A view renders one
+slice of at most 64 rows at a time. A database projection keeps projecting that first slice, as it
+always has; a projection of a converted tree (``whole_views``) reads every slice of the view, so no
+family or source context is cut at 64 rows, and the artifact bound then continues it in parts.
 """
 
 from __future__ import annotations
@@ -34,6 +39,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.knowledge_paging.pager import PageCut
+from agents_remember.application.knowledge_paging.view_pages import (
+    read_whole_view,
+    view_page_payload,
+)
 from agents_remember.application.knowledge_read import open_read_context
 from agents_remember.application.knowledge_views import (
     VIEW_RENDERER_VERSION,
@@ -52,7 +62,13 @@ from agents_remember.models.knowledge.projection_manifest import (
     ProjectionReport,
     RenderedOutput,
 )
-from agents_remember.models.knowledge.view import ViewPayloadUnion, ViewRequest
+from agents_remember.models.knowledge.read import KnowledgeReadContext
+from agents_remember.models.knowledge.view import (
+    ViewPayloadUnion,
+    ViewRefusal,
+    ViewRequest,
+    ViewResult,
+)
 
 __all__ = [
     "PROJECTION_PROFILE_VERSION",
@@ -86,6 +102,7 @@ class ProjectionOptions:
     code_tree_id: str | None = None
     authorized_overwrites: tuple[str, ...] = ()
     hooks: ProjectionHooks | None = None
+    whole_views: bool = False
 
 
 def _document_path(payload: ViewPayloadUnion, subject: str) -> str:
@@ -227,7 +244,11 @@ def project_knowledge(
     )
     outputs: list[RenderedOutput] = []
     for request, subject in requests:
-        result = read_knowledge_view(database_path, context, request)
+        result = (
+            _whole_view(database_path, context, request)
+            if resolved.whole_views
+            else read_knowledge_view(database_path, context, request)
+        )
         if result.state == "refused" or result.payload is None:
             return refusal_report(
                 profile,
@@ -254,6 +275,23 @@ def project_knowledge(
     )
     writer = ManagedProjectionWriter(resolved.hooks)
     return writer.write(plan)
+
+
+def _whole_view(
+    database_path: Path, context: KnowledgeReadContext, request: ViewRequest
+) -> ViewResult:
+    """One view with every row of its selection, not only its first 64-row slice."""
+
+    whole = read_whole_view(database_path, context, request)
+    if isinstance(whole, ViewRefusal):
+        return ViewResult(state="refused", repository_id=request.repository_id, refusal=whole)
+    total = len(whole.rows)
+    body = view_page_payload(
+        whole, PageCut(start=0, end=total, total=total), None, index_complete=True
+    )
+    return ViewResult.model_validate(
+        {"state": "view", "repository_id": request.repository_id, "payload": body}
+    )
 
 
 def _outputs_for(

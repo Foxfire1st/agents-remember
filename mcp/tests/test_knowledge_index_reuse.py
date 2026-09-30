@@ -306,7 +306,7 @@ def test_the_ordinary_read_selects_a_converted_memory_tree_through_its_index(
     assert page["state"] == "page"
     assert page["indexState"] == "complete"
     assert page["enumerationComplete"] is (not page["hasMore"])
-    statements = {item.get("statement") for item in page["items"]}
+    statements = {row.get("statement") for row in page["rows"]}  # the leaf read (MIK-R01)
     assert "A comparison shows unchanged realizations beside changed ones." in statements
 
 

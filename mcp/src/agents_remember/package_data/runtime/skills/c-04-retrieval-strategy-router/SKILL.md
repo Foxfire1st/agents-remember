@@ -220,6 +220,23 @@ generation this publication does not carry. Neither is filled from today's data,
 recorded anchor could carry is refused as a seed rather than answered with an absence the read
 never observed.
 
+**A path on a converted memory tree is read family-complete.** When the block's `memoryTree` is
+present, each path's entry is the family-complete leaf read (`page.selectionPolicy:
+"family-complete-leaf"`): its `rows` are, in order, the path's own invariants (a `member` row --
+statement, applicability, conditions, exclusions, status, admission, `state` and every containing
+family in `families` -- followed by its `realization` and `proof` entry rows, each with path,
+locator, role or facet and `state`); then each containing family's `family_header` (title,
+guarantee, `routes`, `memberCount`, `members`, `staleMembers`) followed by its remaining members
+and their entries (a member already returned under an earlier family is a `member_reference` row);
+then one `advertised_family` row per further family a member belongs to, listing in `via` the
+members that reach it, which this read names but does not expand -- read it with `view: "family"`
+if you need it. `counts` gives families, members, entries, distinct paths, invariants by state and
+the rows returned and remaining, and `memoryTreeId` names the tree it was read from.
+`knowledge_read` with `view: "source_context"` and `sourcePath` returns the same selection under
+the same `manifestDigest`; that is the view to use when you need a file's whole invariant
+neighbourhood outside `read_ar_files`. The `invariant` view of a tree names its invariant's
+families in `families`.
+
 **Follow a bounded page through `knowledge_read`.** When the block's `memoryTree` is present (a
 converted memory tree), the whole knowledge block is cut to one shared threshold, stated as
 `threshold` (8,000 `tiktoken:o200k_base` tokens); each page's `page` block states the walk's
@@ -235,13 +252,15 @@ response's `continuation` (and its `payload.continuationView`) until a response 
 The threshold bounds the whole block, not each path. Once the block is full, each remaining path
 arrives as `state: "deferred"` with only its counts and a first `continuation`; when even those
 would not fit, they arrive as one deferred entry listing its `seeds`, whose single continuation
-walks them in turn. Follow either the same way. Every row arrives exactly once per path; a page
-that continues a family names it first in `page.headerReference`, and a single row too large for
-the threshold on its own arrives alone, whole, flagged `oversized_row`. A `knowledge_read` view
-page of a memory tree pages the same way. A refusal `continuation_binding_mismatch` means the
-memory tree, the selection, the ordering or the code tree differs from the walk's: restart from
-the seed, without a continuation. `continuation_unreadable` means the token is not one of these,
-or belongs to another view.
+walks them in turn; a tail too long for one continuation's queue is refused as
+`seed_queue_exceeded` -- read those paths in smaller requests. Follow either the same way. Every
+row arrives exactly once per path; a leaf page that continues a family starts with a
+`family_header_reference` row (a view page names it in `page.headerReference`), and a single row
+too large for the threshold on its own arrives alone, whole, flagged `oversized_row`. A
+`knowledge_read` view page of a memory tree pages the same way. A refusal
+`continuation_binding_mismatch` means the memory tree, the selection, the ordering or the code tree
+differs from the walk's: restart from the seed, without a continuation. `continuation_unreadable`
+means the token is not one of these, or belongs to another view.
 
 A block read from a database (no `memoryTree`) keeps its `read_knowledge_scope` cursor, which the
 mounted read does not continue: read deeper by identity instead -- pass the **value of**

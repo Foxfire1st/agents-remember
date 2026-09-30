@@ -7,8 +7,9 @@ which did not mint it can still resume it: it names
 
 * the **memory tree** it pages (the tree key the derived index was built for), so a tree that
   changed between pages is refused instead of served a page from another state;
-* the **response** it pages (``scope`` for the selective scope read behind the published-intent
-  block, ``view`` for a named view) and the ``knowledge_read`` view that resumes it;
+* the **response** it pages (``leaf`` for the family-complete leaf read of a seed path, MIK-R01;
+  ``scope`` for the selective scope read of an identity seed; ``view`` for a named view) and the
+  ``knowledge_read`` view that resumes it;
 * the **seed**, spelled as the minting surface spelled it, so the resuming call need not repeat it;
 * the **selection policy and its version**, and the **selection-manifest digest** of the whole
   ordered selection, so a position is only ever a position in the selection it was cut from;
@@ -47,6 +48,7 @@ from agents_remember.models.knowledge.base import (
 __all__ = [
     "CONTINUATION_FORMAT",
     "CONTINUATION_PREFIX",
+    "MAX_QUEUED_SEEDS",
     "KnowledgeContinuation",
     "PagedResponse",
     "decode_continuation",
@@ -63,10 +65,11 @@ _TREE_ID_PATTERN = r"^[0-9a-f]{40}$|^[0-9a-f]{64}$"
 # Bounds what a caller can hand the decoder before anything is parsed: a real token is well under a
 # kilobyte, and the seed it carries is bounded by the path and identity fields it holds.
 _MAX_TOKEN_LENGTH = 16384
-# The most seeds one collapsed block tail can queue; a block never holds more seeds than this.
-_MAX_QUEUED_SEEDS = 64
+# The most seeds one collapsed block tail can queue behind its first seed. A tail that would queue
+# more is refused by name (``seed_queue_exceeded``) rather than minted into a token.
+MAX_QUEUED_SEEDS = 64
 
-PagedResponse = Literal["scope", "view"]
+PagedResponse = Literal["leaf", "scope", "view"]
 
 
 class KnowledgeContinuation(KnowledgeModel):
@@ -109,7 +112,7 @@ class KnowledgeContinuation(KnowledgeModel):
     # Seeds queued after this one, when a full ``read_ar_files`` block collapsed its tail into one
     # continuation: the walk moves on to each in turn, from its first row.
     rest: tuple[dict[str, str], ...] = Field(
-        default=(), max_length=_MAX_QUEUED_SEEDS, serialization_alias="q", validation_alias="q"
+        default=(), max_length=MAX_QUEUED_SEEDS, serialization_alias="q", validation_alias="q"
     )
 
 

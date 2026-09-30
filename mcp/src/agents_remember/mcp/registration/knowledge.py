@@ -95,7 +95,11 @@ def _register_knowledge_read(server: FastMCP, config: McpRuntimeConfig) -> None:
         ordering and code tree; repositoryRoot relocates the code repository). `currentness`
         gives each returned invariant's state (stale, unverifiable, unrealized, current) at the
         walk's code tree: the one named by `codeTreeId`, or the continuation's on a resumed page;
-        without either they are unverifiable."""
+        without either they are unverifiable. On a converted tree, source_context with sourcePath
+        is the family-complete leaf read: the path's own invariants, then each containing family's
+        header (guarantee, routes, members) and its remaining members with their entries, then the
+        advertised families -- the same selection and manifestDigest read_ar_files returns. The
+        invariant view names the invariant's families in `families`."""
         return knowledge_read_payload(
             ReadToolRequest(
                 database_path=databasePath,

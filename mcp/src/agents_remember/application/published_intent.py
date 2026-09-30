@@ -68,6 +68,12 @@ without the marker keeps the database selection above, unchanged. Only this read
 write side's :func:`resolve_published_intent` still selects the database, and no writer reaches the
 index.
 
+**A path on a memory tree is read family-complete (MIK-R01).** A path seed of a converted tree is
+the family-complete leaf read (:mod:`agents_remember.application.knowledge_leaf`): the path's own
+invariants, each containing family's header and remaining members with their entries, then the
+advertised families, in one declared row order -- the same selection, under the same manifest, that
+``knowledge_read``'s ``source_context`` view returns. An identity seed keeps the scope read.
+
 **A memory tree's page continues through ``knowledge_read`` (MIK-R02).** A seed read from a
 converted tree is paged by the shared token threshold (:mod:`agents_remember.application.
 knowledge_paging`): the block states the threshold and the walk's counts in ``page``, and its
@@ -93,6 +99,9 @@ from pydantic import ValidationError
 
 from agents_remember.application.knowledge_before_half import read_dataset_identity
 from agents_remember.application.knowledge_currentness import CodeTree
+from agents_remember.application.knowledge_leaf.currentness import LeafCurrentness
+from agents_remember.application.knowledge_leaf.pages import LeafRequest, PreparedLeaf, prepare_leaf
+from agents_remember.application.knowledge_leaf.selection import LEAF_POLICY, LEAF_POLICY_VERSION
 from agents_remember.application.knowledge_paging import threshold_block
 from agents_remember.application.knowledge_paging.bindings import PagingRefusal
 from agents_remember.application.knowledge_paging.block_pages import bounded_block
@@ -110,6 +119,7 @@ from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.logical import bound_repository, dataset_identity
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
 from agents_remember.memory.knowledge_index import (
+    IndexMismatchError,
     KnowledgeIndexCache,
     MemoryTreeError,
     default_cache_directory,
@@ -159,6 +169,9 @@ __all__ = [
 # shared spelling instead of two conventions that agree today.
 PUBLISHED_DATASET_NAME = "knowledge.sqlite"
 
+# The top-level policy of a tree block whose seeds were all read by the leaf read (MIK-R01).
+LEAF_POLICY_VERSION_LABEL = f"{LEAF_POLICY}/{LEAF_POLICY_VERSION}"
+
 # One bounded page per seed. A path seed selects the revisions realized at that path plus the
 # families directly containing them, so the bound is a page size rather than a narrowing: a page
 # that leaves items behind reports ``hasMore`` and hands back the continuation that reaches them.
@@ -179,6 +192,8 @@ _TREE_ID_PATTERN = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 # namespace row this build cannot decode is an input the route was handed, not a caller mistake.
 _PUBLICATION_FAILURES = (KnowledgeStorageError, apsw.Error, OSError, ValidationError)
 _TREE_FAILURES = (*_PUBLICATION_FAILURES, MemoryTreeError)
+# A seed read through a memory tree's index also fails when the index is not the selected tree's.
+_SEED_FAILURES = (*_PUBLICATION_FAILURES, IndexMismatchError)
 
 
 @dataclass(frozen=True)
@@ -477,10 +492,13 @@ def read_published_intent(
     blocks = [_seed_block(selection, context, seed, max_items) for seed in seeds]
     if selection.memory_tree is not None:  # MIK-R02: the threshold bounds the whole block
         tree = selection.memory_tree
-        currentness = WalkCurrentness(
+        scopes = WalkCurrentness(
             selection.database_path, tree.tree_key, _code_tree(selection), _candidates(blocks)
         )
-        return bounded_block(blocks, lambda laid: _tree_block(selection, laid, currentness))
+        leaves = [block for block in blocks if isinstance(block, PreparedLeaf)]
+        currentness = (LeafCurrentness(_code_tree(selection), leaves), scopes)
+        policy = _block_policy(seeds)
+        return bounded_block(blocks, lambda laid: _tree_block(selection, laid, currentness, policy))
     # A database selection prepares no scope to cut: every seed entry is already its block.
     pages = cast(list[dict[str, Any]], blocks)
     return _recorded_block(selection, [_bind_index_state(block, selection) for block in pages])
@@ -489,22 +507,39 @@ def read_published_intent(
 def _tree_block(
     selection: PublishedIntentSelection,
     laid: list[dict[str, Any]],
-    currentness: WalkCurrentness,
+    currentness: tuple[LeafCurrentness, WalkCurrentness],
+    policy: str,
 ) -> dict[str, Any]:
     """The complete block of a memory-tree read around its laid-out seeds.
 
     Everything the block carries beside its seeds -- the threshold, and each returned invariant's
     currentness (MIK-R03) at the source-resolution tree -- is added here, so it is inside the
-    measured block that the threshold bounds.
+    measured block that the threshold bounds. ``policy`` is the selection policy the block's pages
+    were read under (:func:`_block_policy`).
     """
 
     block = _recorded_block(selection, [_bind_index_state(entry, selection) for entry in laid])
+    block["policyVersion"] = policy
     block["threshold"] = threshold_block()
-    block["currentness"] = currentness.document(block["seeds"])
+    leaves, scopes = currentness
+    block["currentness"] = leaves.document(block["seeds"], scopes)
     pair = selection.source_pair
     if pair is not None:
         block["currentness"]["treeScope"] = _TREE_SCOPE.format(tree=pair.code_tree_id)
     return block
+
+
+def _block_policy(seeds: Sequence[object]) -> str:
+    """The block's top-level ``policyVersion``: the leaf read's where it applies (L01 Q5, N5).
+
+    It is decided by what was asked, not by what was answered: a tree block whose seeds are all
+    paths was read by the family-complete leaf read (MIK-R01), even when every path was refused
+    (``registration_absent``, an unseedable spelling). A block with an identity seed, which the
+    scope read answers, keeps the scope policy. Each page states its own policy in ``page``.
+    """
+
+    paths = all(isinstance(seed, PathSeed | _UnseedablePath) for seed in seeds)
+    return LEAF_POLICY_VERSION_LABEL if paths else KNOWLEDGE_READ_POLICY_VERSION
 
 
 def _code_tree(selection: PublishedIntentSelection) -> CodeTree | None:
@@ -512,12 +547,16 @@ def _code_tree(selection: PublishedIntentSelection) -> CodeTree | None:
     return None if pair is None else CodeTree(pair.repository_root, pair.code_tree_id)
 
 
-def _candidates(blocks: list[dict[str, Any] | PreparedScope]) -> list[Any]:
-    """Every row any seed of the block could carry, for the one currentness computation."""
+def _candidates(blocks: list[dict[str, Any] | PreparedScope | PreparedLeaf]) -> list[Any]:
+    """Every row a scope seed of the block could carry, for the one scope currentness computation.
+
+    A leaf seed computed its own selection's currentness when it was prepared.
+    """
 
     return [
         [dict(row.body) for row in block.rows] if isinstance(block, PreparedScope) else block
         for block in blocks
+        if not isinstance(block, PreparedLeaf)
     ]
 
 
@@ -640,7 +679,7 @@ def _seed_block(
     context: KnowledgeReadContext,
     seed: KnowledgeReadSeed | _UnseedablePath,
     max_items: int,
-) -> dict[str, Any] | PreparedScope:
+) -> dict[str, Any] | PreparedScope | PreparedLeaf:
     if isinstance(seed, _UnseedablePath):
         return _refused_block(
             {"kind": "path", "path": seed.path}, "invalid_payload", seed.detail, None
@@ -661,7 +700,7 @@ def _seed_block(
                 ),
             ),
         )
-    except _PUBLICATION_FAILURES as error:
+    except _SEED_FAILURES as error:
         return _refused_block(
             seed_json,
             "snapshot_unavailable",
@@ -677,9 +716,28 @@ def _tree_page_block(
     context: KnowledgeReadContext,
     seed: KnowledgeReadSeed,
     seed_json: dict[str, Any],
-) -> PreparedScope | dict[str, Any]:
-    """A seed's scope in a memory tree, ready to be cut within the block, or its refusal."""
+) -> PreparedScope | PreparedLeaf | dict[str, Any]:
+    """A seed's selection in a memory tree, ready to be cut within the block, or its refusal.
 
+    A path seed is read by the family-complete leaf read (MIK-R01), an identity seed by the scope
+    read.
+    """
+
+    if isinstance(seed, PathSeed):
+        leaf = prepare_leaf(
+            LeafRequest(
+                index_path=selection.database_path,
+                memory_tree_id=tree.tree_key,
+                index_state=tree.index_state,
+                path=seed.path,
+                code_tree=_code_tree(selection),
+            )
+        )
+        if isinstance(leaf, PreparedLeaf):
+            return leaf
+        if isinstance(leaf, PagingRefusal):  # pragma: no cover - page 1 carries no continuation
+            return _refused_block(seed_json, leaf.code, leaf.detail, None)
+        return _refusal_block(seed_json, leaf)
     paged = prepare_scope(
         ScopePageRequest(
             database_path=selection.database_path,

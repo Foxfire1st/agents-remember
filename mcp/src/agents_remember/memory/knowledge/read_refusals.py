@@ -61,22 +61,26 @@ def selector_absent_refusal(
     )
 
 
-def registration_absent_refusal(*, path: str) -> KnowledgeRefusal:
+def registration_absent_refusal(*, path: str, with_proofs: bool = False) -> KnowledgeRefusal:
     """Refuse a path seed that has no recorded realization claim in the selected snapshot.
 
     An unregistered path is absence, and the refusal says so with zero recorded counts. It is never
     reported as "no semantic impact": nothing here decided what the path means, only that no
     authored claim cites it in this snapshot.
+
+    ``with_proofs`` names the claims a family-complete leaf read (MIK-R01) seeds on: realization
+    *and* proof entries. The default wording is the recorded-scope read's, unchanged.
     """
 
+    claim = "realization or proof claim" if with_proofs else "realization claim"
     return refusal(
         "registration_absent",
         _OPERATION,
-        f"no realization claim is recorded at {path!r} in the selected snapshot, so this read "
+        f"no {claim} is recorded at {path!r} in the selected snapshot, so this read "
         "reports absence rather than an empty scope",
-        facts=RefusalFacts(record_id=path, expected="a recorded realization claim"),
+        facts=RefusalFacts(record_id=path, expected=f"a recorded {claim}"),
         next_action=(
-            "Author a realization claim for this path, or select a path that is recorded. Absence "
+            f"Author a {claim} for this path, or select a path that is recorded. Absence "
             "is not a semantic verdict: no Markdown fallback and no working-tree lookup is "
             "performed, and no claim was invented to fill the gap."
         ),
