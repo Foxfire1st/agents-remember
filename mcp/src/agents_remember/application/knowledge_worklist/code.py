@@ -244,7 +244,12 @@ class CodeTrees:
         return self._hunks[key]
 
     def has_blob(self, blob: str) -> bool:
-        return self.objects.has_blob(blob)
+        """Whether the store holds ``blob``; a Git failure is a :class:`CodeReadError`, never absent."""
+
+        try:
+            return self.objects.has_blob(blob)
+        except CodeObjectError as error:
+            raise CodeReadError(str(error)) from error
 
     def resolve(
         self, path: str, locator: Mapping[str, Any], recorded_blob: str, blob: str

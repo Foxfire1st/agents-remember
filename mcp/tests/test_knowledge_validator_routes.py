@@ -11,6 +11,7 @@ import json
 import subprocess
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 from agents_remember.cli.__main__ import main as cli_main
@@ -28,9 +29,12 @@ from agents_remember.worktrees.services import bind_worktree_services
 from agents_remember.worktrees.services import worktree_services as bound_worktree_services
 from knowledge_validator_test_support import (
     CODE_PATHS,
+    INTEGRATE,
     INTEGRATE_CARD,
+    INTEGRATE_SIDECAR,
     INVARIANT,
     LEGACY_COUNT,
+    edit_json,
     encode,
     fixture_tree_files,
     invariant_document,
@@ -206,6 +210,66 @@ def test_parallel_minted_ids_sync_cleanly(tmp_path: Path, worktree_services: Non
 
     assert result.payload["state"] == "synced", result.payload
     assert (worktree / left).is_file() and (worktree / right).is_file()
+
+
+LEAF_HISTORY = "knowledge/history/260928-MIK-L97.json"
+
+
+def _moved(document: dict[str, Any]) -> None:
+    """The official line re-anchors the integrate route's entry (another leaf edited the code)."""
+
+    moved = {"blob": "1" * 40, "content": "sha256:" + "2" * 64}
+    document["realizes"][0]["anchor"] = {**document["realizes"][0]["anchor"], **moved}
+
+
+@pytest.mark.parametrize("own_row", ["consistent", "already wrong"])
+def test_a_sync_merge_refuses_a_history_row_only_when_the_leaf_s_own_side_had_it_wrong(
+    tmp_path: Path, worktree_services: None, own_row: str
+) -> None:
+    """MIK-R09 at a sync: a mismatch the merge caused surfaces at the gate, not at the sync.
+
+    The leaf's open row covers the integrate route's entry; the official line then re-anchors that
+    entry. A row that agreed with the leaf's own side syncs (``R09-history-rows-merged`` reports it);
+    a row that already disagreed there is refused by ``R09-history-rows``.
+    """
+
+    fixture = SyncFixture(tmp_path)
+    worktree = fixture.contract.memory_worktree
+    assert worktree is not None
+    files = fixture_tree_files()
+    code_tip = fixture.move_official_code()
+    _commit(fixture.memory_repo, files, render_memory_content_message("Convert", code_tip))
+    assert fixture.sync(memory_sync_choice="merge-memory").payload["state"] == "synced"
+
+    entry = json.loads(files[INTEGRATE_SIDECAR])["realizes"][0]
+    anchor = {**entry["anchor"], "path": INTEGRATE}
+    after = anchor if own_row == "consistent" else {**anchor, "blob": "3" * 40}
+    row = {
+        "id": "ROW-000000",
+        "items": [],
+        "subject": entry["invariant"],
+        "disposition": "no_impact",
+        "reason": "The route still pairs its commits.",
+        "covers": [{"id": entry["id"], "before": anchor, "after": after}],
+        "revision": json.loads(files[INVARIANT])["revision"],
+    }
+    history = {"schema": "ar-history/v1", "leaf": "260928-MIK-L97", "closed": False, "rows": [row]}
+    _commit(worktree, {LEAF_HISTORY: encode(history)}, "Work: a row about the route")
+
+    later = _commit(fixture.code_repo, {"src/later.py": b"LATER = 1\n"}, "Later code")
+    moved = edit_json(files, INTEGRATE_SIDECAR, _moved)[INTEGRATE_SIDECAR]
+    message = render_memory_content_message("Re-anchor", later)
+    _commit(fixture.memory_repo, {INTEGRATE_SIDECAR: moved}, message)
+
+    result = fixture.sync(memory_sync_choice="merge-memory")
+
+    if own_row == "consistent":
+        assert result.payload["state"] == "synced", result.payload
+        assert (worktree / INTEGRATE_SIDECAR).read_bytes() == moved  # the merge moved the entry
+    else:
+        assert result.payload["state"] == "sync-knowledge-validation-refused", result.payload
+        summary = str(result.payload["summary"])
+        assert "R09-history-rows" in summary and "R09-history-rows-merged" not in summary
 
 
 def _cli(capsys: pytest.CaptureFixture[str], *args: str) -> tuple[int, str]:

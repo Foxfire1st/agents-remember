@@ -146,6 +146,9 @@ class ValidationContext:
     bases: tuple[KnowledgeTree, ...] = ()
     code: CodeTree | None = None
     conversion: bool = False
+    leaf_publication: bool = False
+    """The commit publishes a leaf (its closeout, direct landing or recorded landing): every history
+    file not closed in a base is its own and is checked whatever its ``closed`` flag (MIK-R09)."""
 
     @cached_property
     def record_ids(self) -> frozenset[str]:

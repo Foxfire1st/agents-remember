@@ -19,6 +19,14 @@ through the zero-context diff, a ``file`` is every line) and the one content ide
                           failed or timed out). The reason is always named.
 ========================  ===========================================================================
 
+An ``unverifiable`` observation from a failed read tells two causes apart (L09 review R2-3):
+
+* **a Git read failed** -- a Git call failed or timed out, or Git could not read the tree, a blob or
+  a diff (``read_failed``): the input was never read, so a caller treats the run as incomplete;
+* **a code object is unavailable** -- a persistent, non-Git cause (:class:`CodeObjectUnavailable`,
+  or an unavailable grammar): the blob a line range was recorded against is not in the store, or
+  no grammar reads the path. The entry is simply not ``current``; its reason names the object.
+
 The checks run in the table's order (L03 ruling N1): no tree observes nothing; an absent path is
 ``stale`` and an unchanged blob is ``current`` whatever the locator kind; only then is an
 unsupported kind ``unverifiable``.
@@ -46,6 +54,7 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
+from agents_remember.errors import GrammarUnavailableError
 from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import Entry
 from agents_remember.memory_quality.style.citations import grammars
@@ -53,6 +62,7 @@ from agents_remember.memory_quality.style.citations import grammars
 __all__ = [
     "EXTRACTOR_VERSION",
     "OBSERVATIONS",
+    "CodeObjectUnavailable",
     "CodeTree",
     "EntryObservation",
     "EntryState",
@@ -139,6 +149,9 @@ class EntryObservation:
     observed_blob: str | None
     recorded_content: str
     observed_content: str | None
+    read_failed: bool = False
+    """``unverifiable`` because a Git read failed or timed out -- not because of the locator or a
+    persistent unavailability. The mandatory gate treats it as an unreadable input (MIK-R09)."""
 
     def to_document(self) -> dict[str, Any]:
         document: dict[str, Any] = {
@@ -199,7 +212,15 @@ def observe_entry(
 
     recorded = _Recorded.of(entry)
     observed_blob = code.files.get(entry.path)
-    state, reason, content = _verdict(recorded, observed_blob, code, cache)
+    try:
+        state, reason, content = _verdict(recorded, observed_blob, code, cache)
+        read_failed = state == "unverifiable" and code.problem not in (None, NO_TREE_REQUESTED)
+    except CodeReadError as error:  # its message names the object and why
+        state, reason, content = "unverifiable", str(error), None
+        read_failed = _git_read_failure(error)
+    except (subprocess.SubprocessError, OSError) as error:  # a Git call failed or timed out
+        reason = f"a Git read failed ({type(error).__name__}: {error})"
+        state, content, read_failed = "unverifiable", None, True
     return EntryObservation(
         entry_id=entry.id,
         kind=entry.kind,
@@ -211,7 +232,25 @@ def observe_entry(
         observed_blob=observed_blob,
         recorded_content=recorded.content,
         observed_content=content,
+        read_failed=read_failed,
     )
+
+
+class CodeObjectUnavailable(CodeReadError):
+    """A code object is persistently unavailable (not a Git failure): see the module docstring."""
+
+
+def _git_read_failure(error: CodeReadError) -> bool:
+    """Whether ``error`` is a Git read failure rather than a persistent unavailability."""
+
+    if isinstance(error, CodeObjectUnavailable):
+        return False
+    cause = error.__cause__
+    while cause is not None:
+        if isinstance(cause, GrammarUnavailableError):
+            return False
+        cause = cause.__cause__
+    return True
 
 
 def _verdict(
@@ -224,12 +263,7 @@ def _verdict(
     if decided is not None:
         return decided
     assert observed_blob is not None  # an absent path was decided above
-    try:
-        observed = _observed_content(recorded, observed_blob, code, cache)
-    except CodeReadError as error:
-        return ("unverifiable", str(error), None)
-    except (subprocess.SubprocessError, OSError) as error:  # a Git call failed or timed out
-        return ("unverifiable", f"a Git read failed ({type(error).__name__}: {error})", None)
+    observed = _observed_content(recorded, observed_blob, code, cache)
     if observed is None:
         return ("stale", _unresolved(recorded.locator.get("kind")), None)
     return _compared(recorded.content, observed)
@@ -297,7 +331,7 @@ def _observed_content(
     ):  # guarded by _decided_without_resolving; kept so a direct call cannot misread it
         raise CodeReadError(code.problem or NO_TREE_REQUESTED)
     if recorded.locator.get("kind") == "line_range" and not trees.has_blob(recorded.blob):
-        raise CodeReadError(
+        raise CodeObjectUnavailable(
             f"the blob {recorded.blob} the line range was recorded against is unavailable"
         )
     resolved = trees.resolve(recorded.path, recorded.locator, recorded.blob, blob)

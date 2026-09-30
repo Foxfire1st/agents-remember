@@ -624,11 +624,10 @@ def test_the_memory_quality_controller_persists_the_worklist_and_renders_it_in_t
         scope=SimpleNamespace(pair_identity=pair, working_paths=(), committed_paths=()),
         result=SimpleNamespace(rows=[], blockers=[]),
     )
-    inputs = controller._CuratorCandidateInputs("a" * 40, "b" * 40)
     quality = {"ok": True, "checks": {}, "findings": [], "findingCount": 0}
     with (
         mock.patch.object(controller, "revalidate_memory_candidate_scope", return_value=scope),
-        mock.patch.object(controller, "_curator_candidate_inputs", return_value=inputs),
+        # The exact candidate trees are captured for real: MIK-R09's gate judges them.
         mock.patch.object(controller, "prepare_memory_census", return_value=census),
         mock.patch.object(controller, "publish_memory_census", return_value={}),
         mock.patch.object(controller, "census_curator_candidates", return_value=()),
@@ -666,7 +665,9 @@ def test_the_memory_quality_controller_persists_the_worklist_and_renders_it_in_t
     rendered = report.read_text(encoding="utf-8")
     assert WORKLIST_SECTION_HEADING in rendered
     assert "| touched_invariant | INV-AAAAAA |" in rendered
-    assert response["curatorActionableCount"] == 0  # information, not a gate (MIK-R09's)
+    # MIK-R09: each open item is one repair finding, so the four open items now count.
+    assert response["curatorActionableCount"] == 4
+    assert cast(dict[str, Any], response["knowledgeGate"])["openItemCount"] == 4
 
 
 def test_the_recompute_never_raises_and_a_failure_never_fails_a_completed_sync(

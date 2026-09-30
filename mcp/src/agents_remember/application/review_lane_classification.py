@@ -14,10 +14,13 @@ What differs from the gate is stated once, here:
   it is ``recorded_blob_mismatch``. The gate maps line ranges; the reviewer does not.
 * **Only changed lines are intersected.** A hunk links through a side only where it changes lines
   on that side, so an insertion is matched against after-side ranges only and a deletion against
-  before-side ranges only. Until the curator records the new blob, no after-side entry of an edited
-  file supplies a range, so an insertion there is attribution unknown -- while the gate, which maps
-  ranges and also counts an insertion strictly inside a before-side range, may call it linked or
-  raise it as ``unexplained_hunk``. The two views are allowed to differ; the gate decides gate items.
+  before-side ranges only. The gate's linkage is the same symmetric rule (definition 8: an
+  insertion-only hunk changes no line at B, so only a K_C range at C links it; a deletion-only
+  hunk only a K_B range at B). Where the two differ is the range: until the curator records the
+  new blob, no after-side entry of an edited file supplies a range here, so an insertion there is
+  attribution unknown -- while the gate, which maps line ranges through the diff, may call it linked
+  or raise it as ``unexplained_hunk``. The two views are allowed to differ; the gate decides gate
+  items.
 
 **Buckets.** A path is *attributed* when an entry supplies a range on a side whose knowledge was
 read; *unexplained* when neither side records any entry at the path and both sides were read (a side

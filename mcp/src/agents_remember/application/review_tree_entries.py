@@ -187,10 +187,10 @@ def _in_blob(entry: Entry, trees: CodeTrees, blob: str) -> dict[str, Any]:
     anchor = entry.document.get("anchor") or {}
     locator: Mapping[str, Any] = anchor.get("locator") or {}
     recorded_blob = str(anchor.get("blob", ""))
-    unsupported = _unsupported(entry.path, locator, recorded_blob, blob, trees)
-    if unsupported is not None:
-        return unsupported
     try:
+        unsupported = _unsupported(entry.path, locator, recorded_blob, blob, trees)
+        if unsupported is not None:
+            return unsupported
         resolved = _resolve(trees, entry.path, locator, recorded_blob, blob)
     except CodeReadError as error:
         return {"state": "unavailable", "reason": str(error)}

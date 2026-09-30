@@ -39,6 +39,11 @@ _FILE_MODES: Final = frozenset({"100644", "100755"})
 _BLOB_BATCH: Final = 1500
 
 
+# ``git cat-file -e``: "Exit with zero status if <object> exists and is a valid object"; a valid name
+# of an object the store does not hold exits 1 without an error, any failure exits 128.
+_GIT_NOT_FOUND: Final = 1
+
+
 class CodeObjectError(ValueError):
     """A code object the conversion needs cannot be read."""
 
@@ -136,16 +141,31 @@ class CodeObjects:
         return self._blobs[blob_id]
 
     def has_blob(self, blob_id: str) -> bool:
-        """Answer whether the object store holds ``blob_id`` as a blob."""
+        """Answer whether the object store holds ``blob_id`` as a blob.
+
+        A missing object is Git's documented not-found answer (``cat-file -e`` exits 1): ``False``.
+        Any other failure is Git's, never taken for a missing object: it raises
+        :class:`CodeObjectError` naming it (a timeout raises ``subprocess.TimeoutExpired``), so a
+        caller reports an unreadable input rather than an absent one (L09 review R3-2).
+        """
 
         if blob_id in self._blobs:
             return True
-        result = run_git(
-            self.repository,
-            ["cat-file", "-t", "--end-of-options", blob_id],
-            GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
-        )
-        return result.returncode == 0 and result.stdout.strip() == "blob"
+        options = GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS)
+        exists = run_git(self.repository, ["cat-file", "-e", "--end-of-options", blob_id], options)
+        if exists.returncode == _GIT_NOT_FOUND:
+            return False
+        kind = exists
+        if exists.returncode == 0:
+            kind = run_git(
+                self.repository, ["cat-file", "-t", "--end-of-options", blob_id], options
+            )
+        if kind.returncode != 0:
+            detail = kind.stderr.strip() or f"git exited {kind.returncode}"
+            raise CodeObjectError(
+                f"the object store cannot say whether it holds {blob_id}: {detail}"
+            )
+        return kind.stdout.strip() == "blob"
 
     def symbol_span(
         self, path: str, blob_id: str, name: str, *, top_level: bool = False

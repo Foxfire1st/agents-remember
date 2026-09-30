@@ -62,6 +62,7 @@ from agents_remember.tasks.task_intent import (
     require_current_task_intent,
     task_intent_identity,
 )
+from agents_remember.worktrees.knowledge_gate import leaf_gate_refusal
 from agents_remember.worktrees.modules.future_code_candidate import (
     capture_future_code_candidate,
 )
@@ -341,7 +342,31 @@ def require_current_curator_coherence(
             "the live coherence record names a different leaf task document",
             next_action="publish",
         )
+    _require_knowledge_gate(contract, observation)
     return validated
+
+
+def _require_knowledge_gate(
+    contract: WorktreeContract, observation: CuratorCoherenceObservation
+) -> None:
+    """MIK-R09 rule 3: the closeout validator recomputes the gate over the exact candidate.
+
+    The worklist is recomputed and the validator run over the very code and memory trees this
+    authority binds; any open item, incomplete run or violation refuses. An unconverted leaf (no
+    layout marker on either side) is not gated and is validated exactly as before.
+    """
+
+    refusal = leaf_gate_refusal(
+        contract,
+        code_tree=observation.code_candidate_tree,
+        memory_tree=observation.memory_candidate_tree,
+    )
+    if refusal is not None:
+        raise CuratorCoherenceError(
+            "curator-coherence-knowledge-gate-refused",
+            refusal,
+            next_action="memory_quality_check",
+        )
 
 
 def _require_current_dependencies(record: CuratorCoherenceRecord) -> None:

@@ -668,11 +668,7 @@ def _run_controller(leaf: Leaf, changed: tuple[str, ...]) -> tuple[dict[str, Any
     legacy = mock.Mock()
     with (
         mock.patch.object(controller, "revalidate_memory_candidate_scope", return_value=scope),
-        mock.patch.object(
-            controller,
-            "_curator_candidate_inputs",
-            return_value=controller._CuratorCandidateInputs("a" * 40, "b" * 40),
-        ),
+        # The exact candidate trees are captured for real: MIK-R09's gate judges them.
         mock.patch.object(controller, "prepare_memory_census", return_value=census),
         mock.patch.object(controller, "publish_memory_census", return_value={}),
         mock.patch.object(controller, "census_curator_candidates", return_value=()),
@@ -709,7 +705,10 @@ def test_the_memory_quality_run_counts_each_missing_trace_toward_the_actionable_
     (leaf.code / A).write_text(SOURCE + "\n# tail\n", encoding="utf-8")
     response, legacy = _run_controller(leaf, (A,))
     legacy.assert_not_called()  # a converted tree never runs the Update History gate
-    assert response["curatorActionableCount"] == 2  # the card and its governing route
+    # MIK-R09 counts each open item once: the card, its governing route, and the uncovered file's
+    # unexplained hunk (MIK-R10), which the card's own trace answers.
+    assert response["curatorActionableCount"] == 3
+    assert response["knowledgeGate"]["openItemCount"] == 3
     assert response["onboardingTrace"]["open"] == ["onboarding:pkg/a.py", "onboarding:pkg/overview"]
     rendered = (leaf.root / "group" / "reports" / "curator-memory-quality.md").read_text()
     assert MISSING_CODE in rendered

@@ -18,7 +18,9 @@ pairs with, makes the run ``incomplete`` naming it (MIK-R08 rule 4).
 
 **Applicability.** The worklist exists where K_B or K_C holds the layout marker (MIK-R09 rule 6). A
 leaf whose two memory sides are both unconverted gets no worklist: before the cutover (MIK-R37) that
-is every production leaf, so nothing changes for them.
+is every production leaf, so nothing changes for them. A marker probe Git cannot answer (a failed
+or timed-out call, a line or tree it cannot read) is never taken for unconverted memory: the
+worklist is ``incomplete``, naming ``layout marker`` (L09 review R1, finding 9).
 
 **Persistence (rule 7).** The document is written to ``knowledge-worklist.json`` in the leaf's
 enclosure directory under the task root -- the leaf's durable task-artifact location, beside its
@@ -29,6 +31,7 @@ latest worklist; :func:`read_leaf_worklist` is what ``knowledge_integrity_check`
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -43,6 +46,7 @@ from agents_remember.application.knowledge_worklist.compute import (
     Incomplete,
     WorklistInputs,
     compute_worklist,
+    git_failure,
     incomplete_worklist,
     worklist_digest,
 )
@@ -89,16 +93,18 @@ from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTr
 from agents_remember.memory_quality.knowledge_worklist_section import worklist_summary
 from agents_remember.models.knowledge_files.documents import KNOWLEDGE_ROOT, LAYOUT_MARKER_PATH
 from agents_remember.tasks.leaf_decisions import LeafDocumentUnresolved, strict_leaf_doc
-from agents_remember.tasks.leaf_doc import find_leaf_doc
+from agents_remember.worktrees.knowledge_validation import LayoutProbeError, has_layout_marker
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
 from agents_remember.worktrees.modules.onboarding_trace import OnboardingTraceSides
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
 __all__ = [
     "WORKLIST_FILE_NAME",
+    "CandidateTrees",
     "ExplicitSides",
     "LeafWorklistRecompute",
     "leaf_expected_effects",
+    "leaf_gate_applies",
     "leaf_maintenance_scope",
     "leaf_onboarding_trace_sides",
     "leaf_worklist",
@@ -143,9 +149,14 @@ def read_leaf_worklist(contract_path: Path) -> dict[str, Any] | None:
 
 
 def leaf_maintenance_scope(contract: WorktreeContract) -> bool:
-    """Whether the leaf's task document sets ``knowledgeMaintenanceScope: true``."""
+    """Whether the leaf's task document sets ``knowledgeMaintenanceScope: true``.
 
-    found = find_leaf_doc(contract.task_root, contract.leaf_id or contract.task_name)
+    The document is read through the strict lookup (:func:`strict_leaf_doc`), like the declared
+    effects: a document that exists but cannot be read raises :class:`LeafDocumentUnresolved`, which
+    the run reports as ``incomplete`` -- never as the default scope (MIK-R09, fail closed).
+    """
+
+    found = strict_leaf_doc(contract.task_root, contract.leaf_id or contract.task_name)
     return bool(found is not None and found[1].knowledgeMaintenanceScope)
 
 
@@ -159,6 +170,19 @@ def leaf_expected_effects(contract: WorktreeContract) -> tuple[Declaration, ...]
 
     found = strict_leaf_doc(contract.task_root, contract.leaf_id or contract.task_name)
     return None if found is None else declarations_from(found[1].expectedKnowledgeEffects)
+
+
+@dataclass(frozen=True)
+class CandidateTrees:
+    """C and K_C given as Git trees, the exact candidate a gate evaluates (MIK-R09).
+
+    ``code`` is a tree of the leaf's code repository and ``memory`` a tree of its memory repository,
+    both already written to their object stores (the closeout's own candidate captures). Given them,
+    the worklist reads exactly those trees instead of capturing the two worktrees again.
+    """
+
+    code: str
+    memory: str
 
 
 @dataclass(frozen=True)
@@ -383,6 +407,8 @@ def worklist_for_sides(sides: ExplicitSides) -> dict[str, Any] | None:
         return incomplete_worklist(error.missing, owner=sides.owner, pairing=None)
     except CodeReadError as error:
         return incomplete_worklist(Incomplete("C", str(error)), owner=sides.owner, pairing=None)
+    except subprocess.SubprocessError as error:
+        return incomplete_worklist(git_failure(error), owner=sides.owner, pairing=None)
     if resolved is None:
         return None
     return compute_worklist(
@@ -400,23 +426,69 @@ def worklist_for_sides(sides: ExplicitSides) -> dict[str, Any] | None:
     )
 
 
-def leaf_worklist(contract: WorktreeContract, *, persist: bool = True) -> dict[str, Any] | None:
+def _leaf_converted(
+    contract: WorktreeContract, memory_repository: Path, candidate: CandidateTrees | None
+) -> bool:
+    """The cheap applicability probe: K_C, or the official line K_B pairs on, holds the marker."""
+
+    assert contract.memory_worktree is not None
+    if candidate is not None:
+        in_candidate = _holds_marker(memory_repository, candidate.memory)
+    else:
+        in_candidate = (contract.memory_worktree / LAYOUT_MARKER_PATH).is_file()
+    return in_candidate or _official_converted(memory_repository, contract.memory_source_branch)
+
+
+def leaf_gate_applies(contract: WorktreeContract, candidate: CandidateTrees) -> bool:
+    """Whether a leaf's worklist applies to this exact candidate (the cheap marker probe only)."""
+
+    if contract.kind != "leaf" or contract.memory_worktree is None:
+        return False
+    memory_repository = contract.memory_repo_path or contract.memory_worktree
+    return _leaf_converted(contract, memory_repository, candidate)
+
+
+def leaf_worklist(
+    contract: WorktreeContract,
+    *,
+    persist: bool = True,
+    candidate: CandidateTrees | None = None,
+) -> dict[str, Any] | None:
     """Compute (and persist) a leaf's worklist from its contract; ``None`` where it does not apply.
 
     It does not apply to a non-leaf contract, to a leaf without its own memory worktree, or to a leaf
-    whose two memory sides are both unconverted.
+    whose two memory sides are both unconverted. ``candidate`` names C and K_C as Git trees (the
+    gate's exact candidate); without it both worktrees are captured.
     """
 
     if contract.kind != "leaf" or contract.memory_worktree is None:
         return None
     memory_repository = contract.memory_repo_path or contract.memory_worktree
+    try:
+        converted = _leaf_converted(contract, memory_repository, candidate)
+    except LayoutProbeError as error:  # never taken for unconverted memory
+        document: dict[str, Any] | None = incomplete_worklist(
+            Incomplete("layout marker", str(error)), owner=contract.leaf_id or None, pairing=None
+        )
+    else:
+        if not converted:
+            return None  # cheap applicability probe before any capture: nothing is converted
+        document = _leaf_document(contract, memory_repository, candidate)
+    path = worklist_path(contract)
+    if persist and document is not None and path is not None:
+        persist_worklist(path, document)
+    return document
+
+
+def _leaf_document(
+    contract: WorktreeContract, memory_repository: Path, candidate: CandidateTrees | None
+) -> dict[str, Any] | None:
+    """The worklist over the contract's sides, once the leaf is known to be converted."""
+
     owner = contract.leaf_id or None
-    if not (contract.memory_worktree / LAYOUT_MARKER_PATH).is_file() and not _official_converted(
-        memory_repository, contract.memory_source_branch
-    ):
-        return None  # cheap applicability probe before any capture: nothing is converted
     try:
         expected_effects = leaf_expected_effects(contract)
+        maintenance_scope = leaf_maintenance_scope(contract)
         memory_base = paired_memory_commit(
             memory_repository,
             contract.memory_source_branch,
@@ -424,38 +496,60 @@ def leaf_worklist(contract: WorktreeContract, *, persist: bool = True) -> dict[s
             contract.code_base_commit,
         )
     except LeafDocumentUnresolved as error:
-        document: dict[str, Any] | None = incomplete_worklist(
+        return incomplete_worklist(
             Incomplete("leaf task document", str(error)), owner=owner, pairing=None
         )
-    except _Unreadable as error:
-        document = incomplete_worklist(error.missing, owner=owner, pairing=None)
-    else:
-        cache = default_base_cache_directory(contract.coordination_root)
-        document = worklist_for_sides(
-            ExplicitSides(
-                code_repository=contract.code_repo_path,
-                base=contract.code_base_commit,
-                memory_repository=memory_repository,
-                memory_base=memory_base,
-                memory_candidate=contract.memory_worktree,
-                code_worktree=contract.code_worktree,
-                maintenance_scope=leaf_maintenance_scope(contract),
-                owner=owner,
-                cache_directory=cache,
-                expected_effects=expected_effects,
-                coordination_root=contract.coordination_root,
-            )
-        )
-        if document is not None:
-            # MIK-R30's items join the one list (ruling Q2), over the worklist's own B..C paths.
-            document = worklist_onboarding(
-                document, contract, _trace_request(contract, memory_repository, memory_base)
-            )
-            document = _settled_unexplained(document)
-    path = worklist_path(contract)
-    if persist and document is not None and path is not None:
-        persist_worklist(path, document)
-    return document
+    except (_Unreadable, subprocess.SubprocessError) as error:
+        return incomplete_worklist(_missing(error), owner=owner, pairing=None)
+    assert contract.memory_worktree is not None
+    return worklist_over(
+        contract,
+        ExplicitSides(
+            code_repository=contract.code_repo_path,
+            base=contract.code_base_commit,
+            memory_repository=memory_repository,
+            memory_base=memory_base,
+            memory_candidate=contract.memory_worktree if candidate is None else candidate.memory,
+            code_candidate=None if candidate is None else candidate.code,
+            code_worktree=contract.code_worktree,
+            maintenance_scope=maintenance_scope,
+            owner=owner,
+            cache_directory=default_base_cache_directory(contract.coordination_root),
+            expected_effects=expected_effects,
+            coordination_root=contract.coordination_root,
+        ),
+    )
+
+
+def _missing(error: BaseException) -> Incomplete:
+    """The input an unreadable side names, or ``git`` for a Git call that failed or timed out."""
+
+    return error.missing if isinstance(error, _Unreadable) else git_failure(error)
+
+
+def worklist_over(contract: WorktreeContract, sides: ExplicitSides) -> dict[str, Any] | None:
+    """The full worklist over explicit sides: L08's run, MIK-R30's items, MIK-R10's settling.
+
+    ``contract`` supplies what the onboarding gate reads beside the trees (the storage settings and
+    the converted-base cache). ``None`` when both memory sides are unconverted.
+    """
+
+    document = worklist_for_sides(sides)
+    if document is None:
+        return None
+    candidate = sides.memory_candidate
+    request = TraceSideRequest(
+        owner=sides.owner or contract.leaf_id or contract.task_name,
+        memory_repository=sides.memory_repository,
+        memory_base=sides.memory_base,
+        memory_candidate=candidate if isinstance(candidate, str) else Path(candidate),
+        code_repository=sides.code_repository,
+        code_base=sides.base,
+        cache_directory=sides.cache_directory,
+    )
+    # MIK-R30's items join the one list (ruling Q2), over the worklist's own B..C paths.
+    document = worklist_onboarding(document, contract, request)
+    return _settled_unexplained(document)
 
 
 def _settled_unexplained(document: dict[str, Any]) -> dict[str, Any]:
@@ -516,11 +610,12 @@ def leaf_onboarding_trace_sides(
     memory_repository = contract.memory_repo_path or contract.memory_worktree
     if memory_repository is None:
         return None
-    if not (Path(candidate) / LAYOUT_MARKER_PATH).is_file() and not _official_converted(
-        memory_repository, contract.memory_source_branch
-    ):
-        return None  # cheap probe before any read: nothing is converted, today's gate applies
     owner = contract.leaf_id or contract.task_name
+    try:
+        if not _trace_gate_converted(contract, memory_repository, Path(candidate)):
+            return None  # cheap probe before any read: nothing is converted, today's gate applies
+    except LayoutProbeError as error:  # never taken for unconverted memory
+        return OnboardingTraceSides(owner=owner, incomplete=f"layout marker: {error}")
     try:
         memory_base = paired_memory_commit(
             memory_repository,
@@ -535,14 +630,30 @@ def leaf_onboarding_trace_sides(
         return OnboardingTraceSides(owner=owner, incomplete=f"{type(error).__name__}: {error}")
 
 
+def _trace_gate_converted(
+    contract: WorktreeContract, memory_repository: Path, candidate: Path
+) -> bool:
+    """K_C's directory, or the official line K_B pairs on, holds the marker (Git failure raises)."""
+
+    if (candidate / LAYOUT_MARKER_PATH).is_file():
+        return True
+    return _official_converted(memory_repository, contract.memory_source_branch)
+
+
 def _official_converted(memory_repository: Path, official_line: str) -> bool:
     """Whether the official memory line's tip holds the layout marker (K_B may then be converted)."""
 
-    if not official_line:
-        return False
-    return _git(memory_repository, "cat-file", "-t", f"{official_line}:{LAYOUT_MARKER_PATH}") == (
-        "blob"
-    )
+    return bool(official_line) and _holds_marker(memory_repository, official_line)
+
+
+def _holds_marker(memory_repository: Path, treeish: str) -> bool:
+    """Whether ``treeish`` (a commit, tree or ref) holds the layout marker.
+
+    Raises :class:`LayoutProbeError`, naming why, when Git cannot answer: a probe that fails is
+    never taken for unconverted memory.
+    """
+
+    return has_layout_marker(memory_repository, treeish)
 
 
 def recompute_leaf_worklist(
@@ -562,6 +673,10 @@ def recompute_leaf_worklist(
         return None
     try:
         document = leaf_worklist(contract, persist=False)
+    except subprocess.SubprocessError as error:  # Git failed or timed out: named as git (MIK-R09)
+        document = incomplete_worklist(
+            git_failure(error), owner=contract.leaf_id or None, pairing=None
+        )
     except Exception as error:  # the run's own failure is an incomplete worklist, named
         document = incomplete_worklist(
             Incomplete("worklist run", f"{type(error).__name__}: {error}"),

@@ -44,6 +44,7 @@ from knowledge_validator_test_support import (
     LEGACY_COUNT,
     ROUTE_CARD,
     ROUTE_SIDECAR,
+    UNCHECKED_ADMISSION,
     code,
     edit_json,
     encode,
@@ -444,6 +445,15 @@ def test_an_unconverted_base_is_refused_and_a_standalone_conversion_checks_no_pa
 # --------------------------------------------------------------------------------------------------
 
 
+# The rows' subject, retired since: its record stays in the tree, because records are never
+# deleted (rule 3), so every history file's subjects resolve (MIK-R09, L09 review R2-1).
+RETIRED = {
+    invariant_path("INV-RET1R3"): encode(
+        invariant_document("INV-RET1R3", status="retired", admission=UNCHECKED_ADMISSION)
+    )
+}
+
+
 def _history(owner: str, *, closed: bool, anchor_path: str = INTEGRATE) -> bytes:
     document = empty_history("leaf", owner, closed=closed).to_document()
     document["rows"] = [
@@ -470,7 +480,7 @@ def test_a_closed_history_file_is_frozen() -> None:
     """Packet non-conforming example: a closed leaf's history file is edited later."""
 
     path = history_path("260928-MIK-L01")
-    base = {**fixture_tree_files(), path: _history("260928-MIK-L01", closed=True)}
+    base = {**fixture_tree_files(), **RETIRED, path: _history("260928-MIK-L01", closed=True)}
     edited = dict(base)
     edited[path] = edited[path].replace(b"re-anchored", b"moved")
     deleted = {key: value for key, value in base.items() if key != path}
@@ -480,13 +490,13 @@ def test_a_closed_history_file_is_frozen() -> None:
         "was deleted"
         in _only(_validate(deleted, bases=[tree(base, "K_B")]), "R22.7-history-frozen")[0]
     )
-    merged_bases = [tree(fixture_tree_files(), "left"), tree(base, "right")]
+    merged_bases = [tree({**fixture_tree_files(), **RETIRED}, "left"), tree(base, "right")]
     assert _only(_validate(edited, bases=merged_bases), "R22.7-history-frozen")
 
 
 def test_an_open_history_file_may_change() -> None:
     path = history_path("260928-MIK-L02")
-    base = {**fixture_tree_files(), path: _history("260928-MIK-L02", closed=False)}
+    base = {**fixture_tree_files(), **RETIRED, path: _history("260928-MIK-L02", closed=False)}
     edited = {**base, path: _history("260928-MIK-L02", closed=True)}
 
     assert _validate(edited, bases=[tree(base, "K_B")]).ok
@@ -499,6 +509,7 @@ def test_history_is_checked_for_shape_only() -> None:
     renamed = "mcp/src/agents_remember/worktrees/modules/integrate_old.py"
     files = {
         **fixture_tree_files(),
+        **RETIRED,
         path: _history("260928-MIK-L03", closed=True, anchor_path=renamed),
     }
 

@@ -64,8 +64,9 @@ class CuratorChecklist:
     # Like ``knowledge_review`` it is information and never an input to ``actionable_count``.
     without_proof: WithoutProof | None = None
     # The leaf's persisted MIK-R08 worklist and where it lives, shown as information. ``None`` (every
-    # unconverted leaf) renders nothing; it never enters ``curator_actionable_count`` (MIK-R09 owns
-    # what an open item blocks).
+    # unconverted leaf) renders nothing. The section itself counts nothing: the mandatory gate
+    # (MIK-R09) hands each open item to ``repair_findings`` as one ``knowledge-gate`` finding, and
+    # that is how an open item reaches ``curator_actionable_count``.
     knowledge_worklist: Mapping[str, Any] | None = None
     knowledge_worklist_path: str | None = None
 

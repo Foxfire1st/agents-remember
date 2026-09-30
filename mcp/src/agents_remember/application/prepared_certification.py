@@ -108,6 +108,10 @@ from agents_remember.worktrees.integration.closeout.preparation.memory_port impo
 from agents_remember.worktrees.integration.closeout.preparation_selection import (
     selected_preparation_intents,
 )
+from agents_remember.worktrees.knowledge_gate import (
+    PREPARED_CLOSEOUT_UNCLOSABLE,
+    prepared_closeout_refusal,
+)
 from agents_remember.worktrees.modules.context import contract_context
 from agents_remember.worktrees.modules.models import VerifiedChange
 from agents_remember.worktrees.modules.onboarding import (
@@ -343,6 +347,9 @@ def _realize_prepared_memory(
     request: PreparedMemoryCertificationRequest,
 ) -> PreparedMemoryCandidate:
     """Apply existing metadata writers once, then require curator revalidation if they move memory."""
+    unclosable = prepared_closeout_refusal(request.handoff.contract)
+    if unclosable is not None:
+        refuse(PREPARED_CLOSEOUT_UNCLOSABLE, "unconverted memory", unclosable)
     current = _current(request)
     coherence = require_current_curator_coherence(current.contract)
     pair = request.candidate.codeView.logicalPair

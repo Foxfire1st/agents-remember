@@ -25,6 +25,12 @@ highest version among its ``packets`` entries with that stable ID and ``state: a
 the integer after ``v``. :func:`requirement_approval` is the same lookup with its reason: a task
 without a manifest -- or with one that is not an approved-requirement corpus this lookup can read --
 has approval state ``unknown`` and never triggers a reconsideration.
+
+**Recording what was read.** The approval state lives outside every Git tree, in the owning task's
+files. Every ``requirements/manifest.json`` this module reads for approval, and every packet it
+hands the owner to resolve, is recorded through :func:`agents_remember.kernel.recorded_reads.record_read`
+-- the SHA-256 of the exact bytes read, ``absent`` or ``unreadable`` -- so a caller that reuses a
+result computed from them (the mandatory gate's memo, MIK-R09) can tell whether anything changed.
 """
 
 from __future__ import annotations
@@ -35,6 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Literal
 
+from agents_remember.kernel.recorded_reads import ABSENT, bytes_identity, record_read
 from agents_remember.memory.knowledge.requirement_owner import consume_owner_resolution
 from agents_remember.models.knowledge.requirement import RequirementOwnerRef
 from agents_remember.models.knowledge_files.shapes import RequirementReference
@@ -104,6 +111,7 @@ def resolve_requirement_endpoint(
             TASK_OUTSIDE_TASKS,
             f"task repository {reference.task.repository!r} is not one directory under tasks/",
         )
+    record_read(task_root / reference.packet)  # recorded before the owner reads it: a race misses
     resolution = consume_owner_resolution(
         task_root,
         RequirementOwnerRef(
@@ -154,10 +162,17 @@ class RequirementApproval:
 def _manifest(task_root: Path) -> dict[str, Any] | str:
     path = task_root / MANIFEST_PATH
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        data = path.read_bytes()
     except FileNotFoundError:
+        record_read(path, ABSENT)
         return f"the task has no {MANIFEST_PATH}"
-    except (OSError, UnicodeDecodeError, ValueError) as error:
+    except OSError as error:
+        record_read(path)
+        return f"{MANIFEST_PATH} cannot be read: {error}"
+    record_read(path, bytes_identity(data))  # the identity of exactly the bytes this lookup reads
+    try:
+        document = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as error:
         return f"{MANIFEST_PATH} cannot be read: {error}"
     if not isinstance(document, dict) or document.get("format") != MANIFEST_FORMAT:
         return f"{MANIFEST_PATH} is not an {MANIFEST_FORMAT!r} manifest"

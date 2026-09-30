@@ -21,6 +21,10 @@ from agents_remember.worktrees.integration.lifecycle.certification_observation i
 from agents_remember.worktrees.integration.lifecycle.lifecycle_operation_store import (
     LifecycleOperationStore,
 )
+from agents_remember.worktrees.knowledge_gate import (
+    PREPARED_CLOSEOUT_UNCLOSABLE,
+    prepared_closeout_refusal,
+)
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
 from agents_remember.worktrees.modules.quality.certification_records import certificate_store
 from agents_remember.worktrees.modules.quality.certification_run import SelectedCodeCertification
@@ -352,6 +356,9 @@ def execute_selected_closeout(
         resume_prepared_closeout,
     )
 
+    unclosable = prepared_closeout_refusal(contract)
+    if unclosable is not None:
+        refuse(PREPARED_CLOSEOUT_UNCLOSABLE, "unconverted memory", unclosable)
     recovered = resume_prepared_closeout(contract, record, store)
     if recovered is not None:
         return recovered

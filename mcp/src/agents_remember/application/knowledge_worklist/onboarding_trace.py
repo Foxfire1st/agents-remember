@@ -47,6 +47,7 @@ from agents_remember.application.knowledge_worklist.registry import (
 from agents_remember.errors import AgentsRememberError
 from agents_remember.kernel import coordination_context_resolver as resolver
 from agents_remember.kernel.coordination_context.models import StorageSettings
+from agents_remember.kernel.recorded_reads import record_read
 from agents_remember.memory.conversion.base import pinned_version
 from agents_remember.memory_quality.knowledge_validator.trees import (
     KnowledgeTree,
@@ -97,8 +98,8 @@ class TraceSideRequest:
     memory_repository: Path
     memory_base: str
     """K_B's commit."""
-    memory_candidate: Path
-    """K_C's memory working tree."""
+    memory_candidate: Path | str
+    """K_C: the memory working tree, or a Git tree of ``memory_repository`` (the gate's candidate)."""
     code_repository: Path
     code_base: str
     """B, the commit an unconverted K_B converts at when its own trailer names none."""
@@ -109,7 +110,13 @@ class TraceSideRequest:
 def onboarding_trace_sides(request: TraceSideRequest) -> OnboardingTraceSides | None:
     """The gate's sides over an explicit K_B commit; ``None`` when neither side is converted."""
 
-    candidate = knowledge_tree_from_directory(request.memory_candidate, label="K_C")
+    candidate = (
+        knowledge_tree_from_directory(request.memory_candidate, label="K_C")
+        if isinstance(request.memory_candidate, Path)
+        else knowledge_tree_from_git(
+            request.memory_repository, request.memory_candidate, label="K_C"
+        )
+    )
     base = knowledge_tree_from_git(request.memory_repository, request.memory_base, label="K_B")
     if not base.converted and not candidate.converted:
         return None
@@ -152,7 +159,9 @@ def onboarding_trace_sides(request: TraceSideRequest) -> OnboardingTraceSides | 
             "base": request.code_base,
             "memoryBase": request.memory_base,
             "convertedBase": converted_base,
-            "memoryCandidate": request.memory_candidate.as_posix(),
+            "memoryCandidate": str(request.memory_candidate)
+            if isinstance(request.memory_candidate, str)
+            else request.memory_candidate.as_posix(),
         },
     )
 
@@ -166,7 +175,11 @@ def _onboarding_and_history(tree: KnowledgeTree) -> dict[str, bytes]:
 
 
 def trace_context(contract: WorktreeContract) -> Any:
-    """The storage settings the gate reads: the memory worktree's own, as closeout resolves them."""
+    """The storage settings the gate reads: the memory worktree's own, as closeout resolves them.
+
+    Every settings file read is recorded (:func:`record_read`): the coordination fallback lies in no
+    tree, so a caller that reuses a verdict (the gate's memo) must see it change.
+    """
 
     settings = (
         None
@@ -174,14 +187,25 @@ def trace_context(contract: WorktreeContract) -> Any:
         else contract.memory_worktree / "system/settings.md"
     )
     if settings is not None and settings.is_file():
+        record_read(settings)
         storage, _ = resolver.parse_coordination_settings(settings)
         return _TraceContext(storage=storage, code_repository_name=contract.repo_name)
+    if settings is not None:
+        record_read(settings)  # absent: the fallback below is taken because of it
     try:
-        return contract_context(contract)
+        context = contract_context(contract)
     except AgentsRememberError:
+        record_read(Path(contract.coordination_root) / "system" / "settings.md")
         # No settings anywhere: the resolver's default storage, which stores every source's card
         # (the strictest reading: every changed file is gated).
         return _TraceContext(storage=StorageSettings(), code_repository_name=contract.repo_name)
+    for read in (
+        getattr(context, "settings_path", None),
+        getattr(context, "path_settings_path", None),
+    ):
+        if isinstance(read, Path):
+            record_read(read)
+    return context
 
 
 @dataclass(frozen=True)

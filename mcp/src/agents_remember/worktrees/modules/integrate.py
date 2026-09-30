@@ -37,6 +37,7 @@ from agents_remember.worktrees.integration.integration_resolution_handoff import
 from agents_remember.worktrees.integration.master_review_gate import (
     blocked_integration_payload,
 )
+from agents_remember.worktrees.knowledge_gate import landing_gate_refusal
 from agents_remember.worktrees.modules.args import WorktreeArgs, report_operation_progress
 from agents_remember.worktrees.modules.git import (
     branch_commit,
@@ -69,6 +70,7 @@ from agents_remember.worktrees.series_closeout import (
     publish_series_integration_under_authority,
     require_series_checkpoint_authority,
 )
+from agents_remember.worktrees.services import LandingGateRequest
 from agents_remember.worktrees.source_lineage import (
     lineage_block_payload,
     lineage_refusal,
@@ -741,6 +743,10 @@ def _handover_or_apply_integration(
             },
         )
 
+    blocked = _knowledge_gate_block(contract, args, _route_commits(contract, checkpoint), sources)
+    if blocked is not None:
+        return blocked
+
     # Preview and apply prove the same accepted memory ancestry before promising a landing.
     _require_memory_ancestry(
         contract,
@@ -763,6 +769,49 @@ def _handover_or_apply_integration(
         sources,
         handover_warning=handover_warning,
         checkpoint=checkpoint,
+    )
+
+
+def _knowledge_gate_block(
+    contract: WorktreeContract,
+    args: WorktreeArgs,
+    commits: IntegratedCommits,
+    sources: IntegrationSources,
+) -> WorktreeCommandResult | None:
+    """MIK-R09 rule 4: a master or checkpoint landing waits for valid, current knowledge.
+
+    The validator runs on the master's memory commit against the parent line's memory tip, and
+    every entry at a path the master's net code diff changed must not be stale at its code commit.
+    Preview and apply refuse alike; unconverted memory is not gated.
+    """
+
+    if (
+        contract.kind != "series"
+        or contract.memory_mode != "external"
+        or contract.memory_repo_path is None
+    ):
+        return None
+    refusal = landing_gate_refusal(
+        LandingGateRequest(
+            memory_repository=contract.memory_repo_path,
+            memory_commit=commits.memory_content,
+            memory_bases=(sources.current_memory_source,),
+            code_repository=contract.code_repo_path,
+            code_commit=commits.code,
+            code_base=sources.current_code_source,
+        )
+    )
+    if refusal is None:
+        return None
+    return WorktreeCommandResult(
+        2,
+        blocked_integration_payload(
+            contract,
+            "knowledge-gate-refused",
+            refusal,
+            persist=not args.dry_run,
+            developer_decision_required=False,
+        ),
     )
 
 

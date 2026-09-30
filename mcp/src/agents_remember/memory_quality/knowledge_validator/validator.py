@@ -25,6 +25,9 @@ from agents_remember.memory_quality.knowledge_validator import (
     rules_decisions as _rules_decisions,  # noqa: F401  # registers MIK-R13's decision content rules
 )
 from agents_remember.memory_quality.knowledge_validator import (
+    rules_history as _rules_history,  # noqa: F401  # registers MIK-R09's open history row rule
+)
+from agents_remember.memory_quality.knowledge_validator import (
     rules_reconsideration as _rules_reconsideration,  # noqa: F401  # registers MIK-R14's link guard
 )
 from agents_remember.memory_quality.knowledge_validator import (
@@ -55,6 +58,7 @@ def validate_tree(
     bases: Sequence[KnowledgeTree] = (),
     code: CodeTree | None = None,
     conversion: bool = False,
+    leaf_publication: bool = False,
 ) -> ValidationReport:
     """Validate ``candidate`` with every registered rule.
 
@@ -62,7 +66,8 @@ def validate_tree(
     none for a writer or a curator run with no base (then every anchor is checked for path
     existence). ``code`` is the paired code tree; it is required unless ``conversion`` is set, which
     is a standalone conversion's run: it carries anchors and authors none, so none is checked for
-    path existence.
+    path existence. ``leaf_publication`` marks a commit that publishes a leaf: the history-row rule
+    then reads every history file not closed in a base, whatever its own flag (MIK-R09).
     """
 
     if code is None and not conversion:
@@ -73,6 +78,7 @@ def validate_tree(
         bases=tuple(bases),
         code=code,
         conversion=conversion,
+        leaf_publication=leaf_publication,
     )
     violations = [
         Violation(
@@ -95,7 +101,11 @@ def validation_applies(candidate: KnowledgeTree, bases: Sequence[KnowledgeTree])
 
 
 def require_valid_commit(
-    candidate: KnowledgeTree, *, bases: Sequence[KnowledgeTree], code: CodeTree
+    candidate: KnowledgeTree,
+    *,
+    bases: Sequence[KnowledgeTree],
+    code: CodeTree,
+    leaf_publication: bool = False,
 ) -> ValidationReport | None:
     """Validate a memory commit's candidate at a commit route, refusing on any violation.
 
@@ -106,7 +116,7 @@ def require_valid_commit(
 
     if not validation_applies(candidate, bases):
         return None
-    report = validate_tree(candidate, bases=bases, code=code)
+    report = validate_tree(candidate, bases=bases, code=code, leaf_publication=leaf_publication)
     if not report.ok:
         raise KnowledgeValidationError(report)
     return report

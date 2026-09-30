@@ -11,6 +11,7 @@ validator, or with no paired code commit, is refused rather than committed unche
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,11 +44,17 @@ def has_layout_marker(repository: Path, treeish: str) -> bool:
     unreadable side is never taken for unconverted memory.
     """
 
-    result = run_git(
-        repository,
-        ["ls-tree", "--name-only", treeish, "--", LAYOUT_MARKER_PATH],
-        GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
-    )
+    try:
+        result = run_git(
+            repository,
+            ["ls-tree", "--name-only", treeish, "--", LAYOUT_MARKER_PATH],
+            GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+        )
+    except subprocess.SubprocessError as error:  # a timed-out probe is named, never unconverted
+        raise LayoutProbeError(
+            f"cannot read {treeish!r} in {repository}: the Git probe failed or timed out "
+            f"({type(error).__name__})"
+        ) from error
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
         raise LayoutProbeError(f"cannot read {treeish!r} in {repository}: {detail}")
@@ -60,8 +67,13 @@ def memory_commit_refusal(
     candidate_tree: str,
     bases: Sequence[str],
     paired_code: PairedCode | None,
+    leaf_publication: bool = False,
 ) -> str | None:
-    """Return why this memory commit is refused, or ``None`` when it may be committed."""
+    """Return why this memory commit is refused, or ``None`` when it may be committed.
+
+    ``leaf_publication`` marks a commit that publishes a leaf (closeout, direct landing, a leaf's
+    recorded landing): the leaf's own history file is then checked even once it is closed (MIK-R09).
+    """
 
     try:
         converted = [
@@ -82,7 +94,8 @@ def memory_commit_refusal(
             "the knowledge validator (MIK-R22) is not bound in this process; a converted memory "
             "commit is never committed unvalidated"
         )
-    return validator.refusal(
+    route = validator.leaf_refusal if leaf_publication else validator.refusal
+    return route(
         memory_repository=memory_repository,
         candidate_tree=candidate_tree,
         bases=tuple(bases),

@@ -7,12 +7,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
+from agents_remember.application.knowledge_gate import GateResult, evaluate_leaf_gate
 from agents_remember.application.knowledge_proofs import invariants_without_proof
 from agents_remember.application.knowledge_worklist import (
     answering_trace_subjects,
     leaf_onboarding_trace_sides,
     recompute_leaf_worklist,
 )
+from agents_remember.application.knowledge_worklist.leaf import CandidateTrees
 from agents_remember.application.memory_quality.census import (
     PreparedMemoryCensus,
     census_curator_candidates,
@@ -417,7 +419,7 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
         _curator_candidate_inputs(scope) if execution.publish_curator_report else None
     )
     census = prepare_memory_census(scope)
-    worklist = _knowledge_worklist(scope)
+    gate, worklist = _knowledge_gate_and_worklist(scope, candidate_inputs)
     payload = run_memory_quality_check(
         scope.onboarding_root,
         checks=execution.checks,
@@ -453,8 +455,7 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
         response["memoryCensus"] = publish_memory_census(
             census, detail_limit=execution.detail_limit
         )
-    if worklist is not None:
-        response["knowledgeWorklist"] = worklist_summary(*worklist)
+    response.update(_knowledge_briefs(worklist, gate))
     if not execution.publish_curator_report:
         return _bounded_quality_response(response, execution.detail_limit)
     _attach_curator_checklist(
@@ -462,7 +463,7 @@ def _execute_memory_quality(execution: MemoryQualityExecution) -> dict[str, obje
         payload,
         response,
         candidate_inputs=candidate_inputs,
-        prepared=_PreparedInputs(census=census, worklist=worklist),
+        prepared=_PreparedInputs(census=census, worklist=worklist, gate=gate),
     )
     return _bounded_quality_response(response, execution.detail_limit)
 
@@ -473,6 +474,56 @@ class _PreparedInputs:
 
     census: PreparedMemoryCensus | None
     worklist: tuple[dict[str, Any], str | None] | None = None
+    gate: GateResult | None = None
+    """MIK-R09's verdict over the exact curator candidate; ``None`` for an unconverted leaf."""
+
+
+def _knowledge_gate_and_worklist(
+    scope: MemoryScope, candidate_inputs: _CuratorCandidateInputs | None
+) -> tuple[GateResult | None, tuple[dict[str, Any], str | None] | None]:
+    """The gate's verdict and the worklist it recomputed; without a gate, the plain recompute."""
+
+    gate = _knowledge_gate(scope, candidate_inputs)
+    if gate is None:
+        return None, _knowledge_worklist(scope)
+    return gate, (dict(gate.worklist), gate.worklist_path)
+
+
+def _knowledge_briefs(
+    worklist: tuple[dict[str, Any], str | None] | None, gate: GateResult | None
+) -> dict[str, object]:
+    """The response's ``knowledgeWorklist`` and ``knowledgeGate`` summaries, where they exist."""
+
+    briefs: dict[str, object] = {}
+    if worklist is not None:
+        briefs["knowledgeWorklist"] = worklist_summary(*worklist)
+    if gate is not None:
+        briefs["knowledgeGate"] = gate.brief()
+    return briefs
+
+
+def _knowledge_gate(
+    scope: MemoryScope, candidate_inputs: _CuratorCandidateInputs | None
+) -> GateResult | None:
+    """The mandatory gate over the exact candidate this curator publication attests (MIK-R09).
+
+    It recomputes the worklist over the captured code and memory trees and persists it, decides every
+    item through its kind's predicate and runs the validator. ``None`` for a scope that publishes no
+    curator report, a non-leaf scope, and every unconverted leaf, whose run is unchanged.
+    """
+
+    contract = scope.contract
+    if (
+        contract is None
+        or candidate_inputs is None
+        or contract.kind != "leaf"
+        or contract.memory_mode != "external"
+    ):
+        return None
+    return evaluate_leaf_gate(
+        contract,
+        CandidateTrees(code=candidate_inputs.code_tree, memory=candidate_inputs.memory_tree),
+    )
 
 
 def _knowledge_worklist(scope: MemoryScope) -> tuple[dict[str, Any], str | None] | None:
@@ -633,19 +684,9 @@ def _attach_curator_checklist(
             (accepted_no_impact, accepted_route_no_impact),
             response,
         )
-        repair_findings.extend(gate_findings)
+        repair_findings.extend(_with_gate(gate_findings, prepared.gate))
         report_only.extend(_needed_rows_dropped(gate_report_only, prepared.worklist, response))
-    repair_findings.extend(
-        {
-            "check": "memory-census",
-            "code": blocker.code,
-            "path": blocker.identity.memoryRootRelativePath
-            if blocker.identity
-            else blocker.sourcePath or "",
-            "message": blocker.detail,
-        }
-        for blocker in prepared.census.result.blockers
-    )
+    repair_findings.extend(_prepared_findings(prepared))
     checklist = write_curator_checklist(
         CuratorChecklist(
             report_path=scope.curator_report_path,
@@ -679,6 +720,60 @@ def _attach_curator_checklist(
         missing_onboarding=missing_onboarding,
         stale_route_indexes=route_indexes.stale_indexes,
     )
+
+
+def _prepared_findings(prepared: _PreparedInputs) -> list[dict[str, Any]]:
+    """The census's blockers, as repair findings."""
+
+    assert prepared.census is not None
+    findings: list[dict[str, Any]] = [
+        {
+            "check": "memory-census",
+            "code": blocker.code,
+            "path": blocker.identity.memoryRootRelativePath
+            if blocker.identity
+            else blocker.sourcePath or "",
+            "message": blocker.detail,
+        }
+        for blocker in prepared.census.result.blockers
+    ]
+    return findings
+
+
+def _with_gate(findings: list[Any], gate: GateResult | None) -> list[Any]:
+    """The onboarding gate's findings and the mandatory gate's, each open item counted once.
+
+    MIK-R09 rule 1: each open worklist item, each unreadable input and each validator violation
+    is one repair finding toward ``curatorActionableCount``; none is report-only. Rule 7: the
+    onboarding gate runs through the same registry, so an ``onboarding_trace`` item MIK-R30 already
+    reports (same item ID, with its own required action) is not counted again, and neither is an
+    unreadable onboarding side when the gate's worklist is itself incomplete.
+    """
+
+    if gate is None:
+        return findings
+    traced = {finding.get("itemId") for finding in findings if finding.get("itemId")}
+    kept = _onboarding_findings_beside(
+        findings, incomplete=gate.worklist.get("state") != "complete"
+    )
+    kept += [
+        finding.to_repair_finding()
+        for finding in gate.findings
+        if finding.item is None or finding.item not in traced
+    ]
+    return kept
+
+
+def _onboarding_findings_beside(findings: list[Any], *, incomplete: bool) -> list[Any]:
+    """MIK-R30's findings, less its unreadable-side problem when the gate already names it."""
+
+    if not incomplete:
+        return list(findings)
+    return [
+        finding
+        for finding in findings
+        if finding.get("check") != "onboarding-trace" or "itemId" in finding
+    ]
 
 
 def _needed_rows_dropped(

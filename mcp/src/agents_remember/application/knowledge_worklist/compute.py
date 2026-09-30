@@ -20,7 +20,8 @@ landed inventory owner measures it (:func:`git_rename_inference`, ICR-R08), then
 6. evaluates the family route conditions (MIK-R06, :mod:`.route_conditions`) of every reached
    family, and ``route_path_absent`` of every family with a route this leaf's range killed;
 7. marks every changed hunk **linked** or **unexplained** (definition 8; a delete-only hunk has no
-   changed line at C, so only a K_B entry's range at B links it) and raises MIK-R10's
+   changed line at C, so only a K_B entry's range at B links it, and an insertion-only hunk has no
+   changed line at B, so only a K_C entry's range at C links it) and raises MIK-R10's
    ``unexplained_hunk`` / ``unexplained_file`` item for every unlinked hunk and non-text change
    (:mod:`.unexplained`), with its path's coverage. Its items join step 5's sort; the planning marks
    do not apply to them.
@@ -33,6 +34,7 @@ nothing is a verdict (Exclusions).
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -92,6 +94,7 @@ __all__ = [
     "Item",
     "WorklistInputs",
     "compute_worklist",
+    "git_failure",
     "incomplete_worklist",
     "non_text_linked",
     "worklist_digest",
@@ -194,6 +197,8 @@ def compute_worklist(inputs: WorklistInputs) -> dict[str, Any]:
         return incomplete_worklist(
             Incomplete("C", str(error)), owner=inputs.owner, pairing=inputs.pairing
         )
+    except subprocess.SubprocessError as error:
+        return incomplete_worklist(git_failure(error), owner=inputs.owner, pairing=inputs.pairing)
 
 
 def _changes(inputs: WorklistInputs) -> tuple[tuple[TreeChange, ...], int, dict[str, str]]:
@@ -553,12 +558,7 @@ class _Run:
         base_spans = self._spans(self.inputs.base, path, base_blob)
         candidate_spans = self._spans(self.inputs.candidate, path, candidate_blob)
         document["hunks"] = [
-            {
-                **hunk.to_document(),
-                # A delete-only hunk changes no line at C: only a K_B range links it (MIK-R10 rule 4).
-                "linked": any(hits_old(hunk, span) for span in base_spans)
-                or (hunk.new_count > 0 and any(hits_new(hunk, span) for span in candidate_spans)),
-            }
+            {**hunk.to_document(), "linked": _linked(hunk, base_spans, candidate_spans)}
             for hunk in hunks
         ]
         return document
@@ -596,6 +596,27 @@ def non_text_linked(locator_kinds: Iterable[str]) -> bool:
     """
 
     return any(kind == "file" for kind in locator_kinds)
+
+
+def _linked(
+    hunk: Hunk, base_spans: Iterable[tuple[int, int]], candidate_spans: Iterable[tuple[int, int]]
+) -> bool:
+    """Definition 8: the hunk's *changed lines* intersect an entry's range on their own side.
+
+    A side with no changed line links nothing there, symmetrically: a delete-only hunk changes no
+    line at C, so only a K_B range at B links it (MIK-R10 rule 4); an insertion-only hunk changes
+    no line at B, so only a K_C range at C links it (MIK-R09, carried from the L10 review, N3).
+    """
+
+    return (hunk.old_count > 0 and any(hits_old(hunk, span) for span in base_spans)) or (
+        hunk.new_count > 0 and any(hits_new(hunk, span) for span in candidate_spans)
+    )
+
+
+def git_failure(error: BaseException) -> Incomplete:
+    """A Git call that failed or timed out (``SubprocessError``) is unreadable input, named (rule 4)."""
+
+    return Incomplete("git", f"a Git call failed or timed out ({type(error).__name__}: {error})")
 
 
 def _class_counts(classified: Iterable[Classification]) -> dict[str, int]:

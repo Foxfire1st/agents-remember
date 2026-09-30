@@ -9,6 +9,7 @@ violation.
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,15 @@ from agents_remember.memory_quality.knowledge_validator.validator import (
 
 BaseConverter = Callable[..., KnowledgeTree]
 """``(memory_repository, base, *, after, code_repository, code_commit) -> KnowledgeTree``."""
+
+
+@dataclass(frozen=True)
+class _Commit:
+    memory_repository: Path
+    candidate_tree: str
+    bases: tuple[str, ...]
+    code_repository: Path
+    code_commit: str
 
 
 @dataclass(frozen=True)
@@ -48,6 +58,33 @@ class GitKnowledgeValidation:
         code_repository: Path,
         code_commit: str,
     ) -> str | None:
+        return self._refusal(
+            _Commit(memory_repository, candidate_tree, tuple(bases), code_repository, code_commit)
+        )
+
+    def leaf_refusal(
+        self,
+        *,
+        memory_repository: Path,
+        candidate_tree: str,
+        bases: Sequence[str],
+        code_repository: Path,
+        code_commit: str,
+    ) -> str | None:
+        """A commit that publishes a leaf: its own history file is read whatever its flag."""
+
+        return self._refusal(
+            _Commit(memory_repository, candidate_tree, tuple(bases), code_repository, code_commit),
+            leaf_publication=True,
+        )
+
+    def _refusal(self, commit: _Commit, *, leaf_publication: bool = False) -> str | None:
+        memory_repository, candidate_tree, bases = (
+            commit.memory_repository,
+            commit.candidate_tree,
+            commit.bases,
+        )
+        code_repository, code_commit = commit.code_repository, commit.code_commit
         try:
             candidate = knowledge_tree_from_git(
                 memory_repository, candidate_tree, label=f"memory candidate {candidate_tree}"
@@ -72,9 +109,16 @@ class GitKnowledgeValidation:
                     for base, tree in zip(bases, base_trees, strict=True)
                 ]
             code = code_tree_from_git(code_repository, code_commit, label=f"code {code_commit}")
-            require_valid_commit(candidate, bases=base_trees, code=code)
+            require_valid_commit(
+                candidate, bases=base_trees, code=code, leaf_publication=leaf_publication
+            )
         except KnowledgeValidationError as error:
             return str(error)
         except ValueError as error:  # an unreadable tree is refused, never committed unchecked
             return f"the knowledge validator (MIK-R22) cannot read this commit's trees: {error}"
+        except subprocess.SubprocessError as error:  # a failed or timed-out Git read, named
+            return (
+                "the knowledge validator (MIK-R22) cannot read this commit's trees: a Git call "
+                f"failed or timed out ({type(error).__name__}: {error})"
+            )
         return None

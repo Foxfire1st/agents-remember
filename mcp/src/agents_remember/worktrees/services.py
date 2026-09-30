@@ -4,7 +4,8 @@ Worktrees ranks below providers, memory_quality and code_quality, so the
 lifecycle modules never import them. The composition layer binds one
 ``WorktreeServices`` bundle (provider lifecycle, memory-quality gate,
 citation-cache guard, knowledge validator,
-knowledge crossing, review-artifact cleanup) before invoking worktree operations.
+knowledge crossing, knowledge worklist, the mandatory invariant gate, review-artifact cleanup) before
+invoking worktree operations.
 """
 
 from __future__ import annotations
@@ -147,6 +148,19 @@ class KnowledgeValidationPort(Protocol):
         code_commit: str,
     ) -> str | None: ...
 
+    def leaf_refusal(
+        self,
+        *,
+        memory_repository: Path,
+        candidate_tree: str,
+        bases: Sequence[str],
+        code_repository: Path,
+        code_commit: str,
+    ) -> str | None:
+        """The same, for a commit that publishes a leaf: the leaf's own history file is checked
+        whatever its ``closed`` flag (MIK-R09)."""
+        ...
+
 
 @dataclass(frozen=True)
 class CrossingPlanView:
@@ -195,6 +209,58 @@ class KnowledgeWorklistPort(Protocol):
     """
 
     def recompute(self, contract: WorktreeContract) -> dict[str, Any] | None: ...
+
+
+@dataclass(frozen=True)
+class LandingGateRequest:
+    """One landing the mandatory gate checks (MIK-R09 rules 3 and 4).
+
+    ``memory_commit`` is the landed (or landing) memory commit, validated against ``memory_bases``:
+    the parent line's memory tip for a master or checkpoint landing, the commit's own parents for a
+    recorded landing. ``code_base`` is the parent line's code tip, whose merge base with
+    ``code_commit`` starts the master's net code diff (``None``: no staleness check). A leaf's
+    recorded landing names ``leaf_owner``, whose history file must be closed in ``memory_commit``.
+    """
+
+    memory_repository: Path
+    memory_commit: str
+    memory_bases: tuple[str, ...]
+    code_repository: Path
+    code_commit: str
+    code_base: str | None = None
+    leaf_owner: str | None = None
+
+
+@dataclass(frozen=True)
+class DirectGateVerdict:
+    """The gate's verdict over a direct landing: whether it applies, whose leaf, and any refusal."""
+
+    applies: bool
+    owner: str | None
+    refusal: str | None
+
+
+class KnowledgeGatePort(Protocol):
+    """MIK-R09: the mandatory invariant gate at every route that commits or lands memory.
+
+    Bound by the composition layer. Each method recomputes what it needs from the exact trees it is
+    given (nothing persisted is trusted) and returns the refusal naming every finding, or ``None``.
+    """
+
+    def leaf_refusal(
+        self,
+        contract: WorktreeContract,
+        *,
+        code_tree: str,
+        memory_tree: str,
+        parent_memory_tip: str | None,
+    ) -> str | None: ...
+
+    def direct_verdict(
+        self, contract: WorktreeContract, *, code_commit: str, memory_tree: str
+    ) -> DirectGateVerdict: ...
+
+    def landing_refusal(self, request: LandingGateRequest) -> str | None: ...
 
 
 @dataclass(frozen=True)
@@ -248,6 +314,7 @@ class WorktreeServices:
     knowledge_crossing: KnowledgeCrossingPort | None = None
     knowledge_worklist: KnowledgeWorklistPort | None = None
     review_artifact_cleanup: ReviewArtifactCleanupPort | None = None
+    knowledge_gate: KnowledgeGatePort | None = None
 
 
 @dataclass(frozen=True)
@@ -304,9 +371,12 @@ __all__ = [
     "CrossingPlanView",
     "CrossingRequest",
     "CrossingStepFailed",
+    "DirectGateVerdict",
     "KnowledgeCrossingPort",
+    "KnowledgeGatePort",
     "KnowledgeValidationPort",
     "KnowledgeWorklistPort",
+    "LandingGateRequest",
     "MemoryQualityPort",
     "ProviderLifecyclePort",
     "ReviewArtifactCleanupPort",

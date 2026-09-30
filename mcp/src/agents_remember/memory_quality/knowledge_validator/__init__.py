@@ -16,6 +16,8 @@ committed instead of by database constraints. One module, one rule registry:
   ``superseded`` never stored, ``reconsider_on`` indexes, and the governs links reported;
 * :mod:`.rules_reconsideration` -- MIK-R14's guard: an alternative a ``reconsider_on`` link
   addresses keeps its index, so a reorder never silently retargets the link;
+* :mod:`.rules_history` -- MIK-R09's rule on history rows that are not frozen: their subjects name
+  records and their covered entries' ``after`` anchors are the tree's;
 * :mod:`.validator` -- :func:`validate_tree`, rule 8's applicability and
   :func:`require_valid_commit`;
 * :mod:`.commit_route` -- the Git adapter a commit route calls through the worktree port.

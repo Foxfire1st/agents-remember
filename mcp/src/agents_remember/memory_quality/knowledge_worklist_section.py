@@ -2,9 +2,9 @@
 
 The worklist is computed by the application layer and handed to the checklist as its persisted
 ``knowledge-worklist/v1`` document. This module only renders it: the state, the pairing it used, and
-one row per item with the facts a curator acts on. It does not count toward
-``curatorActionableCount`` -- what an open item blocks is the closeout gate's (MIK-R09), which goes
-live at the cutover (MIK-R37).
+one row per item with the facts a curator acts on. The section itself counts nothing: the mandatory
+gate (MIK-R09) turns every item without a current satisfying row into one repair finding (check
+``knowledge-gate``), which the checklist counts toward ``curatorActionableCount``.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Final
 
-__all__ = ["WORKLIST_SECTION_HEADING", "knowledge_worklist_lines", "worklist_summary"]
+__all__ = ["WORKLIST_SECTION_HEADING", "item_facts", "knowledge_worklist_lines", "worklist_summary"]
 
 WORKLIST_SECTION_HEADING: Final = "## Knowledge worklist (MIK-R08)"
 _SHORT: Final = 12
@@ -59,6 +59,12 @@ def _stale_facts(_item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str
 def _family_facts(_item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str]:
     members = facts.get("members") or ()
     return [f"{len(members)} member(s) to examine", *(facts.get("reachedBy") or ())]
+
+
+def item_facts(item: Mapping[str, Any]) -> str:
+    """The facts a curator acts on for one item, on one line (the section's Facts cell)."""
+
+    return _item_facts(item)
 
 
 def _item_facts(item: Mapping[str, Any]) -> str:
@@ -191,6 +197,21 @@ def _reconsideration_facts(item: Mapping[str, Any], facts: Mapping[str, Any]) ->
     return parts
 
 
+def _trace_facts(item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str]:
+    """MIK-R30: the changed sources a card or route overview traces, and what answers it."""
+
+    parts = [f"sources {', '.join(facts.get('sources') or ()) or '-'}"]
+    if facts.get("sidecarUnreadable"):
+        parts.append("sidecar unreadable: repair it through the writer")
+    answered = item.get("satisfiedBy")
+    parts.append(
+        f"answered by {answered}"
+        if answered
+        else "needs a counted change of its Markdown or sidecar, or a no_impact row"
+    )
+    return parts
+
+
 _FACT_RENDERERS: Final[
     Mapping[str, Callable[[Mapping[str, Any], Mapping[str, Any]], list[str]]]
 ] = {
@@ -202,6 +223,7 @@ _FACT_RENDERERS: Final[
     "unexplained_hunk": _unexplained_facts,
     "unexplained_file": _unexplained_facts,
     "reconsideration_candidate": _reconsideration_facts,
+    "onboarding_trace": _trace_facts,
 }
 
 
@@ -240,9 +262,10 @@ def knowledge_worklist_lines(document: Mapping[str, Any], path: str | None) -> l
     lines += [
         (
             "Each item needs a row about its subject in the leaf's history file "
-            "(`knowledge/history/<leaf>.json`, MIK-R07). The closeout gate that refuses an item "
-            "without a current row is MIK-R09's; until it is live these items are shown here and "
-            "are not counted in `curatorActionableCount`."
+            "(`knowledge/history/<leaf>.json`, MIK-R07). The mandatory gate (MIK-R09) counts each "
+            "item without a current satisfying row as one repairable finding (check "
+            "`knowledge-gate`) toward `curatorActionableCount`, and refuses closeout while any is "
+            "open."
         ),
         "",
     ]

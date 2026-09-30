@@ -11,17 +11,42 @@ never left it.
 The caller supplies the landed commits; this module records them. Nothing is inferred after the
 fact, because inferring means asking GitHub, and a guard that authorizes deletion must not depend
 on the network being reachable.
+
+On converted memory the record route commits no memory but still checks the landed memory commit
+(MIK-R09 rule 3): the validator passes against the parent line the task last synced from, and a
+leaf's history file is ``closed`` in it. A memory commit made before the repository was converted
+carries no layout marker and is exempt; a converted memory line whose landing names no memory
+commit is refused.
+
+**Probe first (L09 review R1, finding 7).** The marker probe reads the memory line and the task's
+memory base before anything reads the landed memory commit. On an unconverted line the landed
+commit is only probed for the marker, and one Git cannot read is exempt as it was before this
+master: the route records exactly as it did. On a converted line an unreadable commit refuses.
 """
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
+from agents_remember.worktrees.knowledge_gate import (
+    GateProbeError,
+    converted_memory,
+    landing_gate_refusal,
+)
 from agents_remember.worktrees.modules.args import WorktreeArgs
-from agents_remember.worktrees.modules.git import branch_exists, is_ancestor
+from agents_remember.worktrees.modules.git import (
+    branch_exists,
+    is_ancestor,
+    local_branch_ref,
+    require_git,
+)
 from agents_remember.worktrees.modules.landing_record import (
     LandedIntegration,
     record_landed_integration,
 )
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.services import LandingGateRequest
 from agents_remember.worktrees.worktree_contract import WorktreeContract, load_contract
 
 # The route label recorded in the contract's ``integration.strategy`` cell, so the cell says which
@@ -44,6 +69,91 @@ def _landing_targets(contract: WorktreeContract) -> tuple[str, ...]:
     return tuple(
         target for target in targets if target and branch_exists(contract.code_repo_path, target)
     )
+
+
+def _line_converted(contract: WorktreeContract, repository: Path) -> bool | str:
+    """Whether the memory line or the task's memory base holds the marker, or why Git cannot say."""
+
+    official = contract.memory_source_branch
+    try:
+        sides = (local_branch_ref(official) if official else "", contract.memory_base_commit)
+        return converted_memory(repository, *sides)
+    except RuntimeError as error:  # an unreadable probe, or an invalid official branch cell
+        return str(error)
+
+
+def _commit_converted(repository: Path, memory_commit: str) -> bool:
+    """On an unconverted line: whether the landed commit holds the marker (unreadable: exempt)."""
+
+    try:
+        return converted_memory(repository, memory_commit)
+    except GateProbeError:
+        return False  # as before this master: an unconverted line's commit is never read
+
+
+def _unnamed_memory_commit_refusal(converted: bool) -> str | None:
+    """A converted memory line's landing must name its memory commit for the gate to check."""
+
+    if not converted:
+        return None
+    return (
+        "record_landing refused: the memory line is converted, so the landing names its landed "
+        "memory commit (landed_memory_content_commit) for the mandatory invariant gate "
+        "(MIK-R09) to check"
+    )
+
+
+def _knowledge_gate_refusal(
+    contract: WorktreeContract, code_commit: str, memory_commit: str
+) -> str | None:
+    """MIK-R09 rule 3 over the landed memory commit; ``None`` for unconverted memory."""
+
+    repository = contract.memory_repo_path
+    if contract.memory_mode != "external" or repository is None:
+        return None
+    line = _line_converted(contract, repository)
+    if isinstance(line, str):
+        return line
+    if not memory_commit:
+        return _unnamed_memory_commit_refusal(line)
+    if not line and not _commit_converted(repository, memory_commit):
+        return None  # unconverted memory: nothing more is read, exactly as before this master
+    request = _landing_request(contract, repository, code_commit, memory_commit)
+    return request if isinstance(request, str) else landing_gate_refusal(request)
+
+
+def _landing_request(
+    contract: WorktreeContract, repository: Path, code_commit: str, memory_commit: str
+) -> LandingGateRequest | str:
+    """The gate's request over the landed memory commit, or why that commit cannot be read."""
+
+    try:
+        parents = require_git(repository, ["rev-list", "--parents", "-n", "1", memory_commit])
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        return f"record_landing refused: the landed memory commit cannot be read: {error}"
+    # The comparison base is the parent line the task last synced from, so every record the task
+    # introduced -- in however many of its own commits -- is judged new (MIK-R27, carried from L27).
+    bases = (
+        (contract.memory_base_commit,)
+        if contract.memory_base_commit
+        else tuple(parents.split()[1:])
+    )
+    return LandingGateRequest(
+        memory_repository=repository,
+        memory_commit=memory_commit,
+        memory_bases=bases,
+        code_repository=contract.code_repo_path,
+        code_commit=code_commit,
+        leaf_owner=(contract.leaf_id or contract.task_name) if contract.kind == "leaf" else None,
+    )
+
+
+def _require_knowledge_gate(
+    contract: WorktreeContract, code_commit: str, memory_commit: str
+) -> None:
+    refusal = _knowledge_gate_refusal(contract, code_commit, memory_commit)
+    if refusal is not None:
+        raise RuntimeError(refusal)
 
 
 def _identity_payload(contract: WorktreeContract) -> dict[str, str]:
@@ -107,6 +217,7 @@ def record_landing_result(args: WorktreeArgs) -> WorktreeCommandResult:
             "record the commit it landed."
         )
     claimed = list(targets)
+    _require_knowledge_gate(contract, commit, args.landed_memory_content_commit.strip())
     if args.dry_run:
         return WorktreeCommandResult(
             0,
