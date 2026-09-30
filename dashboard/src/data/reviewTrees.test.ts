@@ -2,9 +2,10 @@
 //
 // WHERE THE BODY COMES FROM. `reviewTrees.captured.json` is the measured body of GET
 // /api/review/trees served by `create_app(config, collaborators=serving_collaborators(config))` over
-// the 260928-MIK-L25 worker's scratch copy: the real memory repository converted with the leaf's own
-// `knowledge-convert`, and a leaf that edits `_not_listed` in review_source_admission.py and
-// re-anchors RLZ-CXH58B4W (provenance: ../panels/review/gitTrees.capture-provenance.json).
+// the 260928-MIK-L31 worker's scratch copy: the real memory repository converted with the worktree's
+// own `knowledge-convert`, and a leaf that edits `_not_listed` in review_source_admission.py,
+// re-anchors RLZ-CXH58B4W and declares two expected effects (provenance:
+// ../panels/review/gitTrees.capture-provenance.json; re-captured by MIK-L31 from L25's).
 // Only `fetch` is stubbed, so the URL and the body travel the way the browser's do.
 
 import { readFileSync } from 'node:fs';
@@ -18,6 +19,7 @@ import {
   invariantCurrentness,
   reviewTrees,
   reviewTreesRead,
+  treeComparisonNumber,
   unexplainedHunks,
 } from './reviewTrees';
 
@@ -52,18 +54,18 @@ describe('the tree view of a converted leaf', () => {
     const result = await reviewTrees(
       'agents-remember',
       '260928_maintained-invariant-knowledge',
-      '260928-MIK-L25',
+      '260928-MIK-L31',
     );
     expect(requests[0].pathname).toBe('/api/review/trees');
-    expect(requests[0].searchParams.get('leaf')).toBe('260928-MIK-L25');
+    expect(requests[0].searchParams.get('leaf')).toBe('260928-MIK-L31');
     const read = reviewTreesRead(result);
     expect(read.phase).toBe('trees');
     const comparison = result.comparison!;
     expect(comparison.schema).toBe('ar-review-tree-comparison/v1');
     // Committed sides name their commits; the uncommitted candidates are pinned by one ref name.
-    expect(comparison.code_base.commit).toBe('a4eba7b7b5b5ffee7277f6c19086697925a22df2');
+    expect(comparison.code_base.commit).toBe('8a2d4b478971bf40cca0f24d5e5d24a0844bd563');
     expect(comparison.code_candidate.ref).toBe(
-      'refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L25/2',
+      'refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L31/1',
     );
     expect(comparison.memory_candidate.ref).toBe(comparison.code_candidate.ref);
     expect(result.knowledge_sides.map((side) => [side.side, side.state, side.index_state])).toEqual(
@@ -83,16 +85,16 @@ describe('the tree view of a converted leaf', () => {
     expect(source.records).toEqual(['INV-2TQGXFAX']);
     expect(source.files[0].patch).toContain('@@');
     expect(diff.history.map((file) => [file.path, file.status])).toEqual([
-      ['knowledge/history/260928-MIK-L25.json', 'added'],
+      ['knowledge/history/260928-MIK-L31.json', 'added'],
     ]);
     expect(invariantCurrentness(captured, 'INV-2TQGXFAX')).toEqual({
       before: 'current',
       after: 'current',
     });
-    expect(captured.currentness!.before!.codeTree!.treeId).toBe(
+    expect(captured.currentness!.before!.code_tree!.tree_id).toBe(
       captured.comparison!.code_base.tree,
     );
-    expect(captured.currentness!.after!.codeTree!.treeId).toBe(
+    expect(captured.currentness!.after!.code_tree!.tree_id).toBe(
       captured.comparison!.code_candidate.tree,
     );
   });
@@ -106,12 +108,39 @@ describe('the tree view of a converted leaf', () => {
       'INV-2TQGXFAX',
     ]);
     expect(worklist.history_rows.map((row) => [row.owner, row.subject, row.disposition])).toEqual([
-      ['260928-MIK-L25', 'FAM-2HBJREC2', 'no_impact'],
+      ['260928-MIK-L31', 'FAM-2HBJREC2', 'no_impact'],
     ]);
     expect(Object.keys(worklist.history_rows[0])).not.toContain('current');
     const change = worklist.changes.find((one) => one.path === SOURCE)!;
     expect(change.hunks!.map((hunk) => hunk.linked)).toEqual([true]);
     expect(unexplainedHunks(worklist)).toEqual([]);
+  });
+});
+
+describe('one wire convention (MIK-L25 review F9)', () => {
+  it('carries no camelCase key anywhere in the real body, including the owners own documents', () => {
+    const keys: string[] = [];
+    const walk = (value: unknown): void => {
+      if (Array.isArray(value)) value.forEach(walk);
+      else if (value && typeof value === 'object')
+        for (const [key, inner] of Object.entries(value)) {
+          keys.push(key);
+          walk(inner);
+        }
+    };
+    walk(captured);
+    expect(keys.filter((key) => /^[a-z]+[A-Z]/.test(key))).toEqual([]);
+    expect(keys).toContain('stale_members');
+    expect(keys).toContain('owner_kind');
+  });
+
+  it("reads the comparison a payload names and asks for one selection's entries by identity", async () => {
+    expect(treeComparisonNumber(['review:trees:7', 'history:intent:before:available'])).toBe(7);
+    expect(treeComparisonNumber(['limitation:no_semantic_assessment_performed'])).toBeUndefined();
+    const requests = serve(captured);
+    await reviewTrees('r', 'm', 'l', { comparison: 7, invariants: ['a', 'b'] });
+    expect(requests[0].searchParams.get('invariants')).toBe('a,b');
+    expect(requests[0].searchParams.get('comparison')).toBe('7');
   });
 });
 

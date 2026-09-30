@@ -137,7 +137,9 @@ def _attributed_or_refused(
 
     if not link.linked:
         if not link.determined:
-            return _link_undetermined(request, inventory, link.detail)
+            return _link_undetermined(
+                request, inventory, link.detail, never_initialized=link.never_initialized
+            )
         return _not_listed(request, inventory, link.detail)
     sides = " and ".join(link.linking_sides)
     return SourceAdmission(
@@ -150,9 +152,9 @@ def _attributed_or_refused(
         ),
         admission="attributed_unchanged",
         admission_detail=(
-            f"a realization recorded in the comparison's {sides} knowledge is anchored at this "
-            f"unchanged path ({link.detail}); it is opened as that realization's context at the "
-            "requested trees and is not counted as a changed file"
+            f"a realization or proof recorded for the path in the comparison's {sides} knowledge "
+            f"is anchored at this unchanged path ({link.detail}); it is opened as that entry's "
+            "context at the requested trees and is not counted as a changed file"
         ),
     )
 
@@ -214,7 +216,11 @@ def _not_listed(
 
 
 def _link_undetermined(
-    request: ReviewSourceContentRequest, inventory: ReviewSourceInventory, link_detail: str
+    request: ReviewSourceContentRequest,
+    inventory: ReviewSourceInventory,
+    link_detail: str,
+    *,
+    never_initialized: bool = False,
 ) -> ReviewRefusal:
     """The refusal for an unlisted path whose link could not be determined from unreadable knowledge.
 
@@ -231,13 +237,23 @@ def _link_undetermined(
             "no content was read for it, because an unchanged path is opened only on an established "
             "link and an unreadable snapshot establishes neither a link nor its absence"
         ),
-        next_action=(
-            "restore or repair the knowledge snapshot the detail names as unreadable -- the leaf's "
-            "own knowledge halves, or the retained snapshot of the named comparison generation -- "
-            "then expand the path again; this generation's changed paths stay expandable meanwhile"
-        ),
+        next_action=(_INITIALIZE if never_initialized else _RESTORE),
         offending_input=bounded_input(request.path),
     )
+
+
+# The remedy for a half that exists but could not be read, and for knowledge that was never created
+# (ICR-L43 review R2 O1, routed to MIK-R31 rule 6): the usable step names the cause.
+_RESTORE = (
+    "restore or repair the knowledge snapshot the detail names as unreadable -- the leaf's "
+    "own knowledge halves, or the retained snapshot of the named comparison generation -- "
+    "then expand the path again; this generation's changed paths stay expandable meanwhile"
+)
+_INITIALIZE = (
+    "initialize this leaf's knowledge -- the snapshot files the detail names do not exist, so "
+    "it was never created -- then expand the path again; this generation's changed paths stay "
+    "expandable meanwhile"
+)
 
 
 def _entry_for(inventory: ReviewSourceInventory, path: str) -> ReviewChangedFile | None:

@@ -34,10 +34,12 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import apsw
 import pytest
 from agents_remember.application.knowledge_read import open_read_context, read_knowledge_scope
 from agents_remember.application.review_candidate_resolution import review_namespace
 from agents_remember.application.review_comparison_freeze import freeze_review_comparison
+from agents_remember.application.review_source_realization_link import _proof_at_path
 from agents_remember.memory.knowledge import read as read_selection
 from agents_remember.models.knowledge.read import KnowledgeReadRequest, PathSeed
 from agents_remember.models.knowledge.review_source_content import ReviewSourceExpansion
@@ -340,6 +342,7 @@ def test_an_unreadable_snapshot_leaves_the_link_undetermined_rather_than_absent(
 
     linked = _attributed(_expand(fixture, BEFORE_ONLY_PATH, **_pair(inventory)))
     assert "comparison's before knowledge" in linked["admission_detail"]
+    assert linked["admission_detail"].startswith("a realization or proof recorded for the path")
 
     body = _expand(fixture, UNRELATED_PATH, **_pair(inventory))
     detail = _refused(body, UNRELATED_PATH)
@@ -348,3 +351,35 @@ def test_an_unreadable_snapshot_leaves_the_link_undetermined_rather_than_absent(
     assert "the before snapshot records none" in detail
     assert "the after snapshot at" in detail and "could not be read" in detail
     assert "restore or repair the knowledge snapshot" in body["refusal"]["next_action"]
+
+
+def test_never_initialized_knowledge_asks_to_initialize_it(tmp_path: Path) -> None:
+    """ICR-L43-R2 O1 (MIK-R31 rule 6): with no knowledge halves at all, the remedy is to initialize.
+
+    The link stays undetermined -- nothing was read -- but a snapshot that never existed is not a
+    damaged one, so the next action names initialization and not restoring or repairing.
+    """
+
+    fixture = build_endpoint_fixture(tmp_path / "never", datasets=False)
+    inventory = _listed_inventory(fixture)
+    body = _expand(fixture, UNRELATED_PATH, **_pair(inventory))
+    detail = _refused(body, UNRELATED_PATH)
+    assert "could not be determined" in detail and "is absent at" in detail
+    assert body["refusal"]["next_action"].startswith("initialize this leaf's knowledge")
+    assert "restore or repair" not in body["refusal"]["next_action"]
+
+
+def test_a_tree_index_links_a_path_its_proof_entry_is_anchored_at() -> None:
+    """MIK-R31 rule 5: a proof card's unchanged test file opens; a dataset (no ix_entry) links none."""
+
+    index = apsw.Connection(":memory:")
+    index.execute(
+        "CREATE TABLE ix_entry (id TEXT, kind TEXT, invariant TEXT, path TEXT, sidecar TEXT, "
+        "document TEXT)"
+    )
+    index.execute(
+        "INSERT INTO ix_entry VALUES ('PRF-AAAAAA', 'proof', 'INV-AAAAAA', 'tests/t.py', 's', '{}')"
+    )
+    assert _proof_at_path(index, "tests/t.py")
+    assert not _proof_at_path(index, "tests/other.py")
+    assert not _proof_at_path(apsw.Connection(":memory:"), "tests/t.py")

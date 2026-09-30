@@ -11,6 +11,7 @@ from agents_remember.application.review_comparison_generation import (
     ComparisonArtifactReference,
     ComparisonGenerationManifest,
 )
+from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
 from agents_remember.models.knowledge.review_records import (
     ReviewRecordChannel,
     ReviewRecordChannelState,
@@ -64,9 +65,44 @@ def review_curator_records(resolved: ReviewCandidateResolution) -> CuratorAssess
     except (CuratorCoherenceError, OSError, ValueError) as error:
         return _result(
             "unavailable",
-            f"The curator owner could not be read ({', '.join(expected_artifacts) or 'authority not located'}): {error}",
+            _unreadable_detail(expected_artifacts, error),
             unreadable=expected_artifacts,
         )
+
+
+# A closed leaf can bind about a hundred owner artifacts (ICR-L47 binds 94). The channel's
+# `unreadable` field lists every one. The detail keeps its landed wording whenever it fits the prose
+# bound; only a detail that would not fit names the count and the first few artifacts and bounds the
+# owner's own error, so a missing generation is reported as `unavailable` instead of failing the
+# whole review on the detail's length (MIK-L25 Q8, fixed in MIK-L31).
+_NAMED_ARTIFACTS = 3
+_ERROR_CHARACTERS = 4_000
+
+
+def _unreadable_detail(artifacts: tuple[str, ...], error: Exception) -> str:
+    named = ", ".join(artifacts) or "authority not located"
+    detail = f"The curator owner could not be read ({named}): {error}"
+    if len(detail) <= PROSE_MAX_LENGTH:
+        return detail
+    return (
+        f"The curator owner could not be read ({_artifacts_named(artifacts)}): "
+        f"{_bounded(str(error))}"
+    )
+
+
+def _artifacts_named(artifacts: tuple[str, ...]) -> str:
+    if not artifacts:
+        return "authority not located"
+    if len(artifacts) <= _NAMED_ARTIFACTS:
+        return ", ".join(artifacts)
+    shown = ", ".join(artifacts[:_NAMED_ARTIFACTS])
+    return f"{len(artifacts)} bound artifacts, listed as unreadable; the first are {shown}"
+
+
+def _bounded(text: str) -> str:
+    if len(text) <= _ERROR_CHARACTERS:
+        return text
+    return f"{text[:_ERROR_CHARACTERS]}… ({len(text) - _ERROR_CHARACTERS} more characters)"
 
 
 def records_from_curator_generation(

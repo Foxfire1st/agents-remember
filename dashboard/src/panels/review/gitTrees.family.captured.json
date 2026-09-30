@@ -2,20 +2,20 @@
  "operation": "read_knowledge_review",
  "payload": {
   "candidate": {
-   "leaf_id": "260928-MIK-L25",
+   "leaf_id": "260928-MIK-L31",
    "master": "260928_maintained-invariant-knowledge",
    "repository_id": "agents-remember",
    "task_ref": "260928_maintained-invariant-knowledge"
   },
   "comparison": {
-   "after_code_tree_id": "2c7789f0e249bf7c4e6e48d3a8b3910810b76675",
+   "after_code_tree_id": "f7ab3267746015b52265ced94d3468674a4af76f",
    "after_snapshot_digest": "25f7c7dbbc188a02c66e9ea01f569728cd3d80c9976a4d7879278e9569d98498",
-   "before_code_tree_id": "a4eba7b7b5b5ffee7277f6c19086697925a22df2",
+   "before_code_tree_id": "8a2d4b478971bf40cca0f24d5e5d24a0844bd563",
    "before_snapshot_digest": "a1ea4abe833b81cf516f0d78fd6e843936fa3fb79c542da7dc7f427a590fbffe",
-   "binding_digest": "b65aebb6a46ffd2684e077b16503a320a7301831a4a4abc76d241137b439252e",
+   "binding_digest": "60d3babff164b10546d09509972500548626d15d795c664c527c6329bd9bdacf",
    "knowledge_compared": true,
    "policy_version": "recorded-two-snapshot-union/v1",
-   "reference": "b65aebb6a46ffd2684e077b16503a320a7301831a4a4abc76d241137b439252e",
+   "reference": "60d3babff164b10546d09509972500548626d15d795c664c527c6329bd9bdacf",
    "selector_digest": "ade9f3f1f726f3476b63bab2f8f5b72d6e1772934a4550acc9969dce28e64161"
   },
   "evidence": {
@@ -58,7 +58,7 @@
    "assessments": [],
    "channels": [
     {
-     "detail": "The live curator authority 260928-MIK-L25-curator-coherence.json is absent; no current authority is recorded for this candidate.",
+     "detail": "The live curator authority 260928-MIK-L31-curator-coherence.json is absent; no current authority is recorded for this candidate.",
      "owner": "curator_coherence.load_curator_coherence_generation",
      "record_count": 0,
      "records": "assessments",
@@ -1343,7 +1343,7 @@
   },
   "limitations": [
    "limitation:no_semantic_assessment_performed",
-   "review:trees:2",
+   "review:trees:1",
    "history:intent:before:available",
    "knowledge-index:before:complete",
    "history:intent:after:available",
@@ -1391,12 +1391,12 @@
     "subject_scope_complete": true,
     "unknown_attribution_total": 0
    },
-   "expansion_command": "git diff --raw -z --no-renames a4eba7b7b5b5ffee7277f6c19086697925a22df2 2c7789f0e249bf7c4e6e48d3a8b3910810b76675",
+   "expansion_command": "git diff --raw -z --no-renames 8a2d4b478971bf40cca0f24d5e5d24a0844bd563 f7ab3267746015b52265ced94d3468674a4af76f",
    "expansion_reference": "diff_knowledge_scope:full-selected-candidate-source-diff",
    "inventory": {
-    "after_code_tree_id": "2c7789f0e249bf7c4e6e48d3a8b3910810b76675",
-    "before_code_tree_id": "a4eba7b7b5b5ffee7277f6c19086697925a22df2",
-    "command": "git -C /tmp/mik-l25-real/code diff --raw -z --no-renames a4eba7b7b5b5ffee7277f6c19086697925a22df2 2c7789f0e249bf7c4e6e48d3a8b3910810b76675",
+    "after_code_tree_id": "f7ab3267746015b52265ced94d3468674a4af76f",
+    "before_code_tree_id": "8a2d4b478971bf40cca0f24d5e5d24a0844bd563",
+    "command": "git -C /tmp/mik-l31-real/code diff --raw -z --no-renames 8a2d4b478971bf40cca0f24d5e5d24a0844bd563 f7ab3267746015b52265ced94d3468674a4af76f",
     "detail": "the two requested code trees differ at 1 path(s); every one is listed with the change status Git reported for it, whether or not its content can be rendered",
     "entries": [
      {

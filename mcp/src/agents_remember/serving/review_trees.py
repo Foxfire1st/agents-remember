@@ -3,7 +3,9 @@
 Transport only, like the other reviewer routes: it takes the task context (repository, master,
 leaf -- never a path), optionally the number of a recorded comparison to reopen or ``history=recorded``
 for the leaf's latest record, calls the port the composition root wires, and serializes the typed
-result once.
+result once. ``invariants`` (comma-separated identities, as the landed review payload addresses
+them) asks for those invariants' entries only, on both code sides with their excerpts: the focused
+expression cards of one selection (MIK-R31).
 
 Every typed answer is a 200: ``trees``, ``not-converted`` (the leaf's memory is unconverted, so its
 review is the dataset review) and ``refused`` (with the owner's refusal in the body). Only a process
@@ -14,9 +16,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse, Response
 
 from agents_remember.models.knowledge.review_trees import ReviewTreesResult
@@ -25,10 +27,15 @@ __all__ = [
     "KNOWLEDGE_REVIEW_TREES_ROUTE",
     "ReviewTreesPort",
     "ReviewTreesQuery",
+    "ReviewTreesSelection",
     "register_review_trees_route",
 ]
 
 KNOWLEDGE_REVIEW_TREES_ROUTE = "/api/review/trees"
+# One card read names the invariants of one family selection; a bound keeps a request finite.
+MAX_ENTRY_INVARIANTS = 500
+# Each named identity is a UUID (36 characters); a longer key is not an identity this route answers.
+MAX_INVARIANT_KEY_LENGTH = 64
 
 
 @dataclass(frozen=True)
@@ -40,6 +47,8 @@ class ReviewTreesQuery:
     leaf_id: str
     number: int | None = None
     recorded: bool = False
+    # The invariants whose entries the cards need (MIK-R31); naming any answers only those entries.
+    invariants: tuple[str, ...] = ()
 
 
 ReviewTreesPort = Callable[[ReviewTreesQuery], ReviewTreesResult]
@@ -54,6 +63,39 @@ _UNWIRED: dict[str, Any] = {
 }
 
 
+@dataclass(frozen=True)
+class ReviewTreesSelection:
+    """Which comparison, and which invariants' entries, one tree-view request asks about.
+
+    One value rather than three loose query parameters, like the review route's own references:
+    FastAPI derives it from the query string, and the transport checks it as one question.
+    """
+
+    comparison: int | None = None
+    history: str | None = None
+    invariants: str | None = None
+
+    def named(self) -> tuple[str, ...]:
+        return tuple(key for key in (self.invariants or "").split(",") if key)
+
+    def problem(self) -> str | None:
+        """Why this selection is not a question the route answers, or ``None``."""
+
+        if self.history not in (None, "recorded") or (
+            self.comparison is not None and self.comparison < 0
+        ):
+            return "history may only be 'recorded'; comparison is a recorded number"
+        named = self.named()
+        if len(named) > MAX_ENTRY_INVARIANTS:
+            return f"at most {MAX_ENTRY_INVARIANTS} invariants may be named at once"
+        if any(len(key) > MAX_INVARIANT_KEY_LENGTH for key in named):
+            return f"an invariant identity is at most {MAX_INVARIANT_KEY_LENGTH} characters"
+        return None
+
+
+NO_SELECTION = ReviewTreesSelection()
+
+
 def register_review_trees_route(app: FastAPI, port: ReviewTreesPort | None) -> None:
     """Register the read-only tree view route. Must be called BEFORE the greedy static mount."""
 
@@ -62,17 +104,20 @@ def register_review_trees_route(app: FastAPI, port: ReviewTreesPort | None) -> N
         repo: str,
         master: str,
         leaf: str,
-        comparison: int | None = None,
-        history: str | None = None,
+        selection: Annotated[ReviewTreesSelection, Depends()] = NO_SELECTION,
     ) -> Response:
         if port is None:
             return JSONResponse(_UNWIRED, status_code=503)
-        if history not in (None, "recorded") or (comparison is not None and comparison < 0):
+        problem = selection.problem()
+        if problem is not None:
             return JSONResponse(
                 {
                     "status": "invalid-request",
-                    "detail": "history may only be 'recorded'; comparison is a recorded number",
-                    "nextAction": "name the leaf's recorded comparison number, or neither",
+                    "detail": problem,
+                    "nextAction": (
+                        "name the leaf's recorded comparison number, or neither, and the "
+                        "invariants of one family selection"
+                    ),
                 },
                 status_code=400,
             )
@@ -81,8 +126,9 @@ def register_review_trees_route(app: FastAPI, port: ReviewTreesPort | None) -> N
                 repository_id=repo,
                 master=master,
                 leaf_id=leaf,
-                number=comparison,
-                recorded=history == "recorded",
+                number=selection.comparison,
+                recorded=selection.history == "recorded",
+                invariants=selection.named(),
             )
         )
         return JSONResponse(result.model_dump(mode="json", by_alias=True, exclude_none=True))

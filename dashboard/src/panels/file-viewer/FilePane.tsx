@@ -4,10 +4,11 @@
 // imperatively in an effect and torn down on unmount / content change.
 import { useEffect, useRef } from "react";
 import { EditorState, type Extension } from "@codemirror/state";
-import { EditorView, lineNumbers } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 
 import { css } from "../../../styled-system/css";
 import { codeTheme } from "./codemirrorTheme";
+import { numberedFrom } from "./lineNumbering";
 import { langExtension } from "./langByExtension";
 
 const host = css({
@@ -17,7 +18,20 @@ const host = css({
   "& .cm-editor": { height: "100%" },
 });
 
-export function FilePane({ content, language }: { content: string; language: string }) {
+// An excerpt sizes to its content (`fit`) and keeps its file's line numbering (`firstLine`).
+const fitHost = css({ minHeight: "0", "& .cm-editor": { height: "auto", maxHeight: "32rem" } });
+
+export function FilePane({
+  content,
+  language,
+  firstLine = 1,
+  fit = false,
+}: {
+  content: string;
+  language: string;
+  firstLine?: number;
+  fit?: boolean;
+}) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,7 +44,7 @@ export function FilePane({ content, language }: { content: string; language: str
     void langExtension(language).then((lang) => {
       if (disposed || !parent) return;
       const extensions: Extension[] = [
-        lineNumbers(),
+        numberedFrom(firstLine),
         EditorState.readOnly.of(true),
         EditorView.editable.of(false),
         EditorView.lineWrapping,
@@ -44,7 +58,7 @@ export function FilePane({ content, language }: { content: string; language: str
       disposed = true;
       view?.destroy();
     };
-  }, [content, language]);
+  }, [content, language, firstLine]);
 
-  return <div ref={ref} className={host} data-testid="file-pane" />;
+  return <div ref={ref} className={fit ? fitHost : host} data-testid="file-pane" />;
 }

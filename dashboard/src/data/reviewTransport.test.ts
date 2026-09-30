@@ -109,9 +109,11 @@ const BAD_PATH = {
     "routes read no other repository in its place",
 };
 
-// The real expansion route's 400 for a path the measured change set does not contain (measured
-// body-normalized, sha256-normalized
-// 2a8ee681c4654d6331198dbaad454a5d13dffff5b9ff6861d78794f06731da26).
+// The real expansion route's 400 for a path the measured change set does not contain and no recorded
+// realization links, re-measured by MIK-L31 (ICR-L43 review R2 O2) on its converted scratch leaf with
+// the leaf's own code (notes/reports/260928-MIK-L31-evidence/capture_refusal.py; repository id and
+// scratch paths normalized, sha256 of the normalized body
+// 56cd46256f8d1dc615363754016f1964c1bdbee9d9ceeb74edab835faac9ebd8). It replaces the pre-L43 text.
 const SOURCE_CONTENT_REFUSED = {
   state: "refused",
   operation: "read_review_source_content",
@@ -119,12 +121,15 @@ const SOURCE_CONTENT_REFUSED = {
   refusal: {
     code: "source_content_unresolved",
     detail:
-      "the requested path 'src/not-in-this-change-set.py' is not one of the 6 changed path(s) this " +
-      "surface measured between the requested trees, so no content was read for it; an entry is " +
-      "expanded from the inventory's own measurement and this route reads no path outside it",
+      "the requested path 'src/not-in-this-change-set.py' is not one of the 1 changed path(s) this " +
+      "surface measured between the requested trees, and no realization recorded in the " +
+      "comparison's knowledge links it (in the knowledge this leaf's review binds to the requested " +
+      "pair: the before snapshot records none; the after snapshot records none), so no content was " +
+      "read for it; this route reads an inventory entry, or an unchanged path a realization of the " +
+      "same comparison is anchored at, and no other path",
     next_action:
-      "expand a path the inventory listed for this generation, or reopen the review if the " +
-      "generation has moved",
+      "expand a path the inventory listed for this generation or one a realization of this " +
+      "comparison records, or reopen the review if the generation has moved",
     offending_input: "src/not-in-this-change-set.py",
   },
 };

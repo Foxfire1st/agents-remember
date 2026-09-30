@@ -2,40 +2,40 @@
  "code_sides": [],
  "comparison": {
   "code_base": {
-   "commit": "a4eba7b7b5b5ffee7277f6c19086697925a22df2",
-   "repository": "/tmp/mik-l25-real/code",
-   "tree": "e2e255c8303c5692a478e8936474227674579bf3"
+   "commit": "8a2d4b478971bf40cca0f24d5e5d24a0844bd563",
+   "repository": "/tmp/mik-l31-real/code",
+   "tree": "804b3fd2659f01656a8f6ce5419c42ef2f3e220b"
   },
   "code_candidate": {
-   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L25/2",
-   "repository": "/tmp/mik-l25-real/code",
-   "tree": "2c7789f0e249bf7c4e6e48d3a8b3910810b76675"
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L31/1",
+   "repository": "/tmp/mik-l31-real/code",
+   "tree": "f7ab3267746015b52265ced94d3468674a4af76f"
   },
-  "leaf_id": "260928-MIK-L25",
+  "leaf_id": "260928-MIK-L31",
   "memory_base": {
-   "commit": "213383d90a3b6f3dc74bb8e6fcbf6e5f3402d5ae",
-   "repository": "/tmp/mik-l25-real/memory",
-   "tree": "e53cc6686b6a2d4c8ea3a499685f1f0228b52a65"
+   "commit": "10fe223eb1bb3b290113ded28a94a56be805d971",
+   "repository": "/tmp/mik-l31-real/memory",
+   "tree": "36c8ded0464ee68c0e845986adba73941bfa5b86"
   },
   "memory_candidate": {
-   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L25/2",
-   "repository": "/tmp/mik-l25-real/memory",
-   "tree": "52a371e817dfefd071a5742b6266d7724d1a54d7"
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L31/1",
+   "repository": "/tmp/mik-l31-real/memory",
+   "tree": "8496e69b4dc85774701a538fa94f29edfad59adb"
   },
-  "number": 2,
-  "recorded_at": "2026-09-30T00:37:21+00:00",
+  "number": 1,
+  "recorded_at": "2026-09-30T02:35:02+00:00",
   "schema": "ar-review-tree-comparison/v1",
   "task_id": "260928_maintained-invariant-knowledge"
  },
  "currentness": {
   "after": {
-   "codeTree": {
-    "repositoryRoot": "/tmp/mik-l25-real/code",
-    "treeId": "2c7789f0e249bf7c4e6e48d3a8b3910810b76675"
+   "code_tree": {
+    "repository_root": "/tmp/mik-l31-real/code",
+    "tree_id": "f7ab3267746015b52265ced94d3468674a4af76f"
    },
    "counts": {
-    "current": 85,
-    "stale": 9,
+    "current": 84,
+    "stale": 10,
     "unrealized": 0,
     "unverifiable": 0
    },
@@ -44,25 +44,25 @@
      "id": "FAM-1ZDJXHP4",
      "members": 3,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-2HBJREC2",
      "members": 7,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-33YQGFXE",
      "members": 3,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-4V4GSQCS",
      "members": 5,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-7B6N3Y4Q",
@@ -70,13 +70,13 @@
      "stale": [
       "INV-1XKX9ERN"
      ],
-     "staleMembers": 1
+     "stale_members": 1
     },
     {
      "id": "FAM-8FH7A8RH",
      "members": 2,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-BWQ4XYF9",
@@ -84,7 +84,7 @@
      "stale": [
       "INV-RANN4DC0"
      ],
-     "staleMembers": 1
+     "stale_members": 1
     },
     {
      "id": "FAM-KQQE74ZT",
@@ -94,19 +94,19 @@
       "INV-E8655Z54",
       "INV-J7179RG5"
      ],
-     "staleMembers": 3
+     "stale_members": 3
     },
     {
      "id": "FAM-M9QBG39Z",
      "members": 4,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-QWVGDSYX",
      "members": 2,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-R6R095RW",
@@ -115,13 +115,13 @@
       "INV-2E8MG43K",
       "INV-Z385RTQS"
      ],
-     "staleMembers": 2
+     "stale_members": 2
     },
     {
      "id": "FAM-SK1BFPE2",
      "members": 2,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-WEF4M4H1",
@@ -129,16 +129,18 @@
      "stale": [
       "INV-115RDW8H"
      ],
-     "staleMembers": 1
+     "stale_members": 1
     },
     {
      "id": "FAM-XZ5BR65G",
      "members": 11,
-     "stale": [],
-     "staleMembers": 0
+     "stale": [
+      "INV-9NCBGQSY"
+     ],
+     "stale_members": 1
     }
    ],
-   "indexState": "complete",
+   "index_state": "complete",
    "invariants": [
     {
      "entries": [],
@@ -148,14 +150,25 @@
     {
      "entries": [
       {
+       "id": "RLZ-K569QYAK",
+       "kind": "realization",
+       "observed_blob": "5a756f65b233df245d1ae081625d17ba1283e89a",
+       "observed_content": "sha256:aef5bac57cd0eacfb2fe739cf83e1ab29c82ef38e2eab389644a76a903d282c0",
+       "path": "skills/l-01-agent-lifecycles/roles/curator.md",
+       "reason": "the range content differs from the recorded content",
+       "recorded_blob": "f56934cfa18de552519150a7c15eaa8c63722fa6",
+       "recorded_content": "sha256:c3ffb123b5f9b8793ebb0df558b71d5aa89174aa5ad252c34a6f284c61d4793a",
+       "state": "stale"
+      },
+      {
        "id": "RLZ-RSTSK683",
        "kind": "realization",
-       "observedBlob": "e45e5bcff8a03ceb9f7bb528235603073f770407",
-       "observedContent": "sha256:987fccd6d292137830b9d5826566002c3a94be85a9a24366ba2214fd3391e8ad",
+       "observed_blob": "6cf9afc4392cf870c57633af0ac61e2128abf598",
+       "observed_content": "sha256:0578a2d90f9cd02e14a98d59e66d7ef0a8206e1bb2b47a60018543998bf9276f",
        "path": "skills/l-01-agent-lifecycles/templates/curator-handoff-list.md",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "307b232a7fa44eb96b361089df3eb9bfc6d086e0",
-       "recordedContent": "sha256:cb78d96e6d2f849bc05da1c235ce39974a154559ee6c6d01815b56349421bb5d",
+       "recorded_blob": "307b232a7fa44eb96b361089df3eb9bfc6d086e0",
+       "recorded_content": "sha256:cb78d96e6d2f849bc05da1c235ce39974a154559ee6c6d01815b56349421bb5d",
        "state": "stale"
       }
      ],
@@ -172,23 +185,23 @@
       {
        "id": "RLZ-CCAZC6N3",
        "kind": "realization",
-       "observedBlob": "ef3d6346c509dcca300b4bd18b1ad32408881e15",
-       "observedContent": "sha256:9413f7df828e707acd31a1c8799e2cd20451930fbd8dd55086d2ab09cef28501",
+       "observed_blob": "ef3d6346c509dcca300b4bd18b1ad32408881e15",
+       "observed_content": "sha256:9413f7df828e707acd31a1c8799e2cd20451930fbd8dd55086d2ab09cef28501",
        "path": "dashboard/src/panels/review/ReviewNavigation.tsx",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "2d781656bb73395d1724e71b0e17c6c77f53d506",
-       "recordedContent": "sha256:f2fec9b4d7b2e803781bc835698d3d6a5bf971cee4c54192d0f02667c6db59ea",
+       "recorded_blob": "2d781656bb73395d1724e71b0e17c6c77f53d506",
+       "recorded_content": "sha256:f2fec9b4d7b2e803781bc835698d3d6a5bf971cee4c54192d0f02667c6db59ea",
        "state": "stale"
       },
       {
        "id": "RLZ-HG7CRC9D",
        "kind": "realization",
-       "observedBlob": "8f083e965c563704d58f4018c2c803b051d082a6",
-       "observedContent": "sha256:d13154c48e362b2880ba2d42570204a59feca465a9b3ae1a70e2abdbf284255b",
+       "observed_blob": "8f083e965c563704d58f4018c2c803b051d082a6",
+       "observed_content": "sha256:d13154c48e362b2880ba2d42570204a59feca465a9b3ae1a70e2abdbf284255b",
        "path": "dashboard/src/panels/review/ReviewReadCycle.ts",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "9b816f9f3355ee64ee5d13c6d8bf63e9c2c46e84",
-       "recordedContent": "sha256:cbf87f86bb2502c902847d549a040092db924c0ea514ec97d1c95109ebadcb97",
+       "recorded_blob": "9b816f9f3355ee64ee5d13c6d8bf63e9c2c46e84",
+       "recorded_content": "sha256:cbf87f86bb2502c902847d549a040092db924c0ea514ec97d1c95109ebadcb97",
        "state": "stale"
       }
      ],
@@ -210,34 +223,34 @@
       {
        "id": "RLZ-6X7QPYQ5",
        "kind": "realization",
-       "observedBlob": "6c264ad4baa933504af480b247b65dd3c5a52ea3",
-       "observedContent": "sha256:1e68e38b1d88e42cbf232455a533b8ff42545fd09694ebe83890024f9cd1ccb8",
+       "observed_blob": "6c264ad4baa933504af480b247b65dd3c5a52ea3",
+       "observed_content": "sha256:1e68e38b1d88e42cbf232455a533b8ff42545fd09694ebe83890024f9cd1ccb8",
        "path": "mcp/src/agents_remember/application/knowledge_curator_ingest.py",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "8738f61cb917f267705795176cd64d91017a6fb4",
-       "recordedContent": "sha256:49df5cc753f2eb8a23e6342f5e153c00306c2a57fa8ee4e17e0950df0dd5d1b4",
+       "recorded_blob": "8738f61cb917f267705795176cd64d91017a6fb4",
+       "recorded_content": "sha256:49df5cc753f2eb8a23e6342f5e153c00306c2a57fa8ee4e17e0950df0dd5d1b4",
        "state": "stale"
       },
       {
        "id": "RLZ-Y766ENWA",
        "kind": "realization",
-       "observedBlob": "51e8f371cec77ebd9e6de57af37bc236fae86369",
-       "observedContent": null,
+       "observed_blob": "613668711c067bdd7857201b3696e1b807c7cb7c",
+       "observed_content": null,
        "path": "mcp/src/agents_remember/cli/knowledge_bootstrap.py",
        "reason": "the symbol does not resolve uniquely at the code tree",
-       "recordedBlob": "5fd8eca6ebe605204f7d89c4df54f3aa45ccf146",
-       "recordedContent": "sha256:66400cb968340f627a5dc7d7374dc9da0ac59e0cf04870e0dd479e3e994e91b9",
+       "recorded_blob": "5fd8eca6ebe605204f7d89c4df54f3aa45ccf146",
+       "recorded_content": "sha256:66400cb968340f627a5dc7d7374dc9da0ac59e0cf04870e0dd479e3e994e91b9",
        "state": "stale"
       },
       {
        "id": "RLZ-6HAWT71R",
        "kind": "realization",
-       "observedBlob": "14ad7da8d438524430131df8924066d599b6ecff",
-       "observedContent": "sha256:37085a4abd8da3bfb3a83ea4742794ace9fe577d7273a5e9e9259123a38fe62e",
+       "observed_blob": "14ad7da8d438524430131df8924066d599b6ecff",
+       "observed_content": "sha256:37085a4abd8da3bfb3a83ea4742794ace9fe577d7273a5e9e9259123a38fe62e",
        "path": "mcp/src/agents_remember/cli/knowledge_ingest.py",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "baa1b88669772f349fa4058515b44353754cfd9c",
-       "recordedContent": "sha256:4693eb13999aec20a51eb4f64e8554adc3ff333d065343d17d6da01685a6321a",
+       "recorded_blob": "baa1b88669772f349fa4058515b44353754cfd9c",
+       "recorded_content": "sha256:4693eb13999aec20a51eb4f64e8554adc3ff333d065343d17d6da01685a6321a",
        "state": "stale"
       }
      ],
@@ -269,12 +282,12 @@
       {
        "id": "RLZ-TT5XGFN4",
        "kind": "realization",
-       "observedBlob": "ef3d6346c509dcca300b4bd18b1ad32408881e15",
-       "observedContent": "sha256:9413f7df828e707acd31a1c8799e2cd20451930fbd8dd55086d2ab09cef28501",
+       "observed_blob": "ef3d6346c509dcca300b4bd18b1ad32408881e15",
+       "observed_content": "sha256:9413f7df828e707acd31a1c8799e2cd20451930fbd8dd55086d2ab09cef28501",
        "path": "dashboard/src/panels/review/ReviewNavigation.tsx",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "2d781656bb73395d1724e71b0e17c6c77f53d506",
-       "recordedContent": "sha256:f2fec9b4d7b2e803781bc835698d3d6a5bf971cee4c54192d0f02667c6db59ea",
+       "recorded_blob": "2d781656bb73395d1724e71b0e17c6c77f53d506",
+       "recorded_content": "sha256:f2fec9b4d7b2e803781bc835698d3d6a5bf971cee4c54192d0f02667c6db59ea",
        "state": "stale"
       }
      ],
@@ -392,9 +405,21 @@
      "state": "current"
     },
     {
-     "entries": [],
+     "entries": [
+      {
+       "id": "RLZ-8S8VDEJ3",
+       "kind": "realization",
+       "observed_blob": "f1950eaa1da83687a4057e31a07d75638b1400ed",
+       "observed_content": "sha256:7dcac80a8b8df7ac06900093814815776479539dfcb1e54347cbf683c7babbe7",
+       "path": "mcp/src/agents_remember/application/review_committed_leaf.py",
+       "reason": "the range content differs from the recorded content",
+       "recorded_blob": "a5375e4feefde13ed3e25da4820c417b91514b0a",
+       "recorded_content": "sha256:8bfeccdef8a8f71f97bca79d1edaec96d0f3a846cb25153cb211b99b21f7e4b9",
+       "state": "stale"
+      }
+     ],
      "id": "INV-9NCBGQSY",
-     "state": "current"
+     "state": "stale"
     },
     {
      "entries": [],
@@ -431,12 +456,12 @@
       {
        "id": "RLZ-7VHY091X",
        "kind": "realization",
-       "observedBlob": "e45e5bcff8a03ceb9f7bb528235603073f770407",
-       "observedContent": "sha256:987fccd6d292137830b9d5826566002c3a94be85a9a24366ba2214fd3391e8ad",
+       "observed_blob": "6cf9afc4392cf870c57633af0ac61e2128abf598",
+       "observed_content": "sha256:0578a2d90f9cd02e14a98d59e66d7ef0a8206e1bb2b47a60018543998bf9276f",
        "path": "skills/l-01-agent-lifecycles/templates/curator-handoff-list.md",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "307b232a7fa44eb96b361089df3eb9bfc6d086e0",
-       "recordedContent": "sha256:cb78d96e6d2f849bc05da1c235ce39974a154559ee6c6d01815b56349421bb5d",
+       "recorded_blob": "307b232a7fa44eb96b361089df3eb9bfc6d086e0",
+       "recorded_content": "sha256:cb78d96e6d2f849bc05da1c235ce39974a154559ee6c6d01815b56349421bb5d",
        "state": "stale"
       }
      ],
@@ -458,12 +483,12 @@
       {
        "id": "RLZ-ZCE8D5GH",
        "kind": "realization",
-       "observedBlob": "ef3d6346c509dcca300b4bd18b1ad32408881e15",
-       "observedContent": "sha256:9413f7df828e707acd31a1c8799e2cd20451930fbd8dd55086d2ab09cef28501",
+       "observed_blob": "ef3d6346c509dcca300b4bd18b1ad32408881e15",
+       "observed_content": "sha256:9413f7df828e707acd31a1c8799e2cd20451930fbd8dd55086d2ab09cef28501",
        "path": "dashboard/src/panels/review/ReviewNavigation.tsx",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "2d781656bb73395d1724e71b0e17c6c77f53d506",
-       "recordedContent": "sha256:f2fec9b4d7b2e803781bc835698d3d6a5bf971cee4c54192d0f02667c6db59ea",
+       "recorded_blob": "2d781656bb73395d1724e71b0e17c6c77f53d506",
+       "recorded_content": "sha256:f2fec9b4d7b2e803781bc835698d3d6a5bf971cee4c54192d0f02667c6db59ea",
        "state": "stale"
       }
      ],
@@ -505,12 +530,12 @@
       {
        "id": "RLZ-A2D6Y9T1",
        "kind": "realization",
-       "observedBlob": "e45e5bcff8a03ceb9f7bb528235603073f770407",
-       "observedContent": "sha256:987fccd6d292137830b9d5826566002c3a94be85a9a24366ba2214fd3391e8ad",
+       "observed_blob": "6cf9afc4392cf870c57633af0ac61e2128abf598",
+       "observed_content": "sha256:0578a2d90f9cd02e14a98d59e66d7ef0a8206e1bb2b47a60018543998bf9276f",
        "path": "skills/l-01-agent-lifecycles/templates/curator-handoff-list.md",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "307b232a7fa44eb96b361089df3eb9bfc6d086e0",
-       "recordedContent": "sha256:cb78d96e6d2f849bc05da1c235ce39974a154559ee6c6d01815b56349421bb5d",
+       "recorded_blob": "307b232a7fa44eb96b361089df3eb9bfc6d086e0",
+       "recorded_content": "sha256:cb78d96e6d2f849bc05da1c235ce39974a154559ee6c6d01815b56349421bb5d",
        "state": "stale"
       }
      ],
@@ -577,12 +602,12 @@
       {
        "id": "RLZ-GB76X8G2",
        "kind": "realization",
-       "observedBlob": "24c7f2718e93cdc31278f980928b3ae205aa8c86",
-       "observedContent": "sha256:bfc0319d634856fb8f98a46fa53fcb0eb7fbba8a55532e4e7e19bc8d804a5b5f",
+       "observed_blob": "24c7f2718e93cdc31278f980928b3ae205aa8c86",
+       "observed_content": "sha256:bfc0319d634856fb8f98a46fa53fcb0eb7fbba8a55532e4e7e19bc8d804a5b5f",
        "path": "mcp/src/agents_remember/memory/knowledge/read_anchors.py",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "25dc2d7dd7d4079c8ad8e7725b427edf1c4f7e6f",
-       "recordedContent": "sha256:6381261533770f98e10abde19f9389cc3f4d672ec5e39c60b3b6160fe35a6bd7",
+       "recorded_blob": "25dc2d7dd7d4079c8ad8e7725b427edf1c4f7e6f",
+       "recorded_content": "sha256:6381261533770f98e10abde19f9389cc3f4d672ec5e39c60b3b6160fe35a6bd7",
        "state": "stale"
       }
      ],
@@ -709,12 +734,12 @@
       {
        "id": "RLZ-6T67PT58",
        "kind": "realization",
-       "observedBlob": "4399061daa76c16642ac90030e8331f8818d4e5a",
-       "observedContent": "sha256:0eb26ba87dda6c8e4ec89575a1d6dadaac960400b06a77a77dde57ebbcf17c8e",
+       "observed_blob": "4399061daa76c16642ac90030e8331f8818d4e5a",
+       "observed_content": "sha256:0eb26ba87dda6c8e4ec89575a1d6dadaac960400b06a77a77dde57ebbcf17c8e",
        "path": "dashboard/src/panels/review/ReviewWorkspace.tsx",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "0d7dc00d3458ffe7764ee271c0fdaacb7ce8b6fb",
-       "recordedContent": "sha256:6f4480b5b1d5f46cb51c2894823f68951e546212101934703cf5b15fffb11e08",
+       "recorded_blob": "0d7dc00d3458ffe7764ee271c0fdaacb7ce8b6fb",
+       "recorded_content": "sha256:6f4480b5b1d5f46cb51c2894823f68951e546212101934703cf5b15fffb11e08",
        "state": "stale"
       }
      ],
@@ -754,13 +779,13 @@
    ]
   },
   "before": {
-   "codeTree": {
-    "repositoryRoot": "/tmp/mik-l25-real/code",
-    "treeId": "e2e255c8303c5692a478e8936474227674579bf3"
+   "code_tree": {
+    "repository_root": "/tmp/mik-l31-real/code",
+    "tree_id": "804b3fd2659f01656a8f6ce5419c42ef2f3e220b"
    },
    "counts": {
-    "current": 85,
-    "stale": 9,
+    "current": 84,
+    "stale": 10,
     "unrealized": 0,
     "unverifiable": 0
    },
@@ -769,25 +794,25 @@
      "id": "FAM-1ZDJXHP4",
      "members": 3,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-2HBJREC2",
      "members": 7,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-33YQGFXE",
      "members": 3,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-4V4GSQCS",
      "members": 5,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-7B6N3Y4Q",
@@ -795,13 +820,13 @@
      "stale": [
       "INV-1XKX9ERN"
      ],
-     "staleMembers": 1
+     "stale_members": 1
     },
     {
      "id": "FAM-8FH7A8RH",
      "members": 2,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-BWQ4XYF9",
@@ -809,7 +834,7 @@
      "stale": [
       "INV-RANN4DC0"
      ],
-     "staleMembers": 1
+     "stale_members": 1
     },
     {
      "id": "FAM-KQQE74ZT",
@@ -819,19 +844,19 @@
       "INV-E8655Z54",
       "INV-J7179RG5"
      ],
-     "staleMembers": 3
+     "stale_members": 3
     },
     {
      "id": "FAM-M9QBG39Z",
      "members": 4,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-QWVGDSYX",
      "members": 2,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-R6R095RW",
@@ -840,13 +865,13 @@
       "INV-2E8MG43K",
       "INV-Z385RTQS"
      ],
-     "staleMembers": 2
+     "stale_members": 2
     },
     {
      "id": "FAM-SK1BFPE2",
      "members": 2,
      "stale": [],
-     "staleMembers": 0
+     "stale_members": 0
     },
     {
      "id": "FAM-WEF4M4H1",
@@ -854,16 +879,18 @@
      "stale": [
       "INV-115RDW8H"
      ],
-     "staleMembers": 1
+     "stale_members": 1
     },
     {
      "id": "FAM-XZ5BR65G",
      "members": 11,
-     "stale": [],
-     "staleMembers": 0
+     "stale": [
+      "INV-9NCBGQSY"
+     ],
+     "stale_members": 1
     }
    ],
-   "indexState": "complete",
+   "index_state": "complete",
    "invariants": [
     {
      "entries": [],
@@ -873,14 +900,25 @@
     {
      "entries": [
       {
+       "id": "RLZ-K569QYAK",
+       "kind": "realization",
+       "observed_blob": "5a756f65b233df245d1ae081625d17ba1283e89a",
+       "observed_content": "sha256:aef5bac57cd0eacfb2fe739cf83e1ab29c82ef38e2eab389644a76a903d282c0",
+       "path": "skills/l-01-agent-lifecycles/roles/curator.md",
+       "reason": "the range content differs from the recorded content",
+       "recorded_blob": "f56934cfa18de552519150a7c15eaa8c63722fa6",
+       "recorded_content": "sha256:c3ffb123b5f9b8793ebb0df558b71d5aa89174aa5ad252c34a6f284c61d4793a",
+       "state": "stale"
+      },
+      {
        "id": "RLZ-RSTSK683",
        "kind": "realization",
-       "observedBlob": "e45e5bcff8a03ceb9f7bb528235603073f770407",
-       "observedContent": "sha256:987fccd6d292137830b9d5826566002c3a94be85a9a24366ba2214fd3391e8ad",
+       "observed_blob": "6cf9afc4392cf870c57633af0ac61e2128abf598",
+       "observed_content": "sha256:0578a2d90f9cd02e14a98d59e66d7ef0a8206e1bb2b47a60018543998bf9276f",
        "path": "skills/l-01-agent-lifecycles/templates/curator-handoff-list.md",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "307b232a7fa44eb96b361089df3eb9bfc6d086e0",
-       "recordedContent": "sha256:cb78d96e6d2f849bc05da1c235ce39974a154559ee6c6d01815b56349421bb5d",
+       "recorded_blob": "307b232a7fa44eb96b361089df3eb9bfc6d086e0",
+       "recorded_content": "sha256:cb78d96e6d2f849bc05da1c235ce39974a154559ee6c6d01815b56349421bb5d",
        "state": "stale"
       }
      ],
@@ -897,23 +935,23 @@
       {
        "id": "RLZ-CCAZC6N3",
        "kind": "realization",
-       "observedBlob": "ef3d6346c509dcca300b4bd18b1ad32408881e15",
-       "observedContent": "sha256:9413f7df828e707acd31a1c8799e2cd20451930fbd8dd55086d2ab09cef28501",
+       "observed_blob": "ef3d6346c509dcca300b4bd18b1ad32408881e15",
+       "observed_content": "sha256:9413f7df828e707acd31a1c8799e2cd20451930fbd8dd55086d2ab09cef28501",
        "path": "dashboard/src/panels/review/ReviewNavigation.tsx",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "2d781656bb73395d1724e71b0e17c6c77f53d506",
-       "recordedContent": "sha256:f2fec9b4d7b2e803781bc835698d3d6a5bf971cee4c54192d0f02667c6db59ea",
+       "recorded_blob": "2d781656bb73395d1724e71b0e17c6c77f53d506",
+       "recorded_content": "sha256:f2fec9b4d7b2e803781bc835698d3d6a5bf971cee4c54192d0f02667c6db59ea",
        "state": "stale"
       },
       {
        "id": "RLZ-HG7CRC9D",
        "kind": "realization",
-       "observedBlob": "8f083e965c563704d58f4018c2c803b051d082a6",
-       "observedContent": "sha256:d13154c48e362b2880ba2d42570204a59feca465a9b3ae1a70e2abdbf284255b",
+       "observed_blob": "8f083e965c563704d58f4018c2c803b051d082a6",
+       "observed_content": "sha256:d13154c48e362b2880ba2d42570204a59feca465a9b3ae1a70e2abdbf284255b",
        "path": "dashboard/src/panels/review/ReviewReadCycle.ts",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "9b816f9f3355ee64ee5d13c6d8bf63e9c2c46e84",
-       "recordedContent": "sha256:cbf87f86bb2502c902847d549a040092db924c0ea514ec97d1c95109ebadcb97",
+       "recorded_blob": "9b816f9f3355ee64ee5d13c6d8bf63e9c2c46e84",
+       "recorded_content": "sha256:cbf87f86bb2502c902847d549a040092db924c0ea514ec97d1c95109ebadcb97",
        "state": "stale"
       }
      ],
@@ -935,34 +973,34 @@
       {
        "id": "RLZ-6X7QPYQ5",
        "kind": "realization",
-       "observedBlob": "6c264ad4baa933504af480b247b65dd3c5a52ea3",
-       "observedContent": "sha256:1e68e38b1d88e42cbf232455a533b8ff42545fd09694ebe83890024f9cd1ccb8",
+       "observed_blob": "6c264ad4baa933504af480b247b65dd3c5a52ea3",
+       "observed_content": "sha256:1e68e38b1d88e42cbf232455a533b8ff42545fd09694ebe83890024f9cd1ccb8",
        "path": "mcp/src/agents_remember/application/knowledge_curator_ingest.py",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "8738f61cb917f267705795176cd64d91017a6fb4",
-       "recordedContent": "sha256:49df5cc753f2eb8a23e6342f5e153c00306c2a57fa8ee4e17e0950df0dd5d1b4",
+       "recorded_blob": "8738f61cb917f267705795176cd64d91017a6fb4",
+       "recorded_content": "sha256:49df5cc753f2eb8a23e6342f5e153c00306c2a57fa8ee4e17e0950df0dd5d1b4",
        "state": "stale"
       },
       {
        "id": "RLZ-Y766ENWA",
        "kind": "realization",
-       "observedBlob": "51e8f371cec77ebd9e6de57af37bc236fae86369",
-       "observedContent": null,
+       "observed_blob": "613668711c067bdd7857201b3696e1b807c7cb7c",
+       "observed_content": null,
        "path": "mcp/src/agents_remember/cli/knowledge_bootstrap.py",
        "reason": "the symbol does not resolve uniquely at the code tree",
-       "recordedBlob": "5fd8eca6ebe605204f7d89c4df54f3aa45ccf146",
-       "recordedContent": "sha256:66400cb968340f627a5dc7d7374dc9da0ac59e0cf04870e0dd479e3e994e91b9",
+       "recorded_blob": "5fd8eca6ebe605204f7d89c4df54f3aa45ccf146",
+       "recorded_content": "sha256:66400cb968340f627a5dc7d7374dc9da0ac59e0cf04870e0dd479e3e994e91b9",
        "state": "stale"
       },
       {
        "id": "RLZ-6HAWT71R",
        "kind": "realization",
-       "observedBlob": "14ad7da8d438524430131df8924066d599b6ecff",
-       "observedContent": "sha256:37085a4abd8da3bfb3a83ea4742794ace9fe577d7273a5e9e9259123a38fe62e",
+       "observed_blob": "14ad7da8d438524430131df8924066d599b6ecff",
+       "observed_content": "sha256:37085a4abd8da3bfb3a83ea4742794ace9fe577d7273a5e9e9259123a38fe62e",
        "path": "mcp/src/agents_remember/cli/knowledge_ingest.py",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "baa1b88669772f349fa4058515b44353754cfd9c",
-       "recordedContent": "sha256:4693eb13999aec20a51eb4f64e8554adc3ff333d065343d17d6da01685a6321a",
+       "recorded_blob": "baa1b88669772f349fa4058515b44353754cfd9c",
+       "recorded_content": "sha256:4693eb13999aec20a51eb4f64e8554adc3ff333d065343d17d6da01685a6321a",
        "state": "stale"
       }
      ],
@@ -994,12 +1032,12 @@
       {
        "id": "RLZ-TT5XGFN4",
        "kind": "realization",
-       "observedBlob": "ef3d6346c509dcca300b4bd18b1ad32408881e15",
-       "observedContent": "sha256:9413f7df828e707acd31a1c8799e2cd20451930fbd8dd55086d2ab09cef28501",
+       "observed_blob": "ef3d6346c509dcca300b4bd18b1ad32408881e15",
+       "observed_content": "sha256:9413f7df828e707acd31a1c8799e2cd20451930fbd8dd55086d2ab09cef28501",
        "path": "dashboard/src/panels/review/ReviewNavigation.tsx",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "2d781656bb73395d1724e71b0e17c6c77f53d506",
-       "recordedContent": "sha256:f2fec9b4d7b2e803781bc835698d3d6a5bf971cee4c54192d0f02667c6db59ea",
+       "recorded_blob": "2d781656bb73395d1724e71b0e17c6c77f53d506",
+       "recorded_content": "sha256:f2fec9b4d7b2e803781bc835698d3d6a5bf971cee4c54192d0f02667c6db59ea",
        "state": "stale"
       }
      ],
@@ -1117,9 +1155,21 @@
      "state": "current"
     },
     {
-     "entries": [],
+     "entries": [
+      {
+       "id": "RLZ-8S8VDEJ3",
+       "kind": "realization",
+       "observed_blob": "f1950eaa1da83687a4057e31a07d75638b1400ed",
+       "observed_content": "sha256:7dcac80a8b8df7ac06900093814815776479539dfcb1e54347cbf683c7babbe7",
+       "path": "mcp/src/agents_remember/application/review_committed_leaf.py",
+       "reason": "the range content differs from the recorded content",
+       "recorded_blob": "a5375e4feefde13ed3e25da4820c417b91514b0a",
+       "recorded_content": "sha256:8bfeccdef8a8f71f97bca79d1edaec96d0f3a846cb25153cb211b99b21f7e4b9",
+       "state": "stale"
+      }
+     ],
      "id": "INV-9NCBGQSY",
-     "state": "current"
+     "state": "stale"
     },
     {
      "entries": [],
@@ -1156,12 +1206,12 @@
       {
        "id": "RLZ-7VHY091X",
        "kind": "realization",
-       "observedBlob": "e45e5bcff8a03ceb9f7bb528235603073f770407",
-       "observedContent": "sha256:987fccd6d292137830b9d5826566002c3a94be85a9a24366ba2214fd3391e8ad",
+       "observed_blob": "6cf9afc4392cf870c57633af0ac61e2128abf598",
+       "observed_content": "sha256:0578a2d90f9cd02e14a98d59e66d7ef0a8206e1bb2b47a60018543998bf9276f",
        "path": "skills/l-01-agent-lifecycles/templates/curator-handoff-list.md",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "307b232a7fa44eb96b361089df3eb9bfc6d086e0",
-       "recordedContent": "sha256:cb78d96e6d2f849bc05da1c235ce39974a154559ee6c6d01815b56349421bb5d",
+       "recorded_blob": "307b232a7fa44eb96b361089df3eb9bfc6d086e0",
+       "recorded_content": "sha256:cb78d96e6d2f849bc05da1c235ce39974a154559ee6c6d01815b56349421bb5d",
        "state": "stale"
       }
      ],
@@ -1183,12 +1233,12 @@
       {
        "id": "RLZ-ZCE8D5GH",
        "kind": "realization",
-       "observedBlob": "ef3d6346c509dcca300b4bd18b1ad32408881e15",
-       "observedContent": "sha256:9413f7df828e707acd31a1c8799e2cd20451930fbd8dd55086d2ab09cef28501",
+       "observed_blob": "ef3d6346c509dcca300b4bd18b1ad32408881e15",
+       "observed_content": "sha256:9413f7df828e707acd31a1c8799e2cd20451930fbd8dd55086d2ab09cef28501",
        "path": "dashboard/src/panels/review/ReviewNavigation.tsx",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "2d781656bb73395d1724e71b0e17c6c77f53d506",
-       "recordedContent": "sha256:f2fec9b4d7b2e803781bc835698d3d6a5bf971cee4c54192d0f02667c6db59ea",
+       "recorded_blob": "2d781656bb73395d1724e71b0e17c6c77f53d506",
+       "recorded_content": "sha256:f2fec9b4d7b2e803781bc835698d3d6a5bf971cee4c54192d0f02667c6db59ea",
        "state": "stale"
       }
      ],
@@ -1230,12 +1280,12 @@
       {
        "id": "RLZ-A2D6Y9T1",
        "kind": "realization",
-       "observedBlob": "e45e5bcff8a03ceb9f7bb528235603073f770407",
-       "observedContent": "sha256:987fccd6d292137830b9d5826566002c3a94be85a9a24366ba2214fd3391e8ad",
+       "observed_blob": "6cf9afc4392cf870c57633af0ac61e2128abf598",
+       "observed_content": "sha256:0578a2d90f9cd02e14a98d59e66d7ef0a8206e1bb2b47a60018543998bf9276f",
        "path": "skills/l-01-agent-lifecycles/templates/curator-handoff-list.md",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "307b232a7fa44eb96b361089df3eb9bfc6d086e0",
-       "recordedContent": "sha256:cb78d96e6d2f849bc05da1c235ce39974a154559ee6c6d01815b56349421bb5d",
+       "recorded_blob": "307b232a7fa44eb96b361089df3eb9bfc6d086e0",
+       "recorded_content": "sha256:cb78d96e6d2f849bc05da1c235ce39974a154559ee6c6d01815b56349421bb5d",
        "state": "stale"
       }
      ],
@@ -1302,12 +1352,12 @@
       {
        "id": "RLZ-GB76X8G2",
        "kind": "realization",
-       "observedBlob": "24c7f2718e93cdc31278f980928b3ae205aa8c86",
-       "observedContent": "sha256:bfc0319d634856fb8f98a46fa53fcb0eb7fbba8a55532e4e7e19bc8d804a5b5f",
+       "observed_blob": "24c7f2718e93cdc31278f980928b3ae205aa8c86",
+       "observed_content": "sha256:bfc0319d634856fb8f98a46fa53fcb0eb7fbba8a55532e4e7e19bc8d804a5b5f",
        "path": "mcp/src/agents_remember/memory/knowledge/read_anchors.py",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "25dc2d7dd7d4079c8ad8e7725b427edf1c4f7e6f",
-       "recordedContent": "sha256:6381261533770f98e10abde19f9389cc3f4d672ec5e39c60b3b6160fe35a6bd7",
+       "recorded_blob": "25dc2d7dd7d4079c8ad8e7725b427edf1c4f7e6f",
+       "recorded_content": "sha256:6381261533770f98e10abde19f9389cc3f4d672ec5e39c60b3b6160fe35a6bd7",
        "state": "stale"
       }
      ],
@@ -1434,12 +1484,12 @@
       {
        "id": "RLZ-6T67PT58",
        "kind": "realization",
-       "observedBlob": "4399061daa76c16642ac90030e8331f8818d4e5a",
-       "observedContent": "sha256:0eb26ba87dda6c8e4ec89575a1d6dadaac960400b06a77a77dde57ebbcf17c8e",
+       "observed_blob": "4399061daa76c16642ac90030e8331f8818d4e5a",
+       "observed_content": "sha256:0eb26ba87dda6c8e4ec89575a1d6dadaac960400b06a77a77dde57ebbcf17c8e",
        "path": "dashboard/src/panels/review/ReviewWorkspace.tsx",
        "reason": "the range content differs from the recorded content",
-       "recordedBlob": "0d7dc00d3458ffe7764ee271c0fdaacb7ce8b6fb",
-       "recordedContent": "sha256:6f4480b5b1d5f46cb51c2894823f68951e546212101934703cf5b15fffb11e08",
+       "recorded_blob": "0d7dc00d3458ffe7764ee271c0fdaacb7ce8b6fb",
+       "recorded_content": "sha256:6f4480b5b1d5f46cb51c2894823f68951e546212101934703cf5b15fffb11e08",
        "state": "stale"
       }
      ],
@@ -1479,14 +1529,15 @@
    ]
   }
  },
+ "entries": [],
  "knowledge_diff": {
-  "after_tree": "52a371e817dfefd071a5742b6266d7724d1a54d7",
-  "before_tree": "e53cc6686b6a2d4c8ea3a499685f1f0228b52a65",
-  "changed_files": 2,
+  "after_tree": "8496e69b4dc85774701a538fa94f29edfad59adb",
+  "before_tree": "36c8ded0464ee68c0e845986adba73941bfa5b86",
+  "changed_files": 3,
   "history": [
    {
-    "patch": "diff --git a/knowledge/history/260928-MIK-L25.json b/knowledge/history/260928-MIK-L25.json\nnew file mode 100644\nindex 000000000..81a2957aa\n--- /dev/null\n+++ b/knowledge/history/260928-MIK-L25.json\n@@ -0,0 +1,44 @@\n+{\n+  \"closed\": false,\n+  \"leaf\": \"260928-MIK-L25\",\n+  \"rows\": [\n+    {\n+      \"disposition\": \"no_impact\",\n+      \"examined\": [\n+        {\n+          \"id\": \"INV-2TQGXFAX\",\n+          \"revision\": 2\n+        },\n+        {\n+          \"id\": \"INV-9ECAFVTQ\",\n+          \"revision\": 2\n+        },\n+        {\n+          \"id\": \"INV-M9AMAYWY\",\n+          \"revision\": 2\n+        },\n+        {\n+          \"id\": \"INV-RS0EVBHD\",\n+          \"revision\": 2\n+        },\n+        {\n+          \"id\": \"INV-T23G8ZJM\",\n+          \"revision\": 2\n+        },\n+        {\n+          \"id\": \"INV-XTXZESS6\",\n+          \"revision\": 2\n+        },\n+        {\n+          \"id\": \"INV-YBS0CVBK\",\n+          \"revision\": 2\n+        }\n+      ],\n+      \"id\": \"ROW-7K3F9Q\",\n+      \"items\": [],\n+      \"reason\": \"the refusal code was renamed; every member's context rule still holds\",\n+      \"subject\": \"FAM-2HBJREC2\"\n+    }\n+  ],\n+  \"schema\": \"ar-history/v1\"\n+}\n",
-    "path": "knowledge/history/260928-MIK-L25.json",
+    "patch": "diff --git a/knowledge/history/260928-MIK-L31.json b/knowledge/history/260928-MIK-L31.json\nnew file mode 100644\nindex 000000000..50d6acb88\n--- /dev/null\n+++ b/knowledge/history/260928-MIK-L31.json\n@@ -0,0 +1,44 @@\n+{\n+  \"closed\": false,\n+  \"leaf\": \"260928-MIK-L31\",\n+  \"rows\": [\n+    {\n+      \"disposition\": \"no_impact\",\n+      \"examined\": [\n+        {\n+          \"id\": \"INV-2TQGXFAX\",\n+          \"revision\": 2\n+        },\n+        {\n+          \"id\": \"INV-9ECAFVTQ\",\n+          \"revision\": 2\n+        },\n+        {\n+          \"id\": \"INV-M9AMAYWY\",\n+          \"revision\": 2\n+        },\n+        {\n+          \"id\": \"INV-RS0EVBHD\",\n+          \"revision\": 2\n+        },\n+        {\n+          \"id\": \"INV-T23G8ZJM\",\n+          \"revision\": 2\n+        },\n+        {\n+          \"id\": \"INV-XTXZESS6\",\n+          \"revision\": 2\n+        },\n+        {\n+          \"id\": \"INV-YBS0CVBK\",\n+          \"revision\": 2\n+        }\n+      ],\n+      \"id\": \"ROW-7K3F9Q\",\n+      \"items\": [],\n+      \"reason\": \"the refusal code was renamed; every member's context rule still holds\",\n+      \"subject\": \"FAM-2HBJREC2\"\n+    }\n+  ],\n+  \"schema\": \"ar-history/v1\"\n+}\n",
+    "path": "knowledge/history/260928-MIK-L31.json",
     "status": "added",
     "truncated": false
    }
@@ -1499,6 +1550,11 @@
       "RLZ-CXH58B4W",
       "mcp/src/agents_remember/application/review_source_admission.py",
       "changed"
+     ],
+     [
+      "PRF-7Q3M5K",
+      "mcp/tests/test_knowledge_review_attributed_source_content.py",
+      "added"
      ]
     ],
     "files": [],
@@ -1520,6 +1576,20 @@
      "INV-2TQGXFAX"
     ],
     "source_path": "mcp/src/agents_remember/application/review_source_admission.py"
+   },
+   {
+    "files": [
+     {
+      "patch": "diff --git a/onboarding/mcp/tests/test_knowledge_review_attributed_source_content.py.json b/onboarding/mcp/tests/test_knowledge_review_attributed_source_content.py.json\nindex 06c183eff..da138e721 100644\n--- a/onboarding/mcp/tests/test_knowledge_review_attributed_source_content.py.json\n+++ b/onboarding/mcp/tests/test_knowledge_review_attributed_source_content.py.json\n@@ -1,5 +1,20 @@\n {\n   \"path\": \"mcp/tests/test_knowledge_review_attributed_source_content.py\",\n+  \"proves\": [\n+    {\n+      \"anchor\": {\n+        \"blob\": \"36b2d679ee468d0e3c9409694d803b14288cbdbb\",\n+        \"content\": \"sha256:c405e549eab3887145bc7f2ee49d30d66dad755472e4b3e744f0fb1b940c6075\",\n+        \"locator\": {\n+          \"kind\": \"symbol\",\n+          \"name\": \"test_an_unchanged_path_no_recorded_realization_links_is_still_refused\"\n+        }\n+      },\n+      \"facet\": \"An unchanged path that no recorded realization links is refused as unresolved, and no content is read for it.\",\n+      \"id\": \"PRF-7Q3M5K\",\n+      \"invariant\": \"INV-2TQGXFAX\"\n+    }\n+  ],\n   \"realizes\": [],\n   \"references\": {\n     \"1\": {\n",
+      "path": "onboarding/mcp/tests/test_knowledge_review_attributed_source_content.py.json",
+      "status": "modified",
+      "truncated": false
+     }
+    ],
+    "records": [
+     "INV-2TQGXFAX"
+    ],
+    "source_path": "mcp/tests/test_knowledge_review_attributed_source_content.py"
    }
   ]
  },
@@ -1529,17 +1599,17 @@
    "problems": [],
    "side": "before",
    "state": "available",
-   "tree": "e53cc6686b6a2d4c8ea3a499685f1f0228b52a65"
+   "tree": "36c8ded0464ee68c0e845986adba73941bfa5b86"
   },
   {
    "index_state": "complete",
    "problems": [],
    "side": "after",
    "state": "available",
-   "tree": "52a371e817dfefd071a5742b6266d7724d1a54d7"
+   "tree": "8496e69b4dc85774701a538fa94f29edfad59adb"
   }
  ],
- "leaf_id": "260928-MIK-L25",
+ "leaf_id": "260928-MIK-L31",
  "master": "260928_maintained-invariant-knowledge",
  "repository_id": "agents-remember",
  "state": "trees",
@@ -1561,7 +1631,7 @@
       "linked": true
      }
     ],
-    "modeChange": false,
+    "mode_change": false,
     "path": "mcp/src/agents_remember/application/review_source_admission.py",
     "status": "modified"
    }
@@ -1571,9 +1641,9 @@
     "closed": false,
     "disposition": "no_impact",
     "id": "ROW-7K3F9Q",
-    "owner": "260928-MIK-L25",
-    "ownerKind": "leaf",
-    "path": "knowledge/history/260928-MIK-L25.json",
+    "owner": "260928-MIK-L31",
+    "owner_kind": "leaf",
+    "path": "knowledge/history/260928-MIK-L31.json",
     "row": {
      "disposition": "no_impact",
      "examined": [
@@ -1618,7 +1688,90 @@
   "items": [
    {
     "facts": {
-     "countedChange": false,
+     "affected": {
+      "base": [],
+      "candidate": []
+     },
+     "condition": "route_unassigned",
+     "family": "FAM-2HBJREC2",
+     "locations": [
+      {
+       "entry": "RLZ-CXH58B4W",
+       "invariant": "INV-2TQGXFAX",
+       "path": "mcp/src/agents_remember/application/review_source_admission.py"
+      },
+      {
+       "entry": "RLZ-D43E5CF2",
+       "invariant": "INV-9ECAFVTQ",
+       "path": "mcp/src/agents_remember/application/review_source_admission.py"
+      },
+      {
+       "entry": "RLZ-HD60BGRJ",
+       "invariant": "INV-9ECAFVTQ",
+       "path": "mcp/src/agents_remember/application/review_source_realization_link.py"
+      },
+      {
+       "entry": "RLZ-3G19299R",
+       "invariant": "INV-M9AMAYWY",
+       "path": "mcp/src/agents_remember/application/review_source_realization_link.py"
+      },
+      {
+       "entry": "RLZ-7GKF4ASW",
+       "invariant": "INV-RS0EVBHD",
+       "path": "mcp/src/agents_remember/application/review_source_realization_link.py"
+      },
+      {
+       "entry": "RLZ-BRC1Q5RQ",
+       "invariant": "INV-T23G8ZJM",
+       "path": "mcp/src/agents_remember/models/knowledge/review_source_content.py"
+      },
+      {
+       "entry": "RLZ-CHCMPQ0Y",
+       "invariant": "INV-T23G8ZJM",
+       "path": "dashboard/src/data/review.ts"
+      },
+      {
+       "entry": "RLZ-9EC7B6PN",
+       "invariant": "INV-XTXZESS6",
+       "path": "mcp/src/agents_remember/application/review_source_admission.py"
+      },
+      {
+       "entry": "RLZ-CHBR2MK5",
+       "invariant": "INV-XTXZESS6",
+       "path": "mcp/src/agents_remember/application/review_source_realization_link.py"
+      },
+      {
+       "entry": "RLZ-NM6160PK",
+       "invariant": "INV-YBS0CVBK",
+       "path": "mcp/src/agents_remember/application/review_source_admission.py"
+      }
+     ],
+     "record_satisfies_routes": false,
+     "rename_candidates": [],
+     "routes": {
+      "base": [],
+      "candidate": []
+     },
+     "suggestion": {
+      "at_repository_root": [],
+      "family": "FAM-2HBJREC2",
+      "label": "mechanical",
+      "routes": [
+       "dashboard/src/data",
+       "mcp/src/agents_remember/application",
+       "mcp/src/agents_remember/models/knowledge"
+      ]
+     },
+     "unmapped_locations": []
+    },
+    "id": "sha256:9973f571ab6a5eb73784004f1841b783395e32101bfe5cc70300709722a355a4",
+    "kind": "family_route_condition",
+    "satisfied_by": null,
+    "subject": "FAM-2HBJREC2#route_unassigned"
+   },
+   {
+    "facts": {
+     "counted_change": false,
      "markdown": "onboarding/mcp/src/agents_remember/application/overview.md",
      "sidecar": "onboarding/mcp/src/agents_remember/application/overview.json",
      "sources": [
@@ -1627,12 +1780,12 @@
     },
     "id": "sha256:b2493b5b71ba12dd35097a12a89c4d321d0d78e010c12bfe9fba9c633f401eef",
     "kind": "onboarding_trace",
-    "satisfiedBy": null,
+    "satisfied_by": null,
     "subject": "onboarding:mcp/src/agents_remember/application/overview"
    },
    {
     "facts": {
-     "countedChange": false,
+     "counted_change": false,
      "markdown": "onboarding/mcp/src/agents_remember/application/review_source_admission.py.md",
      "sidecar": "onboarding/mcp/src/agents_remember/application/review_source_admission.py.json",
      "sources": [
@@ -1641,8 +1794,38 @@
     },
     "id": "sha256:a3cf1ec5f4baa3093fe7825bf4c7781493301141cbfac0290113368c14961378",
     "kind": "onboarding_trace",
-    "satisfiedBy": null,
+    "satisfied_by": null,
     "subject": "onboarding:mcp/src/agents_remember/application/review_source_admission.py"
+   },
+   {
+    "facts": {
+     "declared": {
+      "effect": "strengthen",
+      "requirement_ref": "MIK-R31@v1",
+      "subject": "family:FAM-BWQ4XYF9"
+     },
+     "rows": [],
+     "unmatched": "no_matching_row"
+    },
+    "id": "sha256:216632333d57757b3492fa58cda105363c307a805bc9faeb83e00dc2a579d259",
+    "kind": "planned_untouched",
+    "satisfied_by": null,
+    "subject": "planned:family:FAM-BWQ4XYF9#strengthen"
+   },
+   {
+    "facts": {
+     "declared": {
+      "effect": "clarify",
+      "requirement_ref": "MIK-R31@v1",
+      "subject": "invariant:INV-2TQGXFAX"
+     },
+     "rows": [],
+     "unmatched": "no_matching_row"
+    },
+    "id": "sha256:51d5f9c5bc4d55f5c7db931fccb6ee223c5ba047a36f1f1b2dcb5d4e11ff06c6",
+    "kind": "planned_untouched",
+    "satisfied_by": null,
+    "subject": "planned:invariant:INV-2TQGXFAX#clarify"
    },
    {
     "facts": {
@@ -1683,7 +1866,7 @@
        "id": "INV-YBS0CVBK"
       }
      ],
-     "reachedBy": [
+     "reached_by": [
       "touched:INV-2TQGXFAX"
      ],
      "routes": {
@@ -1698,12 +1881,25 @@
    },
    {
     "facts": {
-     "added": [],
+     "added": [
+      {
+       "anchor": {
+        "blob": "36b2d679ee468d0e3c9409694d803b14288cbdbb",
+        "content": "sha256:c405e549eab3887145bc7f2ee49d30d66dad755472e4b3e744f0fb1b940c6075",
+        "locator": {
+         "kind": "symbol",
+         "name": "test_an_unchanged_path_no_recorded_realization_links_is_still_refused"
+        },
+        "path": "mcp/tests/test_knowledge_review_attributed_source_content.py"
+       },
+       "id": "PRF-7Q3M5K"
+      }
+     ],
      "context": {
       "families": [
        "FAM-2HBJREC2"
       ],
-      "linkedFrom": []
+      "linked_from": []
      },
      "entries": [
       {
@@ -1754,15 +1950,15 @@
      ],
      "reanchored": [],
      "record": {
-      "baseRevision": 2,
-      "candidateRevision": 2,
+      "base_revision": 2,
+      "candidate_revision": 2,
       "changed": false
      },
      "retired": []
     },
-    "id": "sha256:e49185c1141d785bed272290c79008448b632d7c31b84ba77a95d6a91577c179",
+    "id": "sha256:1dc521a766581a37e4724f0dbc487ecbed1bcd8cff9bb3256ff1a6886834969c",
     "kind": "touched_invariant",
-    "planning": "unplanned",
+    "planning": "planned",
     "subject": "INV-2TQGXFAX"
    }
   ],

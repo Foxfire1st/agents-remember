@@ -33,21 +33,93 @@
       "normalization": "repository_id replaced by \"<repository_id>\" at the top level and in payload.candidate; keys sorted, compact separators"
     }
   ],
-  "not_recaptured": {
-    "stated_by": "260921-ICR-L44 worker, attempt L44-A2 (not written by the producer)",
-    "reason": "The current route cannot emit these committed shapes. At the L24 capture commit 63b47629, application/review_family_rosters._members listed only the family_membership items on a roster page; since L38 (a5bec6c3) it also resolves the member revisions represented by content and claim items. A page whose first items are content therefore now carries that member, and a walk's final claim page now carries the subject row. These fixtures keep their original bytes and do not carry the member-source fields locator, resolved_ranges and locator_state.",
-    "fixtures": {
-      "familyReview.truncated.captured.json": "0 of 24 current-route builds (every side carries its first member)",
-      "familyReview.continued.captured.json": "continues the truncated body's cursor, so it cannot be re-captured without it",
-      "familyReview.oneSided.captured.json": "0 of 10 current-route builds",
-      "familyReview.walkFinal.captured.json": "0 of 10 current-route builds (the final page always carries the subject row)",
-      "familyPaging.captured.json": "0 of 10 current-route builds (captured at L38; walk bodies differ in selection and roster)",
-      "familyReview.emptyRoster.captured.json": "reproducible (10 of 10) but carries no member source, so left unchanged"
+  "mik_l31_recapture": {
+    "stated_by": "260928-MIK-L31 worker (MIK-R31 rule 6, the L44-R1-F5 remainder)",
+    "captured_source_tree": "18b773295b9aedc7cc14126a7fdadaf1d2fd5353",
+    "captured_at": "2026-09-30T04:17:22.965137+00:00",
+    "command": "/home/firefox/projects/agents-remember/mcp/.venv/bin/python /home/firefox/projects/ar-coordination/tasks/agents-remember/260928_maintained-invariant-knowledge/notes/reports/260928-MIK-L31-evidence/recapture_family_fixtures.py /home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l31-ar/260928-mik-l31",
+    "route": "GET /api/review/intent served by serving.review.register_review_routes wired with cli.dashboard.serving_collaborators(config) (review routes only) under uvicorn on a free 127.0.0.1 port; bodies read over HTTP",
+    "producer": "L44's producer, executed unchanged except for the selection rule and output paths",
+    "selection_rule": "the first build of each scenario is accepted (MIK-L31); no signature is matched",
+    "attempts": {
+      "bounded": 1,
+      "one-sided": 1,
+      "paging": 1,
+      "walk": 1,
+      "empty": 1
     },
-    "evidence": [
-      "/home/firefox/projects/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/fixture-bounded-analysis.txt",
-      "/home/firefox/projects/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/fixture-probe.log",
-      "/home/firefox/projects/ar-coordination/tasks/agents-remember/260921_complete-code-and-intent-review/notes/reports/l44-evidence/fixture-complete-analysis.txt"
-    ]
+    "capture_record": "/home/firefox/projects/ar-coordination/tasks/agents-remember/260928_maintained-invariant-knowledge/notes/reports/260928-MIK-L31-evidence/fixture-capture/capture-record.json",
+    "capture_record_sha256": "9103054bec52f57743cad31f7c2350890a960fb7ce49b7aeb95ec2809c6f554c",
+    "why": "L44 found the current route cannot emit the committed shapes (since L38 a roster page also carries the member revisions its content and claim items represent). Each fixture is now the current route's body for its scenario, with the member-source fields locator, resolved_ranges and locator_state; the dashboard expectations were updated to them.",
+    "fixtures": [
+      {
+        "file": "familyReview.truncated.captured.json",
+        "sha256": "ac5cae6f39d6f650b3979f0b8a6afb8106204b3ad1fad2bedea81eae087db8fa",
+        "scenario": "build_family_scenario (test_review_family_context): successor family revision, moved member; pageSize 6 and 1, then the truncated body's retry-budget-family after-side cursor at pageSize 6",
+        "requests": [
+          "bounded1-complete",
+          "bounded1-truncated",
+          "bounded1-continued"
+        ],
+        "normalization": "repository_id replaced by \"<repository_id>\" at the top level and in payload.candidate; keys sorted, compact separators"
+      },
+      {
+        "file": "familyReview.continued.captured.json",
+        "sha256": "9e13e39f3eb51f83c81f5eb878917c61c1aa6a68cf9bf895218333923c27e563",
+        "scenario": "build_family_scenario (test_review_family_context): successor family revision, moved member; pageSize 6 and 1, then the truncated body's retry-budget-family after-side cursor at pageSize 6",
+        "requests": [
+          "bounded1-complete",
+          "bounded1-truncated",
+          "bounded1-continued"
+        ],
+        "normalization": "repository_id replaced by \"<repository_id>\" at the top level and in payload.candidate; keys sorted, compact separators"
+      },
+      {
+        "file": "familyReview.oneSided.captured.json",
+        "sha256": "16e24767eb5556bd238ff195b8a6714b8ff82e3b05a9f1a5dde2f0783d3ad134",
+        "scenario": "build_family_scenario (test_review_family_context): successor family revision, moved member; pageSize 1, then the retry-and-anchor-family before-side cursor at pageSize 4",
+        "requests": [
+          "one-sided1-first",
+          "one-sided1-one-sided"
+        ],
+        "normalization": "repository_id replaced by \"<repository_id>\" at the top level and in payload.candidate; keys sorted, compact separators"
+      },
+      {
+        "file": "familyPaging.captured.json",
+        "sha256": "c7ca11f6f99c1a3f660f77a2c5990601bf43aee369400e23147decca25a11b6a",
+        "scenario": "build_family_scenario (test_review_family_context): successor family revision, moved member; both sides' published-cursor walks at pageSize 4",
+        "requests": [
+          "paging1-paging-before-0",
+          "paging1-paging-before-1",
+          "paging1-paging-before-2",
+          "paging1-paging-after-0",
+          "paging1-paging-after-1",
+          "paging1-paging-after-2"
+        ],
+        "normalization": "none; two-space indentation"
+      },
+      {
+        "file": "familyReview.walkFinal.captured.json",
+        "sha256": "34bb7deeac7c9f5e6efb236fda545271032a0d33e7f7796ff62c3cd3a6c09ca7",
+        "scenario": "build_family_scenario + _author_extra_roster_rows(70); final page of the after-side walk",
+        "requests": [
+          "walk1-walk-0",
+          "walk1-walk-1",
+          "walk1-walk-2",
+          "walk1-walk-3"
+        ],
+        "normalization": "repository_id replaced by \"<repository_id>\" at the top level and in payload.candidate; keys sorted, compact separators"
+      },
+      {
+        "file": "familyReview.emptyRoster.captured.json",
+        "sha256": "94e5701de9583bfb5de759d92f7ab7f0926757673148dc593c63f51493362620",
+        "scenario": "build_family_scenario + _author_recorded_empty_family; the memberless family selected",
+        "requests": [
+          "empty1-empty-roster"
+        ],
+        "normalization": "repository_id replaced by \"<repository_id>\" at the top level and in payload.candidate; keys sorted, compact separators"
+      }
+    ],
+    "tree_note": "captured at the L10-synced tree (base 31d761a2 with this leaf's changes; the family fixtures' tree is 18b77329); the later L05 sync (48f680d5) changes no module on the review routes, so the bodies stay representative (MIK-L31 review R2-4)"
   }
 }

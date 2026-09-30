@@ -23,6 +23,9 @@ decides nothing else.
   the snapshot's identity is resolved from the file itself. That query does not expand families, so a
   path's answer cannot fail on the size of the scope around it. A half a generation did not retain is
   not read: its absence is the record's own statement, not a file to look for elsewhere.
+* **Proofs of a tree comparison.** A tree comparison's knowledge is the derived index of each memory
+  tree (MIK-R23); a proof entry anchored at the path links it too, so a proof's focused card opens its
+  full file like a realization's (MIK-R31). A dataset records no proofs and is asked nothing more.
 * **What is not a criterion.** Whether the anchor's recorded bytes still match the tree is an
   observation the realization's own read reports; the link itself is authored data, and the content
   read beside it shows the bytes the requested endpoints actually hold.
@@ -85,6 +88,9 @@ class RealizationLink:
     linking_sides: tuple[KnowledgeSide, ...]
     detail: str
     determined: bool = True
+    # Every half that was not read does not exist at all: the leaf's knowledge was never created, so
+    # the remedy is to initialize it rather than to restore or repair a damaged snapshot.
+    never_initialized: bool = False
 
     @property
     def linked(self) -> bool:
@@ -96,6 +102,7 @@ class _SideReading:
     side: KnowledgeSide
     state: _SideState
     detail: str
+    absent: bool = False
 
 
 @dataclass(frozen=True)
@@ -141,14 +148,21 @@ def recorded_realization_link(
     readings = tuple(
         _side_reading(side, database, namespace, request.path) for side, database in _halves(bound)
     )
+    return _link_of(bound, readings)
+
+
+def _link_of(bound: _BoundKnowledge, readings: tuple[_SideReading, ...]) -> RealizationLink:
+    """The answer the halves' readings give: who links, whether the negative was measured."""
+
     linking: tuple[KnowledgeSide, ...] = tuple(
         reading.side for reading in readings if reading.state == "linked"
     )
-    unread = any(reading.state == "unread" for reading in readings)
+    unread = [reading for reading in readings if reading.state == "unread"]
     return RealizationLink(
         linking_sides=linking,
         detail=_sentence(bound, readings),
         determined=bool(linking) or not unread,
+        never_initialized=bool(unread) and all(reading.absent for reading in unread),
     )
 
 
@@ -257,12 +271,15 @@ def _side_reading(side: KnowledgeSide, database: Path, namespace: str, path: str
     """
 
     if not database.is_file():
-        return _SideReading(side, "unread", f"the {side} snapshot is absent at {database}")
+        return _SideReading(
+            side, "unread", f"the {side} snapshot is absent at {database}", absent=True
+        )
     try:
         context = open_read_context(database, namespace)
         connection = open_read_only_database(database)
         try:
             rows = fetch_realizations_at_path(connection, context.repository_id, path)
+            proved = not rows and _proof_at_path(connection, path)
         finally:
             connection.close()
     except (KnowledgeStorageError, OSError, ValueError, apsw.Error) as error:
@@ -273,7 +290,28 @@ def _side_reading(side: KnowledgeSide, database: Path, namespace: str, path: str
         )
     if rows:
         return _SideReading(side, "linked", f"the {side} snapshot records a realization here")
+    if proved:
+        return _SideReading(side, "linked", f"the {side} snapshot records a proof here")
     return _SideReading(side, "not_linked", f"the {side} snapshot records none")
+
+
+def _proof_at_path(connection: apsw.Connection, path: str) -> bool:
+    """Whether a derived knowledge index (MIK-R23) records a proof entry anchored at ``path``.
+
+    Proof entries (MIK-R28) have no table in the store's logical schema, so a tree comparison's index
+    answers them from its own ``ix_entry``; a dataset has no such table and answers nothing here. A
+    proof's card offers its full file like every other card (MIK-R31 rule 5).
+    """
+
+    listed = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ix_entry'"
+    ).fetchall()
+    if not listed:
+        return False
+    found = connection.execute(
+        "SELECT 1 FROM ix_entry WHERE kind = 'proof' AND path = ? LIMIT 1", (path,)
+    ).fetchall()
+    return bool(found)
 
 
 def _sentence(bound: _BoundKnowledge, readings: tuple[_SideReading, ...]) -> str:

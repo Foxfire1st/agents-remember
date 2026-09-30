@@ -14,6 +14,15 @@ review composition does not already show, and nothing more (rules 2 and 3):
 * **The worklist view (rule 3).** The leaf's current MIK-R08 worklist items, the history rows about
   their subjects (shown without a current or stale mark until MIK-R09 supplies one), and the gate
   linkage of every changed hunk (linked, or unexplained).
+* **The entries (MIK-R31).** When the query names invariants, the view answers only their
+  realization and proof entries, located on both code sides with each range's excerpt, for the
+  reviewer's focused expression cards (:mod:`.review_tree_entries`). The cards of one selection are
+  read on demand, so the leaf-wide view never carries every excerpt of the repository.
+
+The route's wire keys are snake_case, the review surface's convention (MIK-L25 review F9): the
+currentness documents and the worklist's own documents, which their owners spell in camelCase, are
+re-keyed here by :func:`snake_keys` -- identifier keys only, so a path or an ID used as a key is
+never rewritten.
 
 Each memory side is read through the index of its tree; no database copy is read or made.
 """
@@ -38,6 +47,7 @@ from agents_remember.application.review_tree_comparison import (
     ReviewTrees,
     reopen_review_trees,
 )
+from agents_remember.application.review_tree_entries import tree_entries
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge_index import KnowledgeIndex, is_indexed_path
@@ -55,7 +65,13 @@ from agents_remember.models.knowledge_files.documents import KNOWLEDGE_ROOT, ONB
 from agents_remember.serving.review_trees import ReviewTreesQuery
 from agents_remember.worktrees.worktree_contract import WorktreeContract
 
-__all__ = ["knowledge_tree_diff", "read_review_trees", "side_currentness", "worklist_view"]
+__all__ = [
+    "knowledge_tree_diff",
+    "read_review_trees",
+    "side_currentness",
+    "snake_keys",
+    "worklist_view",
+]
 
 _HISTORY_PREFIX: Final = f"{KNOWLEDGE_ROOT}/history/"
 _PATCH_LIMIT: Final = PROSE_MAX_LENGTH - 200
@@ -67,6 +83,8 @@ _STATUS: Final[dict[str, Literal["added", "deleted", "modified", "renamed", "typ
     "T": "type_changed",
 }
 _SCHEMA_KIND = re.compile(r"^ar-([a-z-]+)/v\d+$")
+_IDENTIFIER_KEY = re.compile(r"^[a-z][A-Za-z0-9]*$")
+_CAMEL_HUMP = re.compile(r"(?<=[a-z0-9])([A-Z])")
 
 
 def read_review_trees(config: McpRuntimeConfig, query: ReviewTreesQuery) -> ReviewTreesResult:
@@ -89,20 +107,38 @@ def read_review_trees(config: McpRuntimeConfig, query: ReviewTreesQuery) -> Revi
             leaf_id=query.leaf_id,
         )
     contract, trees = found
+    if query.invariants:
+        return _entries_view(query, trees)
     return _view(query, contract, trees)
 
 
 def _comparison(
     config: McpRuntimeConfig, query: ReviewTreesQuery
 ) -> tuple[WorktreeContract, ReviewTrees] | ReviewRefusal | None:
-    """The comparison a query names: a recorded number, or the review's own resolution."""
+    """The comparison a query names: a recorded number, or the review's own resolution.
 
-    if query.number is not None:
-        contract = recorded_leaf_contract(config, query.repository_id, query.master, query.leaf_id)
-        if contract is None:
-            return _no_contract(query.master, query.leaf_id)
-        reopened = reopen_review_trees(config.coordination_root, contract, query.number)
-        return reopened if not isinstance(reopened, ReviewTrees) else (contract, reopened)
+    A leaf-wide read that names a number is pinned to that comparison. When the number is the one
+    the review resolves to now, the resolution is used as it is (a live leaf keeps its computed
+    worklist); any other number is reopened from its record. A cards read (named invariants) needs
+    only the trees, so it always reopens.
+    """
+
+    if query.number is None:
+        return _resolved(config, query)
+    if not query.invariants:
+        current = _resolved(config, query)
+        if isinstance(current, tuple) and current[1].record.number == query.number:
+            return current
+    contract = recorded_leaf_contract(config, query.repository_id, query.master, query.leaf_id)
+    if contract is None:
+        return _no_contract(query.master, query.leaf_id)
+    reopened = reopen_review_trees(config.coordination_root, contract, query.number)
+    return reopened if not isinstance(reopened, ReviewTrees) else (contract, reopened)
+
+
+def _resolved(
+    config: McpRuntimeConfig, query: ReviewTreesQuery
+) -> tuple[WorktreeContract, ReviewTrees] | ReviewRefusal | None:
     resolved = resolve_review_candidate(
         config, query.repository_id, query.master, query.leaf_id, recorded=query.recorded
     )
@@ -132,9 +168,40 @@ def _view(
             if available
             else None
         ),
-        currentness=side_currentness(trees),
+        currentness=snake_keys(side_currentness(trees)),
         worklist=worklist_view(contract, trees, live=trees.live),
     )
+
+
+def _entries_view(query: ReviewTreesQuery, trees: ReviewTrees) -> ReviewTreesResult:
+    """The comparison and the named invariants' entries only (MIK-R31's cards)."""
+
+    return ReviewTreesResult(
+        state="trees",
+        repository_id=query.repository_id,
+        master=query.master,
+        leaf_id=trees.record.leaf_id,
+        comparison=trees.record,
+        knowledge_sides=trees.sides(),
+        code_sides=trees.code_sides,
+        entries=tree_entries(trees, query.invariants),
+    )
+
+
+def snake_keys(value: Any) -> Any:
+    """``value`` with every identifier-shaped camelCase key re-spelled in snake_case, recursively."""
+
+    if isinstance(value, Mapping):
+        return {_snake(key): snake_keys(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [snake_keys(item) for item in value]
+    return value
+
+
+def _snake(key: object) -> object:
+    if not isinstance(key, str) or _IDENTIFIER_KEY.match(key) is None:
+        return key
+    return _CAMEL_HUMP.sub(lambda hump: f"_{hump.group(1).lower()}", key)
 
 
 # -- rule 2: the Git diff of the memory trees ----------------------------------------------------
@@ -386,10 +453,10 @@ def worklist_view(
         source=source,
         bound=_bound(document.get("pairing") or {}, trees),
         state=str(document.get("state")),
-        items=items,
-        history_rows=_history_rows(trees, items),
-        changes=tuple(dict(change) for change in document.get("changes", ())),
-        incomplete=tuple(dict(one) for one in document.get("incomplete", ())),
+        items=tuple(snake_keys(items)),
+        history_rows=tuple(snake_keys(_history_rows(trees, items))),
+        changes=tuple(snake_keys(list(document.get("changes", ())))),
+        incomplete=tuple(snake_keys(list(document.get("incomplete", ())))),
     )
 
 
@@ -411,10 +478,14 @@ def _bound(pairing: Mapping[str, Any], trees: ReviewTrees) -> bool:
 def _history_rows(
     trees: ReviewTrees, items: tuple[dict[str, Any], ...]
 ) -> tuple[dict[str, Any], ...]:
-    """The after tree's history rows about the items' subjects, with no currency mark (rule 3)."""
+    """The after tree's history rows about the items' subjects, with no currency mark (rule 3).
+
+    An item names the subject its answering row carries in ``facts.row`` when that is not its own
+    subject (an unexplained hunk is answered by a ``hunk:…`` row, MIK-R10), so both are looked up.
+    """
 
     database = trees.after.database
-    subjects = sorted({str(item.get("subject")) for item in items if item.get("subject")})
+    subjects = sorted({subject for item in items for subject in _row_subjects(item)})
     if database is None or not subjects:
         return ()
     rows: list[dict[str, Any]] = []
@@ -434,6 +505,15 @@ def _history_rows(
                 for row in index.history_rows_about(subject).value
             ]
     return tuple(rows)
+
+
+def _row_subjects(item: Mapping[str, Any]) -> Iterator[str]:
+    if item.get("subject"):
+        yield str(item["subject"])
+    facts = item.get("facts")
+    row = facts.get("row") if isinstance(facts, Mapping) else None
+    if isinstance(row, str) and row:
+        yield row
 
 
 def _no_contract(master: str, leaf_id: str) -> ReviewRefusal:

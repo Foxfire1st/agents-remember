@@ -1,7 +1,15 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { act, cleanup, fireEvent, render, renderHook, waitFor } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import type { ReviewPayload } from '../../data/review';
@@ -13,11 +21,11 @@ import { ReviewSurface } from './ReviewSurface';
 
 // These are complete HTTP bodies captured from the public authorship + real review route, following the
 // published cursors at page size 4 as test_review_family_context_population.py::walk_responses does. No
-// display payload is constructed. familyPaging.captured.json still holds its capture at a5bec6c3: its
-// member sources predate the structured locator, resolved ranges and locator state, and the current
-// route's walk bodies differ in selection and roster (familyReview.capture-provenance.json,
-// `not_recaptured`). Its re-capture belongs with the change that moves these cases to the current
-// route's walk, and is not done here.
+// display payload is constructed. familyPaging.captured.json was re-captured by MIK-L31 with ICR-L44's
+// producer (first build accepted) at the L10-synced tree 18b77329 (familyReview.capture-provenance.json,
+// `mik_l31_recapture`); its member sources carry the structured locator, resolved ranges and locator
+// state. Families are ordered by the identities each build draws, so the cases open the walked family
+// (`family_id`) explicitly rather than relying on its position.
 interface Body {
   payload: ReviewPayload;
 }
@@ -478,6 +486,23 @@ it('keeps selected intent, evidence, siblings, focus and open layout while a lat
   vi.stubGlobal('fetch', fetch);
   const view = render(<ReviewSurface {...target} onBack={vi.fn()} />);
   await view.findByTestId('review-center-member');
+  // The walked family is the capture's `family_id`. Families are ordered by their stored identities,
+  // which each build draws afresh, so the reader opens the subject inside that family's context
+  // rather than relying on it being listed first (MIK-L31 re-capture of familyPaging).
+  const walked = view
+    .getAllByTestId('review-family')
+    .find((node) => node.dataset.family === capture.family_id)!;
+  fireEvent.click(
+    within(walked)
+      .getAllByTestId('review-family-member-open')
+      .find(
+        (node) =>
+          node.dataset.revision === first.payload.knowledge.revision_selection!.before_revision_id,
+      )!,
+  );
+  await waitFor(() =>
+    expect(view.getByTestId('review-center-member').dataset.family).toBe(capture.family_id),
+  );
   expect(view.getByTestId('review-display-state').textContent).toContain('not yet fully loaded');
   const evidence = view.getByTestId('review-center-evidence').textContent;
   const siblings = view.getAllByTestId('review-family-member').length;

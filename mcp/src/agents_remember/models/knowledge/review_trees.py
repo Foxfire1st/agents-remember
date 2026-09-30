@@ -31,6 +31,7 @@ from agents_remember.models.knowledge.base import (
     KnowledgeModel,
 )
 from agents_remember.models.knowledge.review import ReviewRefusal
+from agents_remember.models.knowledge.review_tree_entries import ReviewTreeEntry
 
 __all__ = [
     "REVIEW_REF_NAMESPACE",
@@ -251,4 +252,6 @@ class ReviewTreesResult(KnowledgeModel):
     knowledge_diff: ReviewKnowledgeTreeDiff | None = None
     currentness: dict[str, dict[str, Any]] | None = None
     worklist: ReviewWorklistView | None = None
+    # Every realization and proof entry, on both code sides, for the focused cards (MIK-R31).
+    entries: tuple[ReviewTreeEntry, ...] = ()
     refusal: ReviewRefusal | None = None

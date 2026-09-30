@@ -3,6 +3,7 @@ import { css } from '../../../styled-system/css';
 import type {
   ReviewAssessmentDisplay,
   ReviewDisplayedApplicability,
+  ReviewFamilyMember,
   ReviewKnowledgePane,
   ReviewObservation,
   ReviewPayload,
@@ -11,6 +12,13 @@ import type {
 import type { ReviewSubject } from './ReviewNavigation';
 import type { DiffLayout } from './SourceExplorer';
 import { KnowledgeStatements } from './KnowledgeStatements';
+import {
+  revisionMeta,
+  wordingComparison,
+  type AuthoredWording,
+  type WordingComparison,
+  type WordingField,
+} from './statementWording';
 
 const muted = css({ color: 'muted', fontSize: '0.78rem', margin: '0.35rem 0' });
 const prose = css({ fontSize: '0.9rem', whiteSpace: 'pre-wrap', lineHeight: '1.8' });
@@ -32,32 +40,190 @@ export function selectedRevision(
     : null;
 }
 
-function statementState(selection: ReviewRevisionSelection): string {
-  if (selection.state === 'compared')
-    return selection.before_revision_id === selection.after_revision_id ? 'unchanged' : 'changed';
+function statementState(selection: ReviewRevisionSelection, wording: WordingComparison): string {
+  if (selection.state === 'compared') {
+    if (wording.kind === 'same_revision') return 'unchanged';
+    return wording.kind === 'wording_unchanged' ? 'wording-unchanged' : 'changed';
+  }
   if (selection.state === 'added' || selection.state === 'removed') return 'one-sided';
   return selection.state;
 }
 
-function statementLabel(selection: ReviewRevisionSelection): string {
+const FIELD_NAMES: Record<WordingField, string> = {
+  statement: 'statement',
+  applicability: 'applicability',
+  conditions: 'conditions',
+  exclusions: 'exclusions',
+};
+
+function statementLabel(
+  selection: ReviewRevisionSelection,
+  wording: WordingComparison,
+  revisions: string,
+): string {
   if (selection.state === 'ambiguous')
     return 'Ambiguous revision selection · no before/after pair was chosen';
   if (selection.state === 'unresolved') return 'Revision comparison unresolved';
-  if (selection.state === 'added') return 'Statement recorded on the after side only';
-  if (selection.state === 'removed') return 'Statement recorded on the before side only';
-  return selection.before_revision_id === selection.after_revision_id
-    ? 'Statement unchanged · same recorded revision'
-    : 'Statement revision changed · before/after comparison';
+  if (selection.state === 'added') return 'Added statement · recorded on the after side only';
+  if (selection.state === 'removed') return 'Removed statement · recorded on the before side only';
+  if (wording.kind === 'same_revision') return 'Statement unchanged · same recorded revision';
+  if (wording.kind === 'wording_unchanged') return `Wording unchanged · ${revisions}`;
+  if (wording.kind === 'not_comparable')
+    return `Statement revised · ${revisions} · ${wording.fields.join(', ')} not carried here`;
+  return `Changed ${wording.fields.map((field) => FIELD_NAMES[field]).join(', ')} · ${revisions}`;
+}
+
+// The two revisions' authored text, from the member rows of the selected revisions when the page
+// carried them (every field), else from the knowledge pane (statement and conditions) plus the
+// comparison's own field changes for the rest. A field neither carries stays undefined.
+function authoredSides(
+  knowledge: ReviewKnowledgePane,
+  selection: ReviewRevisionSelection,
+  members: ReviewFamilyMember[],
+): { before: AuthoredWording; after: AuthoredWording; labels: [string, string] } {
+  const row = (revision?: string) =>
+    members.find(
+      (member) => member.invariant_revision_id === revision && member.state === 'recorded',
+    );
+  const beforeRow = row(selection.before_revision_id);
+  const afterRow = row(selection.after_revision_id);
+  const reported = (field: string) =>
+    knowledge.field_changes.find((change) => change.field === field);
+  const pane = (side: 'before' | 'after'): AuthoredWording => {
+    const statement = knowledge[`${side}_statement`];
+    const fromRow = side === 'before' ? beforeRow : afterRow;
+    const change = (field: string) => {
+      const found = reported(field);
+      return found
+        ? ((side === 'before' ? found.before_value : found.after_value) ?? null)
+        : undefined;
+    };
+    if (fromRow)
+      return {
+        statement: fromRow.statement,
+        applicability: fromRow.applicability ?? null,
+        conditions: fromRow.essential_conditions,
+        exclusions: fromRow.exclusions,
+      };
+    return {
+      statement: statement.state === 'present' ? statement.text : undefined,
+      applicability: change('applicability'),
+      conditions: knowledge[`${side}_conditions`],
+      exclusions: listed(change('exclusions')),
+    };
+  };
+  const short = (revision?: string) => (revision ? revision.slice(0, 8) : 'none');
+  const versions = [beforeRow?.display_version, afterRow?.display_version];
+  // Display versions only when both are carried and differ: two revisions never read as one.
+  const labels: [string, string] =
+    versions[0] && versions[1] && versions[0] !== versions[1]
+      ? [versions[0], versions[1]]
+      : [short(selection.before_revision_id), short(selection.after_revision_id)];
+  return { before: pane('before'), after: pane('after'), labels };
+}
+
+// A reported field value as the list it is compared as: absent = not carried, null = none recorded.
+function listed(value: string | null | undefined): string[] | undefined {
+  if (value === undefined) return undefined;
+  return value === null ? [] : [value];
+}
+
+function ChangedFields({
+  fields,
+  before,
+  after,
+}: {
+  fields: WordingField[];
+  before: AuthoredWording;
+  after: AuthoredWording;
+}) {
+  const shown = fields.filter((field) => field !== 'statement');
+  if (!shown.length) return null;
+  const text = (value: AuthoredWording[WordingField]) =>
+    Array.isArray(value) ? value.join('; ') || 'none' : (value ?? 'none');
+  return (
+    <ul className={rows} data-testid="review-center-changed-fields">
+      {shown.map((field) => (
+        <li key={field} data-field={field}>
+          {FIELD_NAMES[field]} · before: {text(before[field])} · after: {text(after[field])}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function StatementBody({
+  knowledge,
+  state,
+  wording,
+  sides,
+  layout,
+}: {
+  knowledge: ReviewKnowledgePane;
+  state: string;
+  wording: WordingComparison;
+  sides: { before: AuthoredWording; after: AuthoredWording };
+  layout: DiffLayout;
+}) {
+  const { before_statement: before, after_statement: after } = knowledge;
+  if (state === 'ambiguous' || state === 'unresolved')
+    return (
+      <p className={muted} data-testid="review-center-statement-unavailable">
+        Before: {before.state} · after: {after.state}. No statement diff is available.
+      </p>
+    );
+  if (state === 'one-sided') return <OneSidedStatement knowledge={knowledge} layout={layout} />;
+  const statementMoved = wording.kind === 'changed' && wording.fields.includes('statement');
+  // The prose is shown once only when both sides carry it; otherwise each side keeps its own state
+  // line (review F5), so an unreadable side is never dropped behind the other side's text.
+  const fields =
+    wording.kind === 'changed' ? (
+      <ChangedFields fields={wording.fields} before={sides.before} after={sides.after} />
+    ) : null;
+  return (
+    <>
+      {!statementMoved && before.state === 'present' && after.state === 'present' ? (
+        <p className={prose} data-testid="review-center-statement-prose">
+          {before.text}
+        </p>
+      ) : (
+        <KnowledgeStatements before={before} after={after} mode={layout} />
+      )}
+      {fields}
+    </>
+  );
+}
+
+// An added or removed statement is labelled prose (MIK-R31 rule 3), not a split code editor. A side
+// whose text is not present keeps the landed state lines, which name why.
+function OneSidedStatement({
+  knowledge,
+  layout,
+}: {
+  knowledge: ReviewKnowledgePane;
+  layout: DiffLayout;
+}) {
+  const { before_statement: before, after_statement: after } = knowledge;
+  const present = before.state === 'present' ? before : after;
+  if (present.state !== 'present')
+    return <KnowledgeStatements before={before} after={after} mode={layout} />;
+  return (
+    <p className={prose} data-testid="review-center-statement-prose">
+      {present.text}
+    </p>
+  );
 }
 
 export function SelectedStatement({
   knowledge,
   subject,
   layout,
+  members = [],
 }: {
   knowledge: ReviewKnowledgePane;
   subject: ReviewSubject;
   layout: DiffLayout;
+  members?: ReviewFamilyMember[];
 }) {
   const selection = selectedRevision(knowledge, subject);
   if (!selection)
@@ -67,25 +233,25 @@ export function SelectedStatement({
         claimed.
       </p>
     );
-  const state = statementState(selection);
-  const unresolved = state === 'ambiguous' || state === 'unresolved';
+  const sides = authoredSides(knowledge, selection, members);
+  const wording = wordingComparison(
+    sides.before,
+    sides.after,
+    selection.before_revision_id === selection.after_revision_id,
+  );
+  const state = statementState(selection, wording);
   return (
     <div data-testid={`review-center-member-${state}`} data-revision-state={selection.state}>
-      <p className={muted}>{statementLabel(selection)}</p>
-      {unresolved ? (
-        <p className={muted} data-testid="review-center-statement-unavailable">
-          Before: {knowledge.before_statement.state} · after: {knowledge.after_statement.state}. No
-          statement diff is available.
-        </p>
-      ) : state === 'unchanged' && knowledge.before_statement.state === 'present' ? (
-        <p className={prose}>{knowledge.before_statement.text}</p>
-      ) : (
-        <KnowledgeStatements
-          before={knowledge.before_statement}
-          after={knowledge.after_statement}
-          mode={layout}
-        />
-      )}
+      <p className={muted} data-testid="review-center-statement-label">
+        {statementLabel(selection, wording, revisionMeta(...sides.labels))}
+      </p>
+      <StatementBody
+        knowledge={knowledge}
+        state={state}
+        wording={wording}
+        sides={sides}
+        layout={layout}
+      />
       {selection.state === 'ambiguous' ? (
         <p className={muted}>
           Retained revisions remain available as context. Manual revision pairing is not available

@@ -19,12 +19,14 @@ from unittest import mock
 
 import apsw
 import pytest
-from agents_remember.application import review_tree_comparison
+from agents_remember.application import review_tree_comparison, review_tree_entries
+from agents_remember.application.knowledge_currentness import CodeTree
+from agents_remember.application.knowledge_currentness.observe import OpenedCodeTree
 from agents_remember.application.knowledge_review import (
     compose_review,
     list_knowledge_review_entries,
 )
-from agents_remember.application.knowledge_worklist.code import CodeTrees
+from agents_remember.application.knowledge_worklist.code import CodeReadError, CodeTrees
 from agents_remember.application.review_artifact_cleanup import (
     cleanup_review_artifacts,
 )
@@ -36,11 +38,18 @@ from agents_remember.application.review_comparison_freeze import (
     ComparisonGenerationRequest,
     freeze_comparison_generation,
 )
+from agents_remember.application.review_source_content import read_review_source_content
 from agents_remember.application.review_tree_knowledge import read_review_trees
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
+from agents_remember.memory.knowledge.read_anchor_memo import BoundedMemo
 from agents_remember.memory.knowledge_index import text_uuid
 from agents_remember.models.knowledge.read import InvariantIdentitySeed
 from agents_remember.models.knowledge.review import ReviewRefusal, ReviewSurfaceRequest
+from agents_remember.models.knowledge.review_source_content import ReviewSourceContentRequest
+from agents_remember.models.knowledge.review_tree_entries import (
+    EXCERPT_MAX_LINES,
+    ReviewTreeEntry,
+)
 from agents_remember.models.knowledge_files import canonical_text
 from agents_remember.serving.review_trees import ReviewTreesQuery, register_review_trees_route
 from agents_remember.worktrees.services import (
@@ -465,11 +474,12 @@ def test_the_tree_view_shows_the_knowledge_diff_currentness_per_side_and_the_wor
     # Currentness per side, each against its own code tree: the body edit makes the after side stale.
     assert view.currentness is not None
     before, after = view.currentness["before"], view.currentness["after"]
-    assert before["codeTree"]["treeId"] == view.comparison.code_base.tree
+    # Every key is snake_case on the wire (MIK-L25 review F9), including the owners' own documents.
+    assert before["code_tree"]["tree_id"] == view.comparison.code_base.tree
     assert {one["id"]: one["state"] for one in before["invariants"]} == {INVARIANT: "current"}
     assert {one["id"]: one["state"] for one in after["invariants"]} == {INVARIANT: "stale"}
     assert after["families"] == [
-        {"id": FAMILY, "members": 1, "staleMembers": 1, "stale": [INVARIANT]}
+        {"id": FAMILY, "members": 1, "stale_members": 1, "stale": [INVARIANT]}
     ]
     # The worklist view: the items, the history rows about their subjects, the gate linkage.
     worklist = view.worklist
@@ -480,6 +490,8 @@ def test_the_tree_view_shows_the_knowledge_diff_currentness_per_side_and_the_wor
         (FAMILY, "no_impact")
     ]
     assert "current" not in worklist.history_rows[0] and "stale" not in worklist.history_rows[0]
+    assert worklist.history_rows[0]["owner_kind"] == "leaf"
+    assert view.entries == ()  # the cards' entries are read per selection, never leaf-wide
     change = next(one for one in worklist.changes if one["path"] == CODE_FILE)
     assert [hunk["linked"] for hunk in change["hunks"]] == [True]
     # A sidecar change is grouped by its source path and under the record its entry realizes.
@@ -734,6 +746,26 @@ def test_the_tree_view_route_serves_the_port_and_refuses_when_unwired(world: Wor
         params={"repo": REPO, "master": MASTER, "leaf": LEAF, "comparison": 1},
     )
     assert numbered.json()["comparison"]["number"] == 1 and seen[-1].number == 1
+    # Pinned to comparison 1, which is the live leaf's current one: its worklist stays computed.
+    assert numbered.json()["worklist"]["source"] == "computed"
+    cards = client.get(
+        "/api/review/trees",
+        params={"repo": REPO, "master": MASTER, "leaf": LEAF, "invariants": "a,b"},
+    )
+    assert cards.status_code == 200 and seen[-1].invariants == ("a", "b")
+    too_long = client.get(
+        "/api/review/trees",
+        params={"repo": REPO, "master": MASTER, "leaf": LEAF, "invariants": "k" * 65},
+    )
+    assert too_long.status_code == 400 and "65" not in too_long.json()["detail"]
+    too_many = ",".join(str(number) for number in range(501))
+    assert (
+        client.get(
+            "/api/review/trees",
+            params={"repo": REPO, "master": MASTER, "leaf": LEAF, "invariants": too_many},
+        ).status_code
+        == 400
+    )
     unwired = FastAPI()
     register_review_trees_route(unwired, None)
     assert (
@@ -742,6 +774,246 @@ def test_the_tree_view_route_serves_the_port_and_refuses_when_unwired(world: Wor
         .status_code
         == 503
     )
+
+
+def _with_proof_and_unresolved(world: World) -> str:
+    """K_C's sidecar: ``keep`` retired (RLZ-A00002), a proof added, a realization of a gone name."""
+
+    sidecar = json.loads(_without_keep(world))
+    anchor = dict(sidecar["realizes"][0]["anchor"])
+    sidecar["proves"] = [
+        {
+            "id": "PRF-A00003",
+            "invariant": INVARIANT,
+            "anchor": {**anchor, "locator": {"kind": "symbol", "name": "keep"}},
+            "facet": "keep answers one.",
+        }
+    ]
+    sidecar["realizes"].append(
+        {
+            **sidecar["realizes"][0],
+            "id": "RLZ-A00004",
+            "anchor": {**anchor, "locator": {"kind": "symbol", "name": "gone"}},
+        }
+    )
+    return canonical_text(sidecar)
+
+
+def test_the_cards_read_locates_each_entry_of_the_named_invariants_on_both_code_sides(
+    world: World,
+) -> None:
+    world.edit()
+    _write(
+        world.memory_worktree, {f"onboarding/{CODE_FILE}.json": _with_proof_and_unresolved(world)}
+    )
+    key = text_uuid("identity", INVARIANT)
+    view = read_review_trees(world.config, _query(invariants=(key,)))
+    assert view.state == "trees" and view.knowledge_diff is None and view.worklist is None
+    entries = {entry.id: entry for entry in view.entries}
+    assert list(entries) == ["PRF-A00003", "RLZ-A00001", "RLZ-A00002", "RLZ-A00004"]
+    assert {entry.invariant_key for entry in view.entries} == {key}
+    _changed_range(entries["RLZ-A00001"])
+    _retired_entry(entries["RLZ-A00002"])
+    _proof_entry(entries["PRF-A00003"])
+    _unresolved_entry(entries["RLZ-A00004"])
+    # An identity no memory tree holds contributes nothing.
+    assert read_review_trees(world.config, _query(invariants=("no-such-key",))).entries == ()
+
+
+def _changed_range(land: ReviewTreeEntry) -> None:
+    """The edited body: one changed range, each side's excerpt from its own blob and R03 state."""
+
+    assert land.change == "changed"
+    assert (land.after.role, land.after.rationale) == ("primary-authority", "It is the rule.")
+    assert (land.before.start_line, land.before.end_line) == (1, 2)
+    assert (land.after.start_line, land.after.end_line) == (1, 2)
+    assert land.before.excerpt == "def land(value):\n    return value\n"
+    assert land.after.excerpt == "def land(value):\n    return value + 0\n"
+    assert (land.before.currentness, land.after.currentness) == ("current", "stale")
+
+
+def _retired_entry(keep: ReviewTreeEntry) -> None:
+    """Retired in K_C: still located on both sides, its excerpt carried once, named unrecorded."""
+
+    assert keep.change == "unchanged"
+    assert (keep.before.recorded, keep.after.recorded) == (True, False)
+    assert keep.before.excerpt is None
+    assert keep.after.excerpt == "def keep():\n    return 1\n"
+    assert (keep.after.currentness, keep.after.rationale) == (None, None)
+
+
+def _proof_entry(proof: ReviewTreeEntry) -> None:
+    """A proof carries its facet and no role or rationale; added in K_C, it is unrecorded at B."""
+
+    assert (proof.kind, proof.after.facet) == ("proof", "keep answers one.")
+    assert (proof.after.role, proof.before.recorded) == (None, False)
+
+
+def _unresolved_entry(gone: ReviewTreeEntry) -> None:
+    """A locator that resolves nowhere is unresolved, with the reason and no range."""
+
+    assert (gone.change, gone.after.state, gone.after.start_line) == (
+        "undetermined",
+        "unresolved",
+        None,
+    )
+    assert "does not resolve" in (gone.after.reason or "")
+
+
+def test_the_cards_read_names_an_unreadable_side_unavailable_and_a_missing_file_absent(
+    world: World,
+) -> None:
+    world.edit()
+    (world.code_worktree / CODE_FILE).unlink()
+    keys = (text_uuid("identity", INVARIANT),)
+    land = next(e for e in read_review_trees(world.config, _query(invariants=keys)).entries)
+    assert (land.before.state, land.after.state, land.change) == ("resolved", "absent", "changed")
+    record = read_review_trees(world.config, _query(invariants=keys)).comparison
+    assert record is not None
+    real_open = review_tree_entries.open_code_tree
+
+    def unreadable_candidate(tree: CodeTree | None) -> OpenedCodeTree:
+        if tree is not None and tree.tree == record.code_candidate.tree:
+            return OpenedCodeTree(tree=tree, trees=None, files={}, problem="the tree is gone")
+        return real_open(tree)
+
+    with mock.patch.object(review_tree_entries, "open_code_tree", unreadable_candidate):
+        land = next(e for e in read_review_trees(world.config, _query(invariants=keys)).entries)
+    assert (land.after.state, land.after.reason) == ("unavailable", "the tree is gone")
+    assert land.change == "undetermined" and land.after.excerpt is None
+
+
+def test_history_rows_are_found_by_the_row_subject_an_item_names(world: World) -> None:
+    world.edit()
+    item = {"kind": "unexplained_hunk", "subject": "hunk:x", "facts": {"row": FAMILY}}
+    document = {"items": [item], "changes": [], "incomplete": [], "state": "open"}
+    with mock.patch(
+        "agents_remember.application.review_tree_knowledge.leaf_worklist", return_value=document
+    ):
+        worklist = read_review_trees(world.config, _query()).worklist
+    assert worklist is not None
+    assert [(row["subject"], row["owner_kind"]) for row in worklist.history_rows] == [
+        (FAMILY, "leaf")
+    ]
+
+
+def test_an_excerpt_longer_than_its_bound_is_a_stated_prefix() -> None:
+    """MIK-R31 review F3: a range longer than the excerpt bound is carried as a prefix, marked."""
+
+    blob = "a" * 40
+    long_text = "".join(f"line {number}\n" for number in range(1, 501)).encode()
+    trees = mock.Mock()
+    trees.objects.blob.return_value = long_text
+    bounded = review_tree_entries._excerpt(trees, blob, 1, 500)
+    assert bounded["excerpt_truncated"] is True
+    assert bounded["excerpt"].splitlines() == [f"line {n}" for n in range(1, EXCERPT_MAX_LINES + 1)]
+    assert review_tree_entries._excerpt(trees, blob, 3, 4) == {
+        "excerpt": "line 3\nline 4\n",
+        "excerpt_truncated": False,
+    }
+
+
+def test_the_placement_cache_remembers_answers_only_and_stays_within_its_bound() -> None:
+    """MIK-R31 review F3: a placement answer is remembered, a failed read is asked again, and the
+    table never holds more than its bound."""
+
+    blob = "a" * 40
+    trees = mock.Mock()
+    locator = {"kind": "symbol", "name": "land"}
+    trees.resolve.side_effect = [None, CodeReadError("gone"), None]
+    fresh = BoundedMemo(3)
+    with mock.patch.object(review_tree_entries, "PLACEMENTS", fresh):
+        assert review_tree_entries._resolve(trees, "a.py", locator, blob, "b" * 40) is None
+        assert review_tree_entries._resolve(trees, "a.py", locator, blob, "b" * 40) is None
+        assert trees.resolve.call_count == 1  # the answer "does not resolve" was remembered
+        with pytest.raises(CodeReadError):
+            review_tree_entries._resolve(trees, "a.py", locator, blob, "c" * 40)
+        assert review_tree_entries._resolve(trees, "a.py", locator, blob, "c" * 40) is None
+        assert trees.resolve.call_count == 3  # a failed read was asked again
+        for number in range(5):
+            fresh.put(("k", str(number), "", "", ""), None)
+        assert fresh.get(("k", "0", "", "", "")) is None and fresh.get(("k", "4", "", "", ""))
+    assert review_tree_entries.PLACEMENTS._capacity == 8_192
+
+
+def _inventory(world: World) -> Any:
+    payload = compose_review(_resolve(world), world.review()).payload
+    assert payload is not None
+    return payload.source.inventory
+
+
+def _named(tree: str | None) -> str:
+    assert tree is not None
+    return tree
+
+
+def test_an_unchanged_path_only_a_proof_names_opens_in_a_tree_review(world: World) -> None:
+    """MIK-R31 rule 5 / ruling Q1 at the route: a tree comparison admits an unchanged test file its
+    K_C proof entry is anchored at, and says why; with no such proof it is refused."""
+
+    test_file = "tests/test_land.py"
+    world.code_base = commit(world.code, {test_file: "def test_land():\n    assert True\n"})
+    git(world.code_worktree, "merge", "-q", "--ff-only", "main")
+    world.memory_base = commit(world.memory, {}, trailer=world.code_base)
+    world.contract()
+    world.edit()
+    tree = git(world.code, "rev-parse", f"{world.code_base}^{{tree}}")
+    blob = CodeTrees.open(world.code, tree, tree).base()[test_file]
+    content = CodeTrees.open(world.code, tree, tree).resolve(
+        test_file, {"kind": "symbol", "name": "test_land"}, blob, blob
+    )
+    assert content is not None
+    inventory = _inventory(world)
+
+    def expand() -> Any:
+        return read_review_source_content(
+            world.config,
+            ReviewSourceContentRequest(
+                repository_id=REPO,
+                master=MASTER,
+                leaf_id=LEAF,
+                path=test_file,
+                before_code_tree_id=_named(inventory.before_code_tree_id),
+                after_code_tree_id=_named(inventory.after_code_tree_id),
+            ),
+        )
+
+    refused = expand()
+    assert refused.state == "refused" and refused.refusal is not None
+    _write(
+        world.memory_worktree,
+        {
+            f"onboarding/{test_file}.md": "# t\n",
+            f"onboarding/{test_file}.json": canonical_text(
+                {
+                    "schema": "ar-onboarding-file/v1",
+                    "path": test_file,
+                    "references": {},
+                    "realizes": [],
+                    "proves": [
+                        {
+                            "id": "PRF-A00009",
+                            "invariant": INVARIANT,
+                            "anchor": {
+                                "locator": {"kind": "symbol", "name": "test_land"},
+                                "blob": blob,
+                                "content": content.content,
+                            },
+                            "facet": "Values land.",
+                        }
+                    ],
+                }
+            ),
+        },
+    )
+    inventory = _inventory(world)
+    opened = expand()
+    assert opened.state == "content" and opened.expansion is not None
+    assert opened.expansion.admission == "attributed_unchanged"
+    assert opened.expansion.admission_detail.startswith(
+        "a realization or proof recorded for the path in the comparison's after knowledge"
+    )
+    assert "the after snapshot records a proof here" in opened.expansion.admission_detail
 
 
 @pytest.fixture(autouse=True)

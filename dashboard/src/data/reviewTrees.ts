@@ -12,7 +12,12 @@
 //   * the Git diff of the two memory trees, grouped by record and by source path;
 //   * each invariant's MIK-R03 currentness per side, against that side's own code tree;
 //   * the MIK-R08 worklist view: items, the history rows about their subjects (no current/stale mark
-//     until MIK-R09), and the gate linkage of every changed hunk.
+//     until MIK-R09), and the gate linkage of every changed hunk;
+//   * every realization and proof entry located on both code sides (MIK-R31), for the focused
+//     expression cards (panels/review/focusedCards.ts).
+//
+// Every key is snake_case, the review surface's convention: the server re-keys the currentness and
+// worklist documents its owners spell in camelCase (MIK-L25 review F9), so no key here is camelCase.
 //
 // Three answers are kept apart: `trees`, `not-converted` (the leaf's review is the dataset review;
 // nothing here applies) and `refused` (the owner's refusal). A body that is none of these, and a
@@ -125,12 +130,12 @@ export interface ReviewInvariantCurrentness {
 }
 
 export interface ReviewSideCurrentness {
-  codeTree?: { repositoryRoot: string; treeId: string } | null;
+  code_tree?: { repository_root: string; tree_id: string } | null;
   counts?: Record<InvariantCurrentnessState, number>;
   invariants?: ReviewInvariantCurrentness[];
-  families?: { id: string; members: number; staleMembers: number; stale: string[] }[];
-  indexState?: 'complete' | 'partial';
-  unverifiableReason?: string;
+  families?: { id: string; members: number; stale_members: number; stale: string[] }[];
+  index_state?: 'complete' | 'partial';
+  unverifiable_reason?: string;
 }
 
 export interface ReviewWorklistHunk {
@@ -142,8 +147,30 @@ export interface ReviewWorklistChange {
   path: string;
   status: string;
   hunks?: ReviewWorklistHunk[];
-  fileLevel?: { linked: boolean };
+  file_level?: { linked: boolean };
   [fact: string]: unknown;
+}
+
+// One worklist item, verbatim from the worklist (re-keyed). `planning` is MIK-R11's mark on invariant
+// and family items; `satisfied_by` names the history row that answers it, when one does.
+export interface ReviewWorklistItem {
+  id: string;
+  kind: string;
+  subject: string;
+  planning?: 'planned' | 'unplanned';
+  satisfied_by?: unknown;
+  facts: Record<string, unknown>;
+}
+
+export interface ReviewWorklistHistoryRow {
+  id: string;
+  owner: string;
+  owner_kind?: string;
+  closed?: boolean;
+  path?: string;
+  subject: string;
+  disposition: string;
+  row: Record<string, unknown>;
 }
 
 export interface ReviewWorklistView {
@@ -151,16 +178,47 @@ export interface ReviewWorklistView {
   bound: boolean;
   state?: string;
   detail?: string;
-  items: { id: string; kind: string; subject: string; facts: Record<string, unknown> }[];
-  history_rows: {
-    id: string;
-    owner: string;
-    subject: string;
-    disposition: string;
-    row: Record<string, unknown>;
-  }[];
+  items: ReviewWorklistItem[];
+  history_rows: ReviewWorklistHistoryRow[];
   changes: ReviewWorklistChange[];
   incomplete: Record<string, unknown>[];
+}
+
+// One entry on one code side (models/knowledge/review_tree_entries.py). `recorded` is whether that
+// side's memory tree holds the entry (`undefined` when that tree could not be read); `state` is where
+// the locator landed: `resolved` (a range), `unresolved` (with the reason; no range is guessed),
+// `absent` (no file at the path) or `unavailable` (the side could not be read).
+export type ReviewEntryRangeState = 'resolved' | 'unresolved' | 'absent' | 'unavailable';
+
+export interface ReviewTreeEntrySide {
+  recorded?: boolean;
+  state: ReviewEntryRangeState;
+  path: string;
+  blob?: string;
+  start_line?: number;
+  end_line?: number;
+  content?: string;
+  // The resolved range's text from this side's exact blob, bounded; an unchanged entry carries it on
+  // the after side only (one content identity, one text).
+  excerpt?: string;
+  excerpt_truncated?: boolean;
+  reason?: string;
+  role?: string;
+  facet?: string;
+  rationale?: string;
+  currentness?: 'current' | 'stale' | 'unverifiable';
+  currentness_reason?: string;
+}
+
+export interface ReviewTreeEntry {
+  id: string;
+  kind: 'realization' | 'proof';
+  invariant: string;
+  // The invariant's identity as the landed review payload addresses it: the join key to a member.
+  invariant_key: string;
+  before: ReviewTreeEntrySide;
+  after: ReviewTreeEntrySide;
+  change: 'changed' | 'unchanged' | 'undetermined';
 }
 
 export interface ReviewTreesResult {
@@ -175,6 +233,7 @@ export interface ReviewTreesResult {
   knowledge_diff?: ReviewKnowledgeTreeDiff;
   currentness?: Partial<Record<'before' | 'after', ReviewSideCurrentness>>;
   worklist?: ReviewWorklistView;
+  entries?: ReviewTreeEntry[];
   refusal?: ReviewRefusal;
 }
 
@@ -183,6 +242,9 @@ export interface ReviewTreesResult {
 export interface ReviewTreesAddress {
   comparison?: number;
   recorded?: boolean;
+  // Naming invariants asks for their entries only (MIK-R31's cards), by the identities the landed
+  // review payload addresses them with.
+  invariants?: string[];
 }
 
 export const reviewTrees = (
@@ -195,6 +257,7 @@ export const reviewTrees = (
   const params: Record<string, string> = { repo, master, leaf };
   if (address.comparison !== undefined) params.comparison = String(address.comparison);
   if (address.recorded) params.history = 'recorded';
+  if (address.invariants?.length) params.invariants = address.invariants.join(',');
   return getReviewJson<ReviewTreesResult>(`${base}/api/review/trees?${qs(params)}`);
 };
 
@@ -247,6 +310,47 @@ export function unexplainedHunks(
   );
 }
 
+// The recorded tree comparison a landed review payload was composed over: the server declares it as
+// the limitation token `review:trees:<n>`. A payload without it is a dataset review, for which no
+// tree read is made at all, so an unconverted review behaves exactly as before.
+export function treeComparisonNumber(limitations: string[]): number | undefined {
+  for (const token of limitations) {
+    const match = /^review:trees:(\d+)$/.exec(token);
+    if (match) return Number(match[1]);
+  }
+  return undefined;
+}
+
+// The entries of one selection's invariants, from the comparison the review payload names. The
+// answer is kept with the question it answers, so a superseded selection never draws its cards.
+export function useReviewTreeEntries(
+  repo: string,
+  master: string,
+  leaf: string,
+  comparison: number | undefined,
+  invariants: string[],
+): ReviewTreesRead | null {
+  const wanted = invariants.join(',');
+  const key = `${repo}/${master}/${leaf}/${comparison ?? ''}/${wanted}`;
+  const [read, setRead] = useState<{ key: string; read: ReviewTreesRead } | null>(null);
+  useEffect(() => {
+    if (comparison === undefined || !wanted) return undefined;
+    let mounted = true;
+    const apply = (next: ReviewTreesRead) => {
+      if (mounted) setRead({ key, read: next });
+    };
+    void reviewTrees(repo, master, leaf, { comparison, invariants: wanted.split(',') }).then(
+      (result) => apply(reviewTreesRead(result)),
+      (cause: unknown) => apply({ phase: 'unavailable', problem: reviewProblemFromCause(cause) }),
+    );
+    return () => {
+      mounted = false;
+    };
+  }, [repo, master, leaf, comparison, wanted, key]);
+  if (comparison === undefined || !wanted) return null;
+  return read?.key === key ? read.read : { phase: 'loading' };
+}
+
 // The tree view read for one task context. A superseded answer (the props moved while it was in
 // flight) is dropped by sequence number, so it cannot land on the leaf shown now.
 export function useReviewTrees(
@@ -254,12 +358,14 @@ export function useReviewTrees(
   master: string,
   leaf: string,
   address: ReviewTreesAddress = {},
-): ReviewTreesRead {
+  enabled = true,
+): ReviewTreesRead | null {
   const { comparison, recorded } = address;
   const key = `${repo}/${master}/${leaf}/${comparison ?? ''}/${recorded ? 'recorded' : ''}`;
   const [read, setRead] = useState<{ key: string; read: ReviewTreesRead } | null>(null);
   const reads = useRef(0);
   useEffect(() => {
+    if (!enabled) return undefined;
     const seq = ++reads.current;
     let mounted = true;
     const apply = (next: ReviewTreesRead) => {
@@ -272,6 +378,7 @@ export function useReviewTrees(
     return () => {
       mounted = false;
     };
-  }, [repo, master, leaf, comparison, recorded, key]);
+  }, [repo, master, leaf, comparison, recorded, key, enabled]);
+  if (!enabled) return null;
   return read?.key === key ? read.read : { phase: 'loading' };
 }

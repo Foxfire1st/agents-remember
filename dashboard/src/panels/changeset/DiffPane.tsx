@@ -8,10 +8,11 @@
 import { useEffect, useRef } from "react";
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { EditorState, type Extension } from "@codemirror/state";
-import { EditorView, lineNumbers } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 
 import { css } from "../../../styled-system/css";
 import { codeTheme } from "../file-viewer/codemirrorTheme";
+import { numberedFrom } from "../file-viewer/lineNumbering";
 import { langExtension } from "../file-viewer/langByExtension";
 
 const host = css({
@@ -43,6 +44,20 @@ const host = css({
   },
 });
 
+// A focused excerpt (the reviewer's expression cards) sizes to its content instead of filling a
+// fixed-height parent: the editors grow to their lines and the card, not the pane, scrolls.
+const fitHost = css({
+  minHeight: "0",
+  "& > .cm-editor": { height: "auto" },
+  "& .cm-mergeView": { height: "auto", maxHeight: "32rem" },
+  "& .cm-changedText": {
+    background: "linear-gradient(#255a25aa, #255a25aa) bottom / 100% 16px no-repeat !important",
+  },
+  "& .cm-merge-a .cm-changedText": {
+    background: "linear-gradient(#5a2525aa, #5a2525aa) bottom / 100% 16px no-repeat !important",
+  },
+});
+
 export type DiffMode = "split" | "inline";
 
 export function DiffPane({
@@ -51,6 +66,8 @@ export function DiffPane({
   language,
   mode,
   collapse = true,
+  firstLine,
+  fit = false,
 }: {
   before: string;
   after: string;
@@ -58,7 +75,12 @@ export function DiffPane({
   mode: DiffMode;
   // change-set view collapses unchanged regions; full-file (highlighted) view shows everything.
   collapse?: boolean;
+  // Where each side's document starts in its file (an excerpt); absent = line 1 on both sides.
+  firstLine?: { before: number; after: number };
+  fit?: boolean;
 }) {
+  const beforeFirst = firstLine?.before ?? 1;
+  const afterFirst = firstLine?.after ?? 1;
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -70,19 +92,19 @@ export function DiffPane({
     // Language packs are async (code-split); guard against a late resolve after teardown.
     void langExtension(language).then((lang) => {
       if (disposed || !parent) return;
-      const base: Extension[] = [
-        lineNumbers(),
+      const common: Extension[] = [
         EditorState.readOnly.of(true),
         EditorView.editable.of(false),
         EditorView.lineWrapping,
         codeTheme,
       ];
-      if (lang) base.push(lang);
+      if (lang) common.push(lang);
+      const base = [numberedFrom(afterFirst), ...common];
 
       const collapseUnchanged = collapse ? { margin: 3 } : undefined;
       if (mode === "split") {
         view = new MergeView({
-          a: { doc: before, extensions: base },
+          a: { doc: before, extensions: [numberedFrom(beforeFirst), ...common] },
           b: { doc: after, extensions: base },
           parent,
           gutter: true,
@@ -112,7 +134,7 @@ export function DiffPane({
       disposed = true;
       view?.destroy();
     };
-  }, [before, after, language, mode, collapse]);
+  }, [before, after, language, mode, collapse, beforeFirst, afterFirst]);
 
-  return <div ref={ref} className={host} data-testid="diff-pane" />;
+  return <div ref={ref} className={fit ? fitHost : host} data-testid="diff-pane" />;
 }

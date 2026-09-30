@@ -18,6 +18,16 @@ import {
   type FamilyExcerptOccurrence,
 } from './familyExpressions';
 import { FAMILY_SIDES, guaranteeComparison } from '../../data/review';
+import {
+  treeComparisonNumber,
+  useReviewTreeEntries,
+  type ReviewTreesRead,
+} from '../../data/reviewTrees';
+import { ExpressionCards } from './ExpressionCards';
+import { LeafKnowledgeChanges } from './LeafKnowledgeChanges';
+import { revisionMeta } from './statementWording';
+import { planningMarks } from './worklistGroups';
+import { cardScope } from './focusedCards';
 import { DiffPane } from '../changeset/DiffPane';
 import type { DiffLayout } from './SourceExplorer';
 import { ReviewExpressions } from './ReviewExpressions';
@@ -122,7 +132,8 @@ function GuaranteeComparisonBlock({
     return (
       <div data-testid="review-center-guarantee-one-sided" data-side={comparison.side}>
         <p className={muted}>
-          Guarantee recorded on {comparison.side} only · no {other} revision
+          {comparison.side === 'after' ? 'Added guarantee' : 'Removed guarantee'} · recorded on{' '}
+          {comparison.side} only · no {other} revision
         </p>
         <GuaranteeBlock guarantee={comparison.guarantee} side={comparison.side} />
       </div>
@@ -137,13 +148,21 @@ function GuaranteeComparisonBlock({
     );
   }
   if (comparison.kind === 'identical_text') {
+    // MIK-R31 rule 3: the guarantee is the family's one authored text field, so identical text is
+    // "wording unchanged", shown once, with the revisions as compact metadata and the IDs in details.
+    const { before, after } = comparison;
     return (
       <div data-testid="review-center-guarantee-identical-text">
-        <p className={muted}>Guarantee wording unchanged · two recorded revisions</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-          <GuaranteeBlock guarantee={comparison.before} side="before" />
-          <GuaranteeBlock guarantee={comparison.after} side="after" />
-        </div>
+        <p className={muted}>
+          Wording unchanged · {revisionMeta(...guaranteeRevisionLabels(before, after))}
+        </p>
+        <GuaranteeBlock guarantee={after} />
+        <details>
+          <summary>Revision records</summary>
+          <p className={muted}>
+            before revision {before.revision_id} · after revision {after.revision_id}
+          </p>
+        </details>
       </div>
     );
   }
@@ -166,6 +185,17 @@ function GuaranteeComparisonBlock({
       </p>
     </div>
   );
+}
+
+// The compact revision labels: the display versions, or the revisions' own short identities when
+// the two display versions read alike (two authored revisions must never read as one).
+function guaranteeRevisionLabels(
+  before: ReviewFamilyGuarantee,
+  after: ReviewFamilyGuarantee,
+): [string, string] {
+  return before.display_version === after.display_version
+    ? [before.revision_id.slice(0, 8), after.revision_id.slice(0, 8)]
+    : [before.display_version, after.display_version];
 }
 
 function MemberIdentity({ member }: { member: ReviewFamilyMember }) {
@@ -308,7 +338,13 @@ function AttributedPaths({
   );
 }
 
-function UnselectedCenter({ payload }: { payload: ReviewPayload }) {
+function UnselectedCenter({
+  payload,
+  knowledge,
+}: {
+  payload: ReviewPayload;
+  knowledge: React.ReactNode;
+}) {
   const selected = payload.knowledge.selection_state === 'subject_selected';
   const noFamily = payload.family_context?.state === 'no_family_recorded';
   return (
@@ -326,6 +362,7 @@ function UnselectedCenter({ payload }: { payload: ReviewPayload }) {
           Source-only view. Inspect the changed files below; no intent attribution is claimed.
         </p>
       )}
+      {knowledge}
     </section>
   );
 }
@@ -602,10 +639,12 @@ function FamilyCenter({
   onOpenPath,
   onRosterNext,
   expressions,
+  knowledge,
   payload,
 }: {
   entry: ReviewFamilyContextEntry;
   expressions: React.ReactNode;
+  knowledge: React.ReactNode;
   payload: ReviewPayload;
   layout: DiffLayout;
   listed: Set<string>;
@@ -653,6 +692,7 @@ function FamilyCenter({
         />
       </details>
       <FamilyEvidence entry={entry} payload={payload} />
+      {knowledge}
     </section>
   );
 }
@@ -717,6 +757,7 @@ function MemberCenter({
   onOpenPath,
   onRosterNext,
   expressions,
+  knowledge,
   subject,
 }: {
   entry?: ReviewFamilyContextEntry;
@@ -726,6 +767,7 @@ function MemberCenter({
   listed: Set<string>;
   subject: ReviewSubject;
   expressions: React.ReactNode;
+  knowledge: React.ReactNode;
   onOpenPath: (path: string) => void;
   onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
 }) {
@@ -745,7 +787,12 @@ function MemberCenter({
       {entry ? <GuaranteeComparisonBlock entry={entry} layout={layout} /> : null}
       <div className={card}>
         <h3 className={sectionLabel}>Selected intent</h3>
-        <SelectedStatement knowledge={payload.knowledge} subject={subject} layout={layout} />
+        <SelectedStatement
+          knowledge={payload.knowledge}
+          subject={subject}
+          layout={layout}
+          members={subjectRows(entry, subject)}
+        />
       </div>
       {expressions}
       <details>
@@ -769,11 +816,23 @@ function MemberCenter({
       <div className={card}>
         <SubjectEvidence payload={payload} subject={subject} />
       </div>
+      {knowledge}
       {entry ? (
         <RosterNext entry={entry} onRosterNext={onRosterNext} testid="review-center-roster-next" />
       ) : null}
     </section>
   );
+}
+
+function subjectRows(
+  entry: ReviewFamilyContextEntry | undefined,
+  subject: ReviewSubject,
+): ReviewFamilyMember[] {
+  return entry
+    ? [...entry.before.members, ...entry.after.members].filter(
+        (row) => row.invariant_id === subject.id,
+      )
+    : [];
 }
 
 function UnavailableMember({
@@ -814,22 +873,13 @@ interface FamilyReviewCenterProps {
   openPath: string | null | undefined;
   onOpenPath: (path: string | null) => void;
   onOpenFromCenter: (path: string) => void;
+  // The leaf's tree view (MIK-R25), read once per task context by the workspace; `null` for a
+  // dataset review, which renders exactly as before.
+  leafTrees?: ReviewTreesRead | null;
 }
 
-export function FamilyReviewCenter({
-  payload,
-  subject,
-  selection,
-  layout,
-  onLayout,
-  fullFile,
-  onFullFile,
-  onOpenMember,
-  onRosterNext,
-  openPath,
-  onOpenPath,
-  onOpenFromCenter,
-}: FamilyReviewCenterProps) {
+export function FamilyReviewCenter(props: FamilyReviewCenterProps) {
+  const { payload, subject, selection, layout, onRosterNext, onOpenMember } = props;
   const { entry, member, members, listed, linksIncomplete } = centerSelection(
     payload,
     selection,
@@ -838,27 +888,22 @@ export function FamilyReviewCenter({
   const addressedSubject = member && !member.invariant_id ? undefined : subject;
   const invariant = addressedSubject?.kind === 'invariant';
   const expressions = (
-    <ReviewExpressions
-      payload={payload}
+    <CenterExpressions
+      {...props}
+      entry={entry}
       members={members}
       subject={addressedSubject}
       linksIncomplete={linksIncomplete}
-      layout={layout}
-      onLayout={onLayout}
-      fullFile={fullFile}
-      onFullFile={onFullFile}
-      openPath={openPath}
-      onOpenPath={onOpenPath}
     />
   );
-
   const common = {
     payload,
     layout,
     listed,
-    onOpenPath: onOpenFromCenter,
+    onOpenPath: props.onOpenFromCenter,
     onRosterNext,
     expressions,
+    knowledge: knowledgePanel(props.leafTrees, payload),
   };
 
   return (
@@ -872,7 +917,10 @@ export function FamilyReviewCenter({
         <MemberCenter {...common} entry={entry} member={member} subject={addressedSubject} />
       ) : entry === undefined ? (
         <>
-          <UnselectedCenter payload={payload} />
+          <UnselectedCenter
+            payload={payload}
+            knowledge={knowledgePanel(props.leafTrees, payload, true)}
+          />
           {expressions}
         </>
       ) : member ? (
@@ -895,6 +943,103 @@ export function FamilyReviewCenter({
       )}
     </div>
   );
+}
+
+// The worklist the cards' planning marks come from, only when the leaf-wide read answered for the
+// very comparison this payload was composed over (review F11); otherwise the cards carry no mark.
+function pinnedWorklist(leafTrees: ReviewTreesRead | null | undefined, payload: ReviewPayload) {
+  if (leafTrees?.phase !== 'trees') return undefined;
+  const same = leafTrees.trees.comparison?.number === treeComparisonNumber(payload.limitations);
+  return same ? leafTrees.trees.worklist : undefined;
+}
+
+function knowledgePanel(
+  leafTrees: ReviewTreesRead | null | undefined,
+  payload: ReviewPayload,
+  open = false,
+): React.ReactNode {
+  if (leafTrees?.phase !== 'trees') return null;
+  return (
+    <LeafKnowledgeChanges
+      trees={leafTrees.trees}
+      reviewComparison={treeComparisonNumber(payload.limitations)}
+      open={open}
+    />
+  );
+}
+
+// The code and test expressions of the selection: focused cards for a tree comparison (MIK-R31),
+// the landed file view for a dataset review, which never asks for cards.
+function CenterExpressions({
+  payload,
+  entry,
+  members,
+  subject,
+  linksIncomplete,
+  layout,
+  onLayout,
+  fullFile,
+  onFullFile,
+  openPath,
+  onOpenPath,
+  onOpenFromCenter,
+  leafTrees = null,
+}: FamilyReviewCenterProps & {
+  entry?: ReviewFamilyContextEntry;
+  members?: ReviewFamilyMember[];
+  linksIncomplete: boolean;
+}) {
+  const cardRead = useReviewTreeEntries(
+    payload.candidate.repository_id,
+    payload.candidate.master,
+    payload.candidate.leaf_id,
+    treeComparisonNumber(payload.limitations),
+    cardInvariants(entry, subject),
+  );
+  if (cardRead === null)
+    return (
+      <ReviewExpressions
+        payload={payload}
+        members={members}
+        subject={subject}
+        linksIncomplete={linksIncomplete}
+        layout={layout}
+        onLayout={onLayout}
+        fullFile={fullFile}
+        onFullFile={onFullFile}
+        openPath={openPath}
+        onOpenPath={onOpenPath}
+      />
+    );
+  return (
+    <ExpressionCards
+      payload={payload}
+      read={cardRead}
+      seed={subject?.kind === 'invariant' ? subject.id : undefined}
+      planning={planningMarks(pinnedWorklist(leafTrees, payload))}
+      scope={cardScope(entry)}
+      layout={layout}
+      onLayout={onLayout}
+      fullFile={fullFile}
+      onFullFile={onFullFile}
+      openPath={openPath}
+      onOpenPath={(path) => (path === null ? onOpenPath(null) : onOpenFromCenter(path))}
+    />
+  );
+}
+
+// The invariants whose entries make the cards: every member of the selected family (both sides),
+// or the selected invariant alone when it has no family on this page. Sorted, so one selection is
+// one read.
+function cardInvariants(
+  entry: ReviewFamilyContextEntry | undefined,
+  subject: ReviewSubject | undefined,
+): string[] {
+  const keys = new Set<string>();
+  for (const row of entry ? [...entry.before.members, ...entry.after.members] : [])
+    if (row.invariant_id) keys.add(row.invariant_id);
+  if (subject?.kind === 'invariant') keys.add(subject.id);
+  return [...keys].sort();
 }
 
 function centerSelection(

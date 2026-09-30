@@ -100,7 +100,7 @@ export function ReviewExpressions({
   );
 }
 
-function ExpressionControls({
+export function ExpressionControls({
   layout,
   onLayout,
   fullFile,

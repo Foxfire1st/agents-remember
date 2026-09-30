@@ -10,6 +10,7 @@ import { css } from '../../../styled-system/css';
 import type { ReviewFamilyContext, ReviewPayload, ReviewSelectorKind } from '../../data/review';
 import { selectedRevision } from './SubjectReview';
 import { carriedPage } from '../../data/review';
+import { treeComparisonNumber, useReviewTrees } from '../../data/reviewTrees';
 import type { ReviewPageRequest } from './ReviewReadCycle';
 import { FamilyReviewCenter } from './FamilyReviewCenter';
 import { FamilyTree, type FamilySelection } from './FamilyTree';
@@ -263,6 +264,7 @@ export function ReviewWorkspace({
       />
       <WorkspaceCenter
         payload={payload}
+        task={{ repo, master, leaf, history }}
         reading={reading}
         state={state}
         subject={navigation?.subject}
@@ -278,6 +280,7 @@ export function ReviewWorkspace({
 // swapped, between the unanswered subject's status and the answered subject's reading.
 function WorkspaceCenter({
   payload,
+  task,
   reading,
   state,
   subject,
@@ -286,6 +289,7 @@ function WorkspaceCenter({
   rosterNext,
 }: {
   payload: ReviewPayload;
+  task: { repo: string; master: string; leaf: string; history?: 'recorded' };
   reading: ReadingStatus | null;
   state: WorkspaceState;
   subject?: ReviewNavigationState['subject'];
@@ -293,6 +297,18 @@ function WorkspaceCenter({
   onOpenMember: (familyId: string, memberRevisionId: string) => void;
   rosterNext: (family: string, side: string, continuation: string) => void;
 }) {
+  // The leaf's tree view (MIK-R25), read once per comparison and only for a tree comparison: a
+  // dataset review's payload declares no `review:trees:<n>`, so it makes no tree read.
+  // The read is pinned to the comparison the payload names (review F11), so the knowledge panel and
+  // the cards' planning marks describe the same four trees as the review on screen.
+  const comparison = treeComparisonNumber(payload.limitations);
+  const leafTrees = useReviewTrees(
+    task.repo,
+    task.master,
+    task.leaf,
+    { comparison },
+    comparison !== undefined,
+  );
   return (
     <div
       ref={state.center}
@@ -317,6 +333,7 @@ function WorkspaceCenter({
             onOpenFromCenter={state.openFromCenter}
             onOpenMember={onOpenMember}
             onRosterNext={rosterNext}
+            leafTrees={leafTrees}
           />
           <RosterPageNote payload={payload} />
         </>

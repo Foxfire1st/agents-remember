@@ -6,20 +6,19 @@
 // browser's does (status, body, the shared decode in `data/reviewTransport.ts`, the component tree,
 // the read cycle in `ReviewReadCycle.ts`). Only `fetch` is stubbed, and the bodies it is stubbed WITH
 // are the real route's own: each `familyReview.*.captured.json` holds the bytes `serving/review.py`
-// published over the real application owners and the real store for one real enclosure. Not all of
-// them are from the same route revision:
-//   * `complete` and `identical` were re-captured over HTTP by the producer, command and source tree
-//     named in `familyReview.capture-provenance.json`, and carry each member source's structured
-//     locator, resolved ranges and locator state;
-//   * `truncated`, `continued`, `oneSided`, `walkFinal` and `emptyRoster` still hold their capture at
-//     63b47629. That route listed only the membership rows on a roster page; the current route also
-//     resolves the members that a page's content and claim items represent, so it cannot reproduce
-//     the first four (`emptyRoster` carries no member source and was left as captured; see the
-//     receipt's `not_recaptured` section). Their re-capture belongs with the change that moves the
-//     cases reading them to the current route's roster states, and is not done here.
-// No assertion below reads a prop this test itself passed, and
-// no payload is assembled here: a case that reached into the component with a hand-built value would
-// prove nothing about the wire contract, which is what these cases are about.
+// published over the real application owners and the real store for one real enclosure. Two captures,
+// both recorded in `familyReview.capture-provenance.json`, made them over HTTP with ICR-L44's producer:
+//   * `complete` and `identical`: its own run, at source tree a8039b8e (the receipt's top level);
+//   * `truncated`, `continued`, `oneSided`, `walkFinal` and `emptyRoster`: re-captured by MIK-L31 with
+//     that producer unchanged except that the first build of each scenario is accepted, at the
+//     L10-synced tree 18b77329 (`mik_l31_recapture`). The current route also resolves the members a
+//     roster page's content and claim items represent, so a bounded first page carries its first
+//     member; the expectations below follow these bodies, and counts that depend on a build's identity
+//     draw are read from the body. Every member source they carry has its structured locator,
+//     resolved ranges and locator state.
+// No assertion below reads a prop this test itself passed, and no payload is assembled here, except
+// the one case labelled SYNTHETIC, which derives its body from the real `truncated` capture: a case
+// that reached into the component with a hand-built value would prove nothing about the wire contract.
 //
 // WHAT THESE CASES CATCH. The surface as it stood was a stack of diagnostic paragraphs over three
 // panes: a family's recorded guarantee, its roster of member revisions (unchanged siblings included)
@@ -42,7 +41,11 @@ import path from "node:path";
 import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { REVIEW_PAGED_COLLECTIONS, REVIEW_WALKABLE_COLLECTIONS } from "../../data/review";
+import {
+  REVIEW_PAGED_COLLECTIONS,
+  REVIEW_WALKABLE_COLLECTIONS,
+  type ReviewResult,
+} from "../../data/review";
 import { RECORDS_PAGE_REFUSAL_RESPONSE } from "./recordsPageRefusal.captured";
 import { ReviewSurface } from "./ReviewSurface";
 
@@ -445,16 +448,39 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
   });
   // ── fix round 1: the two blocked sentences, and the two unpinned distinctions ────────────────────
 
-  it("says a bounded roster carried none of the measured rows, never that the read measured zero", async () => {
+  it("states a bounded roster page as the part of the measured rows it carried, never as zero", async () => {
     serving([TRUNCATED]);
     const view = mount();
     await view.findByTestId("review-family-tree");
 
     // Every family in this capture has a roster page that is a position in a walk: each side MEASURED
-    // 2 recorded membership rows and carried none of them. The sentence this block prints must be the
-    // page-scoped fact, because the clause it replaced ("the read measured zero memberships for the
-    // selected family revision") was false about the store while the owner's own line two paragraphs
-    // above said it records 2 and carried 0.
+    // 2 recorded membership rows and this page carried 1 of them. (Since ICR-L38 a first page always
+    // carries the member its first items represent, so the route no longer serves a bounded page that
+    // carries none; MIK-L31 re-captured this body from the current route.) The owner's own measures
+    // are printed, the continuation is offered, and nothing says "measured zero" or prints the
+    // empty-roster sentence for a roster that is not empty.
+    const rosters = view.getAllByTestId("review-family-roster").map((node) => node.textContent ?? "");
+    expect(rosters).toHaveLength(4);
+    for (const roster of rosters)
+      expect(roster).toContain("records 2 membership row(s); loaded context contains 1 of them");
+    expect(view.queryAllByTestId("review-family-empty-roster")).toHaveLength(0);
+    expect(view.getByTestId("review-family-tree").textContent).not.toContain("measured zero");
+    expect(view.getAllByTestId("review-family-roster-next").length).toBeGreaterThan(0);
+  });
+
+  it("says a bounded roster carried none of the measured rows, never that the read measured zero (SYNTHETIC body)", async () => {
+    // SYNTHETIC FIXTURE, not a route body: the real TRUNCATED capture with every roster's member rows
+    // removed. Since ICR-L38 the route's first page always carries the member its first items
+    // represent, so no real body reaches this branch any more; it is kept (MIK-L31 ruling Q3) and
+    // covered by this derived body, whose owner counts still say each side records 2 rows.
+    const synthetic = structuredClone(TRUNCATED as ReviewResult);
+    for (const entry of synthetic.payload!.family_context!.entries) {
+      entry.before.members = [];
+      entry.after.members = [];
+    }
+    serving([synthetic]);
+    const view = mount();
+    await view.findByTestId("review-family-tree");
     const empties = view.getAllByTestId("review-family-empty-roster");
     expect(empties).toHaveLength(2);
     const said = empties.map((node) => node.textContent ?? "").join("\n");
@@ -462,10 +488,6 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     expect(said).toContain("0 of the 2 recorded membership row(s) it measured");
     expect(said).toContain("The continuation beside each bounded roster reaches the rows this page did not carry.");
     expect(said).not.toContain("measured zero");
-
-    // The owner's own two measures are still printed above it, so the two clauses cannot disagree.
-    const roster = view.getAllByTestId("review-family-roster")[0];
-    expect(roster.textContent).toContain("records 2 membership row(s); loaded context contains 0 of them");
   });
 
   it("still says the measured zero when the read really measured zero memberships", async () => {
@@ -493,7 +515,17 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     );
     const counts = view.getByTestId("review-center-member-counts").textContent ?? "";
     expect(counts).toContain("4 recorded membership row(s) measured by the read across 2 recorded side(s) (before 2 + after 2)");
-    expect(counts).toContain("loaded context contains 0 member row(s) of them");
+    // The loaded count is this capture's own distinct member revisions of the opened family (the
+    // builders draw fresh identities, so it is read from the body, not written as a literal).
+    const opened = view.getByTestId("review-center-family").dataset.family;
+    const family = (TRUNCATED as ReviewResult).payload!.family_context!.entries.find(
+      (entry) => entry.family_id === opened,
+    )!;
+    const loaded = new Set(
+      [...family.before.members, ...family.after.members].map((member) => member.invariant_revision_id),
+    ).size;
+    expect(loaded).toBeLessThan(4); // a capture that carried every row could not pass silently
+    expect(counts).toContain(`loaded context contains ${loaded} member row(s) of them`);
     expect(counts).toContain("the continuations beside the bounded rosters reach the rest");
     expect(view.getByTestId("review-center-member-distinct").textContent).toContain(
       "among the loaded membership contexts",
@@ -522,11 +554,19 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
 
     // Family 2 authored a successor revision carrying the parent's own text: two DISTINCT revisions,
     // identical text. That is not "the guarantee is unchanged" -- a revision was authored between
-    // them -- and the block must say so with both revision identities.
+    // them. MIK-R31 rule 3 (the 13:40 decision): it is "wording unchanged", the text shown ONCE with
+    // `revision <before> → <after>` as compact metadata and both revision identities in details.
     fireEvent.click(openers[1]);
     const identical = await view.findByTestId("review-center-guarantee-identical-text");
-    expect(identical.textContent).toContain("two recorded revisions");
-    expect(identical.textContent).toContain("Guarantee wording unchanged");
+    const family = (IDENTICAL as ReviewResult).payload!.family_context!.entries[1];
+    const [before, after] = [family.before.guarantee!, family.after.guarantee!];
+    expect(identical.textContent).toContain(
+      `Wording unchanged · revision ${before.revision_id.slice(0, 8)} → ${after.revision_id.slice(0, 8)}`,
+    );
+    expect(identical.querySelectorAll('[data-testid="review-center-guarantee"]')).toHaveLength(1);
+    expect(identical.textContent!.split(after.joint_guarantee)).toHaveLength(2);
+    expect(identical.textContent).toContain(`before revision ${before.revision_id}`);
+    expect(identical.textContent).toContain(`after revision ${after.revision_id}`);
     expect(view.queryByTestId("review-center-guarantee-unchanged")).toBeNull();
     expect(identical.textContent).not.toContain("so the guarantee is unchanged");
 
@@ -590,12 +630,13 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
   });
 
   it("prints one empty-roster sentence in both columns, not two that happen to agree", async () => {
-    serving([TRUNCATED]);
-    const view = mount();
+    serving([EMPTY_ROSTER]);
+    const view = mount(undefined, firstFamilyId(EMPTY_ROSTER));
     await view.findByTestId("review-family-tree");
 
     // One implementation, mounted twice: the centre's line is the tree's own string for the same
-    // family. A second sentence in the centre that merely happens to read the same would drift.
+    // family. A second sentence in the centre that merely happens to read the same would drift. (The
+    // measured-empty family is the body the current route serves with an empty roster; MIK-L31.)
     const treeSaid = Object.fromEntries(
       view
         .getAllByTestId("review-family")
@@ -605,13 +646,13 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
         ]),
     );
     const openers = view.getAllByTestId("review-family-open");
-    for (const [index, opener] of openers.entries()) {
+    expect(openers.length).toBeGreaterThan(0);
+    for (const opener of openers) {
       fireEvent.click(opener);
       await view.findByTestId("review-center-family");
       const family = view.getByTestId("review-center-family").dataset.family ?? "";
       const centreSaid = view.getByTestId("review-center-family-empty").textContent ?? "";
       expect(centreSaid).toBe(treeSaid[family]);
-      expect(index).toBeLessThan(openers.length);
     }
   });
   it("states the page that completes a multi-page walk as the walk's last page, not as the whole roster", async () => {
@@ -619,8 +660,9 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     const view = mount();
     await view.findByTestId("review-family-tree");
 
-    // This body is the final page of a four-page roster walk: it completes the walk and carried 11 of
-    // the revision's 72 recorded membership rows. Before the walk's completion guard was corrected the
+    // This body is the final page of a four-page roster walk: it completes the walk and carried some
+    // of the revision's 72 recorded membership rows (re-captured by MIK-L31 from the current route;
+    // how many depends on the build's identity draw, so the count is read from the body). Before the walk's completion guard was corrected the
     // route answered this page's request with HTTP 500, so nothing here was renderable at all.
     const lines = view.getAllByTestId("review-family-roster");
     const lastPage = lines.filter((node) =>
@@ -630,7 +672,13 @@ describe("ReviewSurface family-centered workspace (ICR-R24@v3)", () => {
     expect(lastPage[0].textContent).toContain(
       "loaded context can retain earlier pages",
     );
-    expect(lastPage[0].textContent).toContain("loaded context contains 11 of them");
+    const walked = (WALK_FINAL as ReviewResult).payload!.family_context!.entries.find(
+      (entry) => entry.after.members_total === 72,
+    )!;
+    expect(walked.after.members.length).toBeLessThan(72);
+    expect(lastPage[0].textContent).toContain(
+      `loaded context contains ${walked.after.members.length} of them`,
+    );
     expect(lastPage[0].textContent).not.toContain("the page is the whole selection");
 
     // The rosters the read really did take in one page still say so, and never claim to be a step in

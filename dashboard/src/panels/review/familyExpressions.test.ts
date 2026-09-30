@@ -160,12 +160,13 @@ describe("the family's changed expression excerpts (A4)", () => {
 
   it("keeps both sides' readings of one divergent address, because the disagreement is the change", () => {
     // THE MEASURED SHAPE, not a guess: the captured `familyReview.walkFinal` body records member
-    // revision `d24e5187` with `src/batch.py` under one recorded blob, resolved `exact_recorded_blob`
-    // on the before snapshot and `recorded_blob_mismatch` on the after one. The observed identity is
-    // not one value for that address -- the before read observed the recorded blob itself and the after
-    // read observed different bytes -- and it is what the read FOUND, not part of the address's
-    // identity. Keying the excerpt by it split this one address into two rows that could never be
-    // paired, so the row named a single side and the per-side fact the collection exists for was lost.
+    // revision `a08a87b4` (retry-budget-family) with `src/batch.py` under one recorded blob, resolved
+    // `exact_recorded_blob` on the before snapshot and `recorded_blob_mismatch` on the after one. The
+    // observed identity is not one value for that address -- the before read observed the recorded
+    // blob itself and the after read observed different bytes -- and it is what the read FOUND, not
+    // part of the address's identity. Keying the excerpt by it split this one address into two rows
+    // that could never be paired, so the row named a single side and the per-side fact the collection
+    // exists for was lost.
     const recorded = "d".repeat(40);
     const collection = familyExpressionExcerpts(
       rows(
