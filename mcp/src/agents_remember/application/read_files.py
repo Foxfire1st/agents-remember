@@ -17,7 +17,11 @@ dataset's exact snapshot through the shipped selective read. The block is attach
 including when the repository publishes nothing yet, because "nothing is recorded" is an answer a
 fresh planner needs and an omitted block is indistinguishable from a route that never ran. The
 selection, the seeds and the named absences are owned by
-:mod:`agents_remember.application.published_intent`; this module only carries the block.
+:mod:`agents_remember.application.published_intent`; this module only carries the block -- and
+renders one thing in it: a route-chain family entry (MIK-R05) already served to this lifecycle, and
+unchanged since, is shortened to a ``served_earlier`` reference row through the same served ledger
+the overviews use. The row keeps its place, so the block's counts and continuations are unchanged;
+``knowledge_read`` never shortens.
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from agents_remember.application.knowledge_leaf.chain import shorten_served
 from agents_remember.application.published_intent import published_intent_block
 from agents_remember.application.read_files_format import (
     TEXT_FORMAT,
@@ -81,6 +86,8 @@ _SIDECAR_STORAGE_MODES = {"repo-sidecar", "memory-repo", "external"}
 # The auto-attached front-door pieces, keyed for the served ledger.
 _KIND_REPO_OVERVIEW = "repository_overview"
 _KIND_ROUTE_OVERVIEW = "route_overview"
+# A route-chain family entry of the published-intent block (MIK-R05 rule 4), keyed by family ID.
+_KIND_CHAIN_FAMILY = "knowledge_chain_family"
 
 # The workspace marker whose presence clears the served set for the current
 # lifecycle on the next read (see ``_maybe_reset_served``).
@@ -153,7 +160,11 @@ def read_ar_files_tool(
         # the caller the source and onboarding bytes this call exists to return.
         # MIK-R24 rule 9: an unconverted memory tree returns no knowledge section.
         "published_intent": (
-            published_intent_block(context, [request.path for request in requests])
+            _chain_rendered(
+                published_intent_block(context, [request.path for request in requests]),
+                amb,
+                lifecycle_id,
+            )
             if memory_format(context.onboarding_root.parent) == TEXT_FORMAT
             else legacy_published_intent(context.onboarding_root.parent)
         ),
@@ -332,6 +343,15 @@ def _attach_front_door(
                     "overview": route_overview["overview"],
                 }
     return served
+
+
+def _chain_rendered(block: dict[str, Any], amb: Any, lifecycle_id: str | None) -> dict[str, Any]:
+    """The block with each chain entry this lifecycle was already served shortened (MIK-R05)."""
+
+    return shorten_served(
+        block,
+        lambda family, digest: _should_serve(amb, lifecycle_id, _KIND_CHAIN_FAMILY, family, digest),
+    )
 
 
 def _should_serve(

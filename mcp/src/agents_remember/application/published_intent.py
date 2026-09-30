@@ -72,7 +72,9 @@ index.
 the family-complete leaf read (:mod:`agents_remember.application.knowledge_leaf`): the path's own
 invariants, each containing family's header and remaining members with their entries, then the
 advertised families, in one declared row order -- the same selection, under the same manifest, that
-``knowledge_read``'s ``source_context`` view returns. An identity seed keeps the scope read.
+``knowledge_read``'s ``source_context`` view returns. An identity seed keeps the scope read. Its
+route-chain families follow (MIK-R05), and a path with no entry still returns them; a path with
+neither is refused ``registration_absent`` with its ``routeChain`` stating ``no_governing_family``.
 
 **A memory tree's page continues through ``knowledge_read`` (MIK-R02).** A seed read from a
 converted tree is paged by the shared token threshold (:mod:`agents_remember.application.
@@ -100,7 +102,12 @@ from pydantic import ValidationError
 from agents_remember.application.knowledge_before_half import read_dataset_identity
 from agents_remember.application.knowledge_currentness import CodeTree
 from agents_remember.application.knowledge_leaf.currentness import LeafCurrentness
-from agents_remember.application.knowledge_leaf.pages import LeafRequest, PreparedLeaf, prepare_leaf
+from agents_remember.application.knowledge_leaf.pages import (
+    LeafRequest,
+    PreparedLeaf,
+    absent_chain,
+    prepare_leaf,
+)
 from agents_remember.application.knowledge_leaf.selection import LEAF_POLICY, LEAF_POLICY_VERSION
 from agents_remember.application.knowledge_paging import threshold_block
 from agents_remember.application.knowledge_paging.bindings import PagingRefusal
@@ -737,7 +744,7 @@ def _tree_page_block(
             return leaf
         if isinstance(leaf, PagingRefusal):  # pragma: no cover - page 1 carries no continuation
             return _refused_block(seed_json, leaf.code, leaf.detail, None)
-        return _refusal_block(seed_json, leaf)
+        return {**_refusal_block(seed_json, leaf), **absent_chain(seed.path)}
     paged = prepare_scope(
         ScopePageRequest(
             database_path=selection.database_path,

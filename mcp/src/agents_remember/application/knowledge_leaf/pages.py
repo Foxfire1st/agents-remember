@@ -2,7 +2,7 @@
 
 The leaf read is one more response the paging seam (:mod:`agents_remember.application.
 knowledge_paging`) pages: its ordered selection is :func:`~.selection.leaf_rows`, its manifest the
-structure's digest, its policy ``family-complete-leaf/v1``. The same :class:`PreparedLeaf` builds
+structure's digest, its policy ``family-complete-leaf/v2`` (v2 since MIK-R05 added the route chain). The same :class:`PreparedLeaf` builds
 page 1 inside a ``read_ar_files`` block and every page of ``knowledge_read``'s ``source_context``
 view, so both surfaces return one selection under one manifest (rule 6).
 
@@ -13,6 +13,13 @@ repeats an identity already returned and so is not counted as a returned row.
 Each page states the memory tree it was read from (rule 9), the selection's counts with the walk's
 ``rowsReturned``/``rowsRemaining`` (rule 8), and the shared continuation, which ``knowledge_read``
 resumes with ``view: "source_context"``.
+
+**A path seed's page states its route chain** (MIK-R05): ``routeChain`` names the directory the
+mechanical chain starts at and whether a family governs it (``no_governing_family`` when none
+does). A path with no entry but a governing family is a page of chain entries that states
+``registration: registration_absent``; a path with neither is refused ``registration_absent`` and
+the refusal carries the same ``routeChain`` (:func:`absent_chain`). A *family seed* (MIK-R05
+rule 3) pages the family's full content under the same policy.
 """
 
 from __future__ import annotations
@@ -29,12 +36,14 @@ from agents_remember.application.knowledge_currentness.state import (
     invariant_currentness,
 )
 from agents_remember.application.knowledge_currentness.surface import CURRENTNESS_FAILURES
+from agents_remember.application.knowledge_leaf.chain import route_chain_block
 from agents_remember.application.knowledge_leaf.selection import (
     LEAF_POLICY,
     LEAF_POLICY_VERSION,
     LeafStructure,
     leaf_counts,
     leaf_rows,
+    select_family,
     select_leaf,
 )
 from agents_remember.application.knowledge_paging.bindings import (
@@ -48,7 +57,10 @@ from agents_remember.application.knowledge_paging.pager import (
     PageRow,
     page_block,
 )
-from agents_remember.memory.knowledge.read_refusals import registration_absent_refusal
+from agents_remember.memory.knowledge.read_refusals import (
+    registration_absent_refusal,
+    selector_absent_refusal,
+)
 from agents_remember.memory.knowledge_index import KnowledgeIndex
 from agents_remember.models.knowledge.continuation import KnowledgeContinuation
 from agents_remember.models.knowledge.result import KnowledgeRefusal
@@ -57,6 +69,7 @@ __all__ = [
     "LEAF_VIEW",
     "LeafRequest",
     "PreparedLeaf",
+    "absent_chain",
     "prepare_leaf",
 ]
 
@@ -70,15 +83,23 @@ class LeafRequest:
 
     ``code_tree`` is the tree entries are observed at (MIK-R03); its ID is what the walk binds.
     ``index_state`` is the index's completeness: a page read from a ``partial`` index is never
-    presented as complete (MIK-R23, Failure).
+    presented as complete (MIK-R23, Failure). The seed is a ``path``, or a ``family`` ID (MIK-R05
+    rule 3).
     """
 
     index_path: Path
     memory_tree_id: str
     index_state: str
-    path: str
+    path: str | None = None
     code_tree: CodeTree | None = None
     resume: KnowledgeContinuation | None = None
+    family: str | None = None
+
+    @property
+    def seed_json(self) -> dict[str, str]:
+        if self.family is not None:
+            return {"kind": "family", "id": self.family}
+        return {"kind": "path", "path": self.path or ""}
 
 
 @dataclass(frozen=True)
@@ -101,7 +122,7 @@ class PreparedLeaf:
 
     @property
     def seed_json(self) -> dict[str, str]:
-        return {"kind": "path", "path": self.request.path}
+        return self.request.seed_json
 
     def render(self, cut: PageCut) -> dict[str, Any]:
         """The seed's page for one cut of its rows."""
@@ -141,15 +162,18 @@ class PreparedLeaf:
 
 
 def prepare_leaf(request: LeafRequest) -> PreparedLeaf | KnowledgeRefusal | PagingRefusal:
-    """Select a seed path's leaf and check a continuation against it, or return the refusal.
+    """Select a seed's leaf and check a continuation against it, or return the refusal.
 
-    A path with no live entry is ``registration_absent`` (MIK-R01, Failure).
+    A path with no live entry and no governing family is ``registration_absent`` (MIK-R01 and
+    MIK-R05, Failure); a family seed the tree holds no live family for is ``selector_absent``.
     """
 
     with KnowledgeIndex(request.index_path, expected_key=request.memory_tree_id) as index:
-        structure = select_leaf(index, request.path)
+        structure = _select(index, request.seed_json)
         if structure is None:
-            return registration_absent_refusal(path=request.path, with_proofs=True)
+            if request.family is not None:
+                return selector_absent_refusal(record_id=request.family, kind="live family")
+            return registration_absent_refusal(path=request.path or "", with_proofs=True)
         currentness = _currentness(index, structure, request.code_tree)
         rows, counts = leaf_rows(structure, currentness), leaf_counts(structure, currentness)
         rest = () if request.resume is None else request.resume.rest
@@ -216,8 +240,7 @@ def _next_manifest(
 
     if not rest:
         return None
-    path = rest[0].get("path")
-    structure = None if path is None else select_leaf(index, path)
+    structure = _select(index, rest[0])
     if structure is None:
         # Unreachable at the bound tree -- only a seed that selected rows is ever queued -- and
         # refused rather than skipped, so a queued seed is never silently dropped.
@@ -227,6 +250,21 @@ def _next_manifest(
             "from the seed without a continuation",
         )
     return structure.manifest_digest
+
+
+def _select(index: KnowledgeIndex, seed: dict[str, str]) -> LeafStructure | None:
+    """The structure a seed selects: a path's leaf and chain, or a family's full content."""
+
+    if seed.get("kind") == "family":
+        return select_family(index, seed.get("id", ""))
+    path = seed.get("path")
+    return None if not path else select_leaf(index, path)
+
+
+def absent_chain(path: str) -> dict[str, Any]:
+    """What a ``registration_absent`` refusal of a path adds: its chain, which found no family."""
+
+    return {"routeChain": route_chain_block(path, ())}
 
 
 def _continuation(prepared: PreparedLeaf, cut: PageCut) -> tuple[str | None, dict[str, str] | None]:
@@ -271,6 +309,13 @@ def _page(prepared: PreparedLeaf, cut: PageCut) -> dict[str, Any]:
         "continuationView": LEAF_VIEW,
         "page": page,
     }
+    structure = prepared.structure
+    if structure.family_seed is None:
+        block["routeChain"] = route_chain_block(structure.path, structure.chain)
+        if not structure.seed:
+            # MIK-R01 Failure: the path has no entry, and its route-chain families are still read.
+            absent = registration_absent_refusal(path=structure.path, with_proofs=True)
+            block["registration"] = {"state": absent.code, "detail": absent.detail}
     if queued is not None:
         # This seed is done; the continuation moves on to the next queued seed.
         block["continuationSeed"] = queued

@@ -43,8 +43,22 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 80
-LIFECYCLE_CATALOG_SHA256 = "449b69efb61498ac2e81d888c9891be3a7227562d267f1d184aea70104b7d254"
+LIFECYCLE_CATALOG_SHA256 = "f8b048143a4072e35d3a65e9fcce16cd7bfd9ca6a2f253272ae251ea912f212b"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
+
+**Forty-first deliberate re-pin (260928-MIK-L05, re-measured at base ``31d761a2``, 2026-09-30) --
+four consumers the census derived for the route-chain case module.** ``260928-MIK-L05`` (MIK-R05, route-chain family retrieval) adds
+``mcp/tests/test_knowledge_route_chain.py``, which imports the leaf-read case module (so
+transitively ``mcp/tests/knowledge_index_test_support.py`` and
+``fixtures/repository_profiles/node/package-lock.json``) and the ``read_ar_files`` case module (so
+transitively ``mcp/tests/read_scope_test_support.py`` and
+``mcp/tests/curator_coherence_test_support.py``); each of those four rows gains the one path,
+appended at the end without re-sorting. **No row was added or removed, no other consumer changed
+and no field changed**, so the population stays at **sixteen contracts / eighty artifacts**, and
+the catalog is re-pinned from ``449b69efb61498ac2e81d888c9891be3a7227562d267f1d184aea70104b7d254``
+(the Fortieth) to ``f8b048143a4072e35d3a65e9fcce16cd7bfd9ca6a2f253272ae251ea912f212b``,
+measured with ``sha256sum mcp/tests/evidence-lifecycle.toml``. The proof's own artifact delta
+remains exactly empty.
 
 **Fortieth deliberate re-pin (260928-MIK-L10, at base ``3772cdcd``, 2026-09-30) -- one consumer the
 census derived for the unexplained-change case module.** ``260928-MIK-L10`` (MIK-R10, unexplained

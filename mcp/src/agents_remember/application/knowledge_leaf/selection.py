@@ -20,7 +20,13 @@ Retired records are not live and are never selected (MIK-R23 ruling Q4).
    ``member_reference`` row (rule 5), titled by its statement's first sentence -- derived, and
    labelled ``titleDerivedFrom: "statement"``, because an invariant record has no title;
 3. the advertised frontier: one ``advertised_family`` row per family a selected member belongs to
-   outside the selection, by family, listing in ``via`` every selected member that reaches it.
+   outside the selection, by family, listing in ``via`` every selected member that reaches it;
+4. the route chain (MIK-R05, :mod:`.chain`): one compact ``chain_family`` row per live family with a
+   route on the path's directory or one of its ancestors, nearest route first. A path with no entry
+   but a governing family still selects its chain.
+
+A *family seed* (MIK-R05 rule 3, :func:`select_family`) selects the full family content instead:
+the family's header, every live member with its entries, then its advertised frontier.
 
 Every row of a family carries the family as its paging ``group``, and the header carries the
 reference row a page that continues the family starts with (MIK-R02 rule 4).
@@ -43,6 +49,12 @@ from agents_remember.application.knowledge_currentness.state import (
     Currentness,
     InvariantState,
 )
+from agents_remember.application.knowledge_leaf.chain import (
+    CHAIN_ROW,
+    ChainFamily,
+    chain_row,
+    select_chain,
+)
 from agents_remember.application.knowledge_paging.pager import PageRow
 from agents_remember.kernel.canonical_json import sha256_digest
 from agents_remember.memory.knowledge_index import Entry, KnowledgeIndex, Record
@@ -56,11 +68,12 @@ __all__ = [
     "family_names",
     "leaf_counts",
     "leaf_rows",
+    "select_family",
     "select_leaf",
 ]
 
 LEAF_POLICY: Final = "family-complete-leaf"
-LEAF_POLICY_VERSION: Final = "v1"
+LEAF_POLICY_VERSION: Final = "v2"
 
 # The longest derived reference title, in characters (L01 ruling Q1).
 DERIVED_TITLE_LENGTH: Final = 80
@@ -92,6 +105,8 @@ class LeafStructure:
 
     ``order`` is the row list as ``(kind, subject, group)`` triples; :func:`leaf_rows` renders each
     one. ``advertised`` pairs each frontier family with the selected members it is reached through.
+    ``chain`` are the route-chain families of a path seed (MIK-R05); ``family_seed`` names the family
+    a family seed selected, and its ``path`` is then empty.
     """
 
     path: str
@@ -101,15 +116,20 @@ class LeafStructure:
     advertised: tuple[tuple[str, tuple[str, ...]], ...]
     titles: Mapping[str, str | None]
     order: tuple[tuple[str, str, str | None], ...] = field(default=())
+    chain: tuple[ChainFamily, ...] = ()
+    family_seed: str | None = None
 
     @property
     def manifest_digest(self) -> str:
         """The digest of the ordered selection: each row's identity under this policy version."""
 
+        seed: str | dict[str, str] = (
+            self.path if self.family_seed is None else {"kind": "family", "id": self.family_seed}
+        )
         return sha256_digest(
             {
                 "policy": f"{LEAF_POLICY}/{LEAF_POLICY_VERSION}",
-                "seed": self.path,
+                "seed": seed,
                 "rows": [list(one) for one in self.order],
             }
         )
@@ -120,13 +140,42 @@ class LeafStructure:
 
 
 def select_leaf(index: KnowledgeIndex, path: str) -> LeafStructure | None:
-    """The family-complete selection of ``path``, or ``None`` when no live entry is recorded there."""
+    """The family-complete selection of ``path`` with its route chain (MIK-R05), or ``None`` when
+    no live entry is recorded there and no family route covers it."""
 
     members: dict[str, _Member] = {}
     seed = _seed_invariants(index, path, members)
-    if not seed:
+    chain = select_chain(index, path, seed)
+    if not seed and not chain:
         return None
     families = _families_of(index, seed, members)
+    return _structure(index, path, seed, families, members, chain=chain)
+
+
+def select_family(index: KnowledgeIndex, family_id: str) -> LeafStructure | None:
+    """A family seed's selection: the full MIK-R01 content of one live family (MIK-R05 rule 3).
+
+    Every live member is returned under the family's header, with its entries, then the advertised
+    frontier of those members. ``None`` when the tree holds no live family ``family_id``.
+    """
+
+    family = _family(index, family_id)
+    if family is None:
+        return None
+    members: dict[str, _Member] = {}
+    live = tuple(m for m in family.members if _member(index, m, members) is not None)
+    families = {family_id: replace(family, members=live)}
+    return _structure(index, "", (), families, members, family_seed=family_id)
+
+
+def _structure(
+    index: KnowledgeIndex,
+    path: str,
+    seed: tuple[str, ...],
+    families: dict[str, _Family],
+    members: dict[str, _Member],
+    **extra: Any,
+) -> LeafStructure:
     advertised = _advertised(members, families)
     titles = {
         family_id: _title(index, family_id)
@@ -139,6 +188,7 @@ def select_leaf(index: KnowledgeIndex, path: str) -> LeafStructure | None:
         members=members,
         advertised=advertised,
         titles=titles,
+        **extra,
     )
     return replace(structure, order=_order(structure))
 
@@ -243,6 +293,8 @@ def _order(structure: LeafStructure) -> tuple[tuple[str, str, str | None], ...]:
             else:
                 member_rows(invariant, family_id)
     order.extend(("advertised_family", family_id, None) for family_id, _ in structure.advertised)
+    # MIK-R05 rule 5: the route chain comes after the MIK-R01 content.
+    order.extend((CHAIN_ROW, family.id, None) for family in structure.chain)
     return tuple(order)
 
 
@@ -333,6 +385,11 @@ def _render_advertised(rendering: _Rendering, subject: str, group: str | None) -
     return PageRow(body, group=group)
 
 
+def _render_chain(rendering: _Rendering, subject: str, group: str | None) -> PageRow:
+    family = next(one for one in rendering.structure.chain if one.id == subject)
+    return PageRow(chain_row(family), group=group)
+
+
 _RENDERERS: Final = {
     "member": _render_member,
     "realization": _render_entry,
@@ -340,6 +397,7 @@ _RENDERERS: Final = {
     "family_header": _render_header,
     "member_reference": _render_reference,
     "advertised_family": _render_advertised,
+    CHAIN_ROW: _render_chain,
 }
 
 
@@ -439,6 +497,7 @@ def leaf_counts(structure: LeafStructure, currentness: Currentness) -> dict[str,
         "distinctPaths": len({e.path for e in entries}),
         "invariantsByState": _by_state(structure, currentness),
         "advertisedFamilies": len(structure.advertised),
+        "chainFamilies": len(structure.chain),
         "rowsTotal": len(structure.order),
     }
 

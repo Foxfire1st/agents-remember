@@ -456,6 +456,7 @@ consumers = [
   "mcp/tests/test_review_assessment_history.py",
   "mcp/tests/test_review_assessment_history_repairs.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_route_chain.py",
 ]
 
 [[artifact]]
@@ -834,6 +835,7 @@ consumers = [
   "mcp/tests/test_planned_knowledge_effects.py",
   "mcp/tests/test_knowledge_leaf_read.py",
   "mcp/tests/test_unexplained_change_disposition.py",
+  "mcp/tests/test_knowledge_route_chain.py",
 ]
 
 [[artifact]]
@@ -1548,6 +1550,7 @@ consumers = [
   "mcp/tests/test_review_recorded_knowledge.py",
   "mcp/tests/test_review_unchanged_knowledge.py",
   "mcp/tests/test_knowledge_conversion_toolchain.py",
+  "mcp/tests/test_knowledge_route_chain.py",
 ]
 
 [[artifact]]
@@ -1823,6 +1826,7 @@ consumers = [
   "mcp/tests/test_knowledge_proofs.py",
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_knowledge_leaf_read.py",
+  "mcp/tests/test_knowledge_route_chain.py",
 ]
 
 [[artifact]]

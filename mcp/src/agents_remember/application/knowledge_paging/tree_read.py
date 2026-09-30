@@ -13,7 +13,10 @@ its continuation is the shared token. A continuation is accepted whichever surfa
 
 A fresh ``source_context`` read of a path is the family-complete leaf read itself: its first page,
 in the same selection and under the same manifest the ``read_ar_files`` block returns (MIK-R01
-rule 6). An ``invariant`` view names the families containing its invariant (rule 7).
+rule 6), with the path's route-chain families after it (MIK-R05). A fresh ``source_context`` read
+that names a family ID (or ``ID@revision``) in ``familyRevisionId`` and no path is a family seed:
+the family's full content (MIK-R05 rule 3). An ``invariant`` view names the families containing
+its invariant (rule 7).
 
 The token carries its seed, its effective ordering and the code tree page 1 resolved anchors at, so
 a resuming call names only the dataset, the namespace, the view and the token, and every page of
@@ -41,6 +44,7 @@ from agents_remember.application.knowledge_leaf.pages import (
     LEAF_VIEW,
     LeafRequest,
     PreparedLeaf,
+    absent_chain,
     prepare_leaf,
 )
 from agents_remember.application.knowledge_leaf.selection import (
@@ -120,6 +124,7 @@ _POLICIES = {
 _SUBJECT_FIELDS = ("invariant_revision_id", "family_revision_id", "source_path")
 _SCOPE_SUBJECTS = {
     "path": ("source_path", "path"),
+    "family": ("family_revision_id", "id"),
     "invariant_revision": ("invariant_revision_id", "revision_id"),
     "family_revision": ("family_revision_id", "revision_id"),
 }
@@ -230,12 +235,15 @@ def read_tree_page(
     )
     refusal = (
         refusal
-        or _subject_refusal(request, resume)
+        or _subject_refusal(request, resume, lambda named: _family_spelling(read, named)[0])
         or ordering_refusal(resume, ordering_input=request.ordering_input)
         or resolution_refusal(resume, code_tree_id=request.code_tree_id)
     )
     if refusal is not None:
         return _refused(read, refusal.code, refusal.detail)
+    absent = _resumed_revision_absent(read, resume)
+    if absent is not None:
+        return _refused(read, "selector_absent", absent)
     read = _at_code_tree(read, resume.code_tree_id)
     missing = _missing_code_tree(read, resume.code_tree_id)
     if missing is not None:
@@ -248,7 +256,9 @@ def _fresh_response(read: _TreeRead) -> dict[str, Any]:
 
     request = read.request
     if request.view == LEAF_VIEW and request.source_path is not None:
-        return _leaf_response(read, request.source_path, None)
+        return _leaf_response(read, {"kind": "path", "path": request.source_path}, None)
+    if request.view == LEAF_VIEW and request.family_revision_id is not None:
+        return _family_response(read, request.family_revision_id)
     return _view_response(read, _requested_subject(request), None)
 
 
@@ -256,10 +266,10 @@ def _resumed_response(read: _TreeRead, resume: KnowledgeContinuation) -> dict[st
     """A later page of the walk the continuation names, whichever response it pages."""
 
     if resume.response == "leaf":
-        path = resume.seed.get("path")
-        if resume.seed.get("kind") != "path" or not path:
-            return _refused(read, "continuation_unreadable", "its seed is not a path")
-        return _leaf_response(read, path, resume)
+        kind, key = resume.seed.get("kind"), {"path": "path", "family": "id"}
+        if kind not in key or not resume.seed.get(key[kind]):
+            return _refused(read, "continuation_unreadable", "its seed is not a path or a family")
+        return _leaf_response(read, dict(resume.seed), resume)
     if resume.response == "scope":
         return _scope_response(read, resume)
     return _view_response(read, _token_subject(resume), resume)
@@ -336,20 +346,40 @@ def _token_subject(resume: KnowledgeContinuation) -> ReadSubject:
 
 
 def _subject_refusal(
-    request: ToolReadRequest, resume: KnowledgeContinuation
+    request: ToolReadRequest,
+    resume: KnowledgeContinuation,
+    family_id: Callable[[str], str],
 ) -> PagingRefusal | None:
-    """A named subject argument that disagrees with the continuation's seed, or ``None``."""
+    """A named subject argument that disagrees with the continuation's seed, or ``None``.
+
+    A family seed binds the bare family ID, so a named ``familyRevisionId`` is compared by the
+    family it names (``family_id``): ``ID@rev`` and a projected UUID resume it too.
+    """
 
     if resume.response in ("leaf", "scope"):
         field, key = _SCOPE_SUBJECTS.get(str(resume.seed.get("kind")), (None, None))
         bound = {} if field is None or key is None else {field: resume.seed.get(key)}
     else:
         bound = {name: resume.seed.get(name) for name in _SUBJECT_FIELDS}
-    for name in _SUBJECT_FIELDS:
-        named = getattr(request, name)
-        if named is not None and named != bound.get(name):
+    for name, (named, compared) in _named_subjects(request, resume, family_id).items():
+        if compared != bound.get(name):
             return _seed_mismatch(name, named)
     return None
+
+
+def _named_subjects(
+    request: ToolReadRequest,
+    resume: KnowledgeContinuation,
+    family_id: Callable[[str], str],
+) -> dict[str, tuple[str, str]]:
+    """Each subject argument the caller named, with the value it is compared by."""
+
+    named = {name: getattr(request, name) for name in _SUBJECT_FIELDS}
+    subjects = {name: (value, value) for name, value in named.items() if value is not None}
+    family = subjects.get("family_revision_id")
+    if family is not None and resume.response == "leaf" and resume.seed.get("kind") == "family":
+        subjects["family_revision_id"] = (family[0], family_id(family[0]))
+    return subjects
 
 
 def _seed_mismatch(argument: str, value: str) -> PagingRefusal:
@@ -492,10 +522,62 @@ def _scope_response(read: _TreeRead, resume: KnowledgeContinuation) -> dict[str,
     return response
 
 
+def _family_response(read: _TreeRead, named: str) -> dict[str, Any]:
+    """Page 1 of a family seed (MIK-R05 rule 3): ``named`` is a family ID, ``ID@revision``, or the
+    projected UUID of either (the spelling the views use).
+
+    A named revision must be the family's revision at this memory tree: a tree holds one.
+    """
+
+    absent = _revision_absent(read, named)
+    if absent is not None:
+        return _refused(read, "selector_absent", absent)
+    return _leaf_response(read, {"kind": "family", "id": _family_spelling(read, named)[0]}, None)
+
+
+def _family_spelling(read: _TreeRead, named: str) -> tuple[str, str | None]:
+    """The family ID and the revision a ``familyRevisionId`` spells (``None`` when it names none;
+    an empty revision when it ends in a bare ``@``)."""
+
+    with KnowledgeIndex(read.selected.database_path, expected_key=read.tree.tree_key) as index:
+        family, at, revision = (index.text_id(named) or named).partition("@")
+    return family, revision if at else None
+
+
+def _revision_absent(read: _TreeRead, named: str) -> str | None:
+    """Why ``named`` names a revision this tree does not hold (refused ``selector_absent``), or
+    ``None`` when it names none or the tree's own.
+
+    A tree holds one revision of a family; a bare ``ID@`` names none of them.
+    """
+
+    family, revision = _family_spelling(read, named)
+    if revision is None:
+        return None
+    with KnowledgeIndex(read.selected.database_path, expected_key=read.tree.tree_key) as index:
+        record = index.record(family).value
+    if record is not None and str(record.revision) == revision:
+        return None
+    held = "no such family" if record is None else f"revision {record.revision}"
+    return (
+        f"familyRevisionId {named!r} names a revision this memory tree does not hold ({held}); "
+        "name the family ID alone to read the tree's revision"
+    )
+
+
+def _resumed_revision_absent(read: _TreeRead, resume: KnowledgeContinuation) -> str | None:
+    """A family-seed walk resumed naming a revision is held to that revision, as a fresh read is."""
+
+    named = read.request.family_revision_id
+    if named is None or resume.response != "leaf" or resume.seed.get("kind") != "family":
+        return None
+    return _revision_absent(read, named)
+
+
 def _leaf_response(
-    read: _TreeRead, path: str, resume: KnowledgeContinuation | None
+    read: _TreeRead, seed: dict[str, str], resume: KnowledgeContinuation | None
 ) -> dict[str, Any]:
-    """One page of the family-complete leaf read of ``path`` (MIK-R01), or its refusal.
+    """One page of the family-complete leaf read of ``seed`` (MIK-R01 and MIK-R05), or its refusal.
 
     The leaf has one declared row order, so an ordering other than the default is refused on a
     fresh read (a resumed one is checked against the token like every walk).
@@ -514,13 +596,18 @@ def _leaf_response(
             index_path=read.selected.database_path,
             memory_tree_id=read.tree.tree_key,
             index_state=read.tree.index_state,
-            path=path,
+            path=seed.get("path"),
             code_tree=read.code_tree,
             resume=resume,
+            family=seed.get("id") if seed.get("kind") == "family" else None,
         )
     )
-    if not isinstance(prepared, PreparedLeaf):  # a refused continuation, or registration_absent
-        return _refused(read, prepared.code, prepared.detail)
+    if not isinstance(prepared, PreparedLeaf):  # a refused continuation, or an absent seed
+        refused = _refused(read, prepared.code, prepared.detail)
+        path = seed.get("path")
+        if prepared.code == "registration_absent" and path:
+            refused.update(absent_chain(path))  # MIK-R05: no family route covers the path either
+        return refused
     states = LeafCurrentness(read.code_tree, [prepared])
     fixed = {"memoryTree": memory_tree_block(read.tree), "indexComplete": read.index_complete}
 

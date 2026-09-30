@@ -237,6 +237,16 @@ the same `manifestDigest`; that is the view to use when you need a file's whole 
 neighbourhood outside `read_ar_files`. The `invariant` view of a tree names its invariant's
 families in `families`.
 
+**Route-chain families come last.** After that content, each path lists one compact
+`chain_family` row per family routed at its directory or an ancestor (ID, title, guarantee,
+`routes`, `memberCount`, `via`, `memberAtSeed`), so a new or unattributed file still sees the
+families whose territory it is in; `routeChain` states the mechanical chain, or
+`no_governing_family`. A path with no entries but a governing family returns these rows and
+states `registration_absent`. To read a chain family whole, follow the row's `expand`:
+`knowledge_read` with `view: "source_context"` and `familyRevisionId` set to the family ID and no
+`sourcePath`. On a repeated `read_ar_files` in the same session an unchanged chain row may come
+back as a short `served_earlier` row; `knowledge_read` always returns it in full.
+
 **Follow a bounded page through `knowledge_read`.** When the block's `memoryTree` is present (a
 converted memory tree), the whole knowledge block is cut to one shared threshold, stated as
 `threshold` (8,000 `tiktoken:o200k_base` tokens); each page's `page` block states the walk's

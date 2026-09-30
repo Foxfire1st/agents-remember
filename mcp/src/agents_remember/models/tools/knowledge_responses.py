@@ -46,6 +46,12 @@ path's invariants, each containing family's header and remaining members, their 
 its state) and the advertised families, in one declared order. An ``invariant`` view adds
 ``families``, the families containing its invariant by ID and title. Absent for a database.
 
+**Route-chain families (MIK-R05).** After that content, ``payload.rows`` hold one compact
+``chain_family`` row per family with a route on the path's directory or an ancestor, and
+``payload.routeChain`` states the mechanical chain (``no_governing_family`` when no route covers
+it). A ``registration_absent`` refusal of a path carries the same ``routeChain``. A
+``source_context`` read naming ``familyRevisionId`` and no path returns that family's full content.
+
 **A refusal is a state, not a partial success.** ``state`` is ``view``/``result`` or ``refused``, and
 the refusal fields name the offending input. A handler never translates a refusal into an empty
 result or a default value, so a caller can always tell "nothing was selected" from "the selection was
@@ -92,6 +98,7 @@ class KnowledgeReadResponse(ToolResponse):
     proofs: list[dict[str, Any]] | None = None
     currentness: dict[str, Any] | None = None
     families: list[dict[str, Any]] | None = None
+    routeChain: dict[str, Any] | None = None
     refusalCode: str | None = None
     refusalDetail: str | None = None
 

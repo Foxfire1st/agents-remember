@@ -207,6 +207,9 @@ def test_a_path_selects_one_family_hop_in_the_declared_order(tmp_path: Path) -> 
         ("realization", "RLZ-E00001"),
         # 3. the advertised frontier: named, never expanded -- one row per family (review N4)
         ("advertised_family", "FAM-F33333"),
+        # 4. MIK-R05: the route chain (src, then .) after the MIK-R01 content, nearest first
+        ("chain_family", "FAM-F11111"),
+        ("chain_family", "FAM-F22222"),
     ]
     rows = {(row["kind"], row["id"]): row for row in page["rows"]}
     header = rows[("family_header", "FAM-F22222")]
@@ -252,11 +255,12 @@ def test_a_path_selects_one_family_hop_in_the_declared_order(tmp_path: Path) -> 
         "distinctPaths": 5,
         "invariantsByState": {"stale": 0, "unverifiable": 5, "unrealized": 0, "current": 0},
         "advertisedFamilies": 1,
-        "rowsTotal": 15,
-        "rowsReturned": 15,
+        "chainFamilies": 2,
+        "rowsTotal": 17,
+        "rowsReturned": 17,
         "rowsRemaining": 0,
     }
-    assert block["policyVersion"] == "family-complete-leaf/v1"  # ruling Q5
+    assert block["policyVersion"] == "family-complete-leaf/v2"  # ruling Q5
     tree = block["memoryTree"]["treeId"]
     assert page["memoryTreeId"] == tree == page["page"]["memoryTreeId"]  # rule 9
     assert page["page"]["selectionPolicy"] == "family-complete-leaf"
@@ -332,26 +336,53 @@ def test_the_conforming_example_returns_the_whole_family_in_one_response(tmp_pat
     }
 
 
+def test_a_path_without_entries_still_returns_its_route_chain(tmp_path: Path) -> None:
+    root = tmp_path / "memory"
+    _graph(root)
+    # MIK-R05: a path without entries still returns its route-chain families, and states the
+    # registration_absent it would otherwise be refused with.
+    governed = published_intent_block(_context(tmp_path, root), ["src/nothing.py"])["seeds"][0]
+    assert governed["state"] == "page", governed
+    assert governed["registration"]["state"] == "registration_absent"
+    assert "realization or proof claim" in governed["registration"]["detail"]  # review N6
+    assert _shape(governed["rows"]) == [
+        ("chain_family", "FAM-F11111"),
+        ("chain_family", "FAM-F22222"),
+    ]
+
+
 def test_absent_and_partial_states_are_named(tmp_path: Path) -> None:
     root = tmp_path / "memory"
     _graph(root)
-    refused = published_intent_block(_context(tmp_path, root), ["src/nothing.py"])
+    # With no route covering the path either (F2 leaves ``.``), it is refused, and the refusal
+    # states the chain (MIK-R05).
+    _family(root, "FAM-F22222", ["INV-BBBBBB", "INV-CCCCCC", "INV-EEEEEE", "INV-RRRRRR"], ["src"])
+    commit_all(root)
+    refused = published_intent_block(_context(tmp_path, root), ["docs/nothing.md"])
     absent = refused["seeds"][0]
     assert (absent["state"], absent["refusalCode"]) == ("refused", "registration_absent")
     assert "realization or proof claim" in absent["refusalDetail"]  # review N6
+    assert absent["routeChain"]["state"] == "no_governing_family"
     # Review N5: the leaf read applied, and refused every path.
-    assert refused["policyVersion"] == "family-complete-leaf/v1"
-    read = _read(tmp_path, root, view="source_context", source_path="src/nothing.py")
+    assert refused["policyVersion"] == "family-complete-leaf/v2"
+    read = _read(tmp_path, root, view="source_context", source_path="docs/nothing.md")
     assert read["refusalCode"] == "registration_absent"
+    assert read["routeChain"] == absent["routeChain"]
     # Review N3 (rule 9): a refused tree read names the memory tree and its index state.
     assert read["memoryTree"]["treeId"] == refused["memoryTree"]["treeId"]
     assert read["indexComplete"] is True
 
+
+def test_a_partial_index_is_named_on_both_surfaces(tmp_path: Path) -> None:
+    root = tmp_path / "memory"
+    _graph(root)
+    _family(root, "FAM-F22222", ["INV-BBBBBB", "INV-CCCCCC", "INV-EEEEEE", "INV-RRRRRR"], ["src"])
+    commit_all(root)
     (root / "knowledge" / "invariants" / "INV-BRKN01-x.json").write_text("{}", "utf-8")
     partial = published_intent_block(_context(tmp_path, root), [SEED])["seeds"][0]
     assert partial["indexState"] == "partial" and partial["enumerationComplete"] is False
     assert partial["rows"]  # the partial answer is still returned, and says it is partial
-    missing = _read(tmp_path, root, view="source_context", source_path="src/nothing.py")
+    missing = _read(tmp_path, root, view="source_context", source_path="docs/nothing.md")
     assert missing["memoryTree"]["indexState"] == "partial" and missing["indexComplete"] is False
 
 
