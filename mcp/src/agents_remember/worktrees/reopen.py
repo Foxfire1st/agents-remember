@@ -36,10 +36,9 @@ from pathlib import Path
 
 from agents_remember.kernel.atomic_write import atomic_write_bytes
 from agents_remember.kernel.primitives.observer_paths import LANDING_FINAL_BASENAME
-from agents_remember.tasks import ReviewState
+from agents_remember.tasks import ReviewState, master_sync
 from agents_remember.tasks.document import TaskDocument
-from agents_remember.tasks.leaf_doc import find_leaf_doc
-from agents_remember.tasks.master_sync import demote_completed_master_if_unresolved
+from agents_remember.tasks.leaf_doc import find_leaf_doc, require_task_document_in_place
 from agents_remember.tasks.store import (
     json_path_for,
     markdown_path_for,
@@ -444,6 +443,7 @@ def _plan_leaf_doc_reset(
             "task_reopen cannot produce an actionable worktree_start identity"
         )
     json_path, doc = found
+    require_task_document_in_place(json_path, doc, ReopenTaskDocumentError)
     stamp = datetime.now(UTC).astimezone().strftime("%Y-%m-%dT%H:%M")
     data = doc.model_dump(by_alias=True)
     data["status"] = "planning"
@@ -608,6 +608,7 @@ def _plan_master_index_reset(
         ) from exc
     if master.kind != "master":
         raise ReopenTaskDocumentError(f"parent task document is not a master: {master_path}")
+    require_task_document_in_place(master_path, master, ReopenTaskDocumentError)
     data = master.model_dump(by_alias=True)
     refs = data.get("subTasks", [])
     rows = [ref for ref in refs if ref.get("number") == doc.id]
@@ -623,7 +624,7 @@ def _plan_master_index_reset(
         )
     _validate_reopen_row_path(master_path, leaf_path, doc.id, rows[0])
     rows[0]["status"] = "planning"
-    updated = demote_completed_master_if_unresolved(TaskDocument.model_validate(data))
+    updated = master_sync.demote_completed_master_if_unresolved(TaskDocument.model_validate(data))
     return updated, "reset"
 
 
@@ -644,9 +645,8 @@ def _validate_reopen_row_path(
 
 
 def _reopen_master_path(task_root: Path, doc: TaskDocument) -> Path | None:
-    if not doc.master:
-        default = task_root / "task.json"
-        return default if default.exists() else None
+    if not doc.master:  # the finalizer and the master sync resolve an unnamed leaf by this rule
+        return master_sync.folder_master_json_path(task_root, doc)
     root = task_root.resolve(strict=False)
     ref = Path(doc.master)
     candidate = (root / ref.with_suffix(".json")).resolve(strict=False)

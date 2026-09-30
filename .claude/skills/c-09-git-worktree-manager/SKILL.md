@@ -493,13 +493,14 @@ The finalizer resolves the leaf from the contract's task root and leaf id. An om
 match it. Before any cleanup (including a dry-run cleanup preview), every declared
 top-level step and nested substep must be `done`. Use `task_doc.skip_step` with an
 exact id and nonblank reason for an intentional skip; cleanup/finalization never
-auto-checks work. When the bound leaf declares an existing immediate parent, the
-finalizer always derives that parent and reconciles its exact row to `Completed`, even
-when both optional parent assertions are omitted. `master_doc_path` and
-`subtask_number` are independent identity assertions; when supplied, each must match
-that derived edge. Standalone/no-parent leaves remain supported. The finalizer does
-not mark the parent task itself complete or recursively complete ancestors; each
-parent-child edge is finalized separately.
+auto-checks work. When the bound leaf declares an existing immediate parent, or names
+none and its folder's `task.json` master lists it, the finalizer always derives that
+parent and reconciles its exact row to `Completed`, even when both optional parent
+assertions are omitted. A sub-task naming none whose folder `task.json` is not a
+master is refused. `master_doc_path` and `subtask_number` are independent identity
+assertions; when supplied, each must match that derived edge. Standalone/no-parent
+leaves remain supported. The finalizer does not mark the parent task itself complete
+or recursively complete ancestors; each parent-child edge is finalized separately.
 
 Standalone `worktree_cleanup` is deliberately non-terminal for task documents. If a
 declared final step includes cleanup, run standalone cleanup first, then mark that

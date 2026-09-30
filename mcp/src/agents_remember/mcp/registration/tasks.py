@@ -93,12 +93,14 @@ def _register_task_finalizer_tools(server: FastMCP, config: McpRuntimeConfig) ->
         landed-state and memory carryover checks, the contract identity resolves the one exact leaf
         document (an omitted task_doc_path adopts it; a supplied path must match it) and refuses
         before cleanup unless every declared parent/nested step is done. When that leaf declares an
-        existing immediate parent, the finalizer always derives and reconciles its exact row, even
-        when both optional parent assertions are omitted. master_doc_path and subtask_number are
-        independent identity assertions; when present, each must match that derived edge.
-        Standalone/no-parent leaves remain supported; the parent task itself and recursive ancestors
-        are not completed. No step is auto-checked and no squash-merge equivalence is attempted.
-        Preview with dry_run=true; unresolved steps also refuse previews."""
+        existing immediate parent, or names none and its folder's task.json master lists it, the
+        finalizer always derives and reconciles its exact row, even when both optional parent
+        assertions are omitted; a sub-task naming none whose folder task.json is not a master is
+        refused. master_doc_path and subtask_number are independent identity assertions; when
+        present, each must match that derived edge. Standalone/no-parent leaves remain supported;
+        the parent task itself and recursive ancestors are not completed. No step is auto-checked
+        and no squash-merge equivalence is attempted. Preview with dry_run=true; unresolved steps
+        also refuse previews."""
         return lifecycle_finalize_task_payload(
             config,
             contract_path,

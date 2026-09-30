@@ -162,11 +162,31 @@ def _validate_existing_row_path(
         )
 
 
+def folder_master_json_path(task_root: Path, leaf: TaskDocument) -> Path | None:
+    """The master of a leaf that names none: its task folder's ``task.json``, when one exists.
+
+    ONE RULE FOR EVERY WRITER OF A LEAF'S MASTER ROW (MIK-R38). This module keeps the row current
+    on every task-document write; the finalizer (``worktrees/modules/finalize.py``) completes it
+    when the leaf lands; reopen (``worktrees/reopen.py``) resets it. The first two used to
+    disagree about a leaf without a ``master`` reference -- the sync fell back to this file, the
+    finalizer called the leaf standalone -- so a master whose leaves name no master kept each
+    finished leaf's row at ``inProgress`` (260928-MIK: 15 rows, repaired by resync writes). All
+    three now resolve an unnamed leaf here.
+
+    Only a ``subTask`` has a folder master: a ``light`` or ``master`` document *is* the folder's
+    ``task.json``. A leaf that names its master gets ``None``; each caller resolves that reference
+    by its own rule.
+    """
+    if leaf.kind != "subTask" or leaf.master:
+        return None
+    default = task_root / "task.json"
+    return default if default.exists() else None
+
+
 def _master_json_path(task_root: Path, leaf: TaskDocument) -> Path | None:
     if leaf.master:
         return _json_path_from_master_ref(task_root, leaf.master)
-    default = task_root / "task.json"
-    return default if default.exists() else None
+    return folder_master_json_path(task_root, leaf)
 
 
 def _json_path_from_master_ref(task_root: Path, master_ref: str | None) -> Path | None:

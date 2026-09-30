@@ -18,9 +18,13 @@ from agents_remember.tasks import (
 )
 from agents_remember.tasks.leaf_doc import (
     TerminalLeafResolutionError,
+    require_task_document_in_place,
     resolve_terminal_leaf_doc,
 )
-from agents_remember.tasks.master_sync import demote_completed_master_if_unresolved
+from agents_remember.tasks.master_sync import (
+    demote_completed_master_if_unresolved,
+    folder_master_json_path,
+)
 from agents_remember.worktrees.activation.atomic_series_activation_terminal import (
     with_terminal_atomic_series_release,
 )
@@ -386,6 +390,7 @@ def _resolve_task_targets(
         raise FinalizeTaskDocumentError(
             "contract-bound leaf task document changed during finalization preflight; retry"
         )
+    require_task_document_in_place(leaf_path, leaf, FinalizeTaskDocumentError)
     return _resolve_parent_target(contract, args, leaf_path, leaf, leaf_source)
 
 
@@ -402,8 +407,12 @@ def _resolve_parent_target(
         raise FinalizeTaskDocumentError(
             "cannot complete an immediate parent row without a contract-bound leaf document"
         )
-    if not leaf.master:
-        if args.master_doc_path is not None or args.subtask_number:
+    if leaf.master:
+        target = _named_parent(contract.task_root, args, leaf.master, leaf.id)
+    else:
+        target = _folder_parent(contract.task_root, args, leaf)
+    if target is None:
+        if _parent_asserted(args):
             raise FinalizeTaskDocumentError(
                 "standalone leaf has no immediate parent reference to assert"
             )
@@ -413,23 +422,67 @@ def _resolve_parent_target(
             completed_leaf=_leaf_completion_candidate(leaf),
             leaf_source=leaf_source,
         )
-    expected_parent = _expected_parent_path(contract.task_root, leaf)
-    _assert_parent_arguments(args, expected_parent, leaf.id)
-    parent, parent_source = _read_parent(expected_parent)
-    row = _exact_parent_row(parent, leaf.id)
-    _check_parent_row_path(expected_parent, row, leaf_path)
-    completed_parent = _parent_completion_candidate(parent, row.number)
+    _check_parent_row_path(target.path, target.row, leaf_path)
+    completed_parent = _parent_completion_candidate(target.document, target.row.number)
     return FinalizeTaskTargets(
         leaf_path=leaf_path,
         leaf=leaf,
         completed_leaf=_leaf_completion_candidate(leaf),
         leaf_source=leaf_source,
-        parent_path=expected_parent,
-        parent=parent,
-        parent_row=row,
+        parent_path=target.path,
+        parent=target.document,
+        parent_row=target.row,
         completed_parent=completed_parent,
-        parent_source=parent_source,
+        parent_source=target.source,
     )
+
+
+@dataclass(frozen=True)
+class _ParentTarget:
+    """The leaf's immediate parent master, its captured source, and the one row naming the leaf."""
+
+    path: Path
+    document: TaskDocument
+    source: TaskDocSourceSnapshot
+    row: SubTaskRef
+
+
+def _named_parent(
+    task_root: Path, args: FinalizeArgs, master_ref: str, leaf_id: str
+) -> _ParentTarget:
+    expected_parent = _expected_parent_path(task_root, master_ref)
+    _assert_parent_arguments(args, expected_parent, leaf_id)
+    parent, parent_source = _read_parent(expected_parent)
+    return _ParentTarget(expected_parent, parent, parent_source, _exact_parent_row(parent, leaf_id))
+
+
+def _folder_parent(task_root: Path, args: FinalizeArgs, leaf: TaskDocument) -> _ParentTarget | None:
+    """The master that lists a leaf naming none, resolved by the master sync's rule (MIK-R38).
+
+    A leaf without a ``master`` reference belongs to its folder's ``task.json`` exactly as the
+    task-document master sync decides it, so the row that sync keeps current is the row finalize
+    completes. That master is held to every check a named master meets: it must be a readable
+    master with exactly one row for the leaf, pointing at this leaf's file. Only a missing folder
+    master, or one listing no row for the leaf, leaves the leaf standalone as before.
+    """
+    folder_master = folder_master_json_path(task_root, leaf)
+    if folder_master is None:
+        return None
+    expected_parent = folder_master.resolve(strict=False)
+    parent, parent_source = _read_parent(expected_parent)
+    if not any(row.number == leaf.id for row in parent.subTasks):
+        if _parent_asserted(args):
+            raise FinalizeTaskDocumentError(
+                f"folder master {expected_parent} lists no row {leaf.id!r}; the leaf finalizes "
+                "standalone, so there is no immediate parent to assert"
+            )
+        return None
+    _assert_parent_arguments(args, expected_parent, leaf.id)
+    return _ParentTarget(expected_parent, parent, parent_source, _exact_parent_row(parent, leaf.id))
+
+
+def _parent_asserted(args: FinalizeArgs) -> bool:
+    return args.master_doc_path is not None or bool(args.subtask_number)
 
 
 def _assert_parent_arguments(
@@ -462,6 +515,7 @@ def _read_parent(parent_path: Path) -> tuple[TaskDocument, TaskDocSourceSnapshot
         raise FinalizeTaskDocumentError(
             f"immediate parent path is not a master task document: {parent_path}"
         )
+    require_task_document_in_place(parent_path, parent, FinalizeTaskDocumentError)
     return parent, source
 
 
@@ -484,13 +538,12 @@ def _check_parent_row_path(parent_path: Path, row: SubTaskRef, leaf_path: Path) 
         )
 
 
-def _expected_parent_path(task_root: Path, leaf: TaskDocument) -> Path:
-    ref = Path(leaf.master) if leaf.master else Path("task.md")
+def _expected_parent_path(task_root: Path, master_ref: str) -> Path:
     root = task_root.resolve(strict=False)
-    candidate = (root / ref.with_suffix(".json")).resolve(strict=False)
+    candidate = (root / Path(master_ref).with_suffix(".json")).resolve(strict=False)
     if candidate.parent != root:
         raise FinalizeTaskDocumentError(
-            f"leaf master reference must resolve to a direct child of {root}: {leaf.master!r}"
+            f"leaf master reference must resolve to a direct child of {root}: {master_ref!r}"
         )
     return candidate
 
