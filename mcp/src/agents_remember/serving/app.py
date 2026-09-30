@@ -124,6 +124,7 @@ from agents_remember.serving.harness_capability_catalog import HarnessCapability
 from agents_remember.serving.harness_control_api import register_harness_control_routes
 from agents_remember.serving.harness_control_client import ControlPlaneClient
 from agents_remember.serving.hosted_interactions import HostedInteractionSynchronizer
+from agents_remember.serving.knowledge_reader import register_knowledge_reader_route
 from agents_remember.serving.notes import register_notes_routes
 from agents_remember.serving.projections.landing_state import LandingStateRefresher
 from agents_remember.serving.projections.projection_store import ProviderStateRefresher
@@ -303,6 +304,7 @@ def create_app(
     )
     register_review_summary_route(app, collaborators.review_intent_summary)
     register_review_trees_route(app, collaborators.review_trees)
+    register_knowledge_reader_route(app, collaborators.knowledge_reader)
     register_harness_control_routes(
         app,
         ConversationRuntime(

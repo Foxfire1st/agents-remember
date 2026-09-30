@@ -19,7 +19,11 @@ The lookups:
 * :meth:`KnowledgeIndex.proofs_of` -- invariants -> their proof entries (MIK-R28 rule 4);
 * :meth:`KnowledgeIndex.invariants_without_proof` -- the live invariants no proof names (MIK-R28
   rule 5);
-* :meth:`KnowledgeIndex.record_ids` -- every record ID of one kind (MIK-R25's per-side currentness).
+* :meth:`KnowledgeIndex.record_ids` -- every record ID of one kind (MIK-R25's per-side currentness);
+* :meth:`KnowledgeIndex.entries_under`, :meth:`KnowledgeIndex.entries_in_directory`,
+  :meth:`KnowledgeIndex.live_entry_paths_under`, :meth:`KnowledgeIndex.links_to_path` and
+  :meth:`KnowledgeIndex.records_of_kind` -- the reader's directory, path and record lookups
+  (MIK-R29).
 """
 
 from __future__ import annotations
@@ -282,6 +286,52 @@ class KnowledgeIndex:
         records = (self._record(str(row[0])) for row in rows)
         return self._answer(tuple(record for record in records if record is not None))
 
+    def entries_under(self, directory: str) -> Answer[EntriesAtPath]:
+        """Entries recorded at ``directory`` or any path below it (MIK-R29's directory listing).
+
+        The root route ``.`` (or an empty directory) holds every entry. A path prefix never matches
+        a sibling that merely shares its spelling: ``dash`` holds ``dash/x``, not ``dashboard/x``.
+        """
+
+        where, parameters = _under(directory)
+        return self._answer(_split(self._entries(where, parameters)))
+
+    def entries_in_directory(self, directory: str) -> Answer[EntriesAtPath]:
+        """Entries recorded at files directly in ``directory``, not in its subdirectories."""
+
+        where, parameters = _under(directory)
+        prefix = _prefix(directory)
+        entries = self._entries(
+            f"({where}) AND instr(substr(path, ?), '/') = 0", (*parameters, len(prefix) + 1)
+        )
+        return self._answer(_split(entries))
+
+    def live_entry_paths_under(self, directory: str) -> Answer[tuple[str, ...]]:
+        """The source path of every entry at or under ``directory`` whose invariant is a live
+        record (not retired, not missing), one per entry, by path: the reader's counts."""
+
+        where, parameters = _under(directory, column="e.path")
+        rows = self._rows(
+            "SELECT e.path FROM ix_entry e JOIN ix_record r ON r.id = e.invariant "
+            f"WHERE r.status != 'retired' AND ({where}) "
+            "ORDER BY e.path, e.id",
+            parameters,
+        )
+        return self._answer(tuple(str(row[0]) for row in rows))
+
+    def links_to_path(self, path: str) -> Answer[tuple[Link, ...]]:
+        """Every relationship whose target is the code anchor or route at ``path`` (MIK-R29)."""
+
+        return self._answer(
+            self._links("target_kind IN ('anchor', 'route') AND target = ?", (path.strip("/"),))
+        )
+
+    def records_of_kind(self, kind: str) -> Answer[tuple[Record, ...]]:
+        """Every record of one kind, by ID (MIK-R29's record list and derived decision status)."""
+
+        records = (self._record(one) for one in self.record_ids(kind).value)
+        return self._answer(tuple(record for record in records if record is not None))
+
     def record(self, record_id: str) -> Answer[Record | None]:
         return self._answer(self._record(record_id))
 
@@ -326,11 +376,14 @@ class KnowledgeIndex:
         )
 
     def _incoming(self, record_id: str) -> tuple[Link, ...]:
+        return self._links("target_kind = 'record' AND target = ?", (record_id,))
+
+    def _links(self, where: str, parameters: tuple[Any, ...]) -> tuple[Link, ...]:
         rows = self._rows(
             "SELECT source, source_kind, relation, target_kind, target, detail, origin_path "
-            "FROM ix_link WHERE target_kind = 'record' AND target = ? "
+            f"FROM ix_link WHERE {where} "
             "ORDER BY source, relation, origin_path",
-            (record_id,),
+            parameters,
         )
         return tuple(
             Link(
@@ -397,3 +450,26 @@ def _self_and_ancestors(path: str) -> list[str]:
     if candidates[-1] != ROOT_ROUTE_PATH:
         candidates.append(ROOT_ROUTE_PATH)
     return candidates
+
+
+def _prefix(directory: str) -> str:
+    """The spelling every path below ``directory`` starts with (empty for the root)."""
+
+    stripped = directory.strip("/")
+    return "" if stripped in ("", ROOT_ROUTE_PATH) else f"{stripped}/"
+
+
+def _under(directory: str, *, column: str = "path") -> tuple[str, tuple[Any, ...]]:
+    """The ``ix_entry`` condition for "``column`` is at or under ``directory``", with parameters."""
+
+    prefix = _prefix(directory)
+    if not prefix:
+        return "1 = 1", ()
+    return f"{column} = ? OR substr({column}, 1, ?) = ?", (prefix[:-1], len(prefix), prefix)
+
+
+def _split(entries: Sequence[Entry]) -> EntriesAtPath:
+    return EntriesAtPath(
+        realizations=tuple(e for e in entries if e.kind == "realization"),
+        proofs=tuple(e for e in entries if e.kind == "proof"),
+    )

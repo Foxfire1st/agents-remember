@@ -28,6 +28,7 @@ from agents_remember.serving.agent_notifier_heartbeat import (
 from agents_remember.serving.build_info import ServingBuild
 from agents_remember.serving.harness_capability_catalog import HarnessCapabilityCatalog
 from agents_remember.serving.hosted_session_runtime import HostedSessionRuntime
+from agents_remember.serving.knowledge_reader import KnowledgeReaderPort
 from agents_remember.serving.launch_capsule import (
     LaunchCapsuleResolver as LaunchCapsuleResolverPort,
 )
@@ -504,6 +505,13 @@ class ServingCollaborators:
 
     A fifth port because it answers for a converted leaf what the dataset review cannot: the Git
     diff of the memory trees and the worklist view. Omitting it refuses that route by name.
+    """
+
+    knowledge_reader: KnowledgeReaderPort | None = None
+    """The path-based knowledge reader (MIK-R29): read-only views of any converted memory tree.
+
+    It needs no task, so it is its own port rather than a mode of the review adapter. Omitting it
+    refuses the reader route by name.
     """
 
     capsule_launch: LaunchCapsuleResolverPort | None = None

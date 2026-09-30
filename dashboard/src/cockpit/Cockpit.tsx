@@ -37,12 +37,14 @@ import type { TaskArtifactReaderTarget as NotesReaderTarget } from "../data/task
 import { NotesReaderViewer } from "../panels/notes-reader/NotesReaderViewer";
 import { DetailPanel } from "../panels/detail-panel/DetailPanel";
 import { IntentEntryRevalidation } from "../data/intentEntryRevalidation";
+import { parseReaderHash } from "../data/knowledgeReader";
 import type { ViewedTaskContext } from "../panels/detail-panel/state";
 import { EngineRoom } from "../panels/EngineRoom";
 import { useShouldAnimate } from "../panels/engine-room/useShouldAnimate";
 import { EventRiver } from "../panels/EventRiver";
 import { FileViewer } from "../panels/file-viewer/FileViewer";
 import { Hangar } from "../panels/Hangar";
+import { KnowledgeReader } from "../panels/knowledge-reader/KnowledgeReader";
 import { HighlightComposer } from "../panels/HighlightComposer";
 import { LifecycleList } from "../panels/lifecycle-list/LifecycleList";
 import { MemoryMirror } from "../panels/MemoryMirror";
@@ -72,6 +74,7 @@ export type CockpitView =
   | "memory"
   | "topology"
   | "hangar"
+  | "knowledge"
   | "chats";
 
 const VIEWS: { id: CockpitView; label: string }[] = [
@@ -81,6 +84,7 @@ const VIEWS: { id: CockpitView; label: string }[] = [
   { id: "memory", label: "Memory" },
   { id: "topology", label: "Topology" },
   { id: "hangar", label: "Hangar" },
+  { id: "knowledge", label: "Knowledge" },
   { id: "chats", label: "Chats" },
 ];
 
@@ -387,7 +391,8 @@ export function Cockpit() {
       gate.onInterrupt,
     );
   }, []);
-  return <CockpitShell />;
+  // A shared knowledge-reader URL (`#knowledge?…`, MIK-R29) opens on the Knowledge view.
+  return <CockpitShell initialView={parseReaderHash(window.location.hash) ? "knowledge" : undefined} />;
 }
 
 interface CockpitShellState {
@@ -950,6 +955,8 @@ function ViewBody({ view, onOpen }: { view: CockpitView; onOpen: (id: string) =>
       return <Topology onSelect={onOpen} />;
     case "hangar":
       return <Hangar onSelect={onOpen} />;
+    case "knowledge":
+      return <KnowledgeReader />;
     // "operations", "files", "engine", and "chats" are intentionally not here — all four are kept
     // mounted in CockpitShell (hidden via CSS) so their in-panel state survives a view switch; routing
     // them through this transient switch would unmount them.

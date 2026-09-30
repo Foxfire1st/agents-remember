@@ -73,6 +73,9 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     dashboard process can never serve a role-configured launch with no compiler behind it.
     """
 
+    from agents_remember.application.knowledge_reader import (  # noqa: PLC0415 - composition
+        read_knowledge_reader,
+    )
     from agents_remember.application.knowledge_review import (  # noqa: PLC0415 - composition
         list_knowledge_review_entries,
         read_knowledge_review,
@@ -143,6 +146,11 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
 
         return read_review_trees(config, query)
 
+    def knowledge_reader_port(query):
+        """The path-based knowledge reader (MIK-R29): one read-only view of one memory tree."""
+
+        return read_knowledge_reader(config, query)
+
     return replace(
         EXECUTION_REGISTRATION_COLLABORATORS,
         capsule_launch=partial(compile_launch_capsule, config),
@@ -151,6 +159,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         review_source_content=review_source_content_port,
         review_intent_summary=review_intent_summary_port,
         review_trees=review_trees_port,
+        knowledge_reader=knowledge_reader_port,
     )
 
 
