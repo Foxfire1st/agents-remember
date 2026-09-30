@@ -33,6 +33,14 @@ afterEach(() => {
 
 const requested: URL[] = [];
 
+// These captures predate the unexplained-changes lane (MIK-R32): its read is answered with the
+// comparison and no lane, which the tree's destinations show as unavailable -- never as a zero.
+const withoutLane = (body: ReviewTreesResult) => ({
+  state: body.state,
+  comparison: body.comparison,
+  knowledge_sides: body.knowledge_sides,
+});
+
 function serve(leafWide: ReviewTreesResult = leafTrees) {
   requested.length = 0;
   const familyId = family.payload!.knowledge.revision_selection!.record_id;
@@ -44,7 +52,9 @@ function serve(leafWide: ReviewTreesResult = leafTrees) {
       const body = url.pathname.endsWith('/trees')
         ? url.searchParams.get('invariants')
           ? cards
-          : leafWide
+          : url.searchParams.get('lane')
+            ? withoutLane(leafWide)
+            : leafWide
         : url.pathname.endsWith('/entries')
           ? entries
           : url.pathname.endsWith('/source-content')
@@ -138,7 +148,10 @@ it('shows the family around _not_listed as focused cards: one changed range, the
   expect(read.searchParams.get('comparison')).toBe('1');
   // The leaf-wide read is pinned to the same comparison (review F11).
   const leafWide = requested.find(
-    (url) => url.pathname.endsWith('/trees') && !url.searchParams.get('invariants'),
+    (url) =>
+      url.pathname.endsWith('/trees') &&
+      !url.searchParams.get('invariants') &&
+      !url.searchParams.get('lane'),
   )!;
   expect(leafWide.searchParams.get('comparison')).toBe('1');
   expect(leafWide.searchParams.get('history')).toBeNull();
@@ -187,6 +200,25 @@ it('shows the family around _not_listed as focused cards: one changed range, the
   );
   // The leaf's knowledge changes and worklist remain reachable in the same reading path.
   const knowledge = within(center).getByTestId('review-leaf-knowledge');
+  // The lane's destinations follow the families; an answer without a lane is not a zero.
+  const lane = view.getByTestId('review-lane-destinations');
+  expect(lane.dataset.laneState).toBe('unavailable');
+  expect(
+    within(lane)
+      .getAllByTestId('review-lane-destination-totals')
+      .map((line) => line.textContent),
+  ).toEqual(['unavailable', 'unavailable']);
+  // With no lane to read, the explorer names no bucket it did not measure.
+  expect(
+    view
+      .getAllByTestId('review-inventory-entry')
+      .map((row) => row.querySelector<HTMLElement>('[data-attribution]')!.dataset.attribution),
+  ).toEqual(['Attribution unknown']);
+  // The technical details state the same unknown, not the landed accounting's lists.
+  const details = view.getByTestId('review-details');
+  expect(within(details).getByTestId('review-unattributed').dataset.attributionState).toBe(
+    'unknown',
+  );
   expect(
     within(knowledge)
       .getAllByTestId('review-worklist-item')
@@ -227,7 +259,31 @@ it('leaves a dataset review exactly as it was: no tree read, the landed file vie
   await view.findByTestId('review-expression-diffs');
   expect(view.queryByTestId('review-expression-cards')).toBeNull();
   expect(view.queryByTestId('review-leaf-knowledge')).toBeNull();
+  expect(view.queryByTestId('review-lane-destinations')).toBeNull();
   expect(urls.some((url) => url.pathname.endsWith('/trees'))).toBe(false);
+  // The explorer keeps the landed accounting's labels, path by path.
+  const source = payload.source;
+  const landed = (entry: string) =>
+    source.attributed_changed_paths.includes(entry)
+      ? 'Mapped'
+      : source.unattributed_changed_paths.includes(entry)
+        ? 'Unmapped'
+        : 'Attribution unknown';
+  const rows = view.getAllByTestId('review-inventory-entry');
+  expect(rows).toHaveLength(source.inventory.entries.length);
+  expect(
+    rows.map((row) => row.querySelector<HTMLElement>('[data-attribution]')!.dataset.attribution),
+  ).toEqual(source.inventory.entries.map((entry) => landed(entry.path)));
+  // The technical details keep the landed accounting's counts and list.
+  const details = view.getByTestId('review-details');
+  const remaining = within(details).getByTestId('review-remaining');
+  expect(remaining.dataset.attributionSource).toBe('landed');
+  const counted = source.remaining.find((count) => count.name === 'unattributed_changed_paths')!;
+  expect(remaining.textContent).toContain(`unattributed_changed_paths: ${counted.value}`);
+  expect(within(details).getByTestId('review-unattributed').textContent).toBe(
+    `changed paths with no registered attribution: ${source.unattributed_changed_paths.join(', ')}`,
+  );
+  expect(within(details).queryByTestId('review-unknown-attribution')).toBeNull();
 });
 
 it('takes no planning mark from a leaf-wide read of another comparison (review R2-3)', async () => {

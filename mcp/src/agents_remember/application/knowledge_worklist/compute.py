@@ -52,6 +52,7 @@ from agents_remember.application.knowledge_worklist.code import (
     CodeReadError,
     CodeTrees,
     Hunk,
+    change_hunks,
     hits_new,
     hits_old,
 )
@@ -92,6 +93,7 @@ __all__ = [
     "WorklistInputs",
     "compute_worklist",
     "incomplete_worklist",
+    "non_text_linked",
     "worklist_digest",
 ]
 
@@ -564,18 +566,7 @@ class _Run:
     def _path_hunks(
         self, change: TreeChange, base_blob: str | None, candidate_blob: str | None
     ) -> tuple[Hunk, ...] | None:
-        """The path's text hunks, or ``None`` for a change linked at file level (non-text)."""
-
-        if change.content != "text" or change.status == "type_changed":
-            return None
-        code = self.inputs.code
-        if base_blob is not None and candidate_blob is not None:
-            return code.hunks(base_blob, candidate_blob)
-        present = base_blob or candidate_blob
-        count = 0 if present is None else code.line_count(present)
-        if count == 0:
-            return None
-        return (Hunk(1, count, 0, 0),) if candidate_blob is None else (Hunk(0, 0, 1, count),)
+        return change_hunks(self.inputs.code, change, base_blob, candidate_blob)
 
     def _spans(self, side: KnowledgeSide, path: str, blob: str | None) -> list[tuple[int, int]]:
         if blob is None:
@@ -591,11 +582,20 @@ class _Run:
         return spans
 
     def _file_covered(self, path: str) -> bool:
-        return any(
-            side.entries[entry_id].entry.anchor.locator.kind == "file"
+        return non_text_linked(
+            side.entries[entry_id].entry.anchor.locator.kind
             for side in (self.inputs.base, self.inputs.candidate)
             for entry_id in side.entries_by_path.get(path, ())
         )
+
+
+def non_text_linked(locator_kinds: Iterable[str]) -> bool:
+    """Whether a non-text change is linked (definition 8): a ``file``-locator entry covers its path.
+
+    ``locator_kinds`` are the locator kinds of every entry either knowledge side records at the path.
+    """
+
+    return any(kind == "file" for kind in locator_kinds)
 
 
 def _class_counts(classified: Iterable[Classification]) -> dict[str, int]:

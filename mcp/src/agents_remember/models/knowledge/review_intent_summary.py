@@ -24,6 +24,11 @@ count and what they cannot be:
 
 Nothing here selects or compares: the application owner computes the counts from the two snapshots'
 own head revisions and this module only fixes the shape and the arithmetic the counts must satisfy.
+
+A tree comparison (MIK-R25) also carries ``attribution``: the unexplained-changes lane's file-level
+count (:class:`~agents_remember.models.knowledge.review_lane.ReviewLaneSummary`), read in the same
+request as the intent counts and never more eagerly. It is a separate fact from ``+N -N`` and never
+folded into it; a dataset comparison carries none.
 """
 
 from __future__ import annotations
@@ -34,6 +39,7 @@ from pydantic import Field, model_validator
 
 from agents_remember.models.knowledge.base import REFERENCE_MAX_LENGTH, KnowledgeModel
 from agents_remember.models.knowledge.review import ReviewRefusal
+from agents_remember.models.knowledge.review_lane import ReviewLaneSummary
 
 __all__ = [
     "IntentHeadChanges",
@@ -98,6 +104,8 @@ class ReviewIntentSummaryResult(KnowledgeModel):
     leaf_id: str = Field(min_length=1, max_length=REFERENCE_MAX_LENGTH)
     counts: ReviewIntentCounts | None = None
     refusal: ReviewRefusal | None = None
+    # The unexplained-changes lane's entry count, for a tree comparison only (MIK-R32 rule 9).
+    attribution: ReviewLaneSummary | None = None
 
     @model_validator(mode="after")
     def _require_one_outcome(self) -> ReviewIntentSummaryResult:

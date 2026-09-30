@@ -16,8 +16,15 @@
 // UNAVAILABLE IS NOT ZERO. A comparison whose knowledge could not be read shows a brief state ("no
 // knowledge yet", "unavailable") and no counts; the owner's code, reason and next action are one click
 // away in the disclosure beside the control (ICR-R16). A partial answer shows its counts marked partial.
+//
+// UNEXPLAINED IS A SEPARATE FACT. A tree comparison's summary also carries the unexplained-changes
+// lane's file count (MIK-R32): `· K unexplained`, or `· K unexplained · U unknown` when some file's
+// attribution is unknown. It is its own element after `+N −N`, never added to it. A partially measured
+// change set says `· attribution partial` (the unmeasured scope is in the disclosure), an unmeasured
+// one `· attribution unknown`; zero of both, a dataset comparison and a pending read show nothing.
 import type { ChangeSetTarget } from "../changeset/ChangeSetViewer";
 import { type IntentSummaryRead, useIntentReviewSummary } from "../../data/reviewIntentSummary";
+import type { ReviewLaneSummary } from "../../data/reviewLane";
 import { EntryStateDetails, briefProblem, problemSentence } from "./entryState";
 import { changeSetBtn, changeSetCounts } from "./styles";
 
@@ -57,6 +64,48 @@ function IntentCounts({ read }: { read: IntentSummaryRead }) {
         </span>
       ) : null}
     </>
+  );
+}
+
+// The lane's entry count, or nothing: `null` for zero of both, a pending read and a dataset comparison.
+function attributionText(attribution: ReviewLaneSummary): string | null {
+  if (attribution.state === "partial") return "· attribution partial";
+  if (attribution.state === "unavailable") return "· attribution unknown";
+  const unexplained = attribution.unexplained ?? 0;
+  const unknown = attribution.attribution_unknown ?? 0;
+  if (unknown > 0) return `· ${unexplained} unexplained · ${unknown} unknown`;
+  return unexplained > 0 ? `· ${unexplained} unexplained` : null;
+}
+
+function AttributionCount({ read }: { read: IntentSummaryRead }) {
+  const attribution = read.phase === "loading" ? undefined : read.attribution;
+  const text = attribution ? attributionText(attribution) : null;
+  if (!attribution || text === null) return null;
+  return (
+    <span
+      className={changeSetCounts}
+      data-testid="intent-review-attribution"
+      data-attribution-state={attribution.state}
+      data-unexplained={attribution.unexplained}
+      data-unknown={attribution.attribution_unknown}
+    >
+      {text}
+    </span>
+  );
+}
+
+function AttributionDetails({ read }: { read: IntentSummaryRead }) {
+  const attribution = read.phase === "loading" ? undefined : read.attribution;
+  if (!attribution || attribution.state === "counted") return null;
+  const scope = attribution.unmeasured.length
+    ? ` Not measured: ${attribution.unmeasured.join(", ")}.`
+    : "";
+  return (
+    <EntryStateDetails testId="intent-review-attribution-details" label="Attribution">
+      {attribution.state === "partial"
+        ? `The change set was measured with some paths not reportable whole, so no unexplained count is given. ${attribution.detail ?? ""}${scope}`
+        : `The attribution of the changed files could not be measured: ${attribution.detail ?? "no reason was given"}.`}
+    </EntryStateDetails>
   );
 }
 
@@ -113,8 +162,10 @@ export function IntentReviewEntry({
       >
         ⇄ {live ? "Intent review" : "Intent review (recorded)"}
         <IntentCounts read={read} />
+        <AttributionCount read={read} />
       </button>
       <IntentDetails read={read} />
+      <AttributionDetails read={read} />
     </>
   );
 }

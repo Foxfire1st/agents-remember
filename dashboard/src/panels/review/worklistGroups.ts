@@ -6,8 +6,8 @@
 //   * knowledge items (invariant and family kinds) carry MIK-R11's `planning` mark;
 //   * `planned_untouched` items are the declared effects no row delivered;
 //   * `unexplained_hunk` / `unexplained_file` items (MIK-R10) can be numerous (160 on one real leaf),
-//     so they are grouped by file and then by coverage state. The unexplained-changes lane
-//     (MIK-R32) owns their disposition; this structure only lists them.
+//     so they are grouped by file and then by coverage state. They are answered by history rows
+//     (MIK-R10) that the closeout gate enforces; this structure and the MIK-R32 lane only list them.
 //   * every other kind (onboarding traces, route conditions, ...) is listed by kind.
 import type {
   ReviewWorklistChange,

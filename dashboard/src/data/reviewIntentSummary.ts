@@ -13,6 +13,10 @@
 //     half, an unresolved candidate); there are NO counts, only the owner's refusal.
 // A body that is none of these, and a request that never reached the server, are failures in the
 // shared review vocabulary (`ReviewFailure`), so the entry can say which happened.
+//
+// A tree comparison's answer also carries `attribution`: the unexplained-changes lane's file-level
+// count (data/reviewLane.ts). It arrives in this same response -- the entry never asks for it more
+// eagerly than for the intent counts -- and is kept apart from `+N −N` all the way to the screen.
 
 import { useEffect, useRef, useState } from "react";
 
@@ -25,6 +29,7 @@ import {
   reviewProblemFromRefusal,
   unreadableAnswer,
 } from "./review";
+import type { ReviewLaneSummary } from "./reviewLane";
 
 interface IntentHeadChanges {
   after_only: number;
@@ -49,6 +54,7 @@ interface ReviewIntentSummaryResult {
   leaf_id: string;
   counts?: ReviewIntentCounts;
   refusal?: ReviewRefusal;
+  attribution?: ReviewLaneSummary;
 }
 
 const intentReviewSummary = (
@@ -61,19 +67,25 @@ const intentReviewSummary = (
     `${base}/api/review/intent/summary?${qs({ repo, master, leaf })}`,
   );
 
-// What the entry renders. `counts` and `problem` are never both present.
+// What the entry renders. `counts` and `problem` are never both present; `attribution` is present for
+// a tree comparison whatever the intent counts' own state.
 export type IntentSummaryRead =
   | { phase: "loading" }
-  | { phase: "counted" | "partial"; counts: ReviewIntentCounts }
-  | { phase: "unavailable"; problem: ReviewFailure };
+  | { phase: "counted" | "partial"; counts: ReviewIntentCounts; attribution?: ReviewLaneSummary }
+  | { phase: "unavailable"; problem: ReviewFailure; attribution?: ReviewLaneSummary };
 
 // One answer as the read state it is. A counted/partial body without counts, and an unavailable body
 // without its refusal, are not this route's answer and are reported as unreadable rather than drawn.
 function summaryRead(result: ReviewIntentSummaryResult): IntentSummaryRead {
+  const attribution = result.attribution ? { attribution: result.attribution } : {};
   if ((result.state === "counted" || result.state === "partial") && result.counts)
-    return { phase: result.state, counts: result.counts };
+    return { phase: result.state, counts: result.counts, ...attribution };
   if (result.state === "unavailable" && result.refusal)
-    return { phase: "unavailable", problem: reviewProblemFromRefusal(result.refusal) };
+    return {
+      phase: "unavailable",
+      problem: reviewProblemFromRefusal(result.refusal),
+      ...attribution,
+    };
   return { phase: "unavailable", problem: unreadableAnswer(String(result.state)) };
 }
 

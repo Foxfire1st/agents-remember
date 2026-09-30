@@ -39,6 +39,7 @@ from agents_remember.kernel.git_command import (
     run_git,
 )
 from agents_remember.memory.conversion.code_objects import CodeObjectError, CodeObjects
+from agents_remember.memory.knowledge.tree_observation import TreeChange
 from agents_remember.memory_quality.style.citations import extents, grammars
 from agents_remember.models.knowledge_files.anchor_content import (
     RangeOutsideBlobError,
@@ -54,6 +55,7 @@ __all__ = [
     "Hunk",
     "LineRange",
     "Resolved",
+    "change_hunks",
     "hits_new",
     "hits_old",
     "map_range",
@@ -330,3 +332,25 @@ class CodeTrees:
             return len(extents.qualified_spans(name, extents.definitions(path, lines)))
         except GrammarUnavailableError as error:
             raise CodeReadError(f"the grammar for {path!r} is unavailable: {error}") from error
+
+
+def change_hunks(
+    code: CodeTrees, change: TreeChange, base_blob: str | None, candidate_blob: str | None
+) -> tuple[Hunk, ...] | None:
+    """A changed path's text hunks (definition 2), or ``None`` for a change linked at file level.
+
+    A path whose content is not text, or whose type changed, has no hunks: it is a non-text change
+    (definition 8). An added or a deleted text file is one hunk of all its lines; an empty one has
+    none and is linked at file level too. The gate linkage and the reviewer's unexplained-changes
+    lane both take a path's hunks from here, so the two never disagree about what a hunk is.
+    """
+
+    if change.content != "text" or change.status == "type_changed":
+        return None
+    if base_blob is not None and candidate_blob is not None:
+        return code.hunks(base_blob, candidate_blob)
+    present = base_blob or candidate_blob
+    count = 0 if present is None else code.line_count(present)
+    if count == 0:
+        return None
+    return (Hunk(1, count, 0, 0),) if candidate_blob is None else (Hunk(0, 0, 1, count),)

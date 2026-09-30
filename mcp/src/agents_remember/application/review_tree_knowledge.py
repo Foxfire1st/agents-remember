@@ -18,6 +18,9 @@ review composition does not already show, and nothing more (rules 2 and 3):
   realization and proof entries, located on both code sides with each range's excerpt, for the
   reviewer's focused expression cards (:mod:`.review_tree_entries`). The cards of one selection are
   read on demand, so the leaf-wide view never carries every excerpt of the repository.
+* **The unexplained-changes lane (MIK-R32).** ``lane`` answers only the lane's two destinations, and
+  ``file`` only one changed path's classification (:mod:`.review_unexplained_lane`); the worklist
+  view of rule 3 stays in the leaf-wide view beside them.
 
 The route's wire keys are snake_case, the review surface's convention (MIK-L25 review F9): the
 currentness documents and the worklist's own documents, which their owners spell in camelCase, are
@@ -48,11 +51,20 @@ from agents_remember.application.review_tree_comparison import (
     reopen_review_trees,
 )
 from agents_remember.application.review_tree_entries import tree_entries
+from agents_remember.application.review_unexplained_lane import (
+    classify_changed_path,
+    unexplained_lane,
+)
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge_index import KnowledgeIndex, is_indexed_path
 from agents_remember.models.knowledge.base import PROSE_MAX_LENGTH
 from agents_remember.models.knowledge.review import ReviewRefusal
+from agents_remember.models.knowledge.review_lane import (
+    ReviewFileClassification,
+    ReviewUnexplainedLane,
+)
+from agents_remember.models.knowledge.review_tree_entries import ReviewTreeEntry
 from agents_remember.models.knowledge.review_trees import (
     ReviewKnowledgeFileChange,
     ReviewKnowledgeRecordGroup,
@@ -107,8 +119,12 @@ def read_review_trees(config: McpRuntimeConfig, query: ReviewTreesQuery) -> Revi
             leaf_id=query.leaf_id,
         )
     contract, trees = found
+    if query.file is not None:
+        return _file_view(query, trees)
+    if query.lane:
+        return _focused(query, trees, lane=unexplained_lane(trees))
     if query.invariants:
-        return _entries_view(query, trees)
+        return _focused(query, trees, entries=tree_entries(trees, query.invariants))
     return _view(query, contract, trees)
 
 
@@ -119,13 +135,13 @@ def _comparison(
 
     A leaf-wide read that names a number is pinned to that comparison. When the number is the one
     the review resolves to now, the resolution is used as it is (a live leaf keeps its computed
-    worklist); any other number is reopened from its record. A cards read (named invariants) needs
-    only the trees, so it always reopens.
+    worklist); any other number is reopened from its record. A focused read (the cards' named
+    invariants, the lane, one file) needs only the trees, so it always reopens.
     """
 
     if query.number is None:
         return _resolved(config, query)
-    if not query.invariants:
+    if not query.focused:
         current = _resolved(config, query)
         if isinstance(current, tuple) and current[1].record.number == query.number:
             return current
@@ -173,8 +189,15 @@ def _view(
     )
 
 
-def _entries_view(query: ReviewTreesQuery, trees: ReviewTrees) -> ReviewTreesResult:
-    """The comparison and the named invariants' entries only (MIK-R31's cards)."""
+def _focused(
+    query: ReviewTreesQuery,
+    trees: ReviewTrees,
+    *,
+    entries: tuple[ReviewTreeEntry, ...] = (),
+    lane: ReviewUnexplainedLane | None = None,
+    file_classification: ReviewFileClassification | None = None,
+) -> ReviewTreesResult:
+    """The comparison and one focused answer: the cards' entries, the lane, or one file."""
 
     return ReviewTreesResult(
         state="trees",
@@ -184,8 +207,27 @@ def _entries_view(query: ReviewTreesQuery, trees: ReviewTrees) -> ReviewTreesRes
         comparison=trees.record,
         knowledge_sides=trees.sides(),
         code_sides=trees.code_sides,
-        entries=tree_entries(trees, query.invariants),
+        entries=entries,
+        lane=lane,
+        file_classification=file_classification,
     )
+
+
+def _file_view(query: ReviewTreesQuery, trees: ReviewTrees) -> ReviewTreesResult:
+    """One changed path's classification, or the refusal a path the comparison did not change earns."""
+
+    assert query.file is not None
+    classified = classify_changed_path(trees, query.file)
+    if isinstance(classified, ReviewRefusal):
+        return ReviewTreesResult(
+            state="refused",
+            repository_id=query.repository_id,
+            master=query.master,
+            leaf_id=trees.record.leaf_id,
+            comparison=trees.record,
+            refusal=classified,
+        )
+    return _focused(query, trees, file_classification=classified)
 
 
 def snake_keys(value: Any) -> Any:

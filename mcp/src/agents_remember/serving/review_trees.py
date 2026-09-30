@@ -5,7 +5,9 @@ leaf -- never a path), optionally the number of a recorded comparison to reopen 
 for the leaf's latest record, calls the port the composition root wires, and serializes the typed
 result once. ``invariants`` (comma-separated identities, as the landed review payload addresses
 them) asks for those invariants' entries only, on both code sides with their excerpts: the focused
-expression cards of one selection (MIK-R31).
+expression cards of one selection (MIK-R31). ``lane=files`` asks for the two destinations of the
+unexplained-changes lane, and ``file=<path>`` for the classification of one changed path (MIK-R32);
+each names one question, so at most one of ``invariants``, ``lane`` and ``file`` is given.
 
 Every typed answer is a 200: ``trees``, ``not-converted`` (the leaf's memory is unconverted, so its
 review is the dataset review) and ``refused`` (with the owner's refusal in the body). Only a process
@@ -36,6 +38,9 @@ KNOWLEDGE_REVIEW_TREES_ROUTE = "/api/review/trees"
 MAX_ENTRY_INVARIANTS = 500
 # Each named identity is a UUID (36 characters); a longer key is not an identity this route answers.
 MAX_INVARIANT_KEY_LENGTH = 64
+# A repository-relative path, bounded like every path the review vocabulary carries.
+MAX_FILE_PATH_LENGTH = 4096
+LANE_FILES = "files"
 
 
 @dataclass(frozen=True)
@@ -49,6 +54,15 @@ class ReviewTreesQuery:
     recorded: bool = False
     # The invariants whose entries the cards need (MIK-R31); naming any answers only those entries.
     invariants: tuple[str, ...] = ()
+    # The unexplained-changes lane's destinations (MIK-R32), or one changed path's classification.
+    lane: bool = False
+    file: str | None = None
+
+    @property
+    def focused(self) -> bool:
+        """Whether the query asks one focused question rather than for the leaf-wide view."""
+
+        return bool(self.invariants) or self.lane or self.file is not None
 
 
 ReviewTreesPort = Callable[[ReviewTreesQuery], ReviewTreesResult]
@@ -74,6 +88,8 @@ class ReviewTreesSelection:
     comparison: int | None = None
     history: str | None = None
     invariants: str | None = None
+    lane: str | None = None
+    file: str | None = None
 
     def named(self) -> tuple[str, ...]:
         return tuple(key for key in (self.invariants or "").split(",") if key)
@@ -90,6 +106,16 @@ class ReviewTreesSelection:
             return f"at most {MAX_ENTRY_INVARIANTS} invariants may be named at once"
         if any(len(key) > MAX_INVARIANT_KEY_LENGTH for key in named):
             return f"an invariant identity is at most {MAX_INVARIANT_KEY_LENGTH} characters"
+        return self._focus_problem()
+
+    def _focus_problem(self) -> str | None:
+        if self.lane not in (None, LANE_FILES):
+            return f"lane may only be '{LANE_FILES}'"
+        if self.file is not None and not 0 < len(self.file) <= MAX_FILE_PATH_LENGTH:
+            return f"file is one changed path of at most {MAX_FILE_PATH_LENGTH} characters"
+        asked = [bool(self.named()), self.lane is not None, self.file is not None]
+        if sum(asked) > 1:
+            return "name at most one of invariants, lane and file"
         return None
 
 
@@ -115,8 +141,8 @@ def register_review_trees_route(app: FastAPI, port: ReviewTreesPort | None) -> N
                     "status": "invalid-request",
                     "detail": problem,
                     "nextAction": (
-                        "name the leaf's recorded comparison number, or neither, and the "
-                        "invariants of one family selection"
+                        "name the leaf's recorded comparison number, or neither, and at most one "
+                        "of: the invariants of one family selection, lane=files, or one changed file"
                     ),
                 },
                 status_code=400,
@@ -129,6 +155,8 @@ def register_review_trees_route(app: FastAPI, port: ReviewTreesPort | None) -> N
                 number=selection.comparison,
                 recorded=selection.history == "recorded",
                 invariants=selection.named(),
+                lane=selection.lane == LANE_FILES,
+                file=selection.file,
             )
         )
         return JSONResponse(result.model_dump(mode="json", by_alias=True, exclude_none=True))

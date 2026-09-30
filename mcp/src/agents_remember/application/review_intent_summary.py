@@ -29,6 +29,10 @@ small read that answers it, over the same resolved pair the reviewer opens:
 
 The read is a handful of indexed statements per identity on each snapshot, opened read-only; it runs
 no comparison of subjects and loads no subject content beyond each head's own fields.
+
+A tree comparison's summary also carries the unexplained-changes lane's file-level count
+(:func:`~agents_remember.application.review_unexplained_lane.lane_summary`), computed over the same
+resolved trees in the same request: the entry asks for it exactly when it asks for the intent counts.
 """
 
 from __future__ import annotations
@@ -49,6 +53,7 @@ from agents_remember.application.review_candidate_resolution import (
 )
 from agents_remember.application.review_pair_preflight import pair_preflight_refusal
 from agents_remember.application.review_revision_comparison import revision_heads
+from agents_remember.application.review_unexplained_lane import lane_summary
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.connection import open_read_only_database
 from agents_remember.memory.knowledge.read_queries import (
@@ -131,7 +136,10 @@ def read_review_intent_summary(
     resolved = resolve_review_candidate(config, repository_id, master, leaf_id)
     if isinstance(resolved, ReviewRefusal):
         return _unavailable(repository_id, master, leaf_id, resolved)
-    return intent_summary_of(resolved, master)
+    summary = intent_summary_of(resolved, master)
+    if resolved.trees is None:
+        return summary
+    return summary.model_copy(update={"attribution": lane_summary(resolved.trees)})
 
 
 def intent_summary_of(

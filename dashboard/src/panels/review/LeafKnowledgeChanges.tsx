@@ -2,7 +2,7 @@
 // the Git diff of the two memory trees by record and by source path, each side's MIK-R03
 // currentness, and the worklist items with the history rows about them, MIK-R11's planning marks
 // and the planned effects no row delivered. Unexplained changes are grouped by file and coverage
-// state; their disposition is the unexplained-changes lane's (MIK-R32), not this panel's.
+// state; history rows (MIK-R10) answer them, and neither this panel nor the lane decides them.
 import { css } from '../../../styled-system/css';
 import type {
   ReviewKnowledgeFileChange,

@@ -31,6 +31,10 @@ from agents_remember.models.knowledge.base import (
     KnowledgeModel,
 )
 from agents_remember.models.knowledge.review import ReviewRefusal
+from agents_remember.models.knowledge.review_lane import (
+    ReviewFileClassification,
+    ReviewUnexplainedLane,
+)
 from agents_remember.models.knowledge.review_tree_entries import ReviewTreeEntry
 
 __all__ = [
@@ -254,4 +258,7 @@ class ReviewTreesResult(KnowledgeModel):
     worklist: ReviewWorklistView | None = None
     # Every realization and proof entry, on both code sides, for the focused cards (MIK-R31).
     entries: tuple[ReviewTreeEntry, ...] = ()
+    # The unexplained-changes lane's destinations, or one changed path's classification (MIK-R32).
+    lane: ReviewUnexplainedLane | None = None
+    file_classification: ReviewFileClassification | None = None
     refusal: ReviewRefusal | None = None

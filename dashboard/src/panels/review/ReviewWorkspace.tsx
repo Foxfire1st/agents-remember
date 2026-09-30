@@ -5,11 +5,14 @@
 // or refusal), so the rail's expansion, scroll, focus and open
 // disclosures survive a selection, and the previous subject's reading is never shown under the new
 // subject's name.
+// For a tree comparison the rail also offers the unexplained-changes lane's two destinations after the
+// families (MIK-R32); choosing one swaps the reading area for the lane, and choosing a family returns.
 import { useEffect, useRef, useState } from 'react';
 import { css } from '../../../styled-system/css';
 import type { ReviewFamilyContext, ReviewPayload, ReviewSelectorKind } from '../../data/review';
 import { selectedRevision } from './SubjectReview';
 import { carriedPage } from '../../data/review';
+import type { LaneRead, ReviewUnexplainedLane } from '../../data/reviewLane';
 import { treeComparisonNumber, useReviewTrees } from '../../data/reviewTrees';
 import type { ReviewPageRequest } from './ReviewReadCycle';
 import { FamilyReviewCenter } from './FamilyReviewCenter';
@@ -17,6 +20,9 @@ import { FamilyTree, type FamilySelection } from './FamilyTree';
 import { ReviewNavigation, type ReviewNavigationState } from './ReviewNavigation';
 import { ReviewScopeHeader } from './ReviewScopeHeader';
 import { SourceExplorer, type DiffLayout } from './SourceExplorer';
+import { LaneDestinations, type LaneSelection, UnexplainedLaneCenter } from './UnexplainedLane';
+import type { GateRead } from './LaneFileFocus';
+import { explorerAttribution } from './laneFocus';
 
 const workspace = css({
   display: 'grid',
@@ -140,6 +146,9 @@ export interface WorkspaceState {
   openFromCenter: (path: string) => void;
   closePath: (path: string | null) => void;
   center: React.RefObject<HTMLDivElement | null>;
+  // The unexplained-changes lane destination on screen (and the file it opened), or none.
+  lane: LaneSelection | null;
+  setLane: (next: LaneSelection | null) => void;
   // Set by an explicit selection with the element that had focus then; the answer's focus lands on
   // the selected node only if the reader has not moved focus elsewhere in the meantime.
   focusSelection: React.RefObject<{ from: Element | null } | null>;
@@ -151,6 +160,7 @@ export function useWorkspaceState(): WorkspaceState {
   const [layout, setLayout] = useState<DiffLayout>('split');
   const [fullFile, setFullFile] = useState(false);
   const [openPath, setOpenPath] = useState<string | null>();
+  const [lane, setLaneState] = useState<LaneSelection | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const center = useRef<HTMLDivElement>(null);
   const focusSelection = useRef<{ from: Element | null } | null>(null);
@@ -165,7 +175,12 @@ export function useWorkspaceState(): WorkspaceState {
   };
   const choose = (selection: FamilySelection | null) => {
     setChosen(selection);
+    setLaneState(null);
     if (selection) revealCenter(center);
+  };
+  const setLane = (next: LaneSelection | null) => {
+    setLaneState(next);
+    if (next) revealCenter(center);
   };
   return {
     chosen,
@@ -180,6 +195,8 @@ export function useWorkspaceState(): WorkspaceState {
     openFromCenter,
     closePath,
     center,
+    lane,
+    setLane,
     focusSelection,
   };
 }
@@ -194,18 +211,7 @@ function selectedContext(
   return initialContext(payload, entries, selectorId);
 }
 
-export function ReviewWorkspace({
-  payload,
-  reading = null,
-  repo,
-  master,
-  leaf,
-  selectorId,
-  history,
-  onPageSelect,
-  state,
-  navigation,
-}: {
+interface ReviewWorkspaceProps {
   payload: ReviewPayload;
   // Set while the subject on screen has no answer (pending, failed or refused): `payload` is then
   // the last admitted answer of this task context, used for the shell only.
@@ -219,7 +225,24 @@ export function ReviewWorkspace({
   onPageSelect: (page: ReviewPageRequest | undefined) => void;
   state: WorkspaceState;
   navigation?: ReviewNavigationState;
-}) {
+  // The unexplained-changes lane of this payload's tree comparison (read once by the surface, which
+  // also gives it to the technical details); `null` for a dataset review.
+  laneRead?: LaneRead<ReviewUnexplainedLane> | null;
+}
+
+export function ReviewWorkspace({
+  payload,
+  reading = null,
+  repo,
+  master,
+  leaf,
+  selectorId,
+  history,
+  onPageSelect,
+  state,
+  navigation,
+  laneRead = null,
+}: ReviewWorkspaceProps) {
   useSelectionFocus(payload, state);
   // While unanswered, only the reader's explicit choice is marked: deriving one from the previous
   // payload would mark that subject's family as the requested subject's context.
@@ -261,6 +284,7 @@ export function ReviewWorkspace({
         chosen={chosen}
         rosterNext={rosterNext}
         onSelect={choose}
+        laneRead={laneRead}
       />
       <WorkspaceCenter
         payload={payload}
@@ -271,6 +295,7 @@ export function ReviewWorkspace({
         chosen={chosen}
         onOpenMember={(familyId, memberRevisionId) => choose({ familyId, memberRevisionId })}
         rosterNext={rosterNext}
+        laneRead={laneRead}
       />
     </div>
   );
@@ -287,6 +312,7 @@ function WorkspaceCenter({
   chosen,
   onOpenMember,
   rosterNext,
+  laneRead,
 }: {
   payload: ReviewPayload;
   task: { repo: string; master: string; leaf: string; history?: 'recorded' };
@@ -296,6 +322,7 @@ function WorkspaceCenter({
   chosen: FamilySelection | null;
   onOpenMember: (familyId: string, memberRevisionId: string) => void;
   rosterNext: (family: string, side: string, continuation: string) => void;
+  laneRead: LaneRead<ReviewUnexplainedLane> | null;
 }) {
   // The leaf's tree view (MIK-R25), read once per comparison and only for a tree comparison: a
   // dataset review's payload declares no `review:trees:<n>`, so it makes no tree read.
@@ -309,6 +336,7 @@ function WorkspaceCenter({
     { comparison },
     comparison !== undefined,
   );
+  const lane = state.lane;
   return (
     <div
       ref={state.center}
@@ -318,6 +346,16 @@ function WorkspaceCenter({
     >
       {reading ? (
         <ReadingStatusCenter reading={reading} />
+      ) : lane && laneRead ? (
+        <UnexplainedLaneCenter
+          read={laneRead}
+          selection={lane}
+          onOpenFile={(path) => state.setLane({ ...lane, path })}
+          task={{ ...task, comparison }}
+          inventory={payload.source.inventory}
+          layout={state.layout}
+          gate={gateRead(leafTrees, comparison)}
+        />
       ) : (
         <>
           <FamilyReviewCenter
@@ -340,6 +378,26 @@ function WorkspaceCenter({
       )}
     </div>
   );
+}
+
+// The gate's items for the lane: the leaf-wide read's worklist, only when that read answered for the
+// comparison the lane shows (a worklist of other trees would describe other hunks).
+function gateRead(
+  leafTrees: ReturnType<typeof useReviewTrees>,
+  comparison: number | undefined,
+): GateRead {
+  if (leafTrees === null || leafTrees.phase === 'loading') return { state: 'reading' };
+  if (leafTrees.phase !== 'trees')
+    return { state: 'none', detail: 'the leaf-wide read gave no answer' };
+  const { trees } = leafTrees;
+  if (trees.comparison?.number !== comparison)
+    return {
+      state: 'none',
+      detail: `the leaf-wide read answered comparison ${trees.comparison?.number}`,
+    };
+  if (!trees.worklist || trees.worklist.source === 'absent')
+    return { state: 'none', detail: 'no worklist applies to this comparison' };
+  return { state: 'read', worklist: trees.worklist };
 }
 
 const rail = css({
@@ -369,6 +427,7 @@ function WorkspaceRail({
   chosen,
   rosterNext,
   onSelect,
+  laneRead,
 }: {
   payload: ReviewPayload;
   repo: string;
@@ -379,8 +438,11 @@ function WorkspaceRail({
   onSelect: (selection: FamilySelection) => void;
   chosen: FamilySelection | null;
   rosterNext: (family: string, side: string, continuation: string) => void;
+  laneRead: LaneRead<ReviewUnexplainedLane> | null;
 }) {
   const context = payload.family_context;
+  // While a lane destination is on screen, no family node is the current selection.
+  const treeChosen = state.lane ? null : chosen;
   return (
     <aside className={rail}>
       <div className={shell}>
@@ -393,7 +455,7 @@ function WorkspaceRail({
             <FamilyRailContext
               payload={payload}
               state={state}
-              chosen={chosen}
+              chosen={treeChosen}
               onSelect={onSelect}
               rosterNext={rosterNext}
               selectable={Boolean(navigation.catalogue.entries?.length)}
@@ -403,16 +465,17 @@ function WorkspaceRail({
           <FamilyRailContext
             payload={payload}
             state={state}
-            chosen={chosen}
+            chosen={treeChosen}
             onSelect={onSelect}
             rosterNext={rosterNext}
             selectable={false}
           />
         )}
+        <RailLaneDestinations laneRead={laneRead} state={state} />
       </div>
       <SourceExplorer
         inventory={payload.source.inventory}
-        attribution={sourceAttribution(payload)}
+        attribution={sourceAttribution(payload, laneRead)}
         repo={repo}
         master={master}
         leaf={leaf}
@@ -428,6 +491,24 @@ function WorkspaceRail({
         showContent={false}
       />
     </aside>
+  );
+}
+
+// The lane's two destinations after the families, for a tree comparison only.
+function RailLaneDestinations({
+  laneRead,
+  state,
+}: {
+  laneRead: LaneRead<ReviewUnexplainedLane> | null;
+  state: WorkspaceState;
+}) {
+  if (!laneRead) return null;
+  return (
+    <LaneDestinations
+      read={laneRead}
+      selection={state.lane}
+      onSelect={(destination) => state.setLane({ destination, path: null })}
+    />
   );
 }
 
@@ -510,7 +591,17 @@ function revealCenter(center: React.RefObject<HTMLDivElement | null>): void {
   if (surface) surface.scrollTop = 0;
 }
 
-function sourceAttribution(payload: ReviewPayload): Record<string, string> {
+// The explorer's labels: a tree comparison's come from the lane's classification, so the two never
+// disagree; a dataset review keeps the landed accounting's lists.
+function sourceAttribution(
+  payload: ReviewPayload,
+  laneRead: LaneRead<ReviewUnexplainedLane> | null,
+): Record<string, string> {
+  if (laneRead)
+    return explorerAttribution(
+      laneRead,
+      payload.source.inventory.entries.map((entry) => entry.path),
+    );
   const mapped = new Set(payload.source.attributed_changed_paths);
   const unmapped = new Set(payload.source.unattributed_changed_paths);
   return Object.fromEntries(

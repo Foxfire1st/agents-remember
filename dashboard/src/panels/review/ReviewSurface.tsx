@@ -24,6 +24,8 @@ import {
   pageBounds,
 } from '../../data/review';
 import type { ReviewRefusal } from '../../data/review';
+import { useReviewLane } from '../../data/reviewLane';
+import { treeComparisonNumber } from '../../data/reviewTrees';
 import type { FamilySelection } from './FamilyTree';
 import { type ReviewPageRequest, targetKeyOf, useReviewReadCycle } from './ReviewReadCycle';
 import { ReviewReadCache, ReviewReadCacheContext } from './ReviewReadCache';
@@ -327,6 +329,15 @@ function ReviewPanes({
   navigation: ReviewNavigationState;
 }) {
   const payload = shown ?? (reading ? frame : null);
+  // The unexplained-changes lane of the tree comparison on screen, read once: the workspace's lane
+  // and explorer and the technical details all show this one classification. A dataset review
+  // names no tree comparison and reads nothing.
+  const laneRead = useReviewLane(
+    repo,
+    master,
+    leaf,
+    payload === null ? undefined : treeComparisonNumber(payload.limitations),
+  );
   if (payload === null) return null;
   return (
     <>
@@ -342,9 +353,11 @@ function ReviewPanes({
         onPageSelect={onSelect}
         state={workspace}
         navigation={navigation}
+        laneRead={laneRead}
       />
       <ReviewTechnicalDetails
         payload={shown}
+        laneRead={laneRead}
         unanswered={{ label: reading?.label ?? '', unavailable: Boolean(reading?.problem) }}
         paging={
           shown === null ? null : (

@@ -165,7 +165,7 @@ function Expansion({
   );
 }
 
-interface SourceContentRequest {
+export interface SourceContentRequest {
   repo: string;
   master: string;
   leaf: string;
@@ -177,7 +177,7 @@ interface SourceContentRequest {
 // One entry's content read. The answer and the failure are held with the request they answer, so a
 // different path or generation never renders a previous entry's content, and content the surface
 // already opened for this exact request is rendered from its cache without asking again.
-function useSourceContentRead(request: SourceContentRequest): {
+export function useSourceContentRead(request: SourceContentRequest): {
   result: ReviewSourceContentResult | null;
   problem: ReviewFailure | null;
   retry: () => void;

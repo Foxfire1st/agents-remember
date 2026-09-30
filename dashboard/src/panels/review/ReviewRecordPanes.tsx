@@ -19,7 +19,15 @@ import type {
   ReviewSignal,
   ReviewUnresolvedReference,
 } from '../../data/review';
+import type { LaneRead, ReviewUnexplainedLane } from '../../data/reviewLane';
 import { KnowledgeStatements } from './KnowledgeStatements';
+import {
+  EXPLORER_LABELS,
+  EXPLORER_PENDING,
+  type LaneAttributionFacts,
+  laneAttributionFacts,
+  laneCountText,
+} from './laneFocus';
 const TAKEOVER = 'changeset-viewer';
 
 const pane = (title: string, children: React.ReactNode) => (
@@ -239,8 +247,58 @@ function KnowledgePane({ payload }: { payload: ReviewPayload }) {
   );
 }
 
-function SourcePane({ payload }: { payload: ReviewPayload }) {
+// A landed remaining count, as the landed accounting states it.
+function landedCountText(count: ReviewPayload['source']['remaining'][number]): string {
+  return count.value === undefined
+    ? `${count.name}: not measured (${count.reason ?? 'no reason recorded'})`
+    : `${count.name}: ${count.value}`;
+}
+
+// A tree comparison's unexplained and unknown files, as the lane classifies them.
+function LaneAttributionLists({ facts }: { facts: LaneAttributionFacts }) {
+  if (facts.state !== 'read')
+    return (
+      <p
+        style={{ margin: '0.2rem 0' }}
+        data-testid="review-unattributed"
+        data-attribution-state={facts.state}
+      >
+        changed paths&apos; attribution:{' '}
+        {facts.state === 'pending'
+          ? EXPLORER_PENDING
+          : `${EXPLORER_LABELS.attribution_unknown} (the unexplained-changes lane could not be read)`}
+      </p>
+    );
+  return (
+    <>
+      {facts.unexplained.length ? (
+        <p
+          style={{ margin: '0.2rem 0' }}
+          data-testid="review-unattributed"
+          data-attribution-state="read"
+        >
+          changed paths no recorded entry explains: {facts.unexplained.join(', ')}
+        </p>
+      ) : null}
+      {facts.unknown.length ? (
+        <p style={{ margin: '0.2rem 0' }} data-testid="review-unknown-attribution">
+          changed paths of unknown attribution: {facts.unknown.join(', ')}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+function SourcePane({
+  payload,
+  laneRead,
+}: {
+  payload: ReviewPayload;
+  laneRead: LaneRead<ReviewUnexplainedLane> | null;
+}) {
   const { source } = payload;
+  // A tree comparison states its attribution from the lane; a dataset review from the landed lists.
+  const lane = laneRead ? laneAttributionFacts(laneRead) : null;
   return pane(
     'Source',
     <>
@@ -268,16 +326,18 @@ function SourcePane({ payload }: { payload: ReviewPayload }) {
           </li>
         ))}
       </ul>
-      <p style={{ margin: '0.4rem 0' }} data-testid="review-remaining">
+      <p
+        style={{ margin: '0.4rem 0' }}
+        data-testid="review-remaining"
+        data-attribution-source={lane ? 'lane' : 'landed'}
+      >
         {source.remaining
-          .map((count) =>
-            count.value === undefined
-              ? `${count.name}: not measured (${count.reason ?? 'no reason recorded'})`
-              : `${count.name}: ${count.value}`,
-          )
+          .map((count) => (lane && laneCountText(count.name, lane)) ?? landedCountText(count))
           .join(' · ')}
       </p>
-      {source.unattributed_changed_paths.length ? (
+      {lane ? (
+        <LaneAttributionLists facts={lane} />
+      ) : source.unattributed_changed_paths.length ? (
         <p style={{ margin: '0.2rem 0' }} data-testid="review-unattributed">
           changed paths with no registered attribution:{' '}
           {source.unattributed_changed_paths.join(', ')}
@@ -391,10 +451,13 @@ export function ReviewTechnicalDetails({
   payload,
   unanswered,
   paging,
+  laneRead = null,
 }: {
   payload: ReviewPayload | null;
   unanswered: { label: string; unavailable: boolean };
   paging: React.ReactNode;
+  // The unexplained-changes lane of a tree comparison; `null` for a dataset review.
+  laneRead?: LaneRead<ReviewUnexplainedLane> | null;
 }) {
   return (
     <details data-testid="review-details" style={{ marginTop: '1rem' }}>
@@ -425,7 +488,7 @@ export function ReviewTechnicalDetails({
           <SubmissionBlock payload={payload} />
           {paging}
           <KnowledgePane payload={payload} />
-          <SourcePane payload={payload} />
+          <SourcePane payload={payload} laneRead={laneRead} />
           <EvidencePane payload={payload} />
         </div>
       )}

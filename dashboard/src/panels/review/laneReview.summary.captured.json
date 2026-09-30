@@ -1,0 +1,30 @@
+{
+ "attribution": {
+  "attributed": 3,
+  "attribution_unknown": 1,
+  "changed_total": 7,
+  "state": "counted",
+  "unexplained": 3,
+  "unmeasured": []
+ },
+ "counts": {
+  "added": 0,
+  "guarantees": {
+   "after_only": 0,
+   "before_only": 0
+  },
+  "invariants": {
+   "after_only": 0,
+   "before_only": 0
+  },
+  "membership_only": 0,
+  "realization_only": 1,
+  "removed": 0,
+  "unresolved": 0
+ },
+ "leaf_id": "260928-MIK-L32",
+ "master": "260928_maintained-invariant-knowledge",
+ "operation": "read_review_intent_summary",
+ "repository_id": "agents-remember",
+ "state": "counted"
+}
