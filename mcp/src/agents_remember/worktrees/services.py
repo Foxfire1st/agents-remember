@@ -4,7 +4,7 @@ Worktrees ranks below providers, memory_quality and code_quality, so the
 lifecycle modules never import them. The composition layer binds one
 ``WorktreeServices`` bundle (provider lifecycle, memory-quality gate,
 citation-cache guard, knowledge validator,
-knowledge crossing) before invoking worktree operations.
+knowledge crossing, review-artifact cleanup) before invoking worktree operations.
 """
 
 from __future__ import annotations
@@ -197,6 +197,32 @@ class KnowledgeWorklistPort(Protocol):
     def recompute(self, contract: WorktreeContract) -> dict[str, Any] | None: ...
 
 
+@dataclass(frozen=True)
+class ReviewArtifactCleanupRequest:
+    """One archived task whose review artifacts are deleted (MIK-R25 rule 5, D17).
+
+    ``task_root`` is the task's root as it is now (the archive location once it is archived);
+    ``task_name`` is its directory name, the fallback task id. The repositories are the ones its
+    series contract names; ``None`` is a repository the task does not have.
+    """
+
+    task_root: Path
+    task_name: str
+    code_repository: Path | None
+    memory_repository: Path | None
+    dry_run: bool
+
+
+class ReviewArtifactCleanupPort(Protocol):
+    """MIK-R25 rule 5: delete an archived task's review refs and dataset copies; bound by composition.
+
+    Returns the cleanup report the finalizer carries as ``taskArchive.reviewArtifacts``. It never
+    raises for one artifact it could not delete: that artifact is listed under ``failures``.
+    """
+
+    def cleanup(self, request: ReviewArtifactCleanupRequest) -> dict[str, Any]: ...
+
+
 class CertificationContinuationPort(Protocol):
     """Composition-owned Gate 5 and finalization boundaries after exact code certificates."""
 
@@ -221,6 +247,7 @@ class WorktreeServices:
     knowledge_validation: KnowledgeValidationPort | None = None
     knowledge_crossing: KnowledgeCrossingPort | None = None
     knowledge_worklist: KnowledgeWorklistPort | None = None
+    review_artifact_cleanup: ReviewArtifactCleanupPort | None = None
 
 
 @dataclass(frozen=True)
@@ -282,6 +309,8 @@ __all__ = [
     "KnowledgeWorklistPort",
     "MemoryQualityPort",
     "ProviderLifecyclePort",
+    "ReviewArtifactCleanupPort",
+    "ReviewArtifactCleanupRequest",
     "TerminalGuard",
     "WorktreeServices",
     "WorktreeServicesUnboundError",

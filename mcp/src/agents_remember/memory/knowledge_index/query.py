@@ -18,7 +18,8 @@ The lookups:
 * :meth:`KnowledgeIndex.history_rows_about` -- subject -> the rows about it, across all owners;
 * :meth:`KnowledgeIndex.proofs_of` -- invariants -> their proof entries (MIK-R28 rule 4);
 * :meth:`KnowledgeIndex.invariants_without_proof` -- the live invariants no proof names (MIK-R28
-  rule 5).
+  rule 5);
+* :meth:`KnowledgeIndex.record_ids` -- every record ID of one kind (MIK-R25's per-side currentness).
 """
 
 from __future__ import annotations
@@ -283,6 +284,12 @@ class KnowledgeIndex:
 
     def record(self, record_id: str) -> Answer[Record | None]:
         return self._answer(self._record(record_id))
+
+    def record_ids(self, kind: str) -> Answer[tuple[str, ...]]:
+        """Every record ID of one kind in the tree, sorted (the reviewer's per-side currentness)."""
+
+        rows = self._rows("SELECT id FROM ix_record WHERE kind = ? ORDER BY id", (kind,))
+        return self._answer(tuple(str(row[0]) for row in rows))
 
     def text_id(self, projected_uuid: str) -> str | None:
         """Return the text ID a projected UUID stands for, or ``None`` (rule 6's reverse map)."""

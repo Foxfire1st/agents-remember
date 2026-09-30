@@ -39,6 +39,7 @@ from agents_remember.serving.review import (
     ReviewSourceContentPort,
 )
 from agents_remember.serving.review_summary import ReviewIntentSummaryPort
+from agents_remember.serving.review_trees import ReviewTreesPort
 from agents_remember.serving.served_state import served_state_tail
 from agents_remember.serving.terminal import TerminalHost, TerminalSessionSpec
 from agents_remember.serving.terminal_liveness import (
@@ -496,6 +497,13 @@ class ServingCollaborators:
     statements each side of the comparison alone holds -- and the task entry asks it without
     loading the subject catalogue. Omitting it refuses that route by name, because "this process
     cannot count" is not "nothing changed".
+    """
+
+    review_trees: ReviewTreesPort | None = None
+    """The same adapter's tree view (MIK-R25): the four trees, knowledge diff, currentness, worklist.
+
+    A fifth port because it answers for a converted leaf what the dataset review cannot: the Git
+    diff of the memory trees and the worklist view. Omitting it refuses that route by name.
     """
 
     capsule_launch: LaunchCapsuleResolverPort | None = None

@@ -30,6 +30,11 @@ from agents_remember.worktrees.modules.cleanup_report import cleanup_report
 from agents_remember.worktrees.modules.git import is_ancestor
 from agents_remember.worktrees.modules.guidance import carryover_done
 from agents_remember.worktrees.modules.models import WorktreeCommandResult
+from agents_remember.worktrees.services import (
+    ReviewArtifactCleanupRequest,
+    WorktreeServicesUnboundError,
+    worktree_services,
+)
 from agents_remember.worktrees.task_fact_publication import (
     preview_contract_task_facts,
     publish_contract_task_facts,
@@ -183,6 +188,7 @@ def _finalized_result(
             contract.task_root,
             dry_run=args.dry_run,
         )
+        archive = _with_review_artifact_cleanup(contract, archive, dry_run=args.dry_run)
     else:
         archive = {
             "state": "skipped",
@@ -218,6 +224,47 @@ def _finalized_result(
             ),
         },
     )
+
+
+def _with_review_artifact_cleanup(
+    contract: WorktreeContract, archive: dict[str, object], *, dry_run: bool
+) -> dict[str, object]:
+    """Carry the archive hook's report (MIK-R25 rule 5): the task's review refs and copies go with it.
+
+    It runs only for a task that is archived now (or would be, on a dry run). A process composed
+    without the hook says so rather than reporting that nothing was there to delete.
+    """
+
+    state = archive.get("state")
+    if state not in {"archived", "would-archive"}:
+        return archive
+    try:
+        port = worktree_services().review_artifact_cleanup
+    except WorktreeServicesUnboundError:
+        port = None
+    if port is None:
+        return {
+            **archive,
+            "reviewArtifacts": {
+                "state": "not-bound",
+                "detail": "no review-artifact cleanup is bound into this process",
+            },
+        }
+    task_root = Path(str(archive.get("archivePath"))) if state == "archived" else contract.task_root
+    request = ReviewArtifactCleanupRequest(
+        task_root=task_root,
+        task_name=contract.task_root.name,
+        code_repository=contract.code_repo_path,
+        memory_repository=contract.memory_repo_path,
+        dry_run=dry_run,
+    )
+    try:
+        report: dict[str, object] = port.cleanup(request)
+    except (
+        Exception
+    ) as error:  # the task is already archived: a failed hook is reported, not raised
+        report = {"state": "failed", "detail": f"{type(error).__name__}: {error}"}
+    return {**archive, "reviewArtifacts": report}
 
 
 def _task_refusal(

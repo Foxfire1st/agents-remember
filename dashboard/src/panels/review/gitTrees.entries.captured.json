@@ -1,0 +1,660 @@
+{
+ "entries": [
+  {
+   "label": "INV-2TQGXFAX",
+   "presence": "both",
+   "selector_id": "09b76b4c-9d5e-50a2-8a4d-de1485e8911c",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-KKJYVB40",
+   "presence": "both",
+   "selector_id": "0b171ed1-ce31-5c55-88ab-335127bf9d37",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-S26EBC8P",
+   "presence": "both",
+   "selector_id": "0b33c674-7583-5249-aee3-dce7a6f36d99",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-R93S8Y30",
+   "presence": "both",
+   "selector_id": "0d7163df-7767-56eb-b015-ee91ca0e49f8",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-49H32B3F",
+   "presence": "both",
+   "selector_id": "0e40eaf0-3d69-5075-9af3-0b90edef09dd",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-8FWJM8RR",
+   "presence": "both",
+   "selector_id": "0f2b42cd-d3cc-5272-b7f4-3f7b13c3db22",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-9NCBGQSY",
+   "presence": "both",
+   "selector_id": "104c2f90-c046-578f-950a-2a66c9ac93d0",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-N213W04A",
+   "presence": "both",
+   "selector_id": "146f2e1a-4500-52c6-afc8-fb5b41c3e44d",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-EJW15DXA",
+   "presence": "both",
+   "selector_id": "16b287d6-2337-5554-b911-43e3a7d15fab",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-4DVNECH3",
+   "presence": "both",
+   "selector_id": "2285d873-1d30-5c3e-a557-8b9b5ec1ab19",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-EZ8QKFX6",
+   "presence": "both",
+   "selector_id": "235eafd4-ce5f-53e7-b642-3112c89bb92f",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-ENTFR23T",
+   "presence": "both",
+   "selector_id": "26716a6b-326a-59c8-bd6d-362925c72916",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-H6A6JS63",
+   "presence": "both",
+   "selector_id": "27321fc6-54d5-5589-96e1-c14ed3237800",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-09FC73JC",
+   "presence": "both",
+   "selector_id": "2fb911ad-1b56-5562-8365-c177cdeeac42",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-ZY0YMXMQ",
+   "presence": "both",
+   "selector_id": "3158556a-3770-53ef-ad54-e0b625aec472",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-CDB4MZW4",
+   "presence": "both",
+   "selector_id": "3357ec83-d609-5566-b465-675eb16be8d7",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-RANN4DC0",
+   "presence": "both",
+   "selector_id": "3544bb7e-cde4-51ef-b22a-cd690f7822bd",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-M9AMAYWY",
+   "presence": "both",
+   "selector_id": "3bce6092-4833-5d2a-b732-8633b2fa9e17",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-ZRTBZAS4",
+   "presence": "both",
+   "selector_id": "3e53531a-182a-57bf-943e-3bf167e24d54",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-8Q6DZTDB",
+   "presence": "both",
+   "selector_id": "3e927c54-7b94-5869-8290-ea6c79e6ece4",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-GRVXS8R9",
+   "presence": "both",
+   "selector_id": "3fc29a28-54ab-58a1-98ad-e67df292ab43",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-E8655Z54",
+   "presence": "both",
+   "selector_id": "4663a05e-2a54-5e76-971b-b1f049f2b864",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-RS0EVBHD",
+   "presence": "both",
+   "selector_id": "49473315-7e7f-5866-834f-c27d49271bbd",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-TH4KXFTX",
+   "presence": "both",
+   "selector_id": "4b809085-d4b7-51e4-b314-c45fa81d6d42",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-53MJW8V0",
+   "presence": "both",
+   "selector_id": "4cc9acf7-1883-57d2-99bb-832933d97991",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-413DC8XE",
+   "presence": "both",
+   "selector_id": "4ec11f34-62de-5d3e-a036-756e10ae7859",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-115RDW8H",
+   "presence": "both",
+   "selector_id": "4fc9f6d9-3a4f-5e6f-b985-8e61c6c27c15",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-0FBA8M52",
+   "presence": "both",
+   "selector_id": "500304e4-7ad0-5e75-9077-bc9d99075d1c",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-6W74GGC8",
+   "presence": "both",
+   "selector_id": "52702d09-d0ed-5024-8d11-f0915c623709",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-T9M21FB4",
+   "presence": "both",
+   "selector_id": "54afdca9-7f7f-5c16-b7c0-0fa79675cd02",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-XTXZESS6",
+   "presence": "both",
+   "selector_id": "54d21b24-6258-58f4-86a5-257e9bd62a0d",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-7W11WKKN",
+   "presence": "both",
+   "selector_id": "57203272-05e5-5219-9ab8-5bb402d8082d",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-8BYGSPZF",
+   "presence": "both",
+   "selector_id": "58de57fc-ea43-527a-b645-cbf1ad03e912",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-B3GYVZTJ",
+   "presence": "both",
+   "selector_id": "5b4b958c-f27c-5188-b2c9-ee7f2b3e36d3",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-4N43MNN2",
+   "presence": "both",
+   "selector_id": "5bbce777-bc26-5c91-968f-917cd51bb9b6",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-ZJS1XY4R",
+   "presence": "both",
+   "selector_id": "5bcc7ed2-71c4-547f-a4b9-4dc5233531e6",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-QR24S1VH",
+   "presence": "both",
+   "selector_id": "5c75cbf9-0778-5765-bdac-50ed81e31ff6",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-VXA7SZ0Z",
+   "presence": "both",
+   "selector_id": "5dbd78fc-07e9-595b-9f90-484f1fc73284",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-WQZ2WFCN",
+   "presence": "both",
+   "selector_id": "608758dd-48f7-54f6-8ef6-616b78aa064a",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-SMYSQKTJ",
+   "presence": "both",
+   "selector_id": "60dc7093-285c-56db-9ad3-8c65df99b55a",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-1BRT5DX6",
+   "presence": "both",
+   "selector_id": "6881ff4f-af4f-58b8-8177-8445a385e62b",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-SVZY1FHR",
+   "presence": "both",
+   "selector_id": "6d21f6cd-5b64-586b-9fc5-fcdfd0a3d45c",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-103S55GN",
+   "presence": "both",
+   "selector_id": "6e7cbebb-c08f-5158-9209-767edba66159",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-QN53GPRB",
+   "presence": "both",
+   "selector_id": "6ec03cae-83a4-5f63-9fa4-66b135506c2a",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-J7179RG5",
+   "presence": "both",
+   "selector_id": "6fb7f156-6e1d-58f1-8903-3ad461eb74db",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-53F058MT",
+   "presence": "both",
+   "selector_id": "717049e6-bebb-5d09-859d-6efdae6f363a",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-2D60EEQS",
+   "presence": "both",
+   "selector_id": "7651e8f5-37aa-5834-9df3-c406a55d78cf",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-1RWT3JRR",
+   "presence": "both",
+   "selector_id": "7b913e30-6de7-5418-9d33-a0e73279aea1",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-HXAH9APB",
+   "presence": "both",
+   "selector_id": "7d779143-28be-5b59-b268-fc1d460e38d7",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-VPX81HXV",
+   "presence": "both",
+   "selector_id": "7e42f0e9-0fa3-54cb-9342-2dfd4b63a817",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-HKS46WB3",
+   "presence": "both",
+   "selector_id": "7e702208-7566-59cb-85ab-dcc99248b95c",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-NRSN2ABQ",
+   "presence": "both",
+   "selector_id": "7f1ae442-55ae-5367-868b-59f2a97a940d",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-P0YZDCS9",
+   "presence": "both",
+   "selector_id": "7fd5ca10-137a-5662-9a23-545b4887bfc0",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-6080HQF9",
+   "presence": "both",
+   "selector_id": "81a3b78e-028a-5c54-87f8-938d0438531f",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-VVMNM9B6",
+   "presence": "both",
+   "selector_id": "81a58c47-61eb-5f69-a3cd-0821644daee4",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-WS8GFNAC",
+   "presence": "both",
+   "selector_id": "83b13e1c-75f1-577a-9e43-e7fbc5062b8d",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-1XKX9ERN",
+   "presence": "both",
+   "selector_id": "8b1a17ca-96ba-5ede-a09f-abfb11ada0a5",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-RT13RESK",
+   "presence": "both",
+   "selector_id": "8f4819b3-5f1b-55a7-9c77-2cbf1077a30b",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-4RERAJCC",
+   "presence": "both",
+   "selector_id": "908c2875-a795-5bb0-88d1-ec322c1f1386",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-H8EM1VJR",
+   "presence": "both",
+   "selector_id": "94989116-7997-5332-a9e8-43b9c9c6fe73",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-ZE4QPG25",
+   "presence": "both",
+   "selector_id": "96228200-c6bd-5e09-a738-cd9705c513ce",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-2E8MG43K",
+   "presence": "both",
+   "selector_id": "97c94e1f-38e1-51db-ade2-f7bc3438024b",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-TPDQGXYK",
+   "presence": "both",
+   "selector_id": "9ea42b52-f112-5172-984b-da5d6b951249",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-T23G8ZJM",
+   "presence": "both",
+   "selector_id": "9f44474c-a3c6-5cca-8269-d4e22a93a27b",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-CKHJ0M7J",
+   "presence": "both",
+   "selector_id": "a160063e-d70f-5498-9602-c43132d10722",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-WSD92WBN",
+   "presence": "both",
+   "selector_id": "a2acd3d5-1775-50db-9c3f-5114f7b84591",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-ZS9ZS878",
+   "presence": "both",
+   "selector_id": "a336c721-8feb-5017-b1bf-653bb1680364",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-EPB2CXBE",
+   "presence": "both",
+   "selector_id": "a768cf89-0471-5c7b-baf3-1224c4861c46",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-RMTHRQ0K",
+   "presence": "both",
+   "selector_id": "a9e4683c-9136-5c53-845f-f6104ff1fce4",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-2DF3HS9Q",
+   "presence": "both",
+   "selector_id": "aaa8aa76-55e2-584f-bc58-cd48935c8aa2",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-BR5MTSTY",
+   "presence": "both",
+   "selector_id": "aafa58c7-476d-5dae-9a72-c2e8c6dc8d0e",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-T0EWDB7H",
+   "presence": "both",
+   "selector_id": "acaa747a-f357-5597-999d-7ed8046f9775",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-716Q6QMV",
+   "presence": "both",
+   "selector_id": "ad6a8c02-9a0d-57e5-a1f4-7d5374f73d9e",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-74578B97",
+   "presence": "both",
+   "selector_id": "ad99032b-d2a9-596e-a49e-d64f6bf81e7f",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-W5CTZJGD",
+   "presence": "both",
+   "selector_id": "b135ffdb-dc23-545d-9ea3-f52d14c143b9",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-9ECAFVTQ",
+   "presence": "both",
+   "selector_id": "b2400c01-fc05-51e5-b34a-08a97e8255f3",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-YBS0CVBK",
+   "presence": "both",
+   "selector_id": "bfb457a7-58d0-57d7-aa99-f4f9b4b0726c",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-453ZPCZ5",
+   "presence": "both",
+   "selector_id": "c49988c6-db16-5646-a462-ff87bff0b48a",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-Z66EMHMH",
+   "presence": "both",
+   "selector_id": "c7c5be49-164f-56e0-923d-fb5f5259d80c",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-753SKJFF",
+   "presence": "both",
+   "selector_id": "c88cc287-0469-556c-9f42-b742b2377478",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-8VQR13WX",
+   "presence": "both",
+   "selector_id": "d4437eb9-2114-5f5e-b698-ea64166d61be",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-YVVW1XCN",
+   "presence": "both",
+   "selector_id": "d5a5651b-cec2-5776-a970-8622d5223bb6",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-KBCKV7N1",
+   "presence": "both",
+   "selector_id": "d8c56045-336e-5fd6-8572-dde132f63482",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-AGA5HG4K",
+   "presence": "both",
+   "selector_id": "d9c238dc-d528-5990-9163-d6dfd2d87a35",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-MCVSM81V",
+   "presence": "both",
+   "selector_id": "da6ea3ef-e87d-5201-9ab8-f0cfb75e0315",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-2A00CD6G",
+   "presence": "both",
+   "selector_id": "dcd28d07-cd1f-5568-91f3-f5c3970bdde1",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-DA7D417G",
+   "presence": "both",
+   "selector_id": "e9043896-8124-5cdb-b1e9-ed38604ca2e2",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-XX178P3W",
+   "presence": "both",
+   "selector_id": "e94e3a14-fe5a-5ce5-900c-00b0b923ef3e",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-WCEGX72X",
+   "presence": "both",
+   "selector_id": "ed5df628-1ec7-5c60-85f4-9851540ef19a",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-Z385RTQS",
+   "presence": "both",
+   "selector_id": "f1091f2c-3fa5-5178-bafb-211fdd04a23c",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-MC654E0T",
+   "presence": "both",
+   "selector_id": "f271aa5b-5d88-5b31-a69b-3d62efb0cb2c",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-555EHWM8",
+   "presence": "both",
+   "selector_id": "f587f769-dbcc-5d50-ba56-260f333110f1",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-9BH2BNCT",
+   "presence": "both",
+   "selector_id": "f5a52e12-8ed9-518c-ae25-137eba6d50cc",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-21SDZECS",
+   "presence": "both",
+   "selector_id": "ff22ba43-5910-5812-89c4-1a6befedee7a",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "attribution-and-landing-pairing",
+   "presence": "both",
+   "selector_id": "15ebeabe-61ca-5798-9bb9-6f057cabbccb",
+   "selector_kind": "family"
+  },
+  {
+   "label": "generated-artifacts-are-disposable-projections",
+   "presence": "both",
+   "selector_id": "1b949a51-5306-52e8-ad0b-4776052275d1",
+   "selector_kind": "family"
+  },
+  {
+   "label": "Curated source continuity",
+   "presence": "both",
+   "selector_id": "4178f151-71c5-5d79-a607-3f9d714649a1",
+   "selector_kind": "family"
+  },
+  {
+   "label": "Authored realization explanation",
+   "presence": "both",
+   "selector_id": "6003ab43-6234-52d9-aefc-51fe02d2bcf5",
+   "selector_kind": "family"
+  },
+  {
+   "label": "Bounded notes listing with unchanged meaning",
+   "presence": "both",
+   "selector_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
+   "selector_kind": "family"
+  },
+  {
+   "label": "Honest changed-intent entry",
+   "presence": "both",
+   "selector_id": "87ce2658-f5fa-5a1e-ac58-c7b6132e3531",
+   "selector_kind": "family"
+  },
+  {
+   "label": "Explicit invariant meaning",
+   "presence": "both",
+   "selector_id": "a217bb7a-1c20-588d-b2bb-175c9d325c42",
+   "selector_kind": "family"
+  },
+  {
+   "label": "Reproducible review history",
+   "presence": "both",
+   "selector_id": "b6bbe31f-6ff4-50cc-aa80-c1dc91809539",
+   "selector_kind": "family"
+  },
+  {
+   "label": "Bounded task-document read with unchanged meaning",
+   "presence": "both",
+   "selector_id": "b753629f-19f4-5733-9bf2-4e69d0c05fd7",
+   "selector_kind": "family"
+  },
+  {
+   "label": "Coherent intent and source review",
+   "presence": "both",
+   "selector_id": "b9f95278-5712-5867-aa87-6e225aed4d45",
+   "selector_kind": "family"
+  },
+  {
+   "label": "Comparison-bound unchanged realization context",
+   "presence": "both",
+   "selector_id": "ccd6de6f-cfca-549c-8ee0-08fc418f3fd9",
+   "selector_kind": "family"
+  },
+  {
+   "label": "Faithful authored family succession",
+   "presence": "both",
+   "selector_id": "e441f6e8-40e8-5d69-97e4-80d300752193",
+   "selector_kind": "family"
+  },
+  {
+   "label": "Member realization regions in family review",
+   "presence": "both",
+   "selector_id": "f3826fcd-f313-5a04-b88f-957f6a35849b",
+   "selector_kind": "family"
+  },
+  {
+   "label": "knowledge-write-and-publication-foundation",
+   "presence": "both",
+   "selector_id": "fa2aac3a-f406-595a-a1e6-b50c656704ca",
+   "selector_kind": "family"
+  }
+ ],
+ "family_total": 14,
+ "invariant_total": 94,
+ "leaf_id": "260928-MIK-L25",
+ "master": "260928_maintained-invariant-knowledge",
+ "operation": "list_knowledge_review_entries",
+ "repository_id": "agents-remember",
+ "state": "entries",
+ "total_subjects": 108
+}

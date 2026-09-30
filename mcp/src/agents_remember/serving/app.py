@@ -138,6 +138,7 @@ from agents_remember.serving.projector import (
 from agents_remember.serving.requirements import register_requirements_routes
 from agents_remember.serving.review import register_review_routes
 from agents_remember.serving.review_summary import register_review_summary_route
+from agents_remember.serving.review_trees import register_review_trees_route
 from agents_remember.serving.seat_events import log_turn_state_change_event
 from agents_remember.serving.static import mount_static
 from agents_remember.serving.terminal import TerminalHost
@@ -301,6 +302,7 @@ def create_app(
         collaborators.review_source_content,
     )
     register_review_summary_route(app, collaborators.review_intent_summary)
+    register_review_trees_route(app, collaborators.review_trees)
     register_harness_control_routes(
         app,
         ConversationRuntime(

@@ -18,7 +18,9 @@ from __future__ import annotations
 
 from typing import Final
 
-INDEX_FORMAT: Final = "ar-knowledge-index/v1"
+# v2 (MIK-R25): projected revision rows carry the store's own payload seal, so an index built by v1
+# (whose seals the store's revision readers refuse) is rebuilt rather than reused.
+INDEX_FORMAT: Final = "ar-knowledge-index/v2"
 
 INDEX_DDL: Final[tuple[str, ...]] = (
     """

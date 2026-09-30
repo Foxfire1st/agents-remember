@@ -39,9 +39,20 @@ from agents_remember.application.review_comparison_reopen import (
     ComparisonReopen,
     reopen_comparison_generation,
 )
+from agents_remember.application.review_legacy_comparison import (
+    knowledge_unavailable_detail,
+    knowledge_unavailable_limitations,
+    knowledge_unavailable_refusal,
+    legacy_comparison_resolution,
+)
 from agents_remember.application.review_recorded_knowledge import (
     RecordedKnowledge,
     read_recorded_knowledge,
+)
+from agents_remember.application.review_tree_comparison import (
+    official_line_converted,
+    reopen_review_trees,
+    tree_resolution,
 )
 from agents_remember.kernel.git_command import run_git
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
@@ -188,6 +199,9 @@ def resolve_committed_leaf_review(
             ),
             offending_input=f"{master}/{leaf_id}",
         )
+    converted = _converted_repository_resolution(config, repository_id, contract, generation_id)
+    if converted is not None:
+        return converted
     reopened = reopen_comparison_generation(
         config, repository_id, master, leaf_id, generation_id=generation_id
     )
@@ -200,6 +214,32 @@ def resolve_committed_leaf_review(
             return _reopen_refusal(contract, reopened)
         return _recorded_range_resolution(contract, reopened)
     return _generation_resolution(contract, reopened, reopened.manifest)
+
+
+def _converted_repository_resolution(
+    config: McpRuntimeConfig,
+    repository_id: str,
+    contract: WorktreeContract,
+    generation_id: str | None,
+) -> ReviewCandidateResolution | ReviewRefusal | None:
+    """A closed leaf's review once trees apply (MIK-R25 rule 4), or ``None`` for the dataset path.
+
+    A leaf that recorded a tree comparison reopens from its tree ids. A leaf whose repository is
+    converted but which recorded only a dataset comparison keeps its code sides, and its knowledge
+    sides are ``legacy-unavailable``: no database is read for a review. Every other leaf -- an
+    unconverted repository's -- keeps the dataset path below unchanged.
+    """
+
+    trees = reopen_review_trees(config.coordination_root, contract)
+    if isinstance(trees, ReviewRefusal):
+        return trees
+    if trees is not None:
+        return tree_resolution(repository_id, contract, trees)
+    if official_line_converted(
+        contract.memory_repo_path or contract.memory_worktree, contract.memory_source_branch
+    ):
+        return legacy_comparison_resolution(config, contract, generation_id=generation_id)
+    return None
 
 
 def _reopen_refusal(contract: WorktreeContract, reopened: ComparisonReopen) -> ReviewRefusal:
@@ -446,7 +486,7 @@ def closed_leaf_limitations(resolved: ReviewCandidateResolution) -> tuple[str, .
 
     review = resolved.closed_leaf
     if review is None:
-        return ()
+        return knowledge_unavailable_limitations(resolved)
     recorded = (
         HISTORY_RECORDED_COMPARISON
         if review.manifest is not None
@@ -482,7 +522,7 @@ def closed_leaf_intent_detail(resolved: ReviewCandidateResolution) -> str | None
 
     review = resolved.closed_leaf
     if review is None:
-        return None
+        return knowledge_unavailable_detail(resolved)
     return _intent_sentence(review)
 
 
@@ -504,6 +544,9 @@ def closed_leaf_dataset_refusal(resolved: ReviewCandidateResolution) -> ReviewRe
     questions: what was never there, and what was there and is not now.
     """
 
+    unavailable = knowledge_unavailable_refusal(resolved)
+    if unavailable is not None:
+        return unavailable
     review = resolved.closed_leaf
     if review is None:
         return None

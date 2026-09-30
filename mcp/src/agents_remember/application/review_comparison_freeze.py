@@ -329,8 +329,10 @@ def freeze_comparison_generation(
 
     resolved = request.resolution
     contract = resolved.contract
-    if contract is None or resolved.baseline_code_root is None:
-        return _refused(_no_task_root_refusal())
+    unfreezable = _unfreezable(resolved)
+    if unfreezable is not None:
+        return _refused(unfreezable)
+    assert contract is not None  # ``_unfreezable`` refused a resolution without one
     input_issue = _record_input_refusal(request)
     if input_issue is not None:
         return _refused(input_issue)
@@ -386,6 +388,36 @@ def _record_input_refusal(request: ComparisonGenerationRequest) -> ReviewRefusal
             next_action="Restore the exact retained parent and owner artifacts, then retry the explicitly selected operation; current inputs are not substitutes.",
         )
     return None
+
+
+def _unfreezable(resolved: ReviewCandidateResolution) -> ReviewRefusal | None:
+    """Why a resolution cannot be frozen into a generation, or ``None`` when it can.
+
+    A converted repository's comparison is four Git trees, recorded and pinned when it is resolved
+    (MIK-R25): no dataset copy is created or retained for it, so there is nothing to freeze. A
+    hand-assembled pair has no task artifact root to publish under.
+    """
+
+    if resolved.trees is not None or resolved.knowledge_unavailable:
+        return _tree_comparison_refusal()
+    if resolved.contract is None or resolved.baseline_code_root is None:
+        return _no_task_root_refusal()
+    return None
+
+
+def _tree_comparison_refusal() -> ReviewRefusal:
+    """The refusal a freeze of a tree comparison earns: it is recorded by trees, never copied."""
+
+    return refusal(
+        _REFUSED,
+        "this comparison is four Git trees, recorded with its pinning refs when it was resolved "
+        "(MIK-R25); no knowledge dataset is copied or retained for a review",
+        next_action=(
+            "reopen the comparison from its record under notes/reports/review-comparisons; its "
+            "refs are deleted when the task is archived"
+        ),
+        offending_input="comparison",
+    )
 
 
 def _no_task_root_refusal() -> ReviewRefusal:

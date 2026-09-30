@@ -28,6 +28,10 @@ The mapping is a pure function of the files:
   select it, a family's projected membership omits a retired member, and a realization of a retired
   invariant is not projected. The record, its entries, its memberships, links and history rows stay
   in the ``ix_*`` tables, where :mod:`.query` answers them with ``status: "retired"`` on the record.
+* **Seals.** Each projected revision row carries the store's own payload digest
+  (:mod:`agents_remember.models.knowledge.digest`) over exactly the projected cells, so the store's
+  revision readers, which verify that seal on every decode, read the index as they read a dataset.
+  The reviewer's family rosters (MIK-R25) read revisions that way.
 * **What is not projected:** proofs, links, history rows, routes and facet records have no table
   the reused code reads; they are answered from the ``ix_*`` tables (:mod:`.query`). A membership
   or realization naming an invariant the tree does not hold is left out of the projection (the
@@ -41,8 +45,16 @@ from typing import TYPE_CHECKING, Any, Final
 
 import apsw
 
-from agents_remember.kernel.canonical_json import canonical_json_bytes, sha256_digest
+from agents_remember.kernel.canonical_json import canonical_json_bytes
+from agents_remember.memory.knowledge.records import decode_authorship
 from agents_remember.memory_quality.style.citations.grammars import grammar_of
+from agents_remember.models.knowledge.base import KnowledgeState
+from agents_remember.models.knowledge.digest import (
+    family_revision_payload_digest,
+    revision_payload_digest,
+)
+from agents_remember.models.knowledge.family import FamilyRevision
+from agents_remember.models.knowledge.invariant import InvariantRevision
 from agents_remember.models.knowledge_files.records import FamilyRecord, InvariantRecord
 from agents_remember.models.knowledge_files.shapes import (
     LineRangeLocator,
@@ -63,6 +75,8 @@ INDEX_AUTHORITY_HOME: Final = "ar-knowledge-index"
 # The projected ``recorded_at``: files record no time of recording, so the epoch stands in and must
 # never be read as one.
 PROJECTED_RECORDED_AT: Final = "1970-01-01T00:00:00+00:00"
+# A placeholder a revision model is built with before its own seal is computed over it.
+_UNSEALED: Final = "0" * 64
 # A record's projected ``display_version`` is ``r<revision>``, its text ``revision`` field.
 DISPLAY_VERSION_PREFIX: Final = "r"
 RETIRED_STATUS: Final = "retired"
@@ -134,7 +148,7 @@ def _provenance(origin: Origin | None, path: str) -> str:
     )
 
 
-def _state(status: str, path: str) -> tuple[str, str | None]:
+def _state(status: str, path: str) -> tuple[KnowledgeState, str | None]:
     """Map a live text status to the logical vocabulary; ``retired`` never reaches here."""
 
     return ("accepted", f"text-knowledge:{path}") if status == "accepted" else ("proposed", None)
@@ -149,6 +163,22 @@ def _invariant(connection: apsw.Connection, record: InvariantRecord, path: str) 
         "INSERT INTO invariant (repository_id, invariant_id, display_label, label_provenance) "
         "VALUES (?, ?, ?, ?)",
         (INDEX_REPOSITORY_ID, identity, record.id, provenance),
+    )
+    seal = revision_payload_digest(
+        InvariantRevision(
+            repository_id=INDEX_REPOSITORY_ID,
+            invariant_id=identity,
+            revision_id=revision,
+            display_version=f"{DISPLAY_VERSION_PREFIX}{record.revision}",
+            statement=record.statement,
+            applicability=record.applicability,
+            conditions=tuple(record.conditions),
+            exclusions=tuple(record.exclusions),
+            state_at_origin=state,
+            acceptance_ref=acceptance,
+            provenance=decode_authorship(provenance),
+            payload_digest=_UNSEALED,
+        )
     )
     connection.execute(
         "INSERT INTO invariant_revision (repository_id, invariant_id, revision_id, display_version, "
@@ -166,7 +196,7 @@ def _invariant(connection: apsw.Connection, record: InvariantRecord, path: str) 
             state,
             acceptance,
             provenance,
-            sha256_digest(record.to_document()),
+            seal,
         ),
     )
     return revision
@@ -187,6 +217,19 @@ def _family(
         "VALUES (?, ?, ?, ?)",
         (INDEX_REPOSITORY_ID, identity, record.title, provenance),
     )
+    seal = family_revision_payload_digest(
+        FamilyRevision(
+            repository_id=INDEX_REPOSITORY_ID,
+            family_id=identity,
+            revision_id=revision,
+            display_version=f"{DISPLAY_VERSION_PREFIX}{record.revision}",
+            joint_guarantee=record.guarantee,
+            state_at_origin=state,
+            acceptance_ref=acceptance,
+            provenance=decode_authorship(provenance),
+            payload_digest=_UNSEALED,
+        )
+    )
     connection.execute(
         "INSERT INTO family_revision (repository_id, family_id, revision_id, display_version, "
         "joint_guarantee, state_at_origin, acceptance_ref, provenance, payload_digest) "
@@ -200,7 +243,7 @@ def _family(
             state,
             acceptance,
             provenance,
-            sha256_digest(record.to_document()),
+            seal,
         ),
     )
     for member in record.members:

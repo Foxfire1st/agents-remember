@@ -11,6 +11,7 @@ from agents_remember.application.knowledge_worklist import LeafWorklistRecompute
 from agents_remember.application.prepared_certification import (
     PreparedMemoryCertificationAdapter,
 )
+from agents_remember.application.review_artifact_cleanup import ReviewArtifactCleanup
 from agents_remember.memory.conversion.base import GitBaseConverter
 from agents_remember.memory.conversion.crossing_port import GitKnowledgeCrossing
 from agents_remember.memory_quality import check as memory_quality_check_api
@@ -217,6 +218,7 @@ def build_default_worktree_services() -> WorktreeServices:
         knowledge_validation=GitKnowledgeValidation(base_converter=GitBaseConverter()),
         knowledge_crossing=GitKnowledgeCrossing(),
         knowledge_worklist=LeafWorklistRecompute(),
+        review_artifact_cleanup=ReviewArtifactCleanup(),
     )
 
 

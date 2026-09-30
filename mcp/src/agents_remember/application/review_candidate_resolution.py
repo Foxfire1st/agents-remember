@@ -43,13 +43,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import apsw
+
 from agents_remember.application.knowledge_baseline_generation import (
     read_baseline_generation,
+)
+from agents_remember.application.review_tree_comparison import (
+    live_review_trees,
+    recheck_memory_candidate,
+    tree_resolution,
 )
 from agents_remember.errors import FutureCodeCandidateError
 from agents_remember.kernel.primitives.runtime_config import McpRuntimeConfig
 from agents_remember.memory.knowledge.candidate_receipt import read_candidate_receipt
 from agents_remember.memory.knowledge.refusals import KnowledgeStorageError
+from agents_remember.memory.knowledge_index import IndexMismatchError, KnowledgeIndex
 from agents_remember.models.knowledge.review import (
     ReviewCandidateRef,
     ReviewRefusal,
@@ -72,6 +80,7 @@ from agents_remember.worktrees.worktree_contract import (
 
 if TYPE_CHECKING:  # pragma: no cover - the annotation only; the value's owner imports this module
     from agents_remember.application.review_committed_leaf import ClosedLeafReview
+    from agents_remember.application.review_tree_comparison import ReviewTrees
 
 __all__ = [
     "REVIEW_BASELINE_DIRECTORY",
@@ -158,6 +167,14 @@ class ReviewCandidateResolution:
     # :mod:`agents_remember.application.review_committed_leaf`, which is also the only thing that
     # constructs one.
     closed_leaf: ClosedLeafReview | None = None
+    # The four-tree comparison this resolution reads, when the leaf's memory is converted (MIK-R25).
+    # Both database paths are then the derived indexes of the two memory trees, never a copy; a
+    # knowledge side Git can no longer produce names no file. ``None`` is the dataset review.
+    trees: ReviewTrees | None = None
+    # ``(side, state, detail)`` for each knowledge side a recorded comparison can no longer read --
+    # ``legacy-unavailable`` for a comparison recorded before the repository's conversion (MIK-R25
+    # rule 4). A side listed here names no file, so nothing reads a database in its place.
+    knowledge_unavailable: tuple[tuple[str, str, str], ...] = ()
 
 
 def resolve_review_candidate(
@@ -222,6 +239,25 @@ def resolve_review_candidate(
     captured = _captured_candidate(contract)
     if isinstance(captured, ReviewRefusal):
         return captured
+    return _live_resolution(config, repository_id, contract, captured)
+
+
+def _live_resolution(
+    config: McpRuntimeConfig,
+    repository_id: str,
+    contract: WorktreeContract,
+    captured: FutureCodeCandidateIdentity,
+) -> ReviewCandidateResolution | ReviewRefusal:
+    """The live pair: four Git trees for a converted leaf (MIK-R25), else the dataset pair.
+
+    Every leaf whose memory is unconverted keeps the dataset pair below, byte for byte.
+    """
+
+    trees = live_review_trees(config.coordination_root, contract, captured.codeCandidateTree)
+    if isinstance(trees, ReviewRefusal):
+        return trees
+    if trees is not None:
+        return tree_resolution(repository_id, contract, trees, candidate_identity=captured)
     root = contract.worktree_group / REVIEW_CANDIDATE_RELATIVE_ROOT
     return ReviewCandidateResolution(
         repository_id=repository_id,
@@ -287,6 +323,10 @@ def require_current_candidate_identity(resolved: ReviewCandidateResolution) -> R
     contract = resolved.contract
     if accepted is None or contract is None:
         return None
+    if resolved.trees is not None:
+        moved_memory = recheck_memory_candidate(resolved.trees)
+        if moved_memory is not None:
+            return moved_memory
     try:
         current = capture_future_code_candidate(contract)
     except FutureCodeCandidateError as error:
@@ -387,7 +427,25 @@ def review_namespace(requested: str, database: Path) -> str:
     generation = read_baseline_generation(database.parent)
     if generation is not None:
         return generation.repository_id
-    return requested
+    return _index_namespace(database) or requested
+
+
+def _index_namespace(database: Path) -> str | None:
+    """The namespace of a derived knowledge index (MIK-R25), or ``None`` for any other file.
+
+    A tree comparison reads each memory side through its index, which is a dataset of the store's
+    schema bound to the index's own constant namespace; the index's format marker is its record.
+    Every other file -- a dataset with no record beside it, or no file -- answers ``None`` and
+    keeps the requested repository, exactly as before.
+    """
+
+    if not database.is_file():
+        return None
+    try:
+        with KnowledgeIndex(database) as index:
+            return index.repository_id
+    except (IndexMismatchError, KnowledgeStorageError, OSError, apsw.Error):
+        return None
 
 
 # The next action one unreadable candidate record earns. It is stated once because the whole point of

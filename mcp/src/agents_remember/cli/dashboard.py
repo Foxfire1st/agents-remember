@@ -84,6 +84,9 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
     from agents_remember.application.review_source_content import (  # noqa: PLC0415 - composition
         read_review_source_content,
     )
+    from agents_remember.application.review_tree_knowledge import (  # noqa: PLC0415 - composition
+        read_review_trees,
+    )
     from agents_remember.application.role_capsules.launch import (  # noqa: PLC0415 - composition
         compile_launch_capsule,
     )
@@ -135,6 +138,11 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
 
         return read_review_intent_summary(config, repository_id, master, leaf_id)
 
+    def review_trees_port(query):
+        """The tree view of the same resolution (MIK-R25): four trees, knowledge diff, worklist."""
+
+        return read_review_trees(config, query)
+
     return replace(
         EXECUTION_REGISTRATION_COLLABORATORS,
         capsule_launch=partial(compile_launch_capsule, config),
@@ -142,6 +150,7 @@ def serving_collaborators(config: McpRuntimeConfig) -> ServingCollaborators:
         knowledge_review_entries=review_entries_port,
         review_source_content=review_source_content_port,
         review_intent_summary=review_intent_summary_port,
+        review_trees=review_trees_port,
     )
 
 

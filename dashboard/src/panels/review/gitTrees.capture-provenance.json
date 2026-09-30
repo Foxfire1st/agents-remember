@@ -1,0 +1,36 @@
+{
+  "captured_at": "2026-09-30T00:37:35+00:00",
+  "producer": "260928-MIK-L25 worker, notes/reports/260928-MIK-L25-evidence/capture_ui_fixtures.py",
+  "route": "create_app(config, collaborators=serving_collaborators(config)) over fastapi TestClient",
+  "scratch": "/tmp/mik-l25-real: --shared clones; memory converted with this worktree's knowledge-convert at a4eba7b7; leaf 260928-MIK-L25 edits _not_listed in review_source_admission.py and re-anchors RLZ-CXH58B4W",
+  "fixtures": [
+    {
+      "file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l25-ar/260928-mik-l25/dashboard/src/panels/review/gitTrees.entries.captured.json",
+      "route": "GET /api/review/intent/entries",
+      "status": 200,
+      "sha256": "9fc928c97c26ccc971c6a7b652ee45eb714104a19559d33af3a8b3803e7dc889",
+      "bytes": 16772
+    },
+    {
+      "file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l25-ar/260928-mik-l25/dashboard/src/panels/review/gitTrees.family.captured.json",
+      "route": "GET /api/review/intent",
+      "status": 200,
+      "sha256": "0800f319becd47394d523b6c41db4466e44fd1091b92f8747938e2070a3bdafd",
+      "bytes": 200521
+    },
+    {
+      "file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l25-ar/260928-mik-l25/dashboard/src/panels/review/gitTrees.invariant.captured.json",
+      "route": "GET /api/review/intent",
+      "status": 200,
+      "sha256": "2846f5cb8b7be7da84e5f974ff94faf1f0c31199c26dbfa24d538a8dc85e4692",
+      "bytes": 201377
+    },
+    {
+      "file": "/home/firefox/projects/ar-coordination/worktrees/agents-remember/260928-mik-l25-ar/260928-mik-l25/dashboard/src/data/reviewTrees.captured.json",
+      "route": "GET /api/review/trees",
+      "status": 200,
+      "sha256": "c90a504dc44b073b4637c7afcde82045c52187f418243e6e3d8aa8aef97b524d",
+      "bytes": 43279
+    }
+  ]
+}
