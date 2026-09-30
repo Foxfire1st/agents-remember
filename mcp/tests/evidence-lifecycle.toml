@@ -833,6 +833,7 @@ consumers = [
   "mcp/tests/test_knowledge_paging.py",
   "mcp/tests/test_planned_knowledge_effects.py",
   "mcp/tests/test_knowledge_leaf_read.py",
+  "mcp/tests/test_unexplained_change_disposition.py",
 ]
 
 [[artifact]]

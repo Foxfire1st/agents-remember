@@ -572,6 +572,14 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
   A `no_impact` row about the declared invariant does not answer the item; a `changed` row with
   the declared effect (or, for `retire`, a `deleted` row that retires it) delivers the effect and
   raises no item.
+- A no_invariant row (MIK-R10, converted memory only) answers an `unexplained_hunk` or
+  `unexplained_file` worklist item in a covered file: a change no entry covers that carries no
+  invariant. Its subject is the item's `facts.row` (`hunk:<item id>`, or the item's own
+  `file:<path>@<blob>`); its disposition is `no_invariant`; its `reason` says why, and it adds
+  nothing else. The other answers need no such row: attach a `target` to a stored invariant
+  (`invariant_id`, not a retired one) or author a new invariant over the change. A delete-only hunk
+  admits only `no_invariant`. An item in an uncovered file is answered by the file's onboarding
+  trace (a counted change of its card, or its `onboarding:<path>` row), not by this row.
 
 **Handles.** `"handoff:<key>"` names the record this document authors under that entry `id` or record
 `key`. Use it wherever an ID goes: link targets, `members`, `subject`, `examined` or `supersedes`.

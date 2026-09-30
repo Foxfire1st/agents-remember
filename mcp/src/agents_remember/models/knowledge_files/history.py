@@ -24,7 +24,8 @@ only -- the gate finds a row by ``subject``, MIK-R09). A row's kind is decided b
   revision (D7).
 
 The other registered item kinds add their row kinds to :data:`HISTORY_ROW_KINDS` when they land
-(MIK-R30 ``onboarding:…``, MIK-R11 ``planned:…``; MIK-R06, R10 and R14 later); until then a row
+(MIK-R30 ``onboarding:…``, MIK-R11 ``planned:…``, MIK-R10 ``hunk:…``/``file:…``; MIK-R06 and R14
+later); until then a row
 whose subject no kind claims is refused.
 
 **Checks that need the trees.** The models check shape. The writer support below checks a row
@@ -73,6 +74,7 @@ from agents_remember.models.knowledge_files.shapes import (
     require_unique,
 )
 from agents_remember.models.knowledge_files.sidecars import ProofEntry, RealizationEntry
+from agents_remember.models.knowledge_files.unexplained import NO_INVARIANT, ROW_SUBJECT_PATTERN
 
 HISTORY_SCHEMA: Final = "ar-history/v1"
 ABSENT: Final = "absent"
@@ -333,6 +335,21 @@ class PlannedEffectRow(HistoryRow):
         return self
 
 
+class UnexplainedChangeRow(HistoryRow):
+    """The ``no_invariant`` disposition of an unexplained change in a covered file (MIK-R10).
+
+    Subject ``hunk:<item id>`` for an ``unexplained_hunk`` item and ``file:<path>@<blob>`` for an
+    ``unexplained_file`` item; ``no_invariant`` is the only disposition, and its ``reason`` says why
+    the change carries no invariant. It adds nothing to the common row fields. MIK-R10 owns the
+    kind. Attaching or authoring an entry over the change is the other answer, and needs no row of
+    this kind: the change is then linked, and the invariant's own row follows (MIK-R08).
+    """
+
+    row_kind: ClassVar[str] = "unexplained"
+    subject_pattern: ClassVar[str] = ROW_SUBJECT_PATTERN
+    dispositions: ClassVar[tuple[str, ...]] = (NO_INVARIANT,)
+
+
 @dataclass(frozen=True)
 class HistoryRowKind:
     """A registered row kind: the subject form it claims, its model and its owner packet."""
@@ -349,6 +366,7 @@ HISTORY_ROW_KINDS: Final[tuple[HistoryRowKind, ...]] = (
     HistoryRowKind("family", FamilyRow, "MIK-R07"),
     HistoryRowKind("onboarding_trace", OnboardingTraceRow, "MIK-R30"),
     HistoryRowKind("planned", PlannedEffectRow, "MIK-R11"),
+    HistoryRowKind("unexplained", UnexplainedChangeRow, "MIK-R10"),
 )
 
 

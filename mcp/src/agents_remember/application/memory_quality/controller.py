@@ -9,6 +9,7 @@ from typing import Any
 
 from agents_remember.application.knowledge_proofs import invariants_without_proof
 from agents_remember.application.knowledge_worklist import (
+    answering_trace_subjects,
     leaf_onboarding_trace_sides,
     recompute_leaf_worklist,
 )
@@ -633,7 +634,7 @@ def _attach_curator_checklist(
             response,
         )
         repair_findings.extend(gate_findings)
-        report_only.extend(gate_report_only)
+        report_only.extend(_needed_rows_dropped(gate_report_only, prepared.worklist, response))
     repair_findings.extend(
         {
             "check": "memory-census",
@@ -678,6 +679,31 @@ def _attach_curator_checklist(
         missing_onboarding=missing_onboarding,
         stale_route_indexes=route_indexes.stale_indexes,
     )
+
+
+def _needed_rows_dropped(
+    findings: list[Any],
+    worklist: tuple[dict[str, Any], str | None] | None,
+    response: dict[str, object] | None = None,
+) -> list[Any]:
+    """MIK-R30's report-only findings, less the rows an unexplained item needs (MIK-R10 rule 5).
+
+    An ``onboarding:<path>`` row answering an uncovered file's unexplained change is the trace that
+    item requires, so it is never reported as an unnecessary row. MIK-R30's report-only findings
+    are exactly its unnecessary rows, so the tool response's ``onboardingTrace`` count is set to
+    what is kept, and the two agree.
+    """
+
+    answering = (
+        frozenset()
+        if worklist is None
+        else answering_trace_subjects(worklist[0].get("items") or ())
+    )
+    kept = [one for one in findings if one.get("subject") not in answering]
+    brief = None if response is None else response.get("onboardingTrace")
+    if isinstance(brief, dict):
+        brief["unnecessaryRowCount"] = len(kept)
+    return kept
 
 
 def _onboarding_refresh_gate(

@@ -68,6 +68,7 @@ from agents_remember.models.knowledge_files.history import (
     InvariantRow,
     OnboardingTraceRow,
     PlannedEffectRow,
+    UnexplainedChangeRow,
 )
 from agents_remember.models.knowledge_files.ids import (
     RECORD_ID_PATTERN,
@@ -300,9 +301,12 @@ class Authoring:
             return ()
         found = self.state.record(invariant_id)
         before = deep_copy(found[2]) if found is not None else None
+        document = self._invariant_document(entry, invariant_id, before)
+        if self._attaches_to_retired(entry, invariant_id, document):
+            return ()
         self._place_record(
             "invariant",
-            self._invariant_document(entry, invariant_id, before),
+            document,
             slug=None if before is not None else slug_of(entry.statement, "invariant"),
             before=before,
             handoff_entry=entry.entry_id,
@@ -322,6 +326,20 @@ class Authoring:
         }
         self._remove_unnamed_entries(entry.entry_id, invariant_id)
         return tuple(self._cited_test(entry, test, proven) for test in entry.cited_tests())
+
+    def _attaches_to_retired(
+        self, entry: EntryRequest, invariant_id: str, document: Mapping[str, Any]
+    ) -> bool:
+        """MIK-R10: a change is never attached to a retired invariant; the refusal is named."""
+
+        if entry.invariant_id is None or not entry.targets or document["status"] != "retired":
+            return False
+        self.problem(
+            f"entry {entry.entry_id}",
+            f"{invariant_id} is retired: a change is not attached to a retired invariant "
+            "(MIK-R10); author a new invariant, or record no_invariant with a reason",
+        )
+        return True
 
     def _invariant_document(
         self, entry: EntryRequest, invariant_id: str, before: Mapping[str, Any] | None
@@ -577,10 +595,13 @@ class Authoring:
 
     def _row(self, request: RowRequest, rows: Mapping[str, Any]) -> dict[str, Any] | None:
         where = f"history[{request.position}]"
-        if re.match(OnboardingTraceRow.subject_pattern, request.subject):
-            return self._onboarding_row(request, rows.get(request.subject), where)
-        if re.match(PlannedEffectRow.subject_pattern, request.subject):
-            return self._planned_row(request, rows.get(request.subject), where)
+        for model, write in (
+            (OnboardingTraceRow, self._onboarding_row),
+            (PlannedEffectRow, self._planned_row),
+            (UnexplainedChangeRow, self._unexplained_row),
+        ):
+            if re.match(model.subject_pattern, request.subject):
+                return write(request, rows.get(request.subject), where)
         subject = self.resolve_id(request.subject, where)
         found = None if subject is None else self.state.record(subject)
         if subject is None or found is None:
@@ -636,6 +657,46 @@ class Authoring:
             OnboardingTraceRow.model_validate(row)
         except ValidationError as error:
             self.problem(where, _first_error(error))
+            return None
+        return row
+
+    def _unexplained_row(
+        self, request: RowRequest, existing: Mapping[str, Any] | None, where: str
+    ) -> dict[str, Any] | None:
+        """A ``no_invariant`` row (MIK-R10): an unexplained change in a covered file that carries
+        no invariant, with the curator's reason. It carries nothing an invariant, family or planned
+        row carries. A ``file:<path>@<blob>`` subject must name the path's object at C (``absent``
+        when C does not hold it): a row about another change of the path answers no item."""
+
+        extra = [
+            name
+            for name, value in (
+                ("covers", request.covers),
+                ("effect", request.effect),
+                ("because", request.because),
+                ("examined", request.examined),
+                ("ref", request.ref),
+            )
+            if value
+        ]
+        if extra:
+            self.problem(where, f"a no_invariant row carries no {extra}")
+            return None
+        row: dict[str, Any] = {
+            "id": existing["id"] if existing is not None else self.mint("history_row"),
+            "subject": request.subject,
+            "disposition": request.disposition,
+            "reason": request.reason,
+            "items": list(request.items),
+        }
+        try:
+            UnexplainedChangeRow.model_validate(row)
+        except ValidationError as error:
+            self.problem(where, _first_error(error))
+            return None
+        stale = self.code.file_subject_mismatch(request.subject)
+        if stale is not None:
+            self.problem(where, stale)
             return None
         return row
 

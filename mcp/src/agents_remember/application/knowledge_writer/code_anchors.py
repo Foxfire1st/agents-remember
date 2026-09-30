@@ -23,7 +23,13 @@ from tempfile import TemporaryDirectory
 from typing import Any, Final
 
 from agents_remember.errors import GrammarUnavailableError
-from agents_remember.kernel.git_command import read_git_blobs_bytes, read_git_tree_bytes
+from agents_remember.kernel.git_command import (
+    GIT_METADATA_TIMEOUT_SECONDS,
+    GitRunnerOptions,
+    read_git_blobs_bytes,
+    read_git_tree_bytes,
+    run_git,
+)
 from agents_remember.memory_quality.style.citations import extents, grammars
 from agents_remember.models.knowledge_files.anchor_content import (
     RangeOutsideBlobError,
@@ -75,6 +81,29 @@ class CodeSnapshot:
         if blob not in self._bytes:
             self._bytes[blob] = read_git_blobs_bytes(self.root, [blob])[blob]
         return self._bytes[blob]
+
+    def file_subject_mismatch(self, subject: str) -> str | None:
+        """Why a ``file:<path>@<object>`` row subject names no change at C, or ``None`` (MIK-R10).
+
+        The object is the path's tree entry at C (a regular file's blob, a symlink's blob, a
+        submodule's commit), or ``absent`` when C holds nothing at the path. Other subjects pass.
+        """
+
+        if not subject.startswith("file:"):
+            return None
+        path, _, recorded = subject.removeprefix("file:").rpartition("@")
+        result = run_git(
+            self.root,
+            ["rev-parse", "--verify", "--quiet", f"{self.tree}:{path}"],
+            GitRunnerOptions(timeout=GIT_METADATA_TIMEOUT_SECONDS),
+        )
+        actual = result.stdout.strip() if result.returncode == 0 else ""
+        if recorded == (actual or "absent"):
+            return None
+        return (
+            f"{subject} names no change at C: the code candidate holds "
+            f"{actual or 'nothing'} at {path!r} (unknown subject)"
+        )
 
     def resolve(self, path: str, locator: Mapping[str, Any]) -> Anchor:
         """Return the anchor ``locator`` names in ``path`` at C, without ``path`` (the caller adds it)."""

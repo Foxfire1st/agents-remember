@@ -81,6 +81,37 @@ def _planned_facts(item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[st
     return parts
 
 
+def _unexplained_facts(item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str]:
+    """MIK-R10: where the change is, its path's coverage, and what answers it."""
+
+    coverage = facts.get("coverage") or {}
+    hunks = facts.get("hunks") or ()
+    where = (
+        ", ".join(
+            f"-{one['base'][0]},{one['base'][1]} +{one['candidate'][0]},{one['candidate'][1]}"
+            for one in hunks
+        )
+        if hunks
+        else f"{facts.get('content')} {facts.get('status')}"
+    )
+    parts = [
+        f"{facts.get('path')} {where}",
+        f"{coverage.get('state')} ({coverage.get('realizationEntries')} entries; route "
+        f"{coverage.get('route') or '-'} {coverage.get('routeStatus')})",
+    ]
+    if facts.get("deleteOnly"):
+        parts.append("delete-only: only no_invariant")
+    answered = item.get("satisfiedBy")
+    if answered:
+        parts.append(f"answered by {answered}")
+    elif coverage.get("state") == "covered":
+        parts.append(f"needs attach/author or a no_invariant row `{facts.get('row')}`")
+    else:
+        trace = facts.get("onboardingTrace") or {}
+        parts.append(f"needs the onboarding trace `{trace.get('subject')}`")
+    return parts
+
+
 def _planned_lines(document: Mapping[str, Any]) -> list[str]:
     """Rule 7: the declaration's reconciliation, one line per declared effect."""
 
@@ -151,6 +182,8 @@ _FACT_RENDERERS: Final[
     "reached_family": _family_facts,
     "planned_untouched": _planned_facts,
     "family_route_condition": _route_facts,
+    "unexplained_hunk": _unexplained_facts,
+    "unexplained_file": _unexplained_facts,
 }
 
 

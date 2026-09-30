@@ -44,6 +44,7 @@ from agents_remember.application.knowledge_worklist.compute import (
     WorklistInputs,
     compute_worklist,
     incomplete_worklist,
+    worklist_digest,
 )
 from agents_remember.application.knowledge_worklist.knowledge import (
     KnowledgeSide,
@@ -58,10 +59,20 @@ from agents_remember.application.knowledge_worklist.planned_effects import (
     Declaration,
     declarations_from,
 )
+from agents_remember.application.knowledge_worklist.unexplained import (
+    CoverageUnreadable,
+    RouteCoverage,
+    answering_trace_subjects,
+    open_count,
+    route_coverage,
+    settle_uncovered,
+)
 from agents_remember.kernel.atomic_write import atomic_write_text
 from agents_remember.kernel.git_command import (
     GIT_METADATA_TIMEOUT_SECONDS,
     GitRunnerOptions,
+    read_git_blobs_bytes,
+    read_git_tree_bytes,
     run_git,
 )
 from agents_remember.kernel.memory_attribution import MemoryAttributionError, attributed_commits
@@ -76,7 +87,7 @@ from agents_remember.memory.knowledge_index import (
 )
 from agents_remember.memory_quality.knowledge_validator.trees import KnowledgeTree
 from agents_remember.memory_quality.knowledge_worklist_section import worklist_summary
-from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
+from agents_remember.models.knowledge_files.documents import KNOWLEDGE_ROOT, LAYOUT_MARKER_PATH
 from agents_remember.tasks.leaf_decisions import LeafDocumentUnresolved, strict_leaf_doc
 from agents_remember.tasks.leaf_doc import find_leaf_doc
 from agents_remember.worktrees.modules.git import worktree_candidate_tree
@@ -248,6 +259,31 @@ class _Resolved:
     base: KnowledgeSide
     candidate: KnowledgeSide
     pairing: dict[str, Any]
+    coverage: RouteCoverage
+
+
+_CENSUS_PREFIX: Final = f"{KNOWLEDGE_ROOT}/census/"
+
+
+def _git_coverage(repository: Path, tree: str) -> RouteCoverage:
+    """MIK-R10's route coverage over K_B's Git tree: its onboarding routes and its censuses."""
+
+    paths: dict[str, str] = {}
+    for row in read_git_tree_bytes(repository, tree).split(b"\0"):
+        if not row:
+            continue
+        meta, _, raw_path = row.partition(b"\t")
+        _mode, kind, object_id = meta.decode("ascii").split(" ")
+        if kind == "blob":
+            paths[raw_path.decode("utf-8", "surrogateescape")] = object_id
+    census = {path: blob for path, blob in paths.items() if path.startswith(_CENSUS_PREFIX)}
+    contents = read_git_blobs_bytes(repository, census.values())
+    return route_coverage(paths, {path: contents[blob] for path, blob in census.items()})
+
+
+def _files_coverage(files: dict[str, bytes]) -> RouteCoverage:
+    census = {path: data for path, data in files.items() if path.startswith(_CENSUS_PREFIX)}
+    return route_coverage(files, census)
 
 
 def _sides(
@@ -269,14 +305,17 @@ def _sides(
     converted_base = not base_files.converted
     try:
         if converted_base:
-            base = _converted_base_side(
+            base, coverage = _converted_base_side(
                 sides, memory_base_commit, base_commit, candidate_tree_files, base_snapshot.key
             )
         else:
             base = KnowledgeSide.from_snapshot("K_B", base_snapshot)
+            coverage = _git_coverage(sides.memory_repository, base_snapshot.key)
         candidate = KnowledgeSide.from_snapshot("K_C", candidate_snapshot)
     except KnowledgeSideUnreadable as error:
         raise _Unreadable(error.label, str(error)) from error
+    except CoverageUnreadable as error:
+        raise _Unreadable("K_B", str(error)) from error
     except (ValueError, OSError) as error:
         raise _Unreadable("K_B", f"the converted base cannot be produced: {error}") from error
     pairing = {
@@ -296,7 +335,7 @@ def _sides(
         },
     }
     code = CodeTrees.open(sides.code_repository, base_tree, candidate_tree)
-    return _Resolved(code, base, candidate, pairing)
+    return _Resolved(code, base, candidate, pairing, coverage)
 
 
 def _converted_base_side(
@@ -305,8 +344,11 @@ def _converted_base_side(
     base_commit: str,
     candidate: KnowledgeTree,
     base_key: str,
-) -> KnowledgeSide:
+) -> tuple[KnowledgeSide, RouteCoverage]:
     """K_B as its conversion (MIK-R24 rule 7), read from the converted-base cache when present.
+
+    The cached conversion also holds the onboarding Markdown, so the same files give MIK-R10's route
+    coverage (a conversion writes no census: every route of a converted base is ``pending``).
 
     :func:`converted_base_files` chooses the code commit (K_B's own ``Code-Commit`` trailer when the
     code store holds it, B otherwise) and keys the cache on (K_B commit, version, that commit).
@@ -323,7 +365,8 @@ def _converted_base_side(
         cache_directory=sides.cache_directory,
     )
     label = f"converted:{base_key}"
-    return KnowledgeSide.from_tree("K_B", label, KnowledgeTree(label=label, files=files))
+    side = KnowledgeSide.from_tree("K_B", label, KnowledgeTree(label=label, files=files))
+    return side, _files_coverage(dict(files))
 
 
 def worklist_for_sides(sides: ExplicitSides) -> dict[str, Any] | None:
@@ -349,6 +392,7 @@ def worklist_for_sides(sides: ExplicitSides) -> dict[str, Any] | None:
             maintenance_scope=sides.maintenance_scope,
             owner=sides.owner,
             expected_effects=sides.expected_effects,
+            coverage=resolved.coverage,
         )
     )
 
@@ -403,10 +447,33 @@ def leaf_worklist(contract: WorktreeContract, *, persist: bool = True) -> dict[s
             document = worklist_onboarding(
                 document, contract, _trace_request(contract, memory_repository, memory_base)
             )
+            document = _settled_unexplained(document)
     path = worklist_path(contract)
     if persist and document is not None and path is not None:
         persist_worklist(path, document)
     return document
+
+
+def _settled_unexplained(document: dict[str, Any]) -> dict[str, Any]:
+    """MIK-R10: an uncovered file's unexplained change is answered by its onboarding trace."""
+
+    if document.get("state") != "complete":
+        return document
+    items = settle_uncovered(document.get("items") or [])
+    settled = {**document, "items": items, "digest": worklist_digest("complete", items, [])}
+    if isinstance(document.get("unexplained"), dict):
+        settled["unexplained"] = {**document["unexplained"], "openCount": open_count(items)}
+    trace = document.get("onboardingTrace")
+    if isinstance(trace, dict):
+        # A row that answers an uncovered item's onboarding trace is needed, not unnecessary.
+        answering = answering_trace_subjects(items)
+        settled["onboardingTrace"] = {
+            **trace,
+            "unnecessaryRows": [
+                row for row in trace.get("unnecessaryRows") or () if row["subject"] not in answering
+            ],
+        }
+    return settled
 
 
 def _trace_request(

@@ -284,6 +284,15 @@ def items(document: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
     return {(item["kind"], item["subject"]): item for item in document["items"]}
 
 
+UNEXPLAINED_KINDS = frozenset({"unexplained_hunk", "unexplained_file"})
+
+
+def knowledge_items(document: dict[str, Any]) -> list[dict[str, Any]]:
+    """The items about recorded knowledge: every kind but MIK-R10's unexplained changes."""
+
+    return [item for item in document["items"] if item["kind"] not in UNEXPLAINED_KINDS]
+
+
 def classes(document: dict[str, Any]) -> dict[str, str]:
     return {entry["id"]: entry["class"] for entry in document["entries"]}
 
@@ -355,7 +364,9 @@ def test_a_body_edit_raises_its_invariant_and_family_and_carries_the_rest_of_the
 def test_a_comment_between_functions_raises_nothing_and_one_inside_raises(world: World) -> None:
     between = REVIEW_V1.replace('LISTED = {"a"}\n', '# the listed paths\nLISTED = {"a"}\n')
     outside = world.worklist(world.code_commit({REVIEW: between}))
-    assert outside["items"] == []
+    assert knowledge_items(outside) == []
+    # The comment is linked to no entry: MIK-R10 raises it as an unexplained change instead.
+    assert [item["kind"] for item in outside["items"]] == ["unexplained_hunk"]
     assert classes(outside)["RLZ-B00001"] == "carried"
     inside = REVIEW_V1.replace(
         '    """Refuse a path not listed."""\n',
@@ -411,7 +422,7 @@ def test_moved_or_absent_covers_deletion_rename_ambiguity_and_a_deleted_range(
 def test_line_ranges_map_carry_and_touch(world: World) -> None:
     shifted = "header\n" + LINES_V1
     document = world.worklist(world.code_commit({LINES: shifted}))
-    assert classes(document)["RLZ-E00001"] == "carried" and document["items"] == []
+    assert classes(document)["RLZ-E00001"] == "carried" and knowledge_items(document) == []
     inside = LINES_V1.replace("line 4\n", "line 4\nline 4b\n")
     document = world.worklist(world.code_commit({LINES: inside}))
     assert classes(document)["RLZ-E00001"] == "touched"
@@ -514,7 +525,7 @@ def test_a_mechanical_carry_forward_in_k_c_is_not_a_change(world: World) -> None
     code = world.code_commit({REVIEW: shifted})
     world.memory_commit(world.sidecars(code, ENTRIES), code)  # every blob re-recorded at C
     document = world.worklist(code)
-    assert document["items"] == []
+    assert knowledge_items(document) == []
     assert classes(document)["RLZ-A00001"] == "carried"
 
 

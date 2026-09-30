@@ -285,6 +285,7 @@ class OnboardingTraceResult:
                 "check": CHECK_NAME,
                 "code": UNNECESSARY_CODE,
                 "path": history_path(self.owner),
+                "subject": subject,
                 "message": (
                     f"row {row} ({subject}) names a card or route no changed source file of this "
                     "leaf needs a trace for; it is unnecessary, not an error"

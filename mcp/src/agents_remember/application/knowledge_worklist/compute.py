@@ -18,11 +18,15 @@ landed inventory owner measures it (:func:`git_rename_inference`, ICR-R08), then
    (MIK-R11, :mod:`.planned_effects`): every invariant and family item is marked ``planned`` or
    ``unplanned``, and every declaration no row delivers raises ``planned_untouched``;
 6. evaluates the family route conditions (MIK-R06, :mod:`.route_conditions`) of every reached
-   family, and ``route_path_absent`` of every family with a route this leaf's range killed.
+   family, and ``route_path_absent`` of every family with a route this leaf's range killed;
+7. marks every changed hunk **linked** or **unexplained** (definition 8; a delete-only hunk has no
+   changed line at C, so only a K_B entry's range at B links it) and raises MIK-R10's
+   ``unexplained_hunk`` / ``unexplained_file`` item for every unlinked hunk and non-text change
+   (:mod:`.unexplained`), with its path's coverage. Its items join step 5's sort; the planning marks
+   do not apply to them.
 
-Every changed hunk is also marked **linked** or **unexplained** (definition 8) for the gate's
-registrants; that marking raises nothing here. An input that cannot be read makes the run
-``incomplete`` naming it, with no items (rule 4); nothing is a verdict (Exclusions).
+An input that cannot be read makes the run ``incomplete`` naming it, with no items (rule 4);
+nothing is a verdict (Exclusions).
 """
 
 from __future__ import annotations
@@ -60,6 +64,11 @@ from agents_remember.application.knowledge_worklist.route_conditions import (
 from agents_remember.application.knowledge_worklist.route_conditions import (
     RouteInputs,
     family_route_conditions,
+)
+from agents_remember.application.knowledge_worklist.unexplained import (
+    RouteCoverage,
+    UnexplainedSides,
+    unexplained_items,
 )
 from agents_remember.application.review_rename_inference import git_rename_inference
 from agents_remember.application.review_source_inventory import (
@@ -138,6 +147,8 @@ class WorklistInputs:
     owner: str | None = None
     expected_effects: tuple[Declaration, ...] | None = None
     """The leaf's ``expectedKnowledgeEffects`` (MIK-R11); ``None`` when it declares none."""
+    coverage: RouteCoverage | None = None
+    """K_B's onboarding routes and census statuses (MIK-R10 coverage); ``None``: every route pending."""
 
 
 def worklist_digest(state: str, items: Iterable[Mapping[str, Any]], missing: Any) -> str:
@@ -228,8 +239,19 @@ class _Run:
         planned = reconcile_planned_effects(
             inputs.expected_effects, inputs.base, inputs.candidate, inputs.owner
         )
+        linkage = self._linkage(changes, renamed)
+        unexplained = unexplained_items(
+            linkage,
+            UnexplainedSides(
+                inputs.code, inputs.base, inputs.candidate, inputs.coverage, inputs.owner
+            ),
+        )
         rendered = sorted(
-            [*(planned.mark(item.to_document()) for item in items), *planned.items],
+            [
+                *(planned.mark(item.to_document()) for item in items),
+                *planned.items,
+                *unexplained.items,
+            ],
             key=lambda item: (item["kind"], item["subject"]),
         )
         return {
@@ -240,8 +262,9 @@ class _Run:
             "pairing": dict(inputs.pairing),
             "scope": self._scope_document(changed_paths, unrepresentable, reached),
             "entries": self._entries_document(),
-            "changes": self._linkage(changes, renamed),
+            "changes": linkage,
             "plannedEffects": planned.summary(),
+            "unexplained": unexplained.summary(),
             "items": rendered,
             "kinds": kinds_document(),
             "digest": worklist_digest("complete", rendered, []),
@@ -511,8 +534,9 @@ class _Run:
         document["hunks"] = [
             {
                 **hunk.to_document(),
+                # A delete-only hunk changes no line at C: only a K_B range links it (MIK-R10 rule 4).
                 "linked": any(hits_old(hunk, span) for span in base_spans)
-                or any(hits_new(hunk, span) for span in candidate_spans),
+                or (hunk.new_count > 0 and any(hits_new(hunk, span) for span in candidate_spans)),
             }
             for hunk in hunks
         ]
