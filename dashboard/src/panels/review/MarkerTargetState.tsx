@@ -53,14 +53,8 @@ function unknownTarget(target: MarkTarget | null | undefined): MarkTarget | null
   return target?.state === 'membership_unknown' ? target : null;
 }
 
-// On the member's row of the named family: the tree's own node for the target.
-export function MemberTargetNote({
-  familyId,
-  memberRevisionId,
-}: {
-  familyId: string;
-  memberRevisionId: string;
-}) {
+// The followed marker's unknown membership when it targets this member row of the named family.
+export function useMemberTarget(familyId: string, memberRevisionId: string): MarkTarget | null {
   const target = unknownTarget(useContext(IntentMarkerScope)?.target);
   if (
     !target?.familyKey ||
@@ -68,14 +62,32 @@ export function MemberTargetNote({
     target.memberRevisionKey !== memberRevisionId
   )
     return null;
+  return target;
+}
+
+// On the member's row of the named family: the tree's own node for the target. A tree comparison's
+// row states it once, through its change badge (MIK-R33, `ChangeBadges.tsx`); this note serves a row
+// without change facts.
+export function MemberTargetNote({
+  id,
+  familyId,
+  memberRevisionId,
+}: {
+  // The row describes itself by this note (its accessible description, review MIK-L33 R3-1).
+  id?: string;
+  familyId: string;
+  memberRevisionId: string;
+}) {
+  const target = useMemberTarget(familyId, memberRevisionId);
+  if (!target) return null;
   return (
     <span
+      id={id}
       className={rowNote}
       data-testid="review-member-target-state"
       data-member-state="membership_unknown"
     >
-      <span className={tag}>{ATTRIBUTION_UNKNOWN}</span>
-      {target.reason}
+      <span className={tag}>{ATTRIBUTION_UNKNOWN}</span> {target.reason}
     </span>
   );
 }

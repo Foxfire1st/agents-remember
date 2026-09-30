@@ -125,6 +125,7 @@ unit-regression = [
   "mcp/tests/test_knowledge_decisions.py",
   "mcp/tests/test_review_git_trees.py",
   "mcp/tests/test_review_unexplained_lane.py",
+  "mcp/tests/test_review_change_kinds.py",
   "mcp/tests/test_review_artifact_cleanup.py",
   "mcp/tests/test_unexplained_change_disposition.py",
   "mcp/tests/test_reconsideration_surfacing.py",

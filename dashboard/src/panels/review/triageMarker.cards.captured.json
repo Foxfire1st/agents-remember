@@ -18,7 +18,7 @@
    "tree": "5bd13699c90fc19c67165faba99022381dd6ce98"
   },
   "code_candidate": {
-   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L34/2",
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L34/3",
    "repository": "/tmp/mik-l33-merge/code",
    "tree": "db68db54906acc5661a3ac7813d75a340ba7cbdc"
   },
@@ -29,12 +29,12 @@
    "tree": "12b510c61dc76327368173d5220a51bada5f4a7e"
   },
   "memory_candidate": {
-   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L34/2",
+   "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L34/3",
    "repository": "/tmp/mik-l33-merge/memory",
-   "tree": "48e359488c2ae9d5c1021229842a01e2b882adf7"
+   "tree": "e524f6c1485b4bd276cb8350960c6672dbc620d8"
   },
-  "number": 2,
-  "recorded_at": "2026-09-30T19:11:33+00:00",
+  "number": 3,
+  "recorded_at": "2026-09-30T19:11:51+00:00",
   "schema": "ar-review-tree-comparison/v1",
   "task_id": "260928_maintained-invariant-knowledge"
  },
@@ -290,11 +290,16 @@
    "tree": "12b510c61dc76327368173d5220a51bada5f4a7e"
   },
   {
-   "index_state": "complete",
-   "problems": [],
+   "index_state": "partial",
+   "problems": [
+    [
+     "knowledge/families/FAM-4V4GSQCS-Bounded-notes-listing-with-unchanged-meaning.json",
+     "a knowledge document names its format in a string 'schema' field"
+    ]
+   ],
    "side": "after",
    "state": "available",
-   "tree": "48e359488c2ae9d5c1021229842a01e2b882adf7"
+   "tree": "e524f6c1485b4bd276cb8350960c6672dbc620d8"
   }
  ],
  "leaf_id": "260928-MIK-L34",

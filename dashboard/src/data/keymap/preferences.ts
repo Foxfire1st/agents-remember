@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-import { CHROME_CHORDS, COMPOSER_CHORDS, type ZoneChord } from "./chords";
+import { CHROME_CHORDS, COMPOSER_CHORDS, REVIEW_CHORDS, type ZoneChord } from "./chords";
 import { BROWSER_FORBIDDEN } from "./reserved";
 
 // FEUI-L8 owns only a local, versioned preference seam. The settings-page editor belongs to
@@ -36,7 +36,7 @@ interface StoredKeymap extends KeymapPreferences {
   version: 1;
 }
 
-const DEFAULT_BINDINGS = [...CHROME_CHORDS, ...COMPOSER_CHORDS] as const;
+const DEFAULT_BINDINGS = [...CHROME_CHORDS, ...COMPOSER_CHORDS, ...REVIEW_CHORDS] as const;
 const KNOWN_COMMANDS = new Set(DEFAULT_BINDINGS.map((entry) => entry.commandId));
 const IMMUTABLE_COMPOSER_ESCAPE_COMMAND = "focus.nextRegion";
 const MODIFIERS = new Map<string, string>([

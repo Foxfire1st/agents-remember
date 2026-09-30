@@ -92,6 +92,7 @@ __all__ = [
     "SideReading",
     "TreeLane",
     "bounded_text",
+    "changes_lines",
     "open_tree_lane",
 ]
 
@@ -469,7 +470,9 @@ def _withheld(reading: SideReading) -> str:
 # -- hunks -----------------------------------------------------------------------------------------
 
 
-def _changes_lines(hunk: Hunk, side: LaneSideName) -> bool:
+def changes_lines(hunk: Hunk, side: LaneSideName) -> bool:
+    """Whether ``hunk`` changes lines on ``side`` (a zero count on a side changes nothing there)."""
+
     return (hunk.old_count if side == "before" else hunk.new_count) > 0
 
 
@@ -492,7 +495,7 @@ def _links(hunk: Hunk, reading: SideReading) -> list[tuple[LaneSideName, Placed]
 
 
 def _classified(hunk: Hunk, before: SideReading, after: SideReading) -> HunkResult:
-    changed = [one for one in (before, after) if _changes_lines(hunk, one.side.name)]
+    changed = [one for one in (before, after) if changes_lines(hunk, one.side.name)]
     links = tuple(link for one in changed for link in _links(hunk, one))
     if links:
         return HunkResult(hunk=hunk, classification="linked", links=links)

@@ -102,3 +102,21 @@ export const COMPOSER_CHORDS: ZoneChord[] = [
     zones: ["composer"],
   },
 ];
+
+// The reviewer's change traversal (MIK-R33, adopting ICR-R32 rule 7): next and previous change in the
+// family tree. Printable, so the generic routing contract keeps them inert in inputs, textareas and
+// contenteditable regions; handled only in the reviewer's own zone, which is never the PTY zone.
+export const REVIEW_CHORDS: ZoneChord[] = [
+  {
+    chord: "J",
+    label: "j",
+    commandId: "review.nextChange",
+    zones: ["review"],
+  },
+  {
+    chord: "K",
+    label: "k",
+    commandId: "review.previousChange",
+    zones: ["review"],
+  },
+];

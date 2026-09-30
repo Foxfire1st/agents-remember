@@ -9,7 +9,7 @@
 // families (MIK-R32); choosing one swaps the reading area for the lane, and choosing a family returns.
 // Its diffs mark each hunk with the intents whose recorded ranges it meets (MIK-R34); following a
 // marker selects its tree position here, and `Back to <file>` returns to the hunk.
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { css } from '../../../styled-system/css';
 import type { ReviewFamilyContext, ReviewPayload, ReviewSelectorKind } from '../../data/review';
 import { selectedRevision } from './SubjectReview';
@@ -30,12 +30,19 @@ import { IntentMarkerScope, markerInventory, useIntentMarkerScope } from './inte
 import { InvariantTargetState, useInvariantTargetState } from './MarkerTargetState';
 import { workspaceMarkerMoves } from './markerNavigation';
 
+// The one sticky offset of the stacked layout (MIK-L33 x MIK-L34): while a followed marker's way back
+// is open it holds the top (`markerReturn`: 0.5rem down, 2rem tall), and every other sticky control
+// of the workspace -- the family tree's triage bar -- sticks below it at `--review-sticky-top`, so
+// neither covers the other. Side by side the rail scrolls on its own and the way back is not sticky.
 const workspace = css({
   display: 'grid',
   gridTemplateColumns: 'minmax(17rem, 24rem) minmax(0, 1fr)',
   gap: '1rem',
   alignItems: 'start',
-  '@media (max-width: 60rem)': { gridTemplateColumns: 'minmax(0, 1fr)' },
+  '@media (max-width: 60rem)': {
+    gridTemplateColumns: 'minmax(0, 1fr)',
+    '&[data-marker-return="open"]': { '--review-sticky-top': '2.75rem' },
+  },
 });
 const shell = css({
   background: 'bgPanel',
@@ -61,7 +68,19 @@ const jump = css({
 const markerReturn = css({
   gridColumn: '1 / -1',
   justifySelf: 'start',
-  '@media (max-width: 60rem)': { position: 'sticky', top: '0.5rem', zIndex: 2 },
+  '@media (max-width: 60rem)': {
+    position: 'sticky',
+    top: '0.5rem',
+    zIndex: 2,
+    // A fixed box, so the offset below it (`--review-sticky-top`) is exact: one line, however long
+    // the file's name.
+    boxSizing: 'border-box',
+    height: '2rem',
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
 });
 
 function FamilyNotComposed({
@@ -265,6 +284,11 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
   );
 }
 
+// `open` while a followed marker's way back is shown: the workspace then holds the sticky offset.
+function useMarkerReturnState(): 'open' | undefined {
+  return useContext(IntentMarkerScope)?.origin ? 'open' : undefined;
+}
+
 function WorkspaceBody({
   payload,
   reading = null,
@@ -279,6 +303,7 @@ function WorkspaceBody({
   laneRead = null,
 }: ReviewWorkspaceProps) {
   useSelectionFocus(payload, state);
+  const returning = useMarkerReturnState();
   // While unanswered, only the reader's explicit choice is marked: deriving one from the previous
   // payload would mark that subject's family as the requested subject's context.
   const chosen = reading ? state.chosen : selectedContext(payload, state.chosen, selectorId);
@@ -290,6 +315,7 @@ function WorkspaceBody({
     <div
       className={workspace}
       data-testid="review-workspace"
+      data-marker-return={returning}
       data-diff-layout={state.layout}
       data-full-file={String(state.fullFile)}
     >

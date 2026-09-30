@@ -258,12 +258,12 @@
     "state": "measured",
     "unknown_attribution_total": 0
    },
-   "expansion_command": "git -C /tmp/mik-l34-real/code diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
+   "expansion_command": "git -C /tmp/mik-l33-merge/code diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
    "expansion_reference": "review:source-change-inventory-of-the-bound-code-tree-pair",
    "inventory": {
     "after_code_tree_id": "db68db54906acc5661a3ac7813d75a340ba7cbdc",
     "before_code_tree_id": "59daf5055eb1ceffba89170be64ac85cabf860f4",
-    "command": "git -C /tmp/mik-l34-real/code diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
+    "command": "git -C /tmp/mik-l33-merge/code diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
     "detail": "the two requested code trees differ at 4 path(s); every one is listed with the change status Git reported for it, whether or not its content can be rendered",
     "entries": [
      {

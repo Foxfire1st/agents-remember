@@ -6,12 +6,14 @@
 //              are handled; everything else passes to the editor.
 //   pty      — EVERY key passes to the hosted harness except exactly the bound reserved set
 //              (reserved.ts). No bare-Esc sequence is ever claimed over a live PTY.
+//   review   — the intent reviewer (MIK-R33): its own chords (j/k change traversal) fire only while
+//              focus is inside it, under the chrome rules (printables never fire in editable targets).
 // Zone membership is carried by `data-kbzone` markers on containers so the React binding and the
 // tests resolve zones the same way.
 
 import { matchReservedChord, type KeyEventLike } from "./reserved";
 
-export type Zone = "chrome" | "composer" | "pty";
+export type Zone = "chrome" | "composer" | "pty" | "review";
 
 export type KeyRoute = "handle" | "passthrough";
 
@@ -28,7 +30,7 @@ export interface ZoneElementLike {
 export function zoneForTarget(target: ZoneElementLike | null | undefined): Zone {
   const host = target?.closest?.("[data-kbzone]");
   const zone = host?.getAttribute?.("data-kbzone");
-  return zone === "pty" || zone === "composer" ? zone : "chrome";
+  return zone === "pty" || zone === "composer" || zone === "review" ? zone : "chrome";
 }
 
 /** True when the target consumes plain typing (inputs, textareas, contenteditable). */

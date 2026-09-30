@@ -1,0 +1,119 @@
+{
+  "captured_at": "2026-09-30T19:15:19+00:00",
+  "producer": "260928-MIK-L33 worker, notes/reports/260928-MIK-L33-evidence/capture_fixture_bodies.py",
+  "command": "PYTHONPATH=mcp/tests <mcp venv python> capture_fixture_bodies.py <scratch> <L33 worktree>/dashboard <this file>",
+  "route": "create_app(config, collaborators=serving_collaborators(config)) over fastapi TestClient",
+  "source_tree": "260928-mik-l33 worktree (base d3a22213ad3124603b0210afb7e3d049c5589b82, with this leaf's uncommitted changes)",
+  "comparison": "STORE-AUTHORED fixture: mcp/tests/test_review_change_kinds.py build_world (a live leaf over four Git trees; every memory side read through its derived index)",
+  "attempts": "one capture per body; each body is the first answer",
+  "fixtures": [
+    {
+      "file": "src/panels/review/triage.entries.captured.json",
+      "route": "GET /api/review/intent/entries",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1"
+      },
+      "status": 200,
+      "seconds": 0.13,
+      "sha256": "f660066b9fb0093cbc8d08dabcf40c98676663707c51177629c1d2d503e19283",
+      "bytes": 2922
+    },
+    {
+      "file": "src/panels/review/triage.family.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1",
+        "selectorKind": "family",
+        "selectorId": "338785bb-9701-50e9-a383-ff33746d5bc0"
+      },
+      "status": 200,
+      "seconds": 0.33,
+      "sha256": "13393f234accd77f975ee23c206b8f69bc59ce03f22af33cf49e21fd03fa0edb",
+      "bytes": 147276
+    },
+    {
+      "file": "src/panels/review/triage.familyPage.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1",
+        "selectorKind": "family",
+        "selectorId": "338785bb-9701-50e9-a383-ff33746d5bc0",
+        "pageSize": 2
+      },
+      "status": 200,
+      "seconds": 0.25,
+      "sha256": "a8fc710480e343b221323e1f0666a5ae08cad497eaacd224fcb6bfacb8732968",
+      "bytes": 34067
+    },
+    {
+      "file": "src/panels/review/triage.familyContinued.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1",
+        "selectorKind": "family",
+        "selectorId": "338785bb-9701-50e9-a383-ff33746d5bc0",
+        "pageSize": 2,
+        "pageOf": "family_members",
+        "continuation": "eyJjdXJzb3JfZm9ybWF0Ijoia25vd2xlZGdlLXJlYWQtY3Vyc29yL3YxIiwicG9saWN5X3ZlcnNpb24iOiJyZWNvcmRlZC1mYW1pbHktZnJvbnRpZXIvdjEiLCJjb250ZXh0X2RpZ2VzdCI6IjFmMTdiYWIzMjRlZDA3NjU3MTlmNTMwOGEwNmEyZGVkMWU0MzczMjk5Njk3MGEyYmFmYzBhOTdiOGQ0OTMyNGMiLCJzZWVkX2RpZ2VzdCI6IjU3YjMwMDNjY2VhMDFkMzJhNTYxZjM2MDRlMzBmYjYzMjBhYTJkMjFiMzZhMDMxYTk1NWU5YjlkZTI3MTg3OTQiLCJtYW5pZmVzdF9kaWdlc3QiOiJkYTA0MjlmMjU5ZDVlNmYwYmU3OWVjMDcwMGU4OGEwMzU5ZmI2NTAzNGI0OWZhOGNjZjUxM2IxYjExNDMxNWMxIiwibG9naWNhbF9kaWdlc3QiOiI2NGQ2OGY5NmYzOTllYzJlNTEyMDNjYWM3YWJkMjU2MGZhNzU2NjI5ZGY1ZWJiMjVjYjRhZDEwN2E0OWU1MTljIiwic2NoZW1hX3ZlcnNpb24iOiJhci1rbm93bGVkZ2Utc3FsaXRlL3Y5IiwicG9zaXRpb24iOjJ9"
+      },
+      "status": 200,
+      "seconds": 0.24,
+      "sha256": "a5313daca34981e5dd6238774c89c572adfc3cea4ddb7a3884d43ac7164378ed",
+      "bytes": 37639
+    },
+    {
+      "file": "src/panels/review/triage.shared.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1",
+        "selectorKind": "invariant",
+        "selectorId": "e701c262-50a6-553b-bab6-691caed0fb04"
+      },
+      "status": 200,
+      "seconds": 0.31,
+      "sha256": "8898456293a4acab47f7eefac90791da513935fa92677d3385b27a351a56fded",
+      "bytes": 167361
+    },
+    {
+      "file": "src/panels/review/triage.memberA.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1",
+        "selectorKind": "invariant",
+        "selectorId": "9e1dbcd4-407f-57b1-957b-36bb811bce81"
+      },
+      "status": 200,
+      "seconds": 0.27,
+      "sha256": "c088678eaeb35a4ab800b1a1b690f376f2925066338f5abfa44417d27d5bef21",
+      "bytes": 147490
+    },
+    {
+      "file": "src/panels/review/triage.memberH.captured.json",
+      "route": "GET /api/review/intent",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260101_tree_review",
+        "leaf": "260101-TRV-L1",
+        "selectorKind": "invariant",
+        "selectorId": "f84e4e24-5490-545f-9b16-62283a0da4ef"
+      },
+      "status": 200,
+      "seconds": 0.28,
+      "sha256": "b0c36e3e32a57ddbfaa2711c29aa9c3ff908ecbf509b4566106a6bcfde1759cd",
+      "bytes": 122130
+    }
+  ],
+  "merge_round": "MIK-L33 merge round: re-captured over the merged tree (MIK-L34 landed at d3a22213) because each body's change facts now carry `membership_reasons` apart from `unknown_reasons`; the world is the same build_world."
+}

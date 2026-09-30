@@ -5,10 +5,12 @@
 // owns WHAT an admitted continuation looks like.
 
 import type {
+  ReviewFamilyContextEntry,
   ReviewFamilyMember,
   ReviewFamilyRevisionContext,
   ReviewPayload,
 } from '../../data/review';
+import { mergeChangeKinds } from './changeTriage';
 
 function mergeMember(
   previous: ReviewFamilyMember | undefined,
@@ -99,6 +101,16 @@ function admittedFamilyContinuation(
   ].every(Boolean);
 }
 
+// A tree comparison's change facts (MIK-R33) of every member the walk has returned so far; a dataset
+// review's entries carry none and gain none.
+function walkedChangeKinds(
+  known: ReviewFamilyContextEntry,
+  entry: ReviewFamilyContextEntry,
+): Pick<ReviewFamilyContextEntry, 'change_kinds'> | Record<string, never> {
+  const merged = mergeChangeKinds(known.change_kinds, entry.change_kinds);
+  return merged === undefined ? {} : { change_kinds: merged };
+}
+
 // This is presentation of one admitted walk, not another dataset or selection authority. The
 // latest response still owns the primary statements, source inventory, evidence and assessments.
 export function mergeFamilyContinuation(
@@ -134,6 +146,7 @@ export function mergeFamilyContinuation(
       after,
       state: complete ? ('recorded' as const) : entry.state,
       detail: `${entry.selection.statement}; before: ${before.detail}; after: ${after.detail}`,
+      ...walkedChangeKinds(known, entry),
     });
   }
   if (continued !== 1) return null;

@@ -1,10 +1,10 @@
 {
-  "captured_at": "2026-09-30T13:48:07+00:00",
-  "producer": "260928-MIK-L34 worker, notes/reports/260928-MIK-L34-evidence/capture_ui_fixtures.py",
-  "command": "PYTHONPATH=<L34 worktree>/mcp/src <mcp venv python> capture_ui_fixtures.py <L34 worktree>/dashboard <this file>",
+  "captured_at": "2026-09-30T19:11:44+00:00",
+  "producer": "260928-MIK-L33 worker (merge round): MIK-L34's capture_ui_fixtures.py re-run over the merged tree, notes/reports/260928-MIK-L33-evidence/merge-round/l34-scenario/capture_ui_fixtures.py",
+  "command": "PYTHONPATH=<L33 worktree>/mcp/src <mcp venv python> capture_ui_fixtures.py <L33 worktree>/dashboard <this file>",
   "route": "create_app(config, collaborators=serving_collaborators(config)) over fastapi TestClient",
-  "source_tree": "260928-mik-l34 worktree (base 59daf5055eb1ceffba89170be64ac85cabf860f4, with this leaf's uncommitted changes; no server file changed)",
-  "scratch": "/tmp/mik-l34-real: --shared clones of the live code and memory repositories (setup_scratch.sh); memory 76f5e91e1 converted with the worktree's knowledge-convert and committed as scratch main with Code-Commit 59daf505; leaf 260928-MIK-L34 (setup_leaf.py setup, then curate): serving/notes.py edited inside _confined_stat (two recorded ranges) and list_notes's docstring line deleted (three recorded ranges), review_comparison_retention.py edited inside _side_binding with a helper appended, a new module with no entry, a test body edited with a SCRATCH-AUTHORED proof PRF-7Q3M5K, INV-ZJS1XY4R reassigned out of FAM-4V4GSQCS on the after side; notes.py and retention entries re-recorded at the candidate blob",
+  "source_tree": "260928-mik-l33 worktree (base d3a22213ad3124603b0210afb7e3d049c5589b82, MIK-L34 landed, with MIK-L33's uncommitted changes: the review route now carries change_kinds)",
+  "scratch": "/tmp/mik-l33-merge: --shared clones of the live code and memory repositories (MIK-L34's setup_scratch.sh, re-run under /tmp/mik-l33-merge); memory 76f5e91e1 converted with the worktree's knowledge-convert and committed as scratch main with Code-Commit 59daf505; leaf 260928-MIK-L34 (setup_leaf.py setup, then curate): serving/notes.py edited inside _confined_stat (two recorded ranges) and list_notes's docstring line deleted (three recorded ranges), review_comparison_retention.py edited inside _side_binding with a helper appended, a new module with no entry, a test body edited with a SCRATCH-AUTHORED proof PRF-7Q3M5K, INV-ZJS1XY4R reassigned out of FAM-4V4GSQCS on the after side; notes.py and retention entries re-recorded at the candidate blob",
   "comparison": 2,
   "attempts": "one capture per body; each body is the first answer",
   "fixtures": [
@@ -17,9 +17,9 @@
         "leaf": "260928-MIK-L34"
       },
       "status": 200,
-      "seconds": 4.99,
-      "sha256": "a94483ac4502119dcfe6426296bded893832f7e30f2b414e111b332db8481095",
-      "bytes": 14991
+      "seconds": 6.09,
+      "sha256": "406ba90062914307f3b686f77fe5adbcf3e8a2080b497407fc45e2c62b1cf80a",
+      "bytes": 14993
     },
     {
       "file": "src/panels/review/markerReturn.lane.captured.json",
@@ -32,9 +32,9 @@
         "lane": "files"
       },
       "status": 200,
-      "seconds": 0.11,
-      "sha256": "51f7eb696b0989eff3fd0d2bb21a818814b403705ba10a6839683ba95a29ab40",
-      "bytes": 3629
+      "seconds": 0.08,
+      "sha256": "da594b485f7ed29203cb5cfdbe778bc4083aba172ebc842dc5441f19c15b9135",
+      "bytes": 3633
     },
     {
       "file": "src/panels/review/markerReturn.file.captured.json",
@@ -47,9 +47,9 @@
         "file": "mcp/src/agents_remember/serving/notes.py"
       },
       "status": 200,
-      "seconds": 0.07,
-      "sha256": "f90da90d5dc12b2c09a5f3761e2fe15294c6142025583441e9157d6fdde7f19f",
-      "bytes": 10089
+      "seconds": 0.05,
+      "sha256": "49227d018710daa9a45ec551fb60ed8b53c556f3f57916b222636973851a225c",
+      "bytes": 10093
     },
     {
       "file": "src/panels/review/markerReturn.source.captured.json",
@@ -63,9 +63,9 @@
         "afterCodeTreeId": "db68db54906acc5661a3ac7813d75a340ba7cbdc"
       },
       "status": 200,
-      "seconds": 3.3,
-      "sha256": "330123f211ef70f9fad66bdfd92b4dc1049f0995487d3d84bb95ef1f9e2a82ae",
-      "bytes": 28591
+      "seconds": 2.55,
+      "sha256": "dd359fe402c6061ba28db1b05c2aeabdeaaaa90bdd20fba9a1647356ee872642",
+      "bytes": 28595
     },
     {
       "file": "src/panels/review/markerReturn.invariant.captured.json",
@@ -78,9 +78,10 @@
         "selectorId": "c7c5be49-164f-56e0-923d-fb5f5259d80c"
       },
       "status": 200,
-      "seconds": 5.54,
-      "sha256": "98957b7101f0eabe55d43e9642ce3ed6bb5e58f985d472bf5aa46bd2def2facf",
-      "bytes": 136399
+      "seconds": 4.09,
+      "sha256": "1ededcdde737a8ae25abe69f6989370110c83923c04d5d0d338d5a2ad053c649",
+      "bytes": 139987
     }
-  ]
+  ],
+  "merge_round": "MIK-L33 merge round: MIK-L34's scenario rebuilt under /tmp/mik-l33-merge with MIK-L34's own scripts (same code base 59daf505 and memory base 76f5e91e1; converted memory commit and scratch paths differ) and re-captured over the merged tree: the invariant review now carries its family's change_kinds; the other bodies differ only by scratch paths, the memory commit, timestamps and comparison digests."
 }

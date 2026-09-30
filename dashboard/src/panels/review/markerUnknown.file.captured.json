@@ -14,27 +14,27 @@
  "comparison": {
   "code_base": {
    "commit": "59daf5055eb1ceffba89170be64ac85cabf860f4",
-   "repository": "/tmp/mik-l34-real/code",
+   "repository": "/tmp/mik-l33-merge/code",
    "tree": "5bd13699c90fc19c67165faba99022381dd6ce98"
   },
   "code_candidate": {
    "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L34/3",
-   "repository": "/tmp/mik-l34-real/code",
+   "repository": "/tmp/mik-l33-merge/code",
    "tree": "db68db54906acc5661a3ac7813d75a340ba7cbdc"
   },
   "leaf_id": "260928-MIK-L34",
   "memory_base": {
-   "commit": "2e3810ed9cc7e9595ca510e8313c3781635373b3",
-   "repository": "/tmp/mik-l34-real/memory",
+   "commit": "31ab701692359a83a8367ab65bf90d4571de7d45",
+   "repository": "/tmp/mik-l33-merge/memory",
    "tree": "12b510c61dc76327368173d5220a51bada5f4a7e"
   },
   "memory_candidate": {
    "ref": "refs/ar/review/260928_maintained-invariant-knowledge/260928-MIK-L34/3",
-   "repository": "/tmp/mik-l34-real/memory",
+   "repository": "/tmp/mik-l33-merge/memory",
    "tree": "e524f6c1485b4bd276cb8350960c6672dbc620d8"
   },
   "number": 3,
-  "recorded_at": "2026-09-30T14:24:07+00:00",
+  "recorded_at": "2026-09-30T19:11:51+00:00",
   "schema": "ar-review-tree-comparison/v1",
   "task_id": "260928_maintained-invariant-knowledge"
  },

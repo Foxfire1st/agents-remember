@@ -1,0 +1,120 @@
+{
+ "entries": [
+  {
+   "label": "INV-MMMMMM",
+   "presence": "both",
+   "selector_id": "04f586fb-319e-54bf-ae05-b5c7f378c23b",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-BBBBBB",
+   "presence": "both",
+   "selector_id": "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-GGGGGG",
+   "presence": "both",
+   "selector_id": "4023613a-f107-5e3e-a21b-617dadcff92c",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-CCCCCC",
+   "presence": "both",
+   "selector_id": "6c36ff0b-8c8b-51ce-a820-a085173bd830",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-NNNNNN",
+   "presence": "both",
+   "selector_id": "89484685-9780-533c-b6fd-5d66eb7aae3f",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-EEEEEE",
+   "presence": "both",
+   "selector_id": "97439c7f-768e-5951-bf6a-70b9093e8fe1",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-AAAAAA",
+   "presence": "both",
+   "selector_id": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-PPPPPP",
+   "presence": "both",
+   "selector_id": "a6312ea8-654b-5f11-8f5b-5881ea910b60",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-SSSSSS",
+   "presence": "both",
+   "selector_id": "e3fa1240-0e07-501a-ab9a-e8528137f7e8",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-FFFFFF",
+   "presence": "both",
+   "selector_id": "e701c262-50a6-553b-bab6-691caed0fb04",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-XXXXXX",
+   "presence": "both",
+   "selector_id": "eb752192-26cb-5775-820d-d1d1af1f5630",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-KKKKKK",
+   "presence": "both",
+   "selector_id": "ecc9c2ca-2784-56c9-8878-0b38c49bfe1a",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-DDDDDD",
+   "presence": "both",
+   "selector_id": "f3e3f975-65c5-5a56-8ef1-20a7273430ea",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-HHHHHH",
+   "presence": "after_only",
+   "selector_id": "f84e4e24-5490-545f-9b16-62283a0da4ef",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "INV-RRRRRR",
+   "presence": "before_only",
+   "selector_id": "30718446-fd72-52ec-9f74-db60bf2da1ca",
+   "selector_kind": "invariant"
+  },
+  {
+   "label": "FAM-F00001",
+   "presence": "both",
+   "selector_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+   "selector_kind": "family"
+  },
+  {
+   "label": "FAM-F00003",
+   "presence": "both",
+   "selector_id": "59af4eac-eebc-53f9-b736-7043d5bd122d",
+   "selector_kind": "family"
+  },
+  {
+   "label": "FAM-F00002",
+   "presence": "both",
+   "selector_id": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44",
+   "selector_kind": "family"
+  }
+ ],
+ "family_total": 3,
+ "invariant_total": 15,
+ "leaf_id": "260101-TRV-L1",
+ "master": "260101_tree_review",
+ "operation": "list_knowledge_review_entries",
+ "repository_id": "agents-remember",
+ "state": "entries",
+ "total_subjects": 18
+}

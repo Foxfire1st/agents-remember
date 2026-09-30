@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, useId, useRef } from 'react';
 
 import { css, cx } from '../../../styled-system/css';
 import type {
@@ -11,9 +11,28 @@ import type {
   ReviewFamilySideName,
 } from '../../data/review';
 import { FAMILY_SIDES } from '../../data/review';
+import type { ReviewMemberChange } from '../../data/reviewFamily';
+import {
+  FamilyBreakdown,
+  GuaranteeChangeBadge,
+  MemberChangeBadge,
+  type MemberChangeState,
+  TriageControls,
+  useMemberChange,
+} from './ChangeBadges';
+import {
+  familyTriage,
+  hasChangeFacts,
+  memberChanges,
+  orderFamilies,
+  orderMemberRows,
+} from './changeTriage';
+import { useChangeTraversal } from './changeTraversal';
+import type { MarkTarget } from './hunkMarkers';
 import { TreeComparisonScope, useTreeComparison } from './IntentWordDiff';
-import { MemberTargetNote } from './MarkerTargetState';
+import { MemberTargetNote, useMemberTarget } from './MarkerTargetState';
 import { rowWording, wordingComparison } from './statementWording';
+import { type TreeOrder, useTreeOrder } from './triageOrderPreference';
 
 export interface FamilySelection {
   familyId: string;
@@ -282,6 +301,7 @@ export function RosterNext({
             className={node}
             data-testid={testid}
             data-family={entry.family_id}
+            data-family-label={familyLabel(entry)}
             data-side={side}
             data-continuation={page.continuation}
             onClick={() => onRosterNext(entry.family_id, side, page.continuation as string)}
@@ -310,9 +330,12 @@ function sameGuaranteeText(
 
 // One revision is "unchanged" only when its two texts are too; on a tree comparison one revision can
 // carry different bytes on its two sides (MIK-R21), and then both texts are shown (review R1 F2).
+// With change facts (MIK-R33) the family row's badge already states "guarantee unchanged", so the
+// block's label does not state it a second time.
 function guaranteesOf(
   entry: ReviewFamilyContextEntry,
   tree: boolean,
+  unchangedNote: string,
 ): { guarantee: ReviewFamilyGuarantee; side: string; note: string }[] {
   const before = entry.before.guarantee;
   const after = entry.after.guarantee;
@@ -324,7 +347,7 @@ function guaranteesOf(
         {
           guarantee: before,
           side: 'both',
-          note: 'Joint guarantee · unchanged',
+          note: unchangedNote,
         },
       ];
     }
@@ -340,7 +363,11 @@ function guaranteesOf(
 }
 
 function FamilyGuarantees({ entry }: { entry: ReviewFamilyContextEntry }) {
-  const guarantees = guaranteesOf(entry, useTreeComparison());
+  const guarantees = guaranteesOf(
+    entry,
+    useTreeComparison(),
+    entry.change_kinds ? 'Joint guarantee' : 'Joint guarantee · unchanged',
+  );
   if (!guarantees.length) {
     return (
       <p className={muted} data-testid="review-family-guarantee">
@@ -395,10 +422,16 @@ function memberLabel(member: ReviewFamilyMember): string {
 
 // The node's side tag. On a tree comparison one revision on both sides is "unchanged" only when its
 // carried texts are the same; otherwise it is the same revision, with its text differing or unknown.
-function memberSideTag(row: MemberRow, tree: boolean): string {
+function memberSideTag(row: MemberRow, tree: boolean, noted = false): string {
   if (row.sides.length !== 2) return ` · ${row.sides[0]} only`;
   if (!tree || row.wording === 'same') return ' · unchanged revision';
-  return row.wording === 'differs' ? ' · same revision · text differs' : ' · same revision';
+  if (row.wording !== 'differs') return ' · same revision';
+  // The change badge's "same revision; text differs" note states it once (MIK-R33).
+  return noted ? '' : ' · same revision · text differs';
+}
+
+function textNoted(facts: Map<string, ReviewMemberChange> | undefined, memberId: string): boolean {
+  return facts?.get(memberId)?.marks.includes('text_differs') ?? false;
 }
 
 function memberSidesNote(row: MemberRow): string {
@@ -407,22 +440,86 @@ function memberSidesNote(row: MemberRow): string {
     : `recorded on the ${row.sides[0]} snapshot only`;
 }
 
+// A tree comparison's change attributes of one member node (MIK-R33): the traversal reads them. The
+// two revision rows of one occurrence share `data-occurrence`, so they are one stop.
+function memberChangeAttributes(
+  entry: ReviewFamilyContextEntry,
+  member: ReviewFamilyMember,
+  facts: Map<string, ReviewMemberChange> | undefined,
+): Record<string, string> {
+  if (!facts) return {};
+  return {
+    'data-family': entry.family_id,
+    'data-occurrence': member.member_id,
+    'data-change-primary': facts.get(member.member_id)?.primary ?? 'unknown',
+  };
+}
+
+// The family node's own stop: the fact of its guarantee.
+function familyChangeAttributes(entry: ReviewFamilyContextEntry): Record<string, string> {
+  const kinds = entry.change_kinds;
+  if (!kinds) return {};
+  return { 'data-occurrence': `family:${entry.family_id}`, 'data-change-primary': kinds.guarantee };
+}
+
+// A member node's accessible name is its subject only -- the statement and the side tag -- and its
+// description is its facts, once each, in the ruled order (review R3-1): with change facts the badge,
+// the change-kind reason and the membership (`useMemberChange`); without them (a dataset review), a
+// followed marker's unknown membership (MIK-L34's note). Nothing is both named and described.
+function useMemberNodeIds(
+  change: MemberChangeState | undefined,
+  target: MarkTarget | null,
+): { subject: string; side: string; note: string; labelledBy: string; describedBy?: string } {
+  const base = useId();
+  const subject = `${base}-subject`;
+  const side = `${base}-side`;
+  const note = `${base}-note`;
+  const describedBy = change ? change.describedBy : target ? note : undefined;
+  return { subject, side, note, labelledBy: `${subject} ${side}`, describedBy };
+}
+
+// The node's subject: the member's statement, or what the page says of a statement it did not carry.
+function MemberSubject({ member, id }: { member: ReviewFamilyMember; id: string }) {
+  return member.state === 'recorded' ? (
+    <span id={id} className={memberText}>
+      {member.statement}
+    </span>
+  ) : (
+    <span id={id} data-testid="review-family-member-state">
+      {memberLabel(member)} · statement not carried on this page
+    </span>
+  );
+}
+
 function MemberNode({
   entry,
   row,
   selected,
   onSelect,
+  facts,
 }: {
   entry: ReviewFamilyContextEntry;
   row: MemberRow;
   selected: FamilySelection | null;
   onSelect: (selection: FamilySelection) => void;
+  // The tree comparison's change facts by member occurrence (MIK-R33); absent on a dataset review.
+  facts?: Map<string, ReviewMemberChange>;
 }) {
   const member = row.member;
   const tree = useTreeComparison();
+  const change = useMemberChange(
+    facts,
+    member.member_id,
+    entry.family_id,
+    member.invariant_revision_id,
+  );
   const isCurrent =
     selected?.familyId === entry.family_id &&
     selected?.memberRevisionId === member.invariant_revision_id;
+  const ids = useMemberNodeIds(
+    change,
+    useMemberTarget(entry.family_id, member.invariant_revision_id),
+  );
   return (
     <li
       data-testid="review-family-member"
@@ -435,25 +532,31 @@ function MemberNode({
         data-tree-node="member"
         data-testid="review-family-member-open"
         data-revision={member.invariant_revision_id}
+        {...memberChangeAttributes(entry, member, facts)}
+        aria-labelledby={ids.labelledBy}
+        aria-describedby={ids.describedBy}
         aria-current={isCurrent ? 'true' : undefined}
         onClick={() =>
           onSelect({ familyId: entry.family_id, memberRevisionId: member.invariant_revision_id })
         }
         onKeyDown={treeArrow}
       >
-        {member.state === 'recorded' ? (
-          <span className={memberText}>{member.statement}</span>
-        ) : (
-          <span data-testid="review-family-member-state">
-            {memberLabel(member)} · statement not carried on this page
-          </span>
-        )}
+        <MemberSubject member={member} id={ids.subject} />
         <span className={muted}>{memberSidesNote(row)}</span>
-        <span className={sideTag}>{memberSideTag(row, tree)}</span>
-        <MemberTargetNote
-          familyId={entry.family_id}
-          memberRevisionId={member.invariant_revision_id}
-        />
+        <span id={ids.side} className={sideTag}>
+          {memberSideTag(row, tree, textNoted(facts, member.member_id))}
+        </span>
+        {/* With change facts the badge is the node's one statement, and a followed marker's
+            unknown membership becomes its tag; without them (a dataset review) L34's note stands. */}
+        {change ? (
+          <MemberChangeBadge state={change} />
+        ) : (
+          <MemberTargetNote
+            id={ids.note}
+            familyId={entry.family_id}
+            memberRevisionId={member.invariant_revision_id}
+          />
+        )}
       </button>
       {member.other_family_revision_ids.length ? (
         <details>
@@ -474,12 +577,15 @@ function MemberRoster({
   entry,
   selected,
   onSelect,
+  order,
 }: {
   entry: ReviewFamilyContextEntry;
   selected: FamilySelection | null;
   onSelect: (selection: FamilySelection) => void;
+  order: TreeOrder;
 }) {
-  const rows = memberRows(entry);
+  const rows = orderMemberRows(entry, memberRows(entry), order);
+  const facts = entry.change_kinds ? memberChanges(entry) : undefined;
   if (rows.length) {
     return (
       <ul className={statements}>
@@ -490,6 +596,7 @@ function MemberRoster({
             row={row}
             selected={selected}
             onSelect={onSelect}
+            facts={facts}
           />
         ))}
       </ul>
@@ -507,11 +614,13 @@ function FamilyNode({
   selected,
   onSelect,
   onRosterNext,
+  order,
 }: {
   entry: ReviewFamilyContextEntry;
   selected: FamilySelection | null;
   onSelect: (selection: FamilySelection) => void;
   onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
+  order: TreeOrder;
 }) {
   const familyCurrent =
     selected?.familyId === entry.family_id && selected.memberRevisionId === undefined;
@@ -521,6 +630,7 @@ function FamilyNode({
       data-testid="review-family"
       data-family={entry.family_id}
       data-family-state={entry.state}
+      data-members-unreturned={familyTriage(entry)?.partial ? 'true' : undefined}
     >
       <button
         type="button"
@@ -528,12 +638,15 @@ function FamilyNode({
         data-tree-node="family"
         data-testid="review-family-open"
         data-family={entry.family_id}
+        {...familyChangeAttributes(entry)}
         aria-current={familyCurrent ? 'true' : undefined}
         onClick={() => onSelect({ familyId: entry.family_id })}
         onKeyDown={treeArrow}
       >
         ▾ {familyLabel(entry)}
+        <GuaranteeChangeBadge kinds={entry.change_kinds} />
       </button>
+      <FamilyBreakdown triage={familyTriage(entry)} />
       <FamilyGuarantees entry={entry} />
       <details>
         <summary>{memberRows(entry).length} member revisions · roster details</summary>
@@ -548,7 +661,7 @@ function FamilyNode({
         <FamilyHistory entry={entry} />
         <RosterLines entry={entry} />
       </details>
-      <MemberRoster entry={entry} selected={selected} onSelect={onSelect} />
+      <MemberRoster entry={entry} selected={selected} onSelect={onSelect} order={order} />
       <RosterNext entry={entry} onRosterNext={onRosterNext} />
     </li>
   );
@@ -605,21 +718,24 @@ function FamilyList({
   selected,
   onSelect,
   onRosterNext,
+  order,
 }: {
   shown: ReviewFamilyContextEntry[];
   selected: FamilySelection | null;
   onSelect: (selection: FamilySelection) => void;
   onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
+  order: TreeOrder;
 }) {
   return (
-    <ul className={statements} data-testid="review-family-list">
-      {shown.map((entry) => (
+    <ul className={statements} data-testid="review-family-list" data-tree-order={order}>
+      {orderFamilies(shown, order).map((entry) => (
         <FamilyNode
           key={entry.family_id}
           entry={entry}
           selected={selected}
           onSelect={onSelect}
           onRosterNext={onRosterNext}
+          order={order}
         />
       ))}
     </ul>
@@ -647,6 +763,12 @@ export function FamilyTree({
   onQuery: (next: string) => void;
 }) {
   const needle = query.trim().toLowerCase();
+  // A tree comparison's change facts order the tree and drive j/k (MIK-R33); a dataset review has
+  // none, and its tree is exactly the landed one.
+  const triaged = hasChangeFacts(context.entries);
+  const order = useTreeOrder();
+  const root = useRef<HTMLElement>(null);
+  const traversal = useChangeTraversal(root, triaged);
   const allMembers = context.entries.reduce((total, entry) => total + memberRows(entry).length, 0);
   const shown = context.entries.filter((entry) => needle === '' || familyMatches(entry, needle));
   const shownMembers = shown.reduce((total, entry) => total + memberRows(entry).length, 0);
@@ -654,6 +776,7 @@ export function FamilyTree({
 
   return (
     <section
+      ref={root}
       className={embedded ? css({ minWidth: 0 }) : shell}
       data-testid="review-family-tree"
       data-family-state={context.state}
@@ -677,6 +800,9 @@ export function FamilyTree({
         {filterScope(query, shown.length, context.entries.length, shownMembers, allMembers)}
       </p>
       <FamilyContextDetails context={context} composed={composed} />
+      {triaged ? (
+        <TriageControls order={order} onMove={traversal.move} status={traversal.status} />
+      ) : null}
       {shown.length ? (
         <TreeComparisonScope tree={tree}>
           <FamilyList
@@ -684,6 +810,7 @@ export function FamilyTree({
             selected={selection}
             onSelect={onSelect}
             onRosterNext={onRosterNext}
+            order={triaged ? order : 'authored'}
           />
         </TreeComparisonScope>
       ) : (

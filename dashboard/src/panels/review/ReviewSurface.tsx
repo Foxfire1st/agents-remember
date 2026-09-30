@@ -543,6 +543,8 @@ export function ReviewSurface(props: ReviewTarget & { onBack: () => void }) {
       ref={root}
       className={reviewShell}
       data-testid="review-surface"
+      // The keymap owner's reviewer zone: its j/k change traversal fires only inside it (MIK-R33).
+      data-kbzone="review"
       data-comparison={shown?.comparison?.reference}
       data-review-target={`${repo}/${master}/${leaf}`}
       data-review-history={history ?? 'live'}

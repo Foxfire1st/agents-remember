@@ -12,10 +12,10 @@
    "after_snapshot_digest": "b58cabe0539641aeb9b4b8d695b074c61e9b9743ac50a9e30caadd9eb40baf39",
    "before_code_tree_id": "59daf5055eb1ceffba89170be64ac85cabf860f4",
    "before_snapshot_digest": "a1ea4abe833b81cf516f0d78fd6e843936fa3fb79c542da7dc7f427a590fbffe",
-   "binding_digest": "7c0b3a643eefd863a0fb7be888a70f1301758a4a53d77533367d8f7dca0a59a6",
+   "binding_digest": "057f01c0ce682fcf6883e79157f9c164bfb62dc4ec6f11c5e11f516aef32cba0",
    "knowledge_compared": true,
    "policy_version": "recorded-two-snapshot-union/v1",
-   "reference": "7c0b3a643eefd863a0fb7be888a70f1301758a4a53d77533367d8f7dca0a59a6",
+   "reference": "057f01c0ce682fcf6883e79157f9c164bfb62dc4ec6f11c5e11f516aef32cba0",
    "selector_digest": "f38c0f1a37b4b280c97e78c8df35d8ab2bff1a4b6c3f9bb1eff56dd214fe7c7b"
   },
   "evidence": {
@@ -820,6 +820,107 @@
       "state": "recorded"
      },
      "candidates": [],
+     "change_kinds": {
+      "family": "FAM-4V4GSQCS",
+      "guarantee": "unchanged",
+      "guarantee_detail": "the guarantee text of FAM-4V4GSQCS is the same on both sides",
+      "members": [
+       {
+        "authored_position": 4,
+        "evidence": [
+         "realization RLZ-9YY9Y1E1 re-anchored",
+         "the hunk of mcp/src/agents_remember/serving/notes.py at before 210,1 after 209,0 intersects realization RLZ-9YY9Y1E1 on the before side",
+         "INV-ZJS1XY4R left FAM-4V4GSQCS"
+        ],
+        "implementation": "established",
+        "intent": "not_established",
+        "invariant": "INV-ZJS1XY4R",
+        "marks": [
+         "membership"
+        ],
+        "member_id": "e5299a23-39a6-5fe6-b4a7-253116ccb53c",
+        "membership": "established",
+        "membership_reasons": [],
+        "primary": "implementation",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 2,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-QR24S1VH",
+        "marks": [],
+        "member_id": "675510b9-25a3-5dbd-863e-5a3a1bb25805",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 3,
+        "evidence": [
+         "realization RLZ-7X2C4VRQ re-anchored",
+         "the hunk of mcp/src/agents_remember/serving/notes.py at before 124,1 after 124,1 intersects realization RLZ-7X2C4VRQ on the before side",
+         "the hunk of mcp/src/agents_remember/serving/notes.py at before 124,1 after 124,1 intersects realization RLZ-7X2C4VRQ on the after side"
+        ],
+        "implementation": "established",
+        "intent": "not_established",
+        "invariant": "INV-Z66EMHMH",
+        "marks": [],
+        "member_id": "9ffddd27-b891-569e-9d03-dd7a714e10c7",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "implementation",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 1,
+        "evidence": [
+         "realization RLZ-7RNSV7PG re-anchored",
+         "the hunk of mcp/src/agents_remember/serving/notes.py at before 210,1 after 209,0 intersects realization RLZ-7RNSV7PG on the before side"
+        ],
+        "implementation": "established",
+        "intent": "not_established",
+        "invariant": "INV-EJW15DXA",
+        "marks": [],
+        "member_id": "d0ce2d1d-4f31-5079-affd-3c57f0f3bdad",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "implementation",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 0,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-DA7D417G",
+        "marks": [],
+        "member_id": "b5997a33-bca0-5eff-a78b-5970a568827b",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       }
+      ],
+      "members_total": 5
+     },
      "detail": "the family 8519c70b-92ae-5ad6-9c6c-2fcf83d498ea is read at the before family revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f and the after family revision baa11c45-a27d-5957-9051-ab727b312d81, each the unique authored head its own snapshot establishes for this family; the two snapshots record 1 before and 1 after revision(s) of this family, and 0 other recorded revision(s) of this family remain selectable history; before: the before snapshot's recorded roster of family revision 1b7ca0b9-0423-544f-8ba1-044bb13adc0f was read whole: 5 recorded membership(s), all carried here; after: the after snapshot's recorded roster of family revision baa11c45-a27d-5957-9051-ab727b312d81 was read whole: 4 recorded membership(s), all carried here",
      "display_label": "Bounded notes listing with unchanged meaning",
      "family_id": "8519c70b-92ae-5ad6-9c6c-2fcf83d498ea",
@@ -1103,7 +1204,7 @@
    "inventory": {
     "after_code_tree_id": "db68db54906acc5661a3ac7813d75a340ba7cbdc",
     "before_code_tree_id": "59daf5055eb1ceffba89170be64ac85cabf860f4",
-    "command": "git -C /tmp/mik-l34-real/code diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
+    "command": "git -C /tmp/mik-l33-merge/code diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
     "detail": "the two requested code trees differ at 4 path(s); every one is listed with the change status Git reported for it, whether or not its content can be rendered",
     "entries": [
      {

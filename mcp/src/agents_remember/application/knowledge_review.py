@@ -85,6 +85,7 @@ from agents_remember.application.review_candidate_resolution import (
     review_namespace,
     unreadable_candidate_refusal,
 )
+from agents_remember.application.review_change_kinds import with_change_kinds
 from agents_remember.application.review_committed_leaf import (
     closed_leaf_dataset_refusal,
     closed_leaf_limitations,
@@ -549,7 +550,9 @@ def compose_review(
                 comparison, inventory, _comparison_attribution(comparison), relationships
             ),
             evidence=evidence_pane(displayed_rows, records, subjects, applicability),
-            family_context=family.context,
+            # A tree comparison's families carry the change facts of the members this page
+            # returned (MIK-R33); a dataset review's context is published exactly as composed.
+            family_context=with_change_kinds(family.context, resolved.trees),
             staleness=staleness,
             submission=submission(stale),
             sync_movement=sync_movement,

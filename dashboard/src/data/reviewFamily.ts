@@ -177,6 +177,55 @@ export interface ReviewRevisionSelection {
   statement: string;
 }
 
+// The change facts of a tree comparison (MIK-R33), mirroring `models/knowledge/review_change_kinds.py`.
+// The server computes every fact for the members a page returned; a rendering orders, counts and
+// traverses by them and never recomputes one. A dataset review carries none.
+export type ReviewChangeKind = "intent" | "implementation" | "membership" | "unknown" | "unchanged";
+export type ReviewChangeFact = "established" | "not_established" | "unknown";
+export type ReviewChangeMark =
+  | "intent"
+  | "implementation"
+  | "membership"
+  | "text_differs"
+  | "test"
+  | "unknown";
+
+// One member occurrence: one invariant under one family. `member_id` is the roster's membership
+// identity, the same on both sides, so both revision rows of a revised member read these facts.
+// `text_differs` is an `intent` resting on one revision whose text differs between the sides;
+// `unknown_reasons` says why each unknown fact is unknown, and is non-empty exactly when one is.
+export interface ReviewMemberChange {
+  member_id: string;
+  invariant?: string;
+  authored_position?: number;
+  intent: ReviewChangeFact;
+  implementation: ReviewChangeFact;
+  membership: ReviewChangeFact;
+  proof: boolean;
+  text_differs: boolean;
+  // An entry of the member in a changed file supplies no range there: `unknown` is marked whatever
+  // else holds (ICR-R32 rule 1).
+  range_unresolved: boolean;
+  primary: ReviewChangeKind;
+  marks: ReviewChangeMark[];
+  evidence: string[];
+  // Why the change kind is not fully known (`intent`, `implementation`, an unresolved range), and why
+  // the membership is unknown: kept apart, so neither reads as the other.
+  unknown_reasons: string[];
+  membership_reasons: string[];
+}
+
+// The family's own row (its guarantee's fact) and its returned member occurrences. `members_total`
+// is the deduplicated union of the family's members on either side; absent when it could not be read.
+export interface ReviewFamilyChanges {
+  family?: string;
+  guarantee: "intent" | "unchanged" | "unknown";
+  guarantee_detail: string;
+  members_total?: number;
+  members: ReviewMemberChange[];
+  detail?: string;
+}
+
 export interface ReviewFamilyContextEntry {
   family_id: string;
   display_label?: string;
@@ -189,6 +238,7 @@ export interface ReviewFamilyContextEntry {
   candidates: ReviewFamilyGuarantee[];
   state: ReviewFamilyEntryState;
   detail: string;
+  change_kinds?: ReviewFamilyChanges;
 }
 
 export interface ReviewFamilyContextReferences {

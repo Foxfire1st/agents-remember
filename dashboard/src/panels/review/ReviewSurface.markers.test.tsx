@@ -1,7 +1,8 @@
 // MIK-R34 on real data: following a per-hunk intent marker in the review workspace, and returning.
 //
 // The bodies are the REAL served answers of the reviewer routes for the 260928-MIK-L34 worker's
-// converted scratch leaf, comparison 2 (provenance: markerReturn.capture-provenance.json). The leaf
+// converted scratch leaf, comparison 2 (provenance: markerReturn.capture-provenance.json; re-captured
+// in the MIK-L33 merge round over the merged tree, so the invariant reviews carry change facts). The leaf
 // edits serving/notes.py inside `_confined_stat`, where the recorded ranges of INV-Z66EMHMH
 // (FAM-4V4GSQCS) and INV-413DC8XE (no family) both lie, and deletes `list_notes`'s docstring line,
 // where three ranges lie. The one synthetic body is the subject catalogue, answered empty so the
@@ -292,21 +293,37 @@ it('opens an unknown membership in its own Attribution unknown state, apart from
     'INV-413DC8XE membership_unknown Attribution unknown (after, r1)',
   ]);
 
-  // The family is named and in the tree: the member's own row carries the state and its reason.
+  // The family is named and in the tree: the member's own row carries the state and its reason. A
+  // tree comparison's row states its membership once (MIK-L33 merge round): the state is the
+  // `Attribution unknown` tag on the change facts' membership line, whose reason is the comparison's.
   await followFrom(view, 'FAM-4V4GSQCS r1 · membership unknown (before, r1)', 'INV-Z66EMHMH');
   const row = await waitFor(() => {
     const node = view.container.querySelector<HTMLElement>(
       '[data-tree-node="member"][aria-current="true"]',
     );
-    expect(node?.querySelector('[data-testid="review-member-target-state"]')).toBeTruthy();
+    expect(
+      node?.querySelector(
+        '[data-testid="review-change-membership-why"][data-member-state="membership_unknown"]',
+      ),
+    ).toBeTruthy();
     return node!;
   });
-  // The selected row is what receives focus, and the state is part of its accessible name.
+  // The selected row is what receives focus, and the state is part of its accessible description
+  // (MIK-L33 review R3-1: a member row is named by its subject only, and described by its facts).
   await waitFor(() => expect(document.activeElement).toBe(row));
+  expect(
+    view.getByRole('button', {
+      description:
+        /Attribution unknown opened from an intent marker · membership unknown: the after memory tree/,
+    }),
+  ).toBe(row);
+  expect(view.queryByRole('button', { name: /Attribution unknown|membership unknown/ })).toBeNull();
   expect(row.textContent).toContain(
-    'Attribution unknownnot every family record of the after knowledge could be read, so whether ' +
-      'FAM-4V4GSQCS still lists INV-Z66EMHMH there is not established',
+    'Attribution unknown opened from an intent marker · membership unknown: the after memory tree ' +
+      'has family records that do not parse: knowledge/families/FAM-4V4GSQCS-',
   );
+  expect(row.querySelector('[data-testid="review-member-target-state"]')).toBeNull();
+  expect(row.textContent).not.toContain('not every family record');
   expect(view.queryByRole('heading', { name: 'No recorded family' })).toBeNull();
   await backToNotes(view);
 

@@ -37,6 +37,8 @@ import { LeafKnowledgeChanges } from './LeafKnowledgeChanges';
 import { guaranteeRevisionLabels, revisionMeta } from './statementWording';
 import { planningMarks } from './worklistGroups';
 import { cardScope } from './focusedCards';
+import { orderMemberRows } from './changeTriage';
+import { useTreeOrder } from './triageOrderPreference';
 import { DiffPane } from '../changeset/DiffPane';
 import type { DiffLayout } from './SourceExplorer';
 import { ReviewExpressions } from './ReviewExpressions';
@@ -665,7 +667,15 @@ function FamilyCenter({
   onRosterNext: (familyId: string, side: ReviewFamilySideName, continuation: string) => void;
 }) {
   const members = [...entry.before.members, ...entry.after.members];
-  const distinct = [...new Map(members.map((m) => [m.invariant_revision_id, m])).values()];
+  // On a tree comparison the list follows the tree's displayed order (MIK-R33); a dataset review's
+  // entry carries no change facts and keeps its order.
+  const distinct = orderMemberRows(
+    entry,
+    [...new Map(members.map((m) => [m.invariant_revision_id, m])).values()].map((member) => ({
+      member,
+    })),
+    useTreeOrder(),
+  ).map(({ member }) => member);
   return (
     <section className={shell} data-testid="review-center-family" data-family={entry.family_id}>
       <div>

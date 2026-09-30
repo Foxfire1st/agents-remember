@@ -12,10 +12,10 @@
    "after_snapshot_digest": "1e15a1d7d7782f9571193da66c1d0ef6fb8ad7b1a99f16cfb69bc08fdab5ee12",
    "before_code_tree_id": "59daf5055eb1ceffba89170be64ac85cabf860f4",
    "before_snapshot_digest": "a1ea4abe833b81cf516f0d78fd6e843936fa3fb79c542da7dc7f427a590fbffe",
-   "binding_digest": "edc09e13629e32111467c2a6c1dd63026c7cc7d2b825edfe564fd664eb2531df",
+   "binding_digest": "49654b3cf5a2ddbe9f851d3d7ced17c03de4f8783c0d091b29099aca64934c77",
    "knowledge_compared": true,
    "policy_version": "recorded-two-snapshot-union/v1",
-   "reference": "edc09e13629e32111467c2a6c1dd63026c7cc7d2b825edfe564fd664eb2531df",
+   "reference": "49654b3cf5a2ddbe9f851d3d7ced17c03de4f8783c0d091b29099aca64934c77",
    "selector_digest": "df2f20b211ba33a62456af8bdb42da426e8a0c18acfdc17718a39df00afd538a"
   },
   "evidence": {
@@ -317,7 +317,7 @@
    "inventory": {
     "after_code_tree_id": "db68db54906acc5661a3ac7813d75a340ba7cbdc",
     "before_code_tree_id": "59daf5055eb1ceffba89170be64ac85cabf860f4",
-    "command": "git -C /tmp/mik-l34-real/code diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
+    "command": "git -C /tmp/mik-l33-merge/code diff --raw -z --no-renames 59daf5055eb1ceffba89170be64ac85cabf860f4 db68db54906acc5661a3ac7813d75a340ba7cbdc",
     "detail": "the two requested code trees differ at 4 path(s); every one is listed with the change status Git reported for it, whether or not its content can be rendered",
     "entries": [
      {

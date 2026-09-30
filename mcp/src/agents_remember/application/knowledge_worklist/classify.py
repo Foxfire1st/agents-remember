@@ -61,7 +61,9 @@ __all__ = [
     "EntryClass",
     "InvariantChange",
     "KnowledgeChanges",
+    "carried_mechanically",
     "knowledge_changes",
+    "reanchored",
 ]
 
 EntryClass = Literal["stale_at_base", "moved_or_absent", "touched", "carried", "untouched"]
@@ -308,15 +310,35 @@ def knowledge_changes(
     return KnowledgeChanges(invariants=changes, families=families)
 
 
+def carried_mechanically(
+    old: Mapping[str, Any], new: Mapping[str, Any], entry_class: EntryClass
+) -> bool:
+    """Whether a changed anchor is the writer's carry-forward: a ``carried`` K_B entry whose anchor
+    moved only in ``blob`` and line numbers (definition 7's second exception)."""
+
+    return entry_class == "carried" and _only_mechanical(old, new)
+
+
+def reanchored(old: Mapping[str, Any], new: Mapping[str, Any], entry_class: EntryClass) -> bool:
+    """Whether an entry on both sides, with anchor documents ``old`` and ``new`` (source path filled
+    in) and K_B class ``entry_class``, counts as re-anchored under definition 7.
+
+    Its anchors differ, and neither exception holds: the K_B class is not one whose own item covers
+    the entry, and it is not ``carried`` with only ``blob`` and line numbers moved.
+    """
+
+    if old == new or entry_class in COVERING_CLASSES:
+        return False
+    return not carried_mechanically(old, new, entry_class)
+
+
 def _reanchor(before: IndexedEntry, after: IndexedEntry, classifier: Classifier, note: Any) -> None:
     old = anchor_document(before.entry.anchor, before.path)
     new = anchor_document(after.entry.anchor, after.path)
     if old == new:
         return
     entry_class = classifier.classify(before.entry.id).entry_class
-    if entry_class in COVERING_CLASSES:
-        return
-    if entry_class == "carried" and _only_mechanical(old, new):
+    if not reanchored(old, new, entry_class):
         return
     note(
         before.entry.invariant,

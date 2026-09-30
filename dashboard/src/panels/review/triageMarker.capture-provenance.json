@@ -1,0 +1,27 @@
+{
+  "captured_at": "2026-09-30T19:18:28+00:00",
+  "producer": "260928-MIK-L33 worker (merge round), notes/reports/260928-MIK-L33-evidence/merge-round/capture_merge_fixtures.py",
+  "command": "PYTHONPATH=<L33 worktree>/mcp/src <mcp venv python> capture_merge_fixtures.py <L33 worktree>/dashboard <this file>",
+  "route": "create_app(config, collaborators=serving_collaborators(config)) over fastapi TestClient",
+  "source_tree": "260928-mik-l33 worktree (base d3a22213ad3124603b0210afb7e3d049c5589b82, MIK-L34 landed, with MIK-L33's uncommitted changes)",
+  "scratch": "/tmp/mik-l33-merge: MIK-L34's scenario rebuilt with MIK-L34's own scripts (merge-round/l34-scenario; see markerReturn.capture-provenance.json and markerUnknown.capture-provenance.json), after break-family -- comparison 3",
+  "comparison": 3,
+  "attempts": "one capture per body; each body is the first answer",
+  "fixtures": [
+    {
+      "file": "src/panels/review/triageMarker.cards.captured.json",
+      "route": "GET /api/review/trees",
+      "params": {
+        "repo": "agents-remember",
+        "master": "260928_maintained-invariant-knowledge",
+        "leaf": "260928-MIK-L34",
+        "comparison": 3,
+        "invariants": "16b287d6-2337-5554-b911-43e3a7d15fab,5bcc7ed2-71c4-547f-a4b9-4dc5233531e6,5c75cbf9-0778-5765-bdac-50ed81e31ff6,c7c5be49-164f-56e0-923d-fb5f5259d80c,e9043896-8124-5cdb-b1e9-ed38604ca2e2"
+      },
+      "status": 200,
+      "seconds": 0.05,
+      "sha256": "eb14e9044e655c13878ee38c0e2e2cba98d7e38ca7301fb6c629ee66165f2218",
+      "bytes": 20216
+    }
+  ]
+}

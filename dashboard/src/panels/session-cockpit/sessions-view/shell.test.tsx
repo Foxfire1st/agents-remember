@@ -198,6 +198,12 @@ describe("command palette (S3)", () => {
     ).not.toBeNull();
     expect(getByText("ctrl+alt+pagedown")).not.toBeNull();
     expect(getByText("ctrl+;")).not.toBeNull();
+    // The reviewer's change traversal (MIK-R33) is listed from the same tables, and it is inert
+    // outside the reviewer: j reaches the sessions view unhandled.
+    expect(getByText("Intent reviewer — while focus is inside it")).not.toBeNull();
+    expect(getByText("review.nextChange")).not.toBeNull();
+    expect(getByText("review.previousChange")).not.toBeNull();
+    expect(fireEvent.keyDown(document.body, { key: "j", code: "KeyJ" })).toBe(true);
   });
 
   it("? typed into the composer is passthrough (printable suppression, R7)", async () => {

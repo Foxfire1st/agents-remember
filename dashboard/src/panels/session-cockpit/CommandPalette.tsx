@@ -298,6 +298,14 @@ function PaletteKeysList({
           {keymap.issues.join(" · ")}
         </div>
       ) : null}
+      <Command.Group heading="Intent reviewer — while focus is inside it">
+        {keymap.bindings.filter((entry) => entry.zones.includes("review")).map((entry) => (
+          <Command.Item key={`review-${entry.chord}`} value={`review-${entry.chord}`} disabled>
+            <span>{entry.commandId}</span>
+            <span className={chordTag}>{entry.label}</span>
+          </Command.Item>
+        ))}
+      </Command.Group>
       <Command.Group heading="Terminal — everything passes through except exactly">
         {PTY_RESERVED.map((entry) => (
           <Command.Item key={`pty-${entry.chord}`} value={`pty-${entry.chord}`} disabled>

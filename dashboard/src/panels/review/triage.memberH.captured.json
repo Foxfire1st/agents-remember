@@ -1,0 +1,2517 @@
+{
+ "operation": "read_knowledge_review",
+ "payload": {
+  "candidate": {
+   "leaf_id": "260101-TRV-L1",
+   "master": "260101_tree_review",
+   "repository_id": "agents-remember",
+   "task_ref": "260101_tree_review"
+  },
+  "comparison": {
+   "after_code_tree_id": "ae754e731bd593d76f88822051ff68d6f1cca69c",
+   "after_snapshot_digest": "2e328d48fff79114f6d4346cb282e70196403d0c0954fbb39a647c782ac103c7",
+   "before_code_tree_id": "e53ddfa3b9d6b65cd4dbfcc362aed881f82d826d",
+   "before_snapshot_digest": "64d68f96f399ec2e51203cac7abd2560fa756629df5ebb25cb4ad107a49e519c",
+   "binding_digest": "14028520b4cac5b234448157b292ec17ece3a3bf76b7affe753dba1f269ea92f",
+   "knowledge_compared": true,
+   "policy_version": "recorded-two-snapshot-union/v1",
+   "reference": "14028520b4cac5b234448157b292ec17ece3a3bf76b7affe753dba1f269ea92f",
+   "selector_digest": "16a35658056a8b6a04cb74f48d2256e632a9b452d4e48f3028dfad6a32f4bdb9"
+  },
+  "evidence": {
+   "applicability": [
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "assessments",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "verification_observations",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel",
+     "direct": 0,
+     "historical": 0,
+     "records": "evidence_claims",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    }
+   ],
+   "assessment_state": "unassessed",
+   "assessments": [],
+   "channels": [
+    {
+     "detail": "The live curator authority 260101-TRV-L1-curator-coherence.json is absent; no current authority is recorded for this candidate.",
+     "owner": "curator_coherence.load_curator_coherence_generation",
+     "record_count": 0,
+     "records": "assessments",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate dataset records no detection run, so no detector signal exists for this review; the detection owner answered for the runs it holds",
+     "owner": "detection.read_detection_run",
+     "record_count": 0,
+     "records": "detection_signals",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate's dataset answers for this exact candidate and records no verification observation for it; the evidence owner's own answer is a measured zero, not an unread authority",
+     "owner": "knowledge_evidence.read_evidence_scope",
+     "record_count": 0,
+     "records": "verification_observations",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the candidate dataset records no evidence claim, so no authored evidence exists for this review; the evidence owner answered for the claims it holds",
+     "owner": "evidence_records.claim_record",
+     "record_count": 0,
+     "records": "evidence_claims",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "this candidate records no assessment, so no binding existed to measure; a measured zero of assessments is not a measured binding",
+     "owner": "review_assessment_currentness.comparison_currentness_measurement",
+     "record_count": 0,
+     "records": "assessment_currentness",
+     "state": "none_recorded",
+     "unreadable": []
+    },
+    {
+     "detail": "the owner of authored_effects answered for this candidate and holds none of this class; this is a measured absence, not an authority this composition failed to read",
+     "owner": "knowledge_views.read_knowledge_view:review_matrix",
+     "record_count": 0,
+     "records": "authored_effects",
+     "state": "none_recorded",
+     "unreadable": []
+    }
+   ],
+   "context": [],
+   "evidence_links": [],
+   "evidence_state": "none_recorded",
+   "observations": [],
+   "source_inspection_available": true,
+   "unresolved": []
+  },
+  "family_context": {
+   "detail": "every recorded family the two snapshots place this selection in is composed: 1 family context(s), each with its selected before/after family revision, that revision's own authored guarantee and its recorded member roster",
+   "entries": [
+    {
+     "after": {
+      "detail": "the after snapshot's recorded roster of family revision 63415aa7-a495-58ff-8545-f37e3e04e513 was read whole: 9 recorded membership(s), all carried here",
+      "family_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+      "family_revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "guarantee": {
+       "acceptance_ref": "text-knowledge:knowledge/families/FAM-F00001-fam-f00001.json",
+       "display_version": "r1",
+       "family_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+       "joint_guarantee": "One.",
+       "payload_digest": "9f5f46e350f48fade098423290202f5b4544be3f5f8c5da1f73f4b03fb46aee2",
+       "provenance": {
+        "actor_ref": "260101-OLD/260101-OLD-L1",
+        "authorization_ref": "text-knowledge:knowledge/families/FAM-F00001-fam-f00001.json",
+        "operation_id": "2fa3e91a-f2db-54d5-b372-5ce6de8c5c21",
+        "origin_refs": [],
+        "recorded_at": "1970-01-01T00:00:00+00:00"
+       },
+       "revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+       "state_at_origin": "accepted"
+      },
+      "members": [
+       {
+        "applicability": "Always.",
+        "detail": "the after snapshot records membership ea75c039-7b24-5b5a-acf4-0fa8e5af15cc placing the exact invariant revision 1ef09289-b07c-5fba-ae94-ffbd2f8fa241 in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content; the membership owner records the same exact revision in 1 further family revision(s), which this value names rather than copying",
+        "display_label": "INV-EEEEEE",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "97439c7f-768e-5951-bf6a-70b9093e8fe1",
+        "invariant_revision_id": "1ef09289-b07c-5fba-ae94-ffbd2f8fa241",
+        "lifecycle": "accepted",
+        "member_id": "ea75c039-7b24-5b5a-acf4-0fa8e5af15cc",
+        "movement_reference": "ea75c039-7b24-5b5a-acf4-0fa8e5af15cc",
+        "other_family_revision_ids": [
+         "b1b05371-3d6a-5ea9-b623-ecc2d93697a9"
+        ],
+        "payload_digest": "610ad77b1e26766b7dd47ca5906ab940906b6e9c6576d6d88379dfa86873dd10",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-EEEEEE-inv-eeeeee.json",
+         "operation_id": "c6cbe649-34b4-52bf-b76f-20f8c0da289f",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "21713fa8-7554-59c8-a745-f996f024b43e",
+          "detail": "the author recorded this realization at pkg/b.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'fixed' at pkg/b.py:5-6",
+          "invariant_revision_id": "1ef09289-b07c-5fba-ae94-ffbd2f8fa241",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "fixed"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+          "path": "pkg/b.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 6,
+            "kind": "line_range",
+            "start_line": 5
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-EEEEEE holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the after snapshot records membership 9acebe6e-c7bb-5f65-bd46-81335059df7a placing the exact invariant revision 20d44563-07d0-5aa2-a4d3-4bc451e92b3e in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-CCCCCC",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "6c36ff0b-8c8b-51ce-a820-a085173bd830",
+        "invariant_revision_id": "20d44563-07d0-5aa2-a4d3-4bc451e92b3e",
+        "lifecycle": "accepted",
+        "member_id": "9acebe6e-c7bb-5f65-bd46-81335059df7a",
+        "movement_reference": "9acebe6e-c7bb-5f65-bd46-81335059df7a",
+        "other_family_revision_ids": [],
+        "payload_digest": "f8be8d4f7e19bdaea51aaee7ca342c8769513cb96c8956f9cce9d90f93acf13c",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-CCCCCC-inv-cccccc.json",
+         "operation_id": "94a22c82-5b49-547a-b7af-8c1aed1c24f4",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "d2e8a634-5a7c-521e-b43a-f105a5f847ed",
+          "detail": "the author recorded this realization at pkg/b.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'fixed' at pkg/b.py:5-6",
+          "invariant_revision_id": "20d44563-07d0-5aa2-a4d3-4bc451e92b3e",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "fixed"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+          "path": "pkg/b.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 6,
+            "kind": "line_range",
+            "start_line": 5
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-CCCCCC holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the after snapshot records membership fbd7ab86-17a6-58fd-8b76-7ad830efb8aa placing the exact invariant revision 261296bb-d8b1-58c9-9f2f-a08eba6b1989 in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-KKKKKK",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "ecc9c2ca-2784-56c9-8878-0b38c49bfe1a",
+        "invariant_revision_id": "261296bb-d8b1-58c9-9f2f-a08eba6b1989",
+        "lifecycle": "accepted",
+        "member_id": "fbd7ab86-17a6-58fd-8b76-7ad830efb8aa",
+        "movement_reference": "fbd7ab86-17a6-58fd-8b76-7ad830efb8aa",
+        "other_family_revision_ids": [],
+        "payload_digest": "27e27269f45856fc06d3da7c07a9bd218654bf5a99358aba35c5783b25cd61a4",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-KKKKKK-inv-kkkkkk.json",
+         "operation_id": "52eb9edc-0b84-5984-afca-c9650daaba45",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "6a3a9bb7-4862-50c9-9937-8826186db265",
+          "detail": "the author recorded this realization at pkg/a.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'other' at pkg/a.py:9-10",
+          "invariant_revision_id": "261296bb-d8b1-58c9-9f2f-a08eba6b1989",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "other"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+          "path": "pkg/a.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 10,
+            "kind": "line_range",
+            "start_line": 9
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-KKKKKK holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the after snapshot records membership 54362daa-a2be-5c89-8ac5-7d00db31653c placing the exact invariant revision 722a721e-599d-5b52-8934-99cc9aaf5146 in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-DDDDDD",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "f3e3f975-65c5-5a56-8ef1-20a7273430ea",
+        "invariant_revision_id": "722a721e-599d-5b52-8934-99cc9aaf5146",
+        "lifecycle": "accepted",
+        "member_id": "54362daa-a2be-5c89-8ac5-7d00db31653c",
+        "movement_reference": "54362daa-a2be-5c89-8ac5-7d00db31653c",
+        "other_family_revision_ids": [],
+        "payload_digest": "cbb3e438f1e383d51df968a782071eb8f7645ba52852cdd89bc61958fda119cf",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-DDDDDD-inv-dddddd.json",
+         "operation_id": "91ac1438-a0bc-5c23-b992-4bda4b5bbdb2",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "INV-DDDDDD holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the after snapshot records membership 3b321924-0820-593c-b5a0-368974e73454 placing the exact invariant revision 848ff4da-c662-5358-be3b-9c284578a825 in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content; the membership owner records the same exact revision in 1 further family revision(s), which this value names rather than copying",
+        "display_label": "INV-FFFFFF",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "e701c262-50a6-553b-bab6-691caed0fb04",
+        "invariant_revision_id": "848ff4da-c662-5358-be3b-9c284578a825",
+        "lifecycle": "accepted",
+        "member_id": "3b321924-0820-593c-b5a0-368974e73454",
+        "movement_reference": "3b321924-0820-593c-b5a0-368974e73454",
+        "other_family_revision_ids": [
+         "b1b05371-3d6a-5ea9-b623-ecc2d93697a9"
+        ],
+        "payload_digest": "9774bb4551f790140f5abf2dde4c03d98f6d94958bf95773b4d614db9049bc04",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-FFFFFF-inv-ffffff.json",
+         "operation_id": "90d82877-fcdb-55a8-9d28-becc1cacb00a",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "93566048-1ccf-5ab8-8d90-bb3982f45332",
+          "detail": "the author recorded this realization at pkg/b.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'fixed' at pkg/b.py:5-6",
+          "invariant_revision_id": "848ff4da-c662-5358-be3b-9c284578a825",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "fixed"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+          "path": "pkg/b.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 6,
+            "kind": "line_range",
+            "start_line": 5
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-FFFFFF holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the after snapshot records membership c137adb1-58ac-5d63-a6ff-1f146bfc7002 placing the exact invariant revision a1ca6f89-205b-55b4-bf3e-7930c640b9de in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-AAAAAA",
+        "display_version": "r2",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+        "invariant_revision_id": "a1ca6f89-205b-55b4-bf3e-7930c640b9de",
+        "lifecycle": "accepted",
+        "member_id": "c137adb1-58ac-5d63-a6ff-1f146bfc7002",
+        "movement_reference": "c137adb1-58ac-5d63-a6ff-1f146bfc7002",
+        "other_family_revision_ids": [],
+        "payload_digest": "f398064ac6200e80f6d7e5d27d766fe93dc1f71c6e2fc15f38b340937f07be8f",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-AAAAAA-inv-aaaaaa.json",
+         "operation_id": "6eb3dade-549f-53da-aaa7-2a4cbd84e91a",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "f80d9a05-c0c1-5780-90f5-50063fede315",
+          "detail": "the author recorded this realization at pkg/a.py (recorded_blob_mismatch): the requested tree holds different bytes at this path than the recorded blob, so the authored claim is reported against the recorded identity and is not promoted to a realization of the current bytes",
+          "invariant_revision_id": "a1ca6f89-205b-55b4-bf3e-7930c640b9de",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "land"
+          },
+          "locator_state": "unresolved",
+          "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+          "path": "pkg/a.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "93afbd2ff3dfbd37b930946fa80b34cc1a3bea55",
+          "resolution": "recorded_blob_mismatch",
+          "resolved_ranges": [],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-AAAAAA holds (r2)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the after snapshot records membership e6155f32-0d59-5451-aa76-d211efcabb5b placing the exact invariant revision ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-BBBBBB",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+        "invariant_revision_id": "ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac",
+        "lifecycle": "accepted",
+        "member_id": "e6155f32-0d59-5451-aa76-d211efcabb5b",
+        "movement_reference": "e6155f32-0d59-5451-aa76-d211efcabb5b",
+        "other_family_revision_ids": [],
+        "payload_digest": "11a271b1929eb46c8aab76b7a68c16df624823df58f6b2588b5550bff88dd2ea",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-BBBBBB-inv-bbbbbb.json",
+         "operation_id": "080f48d8-7035-5778-a55c-8abd80e4d10f",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "107db2a6-b1a4-5b55-8c66-c25c98c8de31",
+          "detail": "the author recorded this realization at pkg/a.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'land' at pkg/a.py:1-2",
+          "invariant_revision_id": "ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "land"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+          "path": "pkg/a.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 2,
+            "kind": "line_range",
+            "start_line": 1
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-BBBBBB holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the after snapshot records membership e2bb3092-c71f-538c-9c57-b0661aba5c0b placing the exact invariant revision d38b21ea-901d-55d8-a4f7-5b30a0d882b2 in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-HHHHHH",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "f84e4e24-5490-545f-9b16-62283a0da4ef",
+        "invariant_revision_id": "d38b21ea-901d-55d8-a4f7-5b30a0d882b2",
+        "lifecycle": "accepted",
+        "member_id": "e2bb3092-c71f-538c-9c57-b0661aba5c0b",
+        "movement_reference": "e2bb3092-c71f-538c-9c57-b0661aba5c0b",
+        "other_family_revision_ids": [],
+        "payload_digest": "fa051032570753f0778d5a360d5efbed26fcca9fb4f40f091c965d2c3c57164c",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-HHHHHH-inv-hhhhhh.json",
+         "operation_id": "cfc60870-cb70-5f82-beb1-fb314b3f2d1d",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "INV-HHHHHH holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the after snapshot records membership 43e4a008-cb74-5b1c-b18e-7684b33044c4 placing the exact invariant revision e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-GGGGGG",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "4023613a-f107-5e3e-a21b-617dadcff92c",
+        "invariant_revision_id": "e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be",
+        "lifecycle": "accepted",
+        "member_id": "43e4a008-cb74-5b1c-b18e-7684b33044c4",
+        "movement_reference": "43e4a008-cb74-5b1c-b18e-7684b33044c4",
+        "other_family_revision_ids": [],
+        "payload_digest": "2491145e3e30fb53825808050178b28398fcce057792f170a73842cb508ae37a",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-GGGGGG-inv-gggggg.json",
+         "operation_id": "ecc6af50-d8bd-54af-b4d7-3520c1378f24",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "4f1a6940-7e0c-52dc-a82d-710b81ba8519",
+          "detail": "the author recorded this realization at pkg/a.py (recorded_blob_mismatch): the requested tree holds different bytes at this path than the recorded blob, so the authored claim is reported against the recorded identity and is not promoted to a realization of the current bytes",
+          "invariant_revision_id": "e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be",
+          "locator": {
+           "kind": "file"
+          },
+          "locator_state": "unresolved",
+          "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+          "path": "pkg/a.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "0000000000000000000000000000000000000000",
+          "resolution": "recorded_blob_mismatch",
+          "resolved_ranges": [],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-GGGGGG holds (r1)."
+       }
+      ],
+      "members_total": 9,
+      "page": {
+       "complete": true,
+       "counts": {
+        "advertised_expansions_total": 2,
+        "distinct_source_locations_total": 4,
+        "distinct_source_paths_total": 2,
+        "family_revisions_total": 1,
+        "invariant_revisions_total": 9,
+        "memberships_total": 9,
+        "primary_items_remaining": 0,
+        "primary_items_returned": 28,
+        "primary_items_total": 28,
+        "realization_claims_total": 7,
+        "unresolved_anchor_total": 2
+       },
+       "members_total": 9,
+       "scope": [
+        "side=after",
+        "family_revision_id=63415aa7-a495-58ff-8545-f37e3e04e513",
+        "policy_version=recorded-family-frontier/v1",
+        "page_size=64"
+       ],
+       "state": "first_page"
+      },
+      "recorded_revision_ids": [
+       "63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": {
+      "detail": "the before snapshot's recorded roster of family revision 63415aa7-a495-58ff-8545-f37e3e04e513 was read whole: 8 recorded membership(s), all carried here",
+      "family_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+      "family_revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "guarantee": {
+       "acceptance_ref": "text-knowledge:knowledge/families/FAM-F00001-fam-f00001.json",
+       "display_version": "r1",
+       "family_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+       "joint_guarantee": "One.",
+       "payload_digest": "9f5f46e350f48fade098423290202f5b4544be3f5f8c5da1f73f4b03fb46aee2",
+       "provenance": {
+        "actor_ref": "260101-OLD/260101-OLD-L1",
+        "authorization_ref": "text-knowledge:knowledge/families/FAM-F00001-fam-f00001.json",
+        "operation_id": "2fa3e91a-f2db-54d5-b372-5ce6de8c5c21",
+        "origin_refs": [],
+        "recorded_at": "1970-01-01T00:00:00+00:00"
+       },
+       "revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+       "state_at_origin": "accepted"
+      },
+      "members": [
+       {
+        "applicability": "Always.",
+        "detail": "the before snapshot records membership ea75c039-7b24-5b5a-acf4-0fa8e5af15cc placing the exact invariant revision 1ef09289-b07c-5fba-ae94-ffbd2f8fa241 in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content; the membership owner records the same exact revision in 1 further family revision(s), which this value names rather than copying",
+        "display_label": "INV-EEEEEE",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "97439c7f-768e-5951-bf6a-70b9093e8fe1",
+        "invariant_revision_id": "1ef09289-b07c-5fba-ae94-ffbd2f8fa241",
+        "lifecycle": "accepted",
+        "member_id": "ea75c039-7b24-5b5a-acf4-0fa8e5af15cc",
+        "movement_reference": "ea75c039-7b24-5b5a-acf4-0fa8e5af15cc",
+        "other_family_revision_ids": [
+         "e56ffab1-8b41-5f5f-9c48-808d458c8ab9"
+        ],
+        "payload_digest": "610ad77b1e26766b7dd47ca5906ab940906b6e9c6576d6d88379dfa86873dd10",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-EEEEEE-inv-eeeeee.json",
+         "operation_id": "c6cbe649-34b4-52bf-b76f-20f8c0da289f",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "21713fa8-7554-59c8-a745-f996f024b43e",
+          "detail": "the author recorded this realization at pkg/b.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'fixed' at pkg/b.py:5-6",
+          "invariant_revision_id": "1ef09289-b07c-5fba-ae94-ffbd2f8fa241",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "fixed"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+          "path": "pkg/b.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 6,
+            "kind": "line_range",
+            "start_line": 5
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-EEEEEE holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the before snapshot records membership 9acebe6e-c7bb-5f65-bd46-81335059df7a placing the exact invariant revision 20d44563-07d0-5aa2-a4d3-4bc451e92b3e in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-CCCCCC",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "6c36ff0b-8c8b-51ce-a820-a085173bd830",
+        "invariant_revision_id": "20d44563-07d0-5aa2-a4d3-4bc451e92b3e",
+        "lifecycle": "accepted",
+        "member_id": "9acebe6e-c7bb-5f65-bd46-81335059df7a",
+        "movement_reference": "9acebe6e-c7bb-5f65-bd46-81335059df7a",
+        "other_family_revision_ids": [],
+        "payload_digest": "f8be8d4f7e19bdaea51aaee7ca342c8769513cb96c8956f9cce9d90f93acf13c",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-CCCCCC-inv-cccccc.json",
+         "operation_id": "94a22c82-5b49-547a-b7af-8c1aed1c24f4",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "d2e8a634-5a7c-521e-b43a-f105a5f847ed",
+          "detail": "the author recorded this realization at pkg/b.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'move' at pkg/b.py:1-2",
+          "invariant_revision_id": "20d44563-07d0-5aa2-a4d3-4bc451e92b3e",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "move"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+          "path": "pkg/b.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 2,
+            "kind": "line_range",
+            "start_line": 1
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-CCCCCC holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the before snapshot records membership fbd7ab86-17a6-58fd-8b76-7ad830efb8aa placing the exact invariant revision 261296bb-d8b1-58c9-9f2f-a08eba6b1989 in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-KKKKKK",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "ecc9c2ca-2784-56c9-8878-0b38c49bfe1a",
+        "invariant_revision_id": "261296bb-d8b1-58c9-9f2f-a08eba6b1989",
+        "lifecycle": "accepted",
+        "member_id": "fbd7ab86-17a6-58fd-8b76-7ad830efb8aa",
+        "movement_reference": "fbd7ab86-17a6-58fd-8b76-7ad830efb8aa",
+        "other_family_revision_ids": [],
+        "payload_digest": "27e27269f45856fc06d3da7c07a9bd218654bf5a99358aba35c5783b25cd61a4",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-KKKKKK-inv-kkkkkk.json",
+         "operation_id": "52eb9edc-0b84-5984-afca-c9650daaba45",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "6a3a9bb7-4862-50c9-9937-8826186db265",
+          "detail": "the author recorded this realization at pkg/a.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'other' at pkg/a.py:9-10",
+          "invariant_revision_id": "261296bb-d8b1-58c9-9f2f-a08eba6b1989",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "other"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "93afbd2ff3dfbd37b930946fa80b34cc1a3bea55",
+          "path": "pkg/a.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "93afbd2ff3dfbd37b930946fa80b34cc1a3bea55",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 10,
+            "kind": "line_range",
+            "start_line": 9
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-KKKKKK holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the before snapshot records membership c137adb1-58ac-5d63-a6ff-1f146bfc7002 placing the exact invariant revision 4ac939c1-3580-5e4e-b75e-bbb7e0c5b49e in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-AAAAAA",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+        "invariant_revision_id": "4ac939c1-3580-5e4e-b75e-bbb7e0c5b49e",
+        "lifecycle": "accepted",
+        "member_id": "c137adb1-58ac-5d63-a6ff-1f146bfc7002",
+        "movement_reference": "c137adb1-58ac-5d63-a6ff-1f146bfc7002",
+        "other_family_revision_ids": [],
+        "payload_digest": "c460b7c1a1f1499386b8c564d2d0c5aaf3a6c422935a2127c5c4e93ddcc3f0de",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-AAAAAA-inv-aaaaaa.json",
+         "operation_id": "6eb3dade-549f-53da-aaa7-2a4cbd84e91a",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "f80d9a05-c0c1-5780-90f5-50063fede315",
+          "detail": "the author recorded this realization at pkg/a.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'land' at pkg/a.py:1-2",
+          "invariant_revision_id": "4ac939c1-3580-5e4e-b75e-bbb7e0c5b49e",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "land"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "93afbd2ff3dfbd37b930946fa80b34cc1a3bea55",
+          "path": "pkg/a.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "93afbd2ff3dfbd37b930946fa80b34cc1a3bea55",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 2,
+            "kind": "line_range",
+            "start_line": 1
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-AAAAAA holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the before snapshot records membership 54362daa-a2be-5c89-8ac5-7d00db31653c placing the exact invariant revision 722a721e-599d-5b52-8934-99cc9aaf5146 in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-DDDDDD",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "f3e3f975-65c5-5a56-8ef1-20a7273430ea",
+        "invariant_revision_id": "722a721e-599d-5b52-8934-99cc9aaf5146",
+        "lifecycle": "accepted",
+        "member_id": "54362daa-a2be-5c89-8ac5-7d00db31653c",
+        "movement_reference": "54362daa-a2be-5c89-8ac5-7d00db31653c",
+        "other_family_revision_ids": [],
+        "payload_digest": "cbb3e438f1e383d51df968a782071eb8f7645ba52852cdd89bc61958fda119cf",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-DDDDDD-inv-dddddd.json",
+         "operation_id": "91ac1438-a0bc-5c23-b992-4bda4b5bbdb2",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [],
+        "state": "recorded",
+        "statement": "INV-DDDDDD holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the before snapshot records membership 3b321924-0820-593c-b5a0-368974e73454 placing the exact invariant revision 848ff4da-c662-5358-be3b-9c284578a825 in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-FFFFFF",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "e701c262-50a6-553b-bab6-691caed0fb04",
+        "invariant_revision_id": "848ff4da-c662-5358-be3b-9c284578a825",
+        "lifecycle": "accepted",
+        "member_id": "3b321924-0820-593c-b5a0-368974e73454",
+        "movement_reference": "3b321924-0820-593c-b5a0-368974e73454",
+        "other_family_revision_ids": [],
+        "payload_digest": "9774bb4551f790140f5abf2dde4c03d98f6d94958bf95773b4d614db9049bc04",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-FFFFFF-inv-ffffff.json",
+         "operation_id": "90d82877-fcdb-55a8-9d28-becc1cacb00a",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "93566048-1ccf-5ab8-8d90-bb3982f45332",
+          "detail": "the author recorded this realization at pkg/b.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'fixed' at pkg/b.py:5-6",
+          "invariant_revision_id": "848ff4da-c662-5358-be3b-9c284578a825",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "fixed"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+          "path": "pkg/b.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 6,
+            "kind": "line_range",
+            "start_line": 5
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-FFFFFF holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the before snapshot records membership e6155f32-0d59-5451-aa76-d211efcabb5b placing the exact invariant revision ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-BBBBBB",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+        "invariant_revision_id": "ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac",
+        "lifecycle": "accepted",
+        "member_id": "e6155f32-0d59-5451-aa76-d211efcabb5b",
+        "movement_reference": "e6155f32-0d59-5451-aa76-d211efcabb5b",
+        "other_family_revision_ids": [],
+        "payload_digest": "11a271b1929eb46c8aab76b7a68c16df624823df58f6b2588b5550bff88dd2ea",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-BBBBBB-inv-bbbbbb.json",
+         "operation_id": "080f48d8-7035-5778-a55c-8abd80e4d10f",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "107db2a6-b1a4-5b55-8c66-c25c98c8de31",
+          "detail": "the author recorded this realization at pkg/a.py (exact_recorded_blob): the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'land' at pkg/a.py:1-2",
+          "invariant_revision_id": "ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac",
+          "locator": {
+           "kind": "symbol",
+           "language": "python",
+           "qualified_name": "land"
+          },
+          "locator_state": "resolved",
+          "observed_source_identity": "93afbd2ff3dfbd37b930946fa80b34cc1a3bea55",
+          "path": "pkg/a.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "93afbd2ff3dfbd37b930946fa80b34cc1a3bea55",
+          "resolution": "exact_recorded_blob",
+          "resolved_ranges": [
+           {
+            "end_line": 2,
+            "kind": "line_range",
+            "start_line": 1
+           }
+          ],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-BBBBBB holds (r1)."
+       },
+       {
+        "applicability": "Always.",
+        "detail": "the before snapshot records membership 43e4a008-cb74-5b1c-b18e-7684b33044c4 placing the exact invariant revision e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be in family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and its recorded revision content",
+        "display_label": "INV-GGGGGG",
+        "display_version": "r1",
+        "essential_conditions": [],
+        "exclusions": [],
+        "invariant_id": "4023613a-f107-5e3e-a21b-617dadcff92c",
+        "invariant_revision_id": "e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be",
+        "lifecycle": "accepted",
+        "member_id": "43e4a008-cb74-5b1c-b18e-7684b33044c4",
+        "movement_reference": "43e4a008-cb74-5b1c-b18e-7684b33044c4",
+        "other_family_revision_ids": [],
+        "payload_digest": "2491145e3e30fb53825808050178b28398fcce057792f170a73842cb508ae37a",
+        "provenance": {
+         "actor_ref": "260101-OLD/260101-OLD-L1",
+         "authorization_ref": "text-knowledge:knowledge/invariants/INV-GGGGGG-inv-gggggg.json",
+         "operation_id": "ecc6af50-d8bd-54af-b4d7-3520c1378f24",
+         "origin_refs": [],
+         "recorded_at": "1970-01-01T00:00:00+00:00"
+        },
+        "sources": [
+         {
+          "claim_id": "4f1a6940-7e0c-52dc-a82d-710b81ba8519",
+          "detail": "the author recorded this realization at pkg/a.py (recorded_blob_mismatch): the requested tree holds different bytes at this path than the recorded blob, so the authored claim is reported against the recorded identity and is not promoted to a realization of the current bytes",
+          "invariant_revision_id": "e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be",
+          "locator": {
+           "kind": "file"
+          },
+          "locator_state": "unresolved",
+          "observed_source_identity": "93afbd2ff3dfbd37b930946fa80b34cc1a3bea55",
+          "path": "pkg/a.py",
+          "rationale": "It is the rule.",
+          "recorded_source_identity": "0000000000000000000000000000000000000000",
+          "resolution": "recorded_blob_mismatch",
+          "resolved_ranges": [],
+          "role": "primary-authority"
+         }
+        ],
+        "state": "recorded",
+        "statement": "INV-GGGGGG holds (r1)."
+       }
+      ],
+      "members_total": 8,
+      "page": {
+       "complete": true,
+       "counts": {
+        "advertised_expansions_total": 1,
+        "distinct_source_locations_total": 5,
+        "distinct_source_paths_total": 2,
+        "family_revisions_total": 1,
+        "invariant_revisions_total": 8,
+        "memberships_total": 8,
+        "primary_items_remaining": 0,
+        "primary_items_returned": 25,
+        "primary_items_total": 25,
+        "realization_claims_total": 7,
+        "unresolved_anchor_total": 1
+       },
+       "members_total": 8,
+       "scope": [
+        "side=before",
+        "family_revision_id=63415aa7-a495-58ff-8545-f37e3e04e513",
+        "policy_version=recorded-family-frontier/v1",
+        "page_size=64"
+       ],
+       "state": "first_page"
+      },
+      "recorded_revision_ids": [
+       "63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "side": "before",
+      "state": "recorded"
+     },
+     "candidates": [],
+     "change_kinds": {
+      "family": "FAM-F00001",
+      "guarantee": "unchanged",
+      "guarantee_detail": "the guarantee text of FAM-F00001 is the same on both sides",
+      "members": [
+       {
+        "authored_position": 4,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-EEEEEE",
+        "marks": [],
+        "member_id": "ea75c039-7b24-5b5a-acf4-0fa8e5af15cc",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 2,
+        "evidence": [
+         "realization RLZ-C00001 re-anchored"
+        ],
+        "implementation": "established",
+        "intent": "not_established",
+        "invariant": "INV-CCCCCC",
+        "marks": [],
+        "member_id": "9acebe6e-c7bb-5f65-bd46-81335059df7a",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "implementation",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 7,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-KKKKKK",
+        "marks": [],
+        "member_id": "fbd7ab86-17a6-58fd-8b76-7ad830efb8aa",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 0,
+        "evidence": [
+         "INV-AAAAAA revision 1 \u2192 2",
+         "the hunk of pkg/a.py at before 2,1 after 2,1 intersects realization RLZ-A00001 on the before side"
+        ],
+        "implementation": "established",
+        "intent": "established",
+        "invariant": "INV-AAAAAA",
+        "marks": [
+         "implementation",
+         "unknown"
+        ],
+        "member_id": "c137adb1-58ac-5d63-a6ff-1f146bfc7002",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "intent",
+        "proof": false,
+        "range_unresolved": true,
+        "text_differs": false,
+        "unknown_reasons": [
+         "RLZ-A00001 supplies no range on the after side of pkg/a.py: it is recorded at blob 93afbd2ff3, but the after blob is f265d6f0bd (recorded_blob_mismatch: until the entry is re-recorded at this blob, its range here is not known)"
+        ]
+       },
+       {
+        "authored_position": 3,
+        "evidence": [
+         "the hunk of tests/test_a.py at before 2,1 after 2,1 intersects proof PRF-D00001 on the before side"
+        ],
+        "implementation": "established",
+        "intent": "not_established",
+        "invariant": "INV-DDDDDD",
+        "marks": [
+         "test",
+         "unknown"
+        ],
+        "member_id": "54362daa-a2be-5c89-8ac5-7d00db31653c",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "implementation",
+        "proof": true,
+        "range_unresolved": true,
+        "text_differs": false,
+        "unknown_reasons": [
+         "PRF-D00001 supplies no range on the after side of tests/test_a.py: it is recorded at blob cfb900d08b, but the after blob is 33723e870f (recorded_blob_mismatch: until the entry is re-recorded at this blob, its range here is not known)"
+        ]
+       },
+       {
+        "authored_position": 5,
+        "evidence": [],
+        "implementation": "not_established",
+        "intent": "not_established",
+        "invariant": "INV-FFFFFF",
+        "marks": [],
+        "member_id": "3b321924-0820-593c-b5a0-368974e73454",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unchanged",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 1,
+        "evidence": [
+         "realization RLZ-B00001 re-anchored",
+         "the hunk of pkg/a.py at before 2,1 after 2,1 intersects realization RLZ-B00001 on the before side",
+         "the hunk of pkg/a.py at before 2,1 after 2,1 intersects realization RLZ-B00001 on the after side"
+        ],
+        "implementation": "established",
+        "intent": "not_established",
+        "invariant": "INV-BBBBBB",
+        "marks": [],
+        "member_id": "e6155f32-0d59-5451-aa76-d211efcabb5b",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "implementation",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       },
+       {
+        "authored_position": 6,
+        "evidence": [],
+        "implementation": "unknown",
+        "intent": "not_established",
+        "invariant": "INV-GGGGGG",
+        "marks": [],
+        "member_id": "43e4a008-cb74-5b1c-b18e-7684b33044c4",
+        "membership": "not_established",
+        "membership_reasons": [],
+        "primary": "unknown",
+        "proof": false,
+        "range_unresolved": true,
+        "text_differs": false,
+        "unknown_reasons": [
+         "RLZ-G00001 supplies no range on the before side of pkg/a.py: it is recorded at blob 0000000000, but the before blob is 93afbd2ff3 (recorded_blob_mismatch: until the entry is re-recorded at this blob, its range here is not known)",
+         "RLZ-G00001 supplies no range on the after side of pkg/a.py: it is recorded at blob 0000000000, but the after blob is f265d6f0bd (recorded_blob_mismatch: until the entry is re-recorded at this blob, its range here is not known)"
+        ]
+       },
+       {
+        "authored_position": 8,
+        "evidence": [
+         "INV-HHHHHH is added",
+         "INV-HHHHHH joined FAM-F00001"
+        ],
+        "implementation": "not_established",
+        "intent": "established",
+        "invariant": "INV-HHHHHH",
+        "marks": [
+         "membership"
+        ],
+        "member_id": "e2bb3092-c71f-538c-9c57-b0661aba5c0b",
+        "membership": "established",
+        "membership_reasons": [],
+        "primary": "intent",
+        "proof": false,
+        "range_unresolved": false,
+        "text_differs": false,
+        "unknown_reasons": []
+       }
+      ],
+      "members_total": 9
+     },
+     "detail": "the family 338785bb-9701-50e9-a383-ff33746d5bc0 is read at the before family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and the after family revision 63415aa7-a495-58ff-8545-f37e3e04e513, each the unique authored head its own snapshot establishes for this family; the two snapshots record 1 before and 1 after revision(s) of this family, and 0 other recorded revision(s) of this family remain selectable history; before: the before snapshot's recorded roster of family revision 63415aa7-a495-58ff-8545-f37e3e04e513 was read whole: 8 recorded membership(s), all carried here; after: the after snapshot's recorded roster of family revision 63415aa7-a495-58ff-8545-f37e3e04e513 was read whole: 9 recorded membership(s), all carried here",
+     "display_label": "FAM-F00001",
+     "family_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+     "label_side": "after",
+     "selection": {
+      "after_heads": [
+       "63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "after_retained": [
+       "63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "after_revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "before_heads": [
+       "63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "before_retained": [
+       "63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "before_revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+      "record_kind": "family",
+      "state": "compared",
+      "statement": "the family 338785bb-9701-50e9-a383-ff33746d5bc0 is read at the before family revision 63415aa7-a495-58ff-8545-f37e3e04e513 and the after family revision 63415aa7-a495-58ff-8545-f37e3e04e513, each the unique authored head its own snapshot establishes for this family; the two snapshots record 1 before and 1 after revision(s) of this family, and 0 other recorded revision(s) of this family remain selectable history"
+     },
+     "state": "recorded"
+    }
+   ],
+   "families_remaining": 0,
+   "families_returned": 1,
+   "families_total": 1,
+   "limitations": [],
+   "membership_rows_total": 17,
+   "references": {
+    "applicability": "knowledge.applicability",
+    "assessments": "evidence.assessments",
+    "detail": "each of these collections is published by its own owner in this payload and keeps its own state; this context references them by identity and draws no conclusion from any of them",
+    "evidence_links": "evidence.evidence_links",
+    "join_key": "invariant_revision_id",
+    "observations": "evidence.observations",
+    "relationship_union": "source.relationships",
+    "source_inventory": "source.inventory"
+   },
+   "state": "recorded",
+   "unique_member_revision_total": 10
+  },
+  "knowledge": {
+   "after_conditions": [],
+   "after_statement": {
+    "detail": "the after snapshot's recorded statement for this revision",
+    "language": "text",
+    "state": "present",
+    "text": "INV-HHHHHH holds (r1)."
+   },
+   "applicability": [
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "assessments",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments",
+     "direct": 0,
+     "historical": 0,
+     "records": "detection_signals",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    },
+    {
+     "candidate": 0,
+     "context": 0,
+     "detail": "0 supplied record(s) of this class: 0 displayed with the treatment each record's own recorded binding earned and 0 not displayed as the selected subject's judgments; the review matrix page supplied these rows, and the owner's complete collection count travels on the evidence channel",
+     "direct": 0,
+     "historical": 0,
+     "records": "authored_effects",
+     "supplied": 0,
+     "unrelated": 0,
+     "unresolved": 0
+    }
+   ],
+   "assessments": [],
+   "authored_effects": [],
+   "before_conditions": [],
+   "before_statement": {
+    "detail": "the before snapshot selected no record for the reviewed subject",
+    "language": "text",
+    "state": "absent"
+   },
+   "context": [],
+   "family_ids": [
+    "338785bb-9701-50e9-a383-ff33746d5bc0"
+   ],
+   "field_changes": [],
+   "invariant_ids": [
+    "97439c7f-768e-5951-bf6a-70b9093e8fe1",
+    "6c36ff0b-8c8b-51ce-a820-a085173bd830",
+    "ecc9c2ca-2784-56c9-8878-0b38c49bfe1a",
+    "f3e3f975-65c5-5a56-8ef1-20a7273430ea",
+    "e701c262-50a6-553b-bab6-691caed0fb04",
+    "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+    "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+    "f84e4e24-5490-545f-9b16-62283a0da4ef",
+    "4023613a-f107-5e3e-a21b-617dadcff92c"
+   ],
+   "revision_groups": [
+    {
+     "record_id": "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "4023613a-f107-5e3e-a21b-617dadcff92c",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "6c36ff0b-8c8b-51ce-a820-a085173bd830",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "97439c7f-768e-5951-bf6a-70b9093e8fe1",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "e701c262-50a6-553b-bab6-691caed0fb04",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "ecc9c2ca-2784-56c9-8878-0b38c49bfe1a",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "f3e3f975-65c5-5a56-8ef1-20a7273430ea",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "f84e4e24-5490-545f-9b16-62283a0da4ef",
+     "selected_revision_count": 1,
+     "side": "after"
+    },
+    {
+     "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+     "selected_revision_count": 1,
+     "side": "after"
+    }
+   ],
+   "revision_selection": {
+    "after_heads": [
+     "d38b21ea-901d-55d8-a4f7-5b30a0d882b2"
+    ],
+    "after_retained": [
+     "d38b21ea-901d-55d8-a4f7-5b30a0d882b2"
+    ],
+    "after_revision_id": "d38b21ea-901d-55d8-a4f7-5b30a0d882b2",
+    "before_heads": [],
+    "before_retained": [],
+    "record_id": "f84e4e24-5490-545f-9b16-62283a0da4ef",
+    "record_kind": "invariant",
+    "state": "added",
+    "statement": "the before snapshot retains no revision of the invariant f84e4e24-5490-545f-9b16-62283a0da4ef, so the after head d38b21ea-901d-55d8-a4f7-5b30a0d882b2 is shown as an addition under the one-sided contract"
+   },
+   "selection_state": "subject_selected",
+   "signals": [],
+   "unresolved": []
+  },
+  "limitations": [
+   "limitation:records_present_outside_the_selection",
+   "limitation:unattributed_changed_paths",
+   "limitation:no_semantic_assessment_performed",
+   "omitted:present_outside_the_declared_selection:7",
+   "omitted:present_outside_the_declared_selection:1",
+   "omitted:present_outside_the_declared_selection:8",
+   "omitted:present_outside_the_declared_selection:7",
+   "omitted:change_not_attributed_to_a_recorded_realization:1",
+   "side_absence:before:selector_absent",
+   "review:trees:1",
+   "history:intent:before:available",
+   "knowledge-index:before:complete",
+   "history:intent:after:available",
+   "knowledge-index:after:complete"
+  ],
+  "source": {
+   "attributed_changed_paths": [
+    "pkg/a.py",
+    "pkg/data.bin"
+   ],
+   "attribution": {
+    "attributed_total": 2,
+    "changed_total": 3,
+    "complete": true,
+    "confirmed_unregistered_total": 1,
+    "detail": "3 measured changed path(s) at the changed-path granularity: 2 attributed, 1 confirmed to have no valid registered attribution, and 0 of undetermined attribution. Snapshot inspection: before inspected; after inspected. Every required snapshot/scope completely inspected or legitimately known empty: True. This denominator is the whole measured change population of the bound pair. A resolved path-level mapping establishes that a recorded claim's bytes are at this path and never that every change inside it realizes that claim",
+    "granularity": "changed_path",
+    "paths": [
+     {
+      "bucket": "attributed",
+      "detail": "6 registered realization claim(s) hold the recorded bytes at this path, and 4 purported mapping(s) name it without resolving to them (a stale recording, an unresolvable locator or a path that is not there); the path is counted once at the changed-path granularity, whatever the number of links",
+      "link": "outside_selection_complete",
+      "mapped_sides": [
+       "before",
+       "after"
+      ],
+      "path": "pkg/a.py",
+      "unresolved_mapping_count": 4
+     },
+     {
+      "bucket": "attributed",
+      "detail": "2 registered realization claim(s) hold the recorded bytes at this path, and 2 purported mapping(s) name it without resolving to them (a stale recording, an unresolvable locator or a path that is not there); the path is counted once at the changed-path granularity, whatever the number of links",
+      "link": "outside_selection_complete",
+      "mapped_sides": [
+       "before"
+      ],
+      "path": "pkg/data.bin",
+      "unresolved_mapping_count": 2
+     },
+     {
+      "bucket": "confirmed_unregistered",
+      "detail": "no registered realization claim holds its recorded bytes at this path, and every required snapshot/scope was completely inspected or is a legitimately known-empty side, so the absence of a valid registered attribution is established rather than assumed",
+      "mapped_sides": [],
+      "path": "tests/test_a.py",
+      "unresolved_mapping_count": 2
+     }
+    ],
+    "sides": [
+     {
+      "detail": "every registered claim at the measured changed paths was read from this snapshot (8 mapping(s)), and each one's anchor was observed against this side's own bound code tree",
+      "registered_mapping_count": 8,
+      "side": "before",
+      "state": "inspected"
+     },
+     {
+      "detail": "every registered claim at the measured changed paths was read from this snapshot (8 mapping(s)), and each one's anchor was observed against this side's own bound code tree",
+      "registered_mapping_count": 8,
+      "side": "after",
+      "state": "inspected"
+     }
+    ],
+    "state": "measured",
+    "subject_scope_complete": true,
+    "unknown_attribution_total": 0
+   },
+   "expansion_command": "git diff --raw -z --no-renames e53ddfa3b9d6b65cd4dbfcc362aed881f82d826d ae754e731bd593d76f88822051ff68d6f1cca69c",
+   "expansion_reference": "diff_knowledge_scope:full-selected-candidate-source-diff",
+   "inventory": {
+    "after_code_tree_id": "ae754e731bd593d76f88822051ff68d6f1cca69c",
+    "before_code_tree_id": "e53ddfa3b9d6b65cd4dbfcc362aed881f82d826d",
+    "command": "git -C /tmp/mik-l33-fixture/repos/code diff --raw -z --no-renames e53ddfa3b9d6b65cd4dbfcc362aed881f82d826d ae754e731bd593d76f88822051ff68d6f1cca69c",
+    "detail": "the two requested code trees differ at 3 path(s); every one is listed with the change status Git reported for it, whether or not its content can be rendered",
+    "entries": [
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "pkg/a.py",
+      "status": "modified"
+     },
+     {
+      "content": "binary",
+      "mode_change": false,
+      "path": "pkg/data.bin",
+      "status": "modified"
+     },
+     {
+      "content": "text",
+      "mode_change": false,
+      "path": "tests/test_a.py",
+      "status": "modified"
+     }
+    ],
+    "listed_total": 3,
+    "partial": false,
+    "state": "measured",
+    "unrepresentable_paths": []
+   },
+   "locations": [
+    {
+     "before_only": false,
+     "change_state": "unchanged",
+     "claim_id": "107db2a6-b1a4-5b55-8c66-c25c98c8de31",
+     "invariant_id": "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+     "invariant_revision_id": "ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac",
+     "movement": {
+      "after": {
+       "change_state": "unchanged",
+       "detail": "the after snapshot records invariant 36615462-86f0-5fc8-9f6f-c6667cc6294a through relationship 107db2a6-b1a4-5b55-8c66-c25c98c8de31 at pkg/a.py",
+       "item_coverage": "present_outside_selection",
+       "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+       "path": "pkg/a.py",
+       "rationale": "It is the rule.",
+       "reached_via": [
+        "member_of_selected_family:ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac"
+       ],
+       "record_id": "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+       "record_kind": "invariant",
+       "recorded_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+       "relationship_id": "107db2a6-b1a4-5b55-8c66-c25c98c8de31",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'land' at pkg/a.py:1-2",
+       "revision_id": "ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac",
+       "role": "primary-authority",
+       "side": "after",
+       "state": "recorded"
+      },
+      "before": [],
+      "gaps": [],
+      "lineage": [],
+      "record_id": "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the candidate records realization 107db2a6-b1a4-5b55-8c66-c25c98c8de31 at pkg/a.py (revision ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac) under invariant 36615462-86f0-5fc8-9f6f-c6667cc6294a and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+      "transition": "added"
+     },
+     "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+     "path": "pkg/a.py",
+     "rationale": "It is the rule.",
+     "reached_via": [
+      "member_of_selected_family:ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac"
+     ],
+     "recorded_side": "after",
+     "recorded_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+     "resolution": "exact_recorded_blob",
+     "role": "primary-authority",
+     "transition": "added"
+    },
+    {
+     "before_only": false,
+     "change_state": "unchanged",
+     "claim_id": "4f1a6940-7e0c-52dc-a82d-710b81ba8519",
+     "invariant_id": "4023613a-f107-5e3e-a21b-617dadcff92c",
+     "invariant_revision_id": "e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be",
+     "movement": {
+      "after": {
+       "change_state": "unchanged",
+       "detail": "the after snapshot records invariant 4023613a-f107-5e3e-a21b-617dadcff92c through relationship 4f1a6940-7e0c-52dc-a82d-710b81ba8519 at pkg/a.py",
+       "item_coverage": "present_outside_selection",
+       "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+       "path": "pkg/a.py",
+       "rationale": "It is the rule.",
+       "reached_via": [
+        "member_of_selected_family:e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be"
+       ],
+       "record_id": "4023613a-f107-5e3e-a21b-617dadcff92c",
+       "record_kind": "invariant",
+       "recorded_source_identity": "0000000000000000000000000000000000000000",
+       "relationship_id": "4f1a6940-7e0c-52dc-a82d-710b81ba8519",
+       "resolution": "recorded_blob_mismatch",
+       "resolution_detail": "the requested tree holds different bytes at this path than the recorded blob, so the authored claim is reported against the recorded identity and is not promoted to a realization of the current bytes",
+       "revision_id": "e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be",
+       "role": "primary-authority",
+       "side": "after",
+       "state": "recorded"
+      },
+      "before": [],
+      "gaps": [
+       {
+        "code": "anchor_unresolved",
+        "detail": "the after side's recorded address at pkg/a.py did not resolve exactly against that snapshot's code tree (recorded_blob_mismatch): the requested tree holds different bytes at this path than the recorded blob, so the authored claim is reported against the recorded identity and is not promoted to a realization of the current bytes. The recorded address and the observed identity beside it are displayed as they are, and no working tree or HEAD is substituted for the tree that was asked",
+        "field": "anchor",
+        "side": "after"
+       }
+      ],
+      "lineage": [],
+      "record_id": "4023613a-f107-5e3e-a21b-617dadcff92c",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the candidate records realization 4f1a6940-7e0c-52dc-a82d-710b81ba8519 at pkg/a.py (revision e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be) under invariant 4023613a-f107-5e3e-a21b-617dadcff92c and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+      "transition": "added"
+     },
+     "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+     "path": "pkg/a.py",
+     "rationale": "It is the rule.",
+     "reached_via": [
+      "member_of_selected_family:e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be"
+     ],
+     "recorded_side": "after",
+     "recorded_source_identity": "0000000000000000000000000000000000000000",
+     "resolution": "recorded_blob_mismatch",
+     "role": "primary-authority",
+     "transition": "added"
+    },
+    {
+     "before_only": false,
+     "change_state": "unchanged",
+     "claim_id": "d2e8a634-5a7c-521e-b43a-f105a5f847ed",
+     "invariant_id": "6c36ff0b-8c8b-51ce-a820-a085173bd830",
+     "invariant_revision_id": "20d44563-07d0-5aa2-a4d3-4bc451e92b3e",
+     "movement": {
+      "after": {
+       "change_state": "unchanged",
+       "detail": "the after snapshot records invariant 6c36ff0b-8c8b-51ce-a820-a085173bd830 through relationship d2e8a634-5a7c-521e-b43a-f105a5f847ed at pkg/b.py",
+       "item_coverage": "present_outside_selection",
+       "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+       "path": "pkg/b.py",
+       "rationale": "It is the rule.",
+       "reached_via": [
+        "member_of_selected_family:20d44563-07d0-5aa2-a4d3-4bc451e92b3e"
+       ],
+       "record_id": "6c36ff0b-8c8b-51ce-a820-a085173bd830",
+       "record_kind": "invariant",
+       "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+       "relationship_id": "d2e8a634-5a7c-521e-b43a-f105a5f847ed",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'fixed' at pkg/b.py:5-6",
+       "revision_id": "20d44563-07d0-5aa2-a4d3-4bc451e92b3e",
+       "role": "primary-authority",
+       "side": "after",
+       "state": "recorded"
+      },
+      "before": [],
+      "gaps": [],
+      "lineage": [],
+      "record_id": "6c36ff0b-8c8b-51ce-a820-a085173bd830",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the candidate records realization d2e8a634-5a7c-521e-b43a-f105a5f847ed at pkg/b.py (revision 20d44563-07d0-5aa2-a4d3-4bc451e92b3e) under invariant 6c36ff0b-8c8b-51ce-a820-a085173bd830 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+      "transition": "added"
+     },
+     "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+     "path": "pkg/b.py",
+     "rationale": "It is the rule.",
+     "reached_via": [
+      "member_of_selected_family:20d44563-07d0-5aa2-a4d3-4bc451e92b3e"
+     ],
+     "recorded_side": "after",
+     "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+     "resolution": "exact_recorded_blob",
+     "role": "primary-authority",
+     "transition": "added"
+    },
+    {
+     "before_only": false,
+     "change_state": "unchanged",
+     "claim_id": "21713fa8-7554-59c8-a745-f996f024b43e",
+     "invariant_id": "97439c7f-768e-5951-bf6a-70b9093e8fe1",
+     "invariant_revision_id": "1ef09289-b07c-5fba-ae94-ffbd2f8fa241",
+     "movement": {
+      "after": {
+       "change_state": "unchanged",
+       "detail": "the after snapshot records invariant 97439c7f-768e-5951-bf6a-70b9093e8fe1 through relationship 21713fa8-7554-59c8-a745-f996f024b43e at pkg/b.py",
+       "item_coverage": "present_outside_selection",
+       "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+       "path": "pkg/b.py",
+       "rationale": "It is the rule.",
+       "reached_via": [
+        "member_of_selected_family:1ef09289-b07c-5fba-ae94-ffbd2f8fa241"
+       ],
+       "record_id": "97439c7f-768e-5951-bf6a-70b9093e8fe1",
+       "record_kind": "invariant",
+       "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+       "relationship_id": "21713fa8-7554-59c8-a745-f996f024b43e",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'fixed' at pkg/b.py:5-6",
+       "revision_id": "1ef09289-b07c-5fba-ae94-ffbd2f8fa241",
+       "role": "primary-authority",
+       "side": "after",
+       "state": "recorded"
+      },
+      "before": [],
+      "gaps": [],
+      "lineage": [],
+      "record_id": "97439c7f-768e-5951-bf6a-70b9093e8fe1",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the candidate records realization 21713fa8-7554-59c8-a745-f996f024b43e at pkg/b.py (revision 1ef09289-b07c-5fba-ae94-ffbd2f8fa241) under invariant 97439c7f-768e-5951-bf6a-70b9093e8fe1 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+      "transition": "added"
+     },
+     "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+     "path": "pkg/b.py",
+     "rationale": "It is the rule.",
+     "reached_via": [
+      "member_of_selected_family:1ef09289-b07c-5fba-ae94-ffbd2f8fa241"
+     ],
+     "recorded_side": "after",
+     "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+     "resolution": "exact_recorded_blob",
+     "role": "primary-authority",
+     "transition": "added"
+    },
+    {
+     "before_only": false,
+     "change_state": "unchanged",
+     "claim_id": "f80d9a05-c0c1-5780-90f5-50063fede315",
+     "invariant_id": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+     "invariant_revision_id": "a1ca6f89-205b-55b4-bf3e-7930c640b9de",
+     "movement": {
+      "after": {
+       "change_state": "unchanged",
+       "detail": "the after snapshot records invariant 9e1dbcd4-407f-57b1-957b-36bb811bce81 through relationship f80d9a05-c0c1-5780-90f5-50063fede315 at pkg/a.py",
+       "item_coverage": "present_outside_selection",
+       "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+       "path": "pkg/a.py",
+       "rationale": "It is the rule.",
+       "reached_via": [
+        "member_of_selected_family:a1ca6f89-205b-55b4-bf3e-7930c640b9de"
+       ],
+       "record_id": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+       "record_kind": "invariant",
+       "recorded_source_identity": "93afbd2ff3dfbd37b930946fa80b34cc1a3bea55",
+       "relationship_id": "f80d9a05-c0c1-5780-90f5-50063fede315",
+       "resolution": "recorded_blob_mismatch",
+       "resolution_detail": "the requested tree holds different bytes at this path than the recorded blob, so the authored claim is reported against the recorded identity and is not promoted to a realization of the current bytes",
+       "revision_id": "a1ca6f89-205b-55b4-bf3e-7930c640b9de",
+       "role": "primary-authority",
+       "side": "after",
+       "state": "recorded"
+      },
+      "before": [],
+      "gaps": [
+       {
+        "code": "anchor_unresolved",
+        "detail": "the after side's recorded address at pkg/a.py did not resolve exactly against that snapshot's code tree (recorded_blob_mismatch): the requested tree holds different bytes at this path than the recorded blob, so the authored claim is reported against the recorded identity and is not promoted to a realization of the current bytes. The recorded address and the observed identity beside it are displayed as they are, and no working tree or HEAD is substituted for the tree that was asked",
+        "field": "anchor",
+        "side": "after"
+       }
+      ],
+      "lineage": [],
+      "record_id": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the candidate records realization f80d9a05-c0c1-5780-90f5-50063fede315 at pkg/a.py (revision a1ca6f89-205b-55b4-bf3e-7930c640b9de) under invariant 9e1dbcd4-407f-57b1-957b-36bb811bce81 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+      "transition": "added"
+     },
+     "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+     "path": "pkg/a.py",
+     "rationale": "It is the rule.",
+     "reached_via": [
+      "member_of_selected_family:a1ca6f89-205b-55b4-bf3e-7930c640b9de"
+     ],
+     "recorded_side": "after",
+     "recorded_source_identity": "93afbd2ff3dfbd37b930946fa80b34cc1a3bea55",
+     "resolution": "recorded_blob_mismatch",
+     "role": "primary-authority",
+     "transition": "added"
+    },
+    {
+     "before_only": false,
+     "change_state": "unchanged",
+     "claim_id": "93566048-1ccf-5ab8-8d90-bb3982f45332",
+     "invariant_id": "e701c262-50a6-553b-bab6-691caed0fb04",
+     "invariant_revision_id": "848ff4da-c662-5358-be3b-9c284578a825",
+     "movement": {
+      "after": {
+       "change_state": "unchanged",
+       "detail": "the after snapshot records invariant e701c262-50a6-553b-bab6-691caed0fb04 through relationship 93566048-1ccf-5ab8-8d90-bb3982f45332 at pkg/b.py",
+       "item_coverage": "present_outside_selection",
+       "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+       "path": "pkg/b.py",
+       "rationale": "It is the rule.",
+       "reached_via": [
+        "member_of_selected_family:848ff4da-c662-5358-be3b-9c284578a825"
+       ],
+       "record_id": "e701c262-50a6-553b-bab6-691caed0fb04",
+       "record_kind": "invariant",
+       "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+       "relationship_id": "93566048-1ccf-5ab8-8d90-bb3982f45332",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'fixed' at pkg/b.py:5-6",
+       "revision_id": "848ff4da-c662-5358-be3b-9c284578a825",
+       "role": "primary-authority",
+       "side": "after",
+       "state": "recorded"
+      },
+      "before": [],
+      "gaps": [],
+      "lineage": [],
+      "record_id": "e701c262-50a6-553b-bab6-691caed0fb04",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the candidate records realization 93566048-1ccf-5ab8-8d90-bb3982f45332 at pkg/b.py (revision 848ff4da-c662-5358-be3b-9c284578a825) under invariant e701c262-50a6-553b-bab6-691caed0fb04 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+      "transition": "added"
+     },
+     "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+     "path": "pkg/b.py",
+     "rationale": "It is the rule.",
+     "reached_via": [
+      "member_of_selected_family:848ff4da-c662-5358-be3b-9c284578a825"
+     ],
+     "recorded_side": "after",
+     "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+     "resolution": "exact_recorded_blob",
+     "role": "primary-authority",
+     "transition": "added"
+    },
+    {
+     "before_only": false,
+     "change_state": "unchanged",
+     "claim_id": "6a3a9bb7-4862-50c9-9937-8826186db265",
+     "invariant_id": "ecc9c2ca-2784-56c9-8878-0b38c49bfe1a",
+     "invariant_revision_id": "261296bb-d8b1-58c9-9f2f-a08eba6b1989",
+     "movement": {
+      "after": {
+       "change_state": "unchanged",
+       "detail": "the after snapshot records invariant ecc9c2ca-2784-56c9-8878-0b38c49bfe1a through relationship 6a3a9bb7-4862-50c9-9937-8826186db265 at pkg/a.py",
+       "item_coverage": "present_outside_selection",
+       "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+       "path": "pkg/a.py",
+       "rationale": "It is the rule.",
+       "reached_via": [
+        "member_of_selected_family:261296bb-d8b1-58c9-9f2f-a08eba6b1989"
+       ],
+       "record_id": "ecc9c2ca-2784-56c9-8878-0b38c49bfe1a",
+       "record_kind": "invariant",
+       "recorded_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+       "relationship_id": "6a3a9bb7-4862-50c9-9937-8826186db265",
+       "resolution": "exact_recorded_blob",
+       "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'other' at pkg/a.py:9-10",
+       "revision_id": "261296bb-d8b1-58c9-9f2f-a08eba6b1989",
+       "role": "primary-authority",
+       "side": "after",
+       "state": "recorded"
+      },
+      "before": [],
+      "gaps": [],
+      "lineage": [],
+      "record_id": "ecc9c2ca-2784-56c9-8878-0b38c49bfe1a",
+      "record_kind": "invariant",
+      "relationship_kind": "realization",
+      "statement": "the candidate records realization 6a3a9bb7-4862-50c9-9937-8826186db265 at pkg/a.py (revision 261296bb-d8b1-58c9-9f2f-a08eba6b1989) under invariant ecc9c2ca-2784-56c9-8878-0b38c49bfe1a and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+      "transition": "added"
+     },
+     "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+     "path": "pkg/a.py",
+     "rationale": "It is the rule.",
+     "reached_via": [
+      "member_of_selected_family:261296bb-d8b1-58c9-9f2f-a08eba6b1989"
+     ],
+     "recorded_side": "after",
+     "recorded_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+     "resolution": "exact_recorded_blob",
+     "role": "primary-authority",
+     "transition": "added"
+    }
+   ],
+   "relationships": [
+    {
+     "after": {
+      "detail": "the after snapshot records family 338785bb-9701-50e9-a383-ff33746d5bc0 through relationship 3b321924-0820-593c-b5a0-368974e73454 at None",
+      "item_coverage": "present_outside_selection",
+      "member_revision_id": "848ff4da-c662-5358-be3b-9c284578a825",
+      "reached_via": [
+       "member_of_selected_family:63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+      "record_kind": "family",
+      "relationship_id": "3b321924-0820-593c-b5a0-368974e73454",
+      "revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the candidate records membership 3b321924-0820-593c-b5a0-368974e73454 at no readable address (revision 63415aa7-a495-58ff-8545-f37e3e04e513) under family 338785bb-9701-50e9-a383-ff33746d5bc0 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family 338785bb-9701-50e9-a383-ff33746d5bc0 through relationship 43e4a008-cb74-5b1c-b18e-7684b33044c4 at None",
+      "item_coverage": "present_outside_selection",
+      "member_revision_id": "e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be",
+      "reached_via": [
+       "member_of_selected_family:63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+      "record_kind": "family",
+      "relationship_id": "43e4a008-cb74-5b1c-b18e-7684b33044c4",
+      "revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the candidate records membership 43e4a008-cb74-5b1c-b18e-7684b33044c4 at no readable address (revision 63415aa7-a495-58ff-8545-f37e3e04e513) under family 338785bb-9701-50e9-a383-ff33746d5bc0 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family 338785bb-9701-50e9-a383-ff33746d5bc0 through relationship 54362daa-a2be-5c89-8ac5-7d00db31653c at None",
+      "item_coverage": "present_outside_selection",
+      "member_revision_id": "722a721e-599d-5b52-8934-99cc9aaf5146",
+      "reached_via": [
+       "member_of_selected_family:63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+      "record_kind": "family",
+      "relationship_id": "54362daa-a2be-5c89-8ac5-7d00db31653c",
+      "revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the candidate records membership 54362daa-a2be-5c89-8ac5-7d00db31653c at no readable address (revision 63415aa7-a495-58ff-8545-f37e3e04e513) under family 338785bb-9701-50e9-a383-ff33746d5bc0 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family 338785bb-9701-50e9-a383-ff33746d5bc0 through relationship 9acebe6e-c7bb-5f65-bd46-81335059df7a at None",
+      "item_coverage": "present_outside_selection",
+      "member_revision_id": "20d44563-07d0-5aa2-a4d3-4bc451e92b3e",
+      "reached_via": [
+       "member_of_selected_family:63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+      "record_kind": "family",
+      "relationship_id": "9acebe6e-c7bb-5f65-bd46-81335059df7a",
+      "revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the candidate records membership 9acebe6e-c7bb-5f65-bd46-81335059df7a at no readable address (revision 63415aa7-a495-58ff-8545-f37e3e04e513) under family 338785bb-9701-50e9-a383-ff33746d5bc0 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family 338785bb-9701-50e9-a383-ff33746d5bc0 through relationship c137adb1-58ac-5d63-a6ff-1f146bfc7002 at None",
+      "item_coverage": "present_outside_selection",
+      "member_revision_id": "a1ca6f89-205b-55b4-bf3e-7930c640b9de",
+      "reached_via": [
+       "member_of_selected_family:63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+      "record_kind": "family",
+      "relationship_id": "c137adb1-58ac-5d63-a6ff-1f146bfc7002",
+      "revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the candidate records membership c137adb1-58ac-5d63-a6ff-1f146bfc7002 at no readable address (revision 63415aa7-a495-58ff-8545-f37e3e04e513) under family 338785bb-9701-50e9-a383-ff33746d5bc0 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family 338785bb-9701-50e9-a383-ff33746d5bc0 through relationship e2bb3092-c71f-538c-9c57-b0661aba5c0b at None",
+      "item_coverage": "absent_from_snapshot",
+      "member_revision_id": "d38b21ea-901d-55d8-a4f7-5b30a0d882b2",
+      "reached_via": [
+       "member_of_selected_family:63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+      "record_kind": "family",
+      "relationship_id": "e2bb3092-c71f-538c-9c57-b0661aba5c0b",
+      "revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the candidate records membership e2bb3092-c71f-538c-9c57-b0661aba5c0b at no readable address (revision 63415aa7-a495-58ff-8545-f37e3e04e513) under family 338785bb-9701-50e9-a383-ff33746d5bc0 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family 338785bb-9701-50e9-a383-ff33746d5bc0 through relationship e6155f32-0d59-5451-aa76-d211efcabb5b at None",
+      "item_coverage": "present_outside_selection",
+      "member_revision_id": "ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac",
+      "reached_via": [
+       "member_of_selected_family:63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+      "record_kind": "family",
+      "relationship_id": "e6155f32-0d59-5451-aa76-d211efcabb5b",
+      "revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the candidate records membership e6155f32-0d59-5451-aa76-d211efcabb5b at no readable address (revision 63415aa7-a495-58ff-8545-f37e3e04e513) under family 338785bb-9701-50e9-a383-ff33746d5bc0 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family 338785bb-9701-50e9-a383-ff33746d5bc0 through relationship ea75c039-7b24-5b5a-acf4-0fa8e5af15cc at None",
+      "item_coverage": "present_outside_selection",
+      "member_revision_id": "1ef09289-b07c-5fba-ae94-ffbd2f8fa241",
+      "reached_via": [
+       "member_of_selected_family:63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+      "record_kind": "family",
+      "relationship_id": "ea75c039-7b24-5b5a-acf4-0fa8e5af15cc",
+      "revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the candidate records membership ea75c039-7b24-5b5a-acf4-0fa8e5af15cc at no readable address (revision 63415aa7-a495-58ff-8545-f37e3e04e513) under family 338785bb-9701-50e9-a383-ff33746d5bc0 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family 338785bb-9701-50e9-a383-ff33746d5bc0 through relationship fbd7ab86-17a6-58fd-8b76-7ad830efb8aa at None",
+      "item_coverage": "present_outside_selection",
+      "member_revision_id": "261296bb-d8b1-58c9-9f2f-a08eba6b1989",
+      "reached_via": [
+       "member_of_selected_family:63415aa7-a495-58ff-8545-f37e3e04e513"
+      ],
+      "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+      "record_kind": "family",
+      "relationship_id": "fbd7ab86-17a6-58fd-8b76-7ad830efb8aa",
+      "revision_id": "63415aa7-a495-58ff-8545-f37e3e04e513",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "338785bb-9701-50e9-a383-ff33746d5bc0",
+     "record_kind": "family",
+     "relationship_kind": "membership",
+     "statement": "the candidate records membership fbd7ab86-17a6-58fd-8b76-7ad830efb8aa at no readable address (revision 63415aa7-a495-58ff-8545-f37e3e04e513) under family 338785bb-9701-50e9-a383-ff33746d5bc0 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "change_state": "unchanged",
+      "detail": "the after snapshot records invariant 36615462-86f0-5fc8-9f6f-c6667cc6294a through relationship 107db2a6-b1a4-5b55-8c66-c25c98c8de31 at pkg/a.py",
+      "item_coverage": "present_outside_selection",
+      "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+      "path": "pkg/a.py",
+      "rationale": "It is the rule.",
+      "reached_via": [
+       "member_of_selected_family:ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac"
+      ],
+      "record_id": "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+      "record_kind": "invariant",
+      "recorded_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+      "relationship_id": "107db2a6-b1a4-5b55-8c66-c25c98c8de31",
+      "resolution": "exact_recorded_blob",
+      "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'land' at pkg/a.py:1-2",
+      "revision_id": "ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac",
+      "role": "primary-authority",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "36615462-86f0-5fc8-9f6f-c6667cc6294a",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the candidate records realization 107db2a6-b1a4-5b55-8c66-c25c98c8de31 at pkg/a.py (revision ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac) under invariant 36615462-86f0-5fc8-9f6f-c6667cc6294a and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "change_state": "unchanged",
+      "detail": "the after snapshot records invariant 4023613a-f107-5e3e-a21b-617dadcff92c through relationship 4f1a6940-7e0c-52dc-a82d-710b81ba8519 at pkg/a.py",
+      "item_coverage": "present_outside_selection",
+      "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+      "path": "pkg/a.py",
+      "rationale": "It is the rule.",
+      "reached_via": [
+       "member_of_selected_family:e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be"
+      ],
+      "record_id": "4023613a-f107-5e3e-a21b-617dadcff92c",
+      "record_kind": "invariant",
+      "recorded_source_identity": "0000000000000000000000000000000000000000",
+      "relationship_id": "4f1a6940-7e0c-52dc-a82d-710b81ba8519",
+      "resolution": "recorded_blob_mismatch",
+      "resolution_detail": "the requested tree holds different bytes at this path than the recorded blob, so the authored claim is reported against the recorded identity and is not promoted to a realization of the current bytes",
+      "revision_id": "e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be",
+      "role": "primary-authority",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [
+      {
+       "code": "anchor_unresolved",
+       "detail": "the after side's recorded address at pkg/a.py did not resolve exactly against that snapshot's code tree (recorded_blob_mismatch): the requested tree holds different bytes at this path than the recorded blob, so the authored claim is reported against the recorded identity and is not promoted to a realization of the current bytes. The recorded address and the observed identity beside it are displayed as they are, and no working tree or HEAD is substituted for the tree that was asked",
+       "field": "anchor",
+       "side": "after"
+      }
+     ],
+     "lineage": [],
+     "record_id": "4023613a-f107-5e3e-a21b-617dadcff92c",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the candidate records realization 4f1a6940-7e0c-52dc-a82d-710b81ba8519 at pkg/a.py (revision e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be) under invariant 4023613a-f107-5e3e-a21b-617dadcff92c and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "change_state": "unchanged",
+      "detail": "the after snapshot records invariant 6c36ff0b-8c8b-51ce-a820-a085173bd830 through relationship d2e8a634-5a7c-521e-b43a-f105a5f847ed at pkg/b.py",
+      "item_coverage": "present_outside_selection",
+      "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+      "path": "pkg/b.py",
+      "rationale": "It is the rule.",
+      "reached_via": [
+       "member_of_selected_family:20d44563-07d0-5aa2-a4d3-4bc451e92b3e"
+      ],
+      "record_id": "6c36ff0b-8c8b-51ce-a820-a085173bd830",
+      "record_kind": "invariant",
+      "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+      "relationship_id": "d2e8a634-5a7c-521e-b43a-f105a5f847ed",
+      "resolution": "exact_recorded_blob",
+      "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'fixed' at pkg/b.py:5-6",
+      "revision_id": "20d44563-07d0-5aa2-a4d3-4bc451e92b3e",
+      "role": "primary-authority",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "6c36ff0b-8c8b-51ce-a820-a085173bd830",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the candidate records realization d2e8a634-5a7c-521e-b43a-f105a5f847ed at pkg/b.py (revision 20d44563-07d0-5aa2-a4d3-4bc451e92b3e) under invariant 6c36ff0b-8c8b-51ce-a820-a085173bd830 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "change_state": "unchanged",
+      "detail": "the after snapshot records invariant 97439c7f-768e-5951-bf6a-70b9093e8fe1 through relationship 21713fa8-7554-59c8-a745-f996f024b43e at pkg/b.py",
+      "item_coverage": "present_outside_selection",
+      "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+      "path": "pkg/b.py",
+      "rationale": "It is the rule.",
+      "reached_via": [
+       "member_of_selected_family:1ef09289-b07c-5fba-ae94-ffbd2f8fa241"
+      ],
+      "record_id": "97439c7f-768e-5951-bf6a-70b9093e8fe1",
+      "record_kind": "invariant",
+      "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+      "relationship_id": "21713fa8-7554-59c8-a745-f996f024b43e",
+      "resolution": "exact_recorded_blob",
+      "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'fixed' at pkg/b.py:5-6",
+      "revision_id": "1ef09289-b07c-5fba-ae94-ffbd2f8fa241",
+      "role": "primary-authority",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "97439c7f-768e-5951-bf6a-70b9093e8fe1",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the candidate records realization 21713fa8-7554-59c8-a745-f996f024b43e at pkg/b.py (revision 1ef09289-b07c-5fba-ae94-ffbd2f8fa241) under invariant 97439c7f-768e-5951-bf6a-70b9093e8fe1 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "change_state": "unchanged",
+      "detail": "the after snapshot records invariant 9e1dbcd4-407f-57b1-957b-36bb811bce81 through relationship f80d9a05-c0c1-5780-90f5-50063fede315 at pkg/a.py",
+      "item_coverage": "present_outside_selection",
+      "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+      "path": "pkg/a.py",
+      "rationale": "It is the rule.",
+      "reached_via": [
+       "member_of_selected_family:a1ca6f89-205b-55b4-bf3e-7930c640b9de"
+      ],
+      "record_id": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+      "record_kind": "invariant",
+      "recorded_source_identity": "93afbd2ff3dfbd37b930946fa80b34cc1a3bea55",
+      "relationship_id": "f80d9a05-c0c1-5780-90f5-50063fede315",
+      "resolution": "recorded_blob_mismatch",
+      "resolution_detail": "the requested tree holds different bytes at this path than the recorded blob, so the authored claim is reported against the recorded identity and is not promoted to a realization of the current bytes",
+      "revision_id": "a1ca6f89-205b-55b4-bf3e-7930c640b9de",
+      "role": "primary-authority",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [
+      {
+       "code": "anchor_unresolved",
+       "detail": "the after side's recorded address at pkg/a.py did not resolve exactly against that snapshot's code tree (recorded_blob_mismatch): the requested tree holds different bytes at this path than the recorded blob, so the authored claim is reported against the recorded identity and is not promoted to a realization of the current bytes. The recorded address and the observed identity beside it are displayed as they are, and no working tree or HEAD is substituted for the tree that was asked",
+       "field": "anchor",
+       "side": "after"
+      }
+     ],
+     "lineage": [],
+     "record_id": "9e1dbcd4-407f-57b1-957b-36bb811bce81",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the candidate records realization f80d9a05-c0c1-5780-90f5-50063fede315 at pkg/a.py (revision a1ca6f89-205b-55b4-bf3e-7930c640b9de) under invariant 9e1dbcd4-407f-57b1-957b-36bb811bce81 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "change_state": "unchanged",
+      "detail": "the after snapshot records invariant e701c262-50a6-553b-bab6-691caed0fb04 through relationship 93566048-1ccf-5ab8-8d90-bb3982f45332 at pkg/b.py",
+      "item_coverage": "present_outside_selection",
+      "observed_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+      "path": "pkg/b.py",
+      "rationale": "It is the rule.",
+      "reached_via": [
+       "member_of_selected_family:848ff4da-c662-5358-be3b-9c284578a825"
+      ],
+      "record_id": "e701c262-50a6-553b-bab6-691caed0fb04",
+      "record_kind": "invariant",
+      "recorded_source_identity": "b85b63d53e3ea796ca970310d3fbfe6076d0cdcd",
+      "relationship_id": "93566048-1ccf-5ab8-8d90-bb3982f45332",
+      "resolution": "exact_recorded_blob",
+      "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'fixed' at pkg/b.py:5-6",
+      "revision_id": "848ff4da-c662-5358-be3b-9c284578a825",
+      "role": "primary-authority",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "e701c262-50a6-553b-bab6-691caed0fb04",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the candidate records realization 93566048-1ccf-5ab8-8d90-bb3982f45332 at pkg/b.py (revision 848ff4da-c662-5358-be3b-9c284578a825) under invariant e701c262-50a6-553b-bab6-691caed0fb04 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "change_state": "unchanged",
+      "detail": "the after snapshot records invariant ecc9c2ca-2784-56c9-8878-0b38c49bfe1a through relationship 6a3a9bb7-4862-50c9-9937-8826186db265 at pkg/a.py",
+      "item_coverage": "present_outside_selection",
+      "observed_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+      "path": "pkg/a.py",
+      "rationale": "It is the rule.",
+      "reached_via": [
+       "member_of_selected_family:261296bb-d8b1-58c9-9f2f-a08eba6b1989"
+      ],
+      "record_id": "ecc9c2ca-2784-56c9-8878-0b38c49bfe1a",
+      "record_kind": "invariant",
+      "recorded_source_identity": "f265d6f0bdfd315c40a9a06b21ff3ba5e6da9284",
+      "relationship_id": "6a3a9bb7-4862-50c9-9937-8826186db265",
+      "resolution": "exact_recorded_blob",
+      "resolution_detail": "the requested tree holds the exact recorded blob at the recorded path, and those bytes define 'other' at pkg/a.py:9-10",
+      "revision_id": "261296bb-d8b1-58c9-9f2f-a08eba6b1989",
+      "role": "primary-authority",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "ecc9c2ca-2784-56c9-8878-0b38c49bfe1a",
+     "record_kind": "invariant",
+     "relationship_kind": "realization",
+     "statement": "the candidate records realization 6a3a9bb7-4862-50c9-9937-8826186db265 at pkg/a.py (revision 261296bb-d8b1-58c9-9f2f-a08eba6b1989) under invariant ecc9c2ca-2784-56c9-8878-0b38c49bfe1a and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family 6dbf7a49-9dd7-5bc7-8464-845ac0768d44 through relationship 1b608303-7378-5e59-a0f3-6ac58371e892 at None",
+      "item_coverage": "absent_from_snapshot",
+      "member_revision_id": "848ff4da-c662-5358-be3b-9c284578a825",
+      "reached_via": [
+       "sibling_membership_in_another_family:848ff4da-c662-5358-be3b-9c284578a825"
+      ],
+      "record_id": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44",
+      "record_kind": "family",
+      "relationship_id": "1b608303-7378-5e59-a0f3-6ac58371e892",
+      "revision_id": "b1b05371-3d6a-5ea9-b623-ecc2d93697a9",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44",
+     "record_kind": "family",
+     "relationship_kind": "advertised_family",
+     "statement": "the candidate records advertised_family 1b608303-7378-5e59-a0f3-6ac58371e892 at no readable address (revision b1b05371-3d6a-5ea9-b623-ecc2d93697a9) under family 6dbf7a49-9dd7-5bc7-8464-845ac0768d44 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records family 6dbf7a49-9dd7-5bc7-8464-845ac0768d44 through relationship 816c12ae-5731-585d-90e9-9074b1c6848e at None",
+      "item_coverage": "absent_from_snapshot",
+      "member_revision_id": "1ef09289-b07c-5fba-ae94-ffbd2f8fa241",
+      "reached_via": [
+       "sibling_membership_in_another_family:1ef09289-b07c-5fba-ae94-ffbd2f8fa241"
+      ],
+      "record_id": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44",
+      "record_kind": "family",
+      "relationship_id": "816c12ae-5731-585d-90e9-9074b1c6848e",
+      "revision_id": "b1b05371-3d6a-5ea9-b623-ecc2d93697a9",
+      "side": "after",
+      "state": "recorded"
+     },
+     "before": [],
+     "gaps": [],
+     "lineage": [],
+     "record_id": "6dbf7a49-9dd7-5bc7-8464-845ac0768d44",
+     "record_kind": "family",
+     "relationship_kind": "advertised_family",
+     "statement": "the candidate records advertised_family 816c12ae-5731-585d-90e9-9074b1c6848e at no readable address (revision b1b05371-3d6a-5ea9-b623-ecc2d93697a9) under family 6dbf7a49-9dd7-5bc7-8464-845ac0768d44 and no relationship this review read -- in the comparison's union or at the head of that citation's authored successor line -- is connected to it, so this association is displayed as the candidate's added side and no baseline side is substituted",
+     "transition": "added"
+    },
+    {
+     "after": {
+      "detail": "the after snapshot records invariant f84e4e24-5490-545f-9b16-62283a0da4ef with no governing route; an ungoverned identity is not placed in the repository root and no route is inferred from the paths its claims name",
+      "item_coverage": "selected_both",
+      "reached_via": [],
+      "record_id": "f84e4e24-5490-545f-9b16-62283a0da4ef",
+      "record_kind": "invariant",
+      "side": "after",
+      "state": "ungoverned"
+     },
+     "before": [
+      {
+       "detail": "the before snapshot records no invariant f84e4e24-5490-545f-9b16-62283a0da4ef, so it records no governing route for it; this is a different fact from an identity recorded with no route, and neither is filled in from the other snapshot",
+       "item_coverage": "selected_both",
+       "reached_via": [],
+       "side": "before",
+       "state": "not_recorded"
+      }
+     ],
+     "gaps": [
+      {
+       "code": "route_not_recorded",
+       "detail": "the before snapshot records no invariant f84e4e24-5490-545f-9b16-62283a0da4ef, so it records no governing route for it; this is a different fact from an identity recorded with no route, and neither is filled in from the other snapshot",
+       "field": "route",
+       "side": "before"
+      }
+     ],
+     "lineage": [],
+     "pairing_basis": "same_governed_identity",
+     "record_id": "f84e4e24-5490-545f-9b16-62283a0da4ef",
+     "record_kind": "invariant",
+     "relationship_kind": "governing_route",
+     "statement": "the invariant f84e4e24-5490-545f-9b16-62283a0da4ef records no None identity recorded on the baseline and no governing route on the candidate, so the governing-route association moved; both recorded sides are displayed",
+     "transition": "moved"
+    }
+   ],
+   "remaining": [
+    {
+     "name": "locations_remaining",
+     "value": 0
+    },
+    {
+     "name": "changed_paths_outside_selection",
+     "value": 3
+    },
+    {
+     "name": "unattributed_changed_paths",
+     "value": 1
+    },
+    {
+     "name": "unknown_attribution_changed_paths",
+     "value": 0
+    },
+    {
+     "name": "records_present_outside_selection",
+     "value": 23
+    },
+    {
+     "name": "references_unresolved",
+     "value": 0
+    }
+   ],
+   "unattributed_changed_paths": [
+    "tests/test_a.py"
+   ],
+   "unknown_attribution_changed_paths": [],
+   "unresolved": [
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "1ef09289-b07c-5fba-ae94-ffbd2f8fa241"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "20d44563-07d0-5aa2-a4d3-4bc451e92b3e"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "261296bb-d8b1-58c9-9f2f-a08eba6b1989"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "722a721e-599d-5b52-8934-99cc9aaf5146"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "848ff4da-c662-5358-be3b-9c284578a825"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "ccb19e38-f5f7-52ed-ad45-27f1fe67f2ac"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "e9cdfc62-6f4d-5e58-b4d9-1b4f255f93be"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "63415aa7-a495-58ff-8545-f37e3e04e513"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "3b321924-0820-593c-b5a0-368974e73454"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "43e4a008-cb74-5b1c-b18e-7684b33044c4"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "54362daa-a2be-5c89-8ac5-7d00db31653c"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "9acebe6e-c7bb-5f65-bd46-81335059df7a"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "c137adb1-58ac-5d63-a6ff-1f146bfc7002"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "e6155f32-0d59-5451-aa76-d211efcabb5b"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "ea75c039-7b24-5b5a-acf4-0fa8e5af15cc"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "fbd7ab86-17a6-58fd-8b76-7ad830efb8aa"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "107db2a6-b1a4-5b55-8c66-c25c98c8de31"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "21713fa8-7554-59c8-a745-f996f024b43e"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "4f1a6940-7e0c-52dc-a82d-710b81ba8519"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "6a3a9bb7-4862-50c9-9937-8826186db265"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "93566048-1ccf-5ab8-8d90-bb3982f45332"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "d2e8a634-5a7c-521e-b43a-f105a5f847ed"
+    },
+    {
+     "detail": "this record is held by one snapshot and was not reached by the other side's declared selection; it is displayed as present outside the selection and never as a deletion",
+     "field": "attribution",
+     "recorded_reference": "f80d9a05-c0c1-5780-90f5-50063fede315"
+    }
+   ]
+  },
+  "staleness": {
+   "moved": [],
+   "state": "current",
+   "statement": "the displayed comparison is the candidate's current comparison"
+  },
+  "submission": {
+   "next_action": "publish an assessment through the existing curator authority's publication action, which supplies the author, the role and the authority provenance",
+   "none_is_approval": true,
+   "proposed_dispositions": [
+    "concern_found",
+    "no_concern_found",
+    "unresolved"
+   ],
+   "reason": "this increment mounts no serving route that publishes an assessment, so the surface displays only and does not grow a private write path to compensate",
+   "state": "unavailable"
+  },
+  "surface_version": "knowledge-review-surface/1"
+ },
+ "repository_id": "agents-remember",
+ "state": "review"
+}

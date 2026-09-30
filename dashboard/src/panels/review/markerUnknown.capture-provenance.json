@@ -1,10 +1,10 @@
 {
-  "captured_at": "2026-09-30T14:30:58+00:00",
-  "producer": "260928-MIK-L34 worker (rulings round), notes/reports/260928-MIK-L34-evidence/capture_rulings_fixtures.py",
-  "command": "PYTHONPATH=<L34 worktree>/mcp/src <mcp venv python> capture_rulings_fixtures.py <L34 worktree>/dashboard <this file>",
+  "captured_at": "2026-09-30T19:12:06+00:00",
+  "producer": "260928-MIK-L33 worker (merge round): MIK-L34's capture_rulings_fixtures.py re-run over the merged tree, notes/reports/260928-MIK-L33-evidence/merge-round/l34-scenario/capture_rulings_fixtures.py",
+  "command": "PYTHONPATH=<L33 worktree>/mcp/src <mcp venv python> capture_rulings_fixtures.py <L33 worktree>/dashboard <this file>",
   "route": "create_app(config, collaborators=serving_collaborators(config)) over fastapi TestClient",
-  "source_tree": "260928-mik-l34 worktree (base 904e804b07a598d5d6c66f06b7e67ddab64d9b8e, with this leaf's uncommitted changes; no server file changed)",
-  "scratch": "/tmp/mik-l34-real (see markerReturn.capture-provenance.json), then setup_leaf.py break-family: the leaf's FAM-4V4GSQCS record made '{}' on the after side, so the after memory tree is not read whole -- comparison 3",
+  "source_tree": "260928-mik-l33 worktree (base d3a22213ad3124603b0210afb7e3d049c5589b82, MIK-L34 landed, with MIK-L33's uncommitted changes: the review route now carries change_kinds)",
+  "scratch": "/tmp/mik-l33-merge (see markerReturn.capture-provenance.json), then setup_leaf.py break-family: the leaf's FAM-4V4GSQCS record made '{}' on the after side, so the after memory tree is not read whole -- comparison 3",
   "comparisons": {
     "markerUnknown.*": 3,
     "markerReturn.cards": 2
@@ -20,9 +20,9 @@
         "leaf": "260928-MIK-L34"
       },
       "status": 200,
-      "seconds": 6.45,
-      "sha256": "017cb13bd5ae3fe17c2af49294caf2e5a924124464b026c8d0e47824c7b93ccd",
-      "bytes": 14990
+      "seconds": 5.85,
+      "sha256": "f4372d6e1f5b11920804cb4244dafd023b3cbc875b8e69c45015433de834f980",
+      "bytes": 14992
     },
     {
       "file": "src/panels/review/markerUnknown.lane.captured.json",
@@ -35,9 +35,9 @@
         "lane": "files"
       },
       "status": 200,
-      "seconds": 0.16,
-      "sha256": "5791337287f0027fb88564051f5e43b499d3561691475bd72c60b42cedbecb6b",
-      "bytes": 3806
+      "seconds": 0.08,
+      "sha256": "3e78fce3c18723abdb45376a12445d4cb557a4c17b02c2a1f8d434667ddcdfbf",
+      "bytes": 3810
     },
     {
       "file": "src/panels/review/markerUnknown.file.captured.json",
@@ -50,9 +50,9 @@
         "file": "mcp/src/agents_remember/serving/notes.py"
       },
       "status": 200,
-      "seconds": 0.11,
-      "sha256": "8eb09293f0d559850f1b677341856b5cfcace095b05448d67c63f1c0937060e7",
-      "bytes": 10172
+      "seconds": 0.06,
+      "sha256": "7adff1a34aa5597276d5943e0dcc210a91bb5ef43042bd88d57809c237bc85c4",
+      "bytes": 10176
     },
     {
       "file": "src/panels/review/markerUnknown.source.captured.json",
@@ -66,9 +66,9 @@
         "afterCodeTreeId": "db68db54906acc5661a3ac7813d75a340ba7cbdc"
       },
       "status": 200,
-      "seconds": 4.08,
-      "sha256": "330123f211ef70f9fad66bdfd92b4dc1049f0995487d3d84bb95ef1f9e2a82ae",
-      "bytes": 28591
+      "seconds": 2.57,
+      "sha256": "dd359fe402c6061ba28db1b05c2aeabdeaaaa90bdd20fba9a1647356ee872642",
+      "bytes": 28595
     },
     {
       "file": "src/panels/review/markerUnknown.memberUnknown.captured.json",
@@ -81,9 +81,9 @@
         "selectorId": "c7c5be49-164f-56e0-923d-fb5f5259d80c"
       },
       "status": 200,
-      "seconds": 7.21,
-      "sha256": "6975f97aaa50e46e86e74dafde54c1dcfb983400c5a83f80c0b0bf2a172f95bb",
-      "bytes": 98501
+      "seconds": 4.1,
+      "sha256": "2531e9fd1a7f33f539fa84f14c7d91fedeb45f87f20f533a5035b53788f1dc41",
+      "bytes": 102922
     },
     {
       "file": "src/panels/review/markerUnknown.noFamily.captured.json",
@@ -96,9 +96,9 @@
         "selectorId": "4ec11f34-62de-5d3e-a036-756e10ae7859"
       },
       "status": 200,
-      "seconds": 7.18,
-      "sha256": "a361c6e22a10d11a9e690927c6783112d1f251cdc885c2f5f9ff0015991561b8",
-      "bytes": 27246
+      "seconds": 4.05,
+      "sha256": "ac3fc6c52f2551b320ddf88a482225ebf8d01685f31a368203da8d510120cd4c",
+      "bytes": 27247
     },
     {
       "file": "src/panels/review/markerReturn.cards.captured.json",
@@ -111,9 +111,10 @@
         "invariants": "16b287d6-2337-5554-b911-43e3a7d15fab,5bcc7ed2-71c4-547f-a4b9-4dc5233531e6,5c75cbf9-0778-5765-bdac-50ed81e31ff6,c7c5be49-164f-56e0-923d-fb5f5259d80c,e9043896-8124-5cdb-b1e9-ed38604ca2e2"
       },
       "status": 200,
-      "seconds": 0.11,
-      "sha256": "177cb6c52fd93e5c05a4230f34726c3532e34d60a539d838e4a8779ce820bb40",
-      "bytes": 20035
+      "seconds": 0.05,
+      "sha256": "6d8ad70b151f1ba72a33e19215e212f4ca22fb590fd5da5518ba187bdcf667a8",
+      "bytes": 20039
     }
-  ]
+  ],
+  "merge_round": "MIK-L33 merge round: see markerReturn.capture-provenance.json. markerUnknown.memberUnknown now carries FAM-4V4GSQCS's change_kinds, every member's membership unknown with the unparseable after-side record as its reason; the other bodies differ only by scratch paths, the memory commit, timestamps and comparison digests."
 }

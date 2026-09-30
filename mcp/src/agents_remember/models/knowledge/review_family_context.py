@@ -43,6 +43,7 @@ from agents_remember.models.knowledge.base import (
     KnowledgeModel,
 )
 from agents_remember.models.knowledge.read import KnowledgeReadCounts
+from agents_remember.models.knowledge.review_change_kinds import ReviewFamilyChanges
 from agents_remember.models.knowledge.review_family_source import (
     ReviewFamilyMemberSource,
     ReviewSourceLocatorState,
@@ -349,6 +350,24 @@ class ReviewFamilyContextEntry(KnowledgeModel):
     candidates: tuple[ReviewFamilyGuarantee, ...] = ()
     state: ReviewFamilyEntryState
     detail: str = Field(min_length=1, max_length=PROSE_MAX_LENGTH)
+    # The change facts of a tree comparison (MIK-R33); a dataset review carries none.
+    change_kinds: ReviewFamilyChanges | None = None
+
+    @model_validator(mode="after")
+    def _require_change_facts_for_exactly_the_returned_members(self) -> ReviewFamilyContextEntry:
+        if self.change_kinds is None:
+            return self
+        returned = {
+            member.member_id for side in (self.before, self.after) for member in side.members
+        }
+        described = {member.member_id for member in self.change_kinds.members}
+        if described != returned:
+            raise ValueError(
+                "change facts describe exactly the member occurrences this page returned: a "
+                "returned member without facts would read as unbadged, and facts for a member no "
+                "page returned would describe a population the roster did not carry"
+            )
+        return self
 
     @model_validator(mode="after")
     def _require_the_entry_to_describe_one_family(self) -> ReviewFamilyContextEntry:
