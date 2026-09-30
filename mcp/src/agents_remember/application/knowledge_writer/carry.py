@@ -27,21 +27,39 @@ from agents_remember.application.knowledge_writer.memory_state import MemoryStat
 from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.models.knowledge_files.documents import history_path
 
-__all__ = ["carry_entries"]
+__all__ = ["carry_entries", "mapped_anchor"]
 
 
-def _carried_anchor(code: CodeTrees, source: str, anchor: dict[str, Any], blob: str) -> Any:
+def mapped_anchor(
+    code: CodeTrees, source: str, anchor: dict[str, Any], blob: str | None
+) -> dict[str, Any] | None:
+    """``anchor`` re-recorded at ``blob``: a ``line_range`` mapped through the zero-context diff.
+
+    The new anchor records ``blob`` and the content its range holds there; ``None`` when the
+    locator does not resolve (a range with no image, a symbol not bound once, a file gone).
+    MIK-R14's ``still_rejected`` refresh re-anchors a link target through the same mapping.
+    """
+
+    if blob is None:
+        return None
     locator = anchor.get("locator") or {}
     try:
         resolved = code.resolve(source, locator, str(anchor.get("blob")), blob)
     except CodeReadError:
         return None
-    if resolved is None or resolved.content != anchor.get("content"):
+    if resolved is None:
         return None
     moved = dict(locator)
     if moved.get("kind") == "line_range":
         moved["start"], moved["end"] = resolved.span
-    return {**anchor, "locator": moved, "blob": blob}
+    return {**anchor, "locator": moved, "blob": blob, "content": resolved.content}
+
+
+def _carried_anchor(code: CodeTrees, source: str, anchor: dict[str, Any], blob: str) -> Any:
+    mapped = mapped_anchor(code, source, anchor, blob)
+    if mapped is None or mapped["content"] != anchor.get("content"):
+        return None
+    return mapped
 
 
 def carry_entries(state: MemoryState, snapshot: CodeSnapshot, owner: Owner) -> tuple[str, ...]:

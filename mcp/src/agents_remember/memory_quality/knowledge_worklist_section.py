@@ -174,6 +174,23 @@ def _route_suggestion(suggestion: Any) -> str:
     return "no suggestion (ambiguous rename target, or a file absent at C without a rename)"
 
 
+def _reconsideration_facts(item: Mapping[str, Any], facts: Mapping[str, Any]) -> list[str]:
+    """MIK-R14: the alternative, each changed target with its trigger, and what answers it."""
+
+    parts = [
+        f"{facts.get('alternativeStatus')} alternative {facts.get('alternative')} "
+        f"{facts.get('option')!r} of {facts.get('decision')}"
+    ]
+    parts += [f"{one.get('target')} ({one.get('trigger')})" for one in facts.get("changed") or ()]
+    satisfied = item.get("satisfiedBy")
+    parts.append(
+        f"answered by {satisfied}"
+        if satisfied
+        else "needs a reconsideration row (still_rejected with a reason, or raise)"
+    )
+    return parts
+
+
 _FACT_RENDERERS: Final[
     Mapping[str, Callable[[Mapping[str, Any], Mapping[str, Any]], list[str]]]
 ] = {
@@ -184,6 +201,7 @@ _FACT_RENDERERS: Final[
     "family_route_condition": _route_facts,
     "unexplained_hunk": _unexplained_facts,
     "unexplained_file": _unexplained_facts,
+    "reconsideration_candidate": _reconsideration_facts,
 }
 
 

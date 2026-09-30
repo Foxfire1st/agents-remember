@@ -24,6 +24,8 @@ landed inventory owner measures it (:func:`git_rename_inference`, ICR-R08), then
    ``unexplained_hunk`` / ``unexplained_file`` item for every unlinked hunk and non-text change
    (:mod:`.unexplained`), with its path's coverage. Its items join step 5's sort; the planning marks
    do not apply to them.
+8. evaluates every K_B decision's ``reconsider_on`` links (MIK-R14, :mod:`.reconsideration`) and
+   raises a ``reconsideration_candidate`` for each alternative whose linked target changed.
 
 An input that cannot be read makes the run ``incomplete`` naming it, with no items (rule 4);
 nothing is a verdict (Exclusions).
@@ -33,6 +35,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Final
 
 from agents_remember.application.knowledge_worklist.classify import (
@@ -56,6 +59,10 @@ from agents_remember.application.knowledge_worklist.knowledge import KnowledgeSi
 from agents_remember.application.knowledge_worklist.planned_effects import (
     Declaration,
     reconcile_planned_effects,
+)
+from agents_remember.application.knowledge_worklist.reconsideration import (
+    ReconsiderationInputs,
+    reconsideration_candidates,
 )
 from agents_remember.application.knowledge_worklist.registry import item_id, kinds_document
 from agents_remember.application.knowledge_worklist.route_conditions import (
@@ -149,6 +156,8 @@ class WorklistInputs:
     """The leaf's ``expectedKnowledgeEffects`` (MIK-R11); ``None`` when it declares none."""
     coverage: RouteCoverage | None = None
     """K_B's onboarding routes and census statuses (MIK-R10 coverage); ``None``: every route pending."""
+    coordination_root: Path | None = None
+    """Where requirement endpoints' owning tasks live (MIK-R14); ``None`` resolves none."""
 
 
 def worklist_digest(state: str, items: Iterable[Mapping[str, Any]], missing: Any) -> str:
@@ -223,9 +232,8 @@ class _Run:
         inputs = self.inputs
         changes, unrepresentable, renamed = _changes(inputs)
         changed_paths = {change.path for change in changes}
-        knowledge, touched, reached, stale = self._scope(
-            Classifier(inputs.code, inputs.base, renamed), changed_paths
-        )
+        classifier = Classifier(inputs.code, inputs.base, renamed)
+        knowledge, touched, reached, stale = self._scope(classifier, changed_paths)
         family_items = self._family_items(reached, touched, stale, knowledge)
         items = [
             *(
@@ -246,11 +254,21 @@ class _Run:
                 inputs.code, inputs.base, inputs.candidate, inputs.coverage, inputs.owner
             ),
         )
+        reconsideration = reconsideration_candidates(
+            ReconsiderationInputs(
+                inputs.base,
+                inputs.candidate,
+                classifier.classify_anchor,
+                inputs.owner,
+                inputs.coordination_root,
+            )
+        )
         rendered = sorted(
             [
                 *(planned.mark(item.to_document()) for item in items),
                 *planned.items,
                 *unexplained.items,
+                *reconsideration.items,
             ],
             key=lambda item: (item["kind"], item["subject"]),
         )
@@ -265,6 +283,7 @@ class _Run:
             "changes": linkage,
             "plannedEffects": planned.summary(),
             "unexplained": unexplained.summary(),
+            "reconsideration": reconsideration.summary,
             "items": rendered,
             "kinds": kinds_document(),
             "digest": worklist_digest("complete", rendered, []),

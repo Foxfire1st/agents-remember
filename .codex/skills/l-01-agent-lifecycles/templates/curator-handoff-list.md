@@ -580,6 +580,31 @@ record or keeps it task-local and leaves it out of the list. `proofs` on such an
   (`invariant_id`, not a retired one) or author a new invariant over the change. A delete-only hunk
   admits only `no_invariant`. An item in an uncovered file is answered by the file's onboarding
   trace (a counted change of its card, or its `onboarding:<path>` row), not by this row.
+- A reconsideration row (MIK-R14, converted memory only) answers a `reconsideration_candidate`
+  worklist item: a target a decision's `reconsider_on` link names changed in this leaf. Its subject
+  is the item's, `reconsider:<DEC-ID>#<alternative index>`; it carries the common fields and nothing
+  else. The disposition is one of:
+  - `still_rejected`: the rejection still holds; `reason` says why, against the item's facts. The
+    writer refreshes the links whose trigger fired to what you judged: a requirement link is
+    re-pointed to the item's `latestApproved` version, and an anchor link is re-anchored at C (a
+    line range is mapped through the leaf's diff). The decision's revision goes up once in the
+    leaf, like any change to its links. So the same condition is not raised again, while a later
+    change to the anchored code, in this leaf or a later one, is raised as a new item. A linked
+    anchor that cannot be mapped or no longer resolves refuses the row: re-author the link in
+    `records` first. A link anchor that went stale (`anchor_stale`) is raised too, and
+    `still_rejected` re-anchors it. When a newer version is approved, or the anchored code changes
+    again, after you refreshed a link, rerunning the same row is refused: answer the new item by
+    naming its ID in `items`;
+  - `raise`: the alternative goes to the developer. The writer sets the decision's `status` to
+    `under_reconsideration` and appends a question to the leaf's task-document `openQuestions`
+    through `task_doc`, keeping every existing question. When the question cannot be written, the
+    `raise` is refused and the item stays open.
+
+  A `route:` target is raised by a row of the leaf that reroutes, retires or deletes it (a
+  family row about a family that has the route). A superseded decision is never raised; its
+  successor carries its own links. Never reverse a decision yourself: `raise` it. Keep a linked
+  alternative at its index; the validator refuses a reorder that would move a `reconsider_on` link
+  to another alternative, so append new alternatives after the linked ones.
 
 **Handles.** `"handoff:<key>"` names the record this document authors under that entry `id` or record
 `key`. Use it wherever an ID goes: link targets, `members`, `subject`, `examined` or `supersedes`.
@@ -700,7 +725,8 @@ weighed, so a rejected design can come back up when its grounds change. On conve
 
 The validator refuses a decision with fewer than two alternatives, with no chosen alternative or
 several, with a rejected or deferred alternative that has no `reconsider_when`, with a stored
-`superseded`, or with a `reconsider_on` link to an alternative that does not exist or is `chosen`.
+`superseded`, with a `reconsider_on` link to an alternative that does not exist or is `chosen`, or
+with a linked alternative moved to another index against the memory base.
 
 **Lifting decisions at closeout.** Decisions are born in planning: developer rulings, requirement
 packets and the task's decision log. At closeout the curator lifts into records the decisions that

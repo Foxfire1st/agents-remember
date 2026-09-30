@@ -25,6 +25,9 @@ from agents_remember.memory_quality.knowledge_validator import (
     rules_decisions as _rules_decisions,  # noqa: F401  # registers MIK-R13's decision content rules
 )
 from agents_remember.memory_quality.knowledge_validator import (
+    rules_reconsideration as _rules_reconsideration,  # noqa: F401  # registers MIK-R14's link guard
+)
+from agents_remember.memory_quality.knowledge_validator import (
     rules_references as _rules_references,  # noqa: F401  # registers MIK-R22 rules 3, 5, 6
 )
 from agents_remember.memory_quality.knowledge_validator import (

@@ -12,6 +12,10 @@ the knowledge validator (MIK-R22) over the resulting tree before it writes anyth
 * :mod:`.authoring` -- the edits, with the mechanical fields filled;
 * :mod:`.requirement_links` -- the requirement endpoints a run's records link, resolved by their
   owner and reported, never refused (MIK-R13);
+* :mod:`.reconsideration` -- the reconsideration rows (MIK-R14): ``still_rejected``, and ``raise``,
+  which sets the decision under reconsideration and appends a question for the developer;
+* :mod:`.open_questions` -- that question, appended to the leaf's task document through
+  ``task_doc``;
 * :mod:`.writer` -- :func:`write_knowledge`: validate, then write or refuse;
 * :mod:`.report` -- what the operation reports.
 

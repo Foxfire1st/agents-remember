@@ -24,9 +24,8 @@ only -- the gate finds a row by ``subject``, MIK-R09). A row's kind is decided b
   revision (D7).
 
 The other registered item kinds add their row kinds to :data:`HISTORY_ROW_KINDS` when they land
-(MIK-R30 ``onboarding:…``, MIK-R11 ``planned:…``, MIK-R10 ``hunk:…``/``file:…``; MIK-R06 and R14
-later); until then a row
-whose subject no kind claims is refused.
+(MIK-R30 ``onboarding:…``, MIK-R11 ``planned:…``, MIK-R10 ``hunk:…``/``file:…``, MIK-R14
+``reconsider:…``; MIK-R06 later); until then a row whose subject no kind claims is refused.
 
 **Checks that need the trees.** The models check shape. The writer support below checks a row
 against K_B/K_C facts the caller reads: :func:`reanchor_mismatches` (rule 4: each ``after`` equals
@@ -62,6 +61,10 @@ from agents_remember.models.knowledge_files.planned import (
     PLANNED_DISPOSITIONS,
     PLANNED_SUBJECT_PATTERN,
     REFS_BY_DISPOSITION,
+)
+from agents_remember.models.knowledge_files.reconsideration import (
+    RECONSIDER_DISPOSITIONS,
+    RECONSIDER_SUBJECT_PATTERN,
 )
 from agents_remember.models.knowledge_files.shapes import (
     Anchor,
@@ -350,6 +353,21 @@ class UnexplainedChangeRow(HistoryRow):
     dispositions: ClassVar[tuple[str, ...]] = (NO_INVARIANT,)
 
 
+class ReconsiderationRow(HistoryRow):
+    """The curator's answer to a reconsideration candidate (MIK-R14 rule 4).
+
+    Subject ``reconsider:<DEC-ID>#<alternative index>``; disposition ``still_rejected`` (the
+    rejection holds, and ``reason`` says why) or ``raise`` (the alternative goes to the developer:
+    the writer sets the decision's ``status`` to ``under_reconsideration`` and appends a question to
+    the leaf's task-document ``openQuestions``). It carries nothing beyond the common fields. MIK-R14
+    owns the kind; the row answers a ``reconsideration_candidate`` worklist item.
+    """
+
+    row_kind: ClassVar[str] = "reconsideration"
+    subject_pattern: ClassVar[str] = RECONSIDER_SUBJECT_PATTERN
+    dispositions: ClassVar[tuple[str, ...]] = RECONSIDER_DISPOSITIONS
+
+
 @dataclass(frozen=True)
 class HistoryRowKind:
     """A registered row kind: the subject form it claims, its model and its owner packet."""
@@ -367,6 +385,7 @@ HISTORY_ROW_KINDS: Final[tuple[HistoryRowKind, ...]] = (
     HistoryRowKind("onboarding_trace", OnboardingTraceRow, "MIK-R30"),
     HistoryRowKind("planned", PlannedEffectRow, "MIK-R11"),
     HistoryRowKind("unexplained", UnexplainedChangeRow, "MIK-R10"),
+    HistoryRowKind("reconsideration", ReconsiderationRow, "MIK-R14"),
 )
 
 

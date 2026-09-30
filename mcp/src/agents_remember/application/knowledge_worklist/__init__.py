@@ -19,6 +19,8 @@ MIK-R07 rule 0) and persisted as ``knowledge-worklist/v1`` in the leaf's enclosu
   :mod:`.compute`): the family route conditions and their satisfying rule;
 * :mod:`.unexplained` -- MIK-R10's ``unexplained_hunk`` and ``unexplained_file`` kinds (registered
   on import), the coverage lookup and the items for every unlinked change.
+* :mod:`.reconsideration` -- MIK-R14's ``reconsideration_candidate`` kind (registered on import by
+  :mod:`.compute`): a decision whose ``reconsider_on`` target changed.
 
 An entry is raised only when changed lines intersect its own range, when it moved or disappeared,
 or when it changed outside the managed flow; a change elsewhere in the same file raises nothing.
@@ -53,6 +55,9 @@ from agents_remember.application.knowledge_worklist.onboarding_trace import (
 from agents_remember.application.knowledge_worklist.planned_effects import (
     PLANNED_UNTOUCHED_KIND,
 )
+from agents_remember.application.knowledge_worklist.reconsideration import (
+    RECONSIDERATION_KIND,
+)
 from agents_remember.application.knowledge_worklist.registry import (
     ITEM_KINDS,
     ItemKind,
@@ -75,6 +80,7 @@ __all__ = [
     "ITEM_KINDS",
     "ONBOARDING_TRACE_KIND",
     "PLANNED_UNTOUCHED_KIND",
+    "RECONSIDERATION_KIND",
     "UNEXPLAINED_FILE_KIND",
     "UNEXPLAINED_HUNK_KIND",
     "WORKLIST_FILE_NAME",

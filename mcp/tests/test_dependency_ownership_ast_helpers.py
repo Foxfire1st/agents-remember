@@ -43,13 +43,24 @@ LANE_MANIFEST = Path("mcp/tests/test-evidence-lanes.toml")
 LIFECYCLE_SCHEMA = "ar-test-evidence-lifecycle/v3"
 LIFECYCLE_CONTRACT_COUNT = 16
 LIFECYCLE_ARTIFACT_COUNT = 80
-LIFECYCLE_CATALOG_SHA256 = "f8b048143a4072e35d3a65e9fcce16cd7bfd9ca6a2f253272ae251ea912f212b"
+LIFECYCLE_CATALOG_SHA256 = "4477446eb501ccc6e4c76e627f893c11d08edc313dc92fb399dc1d5e13316d10"
 """``mcp/tests/evidence-lifecycle.toml`` byte-for-byte, re-pinned deliberately at every value below.
 
+**Forty-second deliberate re-pin (260928-MIK-L14, re-measured at base ``48f680d5``, 2026-09-30) --
+one consumer the census derived for the reconsideration case module.** ``260928-MIK-L14``
+(MIK-R14, reconsideration surfacing) adds ``mcp/tests/test_reconsideration_surfacing.py``, which
+transitively consumes ``fixtures/repository_profiles/node/package-lock.json``; that row gains the
+one path, appended after the Forty-first's ``test_knowledge_route_chain.py`` without re-sorting.
+**No row was added or removed, no other consumer changed and no field changed**, so the population
+stays at **sixteen contracts / eighty artifacts**, and the catalog is re-pinned from
+``f8b048143a4072e35d3a65e9fcce16cd7bfd9ca6a2f253272ae251ea912f212b`` (the Forty-first) to
+``4477446eb501ccc6e4c76e627f893c11d08edc313dc92fb399dc1d5e13316d10``, measured with ``sha256sum
+mcp/tests/evidence-lifecycle.toml``. The proof's own artifact delta remains exactly empty.
+
 **Forty-first deliberate re-pin (260928-MIK-L05, re-measured at base ``31d761a2``, 2026-09-30) --
-four consumers the census derived for the route-chain case module.** ``260928-MIK-L05`` (MIK-R05, route-chain family retrieval) adds
-``mcp/tests/test_knowledge_route_chain.py``, which imports the leaf-read case module (so
-transitively ``mcp/tests/knowledge_index_test_support.py`` and
+four consumers the census derived for the route-chain case module.** ``260928-MIK-L05`` (MIK-R05,
+route-chain family retrieval) adds ``mcp/tests/test_knowledge_route_chain.py``, which imports the
+leaf-read case module (so transitively ``mcp/tests/knowledge_index_test_support.py`` and
 ``fixtures/repository_profiles/node/package-lock.json``) and the ``read_ar_files`` case module (so
 transitively ``mcp/tests/read_scope_test_support.py`` and
 ``mcp/tests/curator_coherence_test_support.py``); each of those four rows gains the one path,

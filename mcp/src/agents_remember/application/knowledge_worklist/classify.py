@@ -19,6 +19,10 @@ recorded ``blob`` the entry is ``untouched`` (definition 4 wins, architect rulin
 A ``moved_or_absent`` symbol entry carries the mechanical unique match of definition 6 when there is
 one, labelled ``mechanical``.
 
+A decision's ``reconsider_on`` anchor target is classified the same way (MIK-R14 rule 1,
+:meth:`Classifier.classify_anchor`), as kind ``link``; it is not an entry and is never recorded
+among the classified entries.
+
 **Knowledge-side changes (definition 7).** An invariant of K_B changed when its record file differs,
 when K_C holds an entry for it whose ID K_B does not (added), when an entry of K_B is absent from K_C
 (retired), or when one of its entries was re-anchored: present on both sides with a different anchor
@@ -46,6 +50,7 @@ from agents_remember.application.knowledge_worklist.knowledge import (
     anchor_document,
 )
 from agents_remember.memory.knowledge_index.build import IndexedEntry
+from agents_remember.models.knowledge_files.shapes import Anchor
 from agents_remember.models.knowledge_files.sidecars import ProofEntry
 
 __all__ = [
@@ -60,6 +65,7 @@ __all__ = [
 ]
 
 EntryClass = Literal["stale_at_base", "moved_or_absent", "touched", "carried", "untouched"]
+EntryKind = Literal["realization", "proof", "link"]
 RAISING_CLASSES: Final = frozenset({"touched", "moved_or_absent"})
 COVERING_CLASSES: Final = frozenset({"touched", "moved_or_absent", "stale_at_base"})
 ABSENT: Final = "absent"
@@ -70,7 +76,7 @@ class Classification:
     """One K_B entry's class in this run, with the facts that decided it."""
 
     entry_id: str
-    entry_kind: Literal["realization", "proof"]
+    entry_kind: EntryKind
     invariant: str
     path: str
     entry_class: EntryClass
@@ -139,18 +145,33 @@ class Classifier:
             self._done[entry_id] = found
         return found
 
+    def classify_anchor(self, key: str, anchor: Anchor) -> Classification:
+        """A ``reconsider_on`` link's anchor, classified like an entry (MIK-R14 rule 1).
+
+        It is not an entry: it is never recorded among the run's classified entries, and ``key``
+        names the link. ``anchor.path`` is required on a link target.
+        """
+
+        assert anchor.path is not None  # a link's anchor target always names its path
+        return self._classify_anchor(key, "link", "", anchor.path, anchor)
+
     def _classify(self, indexed: IndexedEntry) -> Classification:
-        entry, path = indexed.entry, indexed.path
-        anchor = entry.anchor
+        entry = indexed.entry
+        kind: EntryKind = "proof" if isinstance(entry, ProofEntry) else "realization"
+        return self._classify_anchor(entry.id, kind, entry.invariant, indexed.path, entry.anchor)
+
+    def _classify_anchor(
+        self, key: str, kind: EntryKind, invariant: str, path: str, anchor: Anchor
+    ) -> Classification:
         locator = anchor.locator.to_document()
         base_blob = self.code.base().get(path)
         candidate_blob = self.code.candidate().get(path)
         at_base = self._resolve(path, locator, anchor.blob, base_blob)
         at_candidate = self._resolve(path, locator, anchor.blob, candidate_blob)
         facts = Classification(
-            entry_id=entry.id,
-            entry_kind="proof" if isinstance(entry, ProofEntry) else "realization",
-            invariant=entry.invariant,
+            entry_id=key,
+            entry_kind=kind,
+            invariant=invariant,
             path=path,
             entry_class="untouched",
             anchor=anchor_document(anchor, path),

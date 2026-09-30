@@ -5,7 +5,7 @@
                                        --memory REPO --memory-base K_B
                                        (--memory-candidate REV | --memory-worktree DIR)
                                        [--maintenance-scope] [--owner LEAF] [--output FILE]
-                                       [--cache-dir DIR]
+                                       [--cache-dir DIR] [--coordination-root DIR]
 
 ``--contract`` computes a leaf's worklist from its series contract exactly as the curator's
 memory-quality run does, and persists it beside the contract. The explicit form names the four sides
@@ -53,6 +53,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=Path,
         help="Cache converted bases here (never inside a Git working tree).",
     )
+    parser.add_argument(
+        "--coordination-root",
+        type=Path,
+        help="Where requirement endpoints' owning tasks live (MIK-R14); omit to resolve none.",
+    )
 
 
 def _explicit(args: argparse.Namespace) -> ExplicitSides | str:
@@ -87,6 +92,7 @@ def _explicit(args: argparse.Namespace) -> ExplicitSides | str:
         maintenance_scope=args.maintenance_scope,
         owner=args.owner,
         cache_directory=args.cache_dir,
+        coordination_root=args.coordination_root,
     )
 
 

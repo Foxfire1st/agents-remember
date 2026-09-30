@@ -29,6 +29,7 @@ from typing import Any, Final
 
 from pydantic import ValidationError
 
+from agents_remember.application.knowledge_worklist.code import CodeTrees
 from agents_remember.application.knowledge_writer.code_anchors import (
     AnchorResolutionError,
     CodeSnapshot,
@@ -54,6 +55,15 @@ from agents_remember.application.knowledge_writer.memory_state import (
     canonical_equal,
     deep_copy,
 )
+from agents_remember.application.knowledge_writer.reconsideration import (
+    UNDER_RECONSIDERATION,
+    Answer,
+    CodeAtC,
+    OpenQuestions,
+    raise_question,
+    reconsidered_alternative,
+    refreshed_links,
+)
 from agents_remember.application.knowledge_writer.report import (
     Action,
     CitedTest,
@@ -62,12 +72,14 @@ from agents_remember.application.knowledge_writer.report import (
     RecordOutcome,
     RowOutcome,
 )
+from agents_remember.memory.conversion.code_objects import CodeObjects
 from agents_remember.models.knowledge_files.documents import history_path
 from agents_remember.models.knowledge_files.history import (
     HISTORY_SCHEMA,
     InvariantRow,
     OnboardingTraceRow,
     PlannedEffectRow,
+    ReconsiderationRow,
     UnexplainedChangeRow,
 )
 from agents_remember.models.knowledge_files.ids import (
@@ -123,6 +135,12 @@ class Authoring:
     _foreign_evidence: dict[str, list[tuple[str, tuple[str, ...]]]] = field(default_factory=dict)
     # The task owner's decision resolution for planned ``dropped`` rows; ``None`` has no task owner.
     decisions: DecisionResolver | None = None
+    # The leaf task document's ``openQuestions`` for ``raise`` rows (MIK-R14); ``None``: no owner.
+    questions: OpenQuestions | None = None
+    # The ``raise`` questions a committing run appends before it writes: ``(key, text)``.
+    raised: list[tuple[str, str]] = field(default_factory=list)
+    # The leaf worklist's reconsideration items by subject, for a still_rejected refresh (MIK-R14).
+    reconsiderations: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     # -- the operation ------------------------------------------------------------------------
 
@@ -599,6 +617,7 @@ class Authoring:
             (OnboardingTraceRow, self._onboarding_row),
             (PlannedEffectRow, self._planned_row),
             (UnexplainedChangeRow, self._unexplained_row),
+            (ReconsiderationRow, self._reconsideration_row),
         ):
             if re.match(model.subject_pattern, request.subject):
                 return write(request, rows.get(request.subject), where)
@@ -747,6 +766,159 @@ class Authoring:
             self.problem(where, unresolved)
             return None
         return row
+
+    def _reconsideration_row(
+        self, request: RowRequest, existing: Mapping[str, Any] | None, where: str
+    ) -> dict[str, Any] | None:
+        """A reconsideration row (MIK-R14 rule 4): ``still_rejected`` or ``raise``.
+
+        It carries the common fields only. A ``raise`` sets the decision's status to
+        ``under_reconsideration`` and plans its question for the leaf's task document; a question
+        the task owner would refuse refuses the row (:mod:`.reconsideration`).
+        """
+
+        row = self._common_row(request, existing, where)
+        if row is None:
+            return None
+        decision = request.subject.removeprefix("reconsider:").split("#", 1)[0]
+        found = self.state.record(decision)
+        named = reconsidered_alternative(request.subject, found)
+        if isinstance(named, str):
+            self.problem(where, named)
+            return None
+        if found is None:
+            return None
+        if request.disposition == "raise":
+            return row if self._raise(found, named[1], row, where) else None
+        return row if self._refresh(found, named[0], row, where) else None
+
+    def _common_row(
+        self, request: RowRequest, existing: Mapping[str, Any] | None, where: str
+    ) -> dict[str, Any] | None:
+        """The reconsideration row's common fields, validated; ``None`` after naming a problem."""
+
+        extra = [
+            name
+            for name, value in (
+                ("covers", request.covers),
+                ("effect", request.effect),
+                ("because", request.because),
+                ("examined", request.examined),
+                ("ref", request.ref),
+            )
+            if value
+        ]
+        if extra:
+            self.problem(where, f"a reconsideration row carries no {extra}")
+            return None
+        row: dict[str, Any] = {
+            "id": existing["id"] if existing is not None else self.mint("history_row"),
+            "subject": request.subject,
+            "disposition": request.disposition,
+            "reason": request.reason,
+            "items": list(request.items),
+        }
+        try:
+            ReconsiderationRow.model_validate(row)
+        except ValidationError as error:
+            self.problem(where, _first_error(error))
+            return None
+        return row
+
+    def _refresh(
+        self,
+        found: tuple[str, str, dict[str, Any]],
+        index: int,
+        row: Mapping[str, Any],
+        where: str,
+    ) -> bool:
+        """``still_rejected`` refreshes the fired links to the judged state.
+
+        Rulings Q2/Q3, reviews R1 F1-F4, R3 and R4 (:func:`.reconsideration.refreshed_links`).
+        """
+
+        item = self._answered_item(row, where)
+        if item is None:
+            return False
+        path, _kind, document = found
+        facts = item.get("facts")
+        answer = Answer(
+            fired=tuple(facts.get("changed") or ()) if isinstance(facts, Mapping) else (),
+            base_document=self.state.base_record(str(document.get("id"))),
+            item=str(item.get("id") or ""),
+            names_item=bool(row.get("items")),
+        )
+        code = CodeAtC(
+            CodeTrees(CodeObjects(self.code.root), self.code.tree, self.code.tree), self.code.blobs
+        )
+        refresh = refreshed_links(document, index, answer, code)
+        for problem in refresh.problems:
+            self.problem(where, f"the still_rejected refresh is refused: {problem}")
+        if refresh.problems:
+            return False
+        if canonical_equal(refresh.links, document.get("links")):
+            return True
+        updated = {**deep_copy(document), "links": refresh.links}
+        if refresh.judged:
+            # Links are meaning: the normal placement bumps the revision once per leaf (F2).
+            self._place_record(
+                "decision", updated, slug=None, before=document, handoff_entry=str(row["subject"])
+            )
+        else:
+            # An earlier refresh carried to the current C: no further bump (review R4-1).
+            self.state.put(path, updated)
+            self.notes.append(f"{row['subject']}: the earlier refresh is carried to the current C")
+        return True
+
+    def _answered_item(self, row: Mapping[str, Any], where: str) -> Mapping[str, Any] | None:
+        """The worklist item the row answers (empty if none); ``None`` after naming a problem."""
+
+        subject = str(row["subject"])
+        item = self.reconsiderations.get(subject)
+        if item is None:
+            self.notes.append(
+                f"{subject}: the leaf's worklist has no item for it; no link refreshed"
+            )
+            return {}
+        named = row.get("items") or ()
+        if named and item.get("id") not in named:
+            self.problem(
+                where,
+                f"the row answers {list(named)}, but the leaf's worklist item for {subject} is "
+                f"{item.get('id')}; recompute the worklist and answer that item",
+            )
+            return None
+        return item
+
+    def _raise(
+        self,
+        found: tuple[str, str, dict[str, Any]],
+        alternative: Mapping[str, Any],
+        row: Mapping[str, Any],
+        where: str,
+    ) -> bool:
+        key, question = raise_question(
+            row["subject"],
+            alternative,
+            reason=row["reason"],
+            leaf=self.owner.id,
+            row_id=row["id"],
+        )
+        refusal = (
+            "a raise appends a question to the leaf's task document, and this write has no task "
+            "owner"
+            if self.questions is None
+            else self.questions.check(key, question)
+        )
+        if refusal is not None:
+            self.problem(where, f"the raise is refused, so the item stays open: {refusal}")
+            return False
+        path, _kind, document = found
+        if document.get("status") != UNDER_RECONSIDERATION:
+            self.state.put(path, {**document, "status": UNDER_RECONSIDERATION})
+        self.raised.append((key, question))
+        self.notes.append(f"raise {row['subject']}: the leaf's task document gets: {question}")
+        return True
 
     def _unresolved_ref(self, row: PlannedEffectRow) -> str | None:
         ref = row.ref

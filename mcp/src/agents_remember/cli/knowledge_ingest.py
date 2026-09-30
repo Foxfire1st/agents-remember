@@ -273,6 +273,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         dest="as_json",
         help="Print the whole report as JSON instead of the human-readable summary.",
     )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="MIK-R14, converted memory only: the MCP authority settings through which a raise "
+        "row's question is appended to the leaf's task document (task_doc). Omit to discover them "
+        "from the working directory; without them a raise is refused.",
+    )
 
 
 def _expected_destination(text: str | None) -> SnapshotIdentity | None:

@@ -21,8 +21,10 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
+from agents_remember.application.knowledge_worklist.leaf import read_leaf_worklist
 from agents_remember.application.knowledge_writer import (
     Owner,
     WriteReport,
@@ -30,6 +32,14 @@ from agents_remember.application.knowledge_writer import (
     write_knowledge,
 )
 from agents_remember.application.knowledge_writer.authoring import DecisionResolver
+from agents_remember.application.knowledge_writer.open_questions import (
+    TaskDocOpenQuestions,
+    UnavailableOpenQuestions,
+)
+from agents_remember.application.knowledge_writer.reconsideration import OpenQuestions
+from agents_remember.cli.discovery import ConfigDiscoveryError, discover_config
+from agents_remember.errors import AgentsRememberError
+from agents_remember.kernel.primitives.runtime_config import load_config, require_config_path
 from agents_remember.models.knowledge_files.documents import LAYOUT_MARKER_PATH
 from agents_remember.tasks.leaf_decisions import leaf_decision_refusal
 from agents_remember.worktrees.knowledge_crossing import unconverted_line_refusal
@@ -140,6 +150,48 @@ def leaf_decisions(contract: WorktreeContract) -> DecisionResolver:
     return lambda at: leaf_decision_refusal(contract.task_root, leaf, at)
 
 
+@dataclass
+class LeafQuestions:
+    """The leaf task document's ``openQuestions`` through ``task_doc``, for ``raise`` rows.
+
+    The MCP authority settings are read only when a ``raise`` needs them.
+    """
+
+    args: argparse.Namespace
+    contract: WorktreeContract
+    _port: OpenQuestions | None = None
+
+    def check(self, key: str, question: str) -> str | None:
+        return self._resolved().check(key, question)
+
+    def append(self, key: str, question: str) -> str | None:
+        return self._resolved().append(key, question)
+
+    def _resolved(self) -> OpenQuestions:
+        if self._port is None:
+            self._port = self._open()
+        return self._port
+
+    def _open(self) -> OpenQuestions:
+        configured = getattr(self.args, "config", None)
+        try:
+            config = load_config(
+                require_config_path(configured) if configured else discover_config(Path.cwd())
+            )
+        except (AgentsRememberError, ConfigDiscoveryError, OSError, ValueError) as error:
+            return UnavailableOpenQuestions(
+                f"no MCP authority settings to reach task_doc ({error}); pass --config"
+            )
+        contract = self.contract
+        return TaskDocOpenQuestions(
+            config=config,
+            repo_id=contract.repo_name,
+            contract_path=contract.contract_path,
+            task_root=contract.task_root,
+            leaf=contract.leaf_id or contract.task_name,
+        )
+
+
 def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
     """``knowledge-ingest`` on a converted memory worktree: the leaf writes through the file writer."""
 
@@ -170,6 +222,8 @@ def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
             authorization=str(args.authorization_ref).strip(),
             decisions=leaf_decisions(contract),
             coordination_root=contract.coordination_root,
+            questions=LeafQuestions(args, contract),
+            worklist=read_leaf_worklist(contract.contract_path),
         )
     )
     _print(report, bool(args.as_json))

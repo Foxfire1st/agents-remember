@@ -183,6 +183,8 @@ class ExplicitSides:
     """Where converted bases are cached (:mod:`.base_cache`); ``None`` converts on every run."""
     expected_effects: tuple[Declaration, ...] | None = None
     """The leaf's declared ``expectedKnowledgeEffects`` (MIK-R11); ``None`` declares none."""
+    coordination_root: Path | None = None
+    """Where requirement endpoints' owning tasks live (MIK-R14); ``None`` resolves none."""
 
 
 def _git(repository: Path, *args: str) -> str | None:
@@ -393,6 +395,7 @@ def worklist_for_sides(sides: ExplicitSides) -> dict[str, Any] | None:
             owner=sides.owner,
             expected_effects=sides.expected_effects,
             coverage=resolved.coverage,
+            coordination_root=sides.coordination_root,
         )
     )
 
@@ -440,6 +443,7 @@ def leaf_worklist(contract: WorktreeContract, *, persist: bool = True) -> dict[s
                 owner=owner,
                 cache_directory=cache,
                 expected_effects=expected_effects,
+                coordination_root=contract.coordination_root,
             )
         )
         if document is not None:

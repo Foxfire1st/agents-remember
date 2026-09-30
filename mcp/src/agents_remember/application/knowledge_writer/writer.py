@@ -35,6 +35,10 @@ from agents_remember.application.knowledge_writer.code_anchors import CodeSnapsh
 from agents_remember.application.knowledge_writer.handoff import Problem, read_handoff
 from agents_remember.application.knowledge_writer.history_check import owner_history_problems
 from agents_remember.application.knowledge_writer.memory_state import MemoryState, Owner
+from agents_remember.application.knowledge_writer.reconsideration import (
+    OpenQuestions,
+    append_questions,
+)
 from agents_remember.application.knowledge_writer.report import WriteReport
 from agents_remember.application.knowledge_writer.requirement_links import requirement_endpoints
 from agents_remember.memory_quality.knowledge_validator import (
@@ -83,6 +87,12 @@ class WriteRequest:
     coordination_root: Path | None = None
     """Where requirement endpoints' owning tasks live (``tasks/<repository>/<path>``); without it
     every endpoint is reported unresolved (MIK-R13 rule 4). Never a reason to refuse."""
+    worklist: Mapping[str, Any] | None = None
+    """The leaf's persisted worklist (MIK-R08): a ``still_rejected`` row refreshes the links whose
+    trigger fired on its item (MIK-R14); without it no link is refreshed."""
+    questions: OpenQuestions | None = None
+    """The leaf task document's ``openQuestions``, where a ``raise`` row's question goes
+    (MIK-R14); without it a ``raise`` is refused."""
 
 
 def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) -> WriteReport:
@@ -101,7 +111,13 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         return replace(report, problems=(*problems, Problem(LAYOUT_MARKER_PATH, UNCONVERTED)))
     snapshot = code if code is not None else CodeSnapshot.capture(request.code_root)
     authoring = Authoring(
-        state, snapshot, request.owner, request.handoff_path, decisions=request.decisions
+        state,
+        snapshot,
+        request.owner,
+        request.handoff_path,
+        decisions=request.decisions,
+        questions=request.questions,
+        reconsiderations=_reconsideration_items(request.worklist),
     )
     authoring.run(document)
     carried = carry_entries(state, snapshot, request.owner)
@@ -132,7 +148,29 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
     refusals, reports = _writer_split(validation)
     if refusals:
         return replace(report, violations=(*refusals, *reports))
-    return _finish(replace(report, violations=reports), state, files, request.commit)
+    report = replace(report, violations=reports)
+    refused = _append_raised(request, authoring.raised)
+    if refused:
+        return replace(report, problems=refused)
+    return _finish(report, state, files, request.commit)
+
+
+def _reconsideration_items(worklist: Mapping[str, Any] | None) -> dict[str, Mapping[str, Any]]:
+    items = (worklist or {}).get("items") or ()
+    return {
+        str(item.get("subject")): item
+        for item in items
+        if isinstance(item, Mapping) and item.get("kind") == "reconsideration_candidate"
+    }
+
+
+def _append_raised(request: WriteRequest, raised: list[tuple[str, str]]) -> tuple[Problem, ...]:
+    """MIK-R14: a committing run's raise questions reach the task document before any file."""
+
+    if not (request.commit and raised):
+        return ()
+    _appended, refused = append_questions(request.questions, raised)
+    return tuple(Problem("openQuestions", f"the raise is refused: {one}") for one in refused)
 
 
 def _writer_split(
