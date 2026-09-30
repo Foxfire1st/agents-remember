@@ -12,6 +12,8 @@ committed instead of by database constraints. One module, one rule registry:
   the reported states and the mechanical route suggestion;
 * :mod:`.rules_admission` -- MIK-R27's admission rule: refused on a new record, reported on an
   existing one, and the count of records still ``legacy-unassessed``;
+* :mod:`.rules_decisions` -- MIK-R13's decision content rules: alternatives, ``reconsider_when``,
+  ``superseded`` never stored, ``reconsider_on`` indexes, and the governs links reported;
 * :mod:`.validator` -- :func:`validate_tree`, rule 8's applicability and
   :func:`require_valid_commit`;
 * :mod:`.commit_route` -- the Git adapter a commit route calls through the worktree port.

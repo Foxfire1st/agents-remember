@@ -585,21 +585,25 @@ def test_the_bootstrap_command_dispatches_converted_memory_to_the_file_writer(
 ) -> None:
     world = build_world(tmp_path)
     listed = world.root / "handoff.json"
+    authored = entry("B-2", target=[target("land_pair")], scope=SCOPE, admission=ADMISSION)
+    _requirement_packet(world)
     listed.write_text(
-        json.dumps([entry("B-2", target=[target("land_pair")], scope=SCOPE, admission=ADMISSION)]),
-        encoding="utf-8",
+        json.dumps({"entries": [authored], "records": [_lifted_d12()]}), encoding="utf-8"
     )
     admission = SimpleNamespace(
         memory_worktree=world.memory, code_worktree=world.code, scope="knowledge-bootstrap:repo"
     )
-    monkeypatch.setattr(
-        knowledge_bootstrap, "_admitted", lambda _args: SimpleNamespace(admission=admission)
-    )
+    authority = SimpleNamespace(coordination_root=world.root)
+    admitted = SimpleNamespace(admission=admission, authority=authority)
+    monkeypatch.setattr(knowledge_bootstrap, "_admitted", lambda _args: admitted)
     argv = ["knowledge-bootstrap", "--repo", "repo", "--list", str(listed), "--json"]
     assert main([*argv, "--authorization-ref", "boot", "--wave", "wave-1", "--commit"]) == 0
     printed = json.loads(capsys.readouterr().out)
     assert printed["state"] == "written" and printed["authorization"] == "boot"
     assert read_json(world.memory, _new_invariant_path(world))["origin"]["wave"] == "wave-1"
+    # The wave resolves requirement endpoints through the admitted coordination root (review F4).
+    endpoints = [(one["field"], one["state"]) for one in printed["requirementEndpoints"]]
+    assert endpoints == [("links.2", "resolved"), ("links.3", "unresolved")]
 
 
 def test_the_leaf_file_route_refuses_a_blank_authorization_and_reports_it(
@@ -746,4 +750,81 @@ def test_a_moved_row_whose_after_names_another_path_relocates_the_entry(tmp_path
     # A rerun of the same list finds the entry already there and changes nothing.
     before = tree_bytes(world.memory)
     assert _write(world, document).state == "written"
+    assert tree_bytes(world.memory) == before
+
+
+R04 = {
+    "task": {"repository": "agents-remember", "path": "260928_family"},
+    "packet": "requirements/MIK-R04-v2-family-routes.md",
+    "id": "MIK-R04",
+    "version": "v2",
+}
+
+
+def _requirement_packet(world: World) -> None:
+    """MIK-R04@v2 in the coordination root the contract names, for the owner to resolve."""
+
+    packet = world.root / "tasks/agents-remember/260928_family" / R04["packet"]
+    table = "| Field | Value |\n| --- | --- |\n| Stable ID | MIK-R04 |\n| Version | v2 |\n"
+    write(packet.parent, {packet.name: f"# R04\n\n{table}"})
+
+
+def _lifted_d12(**fields: Any) -> dict[str, Any]:
+    """D12 lifted from its ruling: governs the base invariant, reopens on it, motivated MIK-R04."""
+
+    document = _decision("D-12", **fields)
+    del document["entry"]
+    document["slug"] = "local-family-routes"
+    document["fields"]["links"] = [
+        {"relation": "constrains", "target": BASE_INVARIANT},
+        {"relation": "reconsider_on", "target": BASE_INVARIANT, "alternative": 1},
+        {"relation": "motivated_change_to", "target": R04},
+        {"relation": "motivated_change_to", "target": {**R04, "version": "v9"}},
+    ]
+    return document
+
+
+def test_a_lifted_decision_round_trips_and_its_requirement_endpoints_are_reported(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """MIK-R13: a decision with a rejected alternative is written; endpoints resolve or are reported."""
+
+    world = build_world(tmp_path)
+    _requirement_packet(world)
+    listed = world.task_root / "notes" / "decisions.json"
+    write(listed.parent, {listed.name: json.dumps({"records": [_lifted_d12()]})})
+    assert _ingest(world, listed, "--commit") == 0
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["state"] == "written", printed
+    (record,) = printed["records"]
+    stored = parse_document_text((world.memory / record["path"]).read_text())
+    assert stored.to_document()["alternatives"][1]["reconsider_when"] == "Never."
+    endpoints = [
+        (one["field"], one["state"], one["code"]) for one in printed["requirementEndpoints"]
+    ]
+    assert endpoints == [
+        ("links.2", "resolved", ""),
+        ("links.3", "unresolved", "task-intent-requirement-packet-version-mismatch"),
+    ]
+    assert not [one for one in printed["violations"] if one["rule"].startswith("R13")]
+    before = tree_bytes(world.memory)
+    assert _ingest(world, listed, "--commit") == 0
+    assert json.loads(capsys.readouterr().out)["records"][0]["action"] == "unchanged"
+    assert tree_bytes(world.memory) == before
+
+
+def test_a_decision_that_breaks_a_content_rule_is_refused_and_nothing_is_written(
+    tmp_path: Path,
+) -> None:
+    world = build_world(tmp_path)
+    before = tree_bytes(world.memory)
+    alternatives = [
+        {"option": "Land together", "status": "chosen", "reason": "One pair."},
+        {"option": "Land apart", "status": "deferred", "reason": "Drift."},
+    ]
+    report = _write(world, {"records": [_lifted_d12(alternatives=alternatives)]})
+    assert report.state == "refused"
+    refusals = {(one.rule, one.field) for one in report.violations if not one.report_only}
+    assert refusals == {("R13.1-reconsider-when", "alternatives.1.reconsider_when")}
+    assert report.requirements[0].state == "unresolved"  # no coordination root: reported only
     assert tree_bytes(world.memory) == before

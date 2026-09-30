@@ -10,6 +10,8 @@ the knowledge validator (MIK-R22) over the resulting tree before it writes anyth
 * :mod:`.code_anchors` -- the code candidate tree C and anchor resolution;
 * :mod:`.memory_state` -- the memory tree, the operation's edits, and the base;
 * :mod:`.authoring` -- the edits, with the mechanical fields filled;
+* :mod:`.requirement_links` -- the requirement endpoints a run's records link, resolved by their
+  owner and reported, never refused (MIK-R13);
 * :mod:`.writer` -- :func:`write_knowledge`: validate, then write or refuse;
 * :mod:`.report` -- what the operation reports.
 

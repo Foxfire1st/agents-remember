@@ -7,7 +7,8 @@ maintenance**, so the same failure is refused on a new record and only reported 
 * **New.** A record is *new* when its ID is absent from every comparison base (K_B at a commit
   route, each parent at a merge) and it is not an export: an exported record's ``origin.legacyId``
   derives its ID (:func:`derived_record_id`, the conversion's own derivation), so a forged legacy ID
-  does not make a record exported. Exported records are never new, and a record with ``status:
+  does not make a record exported, and a decision is never an export (the conversion exports
+  none). Exported records are never new, and a record with ``status:
   retired`` is never refused. With no base (a curator's standalone run without ``--base``) every
   record that is not an export is new.
 * **Refused on a new record** (``R27.2-new-record``): ``legacy-unassessed``, which only the export
@@ -180,9 +181,13 @@ def _exported(record: AdmittedRecord) -> bool:
     """An exported record: its ``legacyId`` derives its ID, as the conversion does (Doc14 §6).
 
     A ``legacyId`` that does not derive the record's ID is not an export's, so the record is judged
-    for admission like any other (review round F2).
+    for admission like any other (review round F2). A decision is never an export: the conversion
+    exports no decisions (MIK-R24), so a ``legacyId`` on a decision exempts it from nothing (L13
+    review F6).
     """
 
+    if isinstance(record, DecisionRecord):
+        return False
     legacy_id = record.origin.legacy_id
     return bool(legacy_id) and derived_record_id(type(record).record_kind, legacy_id) == record.id
 

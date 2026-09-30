@@ -67,6 +67,22 @@ class EvidenceOutcome:
 
 
 @dataclass(frozen=True)
+class EndpointOutcome:
+    """A requirement endpoint one of this run's records links, and the owner's answer (MIK-R13).
+
+    ``state`` is ``resolved`` or ``unresolved``; an unresolved endpoint is reported, never refused.
+    """
+
+    record: str
+    field: str
+    relation: str
+    endpoint: str
+    state: str
+    code: str = ""
+    detail: str = ""
+
+
+@dataclass(frozen=True)
 class WriteReport:
     state: WriteState
     owner: str
@@ -84,6 +100,7 @@ class WriteReport:
     notes: tuple[str, ...] = field(default=())
     authorization: str = ""
     carried: tuple[str, ...] = ()
+    requirements: tuple[EndpointOutcome, ...] = ()
 
     @property
     def refused(self) -> bool:
@@ -108,6 +125,7 @@ class WriteReport:
             "notes": list(self.notes),
             "authorization": self.authorization,
             "carried": list(self.carried),
+            "requirementEndpoints": [_endpoint(one) for one in self.requirements],
         }
 
     def render(self) -> str:
@@ -141,6 +159,7 @@ class WriteReport:
             f"  {verb.replace('write', 'remove').replace('wrote', 'removed')} {one}"
             for one in self.removed
         ]
+        lines += map(_endpoint_line, self.requirements)
         lines += [f"  note: {one}" for one in self.notes]
         return "\n".join(lines)
 
@@ -185,3 +204,23 @@ def _evidence(one: EvidenceOutcome) -> dict[str, Any]:
             {"test": test.test, "state": test.state, "detail": test.detail} for test in one.tests
         ],
     }
+
+
+def _endpoint(one: EndpointOutcome) -> dict[str, Any]:
+    return {
+        "record": one.record,
+        "field": one.field,
+        "relation": one.relation,
+        "endpoint": one.endpoint,
+        "state": one.state,
+        "code": one.code,
+        "detail": one.detail,
+    }
+
+
+def _endpoint_line(one: EndpointOutcome) -> str:
+    refusal = f" [{one.code}] {one.detail}" if one.code else ""
+    return (
+        f"  requirement {one.endpoint} from {one.record} {one.field} ({one.relation}): "
+        f"{one.state}{refusal}"
+    )

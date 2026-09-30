@@ -523,6 +523,7 @@ def _run(args: argparse.Namespace, admitted: AdmittedKnowledgeBootstrap) -> int:
             memory_root=memory,
             code_root=admitted.admission.code_worktree,
             task=admitted.admission.scope,
+            coordination_root=admitted.authority.coordination_root,
         )
     result = bootstrap_knowledge(
         admitted,

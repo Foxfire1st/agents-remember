@@ -169,6 +169,7 @@ def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
             commit=bool(args.commit),
             authorization=str(args.authorization_ref).strip(),
             decisions=leaf_decisions(contract),
+            coordination_root=contract.coordination_root,
         )
     )
     _print(report, bool(args.as_json))
@@ -176,7 +177,12 @@ def run_leaf_write(args: argparse.Namespace, contract: WorktreeContract) -> int:
 
 
 def run_wave_write(
-    args: argparse.Namespace, *, memory_root: Path, code_root: Path, task: str
+    args: argparse.Namespace,
+    *,
+    memory_root: Path,
+    code_root: Path,
+    task: str,
+    coordination_root: Path | None = None,
 ) -> int:
     """``knowledge-bootstrap`` on a converted memory tree: a wave writes through the file writer.
 
@@ -206,6 +212,7 @@ def run_wave_write(
             document=document,
             commit=bool(args.commit),
             authorization=str(getattr(args, "authorization_ref", "") or "").strip(),
+            coordination_root=coordination_root,
         )
     )
     _print(report, bool(args.as_json))

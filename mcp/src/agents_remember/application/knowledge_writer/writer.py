@@ -36,6 +36,7 @@ from agents_remember.application.knowledge_writer.handoff import Problem, read_h
 from agents_remember.application.knowledge_writer.history_check import owner_history_problems
 from agents_remember.application.knowledge_writer.memory_state import MemoryState, Owner
 from agents_remember.application.knowledge_writer.report import WriteReport
+from agents_remember.application.knowledge_writer.requirement_links import requirement_endpoints
 from agents_remember.memory_quality.knowledge_validator import (
     CodePathSet,
     KnowledgeTree,
@@ -79,6 +80,9 @@ class WriteRequest:
     decisions: DecisionResolver | None = None
     """The task owner's resolution of a planned ``dropped`` row's decision (MIK-R11); a write
     without a task owner (a wave) refuses such a row."""
+    coordination_root: Path | None = None
+    """Where requirement endpoints' owning tasks live (``tasks/<repository>/<path>``); without it
+    every endpoint is reported unresolved (MIK-R13 rule 4). Never a reason to refuse."""
 
 
 def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) -> WriteReport:
@@ -114,6 +118,7 @@ def write_knowledge(request: WriteRequest, *, code: CodeSnapshot | None = None) 
         rulings=tuple(entry.entry_id for entry in document.rulings),
         notes=tuple(authoring.notes),
         carried=carried,
+        requirements=requirement_endpoints(state, authoring.records, request.coordination_root),
     )
     if problems:
         return replace(report, problems=tuple(problems))

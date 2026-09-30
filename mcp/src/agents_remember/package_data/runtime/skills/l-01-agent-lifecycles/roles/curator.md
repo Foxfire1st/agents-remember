@@ -92,6 +92,10 @@ response — it must be this leaf's memory worktree — and preview any write wi
    task and memory scope; rows, allocated IDs, original before-half and frozen history remain unchanged by that
    admission step. A moved, corrupt or foreign predecessor is a named refusal. Normal strict-open remains strict;
    never commit source first or manually edit a receipt to work around a curation refusal.
+   **Lift the decisions that keep governing code.** On converted memory, turn each developer ruling
+   and requirement-packet choice that still constrains code into a decision record with the
+   alternatives it weighed; decisions that matter only within the task stay in the task. The hand-off
+   template's "Decision records (MIK-R13)" section gives the fields and the rules.
 4. **Examine family coverage and author it, then read the two planes back.** For every scoped obligation, decide
    whether the evidence and the project's intent justify a **joint obligation** with others: where they do, author
    the family identity, its **own** guarantee text and the exact memberships that place exact invariant revisions in

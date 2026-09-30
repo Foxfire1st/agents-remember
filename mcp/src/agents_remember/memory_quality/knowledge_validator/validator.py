@@ -22,6 +22,9 @@ from agents_remember.memory_quality.knowledge_validator import (
     rules_census as _rules_census,  # noqa: F401  # registers MIK-R20's census rules (rule 9)
 )
 from agents_remember.memory_quality.knowledge_validator import (
+    rules_decisions as _rules_decisions,  # noqa: F401  # registers MIK-R13's decision content rules
+)
+from agents_remember.memory_quality.knowledge_validator import (
     rules_references as _rules_references,  # noqa: F401  # registers MIK-R22 rules 3, 5, 6
 )
 from agents_remember.memory_quality.knowledge_validator import (

@@ -655,6 +655,67 @@ code change alone is never an admissible reason: most knowledge is local and sta
 **Local, no record:** "Execution is synchronous and journaled" describes one file. It stays prose in
 the card of `mcp/src/agents_remember/worktrees/direct_landing.py`.
 
+## Decision records (MIK-R13)
+
+A decision record keeps a choice that **keeps governing code**, with the alternatives that were
+weighed, so a rejected design can come back up when its grounds change. On converted memory it is a
+`records` item of `kind: decision`. Its `fields` are:
+
+- `context`: the situation that forced a choice.
+- `alternatives`: at least two, in a fixed order. Each is `{option, status, reason,
+  reconsider_when?}`, with `status` one of `chosen`, `rejected` or `deferred`:
+  - **exactly one** is `chosen`;
+  - every `rejected` or `deferred` alternative states `reconsider_when`: the condition under which
+    to look at it again. It is prose for people; nothing evaluates it.
+- `consequences`, `decider` (who decided, for example the developer and the ruling), `supersedes`
+  (the `DEC-…` IDs this decision replaces) and `admission` (MIK-R27: `real_alternatives` or
+  `constrains_future_work`).
+- `status` starts `active`. `superseded` is **never stored**: a decision is superseded when a
+  later decision's `supersedes` names it, and readers derive it. `under_reconsideration` is set
+  only when a reconsideration is raised to the developer (MIK-R14).
+- `links`, each `{relation, target, alternative?}`:
+  - `explains`, `constrains` and `motivated_change_to` name what the decision **governs**. The
+    decision is read from each target, so link every record, route (`route:<dir>`), anchor
+    (`{path, locator}`, resolved by the writer) or requirement it governs. A decision with none of
+    these links is reported: nothing would show it.
+  - `reconsider_on` names a target whose change should reopen one alternative, with `alternative`
+    set to that alternative's index in `alternatives` (0 is the first). The alternative must be
+    `rejected` or `deferred`. This link, not the prose, is what brings the decision back to the
+    worklist when the target changes (MIK-R14). Link the record whose change would meet the
+    `reconsider_when`, for example the assumption it rests on.
+  - A requirement target is `{task: {repository, path}, packet, id, version}`, where `path` is the
+    task directory under `tasks/<repository>/`. The writer asks the requirement owner to resolve it
+    and reports each one in `requirementEndpoints` as `resolved` or `unresolved`, with the owner's
+    reason. An unresolved endpoint is written as authored and never refuses the run.
+- Name the ruling or requirement the decision came from in the `entry` it is attached to: that
+  entry's `evidence` is stored in the record's `origin.handoff`. `origin.task` is filled in.
+
+The validator refuses a decision with fewer than two alternatives, with no chosen alternative or
+several, with a rejected or deferred alternative that has no `reconsider_when`, with a stored
+`superseded`, or with a `reconsider_on` link to an alternative that does not exist or is `chosen`.
+
+**Lifting decisions at closeout.** Decisions are born in planning: developer rulings, requirement
+packets and the task's decision log. At closeout the curator lifts into records the decisions that
+**keep governing code**:
+
+- a developer ruling or a requirement packet's choice between real designs that constrains code or
+  knowledge beyond the leaf;
+- with the alternatives the ruling or packet itself names, their reasons and their reconsider
+  conditions. Do not invent alternatives nobody weighed; a choice without a real alternative is not
+  a decision record.
+
+Decisions that matter only within the task stay in the task: sequencing, which leaf does what, a
+fixture choice, a rebind of a leaf to a new packet version. The decision authority stays with the
+developer. A curator records a decision and links it; it never reverses one. A record never replaces
+the task's decision log.
+
+**Example.** D18 (text files are the source of truth) as a record: chosen "text files in Git";
+rejected "canonical SQLite", because it took about 22,000 lines of storage-only machinery and left
+knowledge unreadable, reconsider when the record count grows past about 100,000 or writers appear
+outside Git. It `constrains` the knowledge routes, is `motivated_change_to` the MIK-R21 packet, and
+has `reconsider_on` alternative 1 to the assumption "knowledge stays under about 100,000 records and
+every writer uses Git".
+
 ## What this template is not
 
 It is not the curator's side. The curator consumes this list as data, fills `resolution`,
